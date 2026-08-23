@@ -11,7 +11,16 @@
 
 ## 2026.08.24
 
-1. git版本：[6b6e69f] [v0.1.0]
+1. git版本：[a294845] [v0.1.0]
+   - 完成：P06 子代理管理与护栏（T-022，主代理本人实现）——T-021 的执行引擎。
+   - 交付：src/host/agent/ 三文件——runner.ts（NodeAgentRunner：ensureNodeChild（startContinuable 创建/childKey 复用/签名 person+provider+model+reasoning+presetId+tools 变化即重建）/startNodeTask（followup 派发，coordinator/relay source）/interruptChild/consumeReactCapped/childVisibilityContribution（tools.restrict deny wf_run_node/wf_finish 双保险）+ resolveAgentTools 白名单（combo∩可见+MCP 前缀；官方 preset 经 standingKeyFor 解析、服务缺失回退可见；wf_db_query 仅 db-in 连线注入；wf_run_node/wf_finish 无条件剔除）+ CordisToolsView（全局层∪存活 agent scope∪preset standing scope 并集，scope key 必须是 agent 对象——旧项目历史坑注释保留））；guards.ts（ReAct 软截停：agent/pre-step 计步→替换本步消息为强制收尾指令 + tools.guard 拒绝双保险，V-01 官方无 turn 预算取证）；model-selection.ts（installModelSelection 双瀑布零依赖移植 + WeakMap 身份匹配 attach——思考强度经 registerContinuableSetup 注入，V-02）。
+   - index.ts 装配：三项 registerContinuableSetup 贡献（可见性/软截停/模型选择）归 ctx.effect；NodeAgentRunner 替代占位 runner；host.dispose 清理子代理表。
+   - 编排器联动：NodeRunner 增 consumeReactCapped；handleSubagentEnd 标记 react-capped（非失败正常产出，wait 语义仍 ok）；snapshot.setNodeStatus 对 react-capped 同等回写 output。
+   - 与旧项目行为差异（PRD §4.4.2 规则 7 定稿）：删除自动追加 wf_ask（无强制追加）；minimal/ptc 硬编码正则被真实 preset 解析取代；wf_run_node/wf_finish 白名单无条件剔除。
+   - 测试：新增 34 用例（agent-runner 19 + guards 8 + model-selection 7）+ orchestrator 增 react-capped 用例；全量 249 用例全绿（14 文件），typecheck 三 program + build 通过。
+   - 变更标注：官方取证写入文件头（§8 #1/#4/#5/#6/#7/#10/#21/#22——startContinuable/installModelSelection/agent-pre-step/tools.guard 语义逐条对照）；真实 harness 行为由 T-063 集成测试验证。
+
+2. git版本：[6b6e69f] [v0.1.0]
    - 完成：P05 编排核心（T-021，主代理本人实现）——里程碑 1「host 侧跑得起来」。
    - 交付：src/host/orchestrator/ 三文件——snapshot.ts（快照纯函数：创建/节点状态更新/终态化/截断/lastAssistantText）、runtime.ts（OrchestratorRuntime：运行锁（runs 内存表单一事实源，running/paused 均保留锁）/startRun（校验→锁→事实源文件→编排指令 followup 注入→开始即落盘）/wfRunNode（异步默认/wait:true 阻塞/pause 门三路径）/wfFinish 幂等收尾/subagent-end 观察回写/护栏（全局 500 次上限+单节点重试上限+WF_* 稳定错误码）/currentResolvedFlow 双向同步/terminate/stop/dispose）、watchdog.ts（空闲看护/父代理回合终态/宿主重启 reconcileStaleRuns→interrupted 可恢复）。
    - DI 缝：NodeRunner（T-022 节点执行引擎接口+占位实现，真实 startContinuable 引擎待 T-022 装配）、AgentHost（CordisAgentHost：agents 服务结构适配）；官方取证 §8 #1/#21/#22（SubagentRunEndInfo/agent-error payload/startContinuable 契约）写入文件头注释。
