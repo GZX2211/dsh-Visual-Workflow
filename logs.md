@@ -11,12 +11,23 @@
 
 ## 2026.08.24
 
-1. git版本：[912876b] [v0.1.0]
+1. git版本：[6b6e69f] [v0.1.0]
+   - 完成：P05 编排核心（T-021，主代理本人实现）——里程碑 1「host 侧跑得起来」。
+   - 交付：src/host/orchestrator/ 三文件——snapshot.ts（快照纯函数：创建/节点状态更新/终态化/截断/lastAssistantText）、runtime.ts（OrchestratorRuntime：运行锁（runs 内存表单一事实源，running/paused 均保留锁）/startRun（校验→锁→事实源文件→编排指令 followup 注入→开始即落盘）/wfRunNode（异步默认/wait:true 阻塞/pause 门三路径）/wfFinish 幂等收尾/subagent-end 观察回写/护栏（全局 500 次上限+单节点重试上限+WF_* 稳定错误码）/currentResolvedFlow 双向同步/terminate/stop/dispose）、watchdog.ts（空闲看护/父代理回合终态/宿主重启 reconcileStaleRuns→interrupted 可恢复）。
+   - DI 缝：NodeRunner（T-022 节点执行引擎接口+占位实现，真实 startContinuable 引擎待 T-022 装配）、AgentHost（CordisAgentHost：agents 服务结构适配）；官方取证 §8 #1/#21/#22（SubagentRunEndInfo/agent-error payload/startContinuable 契约）写入文件头注释。
+   - 编排指令/节点任务块装配：facts（节点清单/协作组/暂停节点动态态仅入末段）满足 W-01/W-02（双位断言在单测中逐条验证）；注入消息带 id+source（旧项目父回合 UNKNOWN 失败根因）。
+   - 事件声明收窄：events.d.ts 按官方取证改 unknown 可选形状；index.ts 装配 watchdog ctx.effect + reconcileStaleRuns + agent/error 快速路径。
+   - 测试：orchestrator.test.ts 54 用例（状态机全覆盖：三路径/暂停门锁保留/幂等收尾/看护/对账/dispose）；全量 214 用例全绿（11 文件），typecheck 三 program + build 通过。
+   - 变更标注：snapshot 节点状态词表无 stopped——被终止运行以 run 级状态区分、running 收敛 fail（续跑重试）；pause 门 run=paused+resumeFromNodeId 持久化+锁保留；虚拟节点 wf_run_node 解析为主节点 key（快照/attempts/waitKey 均按主节点记账）。
+
+2. git版本：[912876b] [v0.1.0]
    - 完成：P04 FlowStore 数据层+Host 装配（T-012/T-015，主代理本人实现）。
    - T-012：flow-store.ts 全 CRUD（workflows/services 按 sessionId 隔离、roles/data 模板全局共享、runs 单文件、combos、userId 映射、orchestrations 事实源）+ revision 乐观锁（显式 expectedRevision，文档 revision 不隐式成为期望——比旧项目语义更收敛）+ templateToNode 深拷贝解耦；17 用例（并发写无垃圾/无撕裂/隔离/冲突）。
    - T-015：index.ts 装配 FlowStore+subagent/end+agent/error 观察（events.d.ts 本地增强——先 import 真实模块再 declare module，避免覆盖 exports-map 解析，已验证的陷阱）+ ctx.effect dispose 幂等骨架；真实 cordis Context 单测 4 用例（启动/目录结构/同名 service 冲突/dataDir 缺失失败/卸载清理）。
    - 工程变更：新增 tsconfig.test.json（host 测试进类型检查，不污染 lib/ 产物）；typecheck 扩展为三 program；graph 工厂返回精确节点类型；拓扑助手放宽 Partial 入参。
    - 测试：160 用例全绿（10 文件）。
+
+3. git版本：[d5d346a] [v0.1.0]
    - 完成：P03 原子存储+图模型校验+共享契约（T-011/T-013/T-014）。
    - T-011：storage/atomic.ts 八 API（atomicWriteJson/readJson/withFileLock/acquireDiskLock/releaseDiskLock/withJsonLock/atomicReplaceFile/cleanupStaleTemp）——open('wx') 跨平台 no-clobber、磁盘锁+陈旧回收（mtime+死 pid 双条件）、锁序固定防死锁、CorruptJsonError 不静默；19 用例全绿；@types/node 入 devDeps、tsconfig.host.json types:["node"]。
    - T-013：graph/model.ts（9 类节点连接点矩阵/工厂/拓扑助手）+ validate.ts（自环/重复/通道配对/条件仅流程线/主虚互斥/协作组边界/阶段唯一/父代理唯一/模式差异/归一化/missingStageNodes）；41 用例全绿。
@@ -24,7 +35,7 @@
    - 变更标注：FileNode/DatabaseNode 按需求卡片设计补 label（数据库另有 description）必填字段（主代理在 T-014 基线上扩展）；主代理本人完成 T-013（此后不再分发子代理，后续任务由主代理直接实现）。
    - 测试：139 用例全绿（8 文件）。
 
-2. git版本：[3119869] [v0.1.0]
+4. git版本：[3119869] [v0.1.0]
    - 完成：P02 挂载层+构建链路+模型资产+提示词基线（T-002/T-003/T-004/T-005）。
    - T-002：cordis.patch.yml 13 键（§2.2 实际为 13 键，文档"14 键"为笔误）+ src/host/index.ts 官方 Service 形态入口（z 取自 @deepseek-ai/schemastery，进 peerDependencies；清理用 ctx.effect 而非 ctx.on('dispose')）；真实 Loader 验证：工作区内临时 DSH_HOME + `dsh plugin add file:` + `--dump-config` 出现 visual-workflow 层且入口可 import。
    - T-003：tsdown 0.22.14 客户端构建（__ModuleLoader__ 包装/style[data-plugin]/purity gate/sourcemap/host-client 产物并存）+ client 声明发射 + client-smoke 冒烟；check/verify 脚本扩展；lightningcss 显式 devDep。
@@ -33,7 +44,7 @@
    - 测试：50 用例全绿（新增 cordis-patch 9 + build-artifacts 5 + embedding-assets 6 + prompts-baseline 12）。
    - 变更标注：@deepseek-ai/schemastery 进 peer（共享运行时，非运行时依赖）；vitest --pool=threads（沙箱 pipe EPERM 规避）；`dsh plugin add` 需 profile 的 pnpm-workspace.yaml 设 allowBuilds=false 才能 reconcile bundles（T-064 注意）。
 
-2. git版本：[87f4e0e] [v0.1.0]
+5. git版本：[87f4e0e] [v0.1.0]
    - 完成：P01 项目骨架与包配置（T-001）——package.json 插件契约（exports/files/dsh.bundle/dsh.client，零 @deepseek-ai/* 运行时依赖）、tsconfig.host/client 双 program、scripts/build.mjs（host tsc 双发射：JS→lib/ + 声明→lib/types/）、cordis/serve patch 占位、目录骨架、.gitignore/.gitattributes。
    - 完成：tests/host/package-contract.test.ts（18 用例）断言包契约与 W-05；vitest 使用 --pool=threads（沙箱下 forks 池 pipe EPERM 规避）。
    - 变更标注：@huggingface/transformers@^4.2.0 声明为唯一运行时依赖；其 onnxruntime 硬依赖的构建脚本经 pnpm-workspace.yaml allowBuilds=false 抑制，T-004/T-025 时再评估。
