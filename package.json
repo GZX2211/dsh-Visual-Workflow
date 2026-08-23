@@ -36,30 +36,37 @@
     },
     "client": {
       "platform": "web",
-      "inject": ["@deepseek-ai/dsh-client-runtime"]
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime"
+      ]
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "*"
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/schemastery": "*"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0"
   },
   "devDependencies": {
-    "typescript": "^6.0.3",
-    "tsdown": "^0.22.2",
-    "vitest": "^4.1.8",
-    "jsdom": "29.1.1",
+    "@deepseek-ai/schemastery": "^3.18.1",
     "@types/jsdom": "^28.0.3",
+    "@types/react": "^19.2.8",
+    "@types/react-dom": "^19.2.3",
+    "jsdom": "29.1.1",
+    "lightningcss": "1.33.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "@types/react": "^19.2.8",
-    "@types/react-dom": "^19.2.3"
+    "tsdown": "^0.22.2",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "build": "node scripts/build.mjs",
     "test": "vitest run --pool=threads",
-    "verify": "pnpm typecheck && pnpm build && pnpm test"
+    "client-smoke": "node scripts/client-smoke.mjs",
+    "check": "pnpm typecheck && pnpm test && pnpm build && pnpm client-smoke",
+    "verify": "pnpm typecheck && pnpm build && pnpm test && pnpm client-smoke"
   }
 }

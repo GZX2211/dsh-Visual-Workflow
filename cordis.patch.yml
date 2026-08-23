@@ -1,5 +1,39 @@
 # DSH 挂载层（Web profile 组合层，顶层数组）。
-# P01 占位：空数组保证 exports["./cordis.patch.yml"] 指向的文件真实存在。
-# T-002 将填充插件行（insert 行 id=visual-workflow，name=dsh-visual-workflow，
-# 含 dataDir/servicePortBase/apiKey 等 config 键），形态见架构文档 §2.2。
-[]
+#
+# T-002：insert 块声明插件行。id 是配置树中稳定的行身份（后层按 id 覆盖前层），
+# name 是 Cordis Loader 可解析的 Node 包名（对应本包 main 入口 lib/index.js）。
+# config 的 13 个键与 src/host/index.ts 导出的 Config schema 一一对应（默认值一致），
+# 键义逐条见下方中文注释；形态与架构文档 §2.2 逐字一致。
+- insert:
+    - id: visual-workflow
+      name: dsh-visual-workflow
+      config:
+        # 数据根目录：工作流/服务/角色模板/运行历史/断点等 JSON 都落在此目录下
+        # （默认 $DSH_HOME/visual-workflow，即 ~/.dsh/visual-workflow）。
+        # dshHomePath 是 DSH 在 !!js 求值上下文中注入的宿主 home 路径助手（见官方
+        # packages/util/home-paths，`dshHomePath(...segments)` 拼接 DSH_HOME 与子段）。
+        dataDir: !!js dshHomePath('visual-workflow')
+        # 模式二服务端口的起始值；端口池从该值向上探测空闲端口（冲突自动 +1）。
+        servicePortBase: 7860
+        # 模式二 REST API 的鉴权密钥；null 表示鉴权关闭（默认本机/内网直连）。
+        apiKey: null
+        # 模式二单服务并发请求上限（超出返回 429，需求 §4.1.3 默认 50）。
+        maxConcurrentPerService: 50
+        # wf_ask_agent 阻塞通信的超时毫秒数（默认 120s，需求 §4.4.1 默认 2 分钟）。
+        wfAskAgentTimeoutMs: 120000
+        # 运行空闲超时毫秒数（无 in-flight 时的看护门限，默认 30 分钟）。
+        runIdleTimeoutMs: 1800000
+        # 运行状态回显（编排 → 画布双向同步）的轮询间隔毫秒数（默认 2s，需求 §4.5）。
+        runPollMs: 2000
+        # ReAct 迭代次数默认上限（软截停强制收尾，代理达到上限后不再发起工具调用）。
+        reactIterationLimitDefault: 50
+        # 单节点回流重试次数默认上限（超限按护栏终止该节点）。
+        retryLimitDefault: 3
+        # 节点完整输出持久化的字节上限（默认 100KB，需求 §4.7 可配置）。
+        outputFullLimit: 102400
+        # 文本型文件节点内容注入上下文的字符上限（默认 20000 字，需求 §4.2.4.1）。
+        documentTextLimit: 20000
+        # 本地嵌入模型资产目录；null 表示使用随包分发的 assets/models/bge-small-zh-v1.5。
+        embeddingModelDir: null
+        # 外部 OpenAI 兼容 /embeddings 端点；null 表示优先本地嵌入（不可用才降级 BM25）。
+        embeddingEndpoint: null

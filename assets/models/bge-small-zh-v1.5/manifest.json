@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "source": "D:\\AiCoding-Gzx\\models\\backend\\models\\bge-small-zh-v1.5（tokenizer/配置）+ Xenova/bge-small-zh-v1.5 onnx/model_quantized.onnx（量化权重）",
+  "onnxSourceUrl": "https://huggingface.co/Xenova/bge-small-zh-v1.5/resolve/main/onnx/model_quantized.onnx",
+  "files": {
+    "1_Pooling/config.json": {
+      "bytes": 190,
+      "sha256": "aaa8861589f80c961a03cc86c7eeaef7605c1676b9ab55329d33a304738769c6"
+    },
+    "config.json": {
+      "bytes": 776,
+      "sha256": "3853a7979202c348751b753e36f579c41d8da7d36af617d3d907e1fc9b441f2a"
+    },
+    "config_sentence_transformers.json": {
+      "bytes": 124,
+      "sha256": "940d5f50db195fa6e5e6a4f122c095f77880de259d74b14a65779ed48bdd7c56"
+    },
+    "modules.json": {
+      "bytes": 349,
+      "sha256": "84e40c8e006c9b1d6c122e02cba9b02458120b5fb0c87b746c41e0207cf642cf"
+    },
+    "onnx/model_quantized.onnx": {
+      "bytes": 24010842,
+      "sha256": "15b717c382bcb518ba457b93ea6850ede7f4f1cd8937454aa06972366cd19bcc"
+    },
+    "sentence_bert_config.json": {
+      "bytes": 52,
+      "sha256": "84e39fda68ccbff05bfa723ae9c0e70e23e2ec373b76e0f8c6e71af72a693cbf"
+    },
+    "special_tokens_map.json": {
+      "bytes": 125,
+      "sha256": "b6d346be366a7d1d48332dbc9fdf3bf8960b5d879522b7799ddba59e76237ee3"
+    },
+    "tokenizer.json": {
+      "bytes": 439125,
+      "sha256": "48cea5d44424912a6fd1ea647bf4fe50b55ab8b1e5879c3275f80e339e8fae26"
+    },
+    "tokenizer_config.json": {
+      "bytes": 367,
+      "sha256": "e6f3b96db926a37d4039995fbf5ad17de158dfb8f6343d607e4dbaad18d75f5a"
+    },
+    "vocab.txt": {
+      "bytes": 109540,
+      "sha256": "45bbac6b341c319adc98a532532882e91a9cefc0329aa57bac9ae761c27b291c"
+    }
+  }
+}

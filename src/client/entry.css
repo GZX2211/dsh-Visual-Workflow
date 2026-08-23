@@ -1,0 +1,9 @@
+/* Visual Workflow —— Client 全局样式占位（T-003）。
+ *
+ * 该文件当前仅为验证 client 构建链路的 CSS 注入机制（style[data-plugin]）而存在：
+ * 空入口 + 一条注释规则，确保 tsdown 的全局 CSS 虚拟 loader 被真实命中，
+ * 产物内出现 style[data-plugin-css] 注入代码。真实主题样式（--wf-* 变量、深色/浅色）
+ * 由 T-050 的 styles.ts 补充，届时本占位符号可被替换或保留为空壳。
+ */
+
+/* 占位规则：明确技术边界为注释，不产生产物副作用。 */

@@ -117,8 +117,14 @@ describe('T-001 包契约（依赖约束，W-05）', () => {
     expect(Object.keys(pkg.dependencies ?? {}).sort()).toEqual(['@huggingface/transformers'])
   })
 
-  it('peerDependencies 仅 @deepseek-ai/cordis', () => {
-    expect(Object.keys(pkg.peerDependencies ?? {}).sort()).toEqual(['@deepseek-ai/cordis'])
+  it('peerDependencies 仅 @deepseek-ai/cordis 与 @deepseek-ai/schemastery', () => {
+    // W-05 判定补充：peer 非运行时依赖——cordis（Service/Context，宿主共享运行时）
+    // 与 schemastery（z，Config schema 校验）均经宿主组合解析，插件 package 的
+    // dependencies 里仍零 @deepseek-ai/*（见上一用例），故 W-05 不破。
+    expect(Object.keys(pkg.peerDependencies ?? {}).sort()).toEqual([
+      '@deepseek-ai/cordis',
+      '@deepseek-ai/schemastery',
+    ])
   })
 })
 

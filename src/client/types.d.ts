@@ -9,3 +9,8 @@ declare module '*.module.css' {
   const classes: Record<string, string>
   export default classes
 }
+
+// 全局 CSS 声明（T-003）：允许 `import './x.css'` 的副作用导入（无导出），
+// 供 tsdown 的全局 CSS 虚拟 loader（style[data-plugin] 注入）在 client program 内类型通过。
+// 实际编译与注入由 scripts/build-client.ts 的 lightningcss 负责，此处仅类型占位。
+declare module '*.css' {}
