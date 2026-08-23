@@ -77,7 +77,7 @@ describe('T-011 原子写 JSON：往返与无残留', () => {
     const data = { a: 1, nested: { b: [2, 3], s: 'x' }, 中文: '值' }
 
     await atomicWriteJson(file, data)
-    const read = await readJson<typeof data>(file, { a: 0 })
+    const read = await readJson<typeof data | null>(file, null)
 
     expect(read).toEqual(data)
     await expectNoTmpResidue(dir)
@@ -128,7 +128,7 @@ describe('T-011 并发写：最终为某次完整内容、无撕裂、无垃圾'
     await Promise.all(
       Array.from({ length: n }, (_, i) => withJsonLock(file, () => atomicWriteJson(file, payload(i)), { timeoutMs: 5000 })),
     )
-    const read = await readJson<Record<string, unknown>>(file, null)
+    const read = await readJson<Record<string, unknown> | null>(file, null)
     // 最终必然等于某一次 { seq: k, text: 'content-k' }（k ∈ [0,n)），且不是撕裂混合。
     expect(read).not.toBeNull()
     const seqValue = (read as Record<string, unknown>).seq

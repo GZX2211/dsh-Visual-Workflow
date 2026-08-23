@@ -67,7 +67,7 @@ describe('单连线检测 connectionProblem：合法矩阵', () => {
     ['文件→上下文入', newLine(file.id, agent.id, 'ctx-out', 'ctx-in')],
     ['数据库→db-in', newLine(db.id, agent.id, 'db-out', 'db-in')],
     ['虚拟节点流出入', newLine(proxy.id, end.id, 'flow-out', 'flow-in')],
-    ['条件流程线（内容）', { ...newLine(agent.id, end.id, 'flow-out', 'flow-in'), condition: { type: 'content', label: 'routing' } }],
+    ['条件流程线（内容）', { ...newLine(agent.id, end.id, 'flow-out', 'flow-in'), condition: { type: 'content' as const, label: 'routing' } }],
   ])('%s 通过', (_name, line) => {
     const nodes = [start, end, agent, parent, file, db, proxy]
     expect(connectionProblem(nodes, line).valid).toBe(true)
@@ -146,7 +146,7 @@ describe('validateFlow 全量校验', () => {
   it('content 条件缺 label → contentLabelRequired', () => {
     const a = newRoleNode('agent', 'a')
     const b = newRoleNode('agent', 'b')
-    const line = { ...newLine(a.id, b.id, 'flow-out', 'flow-in'), condition: { type: 'content', label: '  ' } }
+    const line = { ...newLine(a.id, b.id, 'flow-out', 'flow-in'), condition: { type: 'content' as const, label: '  ' } }
     expect(codes(makeFlow([a, b], [line]))).toContain('contentLabelRequired')
   })
 

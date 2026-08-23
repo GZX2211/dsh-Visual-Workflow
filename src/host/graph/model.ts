@@ -14,10 +14,16 @@
 
 import type {
   ConditionType,
+  DatabaseNode,
+  FileNode,
   GraphNode,
+  GroupNode,
   Handle,
   Line,
   NodeKind,
+  ProxyNode,
+  RoleNode,
+  StageNode,
   WorkflowDocument,
   WorkflowMode,
 } from '../shared/graph-model.js'
@@ -106,7 +112,7 @@ export function makeLineId(): string {
  * 新建角色节点（父/子代理，数据形状见 shared RoleNode）。
  * 深拷贝解耦语义：工厂只产出空白默认值，由调用方把模板数据复制进来（§4.2.1）。
  */
-export function newRoleNode(kind: 'parent' | 'agent', label: string, position = { x: 120, y: 80 }): GraphNode {
+export function newRoleNode(kind: 'parent' | 'agent', label: string, position = { x: 120, y: 80 }): RoleNode {
   return {
     id: makeNodeId(),
     kind,
@@ -132,7 +138,7 @@ export function newRoleNode(kind: 'parent' | 'agent', label: string, position = 
  * 新建文件节点（text 或受管 file，§4.2.4.1）。
  * label 为节点名称（卡片设计必填字段）。
  */
-export function newFileNode(fileKind: 'text' | 'file', label: string, position = { x: 120, y: 80 }): GraphNode {
+export function newFileNode(fileKind: 'text' | 'file', label: string, position = { x: 120, y: 80 }): FileNode {
   return {
     id: makeNodeId(),
     kind: 'file',
@@ -145,7 +151,7 @@ export function newFileNode(fileKind: 'text' | 'file', label: string, position =
  * 新建数据库节点（§4.2.4.2）。
  * label 为名称、description 为描述（卡片设计必填字段）。
  */
-export function newDatabaseNode(dbType: 'local' | 'server', label: string, position = { x: 120, y: 80 }): GraphNode {
+export function newDatabaseNode(dbType: 'local' | 'server', label: string, position = { x: 120, y: 80 }): DatabaseNode {
   return {
     id: makeNodeId(),
     kind: 'database',
@@ -163,7 +169,7 @@ export function newDatabaseNode(dbType: 'local' | 'server', label: string, posit
 }
 
 /** 新建阶段节点（start/end/pause；label 由模式决定，硬编码锁定，§4.2.5.1）。 */
-export function newStageNode(kind: 'start' | 'end' | 'pause', mode: WorkflowMode, position = { x: 120, y: 80 }): GraphNode {
+export function newStageNode(kind: 'start' | 'end' | 'pause', mode: WorkflowMode, position = { x: 120, y: 80 }): StageNode {
   return {
     id: makeNodeId(),
     kind,
@@ -180,7 +186,7 @@ export function stageLabel(kind: 'start' | 'end' | 'pause', mode: WorkflowMode):
 }
 
 /** 新建协作组节点（§4.2.5.2）。 */
-export function newGroupNode(label: string, position = { x: 120, y: 80 }): GraphNode {
+export function newGroupNode(label: string, position = { x: 120, y: 80 }): GroupNode {
   return {
     id: makeNodeId(),
     kind: 'group',
@@ -190,7 +196,7 @@ export function newGroupNode(label: string, position = { x: 120, y: 80 }): Graph
 }
 
 /** 新建虚拟节点：引用主节点 id，不携带独立配置（§4.2.3.2 规则 4/7）。 */
-export function newProxyNode(sourceId: string, position = { x: 120, y: 80 }): GraphNode {
+export function newProxyNode(sourceId: string, position = { x: 120, y: 80 }): ProxyNode {
   return { id: makeNodeId(), kind: 'proxy', position: { x: position.x, y: position.y }, proxySourceId: sourceId }
 }
 
@@ -210,68 +216,68 @@ export function newLine(
 // ---------------------------------------------------------------------------
 
 /** 显式启动节点：kind='start' 的节点即流程入口（§4.2.5.1；架构文档 §4.2 入口解析）。 */
-export function entryNodes(flow: Pick<WorkflowDocument, 'nodes'>): GraphNode[] {
-  return flow.nodes.filter((n) => n.kind === 'start')
+export function entryNodes(flow: Partial<WorkflowDocument>): GraphNode[] {
+  return (flow.nodes ?? []).filter((n) => n.kind === 'start')
 }
 
 /** 某节点的 flow-out 出边列表（用于下游推进/条件分支，§4.3）。 */
-export function flowOutEdges(flow: Pick<WorkflowDocument, 'lines'>, nodeId: string): Line[] {
-  return flow.lines.filter((l) => l.source === nodeId && l.sourceHandle === 'flow-out')
+export function flowOutEdges(flow: Partial<WorkflowDocument>, nodeId: string): Line[] {
+  return (flow.lines ?? []).filter((l) => l.source === nodeId && l.sourceHandle === 'flow-out')
 }
 
 /** 某节点的 flow-in 入边列表（上游流程来源）。 */
-export function flowInEdges(flow: Pick<WorkflowDocument, 'lines'>, nodeId: string): Line[] {
-  return flow.lines.filter((l) => l.target === nodeId && l.targetHandle === 'flow-in')
+export function flowInEdges(flow: Partial<WorkflowDocument>, nodeId: string): Line[] {
+  return (flow.lines ?? []).filter((l) => l.target === nodeId && l.targetHandle === 'flow-in')
 }
 
 /** 某节点的 ctx-in 入边列表（上游上下文来源，§4.2.3.2 规则 5 显式连线）。 */
-export function ctxInEdges(flow: Pick<WorkflowDocument, 'lines'>, nodeId: string): Line[] {
-  return flow.lines.filter((l) => l.target === nodeId && l.targetHandle === 'ctx-in')
+export function ctxInEdges(flow: Partial<WorkflowDocument>, nodeId: string): Line[] {
+  return (flow.lines ?? []).filter((l) => l.target === nodeId && l.targetHandle === 'ctx-in')
 }
 
 /** 某节点的 db-in 入边列表（数据库服务标识来源；有边才注入 wf_db_query，§4.4.3 规则 5）。 */
-export function dbInEdges(flow: Pick<WorkflowDocument, 'lines'>, nodeId: string): Line[] {
-  return flow.lines.filter((l) => l.target === nodeId && l.targetHandle === 'db-in')
+export function dbInEdges(flow: Partial<WorkflowDocument>, nodeId: string): Line[] {
+  return (flow.lines ?? []).filter((l) => l.target === nodeId && l.targetHandle === 'db-in')
 }
 
 /** 某节点经 ctx 连线收到的上游来源节点 id 列表（去重，供任务块组装注入上游产出）。 */
-export function upstreamCtxNodeIds(flow: Pick<WorkflowDocument, 'lines'>, nodeId: string): string[] {
+export function upstreamCtxNodeIds(flow: Partial<WorkflowDocument>, nodeId: string): string[] {
   return [...new Set(ctxInEdges(flow, nodeId).map((l) => l.source))]
 }
 
 /** 某节点 flow-out 直接下游节点 id 列表（含条件连线，供父代理按拓扑推进）。 */
-export function downstreamFlowNodeIds(flow: Pick<WorkflowDocument, 'lines'>, nodeId: string): string[] {
+export function downstreamFlowNodeIds(flow: Partial<WorkflowDocument>, nodeId: string): string[] {
   return flowOutEdges(flow, nodeId).map((l) => l.target)
 }
 
 /** 按 id 取节点；不存在返回 undefined。 */
-export function nodeById(flow: Pick<WorkflowDocument, 'nodes'>, nodeId: string): GraphNode | undefined {
-  return flow.nodes.find((n) => n.id === nodeId)
+export function nodeById(flow: Partial<WorkflowDocument>, nodeId: string): GraphNode | undefined {
+  return (flow.nodes ?? []).find((n) => n.id === nodeId)
 }
 
 /** 按 id 取连线。 */
-export function lineById(flow: Pick<WorkflowDocument, 'lines'>, lineId: string): Line | undefined {
-  return flow.lines.find((l) => l.id === lineId)
+export function lineById(flow: Partial<WorkflowDocument>, lineId: string): Line | undefined {
+  return (flow.lines ?? []).find((l) => l.id === lineId)
 }
 
 /** 某主节点的全部虚拟节点（§4.2.3.2 规则 4：复制按钮生成）。 */
-export function proxiesOf(flow: Pick<WorkflowDocument, 'nodes'>, nodeId: string): GraphNode[] {
-  return flow.nodes.filter((n) => n.kind === 'proxy' && n.proxySourceId === nodeId)
+export function proxiesOf(flow: Partial<WorkflowDocument>, nodeId: string): GraphNode[] {
+  return (flow.nodes ?? []).filter((n) => n.kind === 'proxy' && n.proxySourceId === nodeId)
 }
 
 /** 某协作组的成员节点 id 列表。 */
-export function groupMemberIds(flow: Pick<WorkflowDocument, 'nodes'>, groupId: string): string[] {
+export function groupMemberIds(flow: Partial<WorkflowDocument>, groupId: string): string[] {
   const g = nodeById(flow, groupId)
   return g && g.kind === 'group' ? g.data.memberIds : []
 }
 
 /** 某角色节点所属协作组 id（不在组内返回 null）。 */
-export function memberGroupId(flow: Pick<WorkflowDocument, 'nodes'>, nodeId: string): string | null {
+export function memberGroupId(flow: Partial<WorkflowDocument>, nodeId: string): string | null {
   const n = nodeById(flow, nodeId)
   return n && (n.kind === 'parent' || n.kind === 'agent') ? (n.data.groupId ?? null) : null
 }
 
 /** 判断角色节点是否为协作组成员（§4.2.5.2 规则 4：组内成员仅 ctx/db 连接点）。 */
-export function isGroupMember(flow: Pick<WorkflowDocument, 'nodes'>, nodeId: string): boolean {
+export function isGroupMember(flow: Partial<WorkflowDocument>, nodeId: string): boolean {
   return memberGroupId(flow, nodeId) !== null
 }

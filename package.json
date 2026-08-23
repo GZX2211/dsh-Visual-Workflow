@@ -63,7 +63,7 @@
     "vitest": "^4.1.8"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.client.json --noEmit",
+    "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.client.json --noEmit && tsc -p tsconfig.test.json",
     "build": "node scripts/build.mjs",
     "test": "vitest run --pool=threads",
     "client-smoke": "node scripts/client-smoke.mjs",
