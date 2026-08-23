@@ -11,7 +11,10 @@
 
 ## 2026.08.24
 
-> 新日志写在此处（替换该段）
+1. git版本：[87f4e0e] [v0.1.0]
+   - 完成：P01 项目骨架与包配置（T-001）——package.json 插件契约（exports/files/dsh.bundle/dsh.client，零 @deepseek-ai/* 运行时依赖）、tsconfig.host/client 双 program、scripts/build.mjs（host tsc 双发射：JS→lib/ + 声明→lib/types/）、cordis/serve patch 占位、目录骨架、.gitignore/.gitattributes。
+   - 完成：tests/host/package-contract.test.ts（18 用例）断言包契约与 W-05；vitest 使用 --pool=threads（沙箱下 forks 池 pipe EPERM 规避）。
+   - 变更标注：@huggingface/transformers@^4.2.0 声明为唯一运行时依赖；其 onnxruntime 硬依赖的构建脚本经 pnpm-workspace.yaml allowBuilds=false 抑制，T-004/T-025 时再评估。
 
 ## 2026.08.17
 
