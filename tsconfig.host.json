@@ -17,7 +17,8 @@
     "verbatimModuleSyntax": true,
     "declaration": false,
     "sourceMap": true,
-    "noEmitOnError": true
+    "noEmitOnError": true,
+    "types": ["node"]
   },
   "include": ["src/host/**/*.ts"],
   "exclude": ["node_modules", "lib", "src/client", "tests", "scripts"]
