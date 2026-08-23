@@ -78,6 +78,11 @@ export interface NodeRunner {
   startNodeTask(input: NodeStartInput): Promise<{ childId: string; created: boolean }>
   /** 尽力中断某子代理当前回合（保留会话；官方 interrupt 语义）。 */
   interruptChild(childId: string, sessionId: string): Promise<void>
+  /**
+   * 消费软截停标记（T-022 护栏）：该 child 最近一次任务是否触达 ReAct 迭代上限
+   * （消费后清除）。触达上限仍正常产出——节点标记 react-capped（非失败）。
+   */
+  consumeReactCapped?(childId: string): boolean
 }
 
 /** 节点任务启动入参（T-021 组装任务块与节点级参数；T-022 透传官方子代理配置）。 */
@@ -682,8 +687,14 @@ export class OrchestratorRuntime {
       const stopReason = String(info?.stopReason ?? '')
       const completed = stopReason === 'completed' || stopReason === 'max-tokens'
       const outputText = lastAssistantText(info?.lastAssistantMessage, OUTPUT_SUMMARY_LIMIT)
+      // 软截停（T-022 护栏）：触达 ReAct 上限仍正常产出——标记 react-capped（非失败）
+      const reactCapped = this.deps.runner.consumeReactCapped?.(childId) === true
       if (completed) {
-        setNodeStatus(s, meta.nodeId, 'ok', { output: outputText || '(子代理已完成，但无可汇总文本)', outputFullLimit: this.deps.config.outputFullLimit, now: this.now() })
+        setNodeStatus(s, meta.nodeId, reactCapped ? 'react-capped' : 'ok', {
+          output: outputText || '(子代理已完成，但无可汇总文本)',
+          outputFullLimit: this.deps.config.outputFullLimit,
+          now: this.now(),
+        })
       } else {
         setNodeStatus(s, meta.nodeId, 'fail', { now: this.now() })
       }

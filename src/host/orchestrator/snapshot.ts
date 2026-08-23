@@ -101,7 +101,8 @@ export interface SetNodeStatusOptions {
  * 更新快照中某节点的运行状态（与旧项目 setNodeStatus 同语义）：
  *   - running 且无 startedAt → 补开始时间；
  *   - ok/fail/skipped/react-capped 且无 endedAt → 补结束时间；
- *   - ok 同时回写完整输出（output）与展示摘要（outputSummary）。
+ *   - ok 与 react-capped（软截停正常产出，T-022）均回写完整输出（output）与展示摘要
+ *     （outputSummary）——react-capped 不是失败，产出与 ok 同等对待。
  */
 export function setNodeStatus(snapshot: RunSnapshot, nodeId: string, status: NodeRunStatus, options: SetNodeStatusOptions = {}): void {
   const entry = snapshot.nodes.find((node) => node.nodeId === nodeId)
@@ -109,7 +110,7 @@ export function setNodeStatus(snapshot: RunSnapshot, nodeId: string, status: Nod
   const now = options.now ?? Date.now()
   entry.status = status
   if (options.attempts !== undefined) entry.attempts = options.attempts
-  if (status === 'ok') {
+  if (status === 'ok' || status === 'react-capped') {
     const text = String(options.output ?? '')
     entry.output = truncateText(text, options.outputFullLimit ?? DEFAULT_OUTPUT_FULL_LIMIT)
     entry.outputSummary = truncateText(text, OUTPUT_SUMMARY_LIMIT)

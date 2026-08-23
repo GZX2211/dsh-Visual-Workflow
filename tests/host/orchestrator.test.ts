@@ -151,11 +151,12 @@ class FakeAgents implements AgentHost {
   }
 }
 
-/** NodeRunner fake：记录启动入参/中断调用；可注入失败。 */
+/** NodeRunner fake：记录启动入参/中断调用；可注入失败与软截停标记。 */
 class FakeRunner implements NodeRunner {
   calls: NodeStartInput[] = []
   interrupts: Array<{ childId: string; sessionId: string }> = []
   nextFail: unknown = null
+  capped = new Set<string>()
   private seq = 0
   async startNodeTask(input: NodeStartInput): Promise<{ childId: string; created: boolean }> {
     this.calls.push(input)
@@ -169,6 +170,9 @@ class FakeRunner implements NodeRunner {
   }
   async interruptChild(childId: string, sessionId: string): Promise<void> {
     this.interrupts.push({ childId, sessionId })
+  }
+  consumeReactCapped(childId: string): boolean {
+    return this.capped.delete(childId)
   }
 }
 
@@ -761,6 +765,24 @@ describe('subagent/end 观察回写（§8 #21）', () => {
     expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-a1')!.status).toBe('ok')
     expect(entry.inflight.size).toBe(0)
   })
+
+  it('软截停（T-022 护栏）：consumeReactCapped 标记 → 节点 react-capped（非失败，正常产出）', async () => {
+    const h = await makeHarness()
+    await start(h, makeFlow())
+    const pending = h.runtime.wfRunNode(caller, { nodeId: 'n-a1', wait: true })
+    await vi.waitFor(() => {
+      expect(h.runner.calls).toHaveLength(1)
+    })
+    h.runner.capped.add('child-1')
+    await h.runtime.handleSubagentEnd({ id: 'child-1', stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: '软截停结论' }] })
+    const result = await pending
+    expect(result.status).toBe('ok') // wait 语义：软截停正常产出 → ok
+    const node = h.runtime.runSnapshot('run-1')!.nodes.find((n) => n.nodeId === 'n-a1')!
+    expect(node.status).toBe('react-capped')
+    expect(node.outputSummary).toBe('软截停结论')
+    // 标记已消费：二次观察不再判定 react-capped
+    expect(h.runner.capped.has('child-1')).toBe(false)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -855,18 +877,18 @@ describe('watchdog 看护与陈旧记录对账', () => {
   })
 
   it('scheduleIdleWatchdog：定时触发扫描，disposer 可停止', async () => {
-    vi.useFakeTimers()
-    try {
-      const h = await makeHarness()
-      const { entry } = await start(h, makeFlow())
-      const dispose = scheduleIdleWatchdog(h.runtime, { intervalMs: WATCHDOG_INTERVAL_MS })
-      h.clock.now += 10_000
-      await vi.advanceTimersByTimeAsync(WATCHDOG_INTERVAL_MS)
+    const h = await makeHarness()
+    const { entry } = await start(h, makeFlow())
+    const dispose = scheduleIdleWatchdog(h.runtime, { intervalMs: 20 })
+    h.clock.now += 10_000
+    await vi.waitFor(() => {
       expect(entry.snapshot.status).toBe('stopped')
-      dispose() // 停止后不再有副作用
-    } finally {
-      vi.useRealTimers()
-    }
+    })
+    dispose() // 停止后不再有副作用
+    // 等本轮扫描的持久化落盘完成，避免清理目录竞态
+    await vi.waitFor(async () => {
+      expect((await h.store.getRun('run-1'))?.status).toBe('stopped')
+    })
   })
 
   it('reconcileStaleRuns：running/paused → interrupted（running 节点回退 pending、ok 保留）；completed 不动', async () => {
