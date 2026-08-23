@@ -11,7 +11,15 @@
 
 ## 2026.08.24
 
-1. git版本：[3119869] [v0.1.0]
+1. git版本：[d5d346a] [v0.1.0]
+   - 完成：P03 原子存储+图模型校验+共享契约（T-011/T-013/T-014）。
+   - T-011：storage/atomic.ts 八 API（atomicWriteJson/readJson/withFileLock/acquireDiskLock/releaseDiskLock/withJsonLock/atomicReplaceFile/cleanupStaleTemp）——open('wx') 跨平台 no-clobber、磁盘锁+陈旧回收（mtime+死 pid 双条件）、锁序固定防死锁、CorruptJsonError 不静默；19 用例全绿；@types/node 入 devDeps、tsconfig.host.json types:["node"]。
+   - T-013：graph/model.ts（9 类节点连接点矩阵/工厂/拓扑助手）+ validate.ts（自环/重复/通道配对/条件仅流程线/主虚互斥/协作组边界/阶段唯一/父代理唯一/模式差异/归一化/missingStageNodes）；41 用例全绿。
+   - T-014：shared 三文件（graph-model/types/protocol）纯类型零运行时 import + 29 用例（端点 39 个逐字比对/工具可见性/纯度门）。
+   - 变更标注：FileNode/DatabaseNode 按需求卡片设计补 label（数据库另有 description）必填字段（主代理在 T-014 基线上扩展）；主代理本人完成 T-013（此后不再分发子代理，后续任务由主代理直接实现）。
+   - 测试：139 用例全绿（8 文件）。
+
+2. git版本：[3119869] [v0.1.0]
    - 完成：P02 挂载层+构建链路+模型资产+提示词基线（T-002/T-003/T-004/T-005）。
    - T-002：cordis.patch.yml 13 键（§2.2 实际为 13 键，文档"14 键"为笔误）+ src/host/index.ts 官方 Service 形态入口（z 取自 @deepseek-ai/schemastery，进 peerDependencies；清理用 ctx.effect 而非 ctx.on('dispose')）；真实 Loader 验证：工作区内临时 DSH_HOME + `dsh plugin add file:` + `--dump-config` 出现 visual-workflow 层且入口可 import。
    - T-003：tsdown 0.22.14 客户端构建（__ModuleLoader__ 包装/style[data-plugin]/purity gate/sourcemap/host-client 产物并存）+ client 声明发射 + client-smoke 冒烟；check/verify 脚本扩展；lightningcss 显式 devDep。
