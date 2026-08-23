@@ -11,7 +11,12 @@
 
 ## 2026.08.24
 
-1. git版本：[d5d346a] [v0.1.0]
+1. git版本：[912876b] [v0.1.0]
+   - 完成：P04 FlowStore 数据层+Host 装配（T-012/T-015，主代理本人实现）。
+   - T-012：flow-store.ts 全 CRUD（workflows/services 按 sessionId 隔离、roles/data 模板全局共享、runs 单文件、combos、userId 映射、orchestrations 事实源）+ revision 乐观锁（显式 expectedRevision，文档 revision 不隐式成为期望——比旧项目语义更收敛）+ templateToNode 深拷贝解耦；17 用例（并发写无垃圾/无撕裂/隔离/冲突）。
+   - T-015：index.ts 装配 FlowStore+subagent/end+agent/error 观察（events.d.ts 本地增强——先 import 真实模块再 declare module，避免覆盖 exports-map 解析，已验证的陷阱）+ ctx.effect dispose 幂等骨架；真实 cordis Context 单测 4 用例（启动/目录结构/同名 service 冲突/dataDir 缺失失败/卸载清理）。
+   - 工程变更：新增 tsconfig.test.json（host 测试进类型检查，不污染 lib/ 产物）；typecheck 扩展为三 program；graph 工厂返回精确节点类型；拓扑助手放宽 Partial 入参。
+   - 测试：160 用例全绿（10 文件）。
    - 完成：P03 原子存储+图模型校验+共享契约（T-011/T-013/T-014）。
    - T-011：storage/atomic.ts 八 API（atomicWriteJson/readJson/withFileLock/acquireDiskLock/releaseDiskLock/withJsonLock/atomicReplaceFile/cleanupStaleTemp）——open('wx') 跨平台 no-clobber、磁盘锁+陈旧回收（mtime+死 pid 双条件）、锁序固定防死锁、CorruptJsonError 不静默；19 用例全绿；@types/node 入 devDeps、tsconfig.host.json types:["node"]。
    - T-013：graph/model.ts（9 类节点连接点矩阵/工厂/拓扑助手）+ validate.ts（自环/重复/通道配对/条件仅流程线/主虚互斥/协作组边界/阶段唯一/父代理唯一/模式差异/归一化/missingStageNodes）；41 用例全绿。
