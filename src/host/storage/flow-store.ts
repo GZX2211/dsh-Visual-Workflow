@@ -440,6 +440,11 @@ export class FlowStore {
     return readJson<WorkflowDocument | null>(this.orchestrationPath(runId), null)
   }
 
+  /** 运行时流程定义文件的绝对路径（编排指令 facts.definitionPath 注入用，T-021）。 */
+  orchestrationFilePath(runId: string): string {
+    return this.orchestrationPath(runId)
+  }
+
   /** 删除运行时流程定义（run 收尾/清理时调用）。 */
   async deleteOrchestration(runId: string): Promise<boolean> {
     const path = this.orchestrationPath(runId)

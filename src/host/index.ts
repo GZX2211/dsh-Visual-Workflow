@@ -1,22 +1,37 @@
 // DSH Visual Workflow —— Host 半区插件入口。
 //
-// T-002 建立最小可加载骨架；T-015 完成装配：FlowStore 初始化、subagent/end 与
-// agent/error 事件观察挂载、dispose 清理（幂等）。编排运行时（运行锁/快照/状态机、
-// wf_* 工具、GUI API、服务管理器）分别在 T-021/T-023/T-026/T-031 装配。
+// T-002 建立最小可加载骨架；T-015 完成装配（FlowStore 初始化、事件观察挂载、
+// dispose 清理幂等）；T-021 装配编排运行时（运行锁/快照/状态机/wait 阻塞/暂停门/
+// 看护/陈旧记录对账）。wf_* 工具（T-023）、GUI API（T-026）、服务管理器（T-031）
+// 与节点执行引擎（T-022）在后续阶段接入。
 //
 // 装配原则（SKILL §4.3 Effect 所有权）：所有长生命周期资源（事件监听、定时器、
 // 存储句柄）都归当前 fiber——ctx.on 随 fiber 自动反注册，显式清理经 ctx.effect
 // 返回的 disposer 执行；Service.init 失败让 fiber 失败（不吞错）。
 //
-// 取证结论（T-002/T-015）：
+// 取证结论（T-002/T-015/T-021）：
 //   - z 来自 @deepseek-ai/schemastery（默认导出）；Service/Context 来自
 //     @deepseek-ai/cordis（官方 packages/host/webserver/src/index.ts 同款）。
 //   - cordis 4.x 内置 Events 无 dispose 事件 → 清理归 ctx.effect（SKILL §4.3）。
-//   - 事件名 'subagent/end' / 'agent/error' 见本地 events.d.ts 声明（W-05）。
+//   - 事件名 'subagent/end' / 'agent/error' 见本地 events.d.ts 声明（W-05，
+//     T-021 按官方 §8 #21/#22 取证收窄 payload）。
+//   - 官方 services 一律经 ctx.get() 运行时解析（零官方包运行时依赖）；本文件
+//     CordisAgentHost 是 agents 服务的最小结构适配，subagents 服务适配归 T-022。
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { FlowStore } from './storage/flow-store.js'
+import {
+  OrchestratorRuntime,
+  WfError,
+  type AgentHost,
+  type NodeRunner,
+  type OrchestratorLogger,
+  type RootAgentLike,
+  type RootInjectedMessage,
+  type TurnEndInfo,
+} from './orchestrator/runtime.js'
+import { reconcileStaleRuns, scheduleIdleWatchdog } from './orchestrator/watchdog.js'
 
 // 插件稳定标识名（亦是 cordis.patch.yml 中 insert 行的 name 解析目标）。
 export const name = 'dsh-visual-workflow'
@@ -77,24 +92,104 @@ export const Config: z<Config> = z.object({
   embeddingEndpoint: z.union([z.string(), z.const(null)]).default(null),
 })
 
+// ── Cordis agents 服务适配（T-021）───────────────────────────────────────
+// 会话根 Agent（父代理）服务的最小结构适配：零官方类型依赖，全部运行时守卫。
+// 官方取证：agents 服务提供 get(sessionId) → Agent（含 followup/status/session）；
+// 消息必须带 id 与 source（缺 source 父回合以 UNKNOWN 失败——旧项目根因复盘）。
+// subagents 服务（子代理创建/followup/interrupt）由 T-022 的 agent-runner 适配。
+
+/** agents 服务注册表的最小结构（运行时守卫后收窄）。 */
+interface AgentsRegistryLike {
+  get(id: string): unknown
+}
+
+class CordisAgentHost implements AgentHost {
+  constructor(private readonly ctx: Context) {}
+
+  /** 解析 agents 服务（缺省/不可用时返回 null，调用方给明确错误）。 */
+  private agentsService(): AgentsRegistryLike | null {
+    const service: unknown = this.ctx.get('agents')
+    if (service !== null && typeof service === 'object' && typeof (service as { get?: unknown }).get === 'function') {
+      return service as AgentsRegistryLike
+    }
+    return null
+  }
+
+  available(): boolean {
+    return this.agentsService() !== null
+  }
+
+  getRootAgent(sessionId: string): RootAgentLike | null {
+    const service = this.agentsService()
+    if (!service) return null
+    const raw = service.get(sessionId)
+    if (raw === null || typeof raw !== 'object') return null
+    return raw as RootAgentLike
+  }
+
+  followupRoot(agent: RootAgentLike, message: RootInjectedMessage): void {
+    if (typeof agent.followup !== 'function') {
+      throw new Error('当前会话 Agent 未激活；请先在对话区发送一条消息后重试')
+    }
+    agent.followup(message)
+  }
+
+  latestTurnEnd(sessionId: string, afterMs: number): TurnEndInfo | null {
+    const root = this.getRootAgent(sessionId)
+    if (!root) return null
+    const events = root.session?.events
+    if (!Array.isArray(events)) return null
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index] as { type?: unknown; time?: unknown; data?: { reason?: { kind?: unknown; error?: unknown } } } | null
+      if (!event || event.type !== 'turn/end') continue
+      // 最新回合在运行开始前结束 → 运行发起回合尚未结束，不判终态
+      if ((Number(event.time) || 0) < afterMs) return null
+      const kind = event.data?.reason?.kind
+      if (kind === 'error') return { kind: 'error', error: event.data?.reason?.error ?? {} }
+      if (kind === 'aborted') return { kind: 'aborted' }
+      return null
+    }
+    return null
+  }
+
+  childRunning(childId: string): boolean {
+    const service = this.agentsService()
+    if (!service) return false
+    try {
+      const agent = service.get(childId)
+      if (agent === null || typeof agent !== 'object') return false
+      return (agent as { status?: unknown }).status === 'running'
+    } catch {
+      return true // 查询失败保守视为仍在运行
+    }
+  }
+}
+
+/** 占位节点执行引擎（T-022 以真实 agent-runner 替换；单测用 fake 覆盖全部路径）。 */
+const placeholderRunner: NodeRunner = {
+  async startNodeTask() {
+    throw new WfError('节点子代理执行引擎未就绪（T-022 装配）', 'WF_RUNNER_NOT_READY')
+  },
+  async interruptChild() {
+    // 无子代理可中断
+  },
+}
+
 // ── visualWorkflowHost Service ────────────────────────────────────────────
-// 提供 `visualWorkflowHost` 稳定 service；T-021/T-023/T-026/T-031 在后续阶段
-// 扩展运行时（编排器/工具/API/服务管理器）。
+// 提供 `visualWorkflowHost` 稳定 service；编排运行时随 service 生命周期管理。
 
 /** 提供给 ctx 的宿主 service 名称。 */
 export const VisualWorkflowHostServiceName = 'visualWorkflowHost'
 
 /**
- * 宿主 service：持有解析后的 config 与 FlowStore，挂载事件观察与清理。
- *
- * 状态边界：
- *   - 持久化状态全部落盘于 dataDir（FlowStore，T-012）；
- *   - 内存运行态（运行锁/快照/子代理表）由 T-021 编排器接管，本类只保留
- *     dispose 清理骨架与事件观察入口（onSubagentEnd/onAgentError 钩子）。
+ * 宿主 service：持有解析后的 config、FlowStore 与编排运行时，挂载事件观察、
+ * 看护定时器与清理。内存运行态（运行锁/快照/子代理表）全部由编排运行时接管。
  */
 export class VisualWorkflowHost extends Service {
   /** FlowStore 实例（dataDir 落盘数据层）。 */
   readonly store: FlowStore
+  /** 编排运行时（运行锁/快照/状态机/wait 阻塞/暂停门）。 */
+  readonly orchestrator: OrchestratorRuntime
   /** 是否已清理（dispose 幂等标记；私有实现，经 getter 暴露供测试断言）。 */
   private _disposed = false
 
@@ -109,6 +204,19 @@ export class VisualWorkflowHost extends Service {
   ) {
     super(ctx, VisualWorkflowHostServiceName)
     this.store = new FlowStore(config.dataDir)
+    this.orchestrator = new OrchestratorRuntime({
+      store: this.store,
+      runner: placeholderRunner,
+      agents: new CordisAgentHost(ctx),
+      config: {
+        outputFullLimit: config.outputFullLimit,
+        documentTextLimit: config.documentTextLimit,
+        runIdleTimeoutMs: config.runIdleTimeoutMs,
+        retryLimitDefault: config.retryLimitDefault,
+        reactIterationLimitDefault: config.reactIterationLimitDefault,
+      },
+      logger: cordisLogger(ctx),
+    })
   }
 
   /** 启动装配（Service.init 语义：初始化失败让 fiber 失败，不吞错）。 */
@@ -122,45 +230,72 @@ export class VisualWorkflowHost extends Service {
     // 数据目录结构初始化（幂等；§6 目录规划）
     await this.store.init()
 
+    // 陈旧记录对账（§4.7 规则 5）：上次宿主异常关闭残留的 running/paused → interrupted
+    await reconcileStaleRuns(this.store)
+
     // 事件观察（官方 seam 语义，架构文档 §8 #21/#22）：
-    //   - subagent/end：节点子代理结束回写（T-021 填充状态机逻辑；当前钩子记录日志）
-    //   - agent/error：父代理回合错误快速终止（T-021 填充护栏）
+    //   - subagent/end：节点子代理结束回写（ok/fail + output + wait 唤醒）
+    //   - agent/error：父代理回合错误快速终止（看护 latestTurnEnd 为兜底权威检测）
     // ctx.on 随本 fiber 自动反注册（SKILL §4.3），无需手动 removeListener。
     this.ctx.on('subagent/end', (payload) => this.onSubagentEnd(payload))
     this.ctx.on('agent/error', (payload) => this.onAgentError(payload))
 
-    // 显式清理通道：fiber 卸载时执行（中止运行/中断子代理/停止看护——T-021/T-031 扩展）。
+    // 看护定时器：空闲超时自动停止 / 父代理回合终态收尾（ctx.effect 持有 disposer）
+    this.ctx.effect(() => scheduleIdleWatchdog(this.orchestrator), 'visualWorkflowHost.watchdog')
+
+    // 显式清理通道：fiber 卸载时执行（中止运行/阻塞等待 reject/停止看护）。
     this.ctx.effect(() => () => this.dispose(), 'visualWorkflowHost.dispose')
 
     this.ctx.logger.info(`[visual-workflow] host service ready at ${this.config.dataDir}`)
   }
 
-  /** subagent/end 观察钩子（T-021 起写节点状态；当前仅调试日志 + 清理态守卫）。 */
-  onSubagentEnd(payload: unknown): void {
+  /** subagent/end 观察：回写 run 节点状态（ok/fail + output）并唤醒 wait 阻塞。 */
+  onSubagentEnd(payload: {
+    runId?: unknown
+    provider?: unknown
+    id?: unknown
+    local?: unknown
+    stopReason?: unknown
+    lastAssistantMessage?: unknown
+  }): void {
     if (this._disposed) return
-    this.ctx.logger.debug('[visual-workflow] subagent/end observed: %o', payload)
-    // TODO(T-021)：解析 payload 子代理归属，回写 run 节点状态（ok/fail + output）。
+    void this.orchestrator.handleSubagentEnd(payload).catch((error) => {
+      this.ctx.logger.warn(`[visual-workflow] subagent/end handling failed: ${error instanceof Error ? error.message : String(error)}`)
+    })
   }
 
-  /** agent/error 观察钩子（T-021 起触发父代理出错快速终止；当前仅调试日志）。 */
-  onAgentError(payload: unknown): void {
+  /** agent/error 观察：匹配父代理会话 → 快速标记失败并释放运行锁（看护兜底）。 */
+  onAgentError(payload: { agent?: { id?: unknown }; turn?: unknown; step?: unknown; error?: unknown }): void {
     if (this._disposed) return
-    this.ctx.logger.debug('[visual-workflow] agent/error observed: %o', payload)
-    // TODO(T-021)：匹配当前 run 的父代理 → 标记失败并释放运行锁。
+    const sessionId = String(payload?.agent?.id ?? '')
+    if (!sessionId) return
+    const entry = this.orchestrator.activeRunForSession(sessionId)
+    if (!entry) return
+    void this.orchestrator.failRunForParentError(entry, payload?.error).catch((error) => {
+      this.ctx.logger.warn(`[visual-workflow] parent-error handling failed: ${error instanceof Error ? error.message : String(error)}`)
+    })
   }
 
   /**
    * 清理运行时资源（幂等）。
-   * 为什么显式提供（架构文档 §9.6）：fiber 卸载时需尽力中止全部运行、中断
-   * in-flight 子代理、停止看护定时器；当前阶段这些资源尚未建立（T-021/T-031），
-   * 本方法先固化幂等骨架，后续装配任务向其中追加真实清理。
+   * fiber 卸载时需尽力中止全部运行（abort controller + 阻塞等待 reject）；运行中的
+   * 子代理由 T-022 的 agent-runner 提供 interrupt 能力后在此中断；模式二服务进程
+   * 由 T-031 追加停止逻辑。
    */
   dispose(): void {
     if (this._disposed) return
     this._disposed = true
-    // TODO(T-021)：中止全部 run（abort controller + 中断 in-flight 子代理）。
-    // TODO(T-031)：尽力停止模式二服务进程（不等待退出码）。
+    this.orchestrator.dispose()
     this.ctx.logger.info('[visual-workflow] host disposed')
+  }
+}
+
+/** cordis ctx.logger 适配为编排器日志缝（结构化参数收敛为字符串，语义不丢）。 */
+function cordisLogger(ctx: Context): OrchestratorLogger {
+  return {
+    warn: (message, ...args) => ctx.logger.warn(message, ...args),
+    info: (message, ...args) => ctx.logger.info(message, ...args),
+    debug: (message, ...args) => ctx.logger.debug(message, ...args),
   }
 }
 
