@@ -1,0 +1,5 @@
+# 本地嵌入模型资产目录（bge-small-zh-v1.5）。
+# T-004 将在此填充 tokenizer.json / config.json / special_tokens_map.json /
+# 1_Pooling/config.json 与 model_quantized.onnx（约 25MB）等资产；
+# 当前为空目录占位，保证 package.json "files" 中的 assets/models/bge-small-zh-v1.5
+# 路径存在。

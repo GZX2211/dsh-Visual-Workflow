@@ -1,0 +1,24 @@
+{
+  // Host 半区 program（Node.js 运行面）：src/host + src/host/shared。
+  // 与 tsconfig.client.json 完全隔离（SKILL.md §6.1）：各自独立 includes，
+  // 避免 host session 与 browser runtime 对同名 Context service 的
+  // declaration merge 冲突。构建产物形态见 scripts/build.mjs（方案 B：
+  // tsc 发射 JS 到 lib/，声明单独发射到 lib/types/）。
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "rootDir": "src/host",
+    "outDir": "lib",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "verbatimModuleSyntax": true,
+    "declaration": false,
+    "sourceMap": true,
+    "noEmitOnError": true
+  },
+  "include": ["src/host/**/*.ts"],
+  "exclude": ["node_modules", "lib", "src/client", "tests", "scripts"]
+}

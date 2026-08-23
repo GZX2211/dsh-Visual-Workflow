@@ -1,0 +1,27 @@
+{
+  // Client 半区 program（浏览器运行面）：src/client + src/host/shared（仅纯类型）。
+  // 与 tsconfig.host.json 完全隔离（SKILL.md §6.1）。由于 P01 阶段 client
+  // 为空模块骨架，仅用于校验 client 侧类型与 JSX/CSS 模块声明不污染 host。
+  // noEmit：client bundle 由 P02 的 tsdown 构建（scripts/build-client.ts），
+  // 本 program 只做类型检查，不发射产物（DoD 注明 client 排 host 运行代码）。
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "lib": ["es2022", "dom", "dom.iterable"]
+  },
+  "include": [
+    "src/client/**/*.ts",
+    "src/client/**/*.tsx",
+    "src/client/types.d.ts",
+    "src/host/shared/**/*.ts"
+  ],
+  "exclude": ["node_modules", "lib", "src/host/index.ts", "src/host/service-runner.ts", "tests", "scripts"]
+}

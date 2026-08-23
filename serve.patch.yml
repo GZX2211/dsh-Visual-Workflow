@@ -1,0 +1,5 @@
+# 模式二服务进程 serve 层模板（顶层数组）。
+# P01 占位：空数组保证 exports["./serve.patch.yml"] 指向的文件真实存在。
+# T-031 将填充渲染模板（headless-runner disabled + insert 行
+# id=visual-workflow-service，inject: [cmdlineArgs]），形态见架构文档 §7。
+[]

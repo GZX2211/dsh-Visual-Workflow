@@ -1,0 +1,5 @@
+# DSH 挂载层（Web profile 组合层，顶层数组）。
+# P01 占位：空数组保证 exports["./cordis.patch.yml"] 指向的文件真实存在。
+# T-002 将填充插件行（insert 行 id=visual-workflow，name=dsh-visual-workflow，
+# 含 dataDir/servicePortBase/apiKey 等 config 键），形态见架构文档 §2.2。
+[]

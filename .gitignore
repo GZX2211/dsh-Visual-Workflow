@@ -1,0 +1,20 @@
+# 依赖与构建产物
+
+# 依赖
+node_modules/
+.pnpm-store/
+
+# 构建产物（当前阶段 lib 为构建产物，忽略；SKILL.md §7.1 备选分发策略若需
+# 「可提交 lib」时再单独调整）
+lib/
+
+# TypeScript 增量产物
+*.tsbuildinfo
+
+# 测试产物
+coverage/
+
+# 编辑器 / 系统临时
+.DS_Store
+Thumbs.db
+*.log
