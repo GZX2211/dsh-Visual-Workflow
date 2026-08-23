@@ -11,6 +11,14 @@
 
 ## 2026.08.24
 
+1. git版本：[d71d630] [v0.1.0]
+   - 完成：P07 工具注册与数据工具（T-023/T-025，主代理本人实现）——T-022 的出口：三个父代理编排工具 + 本地嵌入/数据访问全链路。
+   - T-023 交付：src/host/tools/ 三文件——define-tool.ts（官方 defineTool DSL 语义的本地等价实现：parameters 隐式开放根 + 属性内联 required 编译为 JSON Schema required 数组；零官方包运行时依赖 W-05）；text-render.ts（递归按键排序的稳定序列化，键序稳定 W-01）；wf-tools.ts（registerWfTools 注册 wf_run_node/wf_finish/wf_ask + callerOf 身份派生——子代理会话 header 的 origin/parentSession 判据；wf_run_node 扩展 wait/thinking/iterationLimit/retryLimit 参数透传 + 暂停门并入；wf_ask 借用官方 userQuestions.ask（agent=父 root 精确存活身份），提问期间 touchRun 防空闲看护误停；description 官方标准英文 W-03 ≤120 tokens）。runtime.ts 增 touchRun；index.ts 装配（agents 提为 public 属性 + ctx.effect 注册）。
+   - T-025 交付：src/host/embedding/ 三文件——chunker.ts（384 字符/步长 128 重叠窗口分块纯函数 + 空白归一化）；engine.ts（EmbeddingService：外部 OpenAI 兼容端点 > 本地 bge-small-zh-v1.5（transformers.js pipeline feature-extraction，pooling cls + normalize，512 维，随包资产路径定位，真机加载验证通过）> BM25 降级，惰性加载重依赖）；indexer.ts（VectorIndex 单文件原子持久化 + 逐记录分块 + embedding 余弦 Top-K / BM25 倒排打分双模式，降级标注 source='bm25'）。data-tools.ts：wf_db_query 单工具三模式（search/query/schema）+ SQL 只读白名单（仅单 SELECT/强制 LIMIT/拒绝写 DDL 多语句/字面量剥离防误伤）+ SqliteDriver（node:sqlite readOnly 物理防写）+ ServerDriver（mysql2/pg 可选依赖惰性 import）+ buildIndexForDatabase/testDatabaseConnection + 归属校验（运行中 run + db-in 连线，无连线 WF_DB_NO_LINE）。
+   - 工程变更：package.json 增 optionalDependencies mysql2/pg（W-05 折中：dependencies 仍仅 transformers，服务器驱动可选安装、惰性加载；契约测试断言记录）；@types/pg 进 devDependencies；cordis-patch 旧测试更新（移除 T-015 残留断言，改为装配行为断言）。
+   - 测试：新增 75 用例（wf-tools 30 + embedding 21 + data-tools 24）；全量 325 用例全绿（17 文件），typecheck 三 program + build + client-smoke 通过；EmbeddingService 真机加载验证（source=local 512 维归一化）。
+   - 变更标注：注释规范调整——自本阶段起代码注释移除对文件/文档章节的引用（遵循最新注释规范）；wait 阻塞测试揭示启动竞态（subagent/end 需在 childIndex 登记后派发，测试用 vi.waitFor 等待）。
+
 1. git版本：[a294845] [v0.1.0]
    - 完成：P06 子代理管理与护栏（T-022，主代理本人实现）——T-021 的执行引擎。
    - 交付：src/host/agent/ 三文件——runner.ts（NodeAgentRunner：ensureNodeChild（startContinuable 创建/childKey 复用/签名 person+provider+model+reasoning+presetId+tools 变化即重建）/startNodeTask（followup 派发，coordinator/relay source）/interruptChild/consumeReactCapped/childVisibilityContribution（tools.restrict deny wf_run_node/wf_finish 双保险）+ resolveAgentTools 白名单（combo∩可见+MCP 前缀；官方 preset 经 standingKeyFor 解析、服务缺失回退可见；wf_db_query 仅 db-in 连线注入；wf_run_node/wf_finish 无条件剔除）+ CordisToolsView（全局层∪存活 agent scope∪preset standing scope 并集，scope key 必须是 agent 对象——旧项目历史坑注释保留））；guards.ts（ReAct 软截停：agent/pre-step 计步→替换本步消息为强制收尾指令 + tools.guard 拒绝双保险，V-01 官方无 turn 预算取证）；model-selection.ts（installModelSelection 双瀑布零依赖移植 + WeakMap 身份匹配 attach——思考强度经 registerContinuableSetup 注入，V-02）。
