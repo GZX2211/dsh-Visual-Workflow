@@ -118,13 +118,14 @@ describe('T-002 src/host/index.ts（最小宿主入口骨架）', () => {
     }
   })
 
-  it('提供 visualWorkflowHost Service 占位（Service.init 日志 + dispose 清理 + T-015 TODO）', () => {
+  it('提供 visualWorkflowHost Service（Service.init 装配 + effect 清理通道）', () => {
     expect(entryText).toMatch(/class VisualWorkflowHost extends Service/)
     expect(entryText).toMatch(/super\(ctx, VisualWorkflowHostServiceName\)/)
     expect(entryText).toMatch(/async \[Service\.init\]\(\): Promise<void>/)
-    expect(entryText).toMatch(/T-015/)
+    expect(entryText).toMatch(/reconcileStaleRuns/)
     expect(entryText).toMatch(/ctx\.effect/)
     expect(entryText).toMatch(/visualWorkflowHost\.dispose/)
+    expect(entryText).toMatch(/visualWorkflowHost\.wfTools/)
   })
 
   it('从 @deepseek-ai/schemastery 默认导入 z（非 zod）', () => {

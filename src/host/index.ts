@@ -1,24 +1,20 @@
 // DSH Visual Workflow —— Host 半区插件入口。
 //
-// T-002 建立最小可加载骨架；T-015 完成装配（FlowStore 初始化、事件观察挂载、
-// dispose 清理幂等）；T-021 装配编排运行时（运行锁/快照/状态机/wait 阻塞/暂停门/
-// 看护/陈旧记录对账）；T-022 装配节点子代理执行引擎（startContinuable 创建/签名
-// 复用/白名单解析）与护栏（ReAct 软截停、思考强度注入、wf_* 可见性双保险）。
-// wf_* 工具（T-023）、GUI API（T-026）、服务管理器（T-031）在后续阶段接入。
+// 本文件承担三类职责：
+//   1. 插件契约：name/inject/Config schema（与 cordis.patch.yml 的配置键逐字一致）；
+//   2. 官方服务适配：agents（会话根 Agent）经 ctx.get() 运行时解析，零官方包
+//      运行时依赖——任何缺失的官方能力都在 Service.init 内明确报错或降级；
+//   3. Host Service 装配：FlowStore 数据层、编排运行时、节点子代理执行引擎、
+//      ReAct 软截停/思考强度/工具可见性护栏贡献、wf_* 工具注册、事件观察、
+//      看护定时器与清理通道。
 //
-// 装配原则（SKILL §4.3 Effect 所有权）：所有长生命周期资源（事件监听、定时器、
-// 存储句柄）都归当前 fiber——ctx.on 随 fiber 自动反注册，显式清理经 ctx.effect
-// 返回的 disposer 执行；Service.init 失败让 fiber 失败（不吞错）。
+// 装配原则：所有长生命周期资源（事件监听、定时器、工具注册、子代理护栏贡献）
+// 都归当前 fiber——ctx.on 随 fiber 自动反注册，显式清理经 ctx.effect 返回的
+// disposer 执行；Service.init 失败让 fiber 失败（不吞错）。
 //
-// 取证结论（T-002/T-015/T-021/T-022）：
-//   - z 来自 @deepseek-ai/schemastery（默认导出）；Service/Context 来自
-//     @deepseek-ai/cordis（官方 packages/host/webserver/src/index.ts 同款）。
-//   - cordis 4.x 内置 Events 无 dispose 事件 → 清理归 ctx.effect（SKILL §4.3）。
-//   - 事件名/服务名见本地 events.d.ts 与 agent/runner.ts 的结构适配（W-05，
-//     payload 按官方 §8 #1/#4/#5/#21/#22 取证收窄）。
-//   - 官方 services 一律经 ctx.get() 运行时解析（零官方包运行时依赖）；本文件
-//     CordisAgentHost 是 agents 服务的最小结构适配，子代理服务适配在
-//     agent/runner.ts（SubagentsServiceLike）。
+// 关键协议事实（为什么）：
+//   - 注入父代理的消息必须带 id 与 source（缺 source 父回合以 UNKNOWN 失败）；
+//   - 子代理会话 header 带 origin: 'subagent' 与 parentSession（工具层归属校验判据）。
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
@@ -41,18 +37,20 @@ import {
 } from './agent/runner.js'
 import { createReactGuard } from './agent/guards.js'
 import { createModelSelectionSetup } from './agent/model-selection.js'
+import { registerWfTools } from './tools/wf-tools.js'
+import { registerDataTools } from './tools/data-tools.js'
+import { EmbeddingService } from './embedding/engine.js'
 
-// 插件稳定标识名（亦是 cordis.patch.yml 中 insert 行的 name 解析目标）。
+/** 插件稳定标识名（亦是 cordis.patch.yml 中 insert 行的 name 解析目标）。 */
 export const name = 'dsh-visual-workflow'
 
-// 必需 service 声明（W-05：所有 @deepseek-ai/* 服务经 ctx.get() 运行时解析）。
-// 宿主插件不声明强依赖官方 service（inject 为空）：数据层自持，事件经 ctx.on
-// 订阅——任何缺失的官方能力都在 Service.init 内以运行时解析+明确报错处理。
+// 必需 service 声明为空：宿主插件不声明强依赖官方 service——数据层自持，
+// 事件经 ctx.on 订阅，任何缺失的官方能力都在 Service.init 内运行时解析。
 export const inject: string[] = []
 
 // ── Config schema ────────────────────────────────────────────────────────
-// 与 cordis.patch.yml 的 13 个配置键一一对应，默认值与 patch 逐字一致。
-// 默认值收敛在 schema（SKILL §4.1：任何部署可能需要改变的值都应成为配置而非源码常量）。
+// 与 cordis.patch.yml 的 13 个配置键一一对应，默认值逐字一致。默认值收敛在
+// schema：任何部署可能需要改变的值都应成为配置而非源码常量。
 
 /** Host 插件的全部可配置键（已含默认值，应用后为必填）。 */
 export interface Config {
@@ -84,7 +82,7 @@ export interface Config {
   embeddingEndpoint: string | null
 }
 
-/** 导出的 Config schema，供 Loader 校验与默认值填充（与官方 tool-fs L36 同款 `z<Config>`）。 */
+/** 导出的 Config schema，供 Loader 校验与默认值填充。 */
 export const Config: z<Config> = z.object({
   dataDir: z.string().default(''),
   servicePortBase: z.natural().default(7860),
@@ -101,11 +99,8 @@ export const Config: z<Config> = z.object({
   embeddingEndpoint: z.union([z.string(), z.const(null)]).default(null),
 })
 
-// ── Cordis agents 服务适配（T-021）───────────────────────────────────────
+// ── agents 服务适配 ─────────────────────────────────────────────────────
 // 会话根 Agent（父代理）服务的最小结构适配：零官方类型依赖，全部运行时守卫。
-// 官方取证：agents 服务提供 get(sessionId) → Agent（含 followup/status/session）；
-// 消息必须带 id 与 source（缺 source 父回合以 UNKNOWN 失败——旧项目根因复盘）。
-// subagents 服务（子代理创建/followup/interrupt）由 T-022 的 agent-runner 适配。
 
 /** agents 服务注册表的最小结构（运行时守卫后收窄）。 */
 interface AgentsRegistryLike {
@@ -174,9 +169,7 @@ class CordisAgentHost implements AgentHost {
   }
 }
 
-/** 占位节点执行引擎已删除——T-022 起使用真实 NodeAgentRunner（见下）。 */
-
-/** agents 服务惰性解析（子代理执行引擎用；与 CordisAgentHost 同一官方服务）。 */
+/** agents 服务惰性解析（节点子代理执行引擎用；与 CordisAgentHost 同一官方服务）。 */
 function agentsServiceLike(ctx: Context): AgentsServiceLike | null {
   const service: unknown = ctx.get('agents')
   if (service !== null && typeof service === 'object' && typeof (service as { get?: unknown }).get === 'function') {
@@ -185,7 +178,7 @@ function agentsServiceLike(ctx: Context): AgentsServiceLike | null {
   return null
 }
 
-/** subagents 服务惰性解析（子代理执行引擎用；官方 SubagentRuntime 使用面）。 */
+/** subagents 服务惰性解析（子代理创建/followup/interrupt/护栏贡献使用面）。 */
 function subagentsServiceLike(ctx: Context): SubagentsServiceLike | null {
   const service: unknown = ctx.get('subagents')
   if (
@@ -217,13 +210,17 @@ export class VisualWorkflowHost extends Service {
   readonly store: FlowStore
   /** 编排运行时（运行锁/快照/状态机/wait 阻塞/暂停门）。 */
   readonly orchestrator: OrchestratorRuntime
-  /** 节点子代理执行引擎（T-022；startContinuable 创建/签名复用/白名单解析）。 */
+  /** 节点子代理执行引擎（startContinuable 创建/签名复用/白名单解析）。 */
   readonly runner: NodeAgentRunner
-  /** ReAct 软截停护栏（guards.ts；桥供 runner/编排器，贡献注入子代理）。 */
+  /** 会话根 Agent 宿主能力（wf_* 工具层归属校验/提问借 root 身份）。 */
+  readonly agents: CordisAgentHost
+  /** ReAct 软截停护栏（桥供 runner/编排器，贡献注入子代理）。 */
   private readonly reactGuard = createReactGuard()
-  /** 思考强度模型选择装配（model-selection.ts）。 */
+  /** 思考强度模型选择装配。 */
   private readonly modelSelection = createModelSelectionSetup()
-  /** 是否已清理（dispose 幂等标记；私有实现，经 getter 暴露供测试断言）。 */
+  /** 本地嵌入引擎（外部端点 > 本地资产 > BM25 降级；惰性加载）。 */
+  private readonly embedding: EmbeddingService
+  /** 已清理标记（dispose 后为 true；重复 dispose 幂等）。 */
   private _disposed = false
 
   /** 已清理标记（dispose 后为 true；重复 dispose 幂等）。 */
@@ -237,6 +234,12 @@ export class VisualWorkflowHost extends Service {
   ) {
     super(ctx, VisualWorkflowHostServiceName)
     this.store = new FlowStore(config.dataDir)
+    this.agents = new CordisAgentHost(ctx)
+    this.embedding = new EmbeddingService({
+      modelDir: config.embeddingModelDir,
+      endpoint: config.embeddingEndpoint,
+      logger: { warn: (message) => ctx.logger.warn(message) },
+    })
     this.runner = new NodeAgentRunner({
       store: this.store,
       agents: () => agentsServiceLike(ctx),
@@ -249,7 +252,7 @@ export class VisualWorkflowHost extends Service {
     this.orchestrator = new OrchestratorRuntime({
       store: this.store,
       runner: this.runner,
-      agents: new CordisAgentHost(ctx),
+      agents: this.agents,
       config: {
         outputFullLimit: config.outputFullLimit,
         documentTextLimit: config.documentTextLimit,
@@ -261,30 +264,45 @@ export class VisualWorkflowHost extends Service {
     })
   }
 
+  /** 按会话取根 Agent（wf_* 工具层提问/校验用；转发至 agents 适配）。 */
+  getRootAgent(sessionId: string): RootAgentLike | null {
+    return this.agents.getRootAgent(sessionId)
+  }
+
+  /** 数据根目录（数据工具索引落盘位置）。 */
+  get dataDir(): string {
+    return this.config.dataDir
+  }
+
+  /** 嵌入引擎（数据工具向量检索用）。 */
+  get engine(): EmbeddingService {
+    return this.embedding
+  }
+
   /** 启动装配（Service.init 语义：初始化失败让 fiber 失败，不吞错）。 */
   async [Service.init](): Promise<void> {
-    // dataDir 必须非空：真实运行由 cordis.patch.yml 的 dshHomePath 在 Loader 求值期
-    // 解析为绝对路径；单测/独立嵌入需显式传入（不静默回退 cwd——SKILL §4.6）。
+    // dataDir 必须非空：真实运行由 patch 层的 dshHomePath 在 Loader 求值期解析为
+    // 绝对路径；单测/独立嵌入需显式传入（不静默回退 cwd）。
     if (!this.config.dataDir || !this.config.dataDir.trim()) {
       throw new Error('[visual-workflow] 配置缺失：dataDir 未指定（cordis.patch.yml 未加载？）')
     }
 
-    // 数据目录结构初始化（幂等；§6 目录规划）
+    // 数据目录结构初始化（幂等）
     await this.store.init()
 
-    // 陈旧记录对账（§4.7 规则 5）：上次宿主异常关闭残留的 running/paused → interrupted
+    // 陈旧记录对账：上次宿主异常关闭残留的 running/paused → interrupted（可恢复）
     await reconcileStaleRuns(this.store)
 
-    // 事件观察（官方 seam 语义，架构文档 §8 #21/#22）：
+    // 事件观察：
     //   - subagent/end：节点子代理结束回写（ok/fail/react-capped + output + wait 唤醒）
     //   - agent/error：父代理回合错误快速终止（看护 latestTurnEnd 为兜底权威检测）
-    // ctx.on 随本 fiber 自动反注册（SKILL §4.3），无需手动 removeListener。
+    // ctx.on 随本 fiber 自动反注册，无需手动 removeListener。
     this.ctx.on('subagent/end', (payload) => this.onSubagentEnd(payload))
     this.ctx.on('agent/error', (payload) => this.onAgentError(payload))
 
-    // 子代理护栏贡献（官方 registerContinuableSetup，§8 #7）：每个未发布子代理
-    // 创建时注入——wf_* 可见性双保险 + ReAct 软截停 + 思考强度模型选择。
-    // 返回的 disposers 归 ctx.effect（服务卸载时撤销贡献，官方契约）。
+    // 子代理护栏贡献：每个未发布子代理创建时注入——wf_* 可见性双保险 +
+    // ReAct 软截停 + 思考强度模型选择。返回的 disposers 归 ctx.effect
+    // （服务卸载时撤销贡献）。
     const subagents = subagentsServiceLike(this.ctx)
     if (subagents) {
       this.ctx.effect(() => {
@@ -304,6 +322,23 @@ export class VisualWorkflowHost extends Service {
       }, 'visualWorkflowHost.childSetup')
     } else {
       this.ctx.logger.warn('[visual-workflow] subagents 服务不可用：子代理护栏与思考强度注入未启用')
+    }
+
+    // wf_* 工具注册：全局层注册 wf_run_node/wf_finish/wf_ask；子代理侧可见性由
+    // 白名单解析 + tools.restrict 双保险控制。注册返回的 disposer 归 ctx.effect
+    // ——服务卸载时工具随 fiber 注销。
+    try {
+      this.ctx.effect(() => registerWfTools(this.ctx, this), 'visualWorkflowHost.wfTools')
+    } catch (error) {
+      this.ctx.logger.warn(`[visual-workflow] wf_* 工具注册失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+
+    // 数据工具注册：wf_db_query（单工具三模式）。子代理侧可见性由白名单按
+    // db-in 连线注入（有连线才进工具集）；执行期再做归属与连线双校验兜底。
+    try {
+      this.ctx.effect(() => registerDataTools(this.ctx, this), 'visualWorkflowHost.dataTools')
+    } catch (error) {
+      this.ctx.logger.warn(`[visual-workflow] 数据工具注册失败：${error instanceof Error ? error.message : String(error)}`)
     }
 
     // 看护定时器：空闲超时自动停止 / 父代理回合终态收尾（ctx.effect 持有 disposer）
@@ -346,13 +381,14 @@ export class VisualWorkflowHost extends Service {
    * 清理运行时资源（幂等）。
    * fiber 卸载时需尽力中止全部运行（abort controller + 阻塞等待 reject）、清理
    * 子代理表与护栏登记；运行中的子代理由编排运行时统一中止后由官方 seam 收尾；
-   * 模式二服务进程由 T-031 追加停止逻辑。
+   * 模式二服务进程的停止逻辑在服务管理阶段接入。
    */
   dispose(): void {
     if (this._disposed) return
     this._disposed = true
     this.orchestrator.dispose()
     this.runner.dispose()
+    this.embedding.dispose()
     this.ctx.logger.info('[visual-workflow] host disposed')
   }
 }

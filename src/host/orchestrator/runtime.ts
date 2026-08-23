@@ -757,6 +757,15 @@ export class OrchestratorRuntime {
 
   // ---- 运行时读取 --------------------------------------------------------------
 
+  /**
+   * 触碰运行的空闲基准（T-023 工具层调用）：wf_ask 提问等长阻塞交互期间持续
+   * 刷新 lastActiveAt，防止空闲看护（runIdleTimeoutMs）把等待用户的运行误判为空闲
+   * 并自动停止。
+   */
+  touchRun(entry: RunEntry): void {
+    entry.lastActiveAt = this.now()
+  }
+
   /** 重读当前（运行的）工作流最新快照：每节点执行前读一次，运行中调整即时生效（双向同步①）。 */
   async currentResolvedFlow(entry: RunEntry): Promise<WorkflowDocument> {
     try {

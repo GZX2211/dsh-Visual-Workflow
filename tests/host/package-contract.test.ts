@@ -117,6 +117,13 @@ describe('T-001 包契约（依赖约束，W-05）', () => {
     expect(Object.keys(pkg.dependencies ?? {}).sort()).toEqual(['@huggingface/transformers'])
   })
 
+  it('optionalDependencies 仅 mysql2/pg（服务器数据库驱动，惰性加载）', () => {
+    // W-05 折中：dependencies 保持仅 transformers（主路径零第三方驱动）；mysql2/pg
+    // 为可选依赖——服务器类型数据库（MySQL/PostgreSQL）功能所需，运行时惰性
+    // import，未安装/未使用时完全不被加载；本地 SQLite 与向量检索零依赖。
+    expect(Object.keys(pkg.optionalDependencies ?? {}).sort()).toEqual(['mysql2', 'pg'])
+  })
+
   it('peerDependencies 仅 @deepseek-ai/cordis 与 @deepseek-ai/schemastery', () => {
     // W-05 判定补充：peer 非运行时依赖——cordis（Service/Context，宿主共享运行时）
     // 与 schemastery（z，Config schema 校验）均经宿主组合解析，插件 package 的
