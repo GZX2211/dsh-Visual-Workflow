@@ -29,6 +29,7 @@ import { validateFlow } from '../graph/validate.js'
 import type { FlowStore } from '../storage/flow-store.js'
 import type { GraphNode, RoleNode, WorkflowDocument } from '../shared/graph-model.js'
 import type { RunSnapshot, RunStatus } from '../shared/types.js'
+import { buildResumedSnapshot, findResumableRun, type ResumeInput, type ResumeResult } from './resume.js'
 import {
   OUTPUT_SUMMARY_LIMIT,
   createRunSnapshot,
@@ -596,6 +597,124 @@ export class OrchestratorRuntime {
     // 运行记录：开始即落盘（中断/崩溃后历史面板仍有记录）
     await this.persistWarn(entry)
     return { runId, defPath }
+  }
+
+  // ---- 断点续跑（resumeRun） --------------------------------------------------
+
+  /**
+   * 断点续跑：从 paused/interrupted 的旧 run 创建新 run（resumedFromRunId 继承链）。
+   * 已 ok/react-capped 节点继承状态与完整产出（resumed 标记，不重跑），其余节点
+   * 回退 pending 重新执行；断点产出随继承快照重新可用（后续节点 ctx 注入直接用
+   * 新快照，无需额外回填通道）。
+   * 旧 paused 记录保留在磁盘历史（状态不变），内存条目释放——运行锁随新 run 接管。
+   */
+  async resumeRun(input: ResumeInput): Promise<ResumeResult> {
+    const sessionId = String(input.sessionId ?? '')
+    const flowId = String(input.flowId ?? '')
+    if (!sessionId || !flowId) throw new WfError('requires sessionId and flowId', 'WF_BAD_ARGS')
+
+    const prev = await findResumableRun(this.deps.store, { sessionId, flowId, fromRunId: input.fromRunId })
+    if (!prev) {
+      if (input.fromRunId) {
+        const run = await this.deps.store.getRun(input.fromRunId)
+        if (run && (run.sessionId !== sessionId || run.flowId !== flowId)) {
+          throw new WfError('指定的运行不属于该工作流', 'WF_BAD_ARGS', { runId: input.fromRunId })
+        }
+        throw new WfError(
+          run ? `该运行已${statusText(run.status)}，无法恢复` : '指定的运行不存在',
+          run ? 'WF_NOT_RESUMABLE' : 'WF_NOT_FOUND',
+          { runId: input.fromRunId },
+        )
+      }
+      throw new WfError('该工作流没有可恢复的断点（暂停或中断记录）', 'WF_NO_RESUME_POINT')
+    }
+
+    // 运行锁护栏：同会话 paused 允许恢复（启动后锁移交新 run）；其余冲突拒绝
+    const locked = this.flowLockInfo(flowId)
+    if (locked) {
+      if (locked.sessionId !== sessionId) {
+        throw new WfError('该工作流正在另一个会话中运行，请先停止后再试', 'WF_LOCKED', { lockedSessionId: locked.sessionId })
+      }
+      if (locked.status === 'running') {
+        throw new WfError('该工作流正在本会话运行中，请先停止再运行', 'WF_LOCKED', { lockedSessionId: locked.sessionId })
+      }
+    }
+
+    const flow = await this.deps.store.getWorkflow(sessionId, flowId)
+    if (!flow) throw new WfError('工作流不存在', 'WF_NOT_FOUND')
+
+    // 运行前完整性（与全新启动同一套校验）
+    const missing = missingStageLabels(flow)
+    if (missing.length > 0) {
+      throw new WfError(`工作流不完整：缺少${missing.join('、')}节点，无法运行`, 'WF_FLOW_INCOMPLETE')
+    }
+    const validation = validateFlowForRun(flow)
+    if (validation !== null) throw validation
+
+    if (!this.deps.agents.available()) {
+      throw new WfError('Agent 能力不可用；父代理编排模式需要会话根 Agent 与可延续子代理', 'WF_AGENT_UNAVAILABLE')
+    }
+    const root = this.deps.agents.getRootAgent(sessionId)
+    if (!root) throw new WfError('当前会话 Agent 未激活；请先在对话区发送一条消息后重试', 'WF_ROOT_INACTIVE')
+    if (root.status === 'running') throw new WfError('父代理当前正在忙碌，请稍后再运行', 'WF_ROOT_BUSY')
+
+    const runId = this.deps.newRunId?.() ?? `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+    const snapshot = buildResumedSnapshot({ prev, runId, flow, sessionId, mode: prev.mode, now: this.now() })
+    const entry: RunEntry = {
+      controller: new AbortController(),
+      snapshot,
+      baseFlow: flow,
+      inflight: new Set(),
+      attempts: new Map(),
+      callCount: 0,
+      lastActiveAt: this.now(),
+      waiters: new Map(),
+      asks: new Map(),
+    }
+    this.runs.set(runId, entry)
+
+    // 流程事实源文件（同 startRun；defPath 注入编排指令）
+    const defPath = this.deps.store.orchestrationFilePath(runId)
+    try {
+      await this.deps.store.saveOrchestration(runId, flow)
+    } catch (error) {
+      this.runs.delete(runId)
+      throw new WfError(`流程定义文件写入失败：${messageOf(error)}`, 'WF_DEF_WRITE_FAILED')
+    }
+
+    // 断点继续指令：isResume 动态态注入末段（已 ok 不重跑；从 resumeFromNodeId 继续）
+    const directive = buildOrchestrationDirective(
+      directiveParams(flow, defPath, prev.mode, { resumeFromNodeId: prev.resumeFromNodeId, resumedFromRunId: prev.id }),
+    )
+    try {
+      this.deps.agents.followupRoot(root, {
+        id: this.deps.uuid?.() ?? randomUUID(),
+        role: 'user',
+        content: [{ type: 'text', text: directive }],
+        source: { kind: 'user' },
+      })
+    } catch (error) {
+      this.runs.delete(runId)
+      throw new WfError(`编排指令注入失败：${messageOf(error)}`, 'WF_INJECT_FAILED')
+    }
+
+    await this.persistWarn(entry)
+
+    // 释放同工作流的旧 paused 内存条目（磁盘历史保留；锁随新 run 接管）
+    for (const [oldId, oldEntry] of [...this.runs]) {
+      const old = oldEntry.snapshot
+      if (oldId !== runId && old.sessionId === sessionId && old.flowId === flowId && old.status === 'paused') {
+        try {
+          oldEntry.controller.abort('resumed')
+        } catch {
+          // 忽略清理期错误
+        }
+        this.rejectWaiters(oldEntry)
+        this.rejectAsks(oldEntry)
+        this.runs.delete(oldId)
+      }
+    }
+    return { runId, defPath, resumedFromRunId: prev.id }
   }
 
   // ---- wf_run_node ----------------------------------------------------------
@@ -1323,7 +1442,12 @@ function buildNodeBlocks(input: {
 }
 
 /** 编排指令参数组装（facts 静态事实 + dynamic 末段动态态，前缀稳定）。 */
-function directiveParams(flow: WorkflowDocument, defPath: string, mode: 'mode1' | 'mode2'): OrchestrationDirectiveParams {
+function directiveParams(
+  flow: WorkflowDocument,
+  defPath: string,
+  mode: 'mode1' | 'mode2',
+  resume?: { resumeFromNodeId?: string; resumedFromRunId: string },
+): OrchestrationDirectiveParams {
   return {
     facts: {
       workflowName: flow.name ?? flow.id,
@@ -1338,6 +1462,9 @@ function directiveParams(flow: WorkflowDocument, defPath: string, mode: 'mode1' 
         mode === 'mode2'
           ? 'mode2 (service): block with wait: true when you need the node output inline.'
           : 'mode1 (orchestration): wf_run_node defaults to async dispatch.',
+      ...(resume
+        ? { isResume: true, resumeFromNodeId: resume.resumeFromNodeId, resumedFromRunId: resume.resumedFromRunId }
+        : {}),
     },
   }
 }

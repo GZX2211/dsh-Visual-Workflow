@@ -1,0 +1,690 @@
+// tests/host/api.test.ts
+//
+// GUI API 层单测：
+//   - 端点白名单与共享协议常量一致（零漂移）；未知端点 404；
+//   - 工作流/服务/模板/组合端点：400/404/409 错误语义；
+//   - 运行端点：run 自动续跑（有断点走 resume）、runStatus 内存+磁盘回退、
+//     runStop/runHistory/runResume；
+//   - 数据库端点：dbTest/dbSchema/dbSearchPreview（缺索引自动构建/rebuild）；
+//   - 生态端点：presets/tools/models/pluginCatalog（fake 服务）；
+//   - 导入导出：v2 bundle 冲突/rename/overwrite、角色模板往返；
+//   - MCP 端点：托管区读写（DSH_HOME 指向临时目录）；
+//   - 路由注册：disposer、非 POST 405、无效 JSON 400、服务端点无管理器 501、
+//     受管文件下载（GET + 目录穿越拒绝）。
+
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, rm, writeFile, mkdir, readFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { FlowStore } from '../../src/host/storage/flow-store.js'
+import { DatabaseSync } from 'node:sqlite'
+import {
+  OrchestratorRuntime,
+  type AgentHost,
+  type NodeRunner,
+  type NodeStartInput,
+  type OrchestratorConfig,
+  type RootAgentLike,
+  type RootInjectedMessage,
+  type TurnEndInfo,
+} from '../../src/host/orchestrator/runtime.js'
+import * as EP from '../../src/host/shared/protocol.js'
+import { VisualWorkflowApi, registerRoutes, type ApiHost } from '../../src/host/remote/api.js'
+import { registerDownloadRoute, copyIntoManagedFile, managedFilePath } from '../../src/host/remote/download.js'
+import { stageLabel } from '../../src/host/graph/model.js'
+import type { DatabaseNode, RoleNode, StageNode, WorkflowDocument } from '../../src/host/shared/graph-model.js'
+import type { EmbeddingEngine } from '../../src/host/embedding/engine.js'
+
+const cleanups: Array<() => Promise<void>> = []
+const savedDshHome = process.env.DSH_HOME
+
+afterEach(async () => {
+  await Promise.all(cleanups.splice(0).map((fn) => fn()))
+  if (savedDshHome === undefined) delete process.env.DSH_HOME
+  else process.env.DSH_HOME = savedDshHome
+})
+
+function stage(id: string, kind: 'start' | 'end' | 'pause'): StageNode {
+  return { id, kind, position: { x: 0, y: 0 }, data: { label: stageLabel(kind, 'mode1') } }
+}
+
+function agent(id: string, label: string): RoleNode {
+  return {
+    id,
+    kind: 'agent',
+    position: { x: 0, y: 0 },
+    data: {
+      label,
+      systemPrompt: `任务：${label}`,
+      provider: '',
+      model: '',
+      presetId: null,
+      retryLimit: 3,
+      reactLimit: null,
+      inputSchema: '',
+      outputSchema: '',
+      groupId: null,
+      proxySourceId: null,
+    },
+  }
+}
+
+function makeFlow(): WorkflowDocument {
+  return {
+    id: 'flow-1',
+    sessionId: 'session-1',
+    mode: 'mode1',
+    name: '测试流程',
+    description: '测试目标',
+    revision: 1,
+    nodes: [stage('n-start', 'start'), agent('n-a1', '子任务A'), stage('n-pause', 'pause'), agent('n-a2', '子任务B'), stage('n-end', 'end')],
+    lines: [
+      { id: 'l1', source: 'n-start', target: 'n-a1', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+      { id: 'l2', source: 'n-a1', target: 'n-pause', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+      { id: 'l3', source: 'n-pause', target: 'n-a2', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+      { id: 'l4', source: 'n-a2', target: 'n-end', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+    ],
+  }
+}
+
+function databaseNode(id: string, localPath: string): DatabaseNode {
+  return {
+    id,
+    kind: 'database',
+    position: { x: 0, y: 0 },
+    data: { label: '本地库', description: '', dbType: 'local', dbKind: 'sqlite', localPath },
+  }
+}
+
+class FakeRoot implements RootAgentLike {
+  id: string
+  status = 'idle'
+  messages: RootInjectedMessage[] = []
+  session: { events: unknown[] } = { events: [] }
+  constructor(id: string) {
+    this.id = id
+  }
+}
+
+class FakeAgents implements AgentHost {
+  roots = new Map<string, FakeRoot>()
+  available(): boolean {
+    return true
+  }
+  getRootAgent(id: string): RootAgentLike | null {
+    return this.roots.get(id) ?? null
+  }
+  followupRoot(agent: RootAgentLike, message: RootInjectedMessage): void {
+    ;(agent as FakeRoot).messages.push(message)
+  }
+  latestTurnEnd(): TurnEndInfo | null {
+    return null
+  }
+  childRunning(): boolean {
+    return false
+  }
+}
+
+class FakeRunner implements NodeRunner {
+  calls: NodeStartInput[] = []
+  async startNodeTask(input: NodeStartInput): Promise<{ childId: string; created: boolean }> {
+    this.calls.push(input)
+    return { childId: `child-${this.calls.length}`, created: true }
+  }
+  async interruptChild(): Promise<void> {}
+}
+
+/** 端点测试上下文（fake 生态服务可注入）。 */
+interface CtxLike {
+  get(name: string): unknown
+}
+
+class FakeCtx implements CtxLike {
+  services = new Map<string, unknown>()
+  get(name: string): unknown {
+    return this.services.get(name)
+  }
+}
+
+interface Harness {
+  api: VisualWorkflowApi
+  host: ApiHost
+  runtime: OrchestratorRuntime
+  store: FlowStore
+  ctx: FakeCtx
+  dataDir: string
+}
+
+async function makeHarness(config?: Partial<OrchestratorConfig>): Promise<Harness> {
+  const dir = await mkdtemp(join(tmpdir(), 'vw-api-'))
+  cleanups.push(() => rm(dir, { recursive: true, force: true }))
+  const store = new FlowStore(dir)
+  await store.init()
+  const agents = new FakeAgents()
+  agents.roots.set('session-1', new FakeRoot('session-1'))
+  const runner = new FakeRunner()
+  const runSeq = { n: 0 }
+  const runtime = new OrchestratorRuntime({
+    store,
+    runner,
+    agents,
+    config: {
+      outputFullLimit: 400,
+      documentTextLimit: 200,
+      runIdleTimeoutMs: 500,
+      retryLimitDefault: 3,
+      reactIterationLimitDefault: 50,
+      wfAskAgentTimeoutMs: 500,
+      ...config,
+    },
+    logger: { warn: () => {}, info: () => {}, debug: () => {} },
+    newRunId: () => {
+      runSeq.n += 1
+      return `run-${runSeq.n}`
+    },
+    uuid: () => `uuid-${runSeq.n}`,
+  })
+  const ctx = new FakeCtx()
+  const engine: EmbeddingEngine = { source: 'bm25', dimension: 0, async embed() { throw new Error('bm25 only') }, dispose() {} }
+  const host: ApiHost = { orchestrator: runtime, store, dataDir: dir, engine }
+  const api = new VisualWorkflowApi(ctx, host)
+  return { api, host, runtime, store, ctx, dataDir: dir }
+}
+
+/** 保存流程（供运行端点）。 */
+async function saveFlow(h: Harness): Promise<void> {
+  await h.store.saveWorkflow(makeFlow(), 'session-1', { force: true })
+}
+
+// ---------------------------------------------------------------------------
+// 白名单与分发
+// ---------------------------------------------------------------------------
+
+describe('端点白名单与分发', () => {
+  it('白名单与共享协议常量完全一致（39 端点，零漂移）', () => {
+    const expected = new Set<string>((Object.values(EP) as unknown[]).filter((v): v is string => typeof v === 'string'))
+    expect(VisualWorkflowApi.ENDPOINTS.size).toBe(expected.size)
+    for (const name of expected) expect(VisualWorkflowApi.ENDPOINTS.has(name)).toBe(true)
+  })
+
+  it('未知端点 404；原型链方法不可达', async () => {
+    const h = await makeHarness()
+    await expect(h.api.handle('constructor', {})).rejects.toMatchObject({ status: 404 })
+    await expect(h.api.handle('__proto__', {})).rejects.toMatchObject({ status: 404 })
+    await expect(h.api.handle('noSuchEndpoint', {})).rejects.toMatchObject({ status: 404 })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 工作流端点
+// ---------------------------------------------------------------------------
+
+describe('工作流端点', () => {
+  it('create/list/get/put/delete 全链路；参数缺失 400、不存在 404', async () => {
+    const h = await makeHarness()
+    await expect(h.api.handle('listWorkflows', {})).rejects.toMatchObject({ status: 400 })
+
+    const created = (await h.api.handle('createWorkflow', { sessionId: 'session-1', name: '新流程' })) as WorkflowDocument
+    expect(created.id).toBeTruthy()
+    expect(created.name).toBe('新流程')
+
+    const list = (await h.api.handle('listWorkflows', { sessionId: 'session-1' })) as WorkflowDocument[]
+    expect(list).toHaveLength(1)
+
+    const got = await h.api.handle('getWorkflow', { sessionId: 'session-1', id: created.id })
+    expect((got as WorkflowDocument).id).toBe(created.id)
+
+    // revision 冲突 → 409（客户端基于旧 revision 提交）
+    await h.store.saveWorkflow({ ...makeFlow(), name: '同名覆盖', id: created.id }, 'session-1', { force: true })
+    await h.store.saveWorkflow({ ...makeFlow(), name: '同名覆盖2', id: created.id }, 'session-1', { force: true })
+    await expect(
+      h.api.handle('putWorkflow', { sessionId: 'session-1', flow: { ...makeFlow(), id: created.id, revision: 1 } }),
+    ).rejects.toMatchObject({ status: 409 })
+
+    const deleted = await h.api.handle('deleteWorkflow', { sessionId: 'session-1', id: created.id })
+    expect(deleted).toEqual({ deleted: true })
+    await expect(h.api.handle('deleteWorkflow', { sessionId: 'session-1', id: created.id })).rejects.toMatchObject({ status: 404 })
+    await expect(h.api.handle('getWorkflow', { sessionId: 'session-1', id: 'nope' })).rejects.toMatchObject({ status: 404 })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 服务与模板端点
+// ---------------------------------------------------------------------------
+
+describe('服务与模板端点', () => {
+  it('服务 CRUD；serviceStart 无服务管理器 → 501', async () => {
+    const h = await makeHarness()
+    const saved = (await h.api.handle('putService', {
+      sessionId: 'session-1',
+      service: {
+        id: 'svc-1',
+        sessionId: 'session-1',
+        name: '服务A',
+        description: '',
+        revision: 0,
+        nodes: [],
+        lines: [],
+        createdAt: '2026-08-24T00:00:00.000Z',
+        updatedAt: '2026-08-24T00:00:00.000Z',
+        status: 'stopped',
+      },
+    })) as { id?: string }
+    expect(saved.id).toBe('svc-1')
+    const list = (await h.api.handle('listServices', { sessionId: 'session-1' })) as unknown[]
+    expect(list).toHaveLength(1)
+    await expect(h.api.handle('serviceStart', { serviceId: 'svc-1' })).rejects.toMatchObject({
+      status: 501,
+      code: 'WF_SERVICE_MANAGER_UNAVAILABLE',
+    })
+    // 管理器装配后透传调用
+    const calls: string[] = []
+    h.host.serviceManager = {
+      start: async (id) => { calls.push(`start:${id}`); return { started: true } },
+      stop: async () => ({}),
+      status: async () => ({}),
+    }
+    const started = await h.api.handle('serviceStart', { serviceId: 'svc-1' })
+    expect(started).toEqual({ started: true })
+    expect(calls).toEqual(['start:svc-1'])
+  })
+
+  it('模板 CRUD 与删除预览（解耦语义：受影响节点恒为 0）', async () => {
+    const h = await makeHarness()
+    await expect(h.api.handle('listTemplates', { kind: 'bad' })).rejects.toMatchObject({ status: 400 })
+    const saved = (await h.api.handle('putTemplate', {
+      kind: 'role',
+      template: { id: 'role-1', kind: 'agent', name: '研究员', systemPrompt: 'x', provider: '', model: '', presetId: 'standard', retryLimit: 3 },
+    })) as { id?: string }
+    expect(saved.id).toBe('role-1')
+    const list = (await h.api.handle('listTemplates', { kind: 'role' })) as unknown[]
+    expect(list).toHaveLength(1)
+
+    const preview = await h.api.handle('deleteTemplatePreview', { kind: 'role', id: 'role-1' })
+    expect(preview).toEqual({ affectedNodes: 0, detached: true })
+
+    const deleted = await h.api.handle('deleteTemplate', { kind: 'role', id: 'role-1' })
+    expect(deleted).toEqual({ deleted: true })
+    await expect(h.api.handle('deleteTemplate', { kind: 'role', id: 'role-1' })).rejects.toMatchObject({ status: 404 })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 组合端点
+// ---------------------------------------------------------------------------
+
+describe('组合端点', () => {
+  it('toolComboPut 校验 combo- 前缀；CRUD 往返', async () => {
+    const h = await makeHarness()
+    await expect(h.api.handle('toolComboPut', { combo: { id: 'bad', name: 'x' } })).rejects.toMatchObject({ status: 400 })
+    const saved = await h.api.handle('toolComboPut', {
+      combo: { id: 'combo-1', name: '研发组合', tools: ['read', 'write'], mcpServers: ['mcp-a'] },
+    })
+    expect((saved as { id?: string }).id).toBe('combo-1')
+    const list = (await h.api.handle('toolCombos', {})) as unknown[]
+    expect(list).toHaveLength(1)
+    const deleted = await h.api.handle('toolComboDelete', { id: 'combo-1' })
+    expect(deleted).toEqual({ deleted: true })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 生态端点
+// ---------------------------------------------------------------------------
+
+describe('生态端点', () => {
+  it('presets/tools/models：fake 服务解析；缺失返回空', async () => {
+    const h = await makeHarness()
+    expect(await h.api.handle('presets', {})).toEqual([])
+    expect(await h.api.handle('tools', {})).toEqual([])
+    expect(await h.api.handle('models', {})).toEqual([])
+
+    h.ctx.services.set('agentPresets', {
+      list: async () => [
+        { id: 'standard', name: '标准模式', description: '默认', trust: 'user' },
+        { id: 'broken-one', broken: true },
+      ],
+    })
+    const presets = (await h.api.handle('presets', {})) as Array<{ id?: string }>
+    expect(presets).toHaveLength(1)
+    expect(presets[0].id).toBe('standard')
+
+    h.ctx.services.set('tools', {
+      schemas: () => [{ name: 'read', description: 'Read a file.' }, { title: 'write' }],
+    })
+    const tools = (await h.api.handle('tools', {})) as Array<{ name?: string }>
+    expect(tools.map((t) => t.name).sort()).toEqual(['read', 'write'])
+
+    h.ctx.services.set('llm', {
+      listProviders: () => ['p1'],
+      listModels: async () => ['m1', { id: 'm2', name: '模型二' }],
+    })
+    const models = (await h.api.handle('models', {})) as Array<{ provider?: string; model?: string }>
+    expect(models).toEqual([
+      { provider: 'p1', model: 'm1' },
+      { provider: 'p1', model: 'm2' },
+    ])
+  })
+
+  it('pluginCatalog：工具并集（全局 + preset standing）+ 中文描述 + MCP 行', async () => {
+    const h = await makeHarness()
+    const mcpDir = join(h.dataDir, 'dsh-home')
+    process.env.DSH_HOME = mcpDir
+    await mkdir(join(mcpDir, 'profiles', 'web'), { recursive: true })
+    await writeFile(
+      join(mcpDir, 'profiles', 'web', 'cordis.patch.yml'),
+      '# >>> dsh-visual-workflow\n- insert:\n    - id: mcp-demo\n      name: \'@deepseek-ai/dsh-mcp-client\'\n      config:\n        serverName: demo\n        transport: stdio\n        command: npx\n        args:\n          - "-y"\n          - demo-server\n# <<< dsh-visual-workflow\n',
+      'utf8',
+    )
+    const presetKey = { presetScope: true }
+    h.ctx.services.set('agentPresets', {
+      list: async () => [{ id: 'standard' }],
+      standingKeyFor: async () => presetKey,
+    })
+    h.ctx.services.set('tools', {
+      schemas: (scope?: unknown) =>
+        scope === undefined
+          ? [{ name: 'wf_run_node', description: 'Start a node.' }]
+          : scope === presetKey
+            ? [{ name: 'read', description: 'Read a file.' }, { name: 'mcp__demo__fetch', description: 'Fetch.' }]
+            : [],
+    })
+    const catalog = (await h.api.handle('pluginCatalog', {})) as {
+      items: Array<{ key: string; name: string; description: string; source: string }>
+      mcp: Array<{ id: string }>
+    }
+    const names = catalog.items.map((item) => item.name).sort()
+    expect(names).toEqual(['mcp__demo__fetch', 'read', 'wf_run_node'])
+    const read = catalog.items.find((item) => item.name === 'read')
+    expect(read?.description).toContain('读取文件')
+    expect(catalog.mcp[0]).toMatchObject({ id: 'mcp-demo' })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 运行端点
+// ---------------------------------------------------------------------------
+
+describe('运行端点', () => {
+  it('run 无断点全新启动；有断点自动续跑（resumedFromRunId）', async () => {
+    const h = await makeHarness()
+    await saveFlow(h)
+    const started = await h.api.handle('run', { sessionId: 'session-1', flowId: 'flow-1' })
+    expect((started as { runId?: string }).runId).toBe('run-1')
+
+    // 构造 paused 断点：a1 ok → 暂停门
+    await h.runtime.wfRunNode({ isChild: false, sessionId: 'session-1' }, { nodeId: 'n-a1' })
+    await h.runtime.handleSubagentEnd({ id: 'child-1', stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: 'A 产出' }] })
+    await h.runtime.wfRunNode({ isChild: false, sessionId: 'session-1' }, { nodeId: 'n-pause' })
+
+    // run 端点自动续跑（新 run-2，继承链指向 run-1）
+    const resumed = await h.api.handle('run', { sessionId: 'session-1', flowId: 'flow-1' })
+    expect(resumed).toMatchObject({ runId: 'run-2', resumedFromRunId: 'run-1' })
+  })
+
+  it('runStatus：运行中内存快照；终态回退磁盘；未知 404', async () => {
+    const h = await makeHarness()
+    await saveFlow(h)
+    await h.api.handle('run', { sessionId: 'session-1', flowId: 'flow-1' })
+    const status = (await h.api.handle('runStatus', { runId: 'run-1' })) as { id?: string; status?: string }
+    expect(status.id).toBe('run-1')
+    expect(status.status).toBe('running')
+
+    await h.api.handle('runStop', { runId: 'run-1' })
+    // 终态条目内存已释放 → 回退磁盘历史
+    const disk = (await h.api.handle('runStatus', { runId: 'run-1' })) as { status?: string }
+    expect(disk.status).toBe('stopped')
+
+    await expect(h.api.handle('runStatus', { runId: 'run-nope' })).rejects.toMatchObject({ status: 404 })
+  })
+
+  it('runStop/runHistory/runResume（显式恢复指定 runId）', async () => {
+    const h = await makeHarness()
+    await saveFlow(h)
+    await h.api.handle('run', { sessionId: 'session-1', flowId: 'flow-1' })
+    await h.runtime.handleSubagentEnd({ id: 'child-1', stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: 'A' }] })
+    await h.runtime.wfRunNode({ isChild: false, sessionId: 'session-1' }, { nodeId: 'n-pause' })
+
+    const history = (await h.api.handle('runHistory', { flowId: 'flow-1' })) as Array<{ id?: string }>
+    expect(history.some((run) => run.id === 'run-1')).toBe(true)
+
+    const resumed = await h.api.handle('runResume', { sessionId: 'session-1', flowId: 'flow-1', runId: 'run-1' })
+    expect(resumed).toMatchObject({ runId: 'run-2', resumedFromRunId: 'run-1' })
+
+    const stopped = await h.api.handle('runStop', { runId: 'run-2' })
+    expect(stopped).toEqual({ stopped: true })
+  })
+
+  it('runResume 无断点 → 端点错误透传（WF_NO_RESUME_POINT）', async () => {
+    const h = await makeHarness()
+    await saveFlow(h)
+    await expect(h.api.handle('runResume', { sessionId: 'session-1', flowId: 'flow-1' })).rejects.toMatchObject({
+      code: 'WF_NO_RESUME_POINT',
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 数据库端点
+// ---------------------------------------------------------------------------
+
+describe('数据库端点', () => {
+  it('dbTest/dbSchema/dbSearchPreview：本地 sqlite 全链路（缺索引自动构建）', async () => {
+    const h = await makeHarness()
+    const dbFile = join(h.dataDir, 'test.db')
+    const sqlite = new DatabaseSync(dbFile)
+    sqlite.exec('CREATE TABLE docs (id INTEGER PRIMARY KEY, title TEXT, body TEXT)')
+    sqlite.prepare('INSERT INTO docs (title, body) VALUES (?, ?)').run('报告', '这是一份关于断点续跑的技术报告')
+    sqlite.close()
+
+    const node = databaseNode('n-db1', dbFile)
+    const test = await h.api.handle('dbTest', { node })
+    expect(test).toEqual({ ok: true, message: '连接成功' })
+
+    const schema = (await h.api.handle('dbSchema', { node })) as Array<{ name?: string }>
+    expect(schema.some((t) => t.name === 'docs')).toBe(true)
+
+    // 缺索引 → 自动构建后检索
+    const preview = (await h.api.handle('dbSearchPreview', { dataId: 'n-db1', query: '断点续跑', node })) as { hits?: unknown[] }
+    expect(preview.hits).toBeTruthy()
+
+    // rebuild=true 强制重建
+    const rebuilt = (await h.api.handle('dbSearchPreview', { dataId: 'n-db1', query: '', node, rebuild: true })) as { hits?: unknown[] }
+    expect(rebuilt.hits).toEqual([])
+
+    await expect(h.api.handle('dbSearchPreview', { dataId: 'nope', query: 'x' })).rejects.toMatchObject({ status: 422 })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 导入导出
+// ---------------------------------------------------------------------------
+
+describe('导入导出', () => {
+  it('exportWorkflow → importWorkflow：冲突/rename/overwrite', async () => {
+    const h = await makeHarness()
+    await h.store.saveWorkflow(makeFlow(), 'session-1', { force: true })
+
+    const { json } = (await h.api.handle('exportWorkflow', { sessionId: 'session-1', id: 'flow-1' })) as { json: string }
+    const bundle = JSON.parse(json) as { format?: string; version?: number; workflow?: { name?: string } }
+    expect(bundle.format).toBe('dsh-vw-bundle')
+    expect(bundle.version).toBe(2)
+
+    // 导入同名单 → conflict
+    const conflict = (await h.api.handle('importWorkflow', { sessionId: 'session-1', json })) as { conflict?: boolean }
+    expect(conflict.conflict).toBe(true)
+
+    // rename → 新名称保存
+    const renamed = (await h.api.handle('importWorkflow', { sessionId: 'session-1', json, conflictMode: 'rename' })) as {
+      workflow?: { id?: string; name?: string }
+    }
+    expect(renamed.workflow?.name).toBe('测试流程 (2)')
+    expect((await h.store.listWorkflows('session-1')).length).toBe(2)
+
+    // overwrite → 覆盖同名（数量不变，id 保持）
+    const overwritten = (await h.api.handle('importWorkflow', { sessionId: 'session-1', json, conflictMode: 'overwrite' })) as {
+      workflow?: { id?: string }
+    }
+    expect(overwritten.workflow?.id).toBe('flow-1')
+    expect((await h.store.listWorkflows('session-1')).length).toBe(2)
+  })
+
+  it('角色模板导出/导入往返；非法文件 400/422', async () => {
+    const h = await makeHarness()
+    await h.api.handle('putTemplate', {
+      kind: 'role',
+      template: { id: 'role-1', kind: 'agent', name: '研究员', systemPrompt: 'x', provider: '', model: '', presetId: 'standard', retryLimit: 3 },
+    })
+    const { json } = (await h.api.handle('exportAgentTemplate', { id: 'role-1' })) as { json: string }
+    // 同名已存在 → conflict；overwrite → 成功往返
+    const conflict = await h.api.handle('importAgentTemplate', { json })
+    expect(conflict).toMatchObject({ conflict: true })
+    const imported = (await h.api.handle('importAgentTemplate', { json, conflictMode: 'overwrite' })) as { template?: { id?: string } }
+    expect(imported.template?.id).toBe('role-1')
+
+    await expect(h.api.handle('importWorkflow', { sessionId: 'session-1', json: 'not-json' })).rejects.toMatchObject({ status: 400 })
+    await expect(h.api.handle('importWorkflow', { sessionId: 'session-1', json: JSON.stringify({ format: 'x' }) })).rejects.toMatchObject({
+      status: 422,
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// MCP 端点
+// ---------------------------------------------------------------------------
+
+describe('MCP 端点', () => {
+  it('mcpPut/mcpList/mcpToggle/mcpDelete：托管区读写往返', async () => {
+    const h = await makeHarness()
+    const mcpDir = join(h.dataDir, 'dsh-home')
+    process.env.DSH_HOME = mcpDir
+    const patch = join(mcpDir, 'profiles', 'web', 'cordis.patch.yml')
+
+    const saved = (await h.api.handle('mcpPut', {
+      server: { id: 'mcp-demo', serverName: 'demo', transport: 'stdio', command: 'npx -y demo-server', args: ['--port', '9000'] },
+    })) as { id?: string; serverName?: string; command?: string; args?: string[] }
+    expect(saved.id).toBe('mcp-demo')
+    expect(saved.command).toBe('npx')
+    expect(saved.args).toEqual(['-y', 'demo-server', '--port', '9000'])
+
+    const list = (await h.api.handle('mcpList', {})) as Array<{ id?: string }>
+    expect(list).toHaveLength(1)
+
+    // 托管区已写入 profile
+    const text = await readFile(patch, 'utf8')
+    expect(text).toContain('# >>> dsh-visual-workflow')
+    expect(text).toContain('serverName: "demo"')
+
+    await h.api.handle('mcpToggle', { id: 'mcp-demo', disabled: true })
+    const toggled = (await h.api.handle('mcpList', {})) as Array<{ disabled?: boolean }>
+    expect(toggled[0].disabled).toBe(true)
+
+    const removed = await h.api.handle('mcpDelete', { id: 'mcp-demo' })
+    expect(removed).toEqual({ deleted: true })
+    expect(await h.api.handle('mcpList', {})).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 路由注册与受管文件下载
+// ---------------------------------------------------------------------------
+
+describe('路由注册与下载', () => {
+  it('registerRoutes：注册/注销、非 POST 405、无效 JSON 400、错误映射', async () => {
+    const h = await makeHarness()
+    let registered: { kind?: string; path?: string; handler?: (req: unknown, res: unknown) => Promise<void> } | null = null
+    const fakeWebServer = {
+      register(route: { kind: string; path: string; handler: (req: unknown, res: unknown) => Promise<void> }) {
+        registered = route
+        return () => {
+          registered = null
+        }
+      },
+    }
+    h.ctx.services.set('webServer', fakeWebServer)
+    const dispose = registerRoutes({ get: (name) => h.ctx.get(name), logger: { warn: () => {} } }, h.host)
+    expect(registered).toMatchObject({ kind: 'prefix', path: '/visual-workflow' })
+
+    const responses: Array<{ status: number; body: string }> = []
+    const res = {
+      writeHead(status: number, headers: Record<string, string>) {
+        responses.push({ status, body: '' })
+        return this
+      },
+      end(body: string) {
+        responses[responses.length - 1].body = String(body ?? '')
+        return this
+      },
+    }
+    /** 构造流式 req（data 触发一次 body、end 收尾；无 body 时仅 end）。 */
+    const reqOf = (method: string, url: string, body?: string) => ({
+      method,
+      url,
+      on(event: string, cb: (chunk?: unknown) => void) {
+        if (event === 'data' && body !== undefined) cb(body)
+        if (event === 'end') cb()
+      },
+      destroy() {},
+    })
+
+    // 非 POST → 405
+    await registered!.handler!(reqOf('GET', '/visual-workflow/listWorkflows'), res)
+    expect(responses[0].status).toBe(405)
+
+    // 无效 JSON → 400
+    await registered!.handler!(reqOf('POST', '/visual-workflow/toolCombos', '{bad json'), res)
+    expect(responses[1].status).toBe(400)
+
+    // 正常端点（带 body）
+    await registered!.handler!(reqOf('POST', '/visual-workflow/toolCombos', '{"args":{}}'), res)
+    expect(responses[2].status).toBe(200)
+    expect(JSON.parse(responses[2].body)).toMatchObject({ ok: true })
+
+    // 未知端点 → 404
+    await registered!.handler!(reqOf('POST', '/visual-workflow/nope'), res)
+    expect(responses[3].status).toBe(404)
+
+    // disposer 生效
+    dispose()
+    expect(registered).toBeNull()
+  })
+
+  it('受管拷贝与下载路由：GET 返回内容、目录穿越拒绝、405', async () => {
+    const h = await makeHarness()
+    const copied = await copyIntoManagedFile(h.dataDir, { name: 'doc.txt', base64: Buffer.from('受管内容').toString('base64') })
+    expect(copied.fileName).toBe('doc.txt')
+    const bytes = await readFile(managedFilePath(h.dataDir, 'doc.txt'), 'utf8')
+    expect(bytes).toBe('受管内容')
+
+    let registered: { handler: (req: unknown, res: unknown) => Promise<void> } | null = null
+    h.ctx.services.set('webServer', {
+      register(route: { kind: string; path: string; handler: (req: unknown, res: unknown) => Promise<void> }) {
+        registered = route
+        return () => {}
+      },
+    })
+    registerDownloadRoute({ get: (name) => h.ctx.get(name), logger: { warn: () => {} } }, h.dataDir)
+    expect(registered).toMatchObject({ handler: expect.any(Function) })
+
+    const responses: Array<{ status: number; body: string }> = []
+    const res = {
+      writeHead(status: number, headers: Record<string, string>) {
+        responses.push({ status, body: '' })
+        return this
+      },
+      end(body: string) {
+        responses[responses.length - 1].body = String(body ?? '')
+        return this
+      },
+    }
+    await registered!.handler({ method: 'GET', url: '/visual-workflow/files/doc.txt' }, res)
+    expect(responses[0].status).toBe(200)
+    expect(responses[0].body).toBe('受管内容')
+
+    await registered!.handler({ method: 'GET', url: '/visual-workflow/files/..%2Fsecret' }, res)
+    expect(responses[1].status).toBe(404)
+
+    await registered!.handler({ method: 'POST', url: '/visual-workflow/files/doc.txt' }, res)
+    expect(responses[2].status).toBe(405)
+  })
+})

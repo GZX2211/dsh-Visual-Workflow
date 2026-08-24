@@ -283,6 +283,8 @@ export class FlowStore {
   async listTemplates(kind: 'file'): Promise<FileTemplate[]>
   /** 列出数据库模板（data/ 下按字段判别过滤）。 */
   async listTemplates(kind: 'database'): Promise<DatabaseTemplate[]>
+  /** 列出某类模板（kind 联合兜底；具体子类型请用窄签名）。 */
+  async listTemplates(kind: TemplateKind): Promise<Template[]>
   /** 列出某类模板（roles/ 为角色模板；data/ 为文件+数据库模板，按字段判别过滤）。 */
   async listTemplates(kind: TemplateKind): Promise<Template[]> {
     const dir = kind === 'role' ? join(this.root, 'roles') : join(this.root, 'data')
@@ -303,6 +305,12 @@ export class FlowStore {
       items.push(t)
     }
     return items.sort((a, b) => String((a as RoleTemplate).name ?? '').localeCompare(String((b as RoleTemplate).name ?? '')))
+  }
+
+  /** 按 id 取单个模板（无则 null；导入导出用）。 */
+  async getTemplate(kind: TemplateKind, id: string): Promise<Template | null> {
+    const list = await this.listTemplates(kind)
+    return list.find((item) => item.id === id) ?? null
   }
 
   /** 保存模板（原子写；模板 id 由调用方生成；返回带 createdAt/updatedAt 的持久化副本）。 */

@@ -40,6 +40,8 @@ import { createModelSelectionSetup } from './agent/model-selection.js'
 import { registerWfTools } from './tools/wf-tools.js'
 import { registerWfAskAgent } from './tools/wf-ask-agent.js'
 import { registerDataTools } from './tools/data-tools.js'
+import { registerRoutes } from './remote/api.js'
+import { registerDownloadRoute } from './remote/download.js'
 import { EmbeddingService } from './embedding/engine.js'
 
 /** 插件稳定标识名（亦是 cordis.patch.yml 中 insert 行的 name 解析目标）。 */
@@ -384,6 +386,19 @@ export class VisualWorkflowHost extends Service {
 
     // 看护定时器：空闲超时自动停止 / 父代理回合终态收尾（ctx.effect 持有 disposer）
     this.ctx.effect(() => scheduleIdleWatchdog(this.orchestrator), 'visualWorkflowHost.watchdog')
+
+    // GUI API 路由：webServer 可用时挂载端点白名单分发与受管文件下载路由
+    // （webServer 缺失时 register 内部告警降级；disposer 随 fiber 注销）
+    try {
+      this.ctx.effect(() => registerRoutes(this.ctx, this), 'visualWorkflowHost.routes')
+    } catch (error) {
+      this.ctx.logger.warn(`[visual-workflow] GUI API 路由挂载失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+    try {
+      this.ctx.effect(() => registerDownloadRoute(this.ctx, this.config.dataDir), 'visualWorkflowHost.downloadRoute')
+    } catch (error) {
+      this.ctx.logger.warn(`[visual-workflow] 受管文件下载路由挂载失败：${error instanceof Error ? error.message : String(error)}`)
+    }
 
     // 显式清理通道：fiber 卸载时执行（中止运行/阻塞等待 reject/停止看护）。
     this.ctx.effect(() => () => this.dispose(), 'visualWorkflowHost.dispose')
