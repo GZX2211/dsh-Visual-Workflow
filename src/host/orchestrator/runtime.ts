@@ -389,6 +389,8 @@ export interface OrchestratorDeps {
 export interface StartRunOptions {
   /** 运行模式（缺省 mode1；模式二由服务管理器传入 mode2）。 */
   mode?: 'mode1' | 'mode2'
+  /** 模式二：本次外部请求的用户问题（注入输入节点产出 + 编排指令动态段）。 */
+  question?: string
 }
 
 export interface StartRunResult {
@@ -537,8 +539,10 @@ export class OrchestratorRuntime {
       throw new WfError('该工作流正在另一个会话中运行，请先停止后再试', 'WF_LOCKED', { lockedSessionId: locked.sessionId })
     }
 
-    const flow = await this.deps.store.getWorkflow(sessionId, flowId)
-    if (!flow) throw new WfError('工作流不存在', 'WF_NOT_FOUND')
+    const flow = mode === 'mode2'
+      ? await this.deps.store.getServiceAsFlow(flowId)
+      : await this.deps.store.getWorkflow(sessionId, flowId)
+    if (!flow) throw new WfError(mode === 'mode2' ? '服务不存在' : '工作流不存在', 'WF_NOT_FOUND')
 
     // 运行前完整性：启动/输入与结束/输出必须齐备（保存中间态与运行分离）
     const missing = missingStageLabels(flow)
@@ -557,6 +561,19 @@ export class OrchestratorRuntime {
 
     const runId = this.deps.newRunId?.() ?? `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     const snapshot = createRunSnapshot({ runId, flow, sessionId, mode, now: this.now() })
+    // 模式二：用户问题注入输入节点产出（无需连线即作为初始上下文；
+    // 右出 ctx 连线经 buildNodeBlocks 的 start 源分支显式传递给下游）
+    const question = typeof input.question === 'string' ? input.question.trim() : ''
+    if (mode === 'mode2' && question) {
+      const inputNode = flow.nodes.find((n) => n.kind === 'start')
+      if (inputNode) {
+        setNodeStatus(snapshot, inputNode.id, 'ok', {
+          output: question,
+          outputFullLimit: this.deps.config.outputFullLimit,
+          now: this.now(),
+        })
+      }
+    }
     const entry: RunEntry = {
       controller: new AbortController(),
       snapshot,
@@ -581,7 +598,7 @@ export class OrchestratorRuntime {
 
     // 一次性注入 + 唤醒：官方 Message 契约要求 id 与 source 齐备（缺 source 父回合
     // 以 UNKNOWN 失败——旧项目根因复盘结论，必须保留）。
-    const directive = buildOrchestrationDirective(directiveParams(flow, defPath, mode))
+    const directive = buildOrchestrationDirective(directiveParams(flow, defPath, mode, { question }))
     try {
       this.deps.agents.followupRoot(root, {
         id: this.deps.uuid?.() ?? randomUUID(),
@@ -640,8 +657,10 @@ export class OrchestratorRuntime {
       }
     }
 
-    const flow = await this.deps.store.getWorkflow(sessionId, flowId)
-    if (!flow) throw new WfError('工作流不存在', 'WF_NOT_FOUND')
+    const flow = prev.mode === 'mode2'
+      ? await this.deps.store.getServiceAsFlow(flowId)
+      : await this.deps.store.getWorkflow(sessionId, flowId)
+    if (!flow) throw new WfError(prev.mode === 'mode2' ? '服务不存在' : '工作流不存在', 'WF_NOT_FOUND')
 
     // 运行前完整性（与全新启动同一套校验）
     const missing = missingStageLabels(flow)
@@ -684,7 +703,9 @@ export class OrchestratorRuntime {
 
     // 断点继续指令：isResume 动态态注入末段（已 ok 不重跑；从 resumeFromNodeId 继续）
     const directive = buildOrchestrationDirective(
-      directiveParams(flow, defPath, prev.mode, { resumeFromNodeId: prev.resumeFromNodeId, resumedFromRunId: prev.id }),
+      directiveParams(flow, defPath, prev.mode, {
+        resume: { resumeFromNodeId: prev.resumeFromNodeId, resumedFromRunId: prev.id },
+      }),
     )
     try {
       this.deps.agents.followupRoot(root, {
@@ -1408,6 +1429,19 @@ function buildNodeBlocks(input: {
       }
       continue
     }
+    // 模式二输入节点：右出 ctx 连线显式传递用户问题（快照已预填产出）
+    if (src.kind === 'start') {
+      if (flow.mode !== 'mode2') continue
+      const entry = input.snapshot.nodes.find((n) => n.nodeId === src.id)
+      if (!entry || entry.status !== 'ok') continue
+      const output = String(entry.output ?? '').trim()
+      if (!output) continue
+      upstreamContext.push({
+        source: labelOf(src),
+        content: truncateText(output, input.documentTextLimit),
+      })
+      continue
+    }
     // 角色/虚拟节点：解析主节点后查快照产出（快照按主节点 key 记账）
     const resolved = src.kind === 'proxy' ? nodeById(flow, src.proxySourceId) : src
     if (!resolved || (resolved.kind !== 'agent' && resolved.kind !== 'parent')) continue
@@ -1446,7 +1480,12 @@ function directiveParams(
   flow: WorkflowDocument,
   defPath: string,
   mode: 'mode1' | 'mode2',
-  resume?: { resumeFromNodeId?: string; resumedFromRunId: string },
+  extra?: {
+    /** 断点继续事实（resumeRun 用）。 */
+    resume?: { resumeFromNodeId?: string; resumedFromRunId: string }
+    /** 模式二用户问题（不稳定内容，仅末段）。 */
+    question?: string
+  },
 ): OrchestrationDirectiveParams {
   return {
     facts: {
@@ -1462,8 +1501,9 @@ function directiveParams(
         mode === 'mode2'
           ? 'mode2 (service): block with wait: true when you need the node output inline.'
           : 'mode1 (orchestration): wf_run_node defaults to async dispatch.',
-      ...(resume
-        ? { isResume: true, resumeFromNodeId: resume.resumeFromNodeId, resumedFromRunId: resume.resumedFromRunId }
+      ...(extra?.question ? { question: extra.question } : {}),
+      ...(extra?.resume
+        ? { isResume: true, resumeFromNodeId: extra.resume.resumeFromNodeId, resumedFromRunId: extra.resume.resumedFromRunId }
         : {}),
     },
   }

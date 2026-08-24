@@ -740,11 +740,18 @@ export function registerRoutes(
         const value = await api.handle(endpoint, args)
         sendJson(res as never, 200, { ok: true, value })
       } catch (error) {
+        const code = (error as { code?: string })?.code ?? ''
         const status = error instanceof HttpError
           ? error.status
-          : (error as { code?: string })?.code === 'FLOW_REVISION_CONFLICT' || (error as { code?: string })?.code === 'WF_LOCKED'
+          : code === 'FLOW_REVISION_CONFLICT' || code === 'WF_LOCKED' || code === 'WF_SERVICE_RUNNING'
             ? 409
-            : 500
+            : code === 'WF_SERVICE_NOT_FOUND'
+              ? 404
+              : code === 'WF_SERVICE_BAD_ID'
+                ? 400
+                : code === 'WF_FLOW_INVALID'
+                  ? 422
+                  : 500
         sendJson(res as never, status, { ok: false, error: { message: error instanceof Error ? error.message : String(error) } })
       }
     },

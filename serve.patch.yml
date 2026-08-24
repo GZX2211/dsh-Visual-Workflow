@@ -1,5 +1,6 @@
 # 模式二服务进程 serve 层模板（顶层数组）。
-# P01 占位：空数组保证 exports["./serve.patch.yml"] 指向的文件真实存在。
-# T-031 将填充渲染模板（headless-runner disabled + insert 行
-# id=visual-workflow-service，inject: [cmdlineArgs]），形态见架构文档 §7。
+# 渲染实现见 src/host/service/serve-patch.ts（renderServePatch）：
+# 服务管理器启动时动态渲染到 <dataDir>/services/<serviceId>.serve.patch.yml
+# （含 headless-runner disabled + webserver 行 + 插件行，插件 name 为绝对 file URL）。
+# 本文件为空数组：仅保证 exports["./serve.patch.yml"] 指向的文件真实存在。
 []

@@ -242,6 +242,47 @@ export class FlowStore {
     return doc
   }
 
+  /** 按 id 读取服务（不校验归属会话；服务管理器/服务进程用）。 */
+  async getServiceById(serviceId: string): Promise<ServiceState | null> {
+    return readJson<ServiceState | null>(this.servicePath(serviceId), null)
+  }
+
+  /** 列出全部服务（不按会话过滤；自动恢复扫描用）。 */
+  async listServicesAll(): Promise<ServiceState[]> {
+    const dir = join(this.root, 'services')
+    let names: string[] = []
+    try {
+      names = await readdir(dir)
+    } catch {
+      return []
+    }
+    const items: ServiceState[] = []
+    for (const name of names) {
+      if (!name.endsWith('.json') || name.endsWith('.sessions.json')) continue
+      const doc = await readJson<ServiceState | null>(join(dir, name), null)
+      if (doc) items.push(doc)
+    }
+    return items.sort((a, b) => String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? '')))
+  }
+
+  /** 服务文档 → 模式二工作流视图（编排运行入口的 flow 形态）。 */
+  async getServiceAsFlow(serviceId: string): Promise<WorkflowDocument | null> {
+    const service = await this.getServiceById(serviceId)
+    if (!service) return null
+    return {
+      id: service.id,
+      sessionId: service.sessionId,
+      mode: 'mode2',
+      name: service.name,
+      description: service.description,
+      nodes: service.nodes,
+      lines: service.lines,
+      revision: service.revision,
+      createdAt: service.createdAt,
+      updatedAt: service.updatedAt,
+    }
+  }
+
   /** 保存服务（revision 递增 + 冲突保护；status/port 等运行字段由服务管理器独立更新）。 */
   async saveService(service: ServiceState, sessionId: string, options: SaveOptions = {}): Promise<ServiceState> {
     if (!sessionId) throw new Error('saveService 需要 sessionId')

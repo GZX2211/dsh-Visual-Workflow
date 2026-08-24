@@ -43,6 +43,7 @@ import { registerDataTools } from './tools/data-tools.js'
 import { registerRoutes } from './remote/api.js'
 import { registerDownloadRoute } from './remote/download.js'
 import { EmbeddingService } from './embedding/engine.js'
+import { ServiceManager } from './service/manager.js'
 
 /** 插件稳定标识名（亦是 cordis.patch.yml 中 insert 行的 name 解析目标）。 */
 export const name = 'dsh-visual-workflow'
@@ -230,6 +231,8 @@ export class VisualWorkflowHost extends Service {
   readonly runner: NodeAgentRunner
   /** 会话根 Agent 宿主能力（wf_* 工具层归属校验/提问借 root 身份）。 */
   readonly agents: CordisAgentHost
+  /** 模式二服务管理器（fork 子进程生命周期/端口池/自动恢复）。 */
+  readonly serviceManager: ServiceManager
   /** ReAct 软截停护栏（桥供 runner/编排器，贡献注入子代理）。 */
   private readonly reactGuard = createReactGuard()
   /** 思考强度模型选择装配。 */
@@ -238,6 +241,8 @@ export class VisualWorkflowHost extends Service {
   private readonly embedding: EmbeddingService
   /** 已清理标记（dispose 后为 true；重复 dispose 幂等）。 */
   private _disposed = false
+  /** 跳过磁盘对账（服务进程装配用：运行记录对账属主进程职责）。 */
+  private readonly skipReconcile: boolean
 
   /** 已清理标记（dispose 后为 true；重复 dispose 幂等）。 */
   get disposed(): boolean {
@@ -247,8 +252,10 @@ export class VisualWorkflowHost extends Service {
   constructor(
     ctx: Context,
     public readonly config: Config,
+    options: { skipReconcile?: boolean } = {},
   ) {
     super(ctx, VisualWorkflowHostServiceName)
+    this.skipReconcile = options.skipReconcile === true
     this.store = new FlowStore(config.dataDir)
     this.agents = new CordisAgentHost(ctx)
     this.embedding = new EmbeddingService({
@@ -278,6 +285,20 @@ export class VisualWorkflowHost extends Service {
         wfAskAgentTimeoutMs: config.wfAskAgentTimeoutMs,
       },
       logger: cordisLogger(ctx),
+    })
+    this.serviceManager = new ServiceManager({
+      store: this.store,
+      dataDir: config.dataDir,
+      config: {
+        servicePortBase: config.servicePortBase,
+        apiKey: config.apiKey,
+        maxConcurrentPerService: config.maxConcurrentPerService,
+      },
+      logger: {
+        info: (message) => ctx.logger.info(message),
+        warn: (message) => ctx.logger.warn(message),
+        error: (message) => ctx.logger.error(message),
+      },
     })
   }
 
@@ -326,8 +347,19 @@ export class VisualWorkflowHost extends Service {
     // 数据目录结构初始化（幂等）
     await this.store.init()
 
-    // 陈旧记录对账：上次宿主异常关闭残留的 running/paused → interrupted（可恢复）
-    await reconcileStaleRuns(this.store)
+    // 陈旧记录对账：上次宿主异常关闭残留的 running/paused → interrupted（可恢复）。
+    // 服务进程装配（skipReconcile）跳过：磁盘运行记录属主进程，服务进程不接管。
+    if (!this.skipReconcile) {
+      await reconcileStaleRuns(this.store)
+    }
+
+    // 模式二自动恢复：上次运行中（status=running）的服务重启（端口冲突重分配）。
+    // 恢复失败仅告警，不阻断主进程启动。
+    try {
+      await this.serviceManager.autoRecover()
+    } catch (error) {
+      this.ctx.logger.warn(`[visual-workflow] 服务自动恢复失败：${error instanceof Error ? error.message : String(error)}`)
+    }
 
     // 事件观察：
     //   - subagent/end：节点子代理结束回写（ok/fail/react-capped + output + wait 唤醒）
@@ -445,6 +477,7 @@ export class VisualWorkflowHost extends Service {
     this.orchestrator.dispose()
     this.runner.dispose()
     this.embedding.dispose()
+    this.serviceManager.dispose()
     this.ctx.logger.info('[visual-workflow] host disposed')
   }
 }

@@ -80,6 +80,10 @@ export interface OrchestrationDirectiveParams {
      * 缺省为空（模板以占位呈现）。
      */
     runParamsText?: string
+    /**
+     * 模式二本次外部请求的用户问题（不稳定内容，仅末段注入；模式一无）。
+     */
+    question?: string
   }
 }
 
@@ -196,5 +200,8 @@ function renderDynamicState(dynamic: OrchestrationDirectiveParams['dynamic']): s
   }
 
   lines.push(`- Run parameters: ${(dynamic.runParamsText ?? '').trim() || '(none)'}`)
+  if (dynamic.question) {
+    lines.push(`- User question (service mode): ${dynamic.question}`)
+  }
   return lines.join('\n')
 }
