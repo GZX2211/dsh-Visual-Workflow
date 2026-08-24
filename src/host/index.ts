@@ -331,6 +331,11 @@ export class VisualWorkflowHost extends Service {
     return this.config.dataDir
   }
 
+  /** 服务 apiKey（调试流式代理鉴权用；密钥仅 Host 持有，不下发浏览器）。 */
+  get apiKey(): string | null {
+    return this.config.apiKey
+  }
+
   /** 嵌入引擎（数据工具向量检索用）。 */
   get engine(): EmbeddingService {
     return this.embedding

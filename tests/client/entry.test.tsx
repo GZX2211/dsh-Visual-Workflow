@@ -28,7 +28,7 @@ function makeCtx(options: { currentSession?: string; locale?: unknown } = {}) {
   const registered: Array<Record<string, unknown>> = []
   const locale = options.locale ?? {
     register: vi.fn(),
-    getLocale: () => ({ active: 'zh' }),
+    language: 'zh-CN',
   }
   const sessions = {
     list: {
@@ -84,8 +84,8 @@ describe('apply 装配', () => {
     await act(async () => { fab.click() })
     const windowEl = document.querySelector('.wf-window') as HTMLElement
     expect(windowEl).toBeTruthy()
-    // 窗口内为工作台（会话绑定注入）
-    expect(document.querySelector('.wf-titlebar__session')).toBeTruthy()
+    // 窗口内为工作台（标题顶栏 = 工作流设计器一行）
+    expect(document.querySelector('.wf-titlebar__title')?.textContent).toBe(zh.studio)
   })
 
   it('i18n 注册：locale.register 收到 zh/en 词典', async () => {

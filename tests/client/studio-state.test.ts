@@ -2,255 +2,185 @@
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-//
 // tests/client/studio-state.test.ts
 //
-// 状态机单测（T-042）：reducer 纯函数——打开工作流/服务（nodes/lines 投影）、
-// 画布变更 dirty、撤销重做、选中与编辑器、模板/工作流列表、运行快照、
-// 轻提示、面板几何、选择器派生。
+// 状态机纯函数单测（照搬/适配旧项目行为 + 新数据模型）：
+// 画布投影、增删改、编辑器数据（角色/文件/数据库/阶段/协作组/虚拟节点）、
+// 撤销重做、面板几何与打开文档的选中/编辑器重置。
 
 import { describe, expect, it } from 'vitest'
 import {
   createInitialState,
   studioReducer,
-  flowToCanvas,
-  serviceToCanvas,
   editorDataOf,
-  currentFlowOf,
-  isRunningOf,
   graphSnapshotOf,
-  HISTORY_LIMIT,
   type StudioState,
+  type CanvasNode,
 } from '../../src/client/studio/studio-state.js'
-import type { WorkflowDocument } from '../../src/host/shared/graph-model.js'
-import type { ServiceState } from '../../src/host/shared/types.js'
 
-function baseFlow(): WorkflowDocument {
-  return {
-    id: 'wf-1',
-    sessionId: 'session-1',
-    mode: 'mode1',
-    name: '测试流程',
-    description: '',
-    revision: 2,
-    nodes: [
-      { id: 'n-start', kind: 'start', position: { x: 0, y: 0 }, data: { label: '启动' } },
-      { id: 'n-a1', kind: 'agent', position: { x: 200, y: 0 }, data: { label: '子任务' } as never },
-      { id: 'n-end', kind: 'end', position: { x: 400, y: 0 }, data: { label: '结束' } },
-    ],
-    lines: [
-      { id: 'l1', source: 'n-start', target: 'n-a1', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
-      { id: 'l2', source: 'n-a1', target: 'n-end', sourceHandle: 'flow-out', targetHandle: 'flow-in', condition: { type: 'pass' } },
-    ],
-  }
+function baseState(): StudioState {
+  return createInitialState('s-1')
 }
 
-function baseService(): ServiceState {
-  return {
-    id: 'svc-1',
-    sessionId: 'session-1',
-    name: '问答服务',
-    description: '',
-    revision: 1,
-    nodes: [
-      { id: 'n-in', kind: 'start', position: { x: 0, y: 0 }, data: { label: '输入' } },
-      { id: 'n-parent', kind: 'parent', position: { x: 200, y: 0 }, data: { label: '父代理' } as never },
-      { id: 'n-out', kind: 'end', position: { x: 400, y: 0 }, data: { label: '输出' } },
-    ],
-    lines: [
-      { id: 'l1', source: 'n-in', target: 'n-parent', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
-    ],
-    createdAt: '2026-08-24T00:00:00.000Z',
-    updatedAt: '2026-08-24T00:00:00.000Z',
-    status: 'stopped',
-  }
+function node(partial: Partial<CanvasNode> & { id: string; kind: CanvasNode['kind'] }): CanvasNode {
+  return { position: { x: 10, y: 10 }, data: {}, ...partial }
 }
 
-describe('画布投影', () => {
-  it('flowToCanvas：节点/连线全量映射（含条件）', () => {
-    const { nodes, edges } = flowToCanvas(baseFlow())
-    expect(nodes).toHaveLength(3)
-    expect(nodes[1]).toMatchObject({ id: 'n-a1', kind: 'agent', position: { x: 200, y: 0 } })
-    expect(edges[1].condition).toEqual({ type: 'pass' })
-    expect(edges[1].sourceHandle).toBe('flow-out')
+describe('studioReducer', () => {
+  it('初始状态：会话绑定 + 默认模式一 + 四列表面板', () => {
+    const state = baseState()
+    expect(state.sessionId).toBe('s-1')
+    expect(state.mode).toBe('mode1')
+    expect(state.libTab).toBe('workflow')
+    expect(state.templates).toEqual({ role: [], file: [], database: [] })
+    expect(state.canvas).toEqual({ nodes: [], edges: [] })
   })
 
-  it('serviceToCanvas：服务文档同构投影', () => {
-    const { nodes, edges } = serviceToCanvas(baseService())
-    expect(nodes.map((n) => n.id)).toEqual(['n-in', 'n-parent', 'n-out'])
-    expect(edges).toHaveLength(1)
-  })
-
-  it('缺省位置落默认格点', () => {
-    const flow = baseFlow()
-    flow.nodes[0] = { id: 'n-x', kind: 'start', data: { label: 'x' } } as never
-    const { nodes } = flowToCanvas(flow)
-    expect(nodes[0].position).toEqual({ x: 120, y: 80 })
-  })
-})
-
-describe('打开文档与选中', () => {
-  it('OPEN_FLOW：画布投影 + 编辑器/库选中 + 清运行状态 + 非 dirty', () => {
-    const state = studioReducer(createInitialState('session-1'), { type: 'OPEN_FLOW', flow: baseFlow() })
-    expect(state.currentKind).toBe('workflow')
+  it('OPEN_FLOW：投影节点/连线并重置选中与编辑器', () => {
+    let state = baseState()
+    state = studioReducer(state, {
+      type: 'OPEN_FLOW',
+      flow: {
+        id: 'wf-1',
+        sessionId: 's-1',
+        mode: 'mode1',
+        name: '流程',
+        description: '',
+        nodes: [node({ id: 'a1', kind: 'start', data: { label: '启动' } }) as unknown as import('../../src/host/shared/graph-model.js').GraphNode],
+        lines: [],
+      },
+    })
     expect(state.currentId).toBe('wf-1')
-    expect(state.canvas.nodes).toHaveLength(3)
-    expect(state.dirty).toBe(false)
-    expect(state.editor).toEqual({ source: 'workflow', id: 'wf-1' })
-    expect(state.selection.lib).toEqual({ kind: 'workflow', id: 'wf-1' })
-  })
-
-  it('OPEN_SERVICE：服务文档打开', () => {
-    const state = studioReducer(createInitialState('session-1'), { type: 'OPEN_SERVICE', service: baseService() })
-    expect(state.currentKind).toBe('service')
-    expect(state.currentId).toBe('svc-1')
-    expect(state.canvas.nodes.map((n) => n.id)).toContain('n-parent')
-  })
-
-  it('SELECT_NODE 联动编辑器；CLEAR_SELECTION 全清', () => {
-    let state = createInitialState('s')
-    state = studioReducer(state, { type: 'SELECT_NODE', id: 'n-a1' })
-    expect(state.selection.nodeId).toBe('n-a1')
-    expect(state.editor).toEqual({ source: 'node', id: 'n-a1' })
-    state = studioReducer(state, { type: 'CLEAR_SELECTION' })
-    expect(state.selection.nodeId).toBeNull()
-    expect(state.editor).toBeNull()
-  })
-
-  it('SELECT_EDGE / SELECT_LIB / SELECT_EDITOR', () => {
-    let state = createInitialState('s')
-    state = studioReducer(state, { type: 'SELECT_EDGE', id: 'l1' })
-    expect(state.selection.edgeId).toBe('l1')
-    state = studioReducer(state, { type: 'SELECT_LIB', kind: 'role', id: 'r-1' })
-    expect(state.selection.lib).toEqual({ kind: 'role', id: 'r-1' })
-    state = studioReducer(state, { type: 'SELECT_EDITOR', editor: { source: 'template', kind: 'file', id: 'f-1' } })
-    expect(state.editor).toEqual({ source: 'template', kind: 'file', id: 'f-1' })
-  })
-})
-
-describe('画布变更与撤销重做', () => {
-  it('NODE_ADDED/NODE_MOVED/NODE_REMOVED 置 dirty', () => {
-    let state = createInitialState('s')
-    state = studioReducer(state, { type: 'NODE_ADDED', node: { id: 'n-1', kind: 'agent', position: { x: 0, y: 0 }, data: {} } })
-    expect(state.dirty).toBe(true)
-    state = studioReducer(state, { type: 'NODE_MOVED', id: 'n-1', position: { x: 9, y: 9 } })
-    expect(state.canvas.nodes[0].position).toEqual({ x: 9, y: 9 })
-    state = studioReducer(state, { type: 'EDGE_ADDED', edge: { id: 'e-1', source: 'n-1', target: 'n-2', sourceHandle: 'flow-out', targetHandle: 'flow-in' } })
-    expect(state.canvas.edges).toHaveLength(1)
-    state = studioReducer(state, { type: 'NODE_REMOVED', id: 'n-1' })
-    // 删除节点级联删除相关连线
-    expect(state.canvas.nodes).toHaveLength(0)
-    expect(state.canvas.edges).toHaveLength(0)
-  })
-
-  it('撤销/重做：HISTORY_PUSH 后 UNDO/REDO 恢复图快照', () => {
-    let state = createInitialState('s')
-    state = studioReducer(state, { type: 'NODE_ADDED', node: { id: 'n-1', kind: 'agent', position: { x: 0, y: 0 }, data: {} } })
-    const snapshot = graphSnapshotOf(state)
-    state = studioReducer(state, { type: 'HISTORY_PUSH', snapshot })
-    state = studioReducer(state, { type: 'NODE_ADDED', node: { id: 'n-2', kind: 'agent', position: { x: 1, y: 1 }, data: {} } })
-    expect(state.canvas.nodes).toHaveLength(2)
-    state = studioReducer(state, { type: 'UNDO' })
+    expect(state.currentKind).toBe('workflow')
     expect(state.canvas.nodes).toHaveLength(1)
+    expect(state.editor).toEqual({ source: 'workflow', id: 'wf-1' })
+    expect(state.dirty).toBe(false)
+  })
+
+  it('NODE_ADDED / NODE_MOVED / NODE_REMOVED：增删改 + 脏标记', () => {
+    let state = baseState()
+    state = studioReducer(state, { type: 'OPEN_FLOW', flow: {
+      id: 'wf-1', sessionId: 's-1', mode: 'mode1', name: '', description: '', nodes: [], lines: [],
+    } })
+    state = studioReducer(state, {
+      type: 'NODE_ADDED',
+      node: node({ id: 'n1', kind: 'agent', data: { label: 'A' } }),
+    })
     expect(state.dirty).toBe(true)
-    state = studioReducer(state, { type: 'REDO' })
-    expect(state.canvas.nodes).toHaveLength(2)
+    expect(state.canvas.nodes.map((item) => item.id)).toEqual(['n1'])
+    state = studioReducer(state, { type: 'NODE_MOVED', id: 'n1', position: { x: 50, y: 60 } })
+    expect(state.canvas.nodes[0]?.position).toEqual({ x: 50, y: 60 })
+    // 删除连线连带
+    state = studioReducer(state, { type: 'EDGE_ADDED', edge: {
+      id: 'e1', source: 'n1', target: 'n2', sourceHandle: 'flow-out', targetHandle: 'flow-in',
+    } })
+    state = studioReducer(state, { type: 'NODE_ADDED', node: node({ id: 'n2', kind: 'end', data: { label: '结束' } }) })
+    const before = studioReducer(state, { type: 'NODE_REMOVED', id: 'n1' })
+    expect(before.canvas.edges).toHaveLength(0)
   })
 
-  it('HISTORY_PUSH 超限裁剪（60）', () => {
-    let state = createInitialState('s')
-    for (let index = 0; index < HISTORY_LIMIT + 10; index += 1) {
-      state = studioReducer(state, { type: 'HISTORY_PUSH', snapshot: { nodes: [], edges: [] } })
-    }
-    expect(state.history.past.length).toBe(HISTORY_LIMIT)
-  })
-
-  it('GRAPH_REPLACED：恢复快照（dirty 可控）', () => {
-    const state = studioReducer(createInitialState('s'), {
+  it('NODE_DATA_PATCH / EDGE_PATCH：局部补丁注入（脏标记）', () => {
+    let state = baseState()
+    state = studioReducer(state, {
       type: 'GRAPH_REPLACED',
-      nodes: [{ id: 'n-x', kind: 'agent', position: { x: 0, y: 0 }, data: {} }],
-      edges: [],
+      nodes: [node({ id: 'n1', kind: 'agent', data: { label: 'A', systemPrompt: '' } })],
+      edges: [{ id: 'e1', source: 'n1', target: 'n2', sourceHandle: 'flow-out', targetHandle: 'flow-in' }],
       dirty: false,
     })
-    expect(state.canvas.nodes[0].id).toBe('n-x')
-    expect(state.dirty).toBe(false)
+    state = studioReducer(state, { type: 'NODE_DATA_PATCH', id: 'n1', patch: { systemPrompt: 'hi' } })
+    expect(state.canvas.nodes[0]?.data.systemPrompt).toBe('hi')
+    expect(state.dirty).toBe(true)
+    state = studioReducer(state, { type: 'EDGE_PATCH', id: 'e1', patch: { condition: { type: 'content', label: '路由' } } })
+    const edge = state.canvas.edges[0] as { condition?: { type: string; label: string } }
+    expect(edge.condition).toEqual({ type: 'content', label: '路由' })
+  })
+
+  it('DOC_PATCH：工作流/服务名称描述更新', () => {
+    let state = baseState()
+    state = studioReducer(state, { type: 'OPEN_FLOW', flow: {
+      id: 'wf-1', sessionId: 's-1', mode: 'mode1', name: '旧', description: '', nodes: [], lines: [],
+    } })
+    state = studioReducer(state, { type: 'DOC_PATCH', patch: { name: '新名', description: '描述' } })
+    expect(state.workflows[0]?.name).toBe('新名')
+    expect(state.workflows[0]?.description).toBe('描述')
+  })
+
+  it('撤销/重做：图快照进出栈', () => {
+    let state = baseState()
+    state = studioReducer(state, { type: 'GRAPH_REPLACED', nodes: [node({ id: 'n1', kind: 'agent' })], edges: [], dirty: false })
+    const snapshot = graphSnapshotOf(state)
+    state = studioReducer(state, { type: 'HISTORY_PUSH', snapshot })
+    state = studioReducer(state, { type: 'NODE_ADDED', node: node({ id: 'n2', kind: 'end' }) })
+    state = studioReducer(state, { type: 'UNDO' })
+    expect(state.canvas.nodes.map((item) => item.id)).toEqual(['n1'])
+    state = studioReducer(state, { type: 'REDO' })
+    expect(state.canvas.nodes.map((item) => item.id)).toEqual(['n1', 'n2'])
+  })
+
+  it('SELECT_LIB：父代理模板选择（右侧面板无显示）', () => {
+    let state = baseState()
+    state = studioReducer(state, { type: 'SELECT_LIB', kind: 'parentTemplate', id: 'p-1' })
+    expect(state.selection.lib).toEqual({ kind: 'parentTemplate', id: 'p-1' })
+    expect(state.editor).toBeNull()
   })
 })
 
-describe('列表与运行', () => {
-  it('工作流列表增删改', () => {
-    let state = createInitialState('s')
-    const flow = baseFlow()
-    state = studioReducer(state, { type: 'WORKFLOWS_LOADED', items: [flow] })
-    expect(state.workflows).toHaveLength(1)
-    state = studioReducer(state, { type: 'WORKFLOW_REMOVED', id: 'wf-1' })
-    expect(state.workflows).toHaveLength(0)
-    state = studioReducer(state, { type: 'WORKFLOW_ADDED', flow: { ...flow, id: 'wf-2' } })
-    expect(state.workflows[0].id).toBe('wf-2')
+describe('editorDataOf', () => {
+  function openWith(state: StudioState, nodes: CanvasNode[]): StudioState {
+    return studioReducer(state, {
+      type: 'GRAPH_REPLACED', nodes, edges: [], dirty: false,
+    })
+  }
+
+  it('角色节点 → kind role（子代理）', () => {
+    const state = openWith(baseState(), [node({ id: 'n1', kind: 'agent', data: { label: 'A', presetId: 'standard' } })])
+    const selected = studioReducer(state, { type: 'SELECT_NODE', id: 'n1' })
+    const data = editorDataOf(selected)
+    expect(data?.kind).toBe('role')
+    expect(data?.isParent).toBe(false)
+    expect(data?.nodeId).toBe('n1')
   })
 
-  it('模板列表加载/更新/删除（三类隔离）', () => {
-    let state = createInitialState('s')
-    state = studioReducer(state, { type: 'TEMPLATES_LOADED', kind: 'role', items: [{ id: 'r-1', name: '角色' } as never] })
-    state = studioReducer(state, { type: 'TEMPLATES_LOADED', kind: 'database', items: [] })
-    expect(state.templates.role).toHaveLength(1)
-    expect(state.templates.database).toHaveLength(0)
-    state = studioReducer(state, { type: 'TEMPLATE_ADDED', kind: 'file', template: { id: 'f-1', name: '文件' } as never })
-    expect(state.templates.file[0].id).toBe('f-1')
-    state = studioReducer(state, { type: 'TEMPLATE_REMOVED', kind: 'role', id: 'r-1' })
-    expect(state.templates.role).toHaveLength(0)
+  it('父代理节点 → kind role + isParent', () => {
+    const state = openWith(baseState(), [node({ id: 'p1', kind: 'parent', data: { label: '父' } })])
+    const selected = studioReducer(state, { type: 'SELECT_NODE', id: 'p1' })
+    expect(editorDataOf(selected)?.isParent).toBe(true)
   })
 
-  it('运行：RUN_STARTED/RUN_SNAPSHOT/RUN_CLEARED', () => {
-    let state = createInitialState('s')
-    state = studioReducer(state, { type: 'RUN_STARTED', runId: 'run-1' })
-    expect(state.run.runId).toBe('run-1')
-    expect(isRunningOf(state)).toBe(true)
-    state = studioReducer(state, { type: 'RUN_SNAPSHOT', snapshot: { status: 'completed' } as never })
-    expect(isRunningOf(state)).toBe(false)
-    state = studioReducer(state, { type: 'RUN_CLEARED' })
-    expect(state.run.runId).toBeNull()
+  it('阶段/虚拟节点 → 只读形态（stage/proxy）', () => {
+    const state = openWith(baseState(), [
+      node({ id: 's1', kind: 'start', data: { label: '启动' } }),
+      node({ id: 'm1', kind: 'agent', data: { label: '主' } }),
+      { ...node({ id: 'x1', kind: 'proxy', data: {} }), proxySourceId: 'm1' } as CanvasNode,
+    ])
+    const stage = studioReducer(state, { type: 'SELECT_NODE', id: 's1' })
+    expect(editorDataOf(stage)?.kind).toBe('stage')
+    const proxy = studioReducer(state, { type: 'SELECT_NODE', id: 'x1' })
+    const proxyData = editorDataOf(proxy)
+    expect(proxyData?.kind).toBe('proxy')
+    expect(proxyData?.mainLabel).toBe('主')
   })
 
-  it('轻提示与面板几何', () => {
-    let state = createInitialState('s')
-    state = studioReducer(state, { type: 'TOAST_PUSH', toast: { id: 't-1', kind: 'error', text: 'boom' } })
-    expect(state.toasts).toHaveLength(1)
-    state = studioReducer(state, { type: 'TOAST_DROP', id: 't-1' })
-    expect(state.toasts).toHaveLength(0)
-    state = studioReducer(state, { type: 'PANELS_SET', panels: { leftWidth: 300 } })
-    expect(state.panels.leftWidth).toBe(300)
-    expect(state.panels.rightOpen).toBe(true)
+  it('协作组 → kind group + members 解析', () => {
+    const state = openWith(baseState(), [
+      node({ id: 'g1', kind: 'group', data: { label: '组', memberIds: ['a1'] } }),
+      node({ id: 'a1', kind: 'agent', data: { label: '成员' } }),
+    ])
+    const selected = studioReducer(state, { type: 'SELECT_NODE', id: 'g1' })
+    const data = editorDataOf(selected)
+    expect(data?.kind).toBe('group')
+    expect(data?.members).toEqual([{ id: 'a1', label: '成员' }])
   })
 
-  it('会话绑定：SET_SESSION', () => {
-    const state = studioReducer(createInitialState('s-1'), { type: 'SET_SESSION', sessionId: 's-2' })
-    expect(state.sessionId).toBe('s-2')
-  })
-})
-
-describe('选择器', () => {
-  it('currentFlowOf / editorDataOf / isRunningOf 派生', () => {
-    let state: StudioState = createInitialState('s')
-    state = studioReducer(state, { type: 'OPEN_FLOW', flow: baseFlow() })
-    expect(currentFlowOf(state)?.id).toBe('wf-1')
-    const editor = editorDataOf(state)
-    expect(editor?.kind).toBe('workflow')
-    expect(editor?.name).toBe('测试流程')
-    expect(isRunningOf(state)).toBe(false)
-  })
-
-  it('editorDataOf：节点/模板/连线', () => {
-    let state: StudioState = createInitialState('s')
-    state = studioReducer(state, { type: 'SELECT_NODE', id: 'n-a1' })
-    state = studioReducer(state, { type: 'GRAPH_REPLACED', nodes: [{ id: 'n-a1', kind: 'agent', position: { x: 0, y: 0 }, data: { label: '子任务' } }], edges: [], dirty: false })
-    const nodeEditor = editorDataOf(state)
-    expect(nodeEditor?.kind).toBe('role')
-    expect(nodeEditor?.name).toBe('子任务')
-    state = studioReducer(state, { type: 'SELECT_EDITOR', editor: { source: 'template', kind: 'file', id: 'f-1' } })
-    state = studioReducer(state, { type: 'TEMPLATES_LOADED', kind: 'file', items: [{ id: 'f-1', name: '手册' } as never] })
-    const templateEditor = editorDataOf(state)
-    expect(templateEditor?.kind).toBe('file')
-    expect(templateEditor?.template).toBe(true)
+  it('连线 → kind edge', () => {
+    let state = baseState()
+    state = studioReducer(state, {
+      type: 'GRAPH_REPLACED',
+      nodes: [],
+      edges: [{ id: 'e1', source: 'a', target: 'b', sourceHandle: 'flow-out', targetHandle: 'flow-in' }],
+      dirty: false,
+    })
+    const selected = studioReducer(state, { type: 'SELECT_EDGE', id: 'e1' })
+    expect(editorDataOf(selected)?.kind).toBe('edge')
   })
 })

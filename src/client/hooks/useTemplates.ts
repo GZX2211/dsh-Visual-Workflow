@@ -27,14 +27,15 @@ function draftOf(kind: TemplateKind): AnyTemplate {
     return {
       id, kind: 'agent', name: '新角色模板', systemPrompt: '', provider: '', model: '',
       presetId: null, retryLimit: 3, reactLimit: null, inputSchema: '', outputSchema: '', createdAt: now, updatedAt: now,
+      ...({ _draft: true } as object),
     } as unknown as RoleTemplate
   }
   if (kind === 'file') {
-    return { id, kind: 'file', name: '新文件模板', fileKind: 'text', content: '', createdAt: now, updatedAt: now } as unknown as FileTemplate
+    return { id, kind: 'file', name: '新文件模板', fileKind: 'text', content: '', createdAt: now, updatedAt: now, ...({ _draft: true } as object) } as unknown as FileTemplate
   }
   return {
     id, kind: 'database', name: '新数据库模板', description: '', dbType: 'local', dbKind: 'sqlite',
-    vectorSource: 'embedding', createdAt: now, updatedAt: now,
+    vectorSource: 'embedding', createdAt: now, updatedAt: now, ...({ _draft: true } as object),
   } as unknown as DatabaseTemplate
 }
 

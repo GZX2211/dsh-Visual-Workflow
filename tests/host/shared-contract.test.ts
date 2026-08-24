@@ -201,9 +201,9 @@ const EXPECTED_ENDPOINTS: string[] = [
   // 工作流
   'listWorkflows', 'getWorkflow', 'putWorkflow', 'deleteWorkflow', 'createWorkflow',
   // 服务
-  'listServices', 'getService', 'putService', 'deleteService', 'serviceStart', 'serviceStop', 'serviceStatus',
+  'listServices', 'getService', 'putService', 'deleteService', 'serviceStart', 'serviceStop', 'serviceStatus', 'serviceDebug',
   // 模板
-  'listTemplates', 'putTemplate', 'deleteTemplate', 'deleteTemplatePreview',
+  'listTemplates', 'putTemplate', 'deleteTemplate', 'deleteTemplatePreview', 'fileUpload',
   // 预设/工具/模型
   'presets', 'tools', 'models',
   // 工具组合 / 插件 / MCP
@@ -231,10 +231,10 @@ function readProtocolEndpoints(): string[] {
 }
 
 describe('T-014 protocol.ts 端点清单（§4.6 全部端点）', () => {
-  it('端点常量定义 39 个且无重复', () => {
+  it('端点常量定义 41 个且无重复', () => {
     const eps = readProtocolEndpoints()
-    expect(eps).toHaveLength(39)
-    expect(new Set(eps).size).toBe(39) // 39 端点名全部唯一（无重复常量）
+    expect(eps).toHaveLength(41)
+    expect(new Set(eps).size).toBe(41) // 41 端点名全部唯一（无重复常量）
   })
 
   it('端点名逐字覆盖 §4.6 清单（正反向双向一致）', () => {

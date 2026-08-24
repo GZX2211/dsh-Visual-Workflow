@@ -1,0 +1,226 @@
+// src/client/components/sidebar/LeftPanel.tsx
+//
+// 左侧模板库（照搬旧项目 left-panel.js，TSX 化，按需求 §4.5.4 适配）：
+// 四 Tab：工作流 / 角色（父代理模板置顶）/ 数据（文件 + 数据库分区）/ 其他（阶段 + 协作组）；
+// 分区标题右侧 ＋ 新建空白模板；卡片支持 pointer 拖拽到画布生成节点。
+
+import type { Dict } from '../../i18n.js'
+import type { LibTab } from '../../studio/studio-state.js'
+import type { RoleTemplate, FileTemplate, DatabaseTemplate } from '../../../host/shared/types.js'
+
+export interface LibSelectionInfo {
+  kind: 'workflow' | 'role' | 'file' | 'database' | 'parentTemplate' | 'stage' | 'groupTemplate' | 'service'
+  id: string
+}
+
+export interface DragPayload {
+  label: string
+  onClick(): void
+  onDrop(position?: { x: number; y: number }): void
+  /** 拖拽落点为协作组卡片时：生成节点并直接入组（角色模板）。 */
+  onDropIntoGroup?(groupId: string, position?: { x: number; y: number }): void
+}
+
+export interface LeftPanelProps {
+  copy: Dict
+  libTab: LibTab
+  onSetTab(tab: LibTab): void
+  open: boolean
+  width: number
+  mode: 'mode1' | 'mode2'
+  workflows: Array<{ id: string; name: string; description?: string; nodes?: unknown[] }>
+  parentTemplate: RoleTemplate | null
+  roleTemplates: RoleTemplate[]
+  fileTemplates: FileTemplate[]
+  databaseTemplates: DatabaseTemplate[]
+  stageKinds: Array<{ kind: string; label: string }>
+  libSelection: LibSelectionInfo | null
+  modeName(presetId: string | null | undefined): string
+  onSelectWorkflow(id: string): void
+  onSelectLib(kind: LibSelectionInfo['kind'], id: string): void
+  onPlaceTemplate(kind: 'role' | 'file' | 'database', id: string, position: { x: number; y: number }): void
+  /** 角色模板拖入协作组：生成节点并直接入组。 */
+  onPlaceTemplateIntoGroup(kind: 'role', id: string, groupId: string, position: { x: number; y: number }): void
+  onPlaceStage(kind: string, position: { x: number; y: number }): void
+  onPlaceGroup(position: { x: number; y: number }): void
+  onPlaceParent(id: string, position: { x: number; y: number }): void
+  onCreateNew(tab: LibTab, section?: 'file' | 'database'): void
+  onBeginDrag(event: React.PointerEvent, payload: DragPayload): void
+}
+
+function truncate(value: unknown, limit: number): string {
+  const text = String(value ?? '').trim()
+  return text.length > limit ? `${text.slice(0, limit)}…` : (text || '—')
+}
+
+export function LeftPanel(props: LeftPanelProps) {
+  const {
+    copy: t, libTab, onSetTab, open, width, mode, workflows, parentTemplate,
+    roleTemplates, fileTemplates, databaseTemplates, stageKinds, libSelection,
+    modeName, onSelectWorkflow, onSelectLib, onPlaceTemplate, onPlaceTemplateIntoGroup, onPlaceStage,
+    onPlaceGroup, onPlaceParent, onCreateNew, onBeginDrag,
+  } = props
+
+  const tabDefs: Array<{ key: LibTab; label: string }> = [
+    { key: 'workflow', label: t.libTab.workflow },
+    { key: 'role', label: t.libTab.role },
+    { key: 'data', label: t.libTab.data },
+    { key: 'other', label: t.libTab.other },
+  ]
+
+  const isActive = (kind: string, id: string): boolean => libSelection?.kind === kind && libSelection?.id === id
+
+  function itemCard(key: string, kind: string, id: string, icon: string, name: string, sub: string, payload: DragPayload, pinned = false) {
+    return (
+      <button
+        key={key}
+        type="button"
+        className={`wf-docitem${pinned ? ' is-pinned' : ''}${isActive(kind, id) ? ' is-active' : ''}`}
+        onPointerDown={(event) => onBeginDrag(event, payload)}
+      >
+        <span className="wf-docitem__icon">{icon}</span>
+        <span>
+          <span className="wf-docitem__label">{name}</span>
+          <span className="wf-docitem__path">{sub}</span>
+        </span>
+      </button>
+    )
+  }
+
+  const sections: Array<{ key: string; title: string; plus: boolean; plusKind?: 'file' | 'database'; cards: React.ReactNode[] }> = []
+
+  if (libTab === 'workflow') {
+    sections.push({
+      key: 'list',
+      title: mode === 'mode2' ? t.services : t.workflows,
+      plus: true,
+      cards: (workflows ?? []).map((item) => itemCard(
+        item.id, 'workflow', item.id, '▦', String(item.name ?? ''),
+        item.description ? truncate(item.description, 60) : `${item.nodes?.length ?? 0} ${t.nodes ?? ''}`,
+        {
+          label: String(item.name ?? ''),
+          onClick: () => onSelectWorkflow(item.id),
+          onDrop: () => onSelectWorkflow(item.id),
+        },
+      )),
+    })
+  } else if (libTab === 'role') {
+    if (parentTemplate) {
+      sections.push({
+        key: 'parent',
+        title: t.parentAgent,
+        plus: false,
+        cards: [
+          itemCard(
+            parentTemplate.id, 'parentTemplate', parentTemplate.id, '父', String(parentTemplate.name ?? t.parentAgent),
+            String(t.parentAgentHint ?? ''), {
+              label: String(parentTemplate.name ?? t.parentAgent),
+              onClick: () => onSelectLib('parentTemplate', parentTemplate.id),
+              onDrop: (position) => onPlaceParent(parentTemplate.id, position ?? { x: 120, y: 80 }),
+            }, true,
+          ),
+        ],
+      })
+    }
+    sections.push({
+      key: 'roles',
+      title: t.roleTemplates,
+      plus: true,
+      cards: (roleTemplates ?? []).map((item) => itemCard(
+        item.id, 'role', item.id, '◆', String(item.name ?? ''), modeName(item.presetId ?? null), {
+          label: String(item.name ?? ''),
+          onClick: () => onSelectLib('role', item.id),
+          onDrop: (position) => onPlaceTemplate('role', item.id, position ?? { x: 120, y: 80 }),
+          onDropIntoGroup: (groupId, position) => onPlaceTemplateIntoGroup('role', item.id, groupId, position ?? { x: 120, y: 80 }),
+        },
+      )),
+    })
+  } else if (libTab === 'data') {
+    sections.push({
+      key: 'files',
+      title: t.files,
+      plus: true,
+      plusKind: 'file',
+      cards: (fileTemplates ?? []).map((item) => itemCard(
+        item.id, 'file', item.id, '▤', String(item.name ?? ''),
+        item.fileKind === 'file' ? truncate(String((item as unknown as { fileName?: string }).fileName ?? ''), 60) : String(t.fileKindLabel?.text ?? ''),
+        {
+          label: String(item.name ?? ''),
+          onClick: () => onSelectLib('file', item.id),
+          onDrop: (position) => onPlaceTemplate('file', item.id, position ?? { x: 120, y: 80 }),
+        },
+      )),
+    })
+    sections.push({
+      key: 'databases',
+      title: t.databases,
+      plus: true,
+      plusKind: 'database',
+      cards: (databaseTemplates ?? []).map((item) => itemCard(
+        item.id, 'database', item.id, '▦', String(item.name ?? ''), truncate(String(item.description ?? ''), 60), {
+          label: String(item.name ?? ''),
+          onClick: () => onSelectLib('database', item.id),
+          onDrop: (position) => onPlaceTemplate('database', item.id, position ?? { x: 120, y: 80 }),
+        },
+      )),
+    })
+  } else {
+    sections.push({
+      key: 'stages',
+      title: t.stages,
+      plus: false,
+      cards: (stageKinds ?? []).map((card) => itemCard(
+        card.kind, 'stage', card.kind, '⬢', String(card.label), String(t.stagePinHint ?? ''), {
+          label: String(card.label),
+          onClick: () => onSelectLib('stage', card.kind),
+          onDrop: (position) => onPlaceStage(card.kind, position ?? { x: 120, y: 80 }),
+        },
+      )),
+    })
+    sections.push({
+      key: 'groups',
+      title: t.groupTemplates,
+      plus: false,
+      cards: [
+        itemCard('group-template', 'groupTemplate', 'group', '☰', String(t.nodeKinds?.group ?? '协作组'), String(t.groupHint ?? ''), {
+          label: String(t.nodeKinds?.group ?? '协作组'),
+          onClick: () => onSelectLib('groupTemplate', 'group'),
+          onDrop: (position) => onPlaceGroup(position ?? { x: 120, y: 80 }),
+        }),
+      ],
+    })
+  }
+
+  return (
+    <aside className={`wf-docrail${open ? '' : ' is-collapsed'}`} style={{ width: open ? width : undefined }}>
+      <div className="wf-lib-tabs" role="tablist">
+        {tabDefs.map((def) => (
+          <button
+            key={def.key}
+            type="button"
+            role="tab"
+            className={`wf-lib-tab${libTab === def.key ? ' is-active' : ''}`}
+            onClick={() => onSetTab(def.key)}
+          >
+            <span>{def.label}</span>
+          </button>
+        ))}
+      </div>
+      <div className="wf-docrail__list">
+        {sections.map((section) => (
+          <div key={section.key}>
+            <div className="wf-docgroup">
+              <span>{section.title}</span>
+              {section.plus
+                ? <button type="button" className="wf-docgroup__add" title={t.newTemplate} onClick={() => onCreateNew(libTab, section.plusKind)}>＋</button>
+                : null}
+            </div>
+            {section.cards.length === 0
+              ? <div className="wf-hint" style={{ padding: '2px 8px' }}>{t.libEmptyTemplates}</div>
+              : section.cards}
+          </div>
+        ))}
+      </div>
+    </aside>
+  )
+}

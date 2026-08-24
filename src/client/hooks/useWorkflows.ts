@@ -48,6 +48,11 @@ export function useWorkflows(
   sessionId: string,
 ): WorkflowsFace {
   const loadWorkflows = useCallback(async () => {
+    // 会话未激活时跳过（后端 requires sessionId 400）
+    if (!sessionId) {
+      dispatch({ type: 'WORKFLOWS_LOADED', items: [] })
+      return
+    }
     const items = await remote.call(EP.EP_LIST_WORKFLOWS, { sessionId })
     dispatch({ type: 'WORKFLOWS_LOADED', items: Array.isArray(items) ? (items as WorkflowDocument[]) : [] })
   }, [dispatch, remote, sessionId])

@@ -178,6 +178,8 @@ export interface FileTemplate {
   content?: string
   /** 受管文件路径（fileKind='file'）。 */
   managedPath?: string
+  /** 源文件名（fileKind='file' 左侧栏展示用，与 FileNode.data.fileName 对齐）。 */
+  fileName?: string
 }
 
 /**

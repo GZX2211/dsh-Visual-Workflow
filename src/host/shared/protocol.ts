@@ -42,6 +42,13 @@ export const EP_SERVICE_START = 'serviceStart'
 export const EP_SERVICE_STOP = 'serviceStop'
 /** 查询服务状态。 */
 export const EP_SERVICE_STATUS = 'serviceStatus'
+/**
+ * 服务调试流式端点名（服务控制台调试框：代理运行中服务的 /v1/chat/completions，
+ * SSE 逐块转发回浏览器打字机渲染）。
+ * 为什么走 Host 代理而非浏览器直连：服务进程无 CORS 头，同源代理避免跨域失败；
+ * apiKey 鉴权由 Host 侧配置持有，不落浏览器。
+ */
+export const EP_SERVICE_DEBUG = 'serviceDebug'
 
 /** 模板列表端点名（角色/文件/数据库三类共用）。 */
 export const EP_LIST_TEMPLATES = 'listTemplates'
@@ -51,6 +58,8 @@ export const EP_PUT_TEMPLATE = 'putTemplate'
 export const EP_DELETE_TEMPLATE = 'deleteTemplate'
 /** 删除模板预览（角色/文件/数据库）。 */
 export const EP_DELETE_TEMPLATE_PREVIEW = 'deleteTemplatePreview'
+/** 受管文件上传端点名（非文本文件：base64 内容 → data/files/ 受管拷贝，§4.2.4.1 规则 2）。 */
+export const EP_FILE_UPLOAD = 'fileUpload'
 
 /** 官方预设列表端点名。 */
 export const EP_PRESETS = 'presets'

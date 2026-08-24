@@ -11,8 +11,10 @@
 import type { WorkflowDocument, GraphNode, Line } from '../../host/shared/graph-model.js'
 import type { ServiceState, RoleTemplate, FileTemplate, DatabaseTemplate, ToolCombo, RunSnapshot } from '../../host/shared/types.js'
 
-/** 左侧栏 Tab。 */
-export type LibTab = 'workflow' | 'role' | 'file' | 'database'
+/** 左侧栏 Tab（需求 §4.5.4：工作流 / 角色 / 数据（文件+数据库）/ 其他（阶段+协作组））。 */
+export type LibTab = 'workflow' | 'role' | 'data' | 'other'
+/** 左侧库选中种类（模板 kind + 固定卡片）。 */
+export type LibSelKind = 'workflow' | 'service' | 'role' | 'file' | 'database' | 'parentTemplate' | 'stage' | 'groupTemplate'
 /** 模板种类（与后端 listTemplates 契约一致）。 */
 export type TemplateKind = 'role' | 'file' | 'database'
 
@@ -58,6 +60,14 @@ export interface ConfirmState {
   proceed?: () => void
   /** 确认回调（confirmText）。 */
   onConfirm?: () => void
+  /** 确认按钮文案（confirmText 定制；缺省"删除"）。 */
+  confirmLabel?: string
+  /** 导入冲突补充：导入类型（workflow/agent）。 */
+  kind2?: string
+  /** 导入冲突补充：原始 JSON 文本。 */
+  json?: string
+  /** 导入冲突补充：已存在名称。 */
+  name?: string
 }
 
 /** 轻提示。 */
@@ -93,7 +103,7 @@ export interface StudioState {
   currentId: string | null
   currentKind: 'workflow' | 'service' | null
   canvas: { nodes: CanvasNode[]; edges: CanvasEdge[] }
-  selection: { nodeId: string | null; edgeId: string | null; lib: { kind: LibTab | 'service'; id: string } | null }
+  selection: { nodeId: string | null; edgeId: string | null; lib: { kind: LibSelKind; id: string } | null }
   editor: EditorRef
   dirty: boolean
   run: { runId: string | null; snapshot: RunSnapshot | null }
@@ -186,9 +196,12 @@ export type StudioAction =
   | { type: 'EDGE_REMOVED'; id: string }
   | { type: 'SELECT_NODE'; id: string }
   | { type: 'SELECT_EDGE'; id: string }
-  | { type: 'SELECT_LIB'; kind: LibTab; id: string }
+  | { type: 'SELECT_LIB'; kind: LibSelKind; id: string }
   | { type: 'SELECT_EDITOR'; editor: EditorRef }
   | { type: 'CLEAR_SELECTION' }
+  | { type: 'NODE_DATA_PATCH'; id: string; patch: Record<string, unknown> }
+  | { type: 'EDGE_PATCH'; id: string; patch: Record<string, unknown> }
+  | { type: 'DOC_PATCH'; patch: { name?: string; description?: string } }
   | { type: 'SET_DIRTY'; dirty: boolean }
   | { type: 'RUN_STARTED'; runId: string }
   | { type: 'RUN_SNAPSHOT'; snapshot: RunSnapshot }
@@ -362,6 +375,42 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       return { ...state, editor: action.editor }
     case 'CLEAR_SELECTION':
       return { ...state, selection: { nodeId: null, edgeId: null, lib: null }, editor: null }
+    case 'NODE_DATA_PATCH':
+      return {
+        ...state,
+        canvas: {
+          ...state.canvas,
+          nodes: state.canvas.nodes.map((node) => (node.id === action.id ? { ...node, data: { ...node.data, ...action.patch } } : node)),
+        },
+        dirty: true,
+      }
+    case 'EDGE_PATCH':
+      return {
+        ...state,
+        canvas: {
+          ...state.canvas,
+          edges: state.canvas.edges.map((edge) => (edge.id === action.id ? { ...edge, ...action.patch } : edge)),
+        },
+        dirty: true,
+      }
+    case 'DOC_PATCH':
+      return state.currentKind === 'workflow'
+        ? {
+            ...state,
+            workflows: state.workflows.map((flow) => (flow.id === state.currentId
+              ? { ...flow, ...(action.patch.name !== undefined ? { name: action.patch.name } : {}), ...(action.patch.description !== undefined ? { description: action.patch.description } : {}) }
+              : flow)),
+            dirty: true,
+          }
+        : state.currentKind === 'service'
+          ? {
+              ...state,
+              services: state.services.map((service) => (service.id === state.currentId
+                ? { ...service, ...(action.patch.name !== undefined ? { name: action.patch.name } : {}), ...(action.patch.description !== undefined ? { description: action.patch.description } : {}) }
+                : service)),
+              dirty: true,
+            }
+          : state
     case 'SET_DIRTY':
       return { ...state, dirty: action.dirty }
     case 'RUN_STARTED':
@@ -448,14 +497,25 @@ export function isRunningOf(state: StudioState): boolean {
   return state.run.snapshot?.status === 'running' || (state.run.runId !== null && state.run.snapshot === null)
 }
 
-/** 编辑器数据（右侧面板渲染源）。 */
-export function editorDataOf(state: StudioState): {
-  kind: 'workflow' | 'service' | TemplateKind | 'edge'
+/** 编辑器数据（右侧面板渲染源；Inspector 按 kind 分发表单）。 */
+export interface EditorData {
+  kind: 'workflow' | 'service' | 'role' | 'file' | 'database' | 'group' | 'stage' | 'proxy' | 'edge'
   data: Record<string, unknown>
   name: string
-  templateId?: string
   template?: boolean
-} | null {
+  templateId?: string
+  /** 角色模板/节点是否为父代理（模式仅 preset + 高级项裁剪，§4.2.3.1）。 */
+  isParent?: boolean
+  /** 画布节点 id（node 来源编辑器）。 */
+  nodeId?: string
+  /** 虚拟节点主节点名称。 */
+  mainLabel?: string
+  /** 协作组成员（画布节点解析）。 */
+  members?: Array<{ id: string; label: string }>
+}
+
+/** 编辑器数据（右侧面板渲染源）。 */
+export function editorDataOf(state: StudioState): EditorData | null {
   const editor = state.editor
   if (!editor) return null
   if (editor.source === 'workflow') {
@@ -472,15 +532,47 @@ export function editorDataOf(state: StudioState): {
   }
   if (editor.source === 'template') {
     const template = state.templates[editor.kind].find((item) => item.id === editor.id)
-    return template
-      ? { kind: editor.kind, data: template as unknown as Record<string, unknown>, name: String((template as { name?: unknown }).name ?? ''), templateId: template.id, template: true }
-      : null
+    if (!template) return null
+    const kind0 = editor.kind
+    return {
+      kind: kind0,
+      data: template as unknown as Record<string, unknown>,
+      name: String((template as { name?: unknown }).name ?? ''),
+      templateId: template.id,
+      template: true,
+      isParent: kind0 === 'role' && (template as { kind?: unknown }).kind === 'parent',
+    }
   }
   if (editor.source === 'node') {
     const node = state.canvas.nodes.find((item) => item.id === editor.id)
     if (!node) return null
-    const kindOf = node.kind === 'parent' || node.kind === 'agent' ? 'role' : node.kind === 'file' ? 'file' : node.kind === 'database' ? 'database' : 'role'
-    return { kind: kindOf, data: node.data, name: String(node.data.label ?? ''), template: false }
+    const data = node.data
+    if (node.kind === 'parent' || node.kind === 'agent') {
+      return { kind: 'role', data, name: String(data.label ?? ''), nodeId: node.id, isParent: node.kind === 'parent' }
+    }
+    if (node.kind === 'file') return { kind: 'file', data, name: String(data.label ?? ''), nodeId: node.id }
+    if (node.kind === 'database') return { kind: 'database', data, name: String(data.label ?? ''), nodeId: node.id }
+    if (node.kind === 'group') {
+      const memberIds = (data.memberIds as string[] | undefined) ?? []
+      const members = memberIds.map((memberId) => {
+        const member = state.canvas.nodes.find((item) => item.id === memberId)
+        return { id: memberId, label: String((member?.data as { label?: unknown } | undefined)?.label ?? memberId) }
+      })
+      return { kind: 'group', data, name: String(data.label ?? ''), nodeId: node.id, members }
+    }
+    if (node.kind === 'start' || node.kind === 'end' || node.kind === 'pause') return { kind: 'stage', data, name: String(data.label ?? ''), nodeId: node.id }
+    if (node.kind === 'proxy') {
+      const sourceId = String((node as { proxySourceId?: unknown }).proxySourceId ?? '')
+      const main = state.canvas.nodes.find((item) => item.id === sourceId)
+      return {
+        kind: 'proxy',
+        data,
+        name: '',
+        nodeId: node.id,
+        mainLabel: String((main?.data as { label?: unknown } | undefined)?.label ?? ''),
+      }
+    }
+    return { kind: 'role', data, name: String(data.label ?? ''), nodeId: node.id }
   }
   if (editor.source === 'edge') {
     const edge = state.canvas.edges.find((item) => item.id === editor.id)

@@ -215,7 +215,10 @@ function clientConfig(): UserConfig {
       },
       banner: `window.__ModuleLoader__.load({ id: ${JSON.stringify(BUNDLE_ID)}, factory: (require) => {`,
       footer: 'return module.exports; } });',
-      intro: 'var module = { exports: {} }; var exports = module.exports;',
+      // ESM→CJS interop 标记（官方 tsdown.client.ts 产物同款）：exports 标注
+      // Symbol.toStringTag='Module'，浏览器 loader 装配 bundle 时按 ESM 命名空间
+      // 处理（unwrapExports/依赖注入路径依赖该标记，缺省时 apply 装配契约失效）。
+      intro: 'var module = { exports: {} }; var exports = module.exports; Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });',
     },
   }
 }

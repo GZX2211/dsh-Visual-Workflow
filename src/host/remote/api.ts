@@ -33,6 +33,8 @@ import {
   importAgentTemplate,
 } from './transfer.js'
 import { listMcpServers, upsertMcpServer, removeMcpServer, toggleMcpServer } from './mcp-registry.js'
+import { copyIntoManagedFile } from './download.js'
+import { openServiceDebug, pumpServiceDebug, ServiceDebugError, type SseSink } from './service-debug.js'
 
 /** 请求体上限（64MB——文件模板 base64 上传需要大体积）。 */
 const BODY_LIMIT = 64 * 1024 * 1024
@@ -90,6 +92,8 @@ export interface ApiHost {
     stop(serviceId: string): Promise<unknown>
     status(serviceId: string): Promise<unknown>
   }
+  /** 服务 apiKey（调试流式代理携带鉴权头用；null 表示未启用，密钥不落浏览器）。 */
+  apiKey?: string | null
 }
 
 /** webServer 服务最小结构（官方 register 契约）。 */
@@ -278,8 +282,7 @@ export class VisualWorkflowApi {
   }
 
   /** 删除预览：模板与画布节点深拷贝解耦，删除模板不影响任何已有节点。 */
-  async deleteTemplatePreview(args: { kind?: unknown; id?: unknown }): Promise<unknown> {
-    const kind = String(args?.kind ?? '')
+  async deleteTemplatePreview(args: { kind?: unknown; id?: unknown }): Promise<unknown> {    const kind = String(args?.kind ?? '')
     if (kind !== 'role' && kind !== 'file' && kind !== 'database') {
       throw httpError(400, 'requires kind: role|file|database')
     }
@@ -297,6 +300,14 @@ export class VisualWorkflowApi {
     const deleted = await this.host.store.deleteTemplate(kind as 'role' | 'file' | 'database', id)
     if (!deleted) throw httpError(404, `模板不存在：${id}`)
     return { deleted: true }
+  }
+
+  /** 受管文件上传：base64 内容 → data/files/<safeName>（原子发布；返回 managedPath）。 */
+  async fileUpload(args: { name?: unknown; base64?: unknown }): Promise<unknown> {
+    const name = String(args?.name ?? '').trim()
+    const base64 = String(args?.base64 ?? '')
+    if (!name || !base64) throw httpError(400, 'requires name and base64')
+    return copyIntoManagedFile(this.host.dataDir, { name, base64 })
   }
 
   // ---------- 生态枚举（presets / tools / models） ----------
@@ -361,8 +372,17 @@ export class VisualWorkflowApi {
         if (typeof llm.listModels !== 'function') continue
         const models = (await llm.listModels(String(name))) ?? []
         for (const model of models ?? []) {
-          const id = typeof model === 'string' ? model : (model as { id?: unknown; name?: unknown })?.id ?? (model as { name?: unknown })?.name
-          if (id) out.push({ provider: String(name), model: String(id) })
+          const info = typeof model === 'string' ? null : model as { id?: unknown; name?: unknown; efforts?: Array<{ id?: unknown; name?: unknown }> }
+          const id = typeof model === 'string' ? model : info?.id ?? info?.name
+          if (id) {
+            // 思考强度列表：适配器公布的 reasoning efforts（V-02）；未公开时 undefined（client 回退内置档位）
+            const efforts = Array.isArray(info?.efforts)
+              ? info.efforts
+                  .map((effort) => ({ id: String(effort.id ?? ''), name: String(effort.name ?? effort.id ?? '') }))
+                  .filter((effort) => effort.id)
+              : undefined
+            out.push({ provider: String(name), model: String(id), ...(efforts ? { efforts } : {}) })
+          }
         }
       } catch {
         // 单 provider 失败跳过
@@ -737,13 +757,18 @@ export function registerRoutes(
           }
           args = (parsed as { args?: Record<string, unknown> })?.args ?? {}
         }
+        // 流式端点（serviceDebug）：SSE 透传，不走 JSON 分发
+        if (endpoint === EP.EP_SERVICE_DEBUG) {
+          await streamServiceDebugEndpoint(host, args, res as never, httpReq as never)
+          return
+        }
         const value = await api.handle(endpoint, args)
         sendJson(res as never, 200, { ok: true, value })
       } catch (error) {
         const code = (error as { code?: string })?.code ?? ''
-        const status = error instanceof HttpError
+        const status = error instanceof HttpError || error instanceof ServiceDebugError
           ? error.status
-          : code === 'FLOW_REVISION_CONFLICT' || code === 'WF_LOCKED' || code === 'WF_SERVICE_RUNNING'
+          : code === 'FLOW_REVISION_CONFLICT' || code === 'WF_LOCKED' || code === 'WF_SERVICE_RUNNING' || code === 'WF_SERVICE_NOT_RUNNING'
             ? 409
             : code === 'WF_SERVICE_NOT_FOUND'
               ? 404
@@ -756,4 +781,86 @@ export function registerRoutes(
       }
     },
   })
+}
+
+/**
+ * serviceDebug 流式响应（不走 JSON 分发）：校验参数 → 查运行状态 → 代理 SSE。
+ * 已写头后的异常经 SSE error 行收尾（浏览器端按流解析）；未写头异常向上抛由
+ * 路由层映射 HTTP 状态。为什么用 Host 代理：服务进程无 CORS 头 + apiKey 密钥
+ * 不落浏览器（见 service-debug.ts 头注释）。
+ */
+async function streamServiceDebugEndpoint(
+  host: ApiHost,
+  args: Record<string, unknown>,
+  res: {
+    writeHead(status: number, headers: Record<string, string>): unknown
+    write(chunk: string): unknown
+    end(body?: string): unknown
+  },
+  req: { on?(event: string, listener: () => void): unknown },
+): Promise<void> {
+  const serviceId = String(args?.serviceId ?? '')
+  const sessionId = String(args?.sessionId ?? '')
+  const prompt = String(args?.prompt ?? '')
+  if (!serviceId || !sessionId || !prompt.trim()) {
+    throw httpError(400, 'requires serviceId, sessionId and prompt')
+  }
+  const manager = host.serviceManager
+  if (!manager) throw httpError(501, 'service manager unavailable')
+  const status = (await manager.status(serviceId)) as { status?: string; port?: number } | null
+  if (status?.status !== 'running' || !status.port) {
+    throw httpError(409, '服务未运行，请先启动服务', 'WF_SERVICE_NOT_RUNNING')
+  }
+  const controller = new AbortController()
+  // 浏览器断连时中止转发（避免残留请求占用服务并发槽）
+  if (typeof req.on === 'function') {
+    req.on('close', () => controller.abort())
+  }
+  let headSent = false
+  try {
+    // 先打开上游流并校验状态（401/400 等错误在写头前以 JSON 透传），再写 SSE 头
+    const body = await openServiceDebug(
+      { port: status.port, apiKey: host.apiKey ?? null, userId: `debug-${sessionId}` },
+      prompt,
+      fetch,
+      controller.signal,
+    )
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Accel-Buffering': 'no',
+    })
+    headSent = true
+    const sink: SseSink = {
+      write: (chunk) => {
+        try {
+          res.write(chunk)
+        } catch {
+          // 浏览器已断开：中止上游请求，交由收尾
+          controller.abort()
+        }
+      },
+      end: () => {
+        try {
+          res.end()
+        } catch {
+          // 已断开：忽略
+        }
+      },
+    }
+    await pumpServiceDebug(body, sink, controller.signal)
+  } catch (error) {
+    if ((error as Error)?.name === 'AbortError') return
+    if (headSent) {
+      const message = error instanceof Error ? error.message : String(error)
+      try {
+        res.write(`data: ${JSON.stringify({ error: { message } })}\n\n`)
+      } catch {
+        // 已断开：忽略
+      }
+      res.end()
+      return
+    }
+    throw error
+  }
 }

@@ -1,29 +1,37 @@
 // src/client/entry.ts
 //
-// Client 半区插件入口：
+// Client 半区插件入口（照搬旧项目 entry.js，按架构文档 §10 改版）：
 //   1. conversation.view slot 注册（对话区视图环，order 20）；
-//   2. 主界面右下角圆形 FAB + 浮窗工作台（常驻 body，独立于视图环激活态）；
-//   3. 样式注入（style[data-plugin]）+ i18n 注册（官方 locale 服务命名空间）。
+//   2. 主界面右下角圆形 FAB + 浮窗工作台（body 常驻，独立于视图环激活态）；
+//   3. 样式注入（style[data-plugin]）+ i18n 注册（官方 locale 服务命名空间 visualWorkflow）。
 // 卸载：样式移除、浮窗 root 卸载、slot disposer 随 fiber 注销（ctx.effect）。
 
 import React from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { Studio } from './studio/Studio.js'
 import { FloatingWindow } from './studio/floating-window.js'
-import { zh, en, text, detectLanguage } from './i18n.js'
+import { zh, en, text, detectLanguage, type Dict } from './i18n.js'
 import { styles } from './styles.js'
 import './entry.css'
 
 /** i18n 命名空间（注册进官方 locale 服务）。 */
 export const I18N_NS = 'visualWorkflow'
 
-/** 会话 id 解析：经 sessions 服务读当前会话（守卫；无会话返回空串）。 */
+/** 会话 id 解析：经 sessions 服务读当前选中会话（守卫；无会话返回空串）。
+ *  官方 v0.1.1 读法：sessions.list 为 ObservableSnapshot（getSnapshot().current）；
+ *  兼容旧运行时的 list.get()。 */
 function currentSessionOf(ctx: { get?(name: string): unknown }): string {
   const sessions = ctx.get?.('sessions') as
-    | { list?: { get?(): { current?: unknown } } }
+    | {
+        list?: {
+          getSnapshot?(): { current?: unknown }
+          get?(): { current?: unknown }
+        }
+      }
     | null
     | undefined
-  const current = sessions?.list?.get?.()?.current
+  const snapshot = sessions?.list?.getSnapshot?.() ?? sessions?.list?.get?.()
+  const current = snapshot?.current
   return typeof current === 'string' ? current : ''
 }
 
@@ -72,19 +80,24 @@ export function apply(ctx: {
     container = document.createElement('div')
     container.id = 'visual-workflow-float-host'
     document.body.append(container)
-    const language = detectLanguage(ctx.get?.('locale'))
     const render = (sessionId: string): void => {
-      const t = text(language)
+      const t = text(detectLanguage(ctx.get?.('locale')))
       root ??= createRoot(container!)
       root.render(
         React.createElement(FloatingWindow, {
           t,
-          children: React.createElement(Studio, { t, sessionId }),
+          children: ({ close, drag }) => React.createElement(Studio, {
+            t: t as Dict,
+            sessionId,
+            onClose: close,
+            // 单一标题栏：工作台标题顶栏兼任窗口标题栏（可拖动）
+            onTitlebarDrag: drag,
+          }),
         }),
       )
     }
     render(currentSessionOf(ctx))
-    // 会话变化时跟随（无会话下拉：绑定当前会话）
+    // 会话变化时跟随（无会话下拉：绑定当前会话，需求 §4.5.7）
     const sessions = ctx.get?.('sessions') as
       | { list?: { subscribe?(fn: () => void): () => void; get?(): unknown } }
       | null
@@ -105,18 +118,20 @@ export function apply(ctx: {
   }, 'visual-workflow: floating window')
 
   // conversation.view slot（对话区视图环：order 20 工作流）
+  // 注意：slots.register 必须「方法链」调用（this=服务代理，cordis 借此把
+  // this.ctx 绑定到调用者 fiber）；先取出再调用会丢 this，内部 this.ctx.effect 崩。
   const slots = ctx.slots as
     | {
         inject?(name: string, factory: () => unknown): unknown
+        register?(options: Record<string, unknown>, view: unknown): unknown
       }
     | null
     | undefined
   if (slots?.inject) {
     ctx.effect?.(() => {
-      const register = (slots as { register?(options: Record<string, unknown>, view: unknown): unknown }).register
-      if (typeof register !== 'function') return undefined
+      if (typeof slots.register !== 'function') return undefined
       const language = detectLanguage(ctx.get?.('locale'))
-      return register({
+      return slots.register({
         name: 'conversation.view',
         id: 'visual-workflow',
         order: 20,

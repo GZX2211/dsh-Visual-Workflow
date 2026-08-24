@@ -30,10 +30,31 @@ function groupsOf(flow: WorkflowDocument): GroupTemplate[] {
     }))
 }
 
-/** 导出工作流为自包含 bundle（格式化 JSON 字符串）。 */
+/** 导出工作流/服务为自包含 bundle（格式化 JSON 字符串；模式二走 service 字段）。 */
 export async function exportWorkflowBundle(store: FlowStore, sessionId: string, flowId: string): Promise<string> {
   const flow = await store.getWorkflow(sessionId, flowId)
-  if (!flow) throw httpError(404, `工作流不存在：${flowId}`)
+  if (!flow) {
+    // 模式二：服务文档（同一入口，按 id 回退服务表）
+    const service = await store.getService(sessionId, flowId)
+    if (!service) throw httpError(404, `工作流/服务不存在：${flowId}`)
+    const combos = await store.listToolCombos().catch(() => [])
+    const bundle: BundleV2 = {
+      format: 'dsh-vw-bundle',
+      version: 2,
+      mode: 'mode2',
+      service: {
+        name: service.name ?? service.id,
+        description: service.description ?? '',
+        nodes: safeClone(service.nodes ?? []),
+        lines: safeClone(service.lines ?? []),
+      },
+      embedded: {
+        groups: groupsOf(service as unknown as WorkflowDocument),
+        combos: safeClone(combos),
+      },
+    }
+    return JSON.stringify(bundle, null, 2)
+  }
   const combos = await store.listToolCombos().catch(() => [])
   const bundle: BundleV2 = {
     format: 'dsh-vw-bundle',
@@ -54,7 +75,7 @@ export async function exportWorkflowBundle(store: FlowStore, sessionId: string, 
 }
 
 /**
- * 导入工作流 bundle。
+ * 导入工作流/服务 bundle（模式按 bundle.mode 落到 workflows/ 或 services/）。
  * @param conflictMode rename | overwrite；缺省且重名时返回 { conflict }。
  */
 export async function importWorkflowBundle(
@@ -69,21 +90,30 @@ export async function importWorkflowBundle(
   } catch {
     throw httpError(400, '无效的 JSON 文件')
   }
-  if (bundle?.format !== 'dsh-vw-bundle' || !bundle.workflow?.name) {
+  if (bundle?.format !== 'dsh-vw-bundle') {
     throw httpError(422, '不是有效的 Visual Workflow 工作流导出文件')
   }
-  const existing = (await store.listWorkflows(sessionId)).find((flow) => flow.name === bundle.workflow?.name)
+  const mode = bundle.mode === 'mode2' ? 'mode2' : 'mode1'
+  const payload = mode === 'mode2' ? bundle.service : bundle.workflow
+  if (!payload?.name) {
+    throw httpError(422, mode === 'mode2' ? '服务导出文件缺少服务信息' : '工作流导出文件缺少工作流信息')
+  }
+  const existing = mode === 'mode2'
+    ? (await store.listServices(sessionId)).find((item) => item.name === payload.name)
+    : (await store.listWorkflows(sessionId)).find((flow) => flow.name === payload.name)
   if (existing && options.conflictMode !== 'rename' && options.conflictMode !== 'overwrite') {
     return { conflict: true, existingName: existing.name, existingId: existing.id }
   }
-  const mode = bundle.mode === 'mode2' ? 'mode2' : 'mode1'
-  let name = bundle.workflow.name
+  let name = payload.name
   if (existing && options.conflictMode === 'rename') {
-    name = uniqueName(name, (await store.listWorkflows(sessionId)).map((flow) => flow.name))
+    const names = mode === 'mode2'
+      ? (await store.listServices(sessionId)).map((item) => item.name)
+      : (await store.listWorkflows(sessionId)).map((flow) => flow.name)
+    name = uniqueName(name, names)
   }
   // overwrite 的原子性：新条目落库成功后再删除旧条目
   const overwriteTargetId = existing && options.conflictMode === 'overwrite' ? existing.id : undefined
-  const flowId = overwriteTargetId ?? `wf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  const newId = overwriteTargetId ?? `wf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
   // 组合并入：重名复用已有，否则创建（id 冲突换新 id）
   const combos = bundle.embedded?.combos ?? []
@@ -101,15 +131,36 @@ export async function importWorkflowBundle(
     await store.saveToolCombo(final)
   }
 
+  if (mode === 'mode2') {
+    const now = new Date().toISOString()
+    const service = {
+      id: newId,
+      sessionId,
+      name,
+      description: String(payload.description ?? ''),
+      revision: 0,
+      nodes: safeClone(payload.nodes ?? []),
+      lines: safeClone(payload.lines ?? []),
+      createdAt: now,
+      updatedAt: now,
+      status: 'stopped',
+    }
+    const saved = await store.saveService(service as never, sessionId, { force: true })
+    if (existing && options.conflictMode === 'overwrite' && existing.id !== saved.id) {
+      await store.deleteService(sessionId, existing.id)
+    }
+    return { service: saved, importedGroups: (bundle.embedded?.groups ?? []).length }
+  }
+
   const flow: WorkflowDocument = {
-    id: flowId,
+    id: newId,
     sessionId,
     mode,
     name,
-    description: String(bundle.workflow.description ?? ''),
+    description: String(payload.description ?? ''),
     revision: 0,
-    nodes: safeClone(bundle.workflow.nodes ?? []),
-    lines: safeClone(bundle.workflow.lines ?? []),
+    nodes: safeClone(payload.nodes ?? []),
+    lines: safeClone(payload.lines ?? []),
   }
   const saved = await store.saveWorkflow(flow, sessionId, { force: true })
   if (existing && options.conflictMode === 'overwrite' && existing.id !== saved.id) {

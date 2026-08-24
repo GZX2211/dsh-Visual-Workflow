@@ -31,3 +31,60 @@ export async function remoteCall(endpoint: string, args: Record<string, unknown>
   }
   return payload.value
 }
+
+/**
+ * 流式调用 Host API（SSE 透传）：POST /visual-workflow/<endpoint>，把服务端
+ * SSE 的 data 行文本逐行回调（解析归调用方）；流结束 resolve。
+ * 非 2xx（未写流头）抛出后端 message；AbortError 静默返回（调用方主动停止）。
+ */
+export async function streamCall(
+  endpoint: string,
+  args: Record<string, unknown>,
+  onLine: (line: string) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  let response: Response
+  try {
+    response = await fetch(`/visual-workflow/${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ args }),
+      signal,
+    })
+  } catch (error) {
+    if ((error as Error)?.name === 'AbortError') return
+    throw new Error(`无法连接工作流服务：${error instanceof Error ? error.message : String(error)}`)
+  }
+  if (!response.ok) {
+    let message = `工作流服务错误（HTTP ${response.status}）`
+    try {
+      const payload = (await response.json()) as { error?: { message?: unknown } }
+      if (payload?.error?.message) message = String(payload.error.message)
+    } catch {
+      // 非 JSON 响应：保留兜底文案
+    }
+    throw new Error(message)
+  }
+  if (!response.body) throw new Error('流式响应无内容')
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      let index: number
+      // 按行切分回调节（空行/注释行由调用方过滤）
+      while ((index = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, index).replace(/\r$/, '')
+        buffer = buffer.slice(index + 1)
+        if (line.trim()) onLine(line)
+      }
+    }
+    if (buffer.trim()) onLine(buffer.replace(/\r$/, ''))
+  } catch (error) {
+    if ((error as Error)?.name === 'AbortError') return
+    throw error
+  }
+}
