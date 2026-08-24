@@ -171,3 +171,13 @@
    - 完成：P01 项目骨架与包配置（T-001）——package.json插件契约（exports/files/dsh.bundle/dsh.client，零@deepseek-ai/*运行时依赖）、tsconfig.host/client双program、scripts/build.mjs（tsc双发射）、cordis/serve patch占位、目录骨架、.gitignore/.gitattributes。
    - 完成：tests/host/package-contract.test.ts（18用例）断言包契约与W-05；vitest --pool=threads。
    - 变更标注：@huggingface/transformers@^4.2.0唯一运行时依赖；pnpm-workspace.yaml allowBuilds=false抑制onnxruntime构建脚本。
+---
+
+## 12. git版本：[已提交] [v0.1.0]（P14-P17 收尾：服务调试台/组合管理/协作组完整化 + 标注图 BUG 修复）
+
+1. **背景**：用户验收 4 张标注图（编排执行模式/后台服务模式/组合管理/UI），报告：工作台按钮不工作、会话读取失败、保存后丢失、属性栏保存删除交叉、模板/工作流无法删除。
+2. **根因**：① entry.ts 会话读取用旧项目 API（list.get()）→ 官方 v0.1.1 为 sessions.list.getSnapshot()，导致浮窗会话恒空 → 会话级操作全 400；② 模板/工作流/服务草稿删除走后端 → 未入库 404 toast；③ 运行历史恢复 useCallback 闭包捕获旧 state，点击恢复永不生效。
+3. **host**：EP_SERVICE_DEBUG SSE 流式代理（CORS/鉴权缘由同文档）；transfer.ts 支持模式二服务 v2 bundle 导出导入（service 字段落到 services/）；FileTemplate 补 fileName 字段。
+4. **client**：服务控制台收敛为调试区（状态/启停并入 Toolbar 最右侧）；组合管理加 MCP 启用/停用与文案裁剪；协作组完整化（左栏/画布节点拖入组、组卡片流程点、组内成员上下文/数据库迷你接点跨组连线）；组协作 Prompt 可从 .md 加载；有向线段箭头（流程/通过/不通过/内容，ctx/db 无向）；阶段节点紧凑卡（168×88）；启动/结束上下文接点按模式裁剪；父代理模板首次启动内置；高级选项间距；System Prompt 标签。
+5. **验证**：538 用例全绿（typecheck 4 program + vitest 全量 + build 未跑（watch 互斥，构建门禁由用户确认时执行））；真实浏览器 E2E（playwright + 系统 Edge）通过：FAB/浮窗渲染、会话绑定、模板保存、拖拽生成节点、刷新持久化、模板删除隔离、组合管理 MCP 显示 playwright。
+6. **MCP 挂载**：官方 @deepseek-ai/dsh-mcp-client 标准行（serverName: playwright）写入 profiles/web/cordis.patch.yml 托管区，与组合管理 mcp-registry 输出格式一致；3081 组合管理 UI 确认工具正常显示；@playwright/mcp 为 devDependencies（仅开发验证用），浏览器复用系统 Edge（--executable-path）。
