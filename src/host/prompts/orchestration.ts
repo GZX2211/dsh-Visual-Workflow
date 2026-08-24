@@ -1,20 +1,18 @@
 // src/host/prompts/orchestration.ts
 //
-// 编排指令模板构建器（T-005 基线之一）。
+// 编排指令模板构建器。
 //
 // 上下文：本指令文本由编排器在 startRun 时一次性 followup 注入「父代理」主会话，
 //       指导父代理按 流程事实源（orchestrations/<runId>.json）自主调度节点子代理、
-//       判断条件连线、并在失控或正常走完时 wf_finish 收尾。模板措辞参考旧项目
-//       VisualWorkflow/lib/orchestrator.js 的 buildOrchestrationCommand（L246-286）
-//       骨架，但按架构文档 §13.1 重构为「前缀稳定 + 关键约束双位 + 动态值仅注入末尾」。
+//       判断条件连线、并在失控或正常走完时 wf_finish 收尾。
 //
-// 稳定布局（§13.1）：
+// 稳定布局（前缀稳定 + 关键约束双位 + 动态值仅注入末尾）：
 //   ① 首段 = 硬约束（仅调度不执行 / wf_run_node 异步 / wf_finish 幂等收尾 / 失败语义 /
 //            条件连线由父代理语义判断 / 空载与调用上限护栏 / 失控立即 wf_finish(failed)）
 //   ② 中段 = 过程性信息（事实源路径 / 节点清单 / 协作组并行说明）
 //   ③ 末段 = 关键约束重申 + 本次动态状态（断点继续 / 暂停 / 运行参数等动态值仅在此注入）
 //
-// 为什么动态值只在末段（§13.1.1 前缀稳定 / KV 缓存友好）：同一 run 内本模板字符串
+// 为什么动态值只在末段（前缀稳定 / KV 缓存友好）：同一 run 内本模板字符串
 // 整体固定，动态状态（当前进度 / 运行参数）若插入前中段会破坏 KV 缓存前缀；单独成
 // 尾段则中前段字节稳定。构建器为纯函数：不读 Date.now/随机源，同一 params 两次构建
 // 字节相同，仅当末段动态字段变化时输出尾段才变化。
@@ -102,6 +100,9 @@ export const ORCH_HARD_CONSTRAINTS = {
   conditionSemantics: 'you decide conditional branches semantically',
   /** 护栏：失控立即 wf_finish(failed)。 */
   failureImmediate: "call wf_finish({ status: 'failed' }) immediately if you detect loss of control",
+  /** 协作通信超时处置：征询用户后 resolve 三动作。 */
+  askAgentTimeout:
+    'on a wf_ask_agent ask-timeout notice, consult the user with ask_user_question, then settle with wf_ask_agent resolve (continue / resend / abort)',
 } as const
 
 /**
@@ -116,7 +117,7 @@ export const ORCH_HARD_CONSTRAINTS = {
 export function buildOrchestrationDirective(params: OrchestrationDirectiveParams): string {
   const { facts, dynamic } = params
 
-  // —— 首段：硬约束（最重要约束置于开头，注意力位置 §13.1.2 第一位）——
+  // —— 首段：硬约束（最重要约束置于开头，注意力第一位）——
   const nodeList = facts.nodes.map((n) => `- ${n.id} (${n.label})`).join('\n')
   const collabText =
     facts.collabGroups.length === 0
@@ -138,6 +139,7 @@ export function buildOrchestrationDirective(params: OrchestrationDirectiveParams
     `5. Conditional edges: ${ORCH_HARD_CONSTRAINTS.conditionSemantics}, from the upstream node's actual output.`,
     `6. Guardrails: global call cap 500 wf_run_node calls; idle timeout when no node is in flight.`,
     `7. Loss of control: ${ORCH_HARD_CONSTRAINTS.failureImmediate}.`,
+    `8. In-group communication uses wf_ask_agent; ${ORCH_HARD_CONSTRAINTS.askAgentTimeout}.`,
   ].join('\n')
 
   // —— 中段：过程性信息（节点清单 / 事实源路径 / 协作组并行说明）——

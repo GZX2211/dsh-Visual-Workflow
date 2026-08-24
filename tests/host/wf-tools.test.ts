@@ -1,6 +1,6 @@
 // tests/host/wf-tools.test.ts
 //
-// wf_* 工具注册单测（T-023）：
+// wf_* 工具注册单测：
 //   - defineTool DSL 编译产物（参数 required 提取/隐式开放根/输出 schema）；
 //   - callerOf 身份派生（根 Agent 与子代理判定）；
 //   - wf_run_node / wf_finish：归属校验（子代理拒绝 WF_NOT_ROOT）、参数透传、
@@ -182,6 +182,7 @@ async function makeHarness(config?: Partial<OrchestratorConfig>): Promise<Harnes
       runIdleTimeoutMs: 500,
       retryLimitDefault: 3,
       reactIterationLimitDefault: 50,
+      wfAskAgentTimeoutMs: 500,
       ...config,
     },
     logger: { warn: () => {}, info: () => {}, debug: () => {} },
@@ -532,7 +533,7 @@ describe('wf_ask 工具执行', () => {
       store,
       runner: new FakeRunner(),
       agents,
-      config: { outputFullLimit: 400, documentTextLimit: 200, runIdleTimeoutMs: 500, retryLimitDefault: 3, reactIterationLimitDefault: 50 },
+      config: { outputFullLimit: 400, documentTextLimit: 200, runIdleTimeoutMs: 500, retryLimitDefault: 3, reactIterationLimitDefault: 50, wfAskAgentTimeoutMs: 500 },
       newRunId: () => 'run-x',
     })
     const tools = new FakeToolsRegistry()

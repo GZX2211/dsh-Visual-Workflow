@@ -38,6 +38,7 @@ import {
 import { createReactGuard } from './agent/guards.js'
 import { createModelSelectionSetup } from './agent/model-selection.js'
 import { registerWfTools } from './tools/wf-tools.js'
+import { registerWfAskAgent } from './tools/wf-ask-agent.js'
 import { registerDataTools } from './tools/data-tools.js'
 import { EmbeddingService } from './embedding/engine.js'
 
@@ -129,6 +130,19 @@ class CordisAgentHost implements AgentHost {
     const raw = service.get(sessionId)
     if (raw === null || typeof raw !== 'object') return null
     return raw as RootAgentLike
+  }
+
+  /** 按会话 id 取子代理 agent（wf_ask_agent 投递缝用；未激活返回 null）。 */
+  getChildAgent(childId: string): RootAgentLike | null {
+    const service = this.agentsService()
+    if (!service) return null
+    try {
+      const raw = service.get(childId)
+      if (raw === null || typeof raw !== 'object') return null
+      return raw as RootAgentLike
+    } catch {
+      return null
+    }
   }
 
   followupRoot(agent: RootAgentLike, message: RootInjectedMessage): void {
@@ -259,6 +273,7 @@ export class VisualWorkflowHost extends Service {
         runIdleTimeoutMs: config.runIdleTimeoutMs,
         retryLimitDefault: config.retryLimitDefault,
         reactIterationLimitDefault: config.reactIterationLimitDefault,
+        wfAskAgentTimeoutMs: config.wfAskAgentTimeoutMs,
       },
       logger: cordisLogger(ctx),
     })
@@ -267,6 +282,25 @@ export class VisualWorkflowHost extends Service {
   /** 按会话取根 Agent（wf_* 工具层提问/校验用；转发至 agents 适配）。 */
   getRootAgent(sessionId: string): RootAgentLike | null {
     return this.agents.getRootAgent(sessionId)
+  }
+
+  /** 按会话 id 取子代理 agent（wf_ask_agent 投递缝用；转发至 agents 适配）。 */
+  getChildAgent(childId: string): RootAgentLike | null {
+    return this.agents.getChildAgent(childId)
+  }
+
+  /** 冷态投递：复用子代理派发协作消息（subagents 服务惰性解析；缺失报明确错误）。 */
+  async followupChild(
+    parent: RootAgentLike,
+    childId: string,
+    content: unknown[],
+    options: { source: unknown; signal?: AbortSignal },
+  ): Promise<unknown> {
+    const subagents = subagentsServiceLike(this.ctx)
+    if (!subagents) {
+      throw new Error('subagents 服务不可用，无法冷恢复目标子代理')
+    }
+    return subagents.followup(parent, childId, content, options)
   }
 
   /** 数据根目录（数据工具索引落盘位置）。 */
@@ -331,6 +365,13 @@ export class VisualWorkflowHost extends Service {
       this.ctx.effect(() => registerWfTools(this.ctx, this), 'visualWorkflowHost.wfTools')
     } catch (error) {
       this.ctx.logger.warn(`[visual-workflow] wf_* 工具注册失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+
+    // wf_ask_agent 注册（Agent 间通信三态协议；父代理 resolve 能力内聚，子代理可选注入）。
+    try {
+      this.ctx.effect(() => registerWfAskAgent(this.ctx, this), 'visualWorkflowHost.wfAskAgent')
+    } catch (error) {
+      this.ctx.logger.warn(`[visual-workflow] wf_ask_agent 注册失败：${error instanceof Error ? error.message : String(error)}`)
     }
 
     // 数据工具注册：wf_db_query（单工具三模式）。子代理侧可见性由白名单按

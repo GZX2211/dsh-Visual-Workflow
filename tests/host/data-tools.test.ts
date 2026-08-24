@@ -1,6 +1,6 @@
 // tests/host/data-tools.test.ts
 //
-// 数据工具单测（T-025）：
+// 数据工具单测：
 //   - SQL 只读白名单矩阵（接受/拒绝）；强制 LIMIT、多语句、写/DDL 黑名单；
 //   - SqliteDriver：只读查询/schema/连接测试/物理防写；
 //   - createDatabaseDriver 配置错误路径；
@@ -348,7 +348,7 @@ async function makeHarness(): Promise<Harness> {
     store,
     runner: new FakeRunner(),
     agents,
-    config: { outputFullLimit: 400, documentTextLimit: 200, runIdleTimeoutMs: 500, retryLimitDefault: 3, reactIterationLimitDefault: 50 },
+    config: { outputFullLimit: 400, documentTextLimit: 200, runIdleTimeoutMs: 500, retryLimitDefault: 3, reactIterationLimitDefault: 50, wfAskAgentTimeoutMs: 500 },
     newRunId: () => 'run-1',
     uuid: () => 'uuid-1',
   })

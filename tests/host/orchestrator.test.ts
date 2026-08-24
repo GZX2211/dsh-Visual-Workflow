@@ -1,12 +1,11 @@
 // tests/host/orchestrator.test.ts
 //
-// 编排核心单测（T-021）：运行锁 / 快照 / startRun / 编排指令注入 / subagent/end
+// 编排核心单测：运行锁 / 快照 / startRun / 编排指令注入 / subagent/end
 // 观察 / 护栏 / currentResolvedFlow / terminate / 幂等收尾 / wait 阻塞 / 暂停门。
 // DoD：状态机全覆盖；wf_run_node 异步/wait 阻塞/pause 门三路径正确；编排指令模板
-// 满足 W-01/W-02（前缀稳定 + 关键约束双位 + 动态值仅注入末段）。
+// 满足前缀稳定 + 关键约束双位 + 动态值仅注入末段。
 //
-// 断言依据：需求文档 §4.1.2/§4.4.2/§4.7、架构文档 §4.3/§13、任务清单 T-021 DoD。
-// 依赖缝：FakeAgents/FakeRunner 模拟父代理与节点执行引擎——T-022 实现真实引擎后
+// 依赖缝：FakeAgents/FakeRunner 模拟父代理与节点执行引擎——真实引擎接入后
 // 本文件的行为契约不变（接口即契约）。
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -208,6 +207,7 @@ async function makeHarness(config?: Partial<OrchestratorConfig>): Promise<Harnes
       runIdleTimeoutMs: 500,
       retryLimitDefault: 3,
       reactIterationLimitDefault: 50,
+      wfAskAgentTimeoutMs: 500,
       ...config,
     },
     logger: { warn: (message) => warnings.push(message), info: () => {}, debug: () => {} },
