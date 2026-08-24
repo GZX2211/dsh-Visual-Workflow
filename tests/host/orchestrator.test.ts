@@ -40,7 +40,7 @@ import { HEAD_MARKER, MID_MARKER, TAIL_MARKER, TAIL_RESTATE_MARKER } from '../..
 import { ORCH_HARD_CONSTRAINTS } from '../../src/host/prompts/orchestration.js'
 import { NODE_HARD_CONSTRAINTS } from '../../src/host/prompts/node-task.js'
 import { stageLabel } from '../../src/host/graph/model.js'
-import type { FileNode, RoleNode, StageNode, WorkflowDocument } from '../../src/host/shared/graph-model.js'
+import type { FileNode, GraphNode, RoleNode, StageNode, WorkflowDocument } from '../../src/host/shared/graph-model.js'
 
 // ---------------------------------------------------------------------------
 // 测试替身与装配
@@ -510,6 +510,64 @@ describe('wfRunNode 异步路径与护栏', () => {
     expect(text).toContain('data/files/b.pdf')
   })
 
+  it('ctx-in 角色节点：上游 ok/react-capped 产出注入下游（截断），来源标签正确', async () => {
+    const h = await makeHarness()
+    const flow = makeFlow()
+    // a1 ctx-out → a2 ctx-in：显式连线传递上游最终产出（需求 §4.1.2 规则 5）
+    flow.lines.push({ id: 'l-ctx-agent', source: 'n-a1', target: 'n-a2', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' })
+    await start(h, flow)
+    // 先完成 a1（产出为超长文本，验证截断）
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    await h.runtime.handleSubagentEnd({
+      id: 'child-1',
+      stopReason: 'completed',
+      lastAssistantMessage: [{ type: 'text', text: `上游总结${'详'.repeat(300)}` }],
+    })
+    // 再启动 a2：任务块应包含 a1 的产出（截断）与来源标签
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a2' })
+    const text = h.runner.calls[1].blocks[0].text
+    expect(text).toContain('上游总结')
+    expect(text).toContain('…（已截断）')
+    expect(text).toContain('子任务A') // 来源标签（labelOf）
+  })
+
+  it('ctx-in 角色节点：上游 fail/pending 无产出不注入；无连线完全不传', async () => {
+    const h = await makeHarness()
+    const flow = makeFlow()
+    flow.lines.push({ id: 'l-ctx-agent', source: 'n-a1', target: 'n-a2', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' })
+    await start(h, flow)
+    // a1 未完成（pending）→ a2 启动时不注入任何上游内容
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a2' })
+    const first = h.runner.calls[0].blocks[0].text
+    expect(first).not.toContain('子任务A') // 不出现 a1 的来源标签
+    // a1 失败（stopReason=error）→ 无产出可注入
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    await h.runtime.handleSubagentEnd({ id: 'child-2', stopReason: 'error', lastAssistantMessage: [] })
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a2' })
+    const second = h.runner.calls[2].blocks[0].text
+    expect(second).not.toContain('子任务A')
+    // 无 ctx 连线的节点（n-pause 后的常规 a1 启动）不注入上游内容
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    const third = h.runner.calls[3].blocks[0].text
+    expect(third).not.toContain('子任务B')
+  })
+
+  it('ctx-in 虚拟节点：解析主节点产出注入（共享执行实例语义）', async () => {
+    const h = await makeHarness()
+    const flow = makeFlow()
+    // a2 的虚拟节点 n-proxy-a2 作为上游：产出 = a2 的产出（快照按主节点记账）
+    flow.lines.push({ id: 'l-ctx-proxy', source: 'n-proxy-a2', target: 'n-a1', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' })
+    await start(h, flow)
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-proxy-a2' }) // 解析为 n-a2
+    await h.runtime.handleSubagentEnd({
+      id: 'child-1',
+      stopReason: 'completed',
+      lastAssistantMessage: [{ type: 'text', text: '虚拟节点上游产出' }],
+    })
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    expect(h.runner.calls[1].blocks[0].text).toContain('虚拟节点上游产出')
+  })
+
   it('虚拟节点解析：按主节点 key 共享子代理（§4.2.3.2 规则 7）', async () => {
     const h = await makeHarness()
     await start(h, makeFlow())
@@ -557,17 +615,16 @@ describe('wfRunNode 异步路径与护栏', () => {
     expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-a1')!.status).toBe('fail')
   })
 
-  it('归属校验：子代理 WF_NOT_ROOT；无运行 WF_NO_ACTIVE_RUN；已结束 WF_STOPPED', async () => {
+  it('归属校验：子代理 WF_NOT_ROOT；无运行 WF_NO_ACTIVE_RUN；已结束 WF_NO_ACTIVE_RUN（终态条目已释放内存）', async () => {
     const h = await makeHarness()
     await expect(h.runtime.wfRunNode(childCaller, { nodeId: 'n-a1' })).rejects.toMatchObject({ code: 'WF_NOT_ROOT' })
     await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })).rejects.toMatchObject({ code: 'WF_NO_ACTIVE_RUN' })
 
     await start(h, makeFlow())
     await h.runtime.wfFinish(caller, { status: 'completed' })
-    await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })).rejects.toMatchObject({
-      code: 'WF_STOPPED',
-      message: expect.stringContaining('完成'),
-    })
+    // 终态条目已从内存释放（防内存膨胀）→ 无法区分「已结束」与「从未运行」，
+    // 统一 WF_NO_ACTIVE_RUN（wf_finish 幂等路径仍可返回终态详情）
+    await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })).rejects.toMatchObject({ code: 'WF_NO_ACTIVE_RUN' })
   })
 
   it('运行控制器已中止：WF_CANCELLED', async () => {
@@ -783,6 +840,43 @@ describe('subagent/end 观察回写（§8 #21）', () => {
     // 标记已消费：二次观察不再判定 react-capped
     expect(h.runner.capped.has('child-1')).toBe(false)
   })
+
+  it('协作组聚合：全部成员完成后组卡片 ok；未完成保持 pending；react-capped 成员算完成', async () => {
+    const h = await makeHarness()
+    const flow = makeFlow()
+    // a1/a2 入组（成员无 flow 连线，仅组卡片 flow 出入——校验规则 §4.2.5.2 规则 4）
+    flow.nodes = flow.nodes.map((n): GraphNode =>
+      n.id === 'n-a1' || n.id === 'n-a2'
+        ? { ...n, data: { ...(n as RoleNode).data, groupId: 'n-group' } } as RoleNode
+        : n,
+    )
+    flow.nodes.push({
+      id: 'n-group',
+      kind: 'group',
+      position: { x: 0, y: 0 },
+      data: { label: '协作组', collabPrompt: '组内通信', memberIds: ['n-a1', 'n-a2'] },
+    })
+    flow.lines = [
+      { id: 'lg1', source: 'n-start', target: 'n-group', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+      { id: 'lg2', source: 'n-group', target: 'n-end', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+    ]
+    const { entry } = await start(h, flow)
+    // 成员 1 完成 → 组仍 pending
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    await h.runtime.handleSubagentEnd({ id: 'child-1', stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: 'A' }] })
+    expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-group')!.status).toBe('pending')
+    // 成员 2 完成（软截停产出）→ 组卡片 ok
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a2' })
+    h.runner.capped.add('child-2')
+    await h.runtime.handleSubagentEnd({ id: 'child-2', stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: 'B' }] })
+    const groupNode = entry.snapshot.nodes.find((n) => n.nodeId === 'n-group')!
+    expect(groupNode.status).toBe('ok')
+    expect(groupNode.output).toContain('协作组')
+    // 组卡片 ok 后成员重试失败不回退
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a2' })
+    await h.runtime.handleSubagentEnd({ id: 'child-3', stopReason: 'error' })
+    expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-group')!.status).toBe('ok')
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -956,6 +1050,30 @@ describe('terminate / stop / dispose', () => {
   it('stopRun 未知 runId：静默 no-op', async () => {
     const h = await makeHarness()
     await expect(h.runtime.stopRun('run-none')).resolves.toBeUndefined()
+  })
+
+  it('终态条目释放：wfFinish/stopRun 后内存 runs 表清空，磁盘历史保留，幂等可查', async () => {
+    const h = await makeHarness()
+    // wfFinish 完成 → 内存释放（runId 自增：第一次 run-1）
+    await start(h, makeFlow())
+    await h.runtime.wfFinish(caller, { status: 'completed', summary: '完成' })
+    expect(h.runtime.runs.size).toBe(0)
+    expect((await h.store.getRun('run-1'))?.status).toBe('completed')
+    // 幂等：二次收尾经磁盘历史返回终态详情
+    const second = await h.runtime.wfFinish(caller, { status: 'completed' })
+    expect(second).toMatchObject({ ok: true, runId: 'run-1', status: 'completed', idempotent: true })
+    // stopRun → 内存释放 + 磁盘 stopped（第二次运行：run-2）
+    await start(h, makeFlow())
+    await h.runtime.stopRun('run-2')
+    expect(h.runtime.runs.size).toBe(0)
+    expect((await h.store.getRun('run-2'))?.status).toBe('stopped')
+    // 新运行可正常启动（锁已释放）
+    const third = await start(h, makeFlow())
+    expect(third.entry.snapshot.status).toBe('running')
+    // paused 运行保留内存（续跑/锁查询需要）
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-pause' })
+    expect(h.runtime.pausedRun('session-1', 'flow-1')).not.toBeNull()
+    expect(h.runtime.flowLockInfo('flow-1')).toMatchObject({ status: 'paused' })
   })
 
   it('dispose：中止全部运行、阻塞等待拒绝、内存表清空', async () => {

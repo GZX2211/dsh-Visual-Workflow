@@ -582,6 +582,7 @@ export class OrchestratorRuntime {
     const blocks = buildNodeBlocks({
       flow,
       node,
+      snapshot: run.snapshot,
       documentTextLimit: this.deps.config.documentTextLimit,
       pauseNodeIds: pauseNodeIdsOf(flow),
       retryLimit: effectiveRetryLimit,
@@ -641,13 +642,18 @@ export class OrchestratorRuntime {
     if (caller.isChild) throw new WfError('子代理无法调用 wf_finish（仅当前会话主 Agent 可收尾编排）', 'WF_NOT_ROOT')
     const sessionId = caller.sessionId
     const run = sessionId ? this.activeRunForSession(sessionId) : null
-    // 已停止/已完成的幂等：允许对已终止的同会话运行静默返回
+    // 已停止/已完成的幂等：允许对已终止的同会话运行静默返回。
+    // 终态条目已从内存释放（防内存膨胀），故幂等判定查磁盘历史（收尾调用频率极低）。
     if (!run) {
-      for (const entry of this.runs.values()) {
-        const s = entry.snapshot
-        if (s.sessionId === sessionId && s.status !== 'running') {
-          return { ok: true, runId: s.id, status: s.status, idempotent: true }
+      try {
+        for (const runId of await this.deps.store.listAllRunIds()) {
+          const record = await this.deps.store.getRun(runId)
+          if (record && record.sessionId === sessionId && record.status !== 'running') {
+            return { ok: true, runId: record.id, status: record.status, idempotent: true }
+          }
         }
+      } catch {
+        // 磁盘读失败按无历史处理
       }
       throw new WfError('当前没有正在运行的工作流编排', 'WF_NO_ACTIVE_RUN')
     }
@@ -659,6 +665,8 @@ export class OrchestratorRuntime {
     snapshot.endedAt = this.isoNow()
     terminalizeNodes(snapshot, this.now())
     await this.persistWarn(run)
+    // 收尾完成即释放内存条目（终态已持久化；运行锁随状态自然释放）
+    this.runs.delete(snapshot.id)
     return { ok: true, runId: snapshot.id, status: snapshot.status }
   }
 
@@ -695,6 +703,9 @@ export class OrchestratorRuntime {
           outputFullLimit: this.deps.config.outputFullLimit,
           now: this.now(),
         })
+        // 协作组聚合：成员完成后若组内全部成员 ok/react-capped → 组卡片记为 ok
+        // （架构 §5.4「组内全部 ok -> 组卡片记为 ok」；只做回显，不干预父代理调度）
+        await this.markGroupOkIfComplete(entry, meta.nodeId)
       } else {
         setNodeStatus(s, meta.nodeId, 'fail', { now: this.now() })
       }
@@ -713,8 +724,39 @@ export class OrchestratorRuntime {
   // ---- 终止 / 停止 ------------------------------------------------------------
 
   /**
+   * 协作组聚合（架构 §5.4）：某成员节点完成后，若其所属协作组全部成员均为
+   * ok/react-capped，把组卡片标记为 ok（只影响运行回显，不干预父代理调度）。
+   * 组卡片单向推进：仅 pending → ok；成员后续重试/失败不回退组卡片。
+   * 流程读取失败时跳过聚合（下一次成员完成事件重试）。
+   */
+  private async markGroupOkIfComplete(entry: RunEntry, memberNodeId: string): Promise<void> {
+    const snapshot = entry.snapshot
+    if (snapshot.status !== 'running' && snapshot.status !== 'paused') return
+    let flow: WorkflowDocument
+    try {
+      flow = await this.currentResolvedFlow(entry)
+    } catch {
+      return
+    }
+    for (const group of flow.nodes) {
+      if (group.kind !== 'group' || !(group.data.memberIds ?? []).includes(memberNodeId)) continue
+      const allDone = (group.data.memberIds ?? []).every((id) => {
+        const record = snapshot.nodes.find((n) => n.nodeId === id)
+        return record !== undefined && (record.status === 'ok' || record.status === 'react-capped')
+      })
+      if (!allDone) continue
+      const current = snapshot.nodes.find((n) => n.nodeId === group.id)
+      if (current && current.status === 'pending') {
+        setNodeStatus(snapshot, group.id, 'ok', { output: '（协作组）全部成员已完成', now: this.now() })
+      }
+    }
+  }
+
+  /**
    * 统一终止运行：中止控制器（含阻塞中的 wait/提问）、尽力中断运行中子代理、
    * 写终态、持久化、释放锁（内存锁随状态自然释放）。幂等。
+   * 终态条目随即从内存 runs 表释放（历史记录在磁盘，§4.7 由 FlowStore 提供），
+   * 防止长期运行内存膨胀；running/paused 条目保留（续跑/锁查询需要）。
    */
   async terminateRun(entry: RunEntry, options: TerminateOptions): Promise<boolean> {
     const snapshot = entry.snapshot
@@ -738,6 +780,9 @@ export class OrchestratorRuntime {
     terminalizeNodes(snapshot, this.now())
     this.rejectWaiters(entry)
     await this.persistWarn(entry)
+    // 4. 释放内存条目（终态记录已持久化；幂等基于 snapshot.status，删除后
+    //    重复 terminateRun(entry) 仍返回 false）
+    this.runs.delete(snapshot.id)
     return true
   }
 
@@ -873,10 +918,12 @@ function validateFlowForRun(flow: WorkflowDocument): WfError | null {
   return null
 }
 
-/** 节点任务块组装：persona 任务 + 输入输出结构 + 文档 ctx-in + 执行与交付约定（§13 模板）。 */
+/** 节点任务块组装：persona 任务 + 输入输出结构 + 上下文注入 + 执行与交付约定。 */
 function buildNodeBlocks(input: {
   flow: WorkflowDocument
   node: RoleNode
+  /** 运行快照：上游角色节点最终产出（ctx 连线显式注入）的读取源。 */
+  snapshot: RunSnapshot
   documentTextLimit: number
   pauseNodeIds: string[]
   retryLimit: number
@@ -885,21 +932,38 @@ function buildNodeBlocks(input: {
 }): Array<{ type: 'text'; text: string }> {
   const { flow, node } = input
   const data = node.data
-  // 上游上下文：文件节点文本直通 + 受管文件路径索引；
-  // agent 节点 ctx-in 按旧项目语义不注入——下游子代理自行查阅上游交付物（§13 中段说明）。
+  // 上游上下文（ctx-in 显式连线）：
+  //   - file 节点：文本直通（截断）/ 受管文件路径索引；
+  //   - agent/parent 角色节点（含虚拟节点引用）：注入运行快照中该节点的最终
+  //     产出（status=ok/react-capped，截断；其余状态无产出不注入）——需求
+  //     明确「上游最终输出作为上下文传入下游；不连接则不传」。
   const upstreamContext: Array<{ source: string; content: string }> = []
   const filePaths: string[] = []
   for (const edge of ctxInEdges(flow, node.id)) {
     const src = nodeById(flow, edge.source)
-    if (!src || src.kind !== 'file') continue
-    if (src.data.fileKind === 'text' && String(src.data.content ?? '').trim()) {
-      upstreamContext.push({
-        source: src.data.label ?? src.id,
-        content: truncateText(src.data.content, input.documentTextLimit),
-      })
-    } else if (src.data.managedPath) {
-      filePaths.push(src.data.managedPath)
+    if (!src) continue
+    if (src.kind === 'file') {
+      if (src.data.fileKind === 'text' && String(src.data.content ?? '').trim()) {
+        upstreamContext.push({
+          source: src.data.label ?? src.id,
+          content: truncateText(src.data.content, input.documentTextLimit),
+        })
+      } else if (src.data.managedPath) {
+        filePaths.push(src.data.managedPath)
+      }
+      continue
     }
+    // 角色/虚拟节点：解析主节点后查快照产出（快照按主节点 key 记账）
+    const resolved = src.kind === 'proxy' ? nodeById(flow, src.proxySourceId) : src
+    if (!resolved || (resolved.kind !== 'agent' && resolved.kind !== 'parent')) continue
+    const entry = input.snapshot.nodes.find((n) => n.nodeId === resolved.id)
+    if (!entry || (entry.status !== 'ok' && entry.status !== 'react-capped')) continue
+    const output = String(entry.output ?? '').trim()
+    if (!output) continue
+    upstreamContext.push({
+      source: labelOf(src),
+      content: truncateText(output, input.documentTextLimit),
+    })
   }
   const dbHint = dbInEdges(flow, node.id).length > 0 ? DB_TOOL_HINT : ''
 
