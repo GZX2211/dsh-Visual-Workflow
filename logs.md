@@ -27,7 +27,19 @@
 
 ## 2026.08.24
 
-1. git版本：[837166f] [v0.1.0]
+1. git版本：[2f57125] [v0.1.0]
+   - 完成：P11 里程碑 5 Client 入口与 Studio 状态机（T-041 浮窗入口 + T-042 Studio/状态机/hooks 拆分）。
+   - 入口改版（Q-UI-01，替代旧「轨迹右侧工作流 Tab」入口）：主界面**右下角圆形 FAB**（body 常驻容器 #visual-workflow-float-host，与视图环激活态解耦）→ 点击展开**独立窗口型页面**（floating-window.tsx：标题栏拖动 + 八方向缩放（四边/四角，最小 480×320）+ 视口边界钳制 + 几何 localStorage 记忆重开恢复）；conversation.view slot 保留（order 20，对话区视图环保留入口，与浮窗并存）。
+   - T-042 交付：
+     - studio-state.ts：纯 reducer 状态机（工作流/服务/模板三类列表、画布投影（nodes/lines 全量内联，无模板引用）、选中与编辑器、dirty、撤销重做栈（60 上限）、运行快照、轻提示、面板几何、对话框）+ 选择器（currentFlowOf/editorDataOf/isRunningOf）+ 文档投影纯函数（flowToCanvas/serviceToCanvas）。
+     - hooks/ 13 个（职责单一）：useStudioState / useRemote / useToast / useWorkflows（草稿首存入库 + revision 乐观锁）/ useTemplates（三类模板草稿/保存/删除）/ useSelection / useGraphHistory / useUnsavedGuard（三选项确认）/ useRunControl / useRunPolling（600ms 轮询终态停）/ useServiceControl（对接 P10 后端）/ useModeSwitch / usePanelLayout（拖宽 + localStorage）。
+     - Studio.tsx：工作台骨架（标题栏 + 三栏：左 Tab/列表只读 + 画布空态 + 右属性空态 + 状态条/toasts）；会话绑定（无下拉，跟随当前会话）；运行=先保存再 run（断点自动续跑）。
+     - i18n.ts（zh/en 适配新模型：role/file/database 模板、mode1/mode2、浮窗键；注册官方 locale 服务命名空间 visualWorkflow，无服务按浏览器语言回退）；styles.ts（FAB/浮窗/骨架样式 + --wf-* 深浅色变量）；lib/remote.ts（端点名直接引用共享协议常量表 EP_*，零漂移）。
+   - 工程：tsconfig.test.client.json 引入（client 测试 program，jsdom 文件头注释声明）；typecheck 扩为四 program；tsconfig.client.emit.json rootDir 扩到 src（client + shared 共享契约），转发文件改 ./client/entry；.gitignore lib/ 改根级锚定 /lib/（src/client/lib/ 是源码目录）；build-artifacts hook 超时放宽 120s（构建变重）。
+   - 测试：新增 41 用例（client 5 文件：remote 6 + studio-state 18 + floating-window 6 + Studio 6 + entry 5：FAB 开关/拖动缩放/几何持久化/slot order-label/dispose 清理/状态机全路径/会话绑定）；全量 490 用例全绿（31 文件，连续两次；atomic 等并发 flaky 与本次无关），typecheck 四 program + build + client-smoke 通过（client.js 0.95KB → 66.76KB）。
+   - 变更标注：入口改版已同步需求文档 §4.5（规则 1 浮窗入口）、架构文档 §10（挂载改版 + 13 hooks 清单）、任务清单 T-041 行（docs 修改留用户侧工作区，未提交）；client 共享契约引用 host/shared（protocol 常量 + 纯类型）经 rootDir 扩展纳入构建，宿主权威声明仍在 lib/types/shared/。
+
+3. git版本：[837166f] [v0.1.0]
    - 完成：P10 里程碑 4 模式二服务全链路（T-031 服务管理 + T-032 服务进程入口/OpenAI 兼容 API + T-033 userId 会话映射）。
    - T-031 交付（src/host/service/ manager.ts / port-pool.ts / serve-patch.ts）：
      - 启动链：serviceId 消毒（命令注入正则）→ 服务存在/未运行/图校验（父代理唯一等）→ 端口池分配（7860 起向上探测）→ 渲染 <dataDir>/services/<serviceId>.serve.patch.yml（原子写；headless-runner disabled + webserver 行 + 服务插件行，插件 name 用绝对 file URL——Loader 直接导入，不依赖 headless profile 安装插件）→ fork `dsh --profile headless --patch <产物> --visual-workflow-serve <serviceId> --port <n>`（环境继承 + cwd=数据根；PATH 无 dsh 明确报错 WF_DSH_NOT_FOUND；win32 经 cmd 外壳执行 dsh.cmd）→ 持久化 running+port+apiKeyHash。
@@ -42,7 +54,7 @@
    - 测试：新增 67 用例（port-pool 7 + serve-patch 7 + sessions-map 6 + service-manager 16 + openai-api 23 + service-run 8：请求解析/鉴权 401/并发 429/SSE chunk+[DONE]/断点自动续跑/问题注入/ctx 连线传递/崩溃标记/自动恢复/dsh 缺失）；全量 449 用例全绿（26 文件，连续两次；atomic 并发锁测试全量并行时偶发 EPERM、单独跑通过——既有 Windows flaky，与本次无关），typecheck 三 program + build + client-smoke 通过。
    - 变更标注：模式二服务进程与主进程共享磁盘数据层（服务文档/运行历史/会话映射同一 dataDir）；skipReconcile 保证服务进程启动不破坏主进程磁盘运行记录；注释规范持续执行（新文件零文档引用）。
 
-2. git版本：[470d5a2] [v0.1.0]
+3. git版本：[470d5a2] [v0.1.0]
    - 完成：P09 里程碑 3 GUI API 层与断点续跑（T-026/T-027）。
    - T-027 交付（src/host/orchestrator/resume.ts 新建 + runtime.ts 扩展）：
      - resume.ts：buildResumedSnapshot（继承快照纯函数——节点清单以当前工作流为准，已 ok/react-capped 继承状态与完整产出（resumed 标记不重跑），running/fail/pending/skipped 一律回退 pending 清零，resumedFromRunId 追溯继承链 + resumeFromNodeId 续跑起点）；findResumableRun（按 runId/最近可恢复，仅 paused/interrupted 可恢复）。
