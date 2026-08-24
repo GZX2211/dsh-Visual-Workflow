@@ -45,12 +45,13 @@ runTsc(['-p', 'tsconfig.host.json'])
 runTsc(['-p', 'tsconfig.host.json', '--declaration', '--emitDeclarationOnly', '--outDir', 'lib/types'])
 
 // 第三步：client 声明发射到 lib/types/client（tsconfig.client.emit.json 的 rootDir 为
-// src/client，产出 lib/types/client/entry.d.ts）。随后写入 lib/types/client/index.d.ts
-// 作为转发文件，使 exports["./client"].types（lib/types/client/index.d.ts）真实命中。
+// src（client + shared 共享契约），产出 lib/types/client/client/entry.d.ts）。
+// 随后写入 lib/types/client/index.d.ts 作为转发文件，使 exports["./client"].types
+// （lib/types/client/index.d.ts）真实命中。
 runTsc(['-p', 'tsconfig.client.emit.json'])
 writeFileSync(
   fileURLToPath(new URL('../lib/types/client/index.d.ts', import.meta.url)),
-  "export * from './entry'\n",
+  "export * from './client/entry'\n",
 )
 
 // 第四步：client bundle（tsdown）。--config 指定 scripts/build-client.ts；--config-loader

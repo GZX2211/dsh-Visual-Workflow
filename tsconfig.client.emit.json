@@ -1,16 +1,15 @@
 {
-  // Client 半区「声明发射」program（T-003）。
+  // Client 半区「声明发射」program（T-003；P11 扩展共享层）。
   //
   // tsconfig.client.json 是 noEmit 的类型检查 program；本文件是它的发射变体：
-  // 仅用于把 src/client 的声明发射到 lib/types/client/，使 exports["./client"].types
+  // 仅用于把 client 声明发射到 lib/types/client/，使 exports["./client"].types
   // 指向的 lib/types/client/index.d.ts 真实存在（index.d.ts 由 scripts/build.mjs 在
-  // 发射后写入，向前转发 entry.d.ts）。与 host 的 lib/types 发射（tsc --emitDeclarationOnly）
-  // 同构，避免与 tsdown 的 dts（会包进 .d.cts 导致解析失败）叠加。
+  // 发射后写入，向前转发 ./client/entry）。
   //
-  // 为什么 rootDir 只含 src/client：client dts 只描述 client 入口的公开 API（inject/apply）。
-  // src/host/shared 是纯类型共享层，其声明随 host 发射进 lib/types/；client 侧消费
-  // shared 类型时经 type-only import（擦除），此处无需重复发射。若后续 T-041 起 client
-  // 需要在 .d.ts 内显式引用 shared 类型，再扩展本 include/rootDir 并调整转发文件。
+  // P11 起 client 运行时引用共享契约（src/host/shared/protocol.ts 端点常量、
+  // graph-model/types 纯类型）——rootDir 相应扩到 src（client + shared），
+  // shared 的声明随本发射冗余产出（lib/types/client/host/shared/*.d.ts），
+  // host 侧权威声明仍在 lib/types/shared/（build.mjs 第二步），互不冲突。
   "extends": "./tsconfig.client.json",
   "compilerOptions": {
     "noEmit": false,
@@ -18,13 +17,14 @@
     "emitDeclarationOnly": true,
     "declarationMap": false,
     "sourceMap": false,
-    "rootDir": "src/client",
+    "rootDir": "src",
     "outDir": "lib/types/client"
   },
   "include": [
     "src/client/**/*.ts",
     "src/client/**/*.tsx",
-    "src/client/types.d.ts"
+    "src/client/types.d.ts",
+    "src/host/shared/**/*.ts"
   ],
   "exclude": ["node_modules", "lib", "tests", "scripts"]
 }

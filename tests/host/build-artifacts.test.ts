@@ -23,12 +23,14 @@ function readArtifact(rel: string): string {
 // 真实构建一次：以 inherit stdio 直接执行 build.mjs（node -- <file> 直接 spawn，
 // 不捕获 pipe），规避 Windows 沙箱下 named pipe 被禁导致的 EPERM（见 SKILL §6）。
 // 放在 beforeAll 中，使本测试不依赖外部「先跑过 build」的隐式前提。
+// hook 超时放宽：全量并行时构建（host 双发射 + client 声明 + tsdown）可能超过
+// vitest 默认 hook 超时（10s），构建是重操作而非测试逻辑问题。
 beforeAll(() => {
   execFileSync(process.execPath, [resolve(root, 'scripts/build.mjs')], {
     cwd: root,
     stdio: 'inherit',
   })
-})
+}, 120_000)
 
 describe('T-003 构建链路（client bundle + host/client 并存）', () => {
   it('lib/client.js 存在且含 __ModuleLoader__.load 包装', () => {
@@ -51,7 +53,8 @@ describe('T-003 构建链路（client bundle + host/client 并存）', () => {
 
   it('lib/types/client/index.d.ts 存在（exports["./client"].types 契约真实可命中）', () => {
     const dts = readArtifact('lib/types/client/index.d.ts')
-    // 转发文件应把公开 API 从 entry 重新导出，保证 ./client 的类型入口非空壳。
-    expect(dts).toContain("export * from './entry'")
+    // 转发文件应把公开 API 从 entry 重新导出（P11 起 rootDir=src，入口在 client/ 子目录），
+    // 保证 ./client 的类型入口非空壳。
+    expect(dts).toContain("export * from './client/entry'")
   })
 })

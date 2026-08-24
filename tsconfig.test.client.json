@@ -1,0 +1,28 @@
+{
+  // Client 测试 program（jsdom 环境，仅类型检查不发射）：
+  // 覆盖 src/client + tests/client，与 tsconfig.test.json（host）隔离。
+  // 运行环境由测试文件头部 `@vitest-environment jsdom` 注释声明。
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "lib": ["es2022", "dom", "dom.iterable"],
+    "types": ["node"]
+  },
+  "include": [
+    "src/client/**/*.ts",
+    "src/client/**/*.tsx",
+    "src/client/types.d.ts",
+    "src/host/shared/**/*.ts",
+    "tests/client/**/*.ts",
+    "tests/client/**/*.tsx"
+  ],
+  "exclude": ["node_modules", "lib", "src/host/index.ts", "src/host/service-runner.ts", "tests/host", "scripts"]
+}

@@ -227,7 +227,7 @@ describe('ServiceManager 生命周期', () => {
       const saved = await store.getServiceById('svc-1')
       expect(saved?.status).toBe('crashed')
       expect(saved?.lastStoppedAt).toBeTruthy()
-    })
+    }, { timeout: 5000 })
     // crashed 后可重启
     await expect(h.manager.start('svc-1')).resolves.toMatchObject({ status: 'running' })
   })

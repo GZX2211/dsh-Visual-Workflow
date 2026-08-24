@@ -1,0 +1,490 @@
+// src/client/studio/studio-state.ts
+//
+// 工作台状态机（纯 reducer，可独立单测）：工作流/服务/模板/组合列表、当前
+// 画布图（节点/连线）、选中与编辑器、未保存标记、运行快照、撤销重做栈、
+// 面板几何、轻提示与对话框。所有变更经 dispatch(action) 单向流转；
+// 数据加载/远端调用在 hooks 层完成后再 dispatch 结果。
+//
+// 数据模型对齐后端共享契约：工作流文档 { nodes, lines }（全量内联，无模板
+// 引用）；模板 role/file/database 三类；模式 mode1/mode2。
+
+import type { WorkflowDocument, GraphNode, Line } from '../../host/shared/graph-model.js'
+import type { ServiceState, RoleTemplate, FileTemplate, DatabaseTemplate, ToolCombo, RunSnapshot } from '../../host/shared/types.js'
+
+/** 左侧栏 Tab。 */
+export type LibTab = 'workflow' | 'role' | 'file' | 'database'
+/** 模板种类（与后端 listTemplates 契约一致）。 */
+export type TemplateKind = 'role' | 'file' | 'database'
+
+/** 画布节点投影（位置/数据全量内联）。 */
+export interface CanvasNode {
+  id: string
+  kind: GraphNode['kind']
+  position: { x: number; y: number }
+  data: Record<string, unknown>
+}
+
+/** 画布连线投影（条件标签由条件类型生成）。 */
+export interface CanvasEdge {
+  id: string
+  source: string
+  target: string
+  sourceHandle: Line['sourceHandle']
+  targetHandle: Line['targetHandle']
+  condition?: Line['condition']
+}
+
+/** 图快照（撤销重做栈元素）。 */
+export interface GraphSnapshot {
+  nodes: CanvasNode[]
+  edges: CanvasEdge[]
+}
+
+/** 编辑器引用（右侧面板编辑对象）。 */
+export type EditorRef =
+  | { source: 'workflow'; id: string }
+  | { source: 'service'; id: string }
+  | { source: 'template'; kind: TemplateKind; id: string }
+  | { source: 'node'; id: string }
+  | { source: 'edge'; id: string }
+  | null
+
+/** 对话框状态（未保存守卫/确认/导入冲突）。 */
+export interface ConfirmState {
+  kind: 'unsaved' | 'confirmText' | 'importConflict'
+  title?: string
+  message?: string
+  /** 确认后的回调（未保存守卫：保存/放弃后继续执行）。 */
+  proceed?: () => void
+  /** 确认回调（confirmText）。 */
+  onConfirm?: () => void
+}
+
+/** 轻提示。 */
+export interface ToastItem {
+  id: string
+  kind: 'info' | 'success' | 'error'
+  text: string
+}
+
+/** 面板几何（localStorage 持久化由 usePanelLayout 负责）。 */
+export interface PanelLayout {
+  leftOpen: boolean
+  leftWidth: number
+  rightOpen: boolean
+  rightWidth: number
+}
+
+export interface StudioState {
+  /** 绑定的会话 id（T-042：会话绑定，不提供下拉）。 */
+  sessionId: string
+  /** 左侧栏 Tab。 */
+  libTab: LibTab
+  /** 当前编辑对象模式（新建草稿的默认模式）。 */
+  mode: 'mode1' | 'mode2'
+  workflows: WorkflowDocument[]
+  services: ServiceState[]
+  templates: Record<TemplateKind, Array<RoleTemplate | FileTemplate | DatabaseTemplate>>
+  combos: ToolCombo[]
+  presets: unknown[]
+  tools: unknown[]
+  models: unknown[]
+  /** 当前画布对象（工作流或服务）。 */
+  currentId: string | null
+  currentKind: 'workflow' | 'service' | null
+  canvas: { nodes: CanvasNode[]; edges: CanvasEdge[] }
+  selection: { nodeId: string | null; edgeId: string | null; lib: { kind: LibTab | 'service'; id: string } | null }
+  editor: EditorRef
+  dirty: boolean
+  run: { runId: string | null; snapshot: RunSnapshot | null }
+  toasts: ToastItem[]
+  message: string
+  history: { past: GraphSnapshot[]; future: GraphSnapshot[] }
+  panels: PanelLayout
+  confirm: ConfirmState | null
+  historyOpen: boolean
+  runHistory: RunSnapshot[]
+  selectedRunId: string | null
+  comboOpen: boolean
+  servicesOpen: boolean
+  importBusy: boolean
+}
+
+/** 撤销重做栈上限（旧项目 HISTORY_LIMIT）。 */
+export const HISTORY_LIMIT = 60
+
+/** 初始面板几何。 */
+export function defaultPanels(): PanelLayout {
+  return { leftOpen: true, leftWidth: 236, rightOpen: true, rightWidth: 300 }
+}
+
+/** 初始状态（会话 id 由调用方注入）。 */
+export function createInitialState(sessionId: string): StudioState {
+  return {
+    sessionId,
+    libTab: 'workflow',
+    mode: 'mode1',
+    workflows: [],
+    services: [],
+    templates: { role: [], file: [], database: [] },
+    combos: [],
+    presets: [],
+    tools: [],
+    models: [],
+    currentId: null,
+    currentKind: null,
+    canvas: { nodes: [], edges: [] },
+    selection: { nodeId: null, edgeId: null, lib: null },
+    editor: null,
+    dirty: false,
+    run: { runId: null, snapshot: null },
+    toasts: [],
+    message: '',
+    history: { past: [], future: [] },
+    panels: defaultPanels(),
+    confirm: null,
+    historyOpen: false,
+    runHistory: [],
+    selectedRunId: null,
+    comboOpen: false,
+    servicesOpen: false,
+    importBusy: false,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Actions
+// ---------------------------------------------------------------------------
+
+export type StudioAction =
+  | { type: 'SET_SESSION'; sessionId: string }
+  | { type: 'SET_MODE'; mode: 'mode1' | 'mode2' }
+  | { type: 'SET_LIB_TAB'; tab: LibTab }
+  | { type: 'WORKFLOWS_LOADED'; items: WorkflowDocument[] }
+  | { type: 'WORKFLOW_ADDED'; flow: WorkflowDocument }
+  | { type: 'WORKFLOW_UPDATED'; flow: WorkflowDocument }
+  | { type: 'WORKFLOW_REMOVED'; id: string }
+  | { type: 'SERVICES_LOADED'; items: ServiceState[] }
+  | { type: 'SERVICE_UPDATED'; service: ServiceState }
+  | { type: 'SERVICE_REMOVED'; id: string }
+  | { type: 'TEMPLATES_LOADED'; kind: TemplateKind; items: Array<RoleTemplate | FileTemplate | DatabaseTemplate> }
+  | { type: 'TEMPLATE_ADDED'; kind: TemplateKind; template: RoleTemplate | FileTemplate | DatabaseTemplate }
+  | { type: 'TEMPLATE_UPDATED'; kind: TemplateKind; template: RoleTemplate | FileTemplate | DatabaseTemplate }
+  | { type: 'TEMPLATE_REMOVED'; kind: TemplateKind; id: string }
+  | { type: 'COMBOS_LOADED'; items: ToolCombo[] }
+  | { type: 'PRESETS_LOADED'; items: unknown[] }
+  | { type: 'TOOLS_LOADED'; items: unknown[] }
+  | { type: 'MODELS_LOADED'; items: unknown[] }
+  | { type: 'OPEN_FLOW'; flow: WorkflowDocument }
+  | { type: 'OPEN_SERVICE'; service: ServiceState }
+  | { type: 'CLEAR_CANVAS' }
+  | { type: 'GRAPH_REPLACED'; nodes: CanvasNode[]; edges: CanvasEdge[]; dirty: boolean }
+  | { type: 'NODE_ADDED'; node: CanvasNode }
+  | { type: 'NODE_MOVED'; id: string; position: { x: number; y: number } }
+  | { type: 'NODE_REMOVED'; id: string }
+  | { type: 'EDGE_ADDED'; edge: CanvasEdge }
+  | { type: 'EDGE_REMOVED'; id: string }
+  | { type: 'SELECT_NODE'; id: string }
+  | { type: 'SELECT_EDGE'; id: string }
+  | { type: 'SELECT_LIB'; kind: LibTab; id: string }
+  | { type: 'SELECT_EDITOR'; editor: EditorRef }
+  | { type: 'CLEAR_SELECTION' }
+  | { type: 'SET_DIRTY'; dirty: boolean }
+  | { type: 'RUN_STARTED'; runId: string }
+  | { type: 'RUN_SNAPSHOT'; snapshot: RunSnapshot }
+  | { type: 'RUN_CLEARED' }
+  | { type: 'TOAST_PUSH'; toast: ToastItem }
+  | { type: 'TOAST_DROP'; id: string }
+  | { type: 'SET_MESSAGE'; message: string }
+  | { type: 'HISTORY_PUSH'; snapshot: GraphSnapshot }
+  | { type: 'UNDO' }
+  | { type: 'REDO' }
+  | { type: 'PANELS_SET'; panels: Partial<PanelLayout> }
+  | { type: 'CONFIRM_SET'; confirm: ConfirmState | null }
+  | { type: 'HISTORY_OPEN'; open: boolean }
+  | { type: 'RUN_HISTORY_LOADED'; items: RunSnapshot[] }
+  | { type: 'RUN_HISTORY_SELECT'; id: string }
+  | { type: 'COMBO_OPEN'; open: boolean }
+  | { type: 'SERVICES_OPEN'; open: boolean }
+  | { type: 'IMPORT_BUSY'; busy: boolean }
+
+// ---------------------------------------------------------------------------
+// Reducer
+// ---------------------------------------------------------------------------
+
+/** 工作流文档 → 画布投影（节点全量内联，位置缺省落默认格点）。 */
+export function flowToCanvas(flow: WorkflowDocument): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
+  return {
+    nodes: (flow.nodes ?? []).map((node) => ({
+      id: node.id,
+      kind: node.kind,
+      position: node.position ?? { x: 120, y: 80 },
+      data: (node as { data?: Record<string, unknown> }).data ?? {},
+    })),
+    edges: (flow.lines ?? []).map((line) => ({
+      id: line.id,
+      source: line.source,
+      target: line.target,
+      sourceHandle: line.sourceHandle,
+      targetHandle: line.targetHandle,
+      ...(line.condition ? { condition: line.condition } : {}),
+    })),
+  }
+}
+
+/** 服务文档 → 画布投影（与工作流同构）。 */
+export function serviceToCanvas(service: ServiceState): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
+  return {
+    nodes: (service.nodes ?? []).map((node) => ({
+      id: node.id,
+      kind: node.kind,
+      position: node.position ?? { x: 120, y: 80 },
+      data: (node as { data?: Record<string, unknown> }).data ?? {},
+    })),
+    edges: (service.lines ?? []).map((line) => ({
+      id: line.id,
+      source: line.source,
+      target: line.target,
+      sourceHandle: line.sourceHandle,
+      targetHandle: line.targetHandle,
+      ...(line.condition ? { condition: line.condition } : {}),
+    })),
+  }
+}
+
+/** 打开工作流/服务时的选中与编辑器重置（可选保留画布选择）。 */
+function openDocument(state: StudioState, canvas: { nodes: CanvasNode[]; edges: CanvasEdge[] }, kind: 'workflow' | 'service', id: string): StudioState {
+  return {
+    ...state,
+    currentKind: kind,
+    currentId: id,
+    canvas,
+    dirty: false,
+    run: { runId: null, snapshot: null },
+    selection: { nodeId: null, edgeId: null, lib: { kind: kind === 'workflow' ? 'workflow' : 'service', id } },
+    editor: kind === 'workflow' ? { source: 'workflow', id } : { source: 'service', id },
+  }
+}
+
+export function studioReducer(state: StudioState, action: StudioAction): StudioState {
+  switch (action.type) {
+    case 'SET_SESSION':
+      return { ...state, sessionId: action.sessionId }
+    case 'SET_MODE':
+      return { ...state, mode: action.mode }
+    case 'SET_LIB_TAB':
+      return { ...state, libTab: action.tab }
+    case 'WORKFLOWS_LOADED':
+      return { ...state, workflows: action.items }
+    case 'WORKFLOW_ADDED':
+      return { ...state, workflows: [action.flow, ...state.workflows] }
+    case 'WORKFLOW_UPDATED':
+      return { ...state, workflows: state.workflows.map((flow) => (flow.id === action.flow.id ? action.flow : flow)) }
+    case 'WORKFLOW_REMOVED':
+      return { ...state, workflows: state.workflows.filter((flow) => flow.id !== action.id) }
+    case 'SERVICES_LOADED':
+      return { ...state, services: action.items }
+    case 'SERVICE_UPDATED':
+      return { ...state, services: state.services.map((service) => (service.id === action.service.id ? action.service : service)) }
+    case 'SERVICE_REMOVED':
+      return { ...state, services: state.services.filter((service) => service.id !== action.id) }
+    case 'TEMPLATES_LOADED':
+      return { ...state, templates: { ...state.templates, [action.kind]: action.items } }
+    case 'TEMPLATE_ADDED':
+      return { ...state, templates: { ...state.templates, [action.kind]: [action.template, ...state.templates[action.kind]] } }
+    case 'TEMPLATE_UPDATED':
+      return { ...state, templates: { ...state.templates, [action.kind]: state.templates[action.kind].map((item) => (item.id === action.template.id ? action.template : item)) } }
+    case 'TEMPLATE_REMOVED':
+      return { ...state, templates: { ...state.templates, [action.kind]: state.templates[action.kind].filter((item) => item.id !== action.id) } }
+    case 'COMBOS_LOADED':
+      return { ...state, combos: action.items }
+    case 'PRESETS_LOADED':
+      return { ...state, presets: action.items }
+    case 'TOOLS_LOADED':
+      return { ...state, tools: action.items }
+    case 'MODELS_LOADED':
+      return { ...state, models: action.items }
+    case 'OPEN_FLOW': {
+      const exists = state.workflows.some((flow) => flow.id === action.flow.id)
+      const workflows = exists
+        ? state.workflows.map((flow) => (flow.id === action.flow.id ? action.flow : flow))
+        : [action.flow, ...state.workflows]
+      return openDocument({ ...state, workflows }, flowToCanvas(action.flow), 'workflow', action.flow.id)
+    }
+    case 'OPEN_SERVICE': {
+      const exists = state.services.some((service) => service.id === action.service.id)
+      const services = exists
+        ? state.services.map((service) => (service.id === action.service.id ? action.service : service))
+        : [action.service, ...state.services]
+      return openDocument({ ...state, services }, serviceToCanvas(action.service), 'service', action.service.id)
+    }
+    case 'CLEAR_CANVAS':
+      return {
+        ...state,
+        currentId: null,
+        currentKind: null,
+        canvas: { nodes: [], edges: [] },
+        selection: { nodeId: null, edgeId: null, lib: null },
+        editor: null,
+        dirty: false,
+        run: { runId: null, snapshot: null },
+      }
+    case 'GRAPH_REPLACED':
+      return { ...state, canvas: { nodes: action.nodes, edges: action.edges }, dirty: action.dirty }
+    case 'NODE_ADDED':
+      return { ...state, canvas: { ...state.canvas, nodes: [...state.canvas.nodes, action.node] }, dirty: true }
+    case 'NODE_MOVED':
+      return {
+        ...state,
+        canvas: { ...state.canvas, nodes: state.canvas.nodes.map((node) => (node.id === action.id ? { ...node, position: action.position } : node)) },
+        dirty: true,
+      }
+    case 'NODE_REMOVED':
+      return {
+        ...state,
+        canvas: {
+          nodes: state.canvas.nodes.filter((node) => node.id !== action.id),
+          edges: state.canvas.edges.filter((edge) => edge.source !== action.id && edge.target !== action.id),
+        },
+        dirty: true,
+      }
+    case 'EDGE_ADDED':
+      return { ...state, canvas: { ...state.canvas, edges: [...state.canvas.edges, action.edge] }, dirty: true }
+    case 'EDGE_REMOVED':
+      return { ...state, canvas: { ...state.canvas, edges: state.canvas.edges.filter((edge) => edge.id !== action.id) }, dirty: true }
+    case 'SELECT_NODE':
+      return { ...state, selection: { nodeId: action.id, edgeId: null, lib: null }, editor: { source: 'node', id: action.id } }
+    case 'SELECT_EDGE':
+      return { ...state, selection: { nodeId: null, edgeId: action.id, lib: null }, editor: { source: 'edge', id: action.id } }
+    case 'SELECT_LIB':
+      return { ...state, selection: { nodeId: null, edgeId: null, lib: { kind: action.kind, id: action.id } } }
+    case 'SELECT_EDITOR':
+      return { ...state, editor: action.editor }
+    case 'CLEAR_SELECTION':
+      return { ...state, selection: { nodeId: null, edgeId: null, lib: null }, editor: null }
+    case 'SET_DIRTY':
+      return { ...state, dirty: action.dirty }
+    case 'RUN_STARTED':
+      return { ...state, run: { runId: action.runId, snapshot: null } }
+    case 'RUN_SNAPSHOT':
+      return { ...state, run: { ...state.run, snapshot: action.snapshot } }
+    case 'RUN_CLEARED':
+      return { ...state, run: { runId: null, snapshot: null } }
+    case 'TOAST_PUSH':
+      return { ...state, toasts: [...state.toasts, action.toast] }
+    case 'TOAST_DROP':
+      return { ...state, toasts: state.toasts.filter((toast) => toast.id !== action.id) }
+    case 'SET_MESSAGE':
+      return { ...state, message: action.message }
+    case 'HISTORY_PUSH': {
+      const past = [...state.history.past, action.snapshot]
+      if (past.length > HISTORY_LIMIT) past.shift()
+      return { ...state, history: { past, future: [] } }
+    }
+    case 'UNDO': {
+      const previous = state.history.past.at(-1)
+      if (!previous) return state
+      return {
+        ...state,
+        canvas: { nodes: previous.nodes, edges: previous.edges },
+        dirty: true,
+        history: { past: state.history.past.slice(0, -1), future: [...state.history.future, graphSnapshotOf(state)] },
+      }
+    }
+    case 'REDO': {
+      const next = state.history.future.at(-1)
+      if (!next) return state
+      return {
+        ...state,
+        canvas: { nodes: next.nodes, edges: next.edges },
+        dirty: true,
+        history: { past: [...state.history.past, graphSnapshotOf(state)], future: state.history.future.slice(0, -1) },
+      }
+    }
+    case 'PANELS_SET':
+      return { ...state, panels: { ...state.panels, ...action.panels } }
+    case 'CONFIRM_SET':
+      return { ...state, confirm: action.confirm }
+    case 'HISTORY_OPEN':
+      return { ...state, historyOpen: action.open }
+    case 'RUN_HISTORY_LOADED':
+      return { ...state, runHistory: action.items, selectedRunId: action.items[0]?.id ?? state.selectedRunId }
+    case 'RUN_HISTORY_SELECT':
+      return { ...state, selectedRunId: action.id }
+    case 'COMBO_OPEN':
+      return { ...state, comboOpen: action.open }
+    case 'SERVICES_OPEN':
+      return { ...state, servicesOpen: action.open }
+    case 'IMPORT_BUSY':
+      return { ...state, importBusy: action.busy }
+    default:
+      return state
+  }
+}
+
+/** 当前图快照（撤销重做栈元素构造）。 */
+export function graphSnapshotOf(state: StudioState): GraphSnapshot {
+  return { nodes: state.canvas.nodes, edges: state.canvas.edges }
+}
+
+// ---------------------------------------------------------------------------
+// 选择器（派生数据；组件与 hooks 消费）
+// ---------------------------------------------------------------------------
+
+/** 当前工作流文档（内存列表优先；草稿回退）。 */
+export function currentFlowOf(state: StudioState): WorkflowDocument | null {
+  if (state.currentKind !== 'workflow' || !state.currentId) return null
+  return state.workflows.find((flow) => flow.id === state.currentId) ?? null
+}
+
+/** 当前服务文档。 */
+export function currentServiceOf(state: StudioState): ServiceState | null {
+  if (state.currentKind !== 'service' || !state.currentId) return null
+  return state.services.find((service) => service.id === state.currentId) ?? null
+}
+
+/** 当前运行状态（running 判定）。 */
+export function isRunningOf(state: StudioState): boolean {
+  return state.run.snapshot?.status === 'running' || (state.run.runId !== null && state.run.snapshot === null)
+}
+
+/** 编辑器数据（右侧面板渲染源）。 */
+export function editorDataOf(state: StudioState): {
+  kind: 'workflow' | 'service' | TemplateKind | 'edge'
+  data: Record<string, unknown>
+  name: string
+  templateId?: string
+  template?: boolean
+} | null {
+  const editor = state.editor
+  if (!editor) return null
+  if (editor.source === 'workflow') {
+    const flow = state.workflows.find((item) => item.id === editor.id)
+    return flow
+      ? { kind: 'workflow', data: { name: flow.name, description: flow.description }, name: flow.name }
+      : null
+  }
+  if (editor.source === 'service') {
+    const service = state.services.find((item) => item.id === editor.id)
+    return service
+      ? { kind: 'service', data: { name: service.name, description: service.description }, name: service.name }
+      : null
+  }
+  if (editor.source === 'template') {
+    const template = state.templates[editor.kind].find((item) => item.id === editor.id)
+    return template
+      ? { kind: editor.kind, data: template as unknown as Record<string, unknown>, name: String((template as { name?: unknown }).name ?? ''), templateId: template.id, template: true }
+      : null
+  }
+  if (editor.source === 'node') {
+    const node = state.canvas.nodes.find((item) => item.id === editor.id)
+    if (!node) return null
+    const kindOf = node.kind === 'parent' || node.kind === 'agent' ? 'role' : node.kind === 'file' ? 'file' : node.kind === 'database' ? 'database' : 'role'
+    return { kind: kindOf, data: node.data, name: String(node.data.label ?? ''), template: false }
+  }
+  if (editor.source === 'edge') {
+    const edge = state.canvas.edges.find((item) => item.id === editor.id)
+    return edge ? { kind: 'edge', data: edge as unknown as Record<string, unknown>, name: '' } : null
+  }
+  return null
+}
