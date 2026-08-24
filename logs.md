@@ -22,9 +22,27 @@
    - （完成的任务/修复的 bug/实现的功能）
    - （功能性重大变更请标注）
 ```
+
+---
+
 ## 2026.08.24
 
-1. git版本：[804f266] [v0.1.0]
+1. git版本：[470d5a2] [v0.1.0]
+   - 完成：P09 里程碑 3 GUI API 层与断点续跑（T-026/T-027）。
+   - T-027 交付（src/host/orchestrator/resume.ts 新建 + runtime.ts 扩展）：
+     - resume.ts：buildResumedSnapshot（继承快照纯函数——节点清单以当前工作流为准，已 ok/react-capped 继承状态与完整产出（resumed 标记不重跑），running/fail/pending/skipped 一律回退 pending 清零，resumedFromRunId 追溯继承链 + resumeFromNodeId 续跑起点）；findResumableRun（按 runId/最近可恢复，仅 paused/interrupted 可恢复）。
+     - runtime.resumeRun：复用 startRun 校验链（锁放宽为同会话 paused 允许恢复）；编排指令注入 isResume 动态态（已 ok 不重跑/从断点继续/继承链）；续跑成功后释放旧 paused 内存条目（锁移交新 run，磁盘历史保留原状）；错误码 WF_NO_RESUME_POINT/WF_NOT_RESUMABLE/WF_NOT_FOUND。
+     - 断点产出回填：继承快照中已 ok 节点 output 保留，后续节点 ctx 连线注入直接用新快照（无需额外回填通道）。
+   - T-026 交付（src/host/remote/ 四文件）：
+     - api.ts：VisualWorkflowApi 端点白名单分发（白名单由共享协议常量表派生零漂移，39 端点全量）+ registerRoutes（webServer prefix 路由，POST body{args} → {ok,value/error}，Cache-Control no-store，错误映射 400/404/405/409/413/422/501）；run 端点存在可恢复断点自动续跑；runStatus 内存快照优先终态回退磁盘；服务端点经 host.serviceManager 可选缝（未装配 501 WF_SERVICE_MANAGER_UNAVAILABLE，服务管理阶段填充）；dbTest/dbSchema/dbSearchPreview（缺索引自动构建/rebuild 强制重建）；生态端点 presets/tools/models/pluginCatalog（scope key=agent 对象官方语义 + 中文描述映射 + preset standing 并集）。
+     - download.ts：受管拷贝 copyIntoManagedFile（base64/源路径 → data/files/ 原子发布）+ GET /visual-workflow/files/<name> 下载路由（严格 basename 校验防目录穿越）。
+     - mcp-registry.ts：MCP 托管区读写移植（$DSH_HOME/profiles/*/cordis.patch.yml，托管区注释隔离 + 原子写 + 命令行引号感知拆分）。
+     - transfer.ts：v2 bundle 导入导出（format dsh-vw-bundle/version 2，节点数据自包含内联 + 嵌入式组/组合，冲突 rename/overwrite/conflict；角色模板单导出）。
+   - 工程：flow-store.ts 加 getTemplate 与 listTemplates 联合兜底 overload；index.ts 装配两条路由（ctx.effect disposer）；putWorkflow/putService 改为 expectedRevision 乐观锁（409 语义）。
+   - 测试：新增 28 用例（resume 10 + api 18：白名单零漂移/404 原型链防护/工作流服务模板组合 CRUD/自动续跑/runStatus 磁盘回退/数据库检索链路/生态枚举/导入导出冲突矩阵/MCP 托管区往返/路由 405-400-404/disposer/下载穿越拒绝）；全量 382 用例全绿（20 文件，连续两次），typecheck 三 program + build + client-smoke 通过。
+   - 变更标注：deleteTemplatePreview 在新模型（节点深拷贝解耦、无 templateId 引用）下返回 affectedNodes=0 + detached 标记（解耦语义）；注释规范持续执行（新文件零文档引用，仅保留功能/时序说明）。
+
+2. git版本：[804f266] [v0.1.0]
    - 完成：P08 里程碑 2 Agent 间通信（T-024 wf_ask_agent 三态协议）。
    - 交付（src/host/tools/wf-ask-agent.ts 新建 + runtime.ts 扩展）：
      - 三态协议：ask（子代理发起并挂起阻塞等待回复）/ reply（目标回复解除阻塞，工具结果=回复文本）/ resolve（父代理对超时 ask 裁决 continue/resend/abort，仅父代理可用）。
@@ -45,7 +63,7 @@
    - 测试：新增 5 用例（B1×3：ok 注入+截断/来源标签、fail/pending 不注入+无连线不传、虚拟节点解析注入；B2×1：组聚合含 react-capped 成员与失败不回退；B3×1：终态释放+幂等磁盘查询+paused 保留）；全量 330 用例全绿（17 文件），typecheck/build/client-smoke 通过；并发测试（atomic/flow-store）在全量并行时曾偶发时序失败，单独/连续三次全量均稳定全绿（与本次修改无关，未改动相关代码）。
    - 变更标注：终态条目释放后，「已结束运行」再调 wf_run_node 由 WF_STOPPED 收敛为 WF_NO_ACTIVE_RUN（内存无法区分已结束/从未运行，保持高频路径零磁盘开销；wf_finish 幂等仍返回终态详情）。
 
-2. git版本：[d71d630] [v0.1.0]
+3. git版本：[d71d630] [v0.1.0]
    - 完成：P07 工具注册与数据工具（T-023/T-025，主代理本人实现）——T-022 的出口：三个父代理编排工具 + 本地嵌入/数据访问全链路。
    - T-023 交付：src/host/tools/ 三文件——define-tool.ts（官方 defineTool DSL 语义的本地等价实现：parameters 隐式开放根 + 属性内联 required 编译为 JSON Schema required 数组；零官方包运行时依赖 W-05）；text-render.ts（递归按键排序的稳定序列化，键序稳定 W-01）；wf-tools.ts（registerWfTools 注册 wf_run_node/wf_finish/wf_ask + callerOf 身份派生——子代理会话 header 的 origin/parentSession 判据；wf_run_node 扩展 wait/thinking/iterationLimit/retryLimit 参数透传 + 暂停门并入；wf_ask 借用官方 userQuestions.ask（agent=父 root 精确存活身份），提问期间 touchRun 防空闲看护误停；description 官方标准英文 W-03 ≤120 tokens）。runtime.ts 增 touchRun；index.ts 装配（agents 提为 public 属性 + ctx.effect 注册）。
    - T-025 交付：src/host/embedding/ 三文件——chunker.ts（384 字符/步长 128 重叠窗口分块纯函数 + 空白归一化）；engine.ts（EmbeddingService：外部 OpenAI 兼容端点 > 本地 bge-small-zh-v1.5（transformers.js pipeline feature-extraction，pooling cls + normalize，512 维，随包资产路径定位，真机加载验证通过）> BM25 降级，惰性加载重依赖）；indexer.ts（VectorIndex 单文件原子持久化 + 逐记录分块 + embedding 余弦 Top-K / BM25 倒排打分双模式，降级标注 source='bm25'）。data-tools.ts：wf_db_query 单工具三模式（search/query/schema）+ SQL 只读白名单（仅单 SELECT/强制 LIMIT/拒绝写 DDL 多语句/字面量剥离防误伤）+ SqliteDriver（node:sqlite readOnly 物理防写）+ ServerDriver（mysql2/pg 可选依赖惰性 import）+ buildIndexForDatabase/testDatabaseConnection + 归属校验（运行中 run + db-in 连线，无连线 WF_DB_NO_LINE）。
