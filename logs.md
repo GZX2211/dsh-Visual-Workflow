@@ -11,6 +11,20 @@
 
 ## 2026.08.24
 
+1. git版本：[9b74c77] [v0.1.0]
+   - 完成：BUG 排查报告逐项查证与修复（docs/bug排查.md，B1~B3 修复；F1~F4 查证为按计划未开发功能，不修复）。
+   - 查证结论（不盲信报告，逐项核对代码与需求/架构）：
+     - B1 属实（核心需求违反）：buildNodeBlocks 的 ctx-in 只处理 file 节点，agent/parent 上游产出不注入——需求明确「上游最终输出作为上下文传入下游；旧项目下游自行查阅行为不再保留」。
+     - B2 部分属实：协作组执行链路可用（编排指令引导父代理对成员逐个 wf_run_node 并行启动，wf_run_node 拒绝 group 是有意防御），但组卡片状态回显缺失（快照永远 pending→skipped）——架构「组内全部 ok -> 组卡片记为 ok」未实现。
+     - B3 属实：runs Map 终态条目（completed/failed/stopped）从不清理，长期运行内存膨胀。
+     - F1（断点续跑）→ T-027（P09）按计划未开发，非 BUG；F2（服务管理器）→ T-031~033（P10）；F3（runStatus 端点）/F4（索引构建入口）→ T-026（P09，按架构端点清单 dbTest/dbSchema/dbSearchPreview 实现，报告建议的 dbBuildIndex 端点名与架构不符）。
+   - 修复交付（src/host/orchestrator/runtime.ts）：
+     - B1：buildNodeBlocks 增加 snapshot 参数，ctx-in 的 agent/parent/虚拟节点引用按快照读取最终产出（status=ok/react-capped，documentTextLimit 截断，来源标签=labelOf；fail/pending 无产出不注入）。
+     - B2：handleSubagentEnd 完成后调用 markGroupOkIfComplete——成员全部 ok/react-capped 时组卡片 pending→ok（单向推进不回退，只影响回显不干预父代理调度）。
+     - B3：terminateRun 成功与 wfFinish 完成路径均从 runs 表释放终态条目（running/paused 保留——续跑/锁查询需要）；wfFinish 幂等判定改查磁盘历史（listAllRunIds+getRun，收尾调用频率极低）。
+   - 测试：新增 5 用例（B1×3：ok 注入+截断/来源标签、fail/pending 不注入+无连线不传、虚拟节点解析注入；B2×1：组聚合含 react-capped 成员与失败不回退；B3×1：终态释放+幂等磁盘查询+paused 保留）；全量 330 用例全绿（17 文件），typecheck/build/client-smoke 通过；并发测试（atomic/flow-store）在全量并行时曾偶发时序失败，单独/连续三次全量均稳定全绿（与本次修改无关，未改动相关代码）。
+   - 变更标注：终态条目释放后，「已结束运行」再调 wf_run_node 由 WF_STOPPED 收敛为 WF_NO_ACTIVE_RUN（内存无法区分已结束/从未运行，保持高频路径零磁盘开销；wf_finish 幂等仍返回终态详情）。
+
 1. git版本：[d71d630] [v0.1.0]
    - 完成：P07 工具注册与数据工具（T-023/T-025，主代理本人实现）——T-022 的出口：三个父代理编排工具 + 本地嵌入/数据访问全链路。
    - T-023 交付：src/host/tools/ 三文件——define-tool.ts（官方 defineTool DSL 语义的本地等价实现：parameters 隐式开放根 + 属性内联 required 编译为 JSON Schema required 数组；零官方包运行时依赖 W-05）；text-render.ts（递归按键排序的稳定序列化，键序稳定 W-01）；wf-tools.ts（registerWfTools 注册 wf_run_node/wf_finish/wf_ask + callerOf 身份派生——子代理会话 header 的 origin/parentSession 判据；wf_run_node 扩展 wait/thinking/iterationLimit/retryLimit 参数透传 + 暂停门并入；wf_ask 借用官方 userQuestions.ask（agent=父 root 精确存活身份），提问期间 touchRun 防空闲看护误停；description 官方标准英文 W-03 ≤120 tokens）。runtime.ts 增 touchRun；index.ts 装配（agents 提为 public 属性 + ctx.effect 注册）。
