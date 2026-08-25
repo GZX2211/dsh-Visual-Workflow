@@ -40,7 +40,7 @@
 
 > 新的日志追加到此处
 
-git版本：[待提交] [v0.1.0]（集成修复：保存/运行全链路 + 4 张标注图 BUG + 模式二服务启动反馈与自动恢复 + 3080 插件安装与 HMR）
+git版本：[70db60d] [v0.1.0]（集成修复：保存/运行全链路 + 4 张标注图 BUG + 模式二服务启动反馈与自动恢复 + 3080 插件安装与 HMR）
    - 保存链路（用户主诉「保存成功但实际没保存」）：①草稿保存原经 createWorkflow 另发新 id → WORKFLOW_UPDATED 不命中列表、画布永远引用旧草稿 id，每次保存都新建副本 → 草稿统一走 putWorkflow（后端不存在即创建，id 不变）；②前端 _draft/_clientMeta 随模板/服务/工作流写盘 → 刷新后已入库对象被误判草稿（本地删除不走后端）→ 保存路径统一剥离（api.ts + flow-store 双保险）+ 清理既有数据残留（scripts/clean-client-meta.mjs）；③受管文件名消毒把中文全替换为 _（任务清单规则.md → ______.md）→ 保留 Unicode 仅过滤危险字符。
    - 标注图修复：父代理画布节点属性栏可编辑（原一律「无属性」）+ 可复制虚拟节点；角色卡元信息两行（模型/组合）；文件节点卡显示内容/文件名列表（两行省略、无「文件」前缀）；已选文件列表移至按钮下方、支持多选所有类型、显示原始文件名；虚拟节点「↻ 引用」重复徽标去重；输入/输出节点仅保留一个连接点；角色模板卡/父代理卡显示 System Prompt（20 字截断或 .md 文件名）；协作组拖拽悬停高亮「放开以入组」；组合管理 MCP「编辑」字段为空（pluginCatalog mcp 段补 command/args/url）；移除会话页「工作流」tab（批注图）。
    - 模式二服务：fork 参数修复（headless commander 不识别 app 级 flag → 服务启动即 crashed；改 patch config 传参 + 占位 task 位置参数）；启动横幅直写 dsh web 终端 stdout（服务名/端口/REST API/鉴权/curl 示例——实测 cordis logger 不落终端）；启停与端口释放（stdin EOF 优雅退出 + taskkill /T 树杀兜底）；自动恢复实测通过（重启 dsh 后 status=running 服务自动重启，无 UI 运行）。
