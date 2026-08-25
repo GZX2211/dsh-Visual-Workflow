@@ -21,8 +21,10 @@ export const HANDLES: Record<string, HandleSpec> = {
   proxy: { inputs: ['db-in', 'ctx-in', 'flow-in'], outputs: ['ctx-out', 'flow-out'] },
   file: { inputs: [], outputs: ['ctx-out'] },
   database: { inputs: [], outputs: ['db-out'] },
-  start: { inputs: [], outputs: ['flow-out', 'ctx-out'] },
-  end: { inputs: ['flow-in', 'ctx-in'], outputs: [] },
+  // 输入/输出节点仅保留一个流程连接点（用户验收标注：连接点多了，应当只有一个；
+  // 外部问题已自动注入输入节点，流式返回不依赖输出节点 ctx 连线）
+  start: { inputs: [], outputs: ['flow-out'] },
+  end: { inputs: ['flow-in'], outputs: [] },
   pause: { inputs: ['flow-in'], outputs: ['flow-out'] },
   group: { inputs: ['flow-in'], outputs: ['flow-out'] },
 }

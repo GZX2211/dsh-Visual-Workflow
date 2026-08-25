@@ -117,8 +117,11 @@ export function RoleForm({ data, copy, presets, models, combos, onPatch, onLoadM
             style={{ minHeight: 130 }}
             onChange={(event) => onPatch({ systemPrompt: event.target.value })}
           />
-          <div style={{ display: 'flex', gap: 6 }}>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <button type="button" className="wf-btn" title={copy.loadMdTitle} onClick={onLoadMd}>{copy.loadMd}</button>
+            {String(data.systemPromptSource ?? '').trim()
+              ? <span className="wf-hint" title={copy.loadMdTitle}>{String(data.systemPromptSource)}</span>
+              : null}
           </div>
         </div>
       </Field>
@@ -201,16 +204,22 @@ export function RoleForm({ data, copy, presets, models, combos, onPatch, onLoadM
 }
 
 // ---------------------------------------------------------------------------
-// 文件表单（text 文本内容 / file 受管文件）
+// 文件表单（text 文本内容 / file 受管文件，支持多选所有类型文件）
 // ---------------------------------------------------------------------------
 
 export function FileForm({ data, copy, onPatch, onFileSelect }: {
   data: Record<string, unknown>
   copy: Dict
   onPatch(patch: Record<string, unknown>): void
-  onFileSelect(file: File): void
+  /** 多选文件回调（用户验收：支持多选所有类型文件）。 */
+  onFileSelect(files: File[]): void
 }) {
   const fileKind = String(data.fileKind ?? 'text')
+  // 已选文件列表：多选 files 优先，兼容单选旧字段（fileName/managedPath）
+  const files = (data.files as Array<{ fileName?: unknown }> | undefined) ?? []
+  const selectedNames = files.length > 0
+    ? files.map((item) => String(item?.fileName ?? '')).filter(Boolean)
+    : [String(data.fileName ?? '')].filter(Boolean)
   return (
     <div>
       <h3>{copy.nodeKinds.file}</h3>
@@ -218,7 +227,7 @@ export function FileForm({ data, copy, onPatch, onFileSelect }: {
       <Field label={copy.fileKind}>
         <select
           value={fileKind}
-          onChange={(event) => onPatch({ fileKind: event.target.value, content: '', managedPath: undefined, fileName: '' })}
+          onChange={(event) => onPatch({ fileKind: event.target.value, content: '', managedPath: undefined, fileName: '', files: [] })}
         >
           <option value="text">{copy.fileKindLabel?.text}</option>
           <option value="file">{copy.fileKindLabel?.file}</option>
@@ -228,16 +237,22 @@ export function FileForm({ data, copy, onPatch, onFileSelect }: {
         <TextAreaField label={copy.fileContent} value={data.content} placeholder={copy.fileContent} onChange={(value) => onPatch({ content: value })} />
       ) : (
         <div className="wf-field" style={{ gap: 6 }}>
-          <span className="wf-hint">
-            {data.fileName ? `${copy.selectedFile}：${String(data.fileName)}` : copy.fileUnset}
-          </span>
           <input
             type="file"
+            multiple
             onChange={(event) => {
-              const file = event.target.files?.[0]
-              if (file) onFileSelect(file)
+              const picked = Array.from(event.target.files ?? [])
+              if (picked.length > 0) onFileSelect(picked)
+              event.target.value = ''
             }}
           />
+          {/* 已选文件列表：显示在按钮下方（用户验收：不在按钮右侧/上方显示），
+              完整文件名，支持多选所有类型文件 */}
+          <div className="wf-file-list">
+            {selectedNames.length > 0
+              ? selectedNames.map((name) => <span key={name} className="wf-file-chip" title={name}>{name}</span>)
+              : <span className="wf-hint">{copy.fileUnset}</span>}
+          </div>
         </div>
       )}
     </div>

@@ -161,11 +161,14 @@ export interface RoleTemplate {
   inputSchema?: string
   /** 输出结构描述（可选）。 */
   outputSchema?: string
+  /** System Prompt 来源文件名（从 .md 加载时记录，左侧栏卡片展示用，需求文档 §4.2.3.1）。 */
+  systemPromptSource?: string
 }
 
 /**
  * 文件模板（架构文档 §6.3）。
  * 非文本文件选择时复制到插件受管目录 data/files/（需求文档 §4.2.4.1 规则 2）。
+ * 支持多选所有类型文件（files 列表，用户验收标注：已选文件列表显示在按钮下方）。
  */
 export interface FileTemplate {
   /** 模板稳定标识。 */
@@ -176,10 +179,12 @@ export interface FileTemplate {
   fileKind: 'text' | 'file'
   /** 文本内容（fileKind='text'）。 */
   content?: string
-  /** 受管文件路径（fileKind='file'）。 */
+  /** 受管文件路径（fileKind='file' 单选时的兼容字段）。 */
   managedPath?: string
   /** 源文件名（fileKind='file' 左侧栏展示用，与 FileNode.data.fileName 对齐）。 */
   fileName?: string
+  /** 多选文件列表（fileKind='file'；每项含受管路径与源文件名）。 */
+  files?: Array<{ fileName: string; managedPath: string }>
 }
 
 /**

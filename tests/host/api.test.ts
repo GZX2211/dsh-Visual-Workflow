@@ -600,10 +600,10 @@ describe('MCP 端点', () => {
     const list = (await h.api.handle('mcpList', {})) as Array<{ id?: string }>
     expect(list).toHaveLength(1)
 
-    // 托管区已写入 profile
+    // 托管区已写入 profile（YAML 单引号标量：反斜杠/路径字面量，避免双重转义事故）
     const text = await readFile(patch, 'utf8')
     expect(text).toContain('# >>> dsh-visual-workflow')
-    expect(text).toContain('serverName: "demo"')
+    expect(text).toContain("serverName: 'demo'")
 
     await h.api.handle('mcpToggle', { id: 'mcp-demo', disabled: true })
     const toggled = (await h.api.handle('mcpList', {})) as Array<{ disabled?: boolean }>

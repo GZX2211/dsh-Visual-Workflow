@@ -11,7 +11,7 @@
 // SIGKILL；主进程重启后 autoRecover 扫描 status=running 的服务重启
 // （端口冲突由端口池重新分配兜底）。
 
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { join, delimiter, isAbsolute } from 'node:path'
@@ -20,6 +20,23 @@ import type { FlowStore } from '../storage/flow-store.js'
 import { validateFlow } from '../graph/validate.js'
 import { renderServePatch } from './serve-patch.js'
 import { findFreePort } from './port-pool.js'
+
+/**
+ * Windows 进程树终止：shell:true 启动的服务进程链表为 cmd(dsh.cmd) → node(dsh)，
+ * 单发 SIGTERM/SIGKILL 只杀 cmd 壳，node 孤儿继续占用端口。故强杀路径统一
+ * taskkill /T（树形）；POSIX 直接 SIGKILL 即可。
+ */
+function killProcessTree(pid: number): void {
+  try {
+    if (process.platform === 'win32') {
+      spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' })
+    } else {
+      process.kill(pid, 'SIGKILL')
+    }
+  } catch {
+    // 进程已退出：忽略
+  }
+}
 
 /** 服务管理器错误码（api.ts 路由层映射 HTTP 状态）。 */
 export const SERVICE_ERR = {
@@ -139,15 +156,27 @@ export class ServiceManager {
     const managed: ManagedChild = { child, port, stopping: false, forceKill: null }
     this.children.set(id, managed)
 
-    // stdout/stderr 持续消费（不消费会阻塞子进程管道）
+    // stdout/stderr 持续消费（不消费会阻塞子进程管道）；转发到进程 stdout（终端可见）
     child.stdout?.on('data', (chunk: Buffer) => {
       for (const line of String(chunk).split(/\r?\n/)) {
-        if (line.trim()) this.log().info?.(`[service:${id}] ${line}`)
+        if (!line.trim()) continue
+        this.log().info?.(`[service:${id}] ${line}`)
+        try {
+          process.stdout.write(`[service:${id}] ${line}\n`)
+        } catch {
+          // stdout 不可用时忽略
+        }
       }
     })
     child.stderr?.on('data', (chunk: Buffer) => {
       for (const line of String(chunk).split(/\r?\n/)) {
-        if (line.trim()) this.log().warn?.(`[service:${id}] ${line}`)
+        if (!line.trim()) continue
+        this.log().warn?.(`[service:${id}] ${line}`)
+        try {
+          process.stdout.write(`[service:${id}] ${line}\n`)
+        } catch {
+          // stdout 不可用时忽略
+        }
       }
     })
 
@@ -172,6 +201,47 @@ export class ServiceManager {
       lastStartedAt: this.isoNow(),
       ...(this.deps.config.apiKey ? { apiKeyHash: hashApiKey(this.deps.config.apiKey) } : { apiKeyHash: undefined }),
     })
+    // 终端启动反馈（dsh web 控制台）：服务已启动 + 端口 + REST API 访问方式。
+    // 用户要求：此信息必须出现在 dsh web 启动终端（不是 DSH 主界面/工作台）。
+    // 关键事实：dsh web 的 cordis logger 不会输出到进程 stdout（实测只有
+    // "dsh web: http://…" 两行 shell 提示）——故横幅直接写进程 stdout（console）。
+    const serviceName = service.name || id
+    const auth = this.deps.config.apiKey
+      ? `Authorization: Bearer <您的 API Key>（已启用鉴权：${this.deps.config.apiKey.slice(0, 4)}****）`
+      : '无鉴权（默认本机/内网直连；可在配置 apiKey 后启用）'
+    const lines = [
+      '',
+      '═══════════════════════════════════════════════════════',
+      `  💡 后台服务已启动：${serviceName}（${id}）`,
+      `     进程 PID：${child.pid ?? '未知'}    服务状态：running`,
+      `     监听地址：http://127.0.0.1:${port}`,
+      '',
+      '  REST API（OpenAI 兼容）：',
+      `     POST  http://127.0.0.1:${port}/v1/chat/completions`,
+      `     GET   http://127.0.0.1:${port}/v1/models`,
+      `     鉴权：${auth}`,
+      '     请求体：{ "messages": [{"role":"user","content":"你好"}], "stream": true, "user_id": "用户标识" }',
+      '     userId 必填（body `user_id` 或 Header `X-User-Id`），多用户会话完全隔离',
+      '',
+      '  curl 示例：',
+      `     curl -N -X POST http://127.0.0.1:${port}/v1/chat/completions \\`,
+      `       -H "Content-Type: application/json" ${this.deps.config.apiKey ? '-H "Authorization: Bearer <API Key>" ' : ''}\\`,
+      `       -d '{"messages":[{"role":"user","content":"你好"}],"stream":true,"user_id":"demo-user"}'`,
+      '',
+      '  停止服务：在工作台点击「停止服务」，或重启 dsh 后由插件自动恢复（若上次为运行中）。',
+      '═══════════════════════════════════════════════════════',
+      '',
+    ]
+    for (const line of lines) {
+      // 双写：logger 归档 + 进程 stdout 直出（dsh web 终端可见）
+      this.log().info?.(line)
+      try {
+        process.stdout.write(`${line}\n`)
+      } catch {
+        // stdout 不可用时忽略（logger 已归档）
+      }
+    }
+    this.log().info?.(`[service:${id}] 服务已启动（端口 ${port}），常规输出见下方服务日志`)
     return { serviceId: id, status: 'running', port, pid: child.pid }
   }
 
@@ -188,12 +258,14 @@ export class ServiceManager {
       } catch (error) {
         this.log().warn?.(`[service:${id}] SIGTERM 失败：${error instanceof Error ? error.message : String(error)}`)
       }
+      // stdin 关闭（EOF）→ 服务进程优雅退出（Windows shell 信号透传不可靠）
+      try {
+        child.stdin?.end()
+      } catch {
+        // stdin 已关
+      }
       managed.forceKill = setTimeout(() => {
-        try {
-          child.kill('SIGKILL')
-        } catch {
-          // 进程已退出
-        }
+        killProcessTree(Number(child.pid ?? 0))
       }, STOP_GRACE_MS)
     }
     await this.persistRuntime(id, { status: 'stopped', lastStoppedAt: this.isoNow() })
@@ -241,6 +313,8 @@ export class ServiceManager {
       } catch {
         // 尽力而为
       }
+      // 树形兜底（Windows 下 cmd 壳被杀后 node 服务进程可能残留）
+      killProcessTree(Number(managed.child.pid ?? 0))
     }
     this.children.clear()
   }
@@ -260,16 +334,25 @@ export class ServiceManager {
 
   private spawnChild(dshCommand: string, serviceId: string, port: number, patchPath: string): ChildProcess {
     const factory = this.deps.spawn ?? spawn
+    // 参数约定（为什么这样传，官方 CLI 事实）：
+    //   - headless 应用的 commander 只自持 task 位置参数；app 级未知 flag
+    //     （--visual-workflow-serve/--port）会被 commander 拒绝 → 进程崩溃
+    //     （此前根因：服务启动即 crashed）。
+    //   - serviceId/port 已在 renderServePatch 渲染进 patch config（config 域），
+    //     服务进程经 ctx.cmdlineArgs→parseServiceArgs 优先解析 flag、缺省回退
+    //     config——故 fork 只传一个占位 task 位置参数满足 headless-startup 的
+    //     非空校验；headless-runner 已被 serve patch disabled，不会执行该任务。
     return factory(dshCommand, [
       '--profile', 'headless',
       '--patch', patchPath,
-      '--visual-workflow-serve', serviceId,
-      '--port', String(port),
+      '__visual_workflow_service__',
     ], {
       cwd: this.deps.dataDir,
       env: process.env,
       shell: process.platform === 'win32',
-      stdio: ['ignore', 'pipe', 'pipe'],
+      // stdin 用 pipe：服务进程监听 EOF（父进程退出/主动关闭 → 优雅退出，
+      // 规避 Windows shell 层信号无法转发到 node 的进程树断裂问题）
+      stdio: ['pipe', 'pipe', 'pipe'],
     })
   }
 

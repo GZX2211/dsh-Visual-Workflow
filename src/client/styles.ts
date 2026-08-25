@@ -89,6 +89,12 @@ export const styles = `
 .wf-node--group .wf-node__kind{color:var(--wf-warn)}
 .wf-node--group{display:flex;flex-direction:column;padding:10px 12px}
 .wf-group-node{width:300px;height:220px}
+/* 拖拽悬停入组高亮（用户验收标注：卡片插入协作组卡片区域即识别为入组） */
+.wf-group-node.is-drop-target .wf-node--group{border-color:var(--wf-pass);box-shadow:0 0 0 3px color-mix(in srgb,var(--wf-pass) 26%,transparent),0 0 22px color-mix(in srgb,var(--wf-pass) 32%,transparent)}
+.wf-group__drop-hint{flex:none;margin:6px 0 2px;padding:4px 8px;border:1px dashed var(--wf-pass);border-radius:8px;color:var(--wf-pass);font-size:10px;font-weight:700;text-align:center;pointer-events:none}
+/* 已选文件列表（文件表单，按钮下方显示；用户验收标注） */
+.wf-file-list{display:flex;flex-direction:column;gap:4px;padding:6px;border:1px solid var(--wf-border);border-radius:8px;background:var(--wf-layer-2);max-height:120px;overflow:auto;scrollbar-width:thin}
+.wf-file-chip{display:block;font-size:11px;color:var(--wf-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:2px 6px;border-radius:6px;background:color-mix(in srgb,var(--wf-brand) 8%,transparent)}
 .wf-group__members{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:4px;margin-top:6px;padding:4px;border:1px solid var(--wf-border);border-radius:8px;background:var(--wf-layer-2);scrollbar-width:thin}
 .wf-group__member{position:relative;display:flex;align-items:center;gap:6px;border:0;background:transparent;color:var(--wf-ink);padding:3px 6px 3px 26px;font-size:11px;text-align:left}
 .wf-group__member:hover{background:color-mix(in srgb,var(--wf-brand) 8%,transparent);border-radius:6px}

@@ -416,11 +416,12 @@ describe('e2e：服务侧组合（fork 参数 / serve patch / 会话映射持久
     } as never)
     const started = (await manager.start('svc-1')) as { status: string; port: number }
     expect(started.status).toBe('running')
-    expect(spawns[0].args).toContain('--visual-workflow-serve')
-    expect(spawns[0].args).toContain('svc-1')
-    expect(spawns[0].args).toContain('--port')
-    expect(spawns[0].args).toContain('7860')
+    // fork 参数形态：serviceId/port 经 patch config 传入；fork 只传占位 task
+    // 位置参数（headless 应用 commander 不识别 app 级 flag，见 manager.ts 注释）
+    expect(spawns[0].args).toContain('--profile')
+    expect(spawns[0].args).toContain('headless')
     expect(spawns[0].args).toContain('--patch')
+    expect(spawns[0].args).toContain('__visual_workflow_service__')
 
     // serve patch 渲染：headless 覆盖 + webserver/服务插件行 + apiKey 为 null
     const patch = renderServePatch({

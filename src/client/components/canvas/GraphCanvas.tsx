@@ -41,6 +41,8 @@ export interface GraphCanvasProps {
   onConnect(connection: { source: string; target: string; sourceHandle: string; targetHandle: string }): void
   onConnectionRejected(): void
   onGroupResize(id: string, size: { w: number; h: number }): void
+  /** 左栏拖拽悬停的协作组 id（组卡片高亮 + 「放开以入组」提示）。 */
+  dropTargetGroupId?: string | null
   fitLabel: string
   zoomInLabel: string
   zoomOutLabel: string
@@ -53,7 +55,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
   const {
     nodes, edges, copy, mode, selectedNode, selectedEdge, runStatusByNode, highlightedNodeIds,
     onInit, onNodeDragStart, onNodeMove, onNodeDropToGroup, onNodeSelect, onEdgeSelect, onPaneClick,
-    onConnect, onConnectionRejected, onGroupResize, fitLabel, zoomInLabel, zoomOutLabel, emptyHint,
+    onConnect, onConnectionRejected, onGroupResize, dropTargetGroupId, fitLabel, zoomInLabel, zoomOutLabel, emptyHint,
   } = props
   const rootRef = useRef<HTMLDivElement | null>(null)
   const viewportRef = useRef<Viewport>({ x: 32, y: 32, zoom: 0.8 })
@@ -411,6 +413,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
               copy={copy}
               members={groupMembers.get(node.id) ?? []}
               selected={node.id === selectedNode}
+              dropTarget={dropTargetGroupId === node.id}
               onPointerDown={beginNodeDrag}
               onHandlePointerDown={beginConnection}
               onMemberSelect={onNodeSelect}

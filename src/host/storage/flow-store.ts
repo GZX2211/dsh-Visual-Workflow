@@ -76,6 +76,17 @@ function safeFilePart(value: string): string {
   return sanitized
 }
 
+/** 前端快照标记字段（保存时剥除，绝不落盘——旧实现把 _draft 写盘导致已入库对象被误判草稿）。 */
+const CLIENT_META_KEYS = ['_draft', '_clientMeta'] as const
+
+/** 剥除前端快照标记（浅拷贝，不修改入参）。 */
+function stripClientMeta<T>(value: T): T {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return value
+  const next = { ...(value as Record<string, unknown>) }
+  for (const key of CLIENT_META_KEYS) delete next[key]
+  return next as T
+}
+
 /** 提取当前 revision（非法/缺失按 0 处理，旧项目 flowRevision 语义）。 */
 function flowRevision(value: { revision?: number } | null): number {
   const r = Number(value?.revision)
@@ -193,7 +204,7 @@ export class FlowStore {
       const revision = nextFlowRevision(flow, current, options)
       const now = new Date().toISOString()
       const saved: WorkflowDocument = {
-        ...flow,
+        ...stripClientMeta(flow),
         revision,
         sessionId,
         createdAt: flow.createdAt ?? current?.createdAt ?? now,
@@ -293,7 +304,7 @@ export class FlowStore {
       const revision = nextFlowRevision(service, current, options)
       const now = new Date().toISOString()
       const saved: ServiceState = {
-        ...service,
+        ...stripClientMeta(service),
         revision,
         sessionId,
         createdAt: service.createdAt ?? current?.createdAt ?? now,
@@ -360,9 +371,9 @@ export class FlowStore {
     const path = this.templatePath(kind, template.id)
     return withJsonLock(path, async () => {
       const now = new Date().toISOString()
-      const saved = { ...template, createdAt: (template as { createdAt?: string }).createdAt ?? now, updatedAt: now }
+      const saved = { ...stripClientMeta(template), createdAt: (template as { createdAt?: string }).createdAt ?? now, updatedAt: now }
       await atomicWriteJson(path, saved)
-      return saved
+      return saved as Template
     })
   }
 
@@ -553,6 +564,10 @@ export class FlowStore {
       }
     }
     const f = template as FileTemplate
+    // files 列表（多选）优先；兼容单选旧字段（fileName/managedPath）
+    const files = Array.isArray(f.files) && f.files.length > 0
+      ? f.files.map((item) => ({ fileName: String(item?.fileName ?? ''), managedPath: String(item?.managedPath ?? '') }))
+      : []
     return {
       id,
       kind: 'file',
@@ -563,6 +578,7 @@ export class FlowStore {
         content: f.content ?? '',
         managedPath: f.managedPath,
         fileName: f.managedPath ? f.managedPath.split(/[\\/]/).pop() : '',
+        ...(files.length > 0 ? { files } : {}),
       },
     }
   }

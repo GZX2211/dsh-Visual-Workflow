@@ -82,28 +82,14 @@ export function useWorkflows(
     edges: CanvasEdge[],
   ): Promise<WorkflowDocument | null> => {
     const serialized = serializeWorkflow(flow, nodes, edges)
-    const draft = (flow as unknown as { _draft?: boolean })._draft === true
-    let saved: WorkflowDocument
-    if (draft) {
-      const created = await remote.call(EP.EP_CREATE_WORKFLOW, {
-        sessionId,
-        name: String(serialized.name ?? '').trim() || '未命名工作流',
-        description: String(serialized.description ?? ''),
-      }) as WorkflowDocument
-      if ((serialized.nodes?.length ?? 0) > 0 || (serialized.lines?.length ?? 0) > 0) {
-        saved = await remote.call(EP.EP_PUT_WORKFLOW, {
-          sessionId,
-          flow: { ...serialized, id: created.id, revision: created.revision },
-        }) as WorkflowDocument
-      } else {
-        saved = created
-      }
-    } else {
-      saved = await remote.call(EP.EP_PUT_WORKFLOW, {
-        sessionId,
-        flow: serialized,
-      }) as WorkflowDocument
-    }
+    // 保存统一走 putWorkflow：后端在文档不存在时视为创建（revision 0 → 1），
+    // id 保持不变——草稿首存不再另 assign id，避免 WORKFLOW_UPDATED 无法命中
+    // 列表项、当前画布继续引用旧草稿 id（旧实现每次保存都新建一个副本，
+    // 用户感知「保存成功但实际没保存」）。
+    const saved = await remote.call(EP.EP_PUT_WORKFLOW, {
+      sessionId,
+      flow: serialized,
+    }) as WorkflowDocument
     dispatch({ type: 'WORKFLOW_UPDATED', flow: saved })
     return saved
   }, [dispatch, remote, sessionId])

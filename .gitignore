@@ -13,6 +13,7 @@ node_modules/
 
 # 测试产物
 coverage/
+imgs/
 
 # 临时验证目录（T-002 Loader 验证：临时 DSH_HOME / scratch profile，避免污染用户全局环境）
 .tmp/

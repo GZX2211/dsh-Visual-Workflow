@@ -1,10 +1,12 @@
 // src/client/entry.ts
 //
-// Client 半区插件入口（照搬旧项目 entry.js，按架构文档 §10 改版）：
-//   1. conversation.view slot 注册（对话区视图环，order 20）；
-//   2. 主界面右下角圆形 FAB + 浮窗工作台（body 常驻，独立于视图环激活态）；
-//   3. 样式注入（style[data-plugin]）+ i18n 注册（官方 locale 服务命名空间 visualWorkflow）。
-// 卸载：样式移除、浮窗 root 卸载、slot disposer 随 fiber 注销（ctx.effect）。
+// Client 半区插件入口：
+//   1. 主界面右下角圆形 FAB + 浮窗工作台（body 常驻，独立于视图环激活态）；
+//   2. 样式注入（style[data-plugin]）+ i18n 注册（官方 locale 服务命名空间 visualWorkflow）。
+// 卸载：样式移除、浮窗 root 卸载、订阅释放（ctx.effect）。
+//
+// 变更（2026.08.25 用户验收批注）：**不再注册 conversation.view 会话页 tab**
+// （「不要在这里注册我的插件入口」）——插件入口仅保留 FAB + 浮窗工作台。
 
 import React from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -35,22 +37,16 @@ function currentSessionOf(ctx: { get?(name: string): unknown }): string {
   return typeof current === 'string' ? current : ''
 }
 
-// 必需 service 声明：slots 为硬依赖；locale/sessions 经 ctx.get 守卫（测试/降级友好）。
-export const inject: string[] = ['slots']
-
-/** 对话区视图（slot 挂载形态；与浮窗工作台共享同一 Studio）。 */
-export function VisualWorkflowView(props: { sessionId?: unknown; language?: unknown }) {
-  const t = text(detectLanguage(props.language))
-  return React.createElement(Studio, { t, sessionId: String(props.sessionId ?? '') })
-}
+// 无硬依赖：样式/DOM 全部自持；locale/sessions 经 ctx.get 守卫（测试/降级友好）。
+export const inject: string[] = []
 
 /** 测试导出（client-smoke 渲染路径验证）。 */
-export const __test = { VisualWorkflowView, FloatingWindow }
+export const VisualWorkflowView = null
+export const __test = { FloatingWindow }
 
 export function apply(ctx: {
   get?(name: string): unknown
   effect?(fn: () => (() => void) | void, label?: string): unknown
-  slots?: unknown
   locale?: unknown
 }): void {
   // 样式注入（fiber 卸载时移除）
@@ -116,34 +112,4 @@ export function apply(ctx: {
       container = null
     }
   }, 'visual-workflow: floating window')
-
-  // conversation.view slot（对话区视图环：order 20 工作流）
-  // 注意：slots.register 必须「方法链」调用（this=服务代理，cordis 借此把
-  // this.ctx 绑定到调用者 fiber）；先取出再调用会丢 this，内部 this.ctx.effect 崩。
-  const slots = ctx.slots as
-    | {
-        inject?(name: string, factory: () => unknown): unknown
-        register?(options: Record<string, unknown>, view: unknown): unknown
-      }
-    | null
-    | undefined
-  if (slots?.inject) {
-    ctx.effect?.(() => {
-      if (typeof slots.register !== 'function') return undefined
-      const language = detectLanguage(ctx.get?.('locale'))
-      return slots.register({
-        name: 'conversation.view',
-        id: 'visual-workflow',
-        order: 20,
-        label: () => {
-          const t = text(detectLanguage(ctx.get?.('locale')))
-          return t.libTab.workflow
-        },
-        inject: (sessionId: unknown) => ({
-          sessionId: String(sessionId ?? ''),
-          language: detectLanguage(ctx.get?.('locale')) || language,
-        }),
-      }, VisualWorkflowView) as () => void
-    }, 'visual-workflow: conversation view')
-  }
 }

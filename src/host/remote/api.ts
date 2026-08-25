@@ -39,6 +39,22 @@ import { openServiceDebug, pumpServiceDebug, ServiceDebugError, type SseSink } f
 /** 请求体上限（64MB——文件模板 base64 上传需要大体积）。 */
 const BODY_LIMIT = 64 * 1024 * 1024
 
+/**
+ * 前端快照标记字段黑名单（保存时剥除，绝不落盘）：
+ *  - _draft：客户端本地草稿标记。旧实现把它随模板/服务/工作流一起写盘，
+ *    刷新后已入库对象被误判为草稿（本地删除不走后端、保存行为错乱）。
+ *  - _clientMeta：预留的其它客户端元数据。
+ * 说明：保存逻辑以深拷贝剔除，避免污染对象本身（调用方列表仍可复用）。
+ */
+const CLIENT_META_KEYS = ['_draft', '_clientMeta'] as const
+
+/** 剥离前端快照标记（浅拷贝，不修改入参）。 */
+function stripClientMeta<T extends Record<string, unknown>>(value: T): T {
+  const next = { ...value }
+  for (const key of CLIENT_META_KEYS) delete next[key]
+  return next
+}
+
 /** HTTP 错误（status 供路由层写响应；code 供 client 分支处理）。 */
 export class HttpError extends Error {
   readonly status: number
@@ -171,7 +187,7 @@ export class VisualWorkflowApi {
     if (!raw || !String(raw.id ?? '').trim()) throw httpError(400, 'requires a flow id')
     const expected = Number(raw.revision)
     if (!Number.isFinite(expected)) throw httpError(400, 'requires a numeric revision')
-    const flow = { ...raw, sessionId } as WorkflowDocument
+    const flow = { ...stripClientMeta(raw as Record<string, unknown>), sessionId } as WorkflowDocument
     try {
       return await this.host.store.saveWorkflow(flow, sessionId, { expectedRevision: expected })
     } catch (error) {
@@ -215,7 +231,7 @@ export class VisualWorkflowApi {
     const expected = Number(raw.revision)
     if (!Number.isFinite(expected)) throw httpError(400, 'requires a numeric revision')
     try {
-      return await this.host.store.saveService(raw as never, sessionId, { expectedRevision: expected })
+      return await this.host.store.saveService(stripClientMeta(raw) as never, sessionId, { expectedRevision: expected })
     } catch (error) {
       const code = (error as { code?: string })?.code ?? ''
       if (code === 'FLOW_REVISION_CONFLICT') throw httpError(409, String((error as Error).message), code)
@@ -278,7 +294,8 @@ export class VisualWorkflowApi {
     if (kind === 'role' && !String(template.kind ?? '').trim()) {
       template.kind = 'agent'
     }
-    return this.host.store.saveTemplate(kind as 'role' | 'file' | 'database', template as never)
+    // 剥除前端快照标记（_draft 等），防止已入库模板刷新后被误判为草稿
+    return this.host.store.saveTemplate(kind as 'role' | 'file' | 'database', stripClientMeta(template) as never)
   }
 
   /** 删除预览：模板与画布节点深拷贝解耦，删除模板不影响任何已有节点。 */
@@ -461,7 +478,7 @@ export class VisualWorkflowApi {
     return {
       items,
       loadedPlugins,
-      mcp: mcpServers.map((server: { id?: unknown; serverName?: unknown; url?: unknown; command?: unknown; transport?: unknown; disabled?: unknown }) => ({
+      mcp: mcpServers.map((server: { id?: unknown; serverName?: unknown; url?: unknown; command?: unknown; transport?: unknown; disabled?: unknown; args?: unknown; env?: unknown }) => ({
         id: server.id,
         name: server.serverName,
         description: server.url
@@ -469,6 +486,11 @@ export class VisualWorkflowApi {
           : `MCP 服务器（stdio：${server.command}）`,
         transport: server.transport,
         disabled: server.disabled === true,
+        // 组合管理「编辑」表单的字段来源：缺失时编辑后启动命令/参数恒为空
+        command: String(server.command ?? ''),
+        args: Array.isArray(server.args) ? server.args : [],
+        env: server.env ?? {},
+        url: String(server.url ?? ''),
         category: 'mcp',
       })),
     }

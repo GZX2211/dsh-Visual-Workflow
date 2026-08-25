@@ -139,6 +139,29 @@ async function boot(ctx: Context, config: Config, io: RunnerIo): Promise<void> {
   ctx.effect(() => registerOpenAiApi(ctx, api), 'visualWorkflowService.openai')
 
   io.stdout.write(`visual-workflow-service: ${serviceId} listening on port ${port} (maxConcurrent=${config.maxConcurrent})\n`)
+  if (config.apiKey) {
+    io.stdout.write(`visual-workflow-service: REST API 鉴权已启用（Authorization: Bearer <apiKey>）\n`)
+  } else {
+    io.stdout.write(`visual-workflow-service: REST API 鉴权关闭（仅限本机/内网使用）\n`)
+  }
+  io.stdout.write(`visual-workflow-service: OpenAI 兼容端点：\n`)
+  io.stdout.write(`  POST http://127.0.0.1:${port}/v1/chat/completions\n`)
+  io.stdout.write(`  GET  http://127.0.0.1:${port}/v1/models\n`)
+  io.stdout.write(`  userId 必填（body user_id 或 Header X-User-Id，多用户会话隔离）\n`)
+
+  // 父进程退出/主动停止 → stdin EOF → 优雅退出。
+  // 为什么：Windows 下 manager 经 shell 启动（cmd 壳），SIGTERM 无法可靠
+  // 透传到 node 服务进程，内存/端口残留。stdin 管道 EOF 是跨平台可靠的
+  // 父进程存活信号（manager stop 会主动 end stdin）。
+  process.stdin.resume()
+  process.stdin.on('end', () => {
+    io.stdout.write('visual-workflow-service: 父进程已关闭 stdin，退出服务\n')
+    try {
+      io.exit(0)
+    } catch {
+      process.exit(0)
+    }
+  })
 }
 
 /** 按会话取/建根 Agent（父代理节点 provider/model 优先；会话持久化上下文保留）。 */

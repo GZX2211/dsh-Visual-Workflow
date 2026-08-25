@@ -111,6 +111,14 @@ export const zh = {
   fileContent: '文件内容',
   selectedFile: '已选文件',
   fileUnset: '未选择文件',
+  /** 文件多选提示（已选文件列表显示在按钮下方，用户验收标注）。 */
+  filePickHint: '可多选所有类型文件；非文本文件复制到插件受管目录',
+  /** 协作组拖拽悬停提示（用户验收标注：放开以入组）。 */
+  groupDropHint: '放开以入组',
+  /** 角色卡元信息「模型」前缀。 */
+  nodeMetaModel: '模型',
+  /** 画布节点元信息「组合」前缀（显示选择的模式或组合，用户验收标注）。 */
+  nodeMetaPreset: '组合',
   description: '描述',
   descriptionHint: '数据库用途说明',
   dbTypeLabel: '类型',
@@ -364,8 +372,12 @@ export const en: Dict = {
   outputSchema: 'Output schema',
   fileKind: 'File kind',
   fileContent: 'File content',
-  selectedFile: 'Selected file',
+  selectedFile: 'selected file',
   fileUnset: 'No file selected',
+  filePickHint: 'Select files of all types; non-text files are copied into the plugin-managed directory',
+  groupDropHint: 'Drop to join the group',
+  nodeMetaModel: 'Model',
+  nodeMetaPreset: 'Preset',
   description: 'Description',
   descriptionHint: 'Database purpose',
   dbTypeLabel: 'Type',

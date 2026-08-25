@@ -25,7 +25,7 @@ export interface InspectorProps {
   onSave(): void
   onCopyProxy(): void
   onRemoveMember(memberId: string): void
-  onFileSelect(file: File): void
+  onFileSelect(files: File[]): void
   onLoadMd(): void
   /** 协作 Prompt 从 .md 加载（与角色 System Prompt 一致）。 */
   onLoadGroupMd(): void
@@ -53,7 +53,9 @@ export function Inspector(props: InspectorProps) {
         content = <WorkflowForm data={data} copy={t} isService={editorData.kind === 'service'} flowMeta={flowMeta} onPatch={onPatch} />
         break
       case 'role':
-        content = editorData.isParent
+        // 父代理规则：左侧模板点击无属性（不可编辑）；画布父代理节点可编辑
+        // （名称/System Prompt/服务商/模型/思考强度/模式（仅 preset）/高级选项，§4.2.3.1）
+        content = editorData.isParent && editorData.template
           ? <div className="wf-empty">{String(t.parentTemplateHint ?? '')}</div>
           : (
               <RoleForm
@@ -64,7 +66,8 @@ export function Inspector(props: InspectorProps) {
                 combos={combos}
                 onPatch={onPatch}
                 onLoadMd={onLoadMd}
-                isParent={false}
+                isParent={editorData.isParent === true}
+                allowCombos={editorData.isParent !== true}
               />
             )
         break
@@ -97,7 +100,9 @@ export function Inspector(props: InspectorProps) {
     const kind = editorData.kind
     const isStage = kind === 'stage'
     const isProxy = kind === 'proxy'
-    const canCopyProxy = kind === 'role' && !editorData.isParent && !editorData.template
+    // 复制按钮：画布角色节点（含父代理节点，§4.2.3.1 规则 3 可创建虚拟节点）；
+    // 模板与父代理模板不可复制
+    const canCopyProxy = kind === 'role' && !editorData.template
     if (!isStage) {
       footer.push(
         <button key="save" type="button" className="wf-btn is-primary" onClick={onSave} disabled={importBusy || saveDisabled}>

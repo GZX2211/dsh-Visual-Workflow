@@ -242,17 +242,26 @@ function renderRegion(rows: McpServerRow[], toggles: Array<[string, boolean]>): 
   return content ? `${START}\n${content}\n${END}` : ''
 }
 
+/**
+ * YAML 单引号字符串转义（单引号内反斜杠为字面量，只有 ' 需翻倍）。
+ * 为什么不用 JSON.stringify：双引号包裹时反斜杠需成对转义，写盘文件里
+ * 出现 16 层反斜杠（双重转义事故），MCP 命令路径解析错误导致工具无法加载。
+ */
+function yamlScalar(value: string): string {
+  return `'${String(value).replace(/'/g, "''")}'`
+}
+
 function renderConfig(config: Record<string, unknown>): string {
   const lines: string[] = []
   for (const [key, value] of Object.entries(config ?? {})) {
     if (value === undefined || value === null || value === '') continue
     if (Array.isArray(value) && value.length > 0) {
       lines.push(`        ${key}:`)
-      for (const item of value) lines.push(`          - ${JSON.stringify(String(item))}`)
+      for (const item of value) lines.push(`          - ${yamlScalar(String(item))}`)
     } else if (typeof value === 'object') {
       lines.push(`        ${key}: ${JSON.stringify(value)}`)
     } else {
-      lines.push(`        ${key}: ${JSON.stringify(value)}`)
+      lines.push(`        ${key}: ${yamlScalar(String(value))}`)
     }
   }
   return lines.length ? `\n${lines.join('\n')}` : ' {}'

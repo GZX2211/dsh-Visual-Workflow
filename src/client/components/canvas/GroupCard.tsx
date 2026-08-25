@@ -13,28 +13,31 @@ interface GroupCardProps {
   copy: Dict
   members: Array<{ id: string; label: string; status: string | null }>
   selected: boolean
+  /** 拖拽悬停目标（左栏角色卡拖入时高亮并提示「放开以入组」）。 */
+  dropTarget: boolean
   onPointerDown(event: React.PointerEvent, id: string): void
   onHandlePointerDown(event: React.PointerEvent, id: string, handle: string): void
   onMemberSelect(id: string): void
   onResizeStart(event: React.PointerEvent, id: string, direction: string): void
 }
 
-export function GroupCard({ node, copy, members, selected, onPointerDown, onHandlePointerDown, onMemberSelect, onResizeStart }: GroupCardProps) {
+export function GroupCard({ node, copy, members, selected, dropTarget, onPointerDown, onHandlePointerDown, onMemberSelect, onResizeStart }: GroupCardProps) {
   const size = nodeSizeOf(node)
   const memberIds = (node.data.memberIds as string[] | undefined) ?? []
   // 组卡片提供流程入/出接点（居中；成员节点的上下文/数据库连线走成员自身接点）
   return (
     <div
-      className="wf-graph__node wf-group-node"
+      className={`wf-graph__node wf-group-node${dropTarget ? ' is-drop-target' : ''}`}
       data-wf-node-id={node.id}
       style={{ left: node.position.x, top: node.position.y, width: size.w, height: size.h }}
       onPointerDown={(event) => onPointerDown(event, node.id)}
     >
-      <div className={`wf-node wf-node--group${selected ? ' is-selected' : ''}`}>
+      <div className={`wf-node wf-node--group${selected ? ' is-selected' : ''}${dropTarget ? ' is-drop-target' : ''}`}>
         <div className="wf-node__kind">
           <span>{String(copy.nodeKinds?.group ?? '协作组')}</span>
           <span className="wf-hint">{`${memberIds.length} ${String(copy.groupMembers ?? '个成员')}`}</span>
         </div>
+        {dropTarget ? <div className="wf-group__drop-hint">{String(copy.groupDropHint ?? '放开以入组')}</div> : null}
         <div className="wf-node__label">{String(node.data.label ?? copy.nodeKinds?.group ?? '协作组')}</div>
         <div className="wf-group__members">
           {members.length === 0

@@ -107,7 +107,7 @@ class FakeChild extends EventEmitter {
 interface SpawnRecord {
   command: string
   args: string[]
-  options: { cwd: string; shell: boolean }
+  options: { cwd: string; shell: boolean; stdio: readonly ('ignore' | 'pipe')[] }
 }
 
 interface ManagerHarness {
@@ -128,7 +128,7 @@ function makeManager(store: FlowStore, dataDir: string, options: { ports?: numbe
     config: { servicePortBase: 17860, apiKey: null, maxConcurrentPerService: 50 },
     dshCommand: 'C:\\dsh\\dsh.cmd',
     findPort: async () => ports.length > 0 ? ports.shift()! : 17860,
-    spawn: ((command: string, args: string[], spawnOptions: { cwd: string; shell: boolean }) => {
+    spawn: ((command: string, args: string[], spawnOptions: { cwd: string; shell: boolean; stdio: readonly ('ignore' | 'pipe')[] }) => {
       spawns.push({ command, args, options: spawnOptions })
       const child = new FakeChild()
       children.push(child)
@@ -146,16 +146,17 @@ describe('ServiceManager.start', () => {
     const result = await h.manager.start('svc-1')
 
     expect(result).toMatchObject({ serviceId: 'svc-1', status: 'running', port: 17860, pid: 4242 })
-    // spawn 参数形态（launcher 自持参数族）
+    // spawn 参数形态：serviceId/port 已渲染进 patch config；fork 只传占位 task
+    // 位置参数（headless 应用 commander 不识别 app 级 flag，见 manager.ts 注释）
     expect(h.spawns[0].args).toEqual([
       '--profile', 'headless',
       '--patch', join(store.root, 'services', 'svc-1.serve.patch.yml'),
-      '--visual-workflow-serve', 'svc-1',
-      '--port', '17860',
+      '__visual_workflow_service__',
     ])
     expect(h.spawns[0].options.cwd).toBe(store.root)
     // win32 下 dsh.cmd 需要 cmd 外壳执行；Unix 直接 exec
     expect(h.spawns[0].options.shell).toBe(process.platform === 'win32')
+    expect(h.spawns[0].options.stdio).toEqual(['pipe', 'pipe', 'pipe'])
     // patch 产物已渲染
     const patch = await readFile(join(store.root, 'services', 'svc-1.serve.patch.yml'), 'utf8')
     expect(patch).toContain('id: headless-runner')
@@ -292,7 +293,9 @@ describe('autoRecover', () => {
     const restarted = await h.manager.autoRecover()
     expect(restarted).toEqual(['svc-run'])
     expect(h.spawns.length).toBe(1)
-    expect(h.spawns[0].args).toContain('svc-run')
+    // serviceId/port 经 patch config 传入（fork 参数只含占位 task）
+    const recoveredPatch = await readFile(join(store.root, 'services', 'svc-run.serve.patch.yml'), 'utf8')
+    expect(recoveredPatch).toContain('svc-run')
     // 新端口落盘
     expect((await store.getServiceById('svc-run'))?.port).toBe(17870)
     // stopped 服务不被拉起

@@ -12,10 +12,19 @@
 import { readFile, writeFile, copyFile, mkdir, rename } from 'node:fs/promises'
 import { join, basename, extname } from 'node:path'
 
-/** 受管文件名消毒（只允许安全字符，防目录穿越）。 */
+/**
+ * 受管文件名消毒：仅剔除路径分隔符与 Windows/会话危险字符，保留中文等
+ * Unicode 字符（旧实现把非 ASCII 全部替换为 '_'，导致「任务清单规则.md」
+ * 变成「______.md」，卡片显示错乱）。防目录穿越：剥 basename + 去 .. + 去控制字符。
+ */
 export function safeManagedName(name: string): string {
-  const base = basename(String(name ?? '').trim()).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120)
-  return base || `file-${Date.now().toString(36)}`
+  const base = basename(String(name ?? '').trim())
+  // 去除路径分隔符、通配/危险字符与控制字符；保留中文、字母、数字与 . _ - 空格
+  const cleaned = base
+    .replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, '_')
+    .replace(/^\.+/, '') // 前置点（隐藏/穿越）
+    .slice(0, 120)
+  return cleaned || `file-${Date.now().toString(36)}`
 }
 
 /** 受管文件绝对路径（data/files/<safeName>）。 */

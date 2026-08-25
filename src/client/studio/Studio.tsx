@@ -513,6 +513,9 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
   }, [dispatch, history, notify, state.canvas.edges, state.canvas.nodes, t.groupMemberLimitHint, t.toastGroupMemberAdded])
 
   // ---------- 左侧拖拽（pointer，照搬旧项目 beginLibraryDrag） ----------
+  // 拖拽经过协作组卡片时：组卡片高亮并提示「放开以入组」（用户验收标注：
+  // 卡片插入协作组卡片区域即识别为入组，而非仅拖到连接点）
+  const [dropGroupId, setDropGroupId] = useState<string | null>(null)
   const beginLibraryDrag = useCallback((event: React.PointerEvent, payload: DragPayload) => {
     if (event.button !== undefined && event.button !== 0) return
     dragRef.current = {
@@ -531,6 +534,12 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
         drag.preview = { x: moveEvent.clientX, y: moveEvent.clientY }
         setDragPreview({ x: moveEvent.clientX, y: moveEvent.clientY, label: payload.label })
       }
+      // 拖拽悬停检测：落点（含其祖先）为协作组卡片 → 高亮 + 提示
+      const target = typeof document.elementFromPoint === 'function'
+        ? document.elementFromPoint(moveEvent.clientX, moveEvent.clientY)
+        : null
+      const groupEl = target?.closest?.('.wf-group-node') as HTMLElement | null
+      setDropGroupId(groupEl?.getAttribute('data-wf-node-id') ?? null)
     }
     const onUp = (upEvent: PointerEvent): void => {
       const drag = dragRef.current
@@ -538,6 +547,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       setDragPreview(null)
+      setDropGroupId(null)
       if (!drag?.preview) {
         payload.onClick?.()
         return
@@ -546,7 +556,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
       if (!rect || upEvent.clientX < rect.left || upEvent.clientX > rect.right || upEvent.clientY < rect.top || upEvent.clientY > rect.bottom) {
         return
       }
-      // 左栏角色模板直接拖入协作组：落点为组卡片时生成节点并入组（§4.2.5.2 规则 1）
+      // 左栏角色模板直接拖入协作组：落点为组卡片（含组内成员行）时生成节点并入组（§4.2.5.2 规则 1）
       const groupEl = typeof document.elementFromPoint === 'function'
         ? document.elementFromPoint(upEvent.clientX, upEvent.clientY)?.closest?.('.wf-group-node') as HTMLElement | null
         : null
@@ -611,13 +621,11 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
     if (editor.source === 'node') {
       const node = state.canvas.nodes.find((item) => item.id === editor.id)
       if (!node) return
-      if (node.kind === 'agent' || node.kind === 'parent') {
-        const normalized = { ...patch }
-        delete normalized.name
-        dispatch({ type: 'NODE_DATA_PATCH', id: editor.id, patch: normalized })
-      } else {
-        dispatch({ type: 'NODE_DATA_PATCH', id: editor.id, patch })
-      }
+      // 画布节点的名称数据源为 label（模板才使用 name）；双写补丁在此消毒，
+      // 避免 file 节点 data 里残留多余的 name 字段（用户验收：磁盘数据被污染）
+      const normalized = { ...patch }
+      delete normalized.name
+      dispatch({ type: 'NODE_DATA_PATCH', id: editor.id, patch: normalized })
       return
     }
     if (editor.source === 'edge') {
@@ -1012,7 +1020,8 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
     if (!file) return
     try {
       const content = await readFileAsText(file)
-      patchEditor({ systemPrompt: content })
+      // 记录来源文件名：左侧栏角色模板卡/画布角色卡展示 System Prompt 字段（用户验收标注）
+      patchEditor({ systemPrompt: content, systemPromptSource: file.name })
       notify('success', t.toastSaved)
     } catch (error) {
       toastError(error)
@@ -1035,7 +1044,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
     }
   }, [notify, patchEditor, t.toastSaved, toastError])
 
-  const onFileSelect = useCallback(async (file: File) => {
+  const onFileSelect = useCallback(async (picked: File[]) => {
     const editor = state.editor
     if (!editor) return
     // 目标：模板或画布节点（文件 kind）
@@ -1048,12 +1057,25 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
         : state.canvas.nodes.find((item) => item.id === editor.id)?.data) as { fileKind?: string } | undefined
       const kind = String(fileKind?.fileKind ?? 'text')
       if (kind === 'text') {
+        // 文本类型：仅取第一个文件内容（多选仅对非文本文件生效，用户验收：可多选所有类型）
+        const { file } = { file: picked[0] }
         const content = await readFileAsText(file)
-        patchEditor({ content, fileName: file.name })
+        patchEditor({ content, fileName: file.name, files: [] })
       } else {
-        const base64 = await readFileAsBase64(file)
-        const result = await remote.call(EP.EP_FILE_UPLOAD, { name: file.name, base64 }) as { managedPath?: string; fileName?: string }
-        patchEditor({ managedPath: result?.managedPath, fileName: result?.fileName ?? file.name })
+        // 文件类型：多选全部文件 → 逐个上传受管拷贝，累积 files 列表（支持多选所有类型文件）
+        const uploaded = []
+        for (const file of picked) {
+          const base64 = await readFileAsBase64(file)
+          const result = await remote.call(EP.EP_FILE_UPLOAD, { name: file.name, base64 }) as { managedPath?: string; fileName?: string }
+          uploaded.push({ fileName: result?.fileName ?? file.name, managedPath: result?.managedPath ?? '' })
+        }
+        const currentFiles = (() => {
+          const data = (editor.source === 'template'
+            ? (state.templates[editor.kind as 'file'] ?? []).find((item) => item.id === editor.id)
+            : state.canvas.nodes.find((item) => item.id === editor.id)?.data) as { files?: Array<{ fileName: string; managedPath: string }> } | undefined
+          return Array.isArray(data?.files) ? data.files : []
+        })()
+        patchEditor({ files: [...currentFiles, ...uploaded] })
       }
       notify('success', t.toastSaved)
     } catch (error) {
@@ -1250,6 +1272,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
             onConnect={onConnect}
             onConnectionRejected={onConnectionRejected}
             onGroupResize={onGroupResize}
+            dropTargetGroupId={dropGroupId}
             fitLabel={t.fitView}
             zoomInLabel={t.zoomIn}
             zoomOutLabel={t.zoomOut}
@@ -1279,7 +1302,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
           onSave={() => { void saveEditor() }}
           onCopyProxy={copyToProxy}
           onRemoveMember={removeGroupMember}
-          onFileSelect={(file) => { void onFileSelect(file) }}
+          onFileSelect={(files) => { void onFileSelect(files) }}
           onLoadMd={() => { void loadPersonaMd() }}
           onLoadGroupMd={() => { void loadGroupMd() }}
           onTestDb={() => { void testDbConnection() }}

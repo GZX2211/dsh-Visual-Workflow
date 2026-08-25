@@ -53,6 +53,26 @@ function truncate(value: unknown, limit: number): string {
   return text.length > limit ? `${text.slice(0, limit)}…` : (text || '—')
 }
 
+/** 角色模板卡副行：System Prompt 截断展示（需求 §4.2.3.1：不可编辑，超过 20 字截断；
+ *  从 .md 加载时显示所选 .md 文件名——用户验收标注）。 */
+function roleSubline(template: RoleTemplate): string {
+  const source = String((template as { systemPromptSource?: unknown }).systemPromptSource ?? '').trim()
+  if (source) return source
+  return truncate(String(template.systemPrompt ?? ''), 20)
+}
+
+/** 文件模板卡副行：文本类型显示内容（单行省略）；文件类型显示所选文件名列表
+ *  （保留中文文件名；超出单行省略）——用户验收标注。 */
+function fileSubline(template: FileTemplate): string {
+  if (template.fileKind === 'file') {
+    const files = Array.isArray(template.files) && template.files.length > 0
+      ? template.files.map((item) => String(item?.fileName ?? '')).filter(Boolean)
+      : [String(template.fileName ?? '')].filter(Boolean)
+    return truncate(files.join('，'), 60)
+  }
+  return truncate(String(template.content ?? ''), 60)
+}
+
 export function LeftPanel(props: LeftPanelProps) {
   const {
     copy: t, libTab, onSetTab, open, width, mode, workflows, parentTemplate,
@@ -113,7 +133,7 @@ export function LeftPanel(props: LeftPanelProps) {
         cards: [
           itemCard(
             parentTemplate.id, 'parentTemplate', parentTemplate.id, '父', String(parentTemplate.name ?? t.parentAgent),
-            String(t.parentAgentHint ?? ''), {
+            roleSubline(parentTemplate), {
               label: String(parentTemplate.name ?? t.parentAgent),
               onClick: () => onSelectLib('parentTemplate', parentTemplate.id),
               onDrop: (position) => onPlaceParent(parentTemplate.id, position ?? { x: 120, y: 80 }),
@@ -127,7 +147,7 @@ export function LeftPanel(props: LeftPanelProps) {
       title: t.roleTemplates,
       plus: true,
       cards: (roleTemplates ?? []).map((item) => itemCard(
-        item.id, 'role', item.id, '◆', String(item.name ?? ''), modeName(item.presetId ?? null), {
+        item.id, 'role', item.id, '◆', String(item.name ?? ''), roleSubline(item), {
           label: String(item.name ?? ''),
           onClick: () => onSelectLib('role', item.id),
           onDrop: (position) => onPlaceTemplate('role', item.id, position ?? { x: 120, y: 80 }),
@@ -142,9 +162,7 @@ export function LeftPanel(props: LeftPanelProps) {
       plus: true,
       plusKind: 'file',
       cards: (fileTemplates ?? []).map((item) => itemCard(
-        item.id, 'file', item.id, '▤', String(item.name ?? ''),
-        item.fileKind === 'file' ? truncate(String((item as unknown as { fileName?: string }).fileName ?? ''), 60) : String(t.fileKindLabel?.text ?? ''),
-        {
+        item.id, 'file', item.id, '▤', String(item.name ?? ''), fileSubline(item), {
           label: String(item.name ?? ''),
           onClick: () => onSelectLib('file', item.id),
           onDrop: (position) => onPlaceTemplate('file', item.id, position ?? { x: 120, y: 80 }),

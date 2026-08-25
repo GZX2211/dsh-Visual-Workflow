@@ -96,16 +96,11 @@ describe('apply 装配', () => {
     while (disposers.length > 0) disposers.pop()!()
   })
 
-  it('conversation.view slot 注册：order 20 / id / label 工作流', async () => {
+  it('不再注册 conversation.view 会话页 tab（用户验收批注：不要在这里注册插件入口）', async () => {
     const { ctx, registered, disposers } = makeCtx()
     await act(async () => { apply(ctx as never) })
-    expect(registered.length).toBeGreaterThan(0)
-    const view = registered.find((entry) => entry.name === 'conversation.view')
-    expect(view).toBeTruthy()
-    expect(view?.id).toBe('visual-workflow')
-    expect(view?.order).toBe(20)
-    expect(typeof view?.label === 'function' ? (view.label as () => string)() : view?.label).toBe(zh.libTab.workflow)
-    expect(typeof view?.inject).toBe('function')
+    // registered 仅收集 slots 注册；插件入口仅保留 FAB + 浮窗
+    expect(registered.find((entry) => entry.name === 'conversation.view')).toBeUndefined()
     while (disposers.length > 0) disposers.pop()!()
   })
 

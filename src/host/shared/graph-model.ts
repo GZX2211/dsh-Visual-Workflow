@@ -64,6 +64,8 @@ export interface RoleNode extends BaseNode {
     inputSchema?: string
     /** 输出结构描述（同上，占位不强校验）。 */
     outputSchema?: string
+    /** System Prompt 来源文件名（从 .md 加载时记录，左侧栏卡片展示用，需求文档 §4.2.3.1）。 */
+    systemPromptSource?: string
     /** 所属协作组 id（组内成员节点字段，需求文档 §4.2.5.2）。 */
     groupId?: string | null
     /** 虚拟节点引用主节点 id：仅 kind='proxy' 的虚拟节点携带（需求文档 §4.2.3.2 规则 4/7）。 */
@@ -84,10 +86,12 @@ export interface FileNode extends BaseNode {
     fileKind: 'text' | 'file'
     /** 文本内容（fileKind='text' 时直通；注入上限默认 20000 字，§4.2.4.1 规则 1）。 */
     content?: string
-    /** 受管文件路径（fileKind='file' 时；复制进 data/files/ 避免源删除失效，§4.2.4.1 规则 2）。 */
+    /** 受管文件路径（fileKind='file' 单选时；复制进 data/files/ 避免源删除失效，§4.2.4.1 规则 2）。 */
     managedPath?: string
-    /** 源文件名（非文本类型左侧栏展示用）。 */
+    /** 源文件名（非文本类型展示用）。 */
     fileName?: string
+    /** 多选文件列表（fileKind='file'；每项含受管路径与源文件名，用户验收：支持多选所有类型文件）。 */
+    files?: Array<{ fileName: string; managedPath: string }>
   }
 }
 
