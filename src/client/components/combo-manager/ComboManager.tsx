@@ -54,7 +54,13 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
         if (current && comboItems.some((item) => item.id === current)) return current
         const first = comboItems[0]
         if (first) {
-          setComboDraft({ name: first.name, tools: [...(first.tools ?? [])], mcpServers: [...(first.mcpServers ?? [])] })
+          // 剔除官方保留传输名 run_code（子代理自带，且官方 restrict 禁止其进入名单）——
+          // 旧数据清理展示；保存走后端 toolComboPut 时同样剔除
+          setComboDraft({
+            name: first.name,
+            tools: (first.tools ?? []).filter((name) => name !== 'run_code'),
+            mcpServers: [...(first.mcpServers ?? [])],
+          })
           return first.id
         }
         return current
@@ -74,7 +80,11 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
     setActiveComboId(id)
     setConfirmDelete(false)
     const combo = combos.find((item) => item.id === id)
-    setComboDraft({ name: combo?.name ?? '', tools: [...(combo?.tools ?? [])], mcpServers: [...(combo?.mcpServers ?? [])] })
+    setComboDraft({
+      name: combo?.name ?? '',
+      tools: (combo?.tools ?? []).filter((name) => name !== 'run_code'),
+      mcpServers: [...(combo?.mcpServers ?? [])],
+    })
   }, [combos])
 
   const newCombo = useCallback((): void => {

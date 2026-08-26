@@ -145,6 +145,14 @@ export const PARENT_AGENT_VISIBLE_TOOLS = [
 export const CHILD_AGENT_HIDDEN_TOOLS = [WF_RUN_NODE, WF_FINISH] as const
 
 /**
+ * 官方保留的 Code Mode presentation transport 名（run_code）：
+ *  - 官方 core/tools 在非 native 模式为每个 scope 自动注入（子代理本就自带，无需勾选）；
+ *  - tools.restrict 的 allow/deny 名单禁止出现该名（官方校验抛错，见 @repo packages/core/tools/src/index.ts L1085）；
+ *  - 因此组合管理可选列表必须剔除、resolveAgentTools 的 allow 名单必须剔除（双保险）。
+ */
+export const RESERVED_TRANSPORT_TOOL = 'run_code'
+
+/**
  * 可选注入工具集（默认不注入任何代理，仅勾选/存在连线时按需进入子代理工具集）。
  *  - wf_ask：组合/白名单勾选时注入（需求文档 §4.6 规则 6）
  *  - wf_ask_agent：组合/白名单勾选时注入（协作组内通信，需求文档 §4.4.1 规则 5）

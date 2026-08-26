@@ -107,7 +107,8 @@ class FakeAgentsService implements AgentsServiceLike {
 
 /** 工具视图 fake：可见集与 preset 解析可控。 */
 class FakeToolsView implements ToolsView {
-  visible: string[] = ['read', 'write', 'edit', 'wf_ask', 'wf_ask_agent', 'wf_db_query', 'wf_run_node', 'wf_finish', 'mcp__srv1__a', 'mcp__srv1__b']
+  // run_code：官方在非 native 模式自动注入 scope（visible 含它，但不得进 allow 名单）
+  visible: string[] = ['read', 'write', 'edit', 'wf_ask', 'wf_ask_agent', 'wf_db_query', 'wf_run_node', 'wf_finish', 'run_code', 'mcp__srv1__a', 'mcp__srv1__b']
   presets = new Map<string, string[] | null>()
   async visibleToolNames(): Promise<string[]> {
     return [...this.visible]
@@ -208,13 +209,14 @@ describe('resolveAgentTools 白名单解析（§4.2 L219）', () => {
     expect(tools).toEqual([])
   })
 
-  it('combo：勾选 ∩ 可见（父代理工具集）+ 所选 MCP 前缀工具；wf_run_node/wf_finish 被白名单天然排除', async () => {
+  it('combo：勾选 ∩ 可见（父代理工具集）+ 所选 MCP 前缀工具；wf_run_node/wf_finish/run_code 被白名单天然排除', async () => {
     const h = await makeHarness()
-    await saveCombo(h, 'combo-c1', ['read', 'not-visible', 'wf_ask', 'wf_run_node', 'wf_finish'], ['srv1'])
+    await saveCombo(h, 'combo-c1', ['read', 'not-visible', 'wf_ask', 'wf_run_node', 'wf_finish', 'run_code'], ['srv1'])
     const tools = await resolveAgentTools({
       store: h.store, toolsView: h.toolsView, sessionId: 'session-1', flowId: 'flow-1',
       node: agentNode('n-a1'),
     })
+    expect(tools).not.toContain('run_code') // 官方保留名（presentation transport）永不进入 allow
     expect(tools.sort()).toEqual(['mcp__srv1__a', 'mcp__srv1__b', 'read', 'wf_ask'])
   })
 
@@ -243,8 +245,11 @@ describe('resolveAgentTools 白名单解析（§4.2 L219）', () => {
       store: h.store, toolsView: h.toolsView, sessionId: 'session-1', flowId: 'flow-1',
       node: agentNode('n-a1', { presetId: 'unknown-preset' }),
     })
-    // 回退全部可见，但 wf_run_node/wf_finish 仍被无条件剔除（§4.4.2 规则 7）
-    expect(fallback.sort()).toEqual(h.toolsView.visible.filter((n) => n !== 'wf_run_node' && n !== 'wf_finish').sort())
+    // 回退全部可见，但 wf_run_node/wf_finish 仍被无条件剔除（§4.4.2 规则 7）；
+    // run_code 为官方保留名同样剔除
+    expect(fallback.sort()).toEqual(
+      h.toolsView.visible.filter((n) => n !== 'wf_run_node' && n !== 'wf_finish' && n !== 'run_code').sort(),
+    )
   })
 
   it('combo 不存在 → 明确报错', async () => {

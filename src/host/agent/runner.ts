@@ -37,6 +37,7 @@ import type { FlowStore } from '../storage/flow-store.js'
 import type { GraphNode, RoleNode } from '../shared/graph-model.js'
 import type { NodeRunner, NodeStartInput, OrchestratorLogger } from '../orchestrator/runtime.js'
 import { consumeReactCappedOf, type ReactGuardBridge } from './guards.js'
+import { RESERVED_TRANSPORT_TOOL } from '../shared/protocol.js'
 import type { ModelSelectionLike, ModelSelectionSetup, SelectionChildContext } from './model-selection.js'
 
 // ---------------------------------------------------------------------------
@@ -292,8 +293,10 @@ export async function resolveAgentTools(input: ResolveToolsInput): Promise<strin
     const presetNames = await input.toolsView.presetToolNames(presetId)
     allow = presetNames ?? visible
   }
-  // wf_run_node/wf_finish 永不可见（§4.4.2 规则 7 双保险第一层）
-  allow = allow.filter((name) => !CHILD_BLOCKED_TOOLS.includes(name))
+  // wf_run_node/wf_finish 永不可见（§4.4.2 规则 7 双保险第一层）；
+  // 官方保留传输名 run_code 也必须剔除：它由官方自动注入子代理 scope（无需勾选），
+  // 且进 allow 名单会让官方 tools.restrict 抛错（core/tools L1085 保留名校验）
+  allow = allow.filter((name) => !CHILD_BLOCKED_TOOLS.includes(name) && name !== RESERVED_TRANSPORT_TOOL)
   // db-in 连线 → wf_db_query 可选注入（§4.4.3 规则 5：有连线才进入工具集）
   if (await hasDbInLine(input)) {
     if (!allow.includes('wf_db_query')) allow.push('wf_db_query')

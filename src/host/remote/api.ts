@@ -14,6 +14,7 @@
 // 工具组合与 MCP / 运行与历史 / 数据库 / 导入导出。
 
 import * as EP from '../shared/protocol.js'
+import { RESERVED_TRANSPORT_TOOL } from '../shared/protocol.js'
 import type { FlowStore } from '../storage/flow-store.js'
 import type { OrchestratorRuntime } from '../orchestrator/runtime.js'
 import { findResumableRun } from '../orchestrator/resume.js'
@@ -362,7 +363,7 @@ export class VisualWorkflowApi {
           const entry = schema as { name?: unknown; title?: unknown; description?: unknown }
           return { name: entry.name ?? entry.title ?? '', description: entry.description ?? '' }
         })
-        .filter((item) => item.name)
+        .filter((item) => item.name && item.name !== RESERVED_TRANSPORT_TOOL)
     } catch (error) {
       throw new Error(`工具清单读取失败：${error instanceof Error ? error.message : String(error)}`)
     }
@@ -423,7 +424,9 @@ export class VisualWorkflowApi {
     return this.host.store.saveToolCombo({
       id: id as `combo-${string}`,
       name: String(combo.name).trim(),
-      tools: Array.isArray(combo.tools) ? combo.tools.filter((name) => typeof name === 'string' && name) : [],
+      tools: Array.isArray(combo.tools)
+        ? combo.tools.filter((name) => typeof name === 'string' && name && name !== RESERVED_TRANSPORT_TOOL)
+        : [],
       mcpServers: Array.isArray(combo.mcpServers) ? combo.mcpServers.filter((name) => typeof name === 'string' && name) : [],
     })
   }
@@ -551,7 +554,12 @@ export class VisualWorkflowApi {
         // agentPresets 不可用
       }
     }
-    return [...out.values()]
+    // 剔除官方保留的 Code Mode 传输名 run_code：组合管理可选列表不得展示
+    // （子代理自动携带该工具，且官方 restrict 禁止其进入 allow/deny 名单）
+    return [...out.values()].filter((schema) => {
+      const entry = schema as { name?: unknown; title?: unknown }
+      return String(entry.name ?? entry.title ?? '') !== RESERVED_TRANSPORT_TOOL
+    })
   }
 
   /** MCP 服务器：列表 / 增删改 / 启停（写入 profile 托管区，重启生效）。 */
