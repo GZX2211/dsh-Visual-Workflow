@@ -117,6 +117,26 @@ describe('studioReducer', () => {
     expect(state.canvas.nodes.map((item) => item.id)).toEqual(['n1', 'n2'])
   })
 
+  it('撤销/重做快照独立性：graphSnapshotOf 深拷贝，canvas 后续变更不污染历史', () => {
+    let state = baseState()
+    state = studioReducer(state, { type: 'GRAPH_REPLACED', nodes: [node({ id: 'n1', kind: 'agent', data: { label: 'A' } })], edges: [], dirty: false })
+    const snapshot = graphSnapshotOf(state)
+    // 快照必须是与 canvas 断开引用的独立副本（别名会让 undo/redo 退化为覆盖式恢复）
+    expect(snapshot.nodes).not.toBe(state.canvas.nodes)
+    expect(snapshot.nodes[0]).not.toBe(state.canvas.nodes[0])
+    expect(snapshot.nodes[0]!.data).not.toBe(state.canvas.nodes[0]!.data)
+    expect(snapshot.nodes[0]!.position).not.toBe(state.canvas.nodes[0]!.position)
+
+    state = studioReducer(state, { type: 'HISTORY_PUSH', snapshot })
+    // 模拟组件对 canvas 节点对象的原地修改（拖拽缓存等副作用路径）
+    const initialPos = { ...state.canvas.nodes[0]!.position }
+    state.canvas.nodes[0]!.data.label = '已污染'
+    state.canvas.nodes[0]!.position.x = 999
+    state = studioReducer(state, { type: 'UNDO' })
+    expect(state.canvas.nodes[0]!.data.label).toBe('A')
+    expect(state.canvas.nodes[0]!.position).toEqual(initialPos)
+  })
+
   it('SELECT_LIB：父代理模板选择（右侧面板无显示）', () => {
     let state = baseState()
     state = studioReducer(state, { type: 'SELECT_LIB', kind: 'parentTemplate', id: 'p-1' })

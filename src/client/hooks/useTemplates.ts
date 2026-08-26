@@ -6,7 +6,7 @@
 import { useCallback } from 'react'
 import type { Dispatch } from 'react'
 import type { RoleTemplate, FileTemplate, DatabaseTemplate } from '../../host/shared/types.js'
-import type { StudioAction, TemplateKind } from '../studio/studio-state.js'
+import type { Drafted, StudioAction, TemplateKind } from '../studio/studio-state.js'
 import type { RemoteFace } from './useRemote.js'
 import { EP } from '../lib/remote.js'
 
@@ -27,16 +27,17 @@ function draftOf(kind: TemplateKind): AnyTemplate {
     return {
       id, kind: 'agent', name: '新角色模板', systemPrompt: '', provider: '', model: '',
       presetId: null, retryLimit: 3, reactLimit: null, inputSchema: '', outputSchema: '', createdAt: now, updatedAt: now,
-      ...({ _draft: true } as object),
-    } as unknown as RoleTemplate
+      // 草稿标记：前端 UI 状态，后端 putTemplate 经 stripClientMeta 剥除、绝不落盘
+      _draft: true,
+    } as Drafted<RoleTemplate>
   }
   if (kind === 'file') {
-    return { id, kind: 'file', name: '新文件模板', fileKind: 'text', content: '', createdAt: now, updatedAt: now, ...({ _draft: true } as object) } as unknown as FileTemplate
+    return { id, kind: 'file', name: '新文件模板', fileKind: 'text', content: '', createdAt: now, updatedAt: now, _draft: true } as Drafted<FileTemplate>
   }
   return {
     id, kind: 'database', name: '新数据库模板', description: '', dbType: 'local', dbKind: 'sqlite',
-    vectorSource: 'embedding', createdAt: now, updatedAt: now, ...({ _draft: true } as object),
-  } as unknown as DatabaseTemplate
+    vectorSource: 'embedding', createdAt: now, updatedAt: now, _draft: true,
+  } as Drafted<DatabaseTemplate>
 }
 
 /** 模板列表面（远端失败抛错，由调用方 toast）。 */

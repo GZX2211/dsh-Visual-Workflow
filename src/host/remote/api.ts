@@ -249,25 +249,32 @@ export class VisualWorkflowApi {
     return { deleted: true }
   }
 
-  async serviceStart(args: { serviceId?: unknown }): Promise<unknown> {
+  async serviceStart(args: { sessionId?: unknown; serviceId?: unknown }): Promise<unknown> {
+    const sessionId = String(args?.sessionId ?? '')
     const serviceId = String(args?.serviceId ?? '')
-    if (!serviceId) throw httpError(400, 'requires serviceId')
-    return this.withServiceManager('start', serviceId)
+    if (!sessionId || !serviceId) throw httpError(400, 'requires sessionId and serviceId')
+    return this.withServiceManager('start', sessionId, serviceId)
   }
 
-  async serviceStop(args: { serviceId?: unknown }): Promise<unknown> {
+  async serviceStop(args: { sessionId?: unknown; serviceId?: unknown }): Promise<unknown> {
+    const sessionId = String(args?.sessionId ?? '')
     const serviceId = String(args?.serviceId ?? '')
-    if (!serviceId) throw httpError(400, 'requires serviceId')
-    return this.withServiceManager('stop', serviceId)
+    if (!sessionId || !serviceId) throw httpError(400, 'requires sessionId and serviceId')
+    return this.withServiceManager('stop', sessionId, serviceId)
   }
 
-  async serviceStatus(args: { serviceId?: unknown }): Promise<unknown> {
+  async serviceStatus(args: { sessionId?: unknown; serviceId?: unknown }): Promise<unknown> {
+    const sessionId = String(args?.sessionId ?? '')
     const serviceId = String(args?.serviceId ?? '')
-    if (!serviceId) throw httpError(400, 'requires serviceId')
-    return this.withServiceManager('status', serviceId)
+    if (!sessionId || !serviceId) throw httpError(400, 'requires sessionId and serviceId')
+    return this.withServiceManager('status', sessionId, serviceId)
   }
 
-  private async withServiceManager(action: 'start' | 'stop' | 'status', serviceId: string): Promise<unknown> {
+  private async withServiceManager(action: 'start' | 'stop' | 'status', sessionId: string, serviceId: string): Promise<unknown> {
+    // 会话归属校验：服务按 sessionId 分桶，越权会话不得启动/停止/查看他人服务
+    // （不匹配按不存在处理，不泄露 serviceId 是否存在）。
+    const service = await this.host.store.getService(sessionId, serviceId)
+    if (!service) throw httpError(404, `服务不存在：${serviceId}`)
     const manager = this.host.serviceManager
     if (!manager || typeof manager[action] !== 'function') {
       throw httpError(501, '服务管理器尚未启用（模式二服务管理未装配）', 'WF_SERVICE_MANAGER_UNAVAILABLE')
@@ -484,6 +491,7 @@ export class VisualWorkflowApi {
       mcp: mcpServers.map((server: { id?: unknown; serverName?: unknown; url?: unknown; command?: unknown; transport?: unknown; disabled?: unknown; args?: unknown; env?: unknown }) => ({
         id: server.id,
         name: server.serverName,
+        serverName: server.serverName,
         description: server.url
           ? `MCP 服务器（streamable-http：${server.url}）`
           : `MCP 服务器（stdio：${server.command}）`,
@@ -555,7 +563,10 @@ export class VisualWorkflowApi {
       }
     }
     // 剔除官方保留的 Code Mode 传输名 run_code：组合管理可选列表不得展示
-    // （子代理自动携带该工具，且官方 restrict 禁止其进入 allow/deny 名单）
+    // （子代理自动携带该工具，且官方 restrict 禁止其进入 allow/deny 名单）。
+    // 注意：不剔除其它工具——str_replace_editor 等官方简单模式专用工具保留展示，
+    // 在描述中标注「简单模式专用，非该模式禁止勾选」，运行时由 resolveAgentTools
+    // 兜底（父代理 scope 视图过滤），避免勾选后官方 restrict 抛 unknown。
     return [...out.values()].filter((schema) => {
       const entry = schema as { name?: unknown; title?: unknown }
       return String(entry.name ?? entry.title ?? '') !== RESERVED_TRANSPORT_TOOL
@@ -607,21 +618,36 @@ export class VisualWorkflowApi {
     return this.host.orchestrator.startRun({ sessionId, flowId })
   }
 
-  /** 运行状态轮询：内存快照优先，终态（内存已释放）回退磁盘历史。 */
-  async runStatus(args: { runId?: unknown }): Promise<unknown> {
+  /** 运行状态轮询：内存快照优先，终态（内存已释放）回退磁盘历史。会话归属校验。 */
+  async runStatus(args: { sessionId?: unknown; runId?: unknown }): Promise<unknown> {
+    const sessionId = String(args?.sessionId ?? '')
     const runId = String(args?.runId ?? '')
-    if (!runId) throw httpError(400, 'requires runId')
+    if (!sessionId || !runId) throw httpError(400, 'requires sessionId and runId')
     const snapshot = this.host.orchestrator.runSnapshot(runId)
-    if (snapshot) return snapshot
+    if (snapshot) {
+      if (snapshot.sessionId !== sessionId) throw httpError(404, `运行不存在：${runId}`)
+      return snapshot
+    }
     const disk = await this.host.store.getRun(runId)
-    if (!disk) throw httpError(404, `运行不存在：${runId}`)
+    if (!disk || disk.sessionId !== sessionId) throw httpError(404, `运行不存在：${runId}`)
     return disk
   }
 
-  async runStop(args: { runId?: unknown }): Promise<unknown> {
+  async runStop(args: { sessionId?: unknown; runId?: unknown }): Promise<unknown> {
+    const sessionId = String(args?.sessionId ?? '')
     const runId = String(args?.runId ?? '')
-    if (!runId) throw httpError(400, 'requires runId')
-    await this.host.orchestrator.stopRun(runId)
+    if (!sessionId || !runId) throw httpError(400, 'requires sessionId and runId')
+    // 会话归属校验：内存激活 run 直接比对；已释放的终态 run 回退磁盘比对
+    // （越权会话不得停止他人运行；不匹配按不存在处理，不泄露 runId 是否存在）。
+    const entry = this.host.orchestrator.entryFor(runId)
+    if (entry) {
+      if (entry.snapshot.sessionId !== sessionId) throw httpError(404, `运行不存在：${runId}`)
+      await this.host.orchestrator.stopRun(runId)
+      return { stopped: true }
+    }
+    const disk = await this.host.store.getRun(runId)
+    if (!disk || disk.sessionId !== sessionId) throw httpError(404, `运行不存在：${runId}`)
+    // 终态幂等：磁盘记录存在且归属匹配 → 视为已停止
     return { stopped: true }
   }
 
@@ -722,7 +748,7 @@ const TOOL_ZH: Record<string, string> = {
   edit: '对已有文件做精确的局部文本替换',
   bash: '在沙箱中执行 shell 命令',
   run_code: '在代码运行时中执行一段代码',
-  str_replace_editor: '代码/文本编辑器：查看、替换、插入、撤销',
+  str_replace_editor: '代码/文本编辑器：查看、替换、插入、撤销（简单模式专用，非该模式禁止勾选）',
   glob: '按通配符模式查找文件路径',
   grep: '在文件内容中按正则搜索并返回匹配行',
   todo_write: '维护并更新结构化任务清单',

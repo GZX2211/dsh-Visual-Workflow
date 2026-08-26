@@ -37,6 +37,7 @@ import {
 } from './agent/runner.js'
 import { createReactGuard } from './agent/guards.js'
 import { createModelSelectionSetup } from './agent/model-selection.js'
+import { createChildPromptSetup } from './agent/prompt-setup.js'
 import { registerWfTools } from './tools/wf-tools.js'
 import { registerWfAskAgent } from './tools/wf-ask-agent.js'
 import { registerDataTools } from './tools/data-tools.js'
@@ -237,6 +238,8 @@ export class VisualWorkflowHost extends Service {
   private readonly reactGuard = createReactGuard()
   /** 思考强度模型选择装配。 */
   private readonly modelSelection = createModelSelectionSetup()
+  /** 子代理系统提示词与协作 Prompt 注入装配。 */
+  private readonly childPrompt = createChildPromptSetup()
   /** 本地嵌入引擎（外部端点 > 本地资产 > BM25 降级；惰性加载）。 */
   private readonly embedding: EmbeddingService
   /** 已清理标记（dispose 后为 true；重复 dispose 幂等）。 */
@@ -270,6 +273,7 @@ export class VisualWorkflowHost extends Service {
       toolsView: new CordisToolsView(ctx),
       react: this.reactGuard.bridge,
       modelSelection: this.modelSelection,
+      promptSetup: this.childPrompt,
       logger: cordisLogger(ctx),
     })
     this.orchestrator = new OrchestratorRuntime({
@@ -383,6 +387,7 @@ export class VisualWorkflowHost extends Service {
         disposers.push(subagents.registerContinuableSetup(childVisibilityContribution()))
         disposers.push(subagents.registerContinuableSetup(this.reactGuard.contribution))
         disposers.push(subagents.registerContinuableSetup(this.modelSelection.contribution))
+          disposers.push(subagents.registerContinuableSetup(this.childPrompt.contribution))
         return () => {
           for (const dispose of disposers) {
             try {

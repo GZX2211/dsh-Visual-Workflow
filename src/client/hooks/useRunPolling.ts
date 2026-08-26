@@ -18,6 +18,7 @@ const TERMINAL = new Set(['completed', 'failed', 'stopped', 'paused', 'interrupt
 
 /** 运行轮询 effect：runId 变化起轮询；终态停。 */
 export function useRunPolling(
+  sessionId: string,
   runId: string | null,
   dispatch: Dispatch<StudioAction>,
   remote: RemoteFace,
@@ -27,7 +28,7 @@ export function useRunPolling(
     let cancelled = false
     const poll = async (): Promise<void> => {
       try {
-        const snapshot = await remote.call(EP.EP_RUN_STATUS, { runId }) as RunSnapshot | null
+        const snapshot = await remote.call(EP.EP_RUN_STATUS, { sessionId, runId }) as RunSnapshot | null
         if (cancelled || !snapshot) return
         dispatch({ type: 'RUN_SNAPSHOT', snapshot })
         if (TERMINAL.has(snapshot.status)) {

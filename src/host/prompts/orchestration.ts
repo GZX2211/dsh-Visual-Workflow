@@ -1,4 +1,4 @@
-// src/host/prompts/orchestration.ts
+﻿// src/host/prompts/orchestration.ts
 //
 // 编排指令模板构建器。
 //
@@ -94,8 +94,10 @@ export interface OrchestrationDirectiveParams {
 export const ORCH_HARD_CONSTRAINTS = {
   /** 父代理「仅调度不执行」核心短语（首段硬约束 + 末段重申双位出现）。 */
   dispatchOnly: 'orchestrate only — never execute node tasks yourself',
-  /** 调用协议：wf_run_node 异步启动（模式一默认）。 */
-  runNodeAsync: 'wf_run_node starts a node subagent asynchronously and returns immediately',
+  /** 调用协议：模式一 wf_run_node 异步启动。 */
+  runNodeAsync: 'use wf_run_node in mode1: it starts a node subagent asynchronously and returns immediately',
+  /** 调用协议：模式二 wf_run_node_wait 阻塞等待。 */
+  runNodeBlocking: 'use wf_run_node_wait in mode2: it starts a node subagent and blocks until the node finishes',
   /** 收尾协议：wf_finish 幂等收尾、释放锁。 */
   finishIdempotent: 'finish with wf_finish exactly once — it is idempotent and releases the run lock',
   /** 失败语义：节点失败需显式处置，不静默跳过。 */
@@ -137,7 +139,7 @@ export function buildOrchestrationDirective(params: OrchestrationDirectiveParams
     '',
     `1. ${ORCH_HARD_CONSTRAINTS.dispatchOnly}.`,
     `2. Calling protocol: ${ORCH_HARD_CONSTRAINTS.runNodeAsync}.`,
-    `   To block until a node finishes (service mode) pass wait: true.`,
+      `   ${ORCH_HARD_CONSTRAINTS.runNodeBlocking}.`,
     `3. Finish protocol: ${ORCH_HARD_CONSTRAINTS.finishIdempotent}.`,
     `4. Failure semantics: ${ORCH_HARD_CONSTRAINTS.failureSemantics}; retry within the node's limit, ask the user, or fail the run explicitly.`,
     `5. Conditional edges: ${ORCH_HARD_CONSTRAINTS.conditionSemantics}, from the upstream node's actual output.`,

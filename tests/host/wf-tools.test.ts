@@ -28,7 +28,7 @@ import {
 } from '../../src/host/orchestrator/runtime.js'
 import { stageLabel } from '../../src/host/graph/model.js'
 import type { RoleNode, StageNode, WorkflowDocument } from '../../src/host/shared/graph-model.js'
-import { WF_ASK, WF_FINISH, WF_RUN_NODE } from '../../src/host/shared/protocol.js'
+import { WF_ASK, WF_FINISH, WF_RUN_NODE, WF_RUN_NODE_WAIT } from '../../src/host/shared/protocol.js'
 import { callerOf, registerWfTools, type WfToolsHost } from '../../src/host/tools/wf-tools.js'
 import { stableStringify, textRender } from '../../src/host/tools/text-render.js'
 import type { JsonSchemaNode, ToolDefinitionLike, ToolExecLike } from '../../src/host/tools/define-tool.js'
@@ -215,6 +215,29 @@ async function start(h: Harness): Promise<void> {
   await h.runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })
 }
 
+/** 保存并启动一个模式二后台服务流程（仅 start → a1 → end，无暂停节点）。 */
+async function startService(h: Harness): Promise<void> {
+  const flow = makeFlow()
+  flow.mode = 'mode2'
+  flow.name = '测试服务'
+    flow.nodes = [
+      {
+        id: 'n-parent',
+        kind: 'parent',
+        position: { x: 0, y: 0 },
+        data: { label: '父代理', systemPrompt: '', provider: '', model: '', presetId: 'standard', retryLimit: 3, reactLimit: null, inputSchema: '', outputSchema: '' },
+      },
+      ...flow.nodes
+        .filter((n) => n.kind !== 'pause')
+        .map((n) => n.kind === 'start' || n.kind === 'end'
+          ? { ...n, data: { ...n.data, label: stageLabel(n.kind, 'mode2') } }
+          : n),
+    ]
+    flow.lines = flow.lines.filter((line) => line.source !== 'n-pause' && line.target !== 'n-pause')
+  await h.store.saveService(flow as never, 'session-1', { force: true })
+  await h.runtime.startRun({ sessionId: 'session-1', flowId: flow.id, mode: 'mode2' })
+}
+
 // ---------------------------------------------------------------------------
 // callerOf 身份派生
 // ---------------------------------------------------------------------------
@@ -252,42 +275,47 @@ describe('callerOf 身份派生', () => {
 // ---------------------------------------------------------------------------
 
 describe('工具注册与 schema 编译', () => {
-  it('三个 wf_* 工具全部注册，disposer 注销全量生效', async () => {
-    const h = await makeHarness()
-    expect([...h.tools.definitions.keys()].sort()).toEqual([WF_ASK, WF_FINISH, WF_RUN_NODE].sort())
-    h.disposeTools()
-    expect(h.tools.definitions.size).toBe(0)
-    expect(h.tools.unregistered.size).toBe(3)
-  })
+    it('四个 wf_* 工具全部注册，disposer 注销全量生效', async () => {
+      const h = await makeHarness()
+      expect([...h.tools.definitions.keys()].sort()).toEqual([WF_ASK, WF_FINISH, WF_RUN_NODE, WF_RUN_NODE_WAIT].sort())
+      h.disposeTools()
+      expect(h.tools.definitions.size).toBe(0)
+      expect(h.tools.unregistered.size).toBe(4)
+    })
+    it('parameters 为隐式开放对象根（无 additionalProperties），内联 required 提取为数组；两个 run 工具均无 wait', async () => {
+      const h = await makeHarness()
+      for (const name of [WF_RUN_NODE, WF_RUN_NODE_WAIT]) {
+        const def = h.tools.definitions.get(name)!
+        expect(def.parameters.type).toBe('object')
+        expect(def.parameters.additionalProperties).toBeUndefined()
+        expect(def.parameters.required).toEqual(['nodeId'])
+        const props = def.parameters.properties ?? {}
+        expect(Object.keys(props).sort()).toEqual(['iterationLimit', 'nodeId', 'retryLimit', 'thinking'].sort())
+        expect(props.wait).toBeUndefined()
+        expect((props.nodeId as JsonSchemaNode).required).toBeUndefined()
+      }
+    })
+    it('output.schema：对象 additionalProperties=false、内联 required 提取、enum 保留（异步/阻塞工具状态枚举不同）', async () => {
+      const h = await makeHarness()
+      const asyncDef = h.tools.definitions.get(WF_RUN_NODE)!
+      const asyncSchema = asyncDef.output.schema as JsonSchemaNode
+      expect(asyncSchema.type).toBe('object')
+      expect(asyncSchema.additionalProperties).toBe(false)
+      expect(asyncSchema.required).toEqual(['nodeId', 'status'])
+      const asyncStatus = (asyncSchema.properties ?? {}).status as JsonSchemaNode
+      expect(asyncStatus.enum).toEqual(['started', 'paused'])
 
-  it('parameters 为隐式开放对象根（无 additionalProperties），内联 required 提取为数组', async () => {
-    const h = await makeHarness()
-    const def = h.tools.definitions.get(WF_RUN_NODE)!
-    expect(def.parameters.type).toBe('object')
-    expect(def.parameters.additionalProperties).toBeUndefined()
-    expect(def.parameters.required).toEqual(['nodeId'])
-    const props = def.parameters.properties ?? {}
-    expect(Object.keys(props).sort()).toEqual(['iterationLimit', 'nodeId', 'retryLimit', 'thinking', 'wait'].sort())
-    // 内联 required 不残留
-    expect((props.nodeId as JsonSchemaNode).required).toBeUndefined()
-  })
+      const waitDef = h.tools.definitions.get(WF_RUN_NODE_WAIT)!
+      const waitSchema = waitDef.output.schema as JsonSchemaNode
+      const waitStatus = (waitSchema.properties ?? {}).status as JsonSchemaNode
+      expect(waitStatus.enum).toEqual(['paused', 'ok', 'fail'])
 
-  it('output.schema：对象 additionalProperties=false、内联 required 提取、enum 保留', async () => {
-    const h = await makeHarness()
-    const runDef = h.tools.definitions.get(WF_RUN_NODE)!
-    const schema = runDef.output.schema as JsonSchemaNode
-    expect(schema.type).toBe('object')
-    expect(schema.additionalProperties).toBe(false)
-    expect(schema.required).toEqual(['nodeId', 'status'])
-    const status = (schema.properties ?? {}).status as JsonSchemaNode
-    expect(status.enum).toEqual(['started', 'paused', 'ok', 'fail'])
-
-    const askDef = h.tools.definitions.get(WF_ASK)!
-    const askSchema = askDef.output.schema as JsonSchemaNode
-    const answers = (askSchema.properties ?? {}).answers as JsonSchemaNode
-    expect(answers.type).toBe('array')
-    expect(answers.required).toBeUndefined() // required 只出现在对象属性上，数组本身不参与
-  })
+      const askDef = h.tools.definitions.get(WF_ASK)!
+      const askSchema = askDef.output.schema as JsonSchemaNode
+      const answers = (askSchema.properties ?? {}).answers as JsonSchemaNode
+      expect(answers.type).toBe('array')
+      expect(answers.required).toBeUndefined() // required 只出现在对象属性上，数组本身不参与
+    })
 
   it('wf_ask 的 questions 参数：数组必填、minItems=1、选项对象 open', async () => {
     const h = await makeHarness()
@@ -382,11 +410,11 @@ describe('wf_run_node 工具执行', () => {
     expect(h.runtime.flowLockInfo('flow-1')).toMatchObject({ status: 'paused' })
   })
 
-  it('wait: true 阻塞：subagent/end 完成后返回 ok + output', async () => {
+  it('wf_run_node_wait 阻塞：subagent/end 完成后返回 ok + output', async () => {
     const h = await makeHarness()
-    await start(h)
-    const def = h.tools.definitions.get(WF_RUN_NODE)!
-    const promise = def.execute({ nodeId: 'n-a1', wait: true }, execOf(rootAgent))
+    await startService(h)
+    const def = h.tools.definitions.get(WF_RUN_NODE_WAIT)!
+    const promise = def.execute({ nodeId: 'n-a1' }, execOf(rootAgent))
     // 等待 wfRunNode 完成启动阶段（waiter/childIndex 注册是异步的；过早派发
     // subagent/end 会因 childIndex 尚未登记而漏掉唤醒）
     await vi.waitFor(() => {

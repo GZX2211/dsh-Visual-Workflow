@@ -106,6 +106,22 @@ describe('组合管理', () => {
     expect(Array.from(document.querySelectorAll('.wf-combo-card')).some((item) => item.textContent?.includes('files'))).toBe(true)
   })
 
+  it('目录描述：str_replace_editor 标注「简单模式专用，非该模式禁止勾选」且保留展示', async () => {
+    const { remote } = makeRemote({
+      catalog: {
+        items: [
+          { key: 'tool:str_replace_editor', name: 'str_replace_editor', description: '代码/文本编辑器（简单模式专用，非该模式禁止勾选）' },
+          { key: 'tool:read', name: 'read', description: '读取文件' },
+        ],
+        mcp: [],
+        loadedPlugins: [],
+      },
+    })
+    await openComboManager(remote)
+    expect(container!.textContent).toContain('str_replace_editor')
+    expect(container!.textContent).toContain('简单模式专用，非该模式禁止勾选')
+  })
+
   it('勾选工具与 MCP → 保存：toolComboPut 参数正确（tools + mcpServers）', async () => {
     const { remote, state } = makeRemote()
     await openComboManager(remote)

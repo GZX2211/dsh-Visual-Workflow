@@ -3,10 +3,10 @@
 // 工作流列表：加载 / 新建草稿 / 保存（草稿首存入库，正式带 revision 乐观锁）/
 // 删除 / 打开。数据模型对齐后端 WorkflowDocument（nodes/lines 全量内联）。
 
-import { useCallback } from 'react'
+import { useCallback, useRef } from 'react'
 import type { Dispatch } from 'react'
 import type { WorkflowDocument } from '../../host/shared/graph-model.js'
-import type { StudioAction, CanvasNode, CanvasEdge } from '../studio/studio-state.js'
+import type { Drafted, StudioAction, CanvasNode, CanvasEdge } from '../studio/studio-state.js'
 import type { RemoteFace } from './useRemote.js'
 import { EP } from '../lib/remote.js'
 
@@ -59,7 +59,7 @@ export function useWorkflows(
 
   const createWorkflowDraft = useCallback((name: string): WorkflowDocument => {
     const now = new Date().toISOString()
-    const draft: WorkflowDocument = {
+    const draft = {
       id: `wf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
       sessionId,
       mode: 'mode1',
@@ -69,29 +69,43 @@ export function useWorkflows(
       nodes: [],
       lines: [],
       createdAt: now,
-      // 草稿标记（未入库；保存时经 createWorkflow 真正创建）
-      ...({ _draft: true } as object),
-    } as WorkflowDocument
+      // 草稿标记（前端 UI 状态；后端 putWorkflow 经 stripClientMeta 剥除，绝不落盘）
+      _draft: true,
+    } as Drafted<WorkflowDocument>
     dispatch({ type: 'WORKFLOW_ADDED', flow: draft })
     return draft
   }, [dispatch, sessionId])
+
+  /** 在途保存 Promise（快速双击/重复触发时共享同一请求，避免第二次携带旧 revision 触发 409）。 */
+  const saveInflight = useRef<Promise<WorkflowDocument | null> | null>(null)
 
   const saveWorkflow = useCallback(async (
     flow: WorkflowDocument,
     nodes: CanvasNode[],
     edges: CanvasEdge[],
   ): Promise<WorkflowDocument | null> => {
-    const serialized = serializeWorkflow(flow, nodes, edges)
-    // 保存统一走 putWorkflow：后端在文档不存在时视为创建（revision 0 → 1），
-    // id 保持不变——草稿首存不再另 assign id，避免 WORKFLOW_UPDATED 无法命中
-    // 列表项、当前画布继续引用旧草稿 id（旧实现每次保存都新建一个副本，
-    // 用户感知「保存成功但实际没保存」）。
-    const saved = await remote.call(EP.EP_PUT_WORKFLOW, {
-      sessionId,
-      flow: serialized,
-    }) as WorkflowDocument
-    dispatch({ type: 'WORKFLOW_UPDATED', flow: saved })
-    return saved
+    // 并发去重：上一次保存尚未返回时，重复调用直接复用同一在途请求（相同入参
+    // 的第二次点击结果一致；捕获 409 后会清空，用户可再次点击重试）。
+    if (saveInflight.current) return saveInflight.current
+    const task = (async (): Promise<WorkflowDocument | null> => {
+      const serialized = serializeWorkflow(flow, nodes, edges)
+      // 保存统一走 putWorkflow：后端在文档不存在时视为创建（revision 0 → 1），
+      // id 保持不变——草稿首存不再另 assign id，避免 WORKFLOW_UPDATED 无法命中
+      // 列表项、当前画布继续引用旧草稿 id（旧实现每次保存都新建一个副本，
+      // 用户感知「保存成功但实际没保存」）。
+      const saved = await remote.call(EP.EP_PUT_WORKFLOW, {
+        sessionId,
+        flow: serialized,
+      }) as WorkflowDocument
+      dispatch({ type: 'WORKFLOW_UPDATED', flow: saved })
+      return saved
+    })()
+    saveInflight.current = task
+    try {
+      return await task
+    } finally {
+      if (saveInflight.current === task) saveInflight.current = null
+    }
   }, [dispatch, remote, sessionId])
 
   const deleteWorkflow = useCallback(async (id: string) => {

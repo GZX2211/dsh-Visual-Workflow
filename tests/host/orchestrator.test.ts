@@ -319,6 +319,117 @@ describe('snapshot 纯函数', () => {
 // startRun 启动与运行锁
 // ---------------------------------------------------------------------------
 
+describe('startRun 并发运行锁（TOCTOU 竞态回归）', () => {
+  it('并发 startRun 同一 flowId：只允许一个成功，另一个 WF_LOCKED', async () => {
+    const h = await makeHarness()
+    await h.store.saveWorkflow(makeFlow(), 'session-1', { force: true })
+
+    // 受控闸门：让两个并发 startRun 都在运行锁首查之后、登记之前交错
+    // （两请求都读到「无锁」，制造 check-then-act 竞态窗口）。
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    let inGate = 0
+    // Object.create 保留 FlowStore 原型链方法（spread 会丢失），仅覆盖 getWorkflow
+    const slowStore = Object.create(h.store) as FlowStore
+    slowStore.getWorkflow = async (sessionId: string, flowId: string) => {
+      inGate += 1
+      if (inGate === 1 || inGate === 2) await gate
+      return h.store.getWorkflow(sessionId, flowId)
+    }
+    const slowRuntime = new OrchestratorRuntime({
+      store: slowStore,
+      runner: h.runner,
+      agents: h.agents,
+      config: {
+        outputFullLimit: 400, documentTextLimit: 200, runIdleTimeoutMs: 500,
+        retryLimitDefault: 3, reactIterationLimitDefault: 50, wfAskAgentTimeoutMs: 500,
+      },
+      logger: { warn: (message) => h.warnings.push(message), info: () => {}, debug: () => {} },
+      now: () => h.clock.now,
+      newRunId: () => 'run-race',
+      uuid: () => 'uuid-race',
+    })
+
+    const p1 = slowRuntime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })
+    const p2 = slowRuntime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })
+    // 等两个请求都进入闸门（都已完成锁首查且看到 null）
+    await new Promise<void>((resolve) => {
+      const tick = (): void => { if (inGate >= 2) resolve(); else setTimeout(tick, 5) }
+      tick()
+    })
+    release()
+
+    const results = await Promise.allSettled([p1, p2])
+    const fulfilled = results.filter((r) => r.status === 'fulfilled')
+    const rejected = results.filter((r) => r.status === 'rejected')
+    expect(fulfilled).toHaveLength(1)
+    expect(rejected).toHaveLength(1)
+    const reason = (rejected[0] as PromiseRejectedResult).reason as { code?: string }
+    expect(reason.code).toBe('WF_LOCKED')
+    // 内存中只登记了一个激活 run
+    expect(slowRuntime.activeRunForSession('session-1')).not.toBeNull()
+    // 磁盘 orchestration 只写了一份（后写者未走到事实源写入）
+    const dir = join(h.store.root, 'orchestrations')
+    const files = await import('node:fs/promises').then((fs) => fs.readdir(dir))
+    expect(files.length).toBe(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// subagent/end 与 wait:true 阻塞
+// ---------------------------------------------------------------------------
+
+describe('subagent/end 迟到缓冲（wait:true 死锁回归）', () => {
+  it('事件早于 childIndex 登记到达：缓冲重试后 wait 等待器仍被唤醒', async () => {
+    const h = await makeHarness()
+    await h.store.saveWorkflow(makeFlow(), 'session-1', { force: true })
+
+    // 受控 runner：startNodeTask 挂起（模拟官方派发后尚未返回 childId 的窗口）
+    let resolveStart!: (value: { childId: string; created: boolean }) => void
+    const startGate = new Promise<{ childId: string; created: boolean }>((resolve) => { resolveStart = resolve })
+    const gatedRunner: NodeRunner = {
+      startNodeTask: async () => startGate,
+      interruptChild: (childId, sessionId) => h.runner.interruptChild(childId, sessionId),
+      consumeReactCapped: (childId) => h.runner.consumeReactCapped(childId),
+    }
+    const runtime = new OrchestratorRuntime({
+      store: h.store,
+      runner: gatedRunner,
+      agents: h.agents,
+      config: {
+        outputFullLimit: 400, documentTextLimit: 200, runIdleTimeoutMs: 500,
+        retryLimitDefault: 3, reactIterationLimitDefault: 50, wfAskAgentTimeoutMs: 500,
+      },
+      logger: { warn: (message) => h.warnings.push(message), info: () => {}, debug: () => {} },
+      now: () => h.clock.now,
+      newRunId: () => 'run-late',
+      uuid: () => 'uuid-late',
+    })
+    await runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })
+
+    // wait:true 阻塞：挂起在 startNodeTask
+    const waitPromise = runtime.wfRunNode({ isChild: false, sessionId: 'session-1' }, { nodeId: 'n-a1', wait: true })
+
+    // 关键场景：subagent/end 在 childIndex 登记前到达（此前实现直接丢弃 → 永久挂起）
+    await runtime.handleSubagentEnd({
+      id: 'child-1',
+      stopReason: 'completed',
+      lastAssistantMessage: [{ type: 'text', text: '完成了' }],
+    })
+    // 随后 runner 才返回 childId 并完成登记
+    resolveStart({ childId: 'child-1', created: true })
+
+    // 缓冲重试（10ms × 20 次上限）应最终命中登记并唤醒等待器
+    const result = await Promise.race([
+      waitPromise,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('waiter 挂起超时')), 2_000)),
+    ])
+    expect(result.status).toBe('ok')
+    expect(result.nodeId).toBe('n-a1')
+    expect(result.output).toBe('完成了')
+  })
+})
+
 describe('startRun 启动与运行锁', () => {
   it('成功：锁建立、快照 running、事实源写入、指令注入、开始即落盘', async () => {
     const h = await makeHarness()
@@ -489,10 +600,11 @@ describe('wfRunNode 异步路径与护栏', () => {
     const tailAt = text.indexOf(TAIL_MARKER)
     expect(text.slice(0, midAt)).toContain(NODE_HARD_CONSTRAINTS.ownPromptOnly)
     expect(text.slice(tailAt)).toContain(NODE_HARD_CONSTRAINTS.ownPromptOnly)
-    expect(text).toContain('任务：子任务A')
-    expect(text.slice(tailAt)).toContain('Retry limit: 3')
-  })
-
+      // 自定义 System Prompt 已注入系统提示词，任务块不再重复（避免排队消息重复）
+      expect(text).not.toContain('任务：子任务A')
+      expect(text).toContain('not repeated here')
+      expect(text.slice(tailAt)).toContain('Retry limit: 3')
+    })
   it('文档 ctx-in：文本内容注入（超限截断）+ 受管文件路径索引', async () => {
     const h = await makeHarness()
     const flow = makeFlow()

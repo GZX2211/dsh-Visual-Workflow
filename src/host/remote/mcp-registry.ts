@@ -37,7 +37,7 @@ export function hostPatchPath(): string {
   const candidates: string[] = []
   try {
     for (const entry of readdirSync(profilesRoot)) {
-      if (entry.startsWith('.')) continue
+      if (entry.startsWith('.') || entry === 'node_modules') continue
       const path = join(profilesRoot, entry)
       try {
         if (statSync(path).isDirectory()) candidates.push(entry)
@@ -49,6 +49,15 @@ export function hostPatchPath(): string {
     candidates.push('web')
   }
   if (candidates.length === 0) candidates.push('web')
+  // 明确优先 web profile（注释约定的首选运行面），避免 readdir 顺序把 headless
+  // 排到 web 前面时读到空 patch，导致组合管理页看不到 MCP 服务器。
+  const webPatch = join(profilesRoot, 'web', 'cordis.patch.yml')
+  try {
+    statSync(webPatch)
+    return webPatch
+  } catch {
+    // web 不存在时再回退到第一个含 patch 的 profile
+  }
   for (const name of candidates) {
     const patch = join(profilesRoot, name, 'cordis.patch.yml')
     try {

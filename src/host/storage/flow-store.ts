@@ -486,6 +486,21 @@ export class FlowStore {
     })
   }
 
+  /**
+   * 合并写入某服务的 userId 映射（读改写在同一把 withJsonLock 内完成）。
+   * 为什么必须合并而不是「先 userIdMap 再 saveUserIdMap」：后者是两次独立锁
+   * 作用域内的读改-写，不同 userId 并发首解析时互相覆盖（丢失映射 → 重启后
+   * 上下文断裂）。合并写把 read-modify-write 收进同一临界区，并发安全。
+   */
+  async mergeUserIdMap(serviceId: string, entries: Record<string, string>): Promise<Record<string, string>> {
+    return withJsonLock(this.sessionsPath(serviceId), async () => {
+      const current = await readJson<Record<string, string>>(this.sessionsPath(serviceId), {})
+      const merged: Record<string, string> = { ...(current ?? {}), ...entries }
+      await atomicWriteJson(this.sessionsPath(serviceId), merged)
+      return merged
+    })
+  }
+
   // ---- 编排事实源（orchestrations/<runId>.json，父代理只读） ------------------
 
   /** 保存运行时流程定义（startRun 时写入，父代理只读的事实源）。 */

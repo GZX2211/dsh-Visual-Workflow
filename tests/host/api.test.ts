@@ -273,7 +273,12 @@ describe('服务与模板端点', () => {
     expect(saved.id).toBe('svc-1')
     const list = (await h.api.handle('listServices', { sessionId: 'session-1' })) as unknown[]
     expect(list).toHaveLength(1)
-    await expect(h.api.handle('serviceStart', { serviceId: 'svc-1' })).rejects.toMatchObject({
+    // 无 sessionId → 400（会话归属必填）
+    await expect(h.api.handle('serviceStart', { serviceId: 'svc-1' })).rejects.toMatchObject({ status: 400 })
+    // 跨会话启动 → 404（越权会话不得启动他人服务）
+    await expect(h.api.handle('serviceStart', { sessionId: 'session-other', serviceId: 'svc-1' })).rejects.toMatchObject({ status: 404 })
+    // 归属匹配但管理器未装配 → 501
+    await expect(h.api.handle('serviceStart', { sessionId: 'session-1', serviceId: 'svc-1' })).rejects.toMatchObject({
       status: 501,
       code: 'WF_SERVICE_MANAGER_UNAVAILABLE',
     })
@@ -284,7 +289,7 @@ describe('服务与模板端点', () => {
       stop: async () => ({}),
       status: async () => ({}),
     }
-    const started = await h.api.handle('serviceStart', { serviceId: 'svc-1' })
+    const started = await h.api.handle('serviceStart', { sessionId: 'session-1', serviceId: 'svc-1' })
     expect(started).toEqual({ started: true })
     expect(calls).toEqual(['start:svc-1'])
   })
@@ -426,16 +431,21 @@ describe('运行端点', () => {
     const h = await makeHarness()
     await saveFlow(h)
     await h.api.handle('run', { sessionId: 'session-1', flowId: 'flow-1' })
-    const status = (await h.api.handle('runStatus', { runId: 'run-1' })) as { id?: string; status?: string }
+    const status = (await h.api.handle('runStatus', { sessionId: 'session-1', runId: 'run-1' })) as { id?: string; status?: string }
     expect(status.id).toBe('run-1')
     expect(status.status).toBe('running')
 
-    await h.api.handle('runStop', { runId: 'run-1' })
+    // 无 sessionId → 400；跨会话 → 404（会话归属校验）
+    await expect(h.api.handle('runStatus', { runId: 'run-1' })).rejects.toMatchObject({ status: 400 })
+    await expect(h.api.handle('runStatus', { sessionId: 'session-other', runId: 'run-1' })).rejects.toMatchObject({ status: 404 })
+    await expect(h.api.handle('runStop', { sessionId: 'session-other', runId: 'run-1' })).rejects.toMatchObject({ status: 404 })
+
+    await h.api.handle('runStop', { sessionId: 'session-1', runId: 'run-1' })
     // 终态条目内存已释放 → 回退磁盘历史
-    const disk = (await h.api.handle('runStatus', { runId: 'run-1' })) as { status?: string }
+    const disk = (await h.api.handle('runStatus', { sessionId: 'session-1', runId: 'run-1' })) as { status?: string }
     expect(disk.status).toBe('stopped')
 
-    await expect(h.api.handle('runStatus', { runId: 'run-nope' })).rejects.toMatchObject({ status: 404 })
+    await expect(h.api.handle('runStatus', { sessionId: 'session-1', runId: 'run-nope' })).rejects.toMatchObject({ status: 404 })
   })
 
   it('runStop/runHistory/runResume（显式恢复指定 runId）', async () => {
@@ -451,7 +461,7 @@ describe('运行端点', () => {
     const resumed = await h.api.handle('runResume', { sessionId: 'session-1', flowId: 'flow-1', runId: 'run-1' })
     expect(resumed).toMatchObject({ runId: 'run-2', resumedFromRunId: 'run-1' })
 
-    const stopped = await h.api.handle('runStop', { runId: 'run-2' })
+    const stopped = await h.api.handle('runStop', { sessionId: 'session-1', runId: 'run-2' })
     expect(stopped).toEqual({ stopped: true })
   })
 

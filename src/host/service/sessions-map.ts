@@ -12,7 +12,7 @@ import type { FlowStore } from '../storage/flow-store.js'
 export const SESSION_ID_PREFIX = 'session-'
 
 export interface SessionMapDeps {
-  /** 数据层（userIdMap/saveUserIdMap 原子读写）。 */
+  /** 数据层（userIdMap 读 / mergeUserIdMap 原子合并写）。 */
   store: FlowStore
   /** 服务 id（映射文件按服务隔离）。 */
   serviceId: string
@@ -59,8 +59,11 @@ export class SessionMap {
       return hit
     }
     const sessionId = `${SESSION_ID_PREFIX}${this.deps.newSessionId?.() ?? randomUUID()}`
-    await this.deps.store.saveUserIdMap(this.deps.serviceId, { ...map, [userId]: sessionId })
-    this.cache.set(userId, sessionId)
-    return sessionId
+    // 合并写入把读改写收进同一把锁（FlowStore.mergeUserIdMap），不同 userId
+    // 并发首解析时不再互相覆盖磁盘映射（旧实现读改写跨两次锁作用域，会丢映射）。
+    const merged = await this.deps.store.mergeUserIdMap(this.deps.serviceId, { [userId]: sessionId })
+    const final = merged[userId] ?? sessionId
+    this.cache.set(userId, final)
+    return final
   }
 }

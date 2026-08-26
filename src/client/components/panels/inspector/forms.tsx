@@ -5,7 +5,7 @@
 // 协作组含成员管理；连线含类型（流程/通过/不通过/内容）与内容值。
 
 import type { Dict } from '../../../i18n.js'
-import type { EditorData } from '../../../studio/studio-state.js'
+import type { EditorData, ModelItem, PresetItem } from '../../../studio/studio-state.js'
 
 // ---------------------------------------------------------------------------
 // 通用字段
@@ -61,9 +61,10 @@ function NameField({ data, copy, onPatch }: { data: Record<string, unknown>; cop
 // ---------------------------------------------------------------------------
 
 export interface ComboLike { id: string; name: string; tools?: string[]; mcpServers?: string[] }
-export interface PresetLike { id: string; name?: string }
-/** 模型条目（含适配器公布的思考强度档位，V-02）。 */
-export interface ModelLike { provider: string; model: string; efforts?: Array<{ id: string; name: string }> }
+/** 预设条目（与 studio-state PresetItem 同构，复用避免双份漂移）。 */
+export type PresetLike = PresetItem
+/** 模型条目（studio-state ModelItem 同构：含适配器公布的思考强度档位，V-02）。 */
+export type ModelLike = ModelItem
 
 /** 思考强度回退档位（DeepSeek 适配器公布 off/low/high/max；适配器未提供 efforts 时使用）。 */
 const FALLBACK_EFFORTS: Array<{ id: string; name: string }> = [

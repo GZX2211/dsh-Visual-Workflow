@@ -7,7 +7,7 @@
 //   - 旧项目 VisualWorkflow/lib/agent-runner.js（childKey/signature/ensureNodeChild/
 //     startNodeTask 骨架，已完整通读）+ lib/plugin-catalog.js（白名单解析骨架）；
 //   - 架构文档 §4.2 L218-219（复用键、签名、白名单规则：无强制追加、wf_db_query
-//     仅 db-in 连线注入、wf_run_node/wf_finish 双保险隐藏）；
+//     仅 db-in 连线注入、wf_run_node/wf_run_node_wait/wf_finish 双保险隐藏）；
 //   - 需求文档 §4.2.3.2 规则 3（子代理复用）/ §4.4.2 规则 7（工具可见性）。
 //
 // 官方 seam 取证（§8 索引 #1/#6/#7，零官方运行时依赖 W-05）：
@@ -37,8 +37,9 @@ import type { FlowStore } from '../storage/flow-store.js'
 import type { GraphNode, RoleNode } from '../shared/graph-model.js'
 import type { NodeRunner, NodeStartInput, OrchestratorLogger } from '../orchestrator/runtime.js'
 import { consumeReactCappedOf, type ReactGuardBridge } from './guards.js'
-import { RESERVED_TRANSPORT_TOOL } from '../shared/protocol.js'
+import { RESERVED_TRANSPORT_TOOL, WF_RUN_NODE, WF_RUN_NODE_WAIT } from '../shared/protocol.js'
 import type { ModelSelectionLike, ModelSelectionSetup, SelectionChildContext } from './model-selection.js'
+import type { ChildPromptSetup } from './prompt-setup.js'
 
 // ---------------------------------------------------------------------------
 // 纯函数（签名/复用键/provider 选择）
@@ -54,7 +55,7 @@ export function childKey(sessionId: string, flowId: string, nodeId: string): str
  * 字段依据架构文档 §4.2 L218：persona/provider/model/工具清单/reasoning
  * （另含 presetId——其决定工具清单，签名内显式保留以抵御同名清单歧义）。
  */
-export function nodeChildSignature(node: GraphNode, resolvedTools: string[]): string {
+export function nodeChildSignature(node: GraphNode, resolvedTools: string[], collabPrompt = ''): string {
   const data = node.kind === 'parent' || node.kind === 'agent' ? node.data : undefined
   return JSON.stringify({
     persona: String(data?.systemPrompt ?? ''),
@@ -63,6 +64,8 @@ export function nodeChildSignature(node: GraphNode, resolvedTools: string[]): st
     reasoning: String(data?.reasoning ?? ''),
     presetId: String(data?.presetId ?? ''),
     tools: [...resolvedTools].sort(),
+    // 协作 Prompt 属于组级配置；变化时同样重建子代理，避免旧系统提示词残留
+    collabPrompt,
   })
 }
 
@@ -131,6 +134,15 @@ export interface ToolsView {
   visibleToolNames(sessionId?: string): Promise<string[]>
   /** 官方 preset 的 standing scope 工具名；服务缺失返回 null（调用方回退）。 */
   presetToolNames(presetId: string): Promise<string[] | null>
+  /**
+   * 当前会话父代理（root agent）scope 视图工具名（全局层 ∪ 父代理链注册工具）。
+   * 子代理创建时官方 tools.restrict 校验的 restrictableNames 恰为此边界
+   * （官方 view() = 全局层 + 祖先 scope 层注册名；不含注入的 run_code、不含
+   * own scope），因此 allow 名单只能取该集合子集——未注册/幽灵工具
+   * （如 str_replace_editor 仅存在于无关 preset standing scope）由此剔除。
+   * 无 agent/服务缺失回退全局层。
+   */
+  agentToolNames(sessionId?: string): Promise<string[]>
 }
 
 /**
@@ -242,6 +254,27 @@ export class CordisToolsView implements ToolsView {
       return null
     }
   }
+
+  async agentToolNames(sessionId?: string): Promise<string[]> {
+    const tools = this.toolsService()
+    if (!tools) return []
+    // 优先取当前会话父代理（root agent）scope 视图：全局层 ∪ 父代理链注册工具。
+    // scope key 必须是 agent 对象本身（官方 ScopeKey 语义，历史坑见类注释）。
+    const agents = this.agentsService()
+    let scope: unknown
+    if (agents && sessionId) {
+      try {
+        const agent = agents.get(sessionId)
+        if (agent) scope = agent
+      } catch {
+        // 会话 agent 不可用 → 回退全局层
+      }
+    }
+    const list = (scope === undefined ? tools.schemas() : tools.schemas(scope)) ?? []
+    return (Array.isArray(list) ? list : [])
+      .map((schema) => String((schema as { name?: unknown; title?: unknown })?.name ?? (schema as { title?: unknown })?.title ?? ''))
+      .filter(Boolean)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -258,8 +291,8 @@ export interface ResolveToolsInput {
   node: RoleNode
 }
 
-/** 子代理永不可见的两工具（§4.4.2 规则 7）：白名单排除 + tools.restrict 双保险第一层。 */
-const CHILD_BLOCKED_TOOLS = ['wf_run_node', 'wf_finish']
+/** 子代理永不可见的三工具（§4.4.2 规则 7）：白名单排除 + tools.restrict 双保险第一层。 */
+const CHILD_BLOCKED_TOOLS = [WF_RUN_NODE, WF_RUN_NODE_WAIT, 'wf_finish']
 
 /**
  * 运行时解析节点工具白名单（架构文档 §4.2 L219）：
@@ -297,6 +330,14 @@ export async function resolveAgentTools(input: ResolveToolsInput): Promise<strin
   // 官方保留传输名 run_code 也必须剔除：它由官方自动注入子代理 scope（无需勾选），
   // 且进 allow 名单会让官方 tools.restrict 抛错（core/tools L1085 保留名校验）
   allow = allow.filter((name) => !CHILD_BLOCKED_TOOLS.includes(name) && name !== RESERVED_TRANSPORT_TOOL)
+  // 未注册/幽灵工具兜底（core/tools L1088-1091 unknown 校验）：allow 只能取
+  // 父代理 scope 视图（全局层 ∪ 父链注册）子集——str_replace_editor 这类仅存在于
+  // 无关 preset standing scope 的工具即使被组合勾选也绝不进入 allow，否则子代理
+  // 创建时官方 tools.restrict 抛 "names unknown global tool"。取不到视图时跳过（白名单仍兜底）。
+  const agentNames = await input.toolsView.agentToolNames(input.sessionId)
+  if (agentNames.length > 0) {
+    allow = allow.filter((name) => agentNames.includes(name))
+  }
   // db-in 连线 → wf_db_query 可选注入（§4.4.3 规则 5：有连线才进入工具集）
   if (await hasDbInLine(input)) {
     if (!allow.includes('wf_db_query')) allow.push('wf_db_query')
@@ -332,6 +373,8 @@ export interface NodeAgentRunnerDeps {
   react: ReactGuardBridge
   /** 模型选择装配（model-selection.ts）。 */
   modelSelection: ModelSelectionSetup
+  /** 子代理系统提示词注入装配（prompt-setup.ts）。 */
+  promptSetup: ChildPromptSetup
   logger?: OrchestratorLogger
 }
 
@@ -376,6 +419,7 @@ export class NodeAgentRunner implements NodeRunner {
     // 每轮派发后刷新护栏上限与模型选择（节点级参数可按次覆盖；官方 selection 可变态）
     this.deps.react.setLimit(childId, input.iterationLimit)
     this.attachModelSelection(childId, input)
+      this.attachPromptState(childId, input)
     return { childId, created }
   }
 
@@ -419,7 +463,8 @@ export class NodeAgentRunner implements NodeRunner {
       flowId: input.flowId,
       node,
     })
-    const signature = nodeChildSignature(node, tools)
+    const collabPrompt = String(input.collabPrompt ?? '').trim()
+      const signature = nodeChildSignature(node, tools, collabPrompt)
     const existing = this.nodeChildren.get(key)
     if (existing && existing.signature === signature) return { childId: existing.childId, created: false }
 
@@ -490,15 +535,36 @@ export class NodeAgentRunner implements NodeRunner {
       this.deps.logger?.warn(`[visual-workflow] model selection attach failed: ${String(error)}`)
     }
   }
+
+  /**
+   * 把节点级系统提示词与协作 Prompt 注入状态写入该 child 的 prompt setup。
+   * 标准模式使用完整替换；Code Mode（presetId='code'）保留官方工具调用提示词。
+   */
+  private attachPromptState(childId: string, input: NodeStartInput): void {
+    const node = input.node as RoleNode
+    const agents = this.deps.agents()
+    const agent = agents?.get(childId) as { ctx?: unknown } | null | undefined
+    if (!agent || typeof agent !== 'object' || !agent.ctx) return
+    const presetId = String(node.data?.presetId ?? '').trim()
+    try {
+      this.deps.promptSetup.attach(agent.ctx, {
+        systemPrompt: String(node.data?.systemPrompt ?? ''),
+        collabPrompt: String(input.collabPrompt ?? ''),
+        complete: presetId !== 'code',
+      })
+    } catch (error) {
+      this.deps.logger?.warn(`[visual-workflow] prompt setup attach failed: ${String(error)}`)
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
-// 子代理 scope 双保险：wf_run_node / wf_finish 经 tools.restrict 显式隐藏
+// 子代理 scope 双保险：wf_run_node / wf_run_node_wait / wf_finish 经 tools.restrict 显式隐藏
 // ---------------------------------------------------------------------------
 
 /**
  * 子代理工具可见性贡献（经 registerContinuableSetup 注入）：
- * 在 child scope 上 tools.restrict({ deny: ['wf_run_node', 'wf_finish'] })——
+ * 在 child scope 上 tools.restrict({ deny: ['wf_run_node', 'wf_run_node_wait', 'wf_finish'] })——
  * 与白名单 allow（永不包含）构成双保险（架构文档 §4.2 L219）。restrict 对未注册
  * 工具会抛错（官方 core/tools L1091），故此处尽力而为：失败即跳过，白名单仍兜底。
  */
@@ -509,7 +575,7 @@ export function childVisibilityContribution(): (childCtx: unknown) => () => void
       if (typeof childCtx.get !== 'function') return () => {}
       const tools = childCtx.get('tools') as ToolsServiceLike | null | undefined
       if (tools && typeof tools.restrict === 'function') {
-        return tools.restrict({ deny: ['wf_run_node', 'wf_finish'] })
+        return tools.restrict({ deny: ['wf_run_node', 'wf_run_node_wait', 'wf_finish'] })
       }
     } catch {
       // 工具尚未注册或服务缺失：白名单 allow 已排除，双保险尽力而为

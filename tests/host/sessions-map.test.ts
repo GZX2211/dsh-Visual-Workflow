@@ -72,6 +72,27 @@ describe('SessionMap', () => {
     expect(map.snapshot().get('user-1')).toBe(results[0])
   })
 
+  it('并发解析不同 userId：磁盘映射合并不互相覆盖（T-033 竞态回归）', async () => {
+    const store = await makeStore()
+    let seq = 0
+    const map = new SessionMap({ store, serviceId: 'svc-1', newSessionId: () => `uuid-${++seq}` })
+    // 并发首解析（不同 userId 同时命中 ensure 的读改写窗口）：修复前
+    // read-modify-write 跨两次锁作用域，后写覆盖先写 → 磁盘丢映射；修复后
+    // mergeUserIdMap 把合并收进同一把锁，两个用户映射同时落盘。
+    const results = await Promise.all([
+      map.resolve('user-1'),
+      map.resolve('user-2'),
+      map.resolve('user-3'),
+    ])
+    expect(new Set(results).size).toBe(3)
+    const raw = await readFile(join(store.root, 'services', 'svc-1.sessions.json'), 'utf8')
+    const disk = JSON.parse(raw) as Record<string, string>
+    expect(Object.keys(disk).sort()).toEqual(['user-1', 'user-2', 'user-3'])
+    expect(disk['user-1']).toBe(results[0])
+    expect(disk['user-2']).toBe(results[1])
+    expect(disk['user-3']).toBe(results[2])
+  })
+
   it('映射按服务隔离（不同 serviceId 互不干扰）', async () => {
     const store = await makeStore()
     const mapA = new SessionMap({ store, serviceId: 'svc-a', newSessionId: () => 'uuid-a' })

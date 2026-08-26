@@ -42,6 +42,21 @@ export interface GraphSnapshot {
   edges: CanvasEdge[]
 }
 
+/** 生态枚举条目（对齐后端 presets 端点返回结构）。 */
+export interface PresetItem { id: string; name?: string; description?: string; trust?: string }
+/** 生态枚举条目（对齐后端 tools 端点返回结构）。 */
+export interface ToolItem { name: string; description: string }
+/** 生态模型条目（对齐后端 models 端点返回结构：provider/model + 思考强度档位）。 */
+export interface ModelItem { provider: string; model: string; efforts?: Array<{ id: string; name: string }> }
+
+/**
+ * 本地草稿标记（前端 UI 状态，绝不落盘——后端 put* 端点经 stripClientMeta 剥除）。
+ * 以交叉类型表达「带草稿标记的持久化对象」，替代旧实现
+ * `...({ _draft: true } as object)` + `as unknown as X` 的双重类型逃逸
+ * （后者完全绕过类型检查，掩盖数据模型不一致）。
+ */
+export type Drafted<T> = T & { _draft: true }
+
 /** 编辑器引用（右侧面板编辑对象）。 */
 export type EditorRef =
   | { source: 'workflow'; id: string }
@@ -96,9 +111,9 @@ export interface StudioState {
   services: ServiceState[]
   templates: Record<TemplateKind, Array<RoleTemplate | FileTemplate | DatabaseTemplate>>
   combos: ToolCombo[]
-  presets: unknown[]
-  tools: unknown[]
-  models: unknown[]
+  presets: PresetItem[]
+  tools: ToolItem[]
+  models: ModelItem[]
   /** 当前画布对象（工作流或服务）。 */
   currentId: string | null
   currentKind: 'workflow' | 'service' | null
@@ -182,9 +197,9 @@ export type StudioAction =
   | { type: 'TEMPLATE_UPDATED'; kind: TemplateKind; template: RoleTemplate | FileTemplate | DatabaseTemplate }
   | { type: 'TEMPLATE_REMOVED'; kind: TemplateKind; id: string }
   | { type: 'COMBOS_LOADED'; items: ToolCombo[] }
-  | { type: 'PRESETS_LOADED'; items: unknown[] }
-  | { type: 'TOOLS_LOADED'; items: unknown[] }
-  | { type: 'MODELS_LOADED'; items: unknown[] }
+  | { type: 'PRESETS_LOADED'; items: PresetItem[] }
+  | { type: 'TOOLS_LOADED'; items: ToolItem[] }
+  | { type: 'MODELS_LOADED'; items: ModelItem[] }
   | { type: 'OPEN_FLOW'; flow: WorkflowDocument }
   | { type: 'OPEN_SERVICE'; service: ServiceState }
   | { type: 'CLEAR_CANVAS' }
@@ -471,9 +486,26 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
   }
 }
 
-/** 当前图快照（撤销重做栈元素构造）。 */
+/**
+ * 当前图快照（撤销重做栈元素构造）。
+ * 必须产出与 state.canvas 完全独立的副本：历史栈（past/future）保存的是
+ * 「图标量」而非引用——若直接返回数组/对象引用，任何后续对 canvas 节点的
+ * 原地修改（拖拽缓存、组件副作用）都会污染历史记录，undo/redo 退化为
+ * 同一对象的覆盖式恢复（撤销失效）。考虑 node.data/edge.condition 为嵌套
+ * 对象，逐层浅拷贝断开引用即可（元素内容不可变约定下即快照语义）。
+ */
 export function graphSnapshotOf(state: StudioState): GraphSnapshot {
-  return { nodes: state.canvas.nodes, edges: state.canvas.edges }
+  return {
+    nodes: state.canvas.nodes.map((node) => ({
+      ...node,
+      position: { ...node.position },
+      data: { ...node.data },
+    })),
+    edges: state.canvas.edges.map((edge) => ({
+      ...edge,
+      ...(edge.condition ? { condition: { ...edge.condition } } : {}),
+    })),
+  }
 }
 
 // ---------------------------------------------------------------------------

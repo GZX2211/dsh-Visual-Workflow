@@ -5,7 +5,7 @@
 import { useCallback } from 'react'
 import type { Dispatch } from 'react'
 import type { ServiceState } from '../../host/shared/types.js'
-import type { StudioAction, CanvasNode, CanvasEdge } from '../studio/studio-state.js'
+import type { Drafted, StudioAction, CanvasNode, CanvasEdge } from '../studio/studio-state.js'
 import type { RemoteFace } from './useRemote.js'
 import { EP } from '../lib/remote.js'
 
@@ -15,8 +15,10 @@ export interface ServiceControlFace {
   createServiceDraft(name: string, sessionId: string): ServiceState
   /** 保存服务（草稿入库 / 正式带 revision 更新）。 */
   saveService(service: ServiceState, nodes: CanvasNode[], edges: CanvasEdge[]): Promise<ServiceState | null>
-  startService(serviceId: string): Promise<void>
-  stopService(serviceId: string): Promise<void>
+  /** 启动服务：携带会话 id 供后端归属校验。 */
+  startService(serviceId: string, sessionId: string): Promise<void>
+  /** 停止服务：携带会话 id 供后端归属校验。 */
+  stopService(serviceId: string, sessionId: string): Promise<void>
 }
 
 /** 服务控制面（远端失败抛错，由调用方 toast）。 */
@@ -44,8 +46,9 @@ export function useServiceControl(dispatch: Dispatch<StudioAction>, remote: Remo
       createdAt: now,
       updatedAt: now,
       status: 'stopped' as const,
-      ...({ _draft: true } as object),
-    } as unknown as ServiceState
+      // 草稿标记（前端 UI 状态；后端 putService 经 stripClientMeta 剥除，绝不落盘）
+      _draft: true,
+    } as Drafted<ServiceState>
     dispatch({ type: 'OPEN_SERVICE', service: draft })
     return draft
   }, [dispatch])
@@ -76,13 +79,13 @@ export function useServiceControl(dispatch: Dispatch<StudioAction>, remote: Remo
     return saved
   }, [dispatch, remote])
 
-  const startService = useCallback(async (serviceId: string) => {
-    const service = await remote.call(EP.EP_SERVICE_START, { serviceId }) as ServiceState
+  const startService = useCallback(async (serviceId: string, sessionId: string) => {
+    const service = await remote.call(EP.EP_SERVICE_START, { sessionId, serviceId }) as ServiceState
     dispatch({ type: 'SERVICE_UPDATED', service })
   }, [dispatch, remote])
 
-  const stopService = useCallback(async (serviceId: string) => {
-    const service = await remote.call(EP.EP_SERVICE_STOP, { serviceId }) as ServiceState
+  const stopService = useCallback(async (serviceId: string, sessionId: string) => {
+    const service = await remote.call(EP.EP_SERVICE_STOP, { sessionId, serviceId }) as ServiceState
     dispatch({ type: 'SERVICE_UPDATED', service })
   }, [dispatch, remote])
 

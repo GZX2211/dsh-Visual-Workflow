@@ -1,4 +1,4 @@
-// src/host/prompts/node-task.ts
+﻿// src/host/prompts/node-task.ts
 //
 // 节点任务块构建器（T-005 基线之一）。
 //
@@ -123,7 +123,7 @@ export function buildNodeTaskBlock(params: NodeTaskBlockParams): string {
   const midParts: string[] = [
     MID_MARKER,
     '',
-    `Your task (from the node's own System Prompt): ${facts.task.trim() || `execute workflow node "${facts.nodeLabel}"`}`,
+      `Your task is defined in your own System Prompt; it is not repeated here. Execute workflow node "${facts.nodeLabel}" from that prompt.`,
   ]
 
   if (facts.upstreamContext.length > 0) {

@@ -116,8 +116,10 @@ export const EP_IMPORT_AGENT_TEMPLATE = 'importAgentTemplate'
 // wf_* 工具名常量（架构文档 §4.5 工具表）
 // ---------------------------------------------------------------------------
 
-/** 启动节点子代理工具名（父代理；异步/阻塞/暂停门三语义）。 */
+/** 启动节点子代理工具名（父代理；模式一编排执行：异步非阻塞启动，暂停门三语义）。 */
 export const WF_RUN_NODE = 'wf_run_node'
+/** 启动节点子代理工具名（父代理；模式二后台服务：阻塞等待节点完成，暂停门仍立即返回）。 */
+export const WF_RUN_NODE_WAIT = 'wf_run_node_wait'
 /** 幂等收尾工具名（父代理；释放运行锁）。 */
 export const WF_FINISH = 'wf_finish'
 /** 子代理向主会话用户提问工具名（官网提问卡，可选注入）。 */
@@ -134,15 +136,16 @@ export const WF_DB_QUERY = 'wf_db_query'
 // resolveAgentTools()（T-022）与 tools.restrict 显式隐藏（双保险）引用，也供
 // client 组合管理（T-048）判定哪些 wf_* 工具可勾选（可选注入集）。
 
-/** 父代理（主会话 Agent）可见工具集：wf_run_node、wf_finish、wf_ask_agent。 */
+/** 父代理（主会话 Agent）可见工具集：wf_run_node / wf_run_node_wait、wf_finish、wf_ask_agent。 */
 export const PARENT_AGENT_VISIBLE_TOOLS = [
   WF_RUN_NODE,
+  WF_RUN_NODE_WAIT,
   WF_FINISH,
   WF_ASK_AGENT, // resolve 裁决能力内聚于父代理（架构文档 §4.5）
 ] as const
 
-/** 子代理永久隐藏工具集（经 tools.restrict 显式隐藏，双保险）：wf_run_node、wf_finish。 */
-export const CHILD_AGENT_HIDDEN_TOOLS = [WF_RUN_NODE, WF_FINISH] as const
+/** 子代理永久隐藏工具集（经 tools.restrict 显式隐藏，双保险）：wf_run_node / wf_run_node_wait、wf_finish。 */
+export const CHILD_AGENT_HIDDEN_TOOLS = [WF_RUN_NODE, WF_RUN_NODE_WAIT, WF_FINISH] as const
 
 /**
  * 官方保留的 Code Mode presentation transport 名（run_code）：
@@ -165,9 +168,9 @@ export const OPTIONAL_INJECT_TOOLS = [WF_ASK, WF_ASK_AGENT, WF_DB_QUERY] as cons
  * 供测试做关键规则断言与消费侧做静态判定（as const，零运行时 import）。
  */
 export const TOOL_VISIBILITY = {
-  /** 父代理可见集（wf_run_node / wf_finish / wf_ask_agent(resolve) + 有 db-in 时的 wf_db_query）。 */
+  /** 父代理可见集（wf_run_node / wf_run_node_wait / wf_finish / wf_ask_agent(resolve) + 有 db-in 时的 wf_db_query）。 */
   parentVisible: PARENT_AGENT_VISIBLE_TOOLS,
-  /** 子代理永久隐藏集（wf_run_node / wf_finish）。 */
+  /** 子代理永久隐藏集（wf_run_node / wf_run_node_wait / wf_finish）。 */
   childHidden: CHILD_AGENT_HIDDEN_TOOLS,
   /** 可选注入集（wf_ask / wf_ask_agent / wf_db_query）。 */
   optionalInject: OPTIONAL_INJECT_TOOLS,

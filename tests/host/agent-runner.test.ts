@@ -26,6 +26,7 @@ import {
 } from '../../src/host/agent/runner.js'
 import type { ReactGuardBridge } from '../../src/host/agent/guards.js'
 import type { ModelSelectionSetup } from '../../src/host/agent/model-selection.js'
+import type { ChildPromptSetup } from '../../src/host/agent/prompt-setup.js'
 import type { NodeStartInput } from '../../src/host/orchestrator/runtime.js'
 import type { RoleNode } from '../../src/host/shared/graph-model.js'
 
@@ -107,14 +108,21 @@ class FakeAgentsService implements AgentsServiceLike {
 
 /** 工具视图 fake：可见集与 preset 解析可控。 */
 class FakeToolsView implements ToolsView {
-  // run_code：官方在非 native 模式自动注入 scope（visible 含它，但不得进 allow 名单）
-  visible: string[] = ['read', 'write', 'edit', 'wf_ask', 'wf_ask_agent', 'wf_db_query', 'wf_run_node', 'wf_finish', 'run_code', 'mcp__srv1__a', 'mcp__srv1__b']
+  // run_code：官方在非 native 模式自动注入 scope（visible 含它，但不得进 allow 名单）；
+  // str_replace_editor：官方简单模式专用工具——存在于可见并集（来自无关 preset standing
+  // scope），但不在父代理 scope 视图（简单模式未启用），运行时被兜底剔除
+  visible: string[] = ['read', 'write', 'edit', 'wf_ask', 'wf_ask_agent', 'wf_db_query', 'wf_run_node', 'wf_finish', 'run_code', 'str_replace_editor', 'mcp__srv1__a', 'mcp__srv1__b']
   presets = new Map<string, string[] | null>()
+  /** 父代理 scope 视图（默认=可见集去掉 run_code 与幽灵工具；测试可覆盖）。 */
+  agentTools: string[] | null = null
   async visibleToolNames(): Promise<string[]> {
     return [...this.visible]
   }
   async presetToolNames(presetId: string): Promise<string[] | null> {
     return this.presets.get(presetId) ?? null
+  }
+  async agentToolNames(): Promise<string[]> {
+    return this.agentTools ?? this.visible.filter((name) => name !== 'run_code' && name !== 'str_replace_editor')
   }
 }
 
@@ -124,8 +132,9 @@ interface RunnerHarness {
   subagents: FakeSubagents
   agents: FakeAgentsService
   toolsView: FakeToolsView
-  react: { setLimit: ReturnType<typeof vi.fn>; drop: ReturnType<typeof vi.fn>; consumeCapped: ReturnType<typeof vi.fn> }
-  modelSelection: { contribution: ReturnType<typeof vi.fn>; attach: ReturnType<typeof vi.fn> }
+    react: { setLimit: ReturnType<typeof vi.fn>; drop: ReturnType<typeof vi.fn>; consumeCapped: ReturnType<typeof vi.fn> }
+    modelSelection: { contribution: ReturnType<typeof vi.fn>; attach: ReturnType<typeof vi.fn> }
+    promptSetup: { contribution: ReturnType<typeof vi.fn>; attach: ReturnType<typeof vi.fn> }
 }
 
 async function makeHarness(): Promise<RunnerHarness> {
@@ -139,6 +148,7 @@ async function makeHarness(): Promise<RunnerHarness> {
   const toolsView = new FakeToolsView()
   const react = { setLimit: vi.fn(), drop: vi.fn(), consumeCapped: vi.fn(() => false) }
   const modelSelection = { contribution: vi.fn(() => () => {}), attach: vi.fn() }
+  const promptSetup = { contribution: vi.fn(() => () => {}), attach: vi.fn() }
   const runner = new NodeAgentRunner({
     store,
     agents: () => agents,
@@ -146,8 +156,9 @@ async function makeHarness(): Promise<RunnerHarness> {
     toolsView,
     react: react as unknown as ReactGuardBridge,
     modelSelection: modelSelection as unknown as ModelSelectionSetup,
+    promptSetup: promptSetup as unknown as ChildPromptSetup,
   })
-  return { runner, store, subagents, agents, toolsView, react, modelSelection }
+  return { runner, store, subagents, agents, toolsView, react, modelSelection, promptSetup }
 }
 
 function taskInput(overrides: Partial<NodeStartInput> = {}): NodeStartInput {
@@ -209,15 +220,30 @@ describe('resolveAgentTools 白名单解析（§4.2 L219）', () => {
     expect(tools).toEqual([])
   })
 
-  it('combo：勾选 ∩ 可见（父代理工具集）+ 所选 MCP 前缀工具；wf_run_node/wf_finish/run_code 被白名单天然排除', async () => {
+  it('combo：勾选 ∩ 可见（父代理工具集）+ 所选 MCP 前缀工具；wf_run_node/wf_finish/run_code/str_replace_editor 被白名单天然排除', async () => {
     const h = await makeHarness()
-    await saveCombo(h, 'combo-c1', ['read', 'not-visible', 'wf_ask', 'wf_run_node', 'wf_finish', 'run_code'], ['srv1'])
+    await saveCombo(h, 'combo-c1', ['read', 'not-visible', 'wf_ask', 'wf_run_node', 'wf_finish', 'run_code', 'str_replace_editor'], ['srv1'])
     const tools = await resolveAgentTools({
       store: h.store, toolsView: h.toolsView, sessionId: 'session-1', flowId: 'flow-1',
       node: agentNode('n-a1'),
     })
     expect(tools).not.toContain('run_code') // 官方保留名（presentation transport）永不进入 allow
+    // str_replace_editor：官方简单模式专用工具，当前父代理视图（简单模式未启用）不含它
+    // → 运行时兜底剔除，避免官方 tools.restrict 抛 "names unknown global tool"
+    expect(tools).not.toContain('str_replace_editor')
     expect(tools.sort()).toEqual(['mcp__srv1__a', 'mcp__srv1__b', 'read', 'wf_ask'])
+  })
+
+  it('str_replace_editor：父代理视图含它（简单模式启用）→ 保留进 allow', async () => {
+    const h = await makeHarness()
+    h.toolsView.agentTools = [...h.toolsView.visible, 'str_replace_editor']
+    await saveCombo(h, 'combo-c1', ['read', 'str_replace_editor'])
+    const tools = await resolveAgentTools({
+      store: h.store, toolsView: h.toolsView, sessionId: 'session-1', flowId: 'flow-1',
+      node: agentNode('n-a1'),
+    })
+    expect(tools).toContain('str_replace_editor')
+    expect(tools).toContain('read')
   })
 
   it('wf_ask/wf_ask_agent 仅勾选注入（无强制追加，PRD §4.4.2 规则 7）', async () => {
@@ -246,9 +272,9 @@ describe('resolveAgentTools 白名单解析（§4.2 L219）', () => {
       node: agentNode('n-a1', { presetId: 'unknown-preset' }),
     })
     // 回退全部可见，但 wf_run_node/wf_finish 仍被无条件剔除（§4.4.2 规则 7）；
-    // run_code 为官方保留名同样剔除
+    // run_code 为官方保留名、str_replace_editor 不在父代理视图（简单模式未启用）同样剔除
     expect(fallback.sort()).toEqual(
-      h.toolsView.visible.filter((n) => n !== 'wf_run_node' && n !== 'wf_finish' && n !== 'run_code').sort(),
+      h.toolsView.visible.filter((n) => n !== 'wf_run_node' && n !== 'wf_finish' && n !== 'run_code' && n !== 'str_replace_editor').sort(),
     )
   })
 
@@ -341,6 +367,7 @@ describe('NodeAgentRunner 创建/复用/派发', () => {
       toolsView: h2.toolsView,
       react: h2.react as unknown as ReactGuardBridge,
       modelSelection: h2.modelSelection as unknown as ModelSelectionSetup,
+      promptSetup: h2.promptSetup as unknown as ChildPromptSetup,
     })
     await expect(runner2.ensureNodeChild(taskInput())).rejects.toThrow(/Agent 服务不可用/)
 
@@ -403,8 +430,8 @@ describe('NodeAgentRunner 创建/复用/派发', () => {
 // 可见性双保险贡献
 // ---------------------------------------------------------------------------
 
-describe('childVisibilityContribution（wf_run_node/wf_finish 双保险隐藏）', () => {
-  it('tools.restrict 可用 → deny 两工具并返回 disposer', () => {
+describe('childVisibilityContribution（wf_run_node/wf_run_node_wait/wf_finish 双保险隐藏）', () => {
+  it('tools.restrict 可用 → deny 三个工具并返回 disposer', () => {
     const denies: unknown[] = []
     const disposed: unknown[] = []
     const fakeTools = {
@@ -416,8 +443,8 @@ describe('childVisibilityContribution（wf_run_node/wf_finish 双保险隐藏）
     const contribution = childVisibilityContribution()
     const childCtx = { get: (name: string) => (name === 'tools' ? fakeTools : undefined) }
     const disposer = contribution(childCtx)
-    expect(denies).toEqual([{ deny: ['wf_run_node', 'wf_finish'] }])
-    disposer()
+    expect(denies).toEqual([{ deny: ['wf_run_node', 'wf_run_node_wait', 'wf_finish'] }])
+      disposer()
     expect(disposed).toEqual(['disposed'])
   })
 

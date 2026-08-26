@@ -1,4 +1,4 @@
-// src/host/orchestrator/runtime.ts
+﻿// src/host/orchestrator/runtime.ts
 //
 // 编排运行时：运行锁 / run 快照 / startRun / 编排指令注入 / subagent/end
 // 观察回写 / 护栏 / currentResolvedFlow / terminate / 幂等收尾 / wait 阻塞 /
@@ -29,6 +29,7 @@ import { validateFlow } from '../graph/validate.js'
 import type { FlowStore } from '../storage/flow-store.js'
 import type { GraphNode, RoleNode, WorkflowDocument } from '../shared/graph-model.js'
 import type { RunSnapshot, RunStatus } from '../shared/types.js'
+import { WF_RUN_NODE_WAIT } from '../shared/protocol.js'
 import { buildResumedSnapshot, findResumableRun, type ResumeInput, type ResumeResult } from './resume.js'
 import {
   OUTPUT_SUMMARY_LIMIT,
@@ -47,6 +48,14 @@ import {
 
 /** 单次运行 wf_run_node 调用总上限（编排护栏）。 */
 export const GLOBAL_RUN_CALL_LIMIT = 500
+
+/**
+ * subagent/end 迟到缓冲参数：childIndex 登记的窗口（startNodeTask 派发 → 编排器
+ * 拿到 childId 登记）只有数个事件循环轮转，10ms × 20 次 = 200ms 远宽于窗口，
+ * 同时有界（不无限重试；超限告警丢弃，避免无主事件常驻）。
+ */
+const SUBAGENT_END_RETRY_DELAY_MS = 10
+const SUBAGENT_END_RETRY_MAX = 20
 
 /** 编排器错误：稳定 code（工具层转 isError 工具结果/测试断言共用）。 */
 export class WfError extends Error {
@@ -94,6 +103,8 @@ export interface NodeStartInput {
   thinking?: string
   /** 节点级 ReAct 迭代上限覆盖（缺省继承节点配置）。 */
   iterationLimit?: number
+    /** 协作组 Prompt（组卡片 data.collabPrompt；非组内成员为空字符串）。 */
+    collabPrompt?: string
 }
 
 /** 注入父代理的 followup 消息（官方 Message 契约：必须带 id 与 source，否则父回合失败）。 */
@@ -433,6 +444,8 @@ export class OrchestratorRuntime {
   readonly runs = new Map<string, RunEntry>()
   /** childId → 运行位置反查（subagent/end 观察回写用）。 */
   private readonly childIndex = new Map<string, ChildMeta>()
+  /** dispose 标记：置位后迟到事件缓冲不再重试（插件卸载清理彻底）。 */
+  private disposed = false
 
   constructor(private readonly deps: OrchestratorDeps) {}
 
@@ -503,10 +516,49 @@ export class OrchestratorRuntime {
     return null
   }
 
+  /**
+   * 运行锁检查（startRun 用）：存在锁定（running/paused）即抛错。
+   * 为什么同时用于「开头护栏」与「登记前重检」：两处语义一致——只要此刻
+   * 该 flowId 已有激活 run，本次启动就要拒绝；登记前在同一同步块内重检，
+   * 使 check-then-act 原子化（并发 startRun 不会双双通过）。
+   */
+  private assertFlowLockFree(flowId: string, sessionId: string): void {
+    const locked = this.flowLockInfo(flowId)
+    if (!locked) return
+    if (locked.status === 'paused' && locked.sessionId === sessionId) {
+      throw new WfError('该工作流已暂停，请先恢复运行', 'WF_PAUSED', { runId: locked.runId, pausedRunId: locked.runId })
+    }
+    if (locked.sessionId === sessionId) {
+      throw new WfError('该工作流正在本会话运行中，请先停止再运行', 'WF_LOCKED', { lockedSessionId: locked.sessionId })
+    }
+    throw new WfError('该工作流正在另一个会话中运行，请先停止后再试', 'WF_LOCKED', { lockedSessionId: locked.sessionId })
+  }
+
+  /**
+   * 运行锁检查（resumeRun 用）：允许本会话 paused（恢复接管锁），拒绝
+   * 跨会话锁定与本会话 running。与 assertFlowLockFree 一样用于开头护栏
+   * 与登记前重检两处，保证并发恢复/启动不会产生同 flowId 双运行。
+   */
+  private assertResumeLockFree(flowId: string, sessionId: string): void {
+    const locked = this.flowLockInfo(flowId)
+    if (!locked) return
+    if (locked.sessionId !== sessionId) {
+      throw new WfError('该工作流正在另一个会话中运行，请先停止后再试', 'WF_LOCKED', { lockedSessionId: locked.sessionId })
+    }
+    if (locked.status === 'running') {
+      throw new WfError('该工作流正在本会话运行中，请先停止再运行', 'WF_LOCKED', { lockedSessionId: locked.sessionId })
+    }
+  }
+
   /** 读取 run 快照（深拷贝副本，防调用方改写内部状态）。 */
   runSnapshot(runId: string): RunSnapshot | null {
     const entry = this.runs.get(runId)
     return entry ? cloneSnapshot(entry.snapshot) : null
+  }
+
+  /** 取 run 内存条目本身（API 层会话归属校验用；调用方只读，不得改写内部状态）。 */
+  entryFor(runId: string): RunEntry | null {
+    return this.runs.get(runId) ?? null
   }
 
   /** childId → 运行位置反查（subagent/end 观察用；未登记返回 null）。 */
@@ -528,16 +580,8 @@ export class OrchestratorRuntime {
     if (!sessionId || !flowId) throw new WfError('requires sessionId and flowId', 'WF_BAD_ARGS')
 
     // 运行锁护栏：跨会话冲突 / 同会话重复 / 暂停保留锁
-    const locked = this.flowLockInfo(flowId)
-    if (locked) {
-      if (locked.status === 'paused' && locked.sessionId === sessionId) {
-        throw new WfError('该工作流已暂停，请先恢复运行', 'WF_PAUSED', { runId: locked.runId, pausedRunId: locked.runId })
-      }
-      if (locked.sessionId === sessionId) {
-        throw new WfError('该工作流正在本会话运行中，请先停止再运行', 'WF_LOCKED', { lockedSessionId: locked.sessionId })
-      }
-      throw new WfError('该工作流正在另一个会话中运行，请先停止后再试', 'WF_LOCKED', { lockedSessionId: locked.sessionId })
-    }
+    // （登记前还会在同一同步块内重检一次，见 runs.set 前注释——杜绝并发双运行）
+    this.assertFlowLockFree(flowId, sessionId)
 
     const flow = mode === 'mode2'
       ? await this.deps.store.getServiceAsFlow(flowId)
@@ -585,6 +629,10 @@ export class OrchestratorRuntime {
       waiters: new Map(),
       asks: new Map(),
     }
+    // 运行锁登记（check-then-act 竞态收口）：并发 startRun 可能已在本请求的
+    // await 期间登记了同一 flowId 的 run。此处重检 + runs.set 在同一同步块内
+    // 完成（Node 单线程内无交错），保证同工作流最多一个激活 run。
+    this.assertFlowLockFree(flowId, sessionId)
     this.runs.set(runId, entry)
 
     // 流程事实源文件（父代理可 read，只读；defPath 注入编排指令）
@@ -647,15 +695,8 @@ export class OrchestratorRuntime {
     }
 
     // 运行锁护栏：同会话 paused 允许恢复（启动后锁移交新 run）；其余冲突拒绝
-    const locked = this.flowLockInfo(flowId)
-    if (locked) {
-      if (locked.sessionId !== sessionId) {
-        throw new WfError('该工作流正在另一个会话中运行，请先停止后再试', 'WF_LOCKED', { lockedSessionId: locked.sessionId })
-      }
-      if (locked.status === 'running') {
-        throw new WfError('该工作流正在本会话运行中，请先停止再运行', 'WF_LOCKED', { lockedSessionId: locked.sessionId })
-      }
-    }
+    // （登记前还会在同一同步块内重检一次，见 runs.set 前注释）
+    this.assertResumeLockFree(flowId, sessionId)
 
     const flow = prev.mode === 'mode2'
       ? await this.deps.store.getServiceAsFlow(flowId)
@@ -690,6 +731,9 @@ export class OrchestratorRuntime {
       waiters: new Map(),
       asks: new Map(),
     }
+    // 运行锁登记（check-then-act 竞态收口）：并发 resumeRun/startRun 可能已在本
+    // 请求的 await 期间登记同一 flowId 的 run；重检 + 写入同一同步块内完成。
+    this.assertResumeLockFree(flowId, sessionId)
     this.runs.set(runId, entry)
 
     // 流程事实源文件（同 startRun；defPath 注入编排指令）
@@ -773,8 +817,22 @@ export class OrchestratorRuntime {
    *   - wait:true 阻塞（模式二）：等待该节点子代理完成，返回 { nodeId, status:'ok'|'fail', childId, output }；
    *   - 暂停节点：触发暂停门（run=paused + 断点持久化 resumeFrom=暂停节点，锁保留）。
    */
-  async wfRunNode(caller: CallerInfo, args: RunNodeArgs, callerSignal?: AbortSignal): Promise<RunNodeResult> {
-    const run = this.requireActiveRootRun(caller, 'wf_run_node')
+  async wfRunNode(
+    caller: CallerInfo,
+    args: RunNodeArgs,
+    callerSignal?: AbortSignal,
+    options: { expectedMode?: 'mode1' | 'mode2' } = {},
+  ): Promise<RunNodeResult> {
+    const run = this.requireActiveRootRun(caller, options?.expectedMode === 'mode2' ? WF_RUN_NODE_WAIT : 'wf_run_node')
+    // 模式与工具一一对应：wf_run_node 仅编排执行模式，wf_run_node_wait 仅后台服务模式
+    if (options?.expectedMode && run.snapshot.mode !== options.expectedMode) {
+      throw new WfError(
+        options.expectedMode === 'mode2'
+          ? 'wf_run_node_wait 只能在后台服务模式（mode2）中使用'
+          : 'wf_run_node 只能在编排执行模式（mode1）中使用',
+        'WF_MODE_MISMATCH',
+      )
+    }
     const nodeId = String(args?.nodeId ?? '').trim()
     if (!nodeId) throw new WfError('wf_run_node 需要参数 nodeId', 'WF_BAD_ARGS')
     if (run.controller.signal.aborted) throw new WfError('该工作流已停止', 'WF_CANCELLED')
@@ -858,6 +916,7 @@ export class OrchestratorRuntime {
         node,
         blocks,
         signal: run.controller.signal,
+        collabPrompt: collabPromptOf(flow, node.id),
         ...(thinking !== undefined ? { thinking } : {}),
         ...(effectiveReactLimit !== undefined ? { iterationLimit: effectiveReactLimit } : {}),
       })
@@ -1150,7 +1209,12 @@ export class OrchestratorRuntime {
     const childId = String(info?.id ?? '')
     if (!childId) return
     const meta = this.childIndex.get(childId)
-    if (!meta) return
+    // childIndex 尚未登记（极快完成/同步失败的子代理事件先于登记到达）：
+    // 不能静默丢弃——否则 wait:true 等待器永久挂起、inflight 残留。有界重试等待登记。
+    if (!meta) {
+      this.deferSubagentEnd(info, 0)
+      return
+    }
     for (const entry of this.runs.values()) {
       const s = entry.snapshot
       if (s.sessionId !== meta.sessionId || s.flowId !== meta.flowId) continue
@@ -1184,6 +1248,26 @@ export class OrchestratorRuntime {
       }
       return
     }
+  }
+
+  /**
+   * 迟到 subagent/end 有界重试：等待 childIndex 完成登记后重放事件。
+   * 防御性兜底——正常路径事件必然晚于登记到达，重试一次即命中；
+   * 连续超限（20 次/200ms）说明 childId 无主（run 已清理），告警后丢弃。
+   */
+  private deferSubagentEnd(info: SubagentEndInfo, tries: number): void {
+    if (this.disposed) return
+    if (tries >= SUBAGENT_END_RETRY_MAX) {
+      this.log().warn('[visual-workflow] subagent/end 缓冲重试超限丢弃：childId=' + String(info?.id ?? ''))
+      return
+    }
+    setTimeout(() => {
+      if (this.disposed) return
+      const childId = String(info?.id ?? '')
+      if (!childId) return
+      if (this.childIndex.has(childId)) void this.handleSubagentEnd(info)
+      else this.deferSubagentEnd(info, tries + 1)
+    }, SUBAGENT_END_RETRY_DELAY_MS)
   }
 
   // ---- 终止 / 停止 ------------------------------------------------------------
@@ -1297,6 +1381,7 @@ export class OrchestratorRuntime {
    * 标记为 interrupted（可恢复）。
    */
   dispose(): void {
+    this.disposed = true
     for (const entry of this.runs.values()) {
       try {
         entry.controller.abort('visual-workflow plugin disposed')
@@ -1375,6 +1460,15 @@ export function collabGroupList(flow: WorkflowDocument): Array<{ groupId: string
   return flow.nodes
     .filter((n) => n.kind === 'group')
     .map((n) => ({ groupId: n.id, label: n.data.label || n.id, memberIds: n.data.memberIds ?? [] }))
+}
+
+/** 读取某角色节点所属协作组的协作 Prompt（组卡片 data.collabPrompt；非组内成员返回空串）。 */
+export function collabPromptOf(flow: WorkflowDocument, nodeId: string): string {
+  const group = flow.nodes.find(
+    (n): n is GraphNode & { data: { collabPrompt?: string; memberIds?: string[] } } =>
+      n.kind === 'group' && ((n.data.memberIds ?? []) as string[]).includes(nodeId),
+  )
+  return group ? String(group.data.collabPrompt ?? '').trim() : ''
 }
 
 /** 运行前完整性检查：缺失的启动/结束节点（按模式渲染中文名）。 */
@@ -1499,8 +1593,8 @@ function directiveParams(
       pauseNodeIds: pauseNodeIdsOf(flow),
       runParamsText:
         mode === 'mode2'
-          ? 'mode2 (service): block with wait: true when you need the node output inline.'
-          : 'mode1 (orchestration): wf_run_node defaults to async dispatch.',
+          ? 'mode2 (service): use wf_run_node_wait to start each node and block until it finishes; never use wf_run_node.'
+            : 'mode1 (orchestration): use wf_run_node to start each node asynchronously; never use wf_run_node_wait.',
       ...(extra?.question ? { question: extra.question } : {}),
       ...(extra?.resume
         ? { isResume: true, resumeFromNodeId: extra.resume.resumeFromNodeId, resumedFromRunId: extra.resume.resumedFromRunId }

@@ -1,6 +1,6 @@
-// src/host/tools/wf-tools.ts
+﻿// src/host/tools/wf-tools.ts
 //
-// wf_run_node / wf_finish / wf_ask 三个父代理编排工具注册。
+// wf_run_node / wf_run_node_wait / wf_finish / wf_ask 四个父代理编排工具注册。
 //
 // 职责边界：
 //   - 本文件只做「注册（defineTool DSL）+ 身份派生（callerOf）+ 归属校验」，
@@ -19,7 +19,7 @@
 // 随后是前置条件/失败语义（WF_* 稳定错误码）/副作用（异步启动 / 阻塞提问 /
 // 幂等收尾）；单条 description 目标 ≤ 120 tokens。
 
-import { WF_ASK, WF_FINISH, WF_RUN_NODE } from '../shared/protocol.js'
+import { WF_ASK, WF_FINISH, WF_RUN_NODE, WF_RUN_NODE_WAIT } from '../shared/protocol.js'
 import type { CallerInfo, OrchestratorRuntime, RootAgentLike } from '../orchestrator/runtime.js'
 import { WfError } from '../orchestrator/runtime.js'
 import { statusText } from '../orchestrator/snapshot.js'
@@ -107,7 +107,7 @@ function combinedSignal(runSignal: AbortSignal, callerSignal: AbortSignal): Abor
 }
 
 /**
- * 注册三个父代理编排工具（全局层；ctx.tools.register）。
+ * 注册四个父代理编排工具（全局层；ctx.tools.register）。
  * 返回 disposer：逐个注销，注销失败尽力而为。
  * 与旧项目注册实现的差异：
  *   - defineTool DSL（本地实现）替代手写 raw JSON Schema；
@@ -126,36 +126,65 @@ export function registerWfTools(
 
   const disposers: Array<() => void> = []
 
-  const wfRunNodeDef = defineTool({
-    name: WF_RUN_NODE,
-    description:
-      'Start one agent node of the active Visual Workflow run. Use while orchestrating: pass the node id from the flow definition file. ' +
-      'Async by default (returns started with the child id); with wait: true it blocks until the node child finishes and returns ok/fail with its final output. ' +
-      'A pause-node id pauses the run and persists a checkpoint instead (returns paused). ' +
-      'Child agents are rejected; fails with WF_* codes on invalid arguments, missing nodes, or after the run is stopped or limits are exceeded.',
-    parameters: {
-      nodeId: { type: 'string', required: true, description: 'Node id from the flow definition file (nodes[].id) to start; proxy nodes resolve to their source node.' },
-      wait: { type: 'boolean', description: 'Block until the node child finishes and return its final output (mode 2). Defaults to false (async).' },
-      thinking: { type: 'string', description: 'Optional reasoning-effort override for this node run; value domain follows the official adapter.' },
-      iterationLimit: { type: 'number', description: 'Optional ReAct iteration-limit override (soft cap: the child stops calling tools and concludes).' },
-      retryLimit: { type: 'number', description: 'Optional per-node retry-limit override (hard guard, over the node default).' },
-    },
-    output: {
-      schema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          nodeId: { type: 'string', required: true, description: 'The resolved node id that was started.' },
-          status: { type: 'string', required: true, enum: ['started', 'paused', 'ok', 'fail'] as const, description: 'started: async start; paused: pause gate; ok/fail: blocked wait result.' },
-          childId: { type: 'string', description: 'The node child session id (started path).' },
-          output: { type: 'string', description: 'Final child output summary (ok/fail wait path).' },
-        },
+    // 模式一编排执行：wf_run_node 仅异步非阻塞启动，不提供 wait 参数。
+    const wfRunNodeDef = defineTool({
+      name: WF_RUN_NODE,
+      description:
+        'Start one agent node of an orchestration run asynchronously. Use only in mode1: pass the node id from the flow definition file. ' +
+        'Returns started with the child id immediately; do not wait for the node child. ' +
+        'A pause-node id pauses the run and persists a checkpoint instead (returns paused). ' +
+        'Child agents are rejected; fails with WF_* codes on invalid arguments, missing nodes, mode mismatch, or stopped runs.',
+      parameters: {
+        nodeId: { type: 'string', required: true, description: 'Node id from the flow definition file (nodes[].id) to start; proxy nodes resolve to their source node.' },
+        thinking: { type: 'string', description: 'Optional reasoning-effort override for this node run; value domain follows the official adapter.' },
+        iterationLimit: { type: 'number', description: 'Optional ReAct iteration-limit override (soft cap: the child stops calling tools and concludes).' },
+        retryLimit: { type: 'number', description: 'Optional per-node retry-limit override (hard guard, over the node default).' },
       },
-      render: textRender,
-    },
-    execute: (args, exec) => host.orchestrator.wfRunNode(callerOf(exec), args ?? {}, exec.signal),
-  })
-  disposers.push(tools.register(wfRunNodeDef))
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            nodeId: { type: 'string', required: true, description: 'The resolved node id that was started.' },
+            status: { type: 'string', required: true, enum: ['started', 'paused'] as const, description: 'started: async start; paused: pause gate.' },
+            childId: { type: 'string', description: 'The node child session id (started path).' },
+          },
+        },
+        render: textRender,
+      },
+      execute: (args, exec) => host.orchestrator.wfRunNode(callerOf(exec), args ?? {}, exec.signal, { expectedMode: 'mode1' }),
+    })
+    disposers.push(tools.register(wfRunNodeDef))
+
+    // 模式二后台服务：wf_run_node_wait 阻塞等待节点完成，返回 ok/fail + 最终输出。
+    const wfRunNodeWaitDef = defineTool({
+      name: WF_RUN_NODE_WAIT,
+      description:
+        'Start one agent node of a service run and block until it finishes. Use only in mode2: pass the node id from the flow definition file. ' +
+        'Returns ok/fail with the child final output when the node child completes, or paused for a pause-node id. ' +
+        'Child agents are rejected; fails with WF_* codes on invalid arguments, missing nodes, mode mismatch, or stopped runs.',
+      parameters: {
+        nodeId: { type: 'string', required: true, description: 'Node id from the flow definition file (nodes[].id) to start; proxy nodes resolve to their source node.' },
+        thinking: { type: 'string', description: 'Optional reasoning-effort override for this node run; value domain follows the official adapter.' },
+        iterationLimit: { type: 'number', description: 'Optional ReAct iteration-limit override (soft cap: the child stops calling tools and concludes).' },
+        retryLimit: { type: 'number', description: 'Optional per-node retry-limit override (hard guard, over the node default).' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            nodeId: { type: 'string', required: true, description: 'The resolved node id that was started.' },
+            status: { type: 'string', required: true, enum: ['paused', 'ok', 'fail'] as const, description: 'ok/fail: blocked wait result; paused: pause gate.' },
+            childId: { type: 'string', description: 'The node child session id (wait path).' },
+            output: { type: 'string', description: 'Final child output summary (ok/fail wait path).' },
+          },
+        },
+        render: textRender,
+      },
+      execute: (args, exec) => host.orchestrator.wfRunNode(callerOf(exec), { ...(args ?? {}), wait: true }, exec.signal, { expectedMode: 'mode2' }),
+    })
+    disposers.push(tools.register(wfRunNodeWaitDef))
 
   const wfFinishDef = defineTool({
     name: WF_FINISH,

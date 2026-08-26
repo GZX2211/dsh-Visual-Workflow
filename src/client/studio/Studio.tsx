@@ -67,7 +67,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
   const serviceControl = useServiceControl(dispatch, remote)
   const modeSwitch = useModeSwitch(dispatch)
   const panels = usePanelLayout(state, dispatch)
-  useRunPolling(state.run.runId, dispatch, remote)
+  useRunPolling(state.sessionId, state.run.runId, dispatch, remote)
 
   const canvasApiRef = useRef<CanvasApi | null>(null)
   const canvasShellRef = useRef<HTMLDivElement | null>(null)
@@ -132,9 +132,9 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
           remote.call(EP.EP_TOOL_COMBOS).catch(() => []),
         ])
         if (cancelled) return
-        dispatch({ type: 'PRESETS_LOADED', items: Array.isArray(presets) ? presets : [] })
-        dispatch({ type: 'TOOLS_LOADED', items: Array.isArray(tools) ? tools : [] })
-        dispatch({ type: 'MODELS_LOADED', items: Array.isArray(models) ? models : [] })
+        dispatch({ type: 'PRESETS_LOADED', items: Array.isArray(presets) ? presets as import('./studio-state.js').PresetItem[] : [] })
+        dispatch({ type: 'TOOLS_LOADED', items: Array.isArray(tools) ? tools as import('./studio-state.js').ToolItem[] : [] })
+        dispatch({ type: 'MODELS_LOADED', items: Array.isArray(models) ? models as import('./studio-state.js').ModelItem[] : [] })
         dispatch({ type: 'COMBOS_LOADED', items: Array.isArray(combos) ? combos : [] })
       }
       await enums()
@@ -161,7 +161,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
     if (!value) return '—'
     const names = t.modeNames as Record<string, string>
     if (names[value]) return names[value]
-    const preset = (state.presets as Array<{ id: string; name?: string }>).find((item) => item.id === value)
+    const preset = state.presets.find((item) => item.id === value)
     if (preset) return preset.name ?? value
     const combo = state.combos.find((item) => item.id === value)
     if (combo) return combo.name
@@ -631,7 +631,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
     if (editor.source === 'edge') {
       dispatch({ type: 'EDGE_PATCH', id: editor.id, patch })
     }
-  }, [dispatch, state.canvas.nodes, state.editor])
+    }, [dispatch, state.canvas.nodes, state.editor, state.templates])
 
   // ---------- 保存 / 删除编辑器对象 ----------
   const saveEditor = useCallback(async () => {
@@ -823,12 +823,12 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
   const stopRun = useCallback(async () => {
     if (!state.run.runId) return
     try {
-      await runControl.stopRun(state.run.runId)
+      await runControl.stopRun(state.sessionId, state.run.runId)
       notify('info', t.toastStopped)
     } catch (error) {
       toastError(error)
     }
-  }, [notify, runControl, state.run.runId, t.toastStopped, toastError])
+  }, [notify, runControl, state.run.runId, state.sessionId, t.toastStopped, toastError])
 
   // ---------- 运行历史 / 断点恢复 ----------
   const openHistory = useCallback(async () => {
@@ -877,7 +877,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
     const saved = await saveCanvas()
     if (!saved) return
     try {
-      await serviceControl.startService(service.id)
+      await serviceControl.startService(service.id, service.sessionId)
       notify('success', t.toastServiceStarted)
     } catch (error) {
       toastError(error)
@@ -888,7 +888,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
     const service = currentServiceOf(state)
     if (!service) return
     try {
-      await serviceControl.stopService(service.id)
+      await serviceControl.stopService(service.id, service.sessionId)
       notify('info', t.toastServiceStopped)
     } catch (error) {
       toastError(error)
@@ -1292,9 +1292,9 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
           open={state.panels.rightOpen}
           width={state.panels.rightWidth}
           editorData={editorData}
-          presets={state.presets as Array<{ id: string; name?: string }>}
+          presets={state.presets}
           tools={state.tools}
-          models={state.models as Array<{ provider: string; model: string; efforts?: Array<{ id: string; name: string }> }>}
+          models={state.models}
           combos={state.combos as Array<{ id: string; name: string; tools?: string[]; mcpServers?: string[] }>}
           flowMeta={{ nodeCount: state.canvas.nodes.length, revision: Number((currentFlow ?? currentService)?.revision ?? 0) }}
           onPatch={patchEditor}
