@@ -124,6 +124,27 @@ export function RoleForm({ data, copy, presets, models, combos, onPatch, onLoadM
               ? <span className="wf-hint" title={copy.loadMdTitle}>{String(data.systemPromptSource)}</span>
               : null}
           </div>
+          {/* 官方系统提示词开关：贴左边框；复选框需覆盖 .wf-inspector input{width:100%} 全局样式（否则被撑成大方框、不贴边） */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-start' }}>
+            <input
+              type="checkbox"
+              checked={data.injectSystemPrompt !== false}
+              onChange={(event) => onPatch({ injectSystemPrompt: event.target.checked })}
+              style={{ width: 'auto', flex: '0 0 auto', padding: 0, margin: 0, minWidth: 0, accentColor: 'var(--wf-brand)' }}
+            />
+            <span className="wf-hint" style={{ whiteSpace: 'nowrap' }}>
+              {copy.injectSystemPromptLabel}：{data.injectSystemPrompt === false ? copy.injectSystemPromptNotInjected : copy.injectSystemPromptInjected}
+            </span>
+          </div>
+          {/* Prompt 文件宿主路径：提示语置于输入框上方（设置后运行时自动读取该 .md，文件改动自动重载） */}
+          <span className="wf-hint">{copy.promptFilePathHint}</span>
+          <input
+            type="text"
+            value={String(data.promptFilePath ?? '')}
+            placeholder={copy.promptFilePathPlaceholder}
+            spellCheck={false}
+            onChange={(event) => onPatch({ promptFilePath: event.target.value.trim() || undefined })}
+          />
         </div>
       </Field>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
@@ -143,7 +164,7 @@ export function RoleForm({ data, copy, presets, models, combos, onPatch, onLoadM
       <div style={{ display: 'grid', gridTemplateColumns: hasMode ? '1fr 1fr' : '1fr', gap: 8 }}>
         {hasMode ? (
           <Field label={copy.modeLabel}>
-            <select value={presetId} onChange={(event) => onPatch({ presetId: event.target.value })}>
+            <select value={presetId} disabled={isParent} onChange={(event) => onPatch({ presetId: event.target.value })}>
               {modeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               {modeGroups.map((group) => (
                 <optgroup key={group.label} label={group.label}>

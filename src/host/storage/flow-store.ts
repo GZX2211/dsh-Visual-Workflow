@@ -557,6 +557,8 @@ export class FlowStore {
           reactLimit: r.reactLimit ?? null,
           inputSchema: r.inputSchema ?? '',
           outputSchema: r.outputSchema ?? '',
+          injectSystemPrompt: r.injectSystemPrompt !== false,
+          promptFilePath: r.promptFilePath ?? undefined,
           groupId: null,
           proxySourceId: null,
         },

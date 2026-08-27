@@ -1,4 +1,4 @@
-﻿// src/host/orchestrator/runtime.ts
+// src/host/orchestrator/runtime.ts
 //
 // 编排运行时：运行锁 / run 快照 / startRun / 编排指令注入 / subagent/end
 // 观察回写 / 护栏 / currentResolvedFlow / terminate / 幂等收尾 / wait 阻塞 /
@@ -24,8 +24,12 @@
 import { randomUUID } from 'node:crypto'
 import { buildOrchestrationDirective, type OrchestrationDirectiveParams } from '../prompts/orchestration.js'
 import { buildNodeTaskBlock } from '../prompts/node-task.js'
+import { buildCollabBlock } from '../prompts/collab.js'
 import { ctxInEdges, dbInEdges, nodeById } from '../graph/model.js'
 import { validateFlow } from '../graph/validate.js'
+import { resolveRolePrompt } from '../agent/runner.js'
+import type { ChildPromptSetup } from '../agent/prompt-setup.js'
+import type { ModelSelectionSetup } from '../agent/model-selection.js'
 import type { FlowStore } from '../storage/flow-store.js'
 import type { GraphNode, RoleNode, WorkflowDocument } from '../shared/graph-model.js'
 import type { RunSnapshot, RunStatus } from '../shared/types.js'
@@ -131,6 +135,8 @@ export interface CoordinatorMessage {
 export interface RootAgentLike {
   id: string
   status?: string
+  /** 根 Agent 的 Cordis Context（官方 agents.get(id)?.ctx 可达；用于注入提示词段/模型选择）。 */
+  ctx?: unknown
   followup?: (message: RootInjectedMessage) => void
   steer?: (message: CoordinatorMessage) => void
   session?: { events?: unknown[] }
@@ -385,6 +391,10 @@ export interface OrchestratorDeps {
   runner: NodeRunner
   /** 父代理宿主能力（index.ts 的 CordisAgentHost；单测 fake）。 */
   agents: AgentHost
+  /** 子代理/父代理提示词注入装配（角色 Prompt 段 + 官方系统提示词开关；缺省跳过父代理绑定）。 */
+  promptSetup?: ChildPromptSetup
+  /** 模型选择装配（父代理模型/思考强度注入；缺省跳过父代理绑定）。 */
+  modelSelection?: ModelSelectionSetup
   /** 配置子集。 */
   config: OrchestratorConfig
   /** 日志（缺省 console）。 */
@@ -463,6 +473,37 @@ export class OrchestratorRuntime {
   /** 当前 ISO 时间字符串。 */
   private isoNow(): string {
     return new Date(this.now()).toISOString()
+  }
+
+  /**
+   * 把父代理（会话根 Agent）节点的配置注入到根 Agent 的 ctx：
+   *   - 角色 Prompt（含 .md 路径读取）注册为系统提示词段 visual-workflow:prompt；
+   *   - injectSystemPrompt 开关控制官方系统提示词注入（OFF 仅保留角色段 + tool:* + 工具）；
+   *   - 服务商/模型/思考强度写入根 Agent 的模型选择。
+   * 非侵入：仅挂载到根 Agent 的 ctx，只对本会话生效；缺父代理节点/根无 ctx 时静默跳过。
+   */
+  private async bindParentConfig(flow: WorkflowDocument, root: RootAgentLike, sessionId: string): Promise<void> {
+    const ctx = root.ctx
+    if (!ctx || typeof ctx !== 'object') return
+    if (!this.deps.promptSetup || !this.deps.modelSelection) return
+    const parentNode = flow.nodes.find((n): n is RoleNode => n.kind === 'parent')
+    if (!parentNode) return
+    try {
+      // 角色 Prompt 实际注入文本（.md 路径设置时读取文件当前内容，与子代理一致）
+      const rolePrompt = await resolveRolePrompt(parentNode)
+      this.deps.promptSetup.bindParent(ctx, {
+        systemPrompt: rolePrompt,
+        injectSystemPrompt: parentNode.data.injectSystemPrompt !== false,
+      }, sessionId)
+      const data = parentNode.data
+      this.deps.modelSelection.bindParent(ctx, {
+        provider: String(data.provider ?? ''),
+        model: String(data.model ?? ''),
+        ...(typeof data.reasoning === 'string' && data.reasoning.trim() ? { reasoningEffort: data.reasoning } : {}),
+      }, sessionId)
+    } catch (error) {
+      this.deps.logger?.warn(`[visual-workflow] 父代理配置注入失败：${error instanceof Error ? error.message : String(error)}`)
+    }
   }
 
   /** 记录告警（watchdog 扫描失败/持久化告警路径）。 */
@@ -603,6 +644,10 @@ export class OrchestratorRuntime {
     if (!root) throw new WfError('当前会话 Agent 未激活；请先在对话区发送一条消息后重试', 'WF_ROOT_INACTIVE')
     if (root.status === 'running') throw new WfError('父代理当前正在忙碌，请稍后再运行', 'WF_ROOT_BUSY')
 
+    // 父代理（会话根 Agent）配置注入：角色 Prompt 段（含 .md 路径读取）+ 官方系统提示词开关
+    // + 模型/思考强度。非侵入：挂载到根 Agent 的 ctx，仅对本会话生效，不修改官方源码。
+    await this.bindParentConfig(flow, root, sessionId)
+
     const runId = this.deps.newRunId?.() ?? `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     const snapshot = createRunSnapshot({ runId, flow, sessionId, mode, now: this.now() })
     // 模式二：用户问题注入输入节点产出（无需连线即作为初始上下文；
@@ -717,6 +762,10 @@ export class OrchestratorRuntime {
     const root = this.deps.agents.getRootAgent(sessionId)
     if (!root) throw new WfError('当前会话 Agent 未激活；请先在对话区发送一条消息后重试', 'WF_ROOT_INACTIVE')
     if (root.status === 'running') throw new WfError('父代理当前正在忙碌，请稍后再运行', 'WF_ROOT_BUSY')
+
+    // 父代理（会话根 Agent）配置注入：角色 Prompt 段（含 .md 路径读取）+ 官方系统提示词开关
+    // + 模型/思考强度。非侵入：挂载到根 Agent 的 ctx，仅对本会话生效，不修改官方源码。
+    await this.bindParentConfig(flow, root, sessionId)
 
     const runId = this.deps.newRunId?.() ?? `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     const snapshot = buildResumedSnapshot({ prev, runId, flow, sessionId, mode: prev.mode, now: this.now() })
@@ -1471,6 +1520,24 @@ export function collabPromptOf(flow: WorkflowDocument, nodeId: string): string {
   return group ? String(group.data.collabPrompt ?? '').trim() : ''
 }
 
+/**
+ * 构建某角色节点的协作成员清单块（追加到其首条用户消息）。
+ * 始终列出本组全部成员（id + 角色名，告知协作对象与可发消息对象），再追加自定义协作说明。
+ * 非组内成员返回空串（不注入）。
+ */
+function collabBlockOf(flow: WorkflowDocument, nodeId: string): string {
+  const group = flow.nodes.find(
+    (n): n is GraphNode & { data: { collabPrompt?: string; memberIds?: string[] } } =>
+      n.kind === 'group' && ((n.data.memberIds ?? []) as string[]).includes(nodeId),
+  )
+  if (!group) return ''
+  const members = (group.data.memberIds ?? []).map((id) => {
+    const member = nodeById(flow, id)
+    return { id, label: member ? labelOf(member) : id }
+  })
+  return buildCollabBlock({ members, custom: String(group.data.collabPrompt ?? '') })
+}
+
 /** 运行前完整性检查：缺失的启动/结束节点（按模式渲染中文名）。 */
 function missingStageLabels(flow: WorkflowDocument): string[] {
   const labels: string[] = []
@@ -1566,7 +1633,10 @@ function buildNodeBlocks(input: {
       runContextText: input.runContextText,
     },
   })
-  return [{ type: 'text', text }]
+  // 协作组成员：把成员清单块（含成员 ID + 角色名 + 自定义说明）追加到首条用户消息。
+  // 需求变更：协作信息不再作为系统提示词段注入，改为注入用户消息。
+  const collabBlock = collabBlockOf(flow, node.id)
+  return [{ type: 'text', text: collabBlock ? `${text}\n\n${collabBlock}` : text }]
 }
 
 /** 编排指令参数组装（facts 静态事实 + dynamic 末段动态态，前缀稳定）。 */

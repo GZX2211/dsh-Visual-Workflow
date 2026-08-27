@@ -163,6 +163,10 @@ export interface RoleTemplate {
   outputSchema?: string
   /** System Prompt 来源文件名（从 .md 加载时记录，左侧栏卡片展示用，需求文档 §4.2.3.1）。 */
   systemPromptSource?: string
+  /** 官方系统提示词注入开关（默认 true）。 */
+  injectSystemPrompt?: boolean
+  /** 角色 Prompt 的宿主绝对路径（可选；设置后运行时从文件读取，文件指纹纳入签名）。 */
+  promptFilePath?: string
 }
 
 /**

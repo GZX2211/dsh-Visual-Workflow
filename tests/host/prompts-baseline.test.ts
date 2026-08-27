@@ -9,7 +9,7 @@ import {
   MID_MARKER,
   TAIL_MARKER,
   TAIL_RESTATE_MARKER,
-  buildCollabPrompt,
+  buildCollabBlock,
   buildNodeTaskBlock,
   buildOrchestrationDirective,
 } from '../../src/host/prompts/index.js'
@@ -110,25 +110,30 @@ describe('T-005 节点任务块模板（关键约束双位 + 上游产出置于�
   })
 })
 
-describe('T-005 协作 Prompt 模板（collab: 前缀 + 末尾追加零失效）', () => {
-  it('输出以 collab: 开头', () => {
-    expect(buildCollabPrompt('').startsWith(`${COLLAB_PREFIX} `)).toBe(true)
+describe('T-005 协作成员清单块模板（始终含成员 ID+角色名 + 自定义说明）', () => {
+  const members = [
+    { id: 'node-a', label: '分析节点' },
+    { id: 'node-b', label: '总结节点' },
+  ]
+
+  it('无论 custom 是否为空，都默认列出组内全部成员的 ID 与角色名', () => {
+    const block = buildCollabBlock({ members, custom: '' })
+    for (const member of members) {
+      expect(block).toContain(member.label)
+      expect(block).toContain(member.id)
+    }
   })
 
-  it('以 collab: 起段且位于输入文本之后（追加式，对既有前缀零失效）', () => {
-    const persona = '你是组内成员。执行 task: 总结数据。'
-    const collab = buildCollabPrompt('成员 A 与 B 互相质询')
-    const appended = `${persona}\n\n${collab}`
-    // collab 块以 collab: 开头。
-    expect(collab.startsWith(`${COLLAB_PREFIX} `)).toBe(true)
-    // 输入文本在下，collab 块在后（追加位置）。
-    expect(appended.indexOf(persona)).toBeLessThan(appended.indexOf(collab))
-    // 输入文本原样保留（未被重排）。
-    expect(appended.startsWith(persona)).toBe(true)
+  it('custom 非空时追加组内说明段（追加式，位于成员清单之后）', () => {
+    const block = buildCollabBlock({ members, custom: '成员 A 与 B 互相质询' })
+    expect(block).toContain('Group instructions:')
+    expect(block).toContain('成员 A 与 B 互相质询')
+    // 成员清单在前，说明段在后
+    expect(block.indexOf(members[0].label)).toBeLessThan(block.indexOf('Group instructions:'))
   })
 
-  it('同一 text 两次构建字节相同', () => {
-    expect(buildCollabPrompt('并行通信')).toBe(buildCollabPrompt('并行通信'))
+  it('同一 params 两次构建字节相同', () => {
+    expect(buildCollabBlock({ members, custom: '并行通信' })).toBe(buildCollabBlock({ members, custom: '并行通信' }))
   })
 })
 

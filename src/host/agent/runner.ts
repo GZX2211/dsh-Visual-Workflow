@@ -32,6 +32,7 @@
 //   - wf_run_node/wf_finish 永不进入 allow，且经 tools.restrict 显式 deny（双保险）。
 
 import type { Context } from '@deepseek-ai/cordis'
+import { readFile } from 'node:fs/promises'
 import { dbInEdges } from '../graph/model.js'
 import type { FlowStore } from '../storage/flow-store.js'
 import type { GraphNode, RoleNode } from '../shared/graph-model.js'
@@ -39,7 +40,7 @@ import type { NodeRunner, NodeStartInput, OrchestratorLogger } from '../orchestr
 import { consumeReactCappedOf, type ReactGuardBridge } from './guards.js'
 import { RESERVED_TRANSPORT_TOOL, WF_RUN_NODE, WF_RUN_NODE_WAIT } from '../shared/protocol.js'
 import type { ModelSelectionLike, ModelSelectionSetup, SelectionChildContext } from './model-selection.js'
-import type { ChildPromptSetup } from './prompt-setup.js'
+import type { ChildPromptSetup, ChildPromptState } from './prompt-setup.js'
 
 // ---------------------------------------------------------------------------
 // 纯函数（签名/复用键/provider 选择）
@@ -52,19 +53,22 @@ export function childKey(sessionId: string, flowId: string, nodeId: string): str
 
 /**
  * 影响子代理组成的配置签名（变化即重建；工具为解析后的清单）。
- * 字段依据架构文档 §4.2 L218：persona/provider/model/工具清单/reasoning
- * （另含 presetId——其决定工具清单，签名内显式保留以抵御同名清单歧义）。
+ * 字段依据架构文档 §4.2 L218：rolePrompt/provider/model/工具清单/reasoning
+ * （另含 presetId——其决定工具清单，签名内显式保留以抵御同名清单歧义；
+ * injectSystemPrompt 决定官方系统提示词开关；rolePrompt 为角色 Prompt 的实际注入文本——
+ * 当 .md 文件路径设置时为其当前内容，文件改动即重建）。
  */
-export function nodeChildSignature(node: GraphNode, resolvedTools: string[], collabPrompt = ''): string {
+export function nodeChildSignature(node: GraphNode, resolvedTools: string[], rolePrompt: string, injectSystemPrompt = true, collabPrompt = ''): string {
   const data = node.kind === 'parent' || node.kind === 'agent' ? node.data : undefined
   return JSON.stringify({
-    persona: String(data?.systemPrompt ?? ''),
+    rolePrompt: String(rolePrompt ?? ''),
     provider: String(data?.provider ?? ''),
     model: String(data?.model ?? ''),
     reasoning: String(data?.reasoning ?? ''),
     presetId: String(data?.presetId ?? ''),
     tools: [...resolvedTools].sort(),
-    // 协作 Prompt 属于组级配置；变化时同样重建子代理，避免旧系统提示词残留
+    injectSystemPrompt: injectSystemPrompt !== false,
+    // 协作 Prompt 属于组级配置；变化时同样重建子代理，避免旧协作信息残留
     collabPrompt,
   })
 }
@@ -84,6 +88,26 @@ function fallbackPrompt(node: RoleNode): string {
     `节点名称：${node.data.label ?? node.id}`,
     '具体任务将随后续消息派发；请按收到的任务要求执行并汇报结论。',
   ].join('\n')
+}
+
+/**
+ * 解析节点的角色 Prompt 实际注入文本：
+ *   - 设置了 promptFilePath（宿主绝对路径）→ 运行时读取该文件（读取失败回退 node.data.systemPrompt）；
+ *   - 未设置 → 直接使用 node.data.systemPrompt（内联文本或 .md 内容快照）。
+ * 返回的角色文本会纳入子代理签名：文件改动 → 内容变 → 签名变 → 重建子代理 → 自动重载。
+ */
+export async function resolveRolePrompt(node: RoleNode): Promise<string> {
+  const inline = String(node.data?.systemPrompt ?? '')
+  const filePath = String(node.data?.promptFilePath ?? '').trim()
+  if (!filePath) return inline
+  try {
+    const content = await readFile(filePath, 'utf8')
+    // 文件存在且可读：以文件内容为准（文件修改后新轮自动生效）
+    return content
+  } catch {
+    // 文件不可读（不存在/权限/沙箱拒绝）：回退内联文本，不阻断节点启动
+    return inline
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -419,7 +443,7 @@ export class NodeAgentRunner implements NodeRunner {
     // 每轮派发后刷新护栏上限与模型选择（节点级参数可按次覆盖；官方 selection 可变态）
     this.deps.react.setLimit(childId, input.iterationLimit)
     this.attachModelSelection(childId, input)
-      this.attachPromptState(childId, input)
+      await this.attachPromptState(childId, input)
     return { childId, created }
   }
 
@@ -464,13 +488,15 @@ export class NodeAgentRunner implements NodeRunner {
       node,
     })
     const collabPrompt = String(input.collabPrompt ?? '').trim()
-      const signature = nodeChildSignature(node, tools, collabPrompt)
+    // 角色 Prompt 实际注入文本（.md 路径设置时读取文件当前内容；未设置用内联文本）
+    const rolePrompt = await resolveRolePrompt(node)
+    const injectSystemPrompt = node.data?.injectSystemPrompt !== false
+    const signature = nodeChildSignature(node, tools, rolePrompt, injectSystemPrompt, collabPrompt)
     const existing = this.nodeChildren.get(key)
     if (existing && existing.signature === signature) return { childId: existing.childId, created: false }
 
     const provider = pickProviderName(subagents.list())
     if (!provider) throw new Error('没有可用的子代理 provider（预期 fork 或 spawn）')
-    const persona = String(node.data?.systemPrompt ?? '').trim()
     // 白名单为空 → 不传 toolFilter（子代理继承父代理工具集边界由宿主组合决定）；
     // wf_run_node/wf_finish 永不进入 allow（§4.4.2 规则 7）
     const toolFilter = tools.length > 0 ? { allow: [...tools] } : undefined
@@ -478,19 +504,23 @@ export class NodeAgentRunner implements NodeRunner {
     if (node.data?.provider) agentOptions.provider = node.data.provider
     if (node.data?.model) agentOptions.model = node.data.model
 
-    const started = await subagents.startContinuable({
+    const promptState: ChildPromptState = {
+      systemPrompt: rolePrompt,
+      injectSystemPrompt,
+    }
+    const started = await this.deps.promptSetup.withPending(promptState, () => subagents.startContinuable({
       provider,
       label: `visual-workflow:${input.flowId}:${node.id}`,
       request: {
-        // 首条消息 = 完整任务块（任务 + 上下文），杜绝创建即空转
+        // 首条消息 = 完整任务块（任务 + 上下文），杜绝创建即空转；角色 Prompt 由
+        // prompt-setup 注册为系统提示词独立段，不再经官方 request.persona 占用官方人设
         prompt: input.blocks.length > 0 ? input.blocks : [{ type: 'text', text: fallbackPrompt(node) }],
         parent,
-        ...(persona ? { persona } : {}),
         ...(toolFilter ? { toolFilter } : {}),
         ...(Object.keys(agentOptions).length > 0 ? { agentOptions } : {}),
       },
       signal: input.signal,
-    })
+    }))
     this.nodeChildren.set(key, { childId: started.childId, signature })
     this.childIds.add(started.childId)
     return { childId: started.childId, created: true }
@@ -537,20 +567,21 @@ export class NodeAgentRunner implements NodeRunner {
   }
 
   /**
-   * 把节点级系统提示词与协作 Prompt 注入状态写入该 child 的 prompt setup。
-   * 标准模式使用完整替换；Code Mode（presetId='code'）保留官方工具调用提示词。
+   * 把节点级角色 Prompt 与官方系统提示词开关写入该 child 的 prompt setup。
+   * 角色 Prompt 由 prompt-setup 注册为系统提示词独立段；injectSystemPrompt=false 时
+   * 开关过滤瀑布会清空官方段（仅保留角色段 + tool:* 段 + 工具 schema）。
+   * 角色文本经 resolveRolePrompt 解析（.md 路径设置时读取文件当前内容），与创建期一致。
    */
-  private attachPromptState(childId: string, input: NodeStartInput): void {
+  private async attachPromptState(childId: string, input: NodeStartInput): Promise<void> {
     const node = input.node as RoleNode
     const agents = this.deps.agents()
     const agent = agents?.get(childId) as { ctx?: unknown } | null | undefined
     if (!agent || typeof agent !== 'object' || !agent.ctx) return
-    const presetId = String(node.data?.presetId ?? '').trim()
     try {
+      const rolePrompt = await resolveRolePrompt(node)
       this.deps.promptSetup.attach(agent.ctx, {
-        systemPrompt: String(node.data?.systemPrompt ?? ''),
-        collabPrompt: String(input.collabPrompt ?? ''),
-        complete: presetId !== 'code',
+        systemPrompt: rolePrompt,
+        injectSystemPrompt: node.data?.injectSystemPrompt !== false,
       })
     } catch (error) {
       this.deps.logger?.warn(`[visual-workflow] prompt setup attach failed: ${String(error)}`)

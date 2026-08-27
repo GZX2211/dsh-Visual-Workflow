@@ -39,7 +39,11 @@ function remoteStub(): RemoteFace & { calls: Array<{ endpoint: string; args: Rec
     call: vi.fn(async (endpoint: string, args?: Record<string, unknown>) => {
       calls.push({ endpoint, args: args ?? {} })
       if (endpoint === EP.EP_LIST_TEMPLATES && String(args?.kind ?? '') === 'role') {
-        return [{ id: 'r-1', kind: 'agent', name: '研究员' }]
+        return [
+          { id: 'r-1', kind: 'agent', name: '研究员', systemPrompt: '' },
+          { id: 'r-2', kind: 'agent', name: '测试工程师', systemPrompt: '' },
+          { id: 'r-3', kind: 'agent', name: '全栈开发工程师', systemPrompt: '' },
+        ]
       }
       if (endpoint === EP.EP_PRESETS) return [{ id: 'standard', name: '标准' }]
       if (endpoint === EP.EP_MODELS) return [{ provider: 'deepseek', model: 'deepseek-chat' }]
@@ -95,6 +99,20 @@ describe('Studio 装配', () => {
     expect(toolbar?.querySelector('[title*="撤销"]')).toBeTruthy()
     expect(toolbar?.querySelector('[title*="重做"]')).toBeTruthy()
     expect(textOf('.wf-toolbar .wf-btn')).toEqual(expect.arrayContaining(['清空', '整理布局', '保存', '运行', '运行历史']))
+  })
+
+  it('保存按钮只写入工作流，不触发运行（单一职责）', async () => {
+    const remote = remoteStub()
+    await renderStudioWith(remote)
+    await createDraft()
+    await act(async () => {
+      Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-toolbar button')).find((item) => item.textContent === zh.save)?.click()
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(remote.calls.some((call) => call.endpoint === EP.EP_RUN)).toBe(false)
+    expect(remote.calls.some((call) => call.endpoint === EP.EP_PUT_WORKFLOW)).toBe(true)
   })
 
   it('左侧栏 4 Tab：工作流/角色/数据/其他；数据 Tab 含文件/数据库分区', async () => {
@@ -269,9 +287,12 @@ describe('Studio 交互', () => {
     const roleNode = document.querySelector<HTMLDivElement>('.wf-graph__node .wf-node--agent')
     expect(roleNode).toBeTruthy()
 
-    // 把画布角色节点拖到组卡片上（mock elementFromPoint：jsdom 无布局命中）
+    // 把画布角色节点拖到组卡片上（mock elementsFromPoint：jsdom 无布局命中）
     const groupEl = document.querySelector('.wf-group-node') as HTMLElement
     const original = document.elementFromPoint
+    const originalMany = document.elementsFromPoint
+    // 入组落点判定走 elementsFromPoint（多元素栈）；jsdom 需手动 mock
+    document.elementsFromPoint = () => [groupEl]
     document.elementFromPoint = () => groupEl
     try {
       await act(async () => {
@@ -285,6 +306,7 @@ describe('Studio 交互', () => {
       })
     } finally {
       document.elementFromPoint = original
+      document.elementsFromPoint = originalMany
     }
 
     // 组内迷你成员（含 ctx/db 接点已渲染）；画布上不再显示角色大卡
@@ -293,5 +315,56 @@ describe('Studio 交互', () => {
     expect(document.querySelector('.wf-group__member .wf-graph__handle--mini')).toBeTruthy()
     const standaloneRoles = Array.from(document.querySelectorAll('.wf-graph__node .wf-node--agent'))
     expect(standaloneRoles.length).toBe(0)
+  })
+
+  it('协作组：删除单个成员只移出一个，其余保留（用户批注：点了 1 个却移出多个）', async () => {
+    await renderStudio()
+    await createDraft()
+    // 放入协作组（其他 tab）
+    await act(async () => {
+      Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-lib-tab')).find((item) => item.textContent === '其他')?.click()
+    })
+    await dragCardTo('协作组', 500, 300)
+    const groupCard = document.querySelector('.wf-group-node') as HTMLElement
+    expect(groupCard).toBeTruthy()
+
+    // 角色 tab：依次拖入 3 个角色模板入组（mock elementsFromPoint 命中组表面）
+    await act(async () => {
+      Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-lib-tab')).find((item) => item.textContent === '角色')?.click()
+    })
+    const original = document.elementFromPoint
+    const originalMany = document.elementsFromPoint
+    document.elementFromPoint = () => groupCard
+    document.elementsFromPoint = () => [groupCard]
+    try {
+      for (const name of ['研究员', '测试工程师', '全栈开发工程师']) {
+        await dragCardTo(name, 500, 300)
+      }
+    } finally {
+      document.elementFromPoint = original
+      document.elementsFromPoint = originalMany
+    }
+
+    // 选中协作组 → 右侧组合成员应有 3 个
+    await act(async () => {
+      groupCard.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 500, clientY: 300, button: 0 }))
+      window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 500, clientY: 300, button: 0 }))
+    })
+    const memberLabels = (): string[] => Array.from(document.querySelectorAll('.wf-check-list label span')).map((s) => s.textContent ?? '')
+    expect(memberLabels()).toEqual(expect.arrayContaining(['研究员', '测试工程师', '全栈开发工程师']))
+
+    // 点击「全栈开发工程师」的 ✕ → 只移出该成员，其余保留
+    const row = Array.from(document.querySelectorAll('.wf-check-list label')).find((lab) => lab.textContent?.includes('全栈开发工程师'))
+    expect(row).toBeTruthy()
+    await act(async () => {
+      (row!.querySelector('button') as HTMLButtonElement)?.click()
+    })
+    const after = memberLabels()
+    expect(after).not.toContain('全栈开发工程师')
+    expect(after).toContain('研究员')
+    expect(after).toContain('测试工程师')
+    const memberMini = Array.from(document.querySelectorAll('.wf-group__member-name')).map((s) => s.textContent ?? '')
+    expect(memberMini).not.toContain('全栈开发工程师')
+    expect(memberMini).toContain('研究员')
   })
 })

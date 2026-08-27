@@ -27,6 +27,7 @@ import {
 } from './studio-state.js'
 import { EP } from '../lib/remote.js'
 import { GraphCanvas, type CanvasApi } from '../components/canvas/GraphCanvas.js'
+import { groupSurfaceUnderPoint } from '../components/canvas/geometry.js'
 import { LeftPanel, type DragPayload } from '../components/sidebar/LeftPanel.js'
 import { Toolbar } from '../components/toolbar/Toolbar.js'
 import { Inspector } from '../components/panels/inspector/Inspector.js'
@@ -35,8 +36,8 @@ import { RunHistory } from '../components/run-history/RunHistory.js'
 import { ServiceConsole } from '../components/service-console/ServiceConsole.js'
 import { ComboManager } from '../components/combo-manager/ComboManager.js'
 import {
-  connectionProblem, connectionProblemMessage, flowToCanvasLines, templateToNodeData,
-  runStatusMap, stageTemplateKinds, type CanvasLine,
+  connectionProblem, connectionProblemMessage, consolidateGroups, dropNodeFlowLines, flowToCanvasLines, templateToNodeData,
+  joinNodeToGroup, runStatusMap, stageTemplateKinds, type CanvasLine,
 } from '../lib/graph-model.js'
 import { readFileAsText, readFileAsBase64, download } from '../lib/files.js'
 import { isRoleTemplateBundle } from '../lib/bundle.js'
@@ -468,16 +469,9 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
       data: { ...data, groupId },
     }
     history.remember()
-    dispatch({
-      type: 'GRAPH_REPLACED',
-      nodes: [
-        ...state.canvas.nodes,
-        node,
-        { ...group, data: { ...group.data, memberIds: [...members, node.id] } },
-      ],
-      edges: state.canvas.edges,
-      dirty: true,
-    })
+    // 原子入组：一次变更同时写 node.groupId + 组 memberIds（追加去重），杜绝「卡有成员/列表空/只显示一个」
+    const nodes = joinNodeToGroup([...state.canvas.nodes, node], node.id, groupId)
+    dispatch({ type: 'GRAPH_REPLACED', nodes, edges: dropNodeFlowLines(state.canvas.edges, node.id), dirty: true })
     dispatch({ type: 'SELECT_NODE', id: node.id })
     notify('success', t.toastGroupMemberAdded)
   }, [dispatch, history, notify, state.canvas.edges, state.canvas.nodes, state.currentId, state.templates, t.groupMemberLimitHint, t.toastGroupMemberAdded])
@@ -486,12 +480,12 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
     dispatch({ type: 'NODE_DATA_PATCH', id, patch: { size } })
   }, [dispatch])
 
-  /** 角色节点拖入协作组（§4.2.5.2 规则 1）：成员标记 groupId + 组 memberIds 登记。 */
+  /** 角色节点拖入协作组（§4.2.5.2 规则 1）：成员标记 groupId + 组 memberIds 登记（原子追加，防止不一致）。 */
   const addNodeToGroup = useCallback((nodeId: string, groupId: string) => {
-    const node = state.canvas.nodes.find((item) => item.id === nodeId)
     const group = state.canvas.nodes.find((item) => item.id === groupId)
-    if (!node || !group || group.kind !== 'group') return
-    if (node.kind !== 'parent' && node.kind !== 'agent') return
+    if (!group || group.kind !== 'group') return
+    const node = state.canvas.nodes.find((item) => item.id === nodeId)
+    if (!node || (node.kind !== 'parent' && node.kind !== 'agent')) return
     const members = (group.data.memberIds as string[] | undefined) ?? []
     if (members.includes(nodeId)) return
     if (members.length >= 8) {
@@ -499,16 +493,8 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
       return
     }
     history.remember()
-    dispatch({
-      type: 'GRAPH_REPLACED',
-      nodes: state.canvas.nodes.map((item) => {
-        if (item.id === nodeId) return { ...item, data: { ...item.data, groupId } }
-        if (item.id === groupId) return { ...item, data: { ...item.data, memberIds: [...members, nodeId] } }
-        return item
-      }),
-      edges: state.canvas.edges,
-      dirty: true,
-    })
+    // 入组时自动断开该节点原有的流程连线（组内成员仅上下文/数据库线，§4.2.5.2 规则 4）
+    dispatch({ type: 'GRAPH_REPLACED', nodes: joinNodeToGroup(state.canvas.nodes, nodeId, groupId), edges: dropNodeFlowLines(state.canvas.edges, nodeId), dirty: true })
     notify('success', t.toastGroupMemberAdded)
   }, [dispatch, history, notify, state.canvas.edges, state.canvas.nodes, t.groupMemberLimitHint, t.toastGroupMemberAdded])
 
@@ -534,12 +520,9 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
         drag.preview = { x: moveEvent.clientX, y: moveEvent.clientY }
         setDragPreview({ x: moveEvent.clientX, y: moveEvent.clientY, label: payload.label })
       }
-      // 拖拽悬停检测：落点（含其祖先）为协作组卡片 → 高亮 + 提示
-      const target = typeof document.elementFromPoint === 'function'
-        ? document.elementFromPoint(moveEvent.clientX, moveEvent.clientY)
-        : null
-      const groupEl = target?.closest?.('.wf-group-node') as HTMLElement | null
-      setDropGroupId(groupEl?.getAttribute('data-wf-node-id') ?? null)
+      // 拖拽悬停检测：仅协作组卡片表面（非连接点）→ 高亮 + 提示；
+      // 只有角色模板（含 onDropIntoGroup）才提示，其他卡片（文件/数据库/阶段）不显示悬浮提示、不能入组
+      setDropGroupId(payload.onDropIntoGroup ? groupSurfaceUnderPoint(moveEvent.clientX, moveEvent.clientY) : null)
     }
     const onUp = (upEvent: PointerEvent): void => {
       const drag = dragRef.current
@@ -556,16 +539,10 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
       if (!rect || upEvent.clientX < rect.left || upEvent.clientX > rect.right || upEvent.clientY < rect.top || upEvent.clientY > rect.bottom) {
         return
       }
-      // 左栏角色模板直接拖入协作组：落点为组卡片（含组内成员行）时生成节点并入组（§4.2.5.2 规则 1）
-      const groupEl = typeof document.elementFromPoint === 'function'
-        ? document.elementFromPoint(upEvent.clientX, upEvent.clientY)?.closest?.('.wf-group-node') as HTMLElement | null
-        : null
-      const groupId = groupEl?.getAttribute('data-wf-node-id') ?? ''
+      // 左栏角色模板直接拖入协作组：仅落点为协作组卡片表面（非连接点）时生成节点并入组（§4.2.5.2 规则 1）
+      const groupId = groupSurfaceUnderPoint(upEvent.clientX, upEvent.clientY) ?? ''
       if (groupId && payload.onDropIntoGroup) {
-        payload.onDropIntoGroup(groupId, {
-          x: Math.round(groupEl!.getBoundingClientRect().left - rect.left),
-          y: Math.round(groupEl!.getBoundingClientRect().top - rect.top),
-        })
+        payload.onDropIntoGroup(groupId)
         return
       }
       const position = canvasApiRef.current?.screenToWorld?.(upEvent.clientX, upEvent.clientY)
@@ -782,22 +759,28 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
   }, [dispatch, history, notify, state.canvas.nodes, state.selection.nodeId, t.toastProxyCreated])
 
   // ---------- 协作组成员移除 ----------
+  // 先合并重复协作组节点（memberIds 并集，且对每个组去重），得到**唯一**权威组；
+  // 再从去重后的成员列表里移除该成员（一次只删一个，即使历史数据里该 id 重复出现），
+  // 同时只清空目标成员的 groupId —— 杜绝「删 1 个却移出多个 / 无论点哪个都移出 2 个」。
   const removeGroupMember = useCallback((memberId: string) => {
-    if (!state.selection.nodeId) return
-    const group = state.canvas.nodes.find((item) => item.id === state.selection.nodeId)
-    if (!group || group.kind !== 'group') return
+    const base = consolidateGroups(state.canvas.nodes)
+    const member = base.find((item) => item.id === memberId)
+    const groupId = member && (member.kind === 'parent' || member.kind === 'agent')
+      ? (member.data.groupId as string | null | undefined) ?? null
+      : null
+    if (!groupId) return
+    const group = base.find((item) => item.id === groupId && item.kind === 'group')
+    if (!group) return
     history.remember()
-    dispatch({
-      type: 'NODE_DATA_PATCH',
-      id: group.id,
-      patch: { memberIds: (group.data.memberIds as string[]).filter((item) => item !== memberId) },
+    const deduped = [...new Set(Array.isArray(group.data.memberIds) ? group.data.memberIds as string[] : [])]
+    const nextMembers = deduped.filter((item) => item !== memberId)
+    const nodes = base.map((n) => {
+      if (n.id === groupId && n.kind === 'group') return { ...n, data: { ...n.data, memberIds: nextMembers } }
+      if (n.id === memberId) return { ...n, data: { ...n.data, groupId: null } }
+      return n
     })
-    dispatch({
-      type: 'NODE_DATA_PATCH',
-      id: memberId,
-      patch: { groupId: null },
-    })
-  }, [dispatch, history, state.canvas.nodes, state.selection.nodeId])
+    dispatch({ type: 'GRAPH_REPLACED', nodes, edges: state.canvas.edges, dirty: true })
+  }, [dispatch, history, state.canvas.edges, state.canvas.nodes])
 
   // ---------- 运行（模式一） ----------
   const startRun = useCallback(async () => {

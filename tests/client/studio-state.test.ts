@@ -13,6 +13,7 @@ import {
   createInitialState,
   studioReducer,
   editorDataOf,
+  flowToCanvas,
   graphSnapshotOf,
   type StudioState,
   type CanvasNode,
@@ -202,5 +203,42 @@ describe('editorDataOf', () => {
     })
     const selected = studioReducer(state, { type: 'SELECT_EDGE', id: 'e1' })
     expect(editorDataOf(selected)?.kind).toBe('edge')
+  })
+
+  it('flowToCanvas：重复节点 id 去重（保留最后出现者，修复历史协作组重复追加缺陷）', () => {
+    const projected = flowToCanvas({
+      id: 'f', sessionId: 's', mode: 'mode1', name: 'f', description: '',
+      nodes: [
+        { id: 'g', kind: 'group', position: { x: 0, y: 0 }, data: { label: '空组', memberIds: [] } },
+        { id: 'g', kind: 'group', position: { x: 0, y: 0 }, data: { label: '有成员', memberIds: ['a'] } },
+        { id: 'a', kind: 'agent', position: { x: 1, y: 1 }, data: { label: '成员', groupId: 'g' } },
+      ],
+      lines: [],
+    } as never)
+    // 只保留最后出现的 g（有成员那个），避免「删成员误删全部」
+    expect(projected.nodes.filter((n) => n.id === 'g')).toHaveLength(1)
+    expect((projected.nodes.find((n) => n.id === 'g')?.data as { memberIds?: string[] }).memberIds).toEqual(['a'])
+  })
+
+  it('协作组成员移除：仅移除目标成员（模拟 removeGroupMember 的两次 patch）', () => {
+    let state = baseState()
+    state = studioReducer(state, {
+      type: 'GRAPH_REPLACED',
+      nodes: [
+        node({ id: 'g', kind: 'group', data: { memberIds: ['a', 'b', 'c'] } }),
+        node({ id: 'a', kind: 'agent', data: { groupId: 'g' } }),
+        node({ id: 'b', kind: 'agent', data: { groupId: 'g' } }),
+        node({ id: 'c', kind: 'agent', data: { groupId: 'g' } }),
+      ],
+      edges: [],
+      dirty: false,
+    })
+    state = studioReducer(state, { type: 'SELECT_NODE', id: 'g' })
+    // removeGroupMember('b')
+    const group = state.canvas.nodes.find((n) => n.id === 'g')!
+    state = studioReducer(state, { type: 'NODE_DATA_PATCH', id: group.id, patch: { memberIds: (group.data.memberIds as string[]).filter((i) => i !== 'b') } })
+    state = studioReducer(state, { type: 'NODE_DATA_PATCH', id: 'b', patch: { groupId: null } })
+    expect((state.canvas.nodes.find((n) => n.id === 'g')?.data as { memberIds?: string[] }).memberIds).toEqual(['a', 'c'])
+    expect((state.canvas.nodes.find((n) => n.id === 'b')?.data as { groupId?: unknown }).groupId).toBeNull()
   })
 })

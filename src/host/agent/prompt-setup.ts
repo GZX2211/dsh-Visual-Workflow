@@ -1,38 +1,65 @@
 // src/host/agent/prompt-setup.ts
 //
-// 子代理系统提示词注入（T-021 配套）：
-//   - 标准模式：把节点自定义 System Prompt 作为「完整系统提示词」注入，
-//     替换官方 Harness/部署 persona 等系统提示段（需求 §4.2.3.2 规则 1）；
-//   - Code Mode（presetId = 'code'）：不覆盖官方工具调用提示词，仅通过
-//     startContinuable 的 persona 字段遮蔽部署 persona（官方 persona 语义），
-//     本注入只负责把协作 Prompt 追加到系统提示词末尾（架构 §13.1.4）；
-//   - 协作 Prompt：以 `collab:` 前缀追加到系统提示词末尾，不对既有前缀重排。
+// 角色 Prompt 系统提示词段注入 + 官方系统提示词开关（T-021 配套，需求变更后重写）。
 //
-// 为什么用 system-prompt/assemble 瀑布而不是在 request.persona 里拼串：
-//   - request.persona 只能注册 deployment:persona 段，无法表达「完整替换」；
-//   - registerContinuableSetup 贡献拿不到节点参数（签名只有 childCtx），
-//     因此沿用 model-selection 的 WeakMap 方案：贡献先挂监听，runner 在
-//     startContinuable 返回后再 attach 节点级状态；监听在真正组装提示词时
-//     读状态，避免创建期并发竞态。
+// 背景：此前实现把节点自定义 System Prompt 作为「完整系统提示词」注入，整段替换/追加
+//       官方 system prompt（含 Code Mode 保留官方工具调用提示词）。该方案被否决：
+//       官方已对系统提示词做缓存/稳定性优化，插件不应随意插入或替换官方段。
+//
+// 统一语义（子代理与父代理共用）：
+//   - 角色 Prompt（节点自定义 System Prompt）注册为**独立命名段** `visual-workflow:prompt`
+//     （order 1），注入一次、会话/回合间稳定不变（KV 缓存前缀友好）；
+//   - **不再整段替换/插入**官方 system prompt，也**不再传** `request.persona` 占用官方人设；
+//   - 新增开关 `injectSystemPrompt`（默认 true）：ON（开）= 官方系统提示词正常注入（不改动）；
+//     OFF（关）= 仅保留角色段 + `tool:*` 段 + 工具 schema，清空官方 harness:identity /
+//     人设 / 系统 / 上下文段——但 Code Mode 的工具调用提示词（`tool:*` 段）必须保留。
+//
+// 两类 Agent 的注入路径：
+//   - 子代理：经 registerContinuableSetup 的 contribution（创建窗口读取 withPending 状态，
+//     经 AsyncLocalStorage 隔离并发创建），resolvePromptOnCtx 装配；
+//   - 父代理（会话根 Agent）：经 bindParent 把节点级状态写入根 Agent 的 ctx（运行时直接
+//     调用，官方 `agents.get(sessionId)?.ctx` 可达；非侵入，仅挂载而不改源码）。
+//
+// 零官方运行时依赖：section() 与 on('system-prompt/assemble') 均以最小结构守卫收窄。
 
-import { buildCollabPrompt } from '../prompts/collab.js'
+import { AsyncLocalStorage } from 'node:async_hooks'
 
-/** 子代理提示词注入状态（runner 在节点启动后写入）。 */
+/** 角色 Prompt 注册为的系统提示词段名（order 1，位于官方 harness:identity 之后、工具段之前）。 */
+export const VISUAL_WORKFLOW_PROMPT_SECTION = 'visual-workflow:prompt'
+/** 角色 Prompt 段的 order（有限数字；官方 harness:identity=-100、部署 persona=0）。 */
+const VISUAL_WORKFLOW_PROMPT_ORDER = 1
+
+/** 子代理提示词注入状态（runner 在节点启动后写入；bindParent 也使用）。 */
 export interface ChildPromptState {
-  /** 节点自定义 System Prompt（可为空；标准模式下为空表示系统提示词为空）。 */
+  /** 节点自定义 System Prompt（角色 Prompt；可为空）。 */
   systemPrompt: string
-  /** 协作组 Prompt（组卡片 data.collabPrompt；非组内成员为空）。 */
-  collabPrompt: string
-  /** true=标准模式完整替换；false=Code Mode，仅追加 collab 且保留官方工具调用提示词。 */
-  complete: boolean
+  /** 官方系统提示词注入开关（默认 true）。 */
+  injectSystemPrompt: boolean
 }
 
-/** 子代理提示词注入装配（与 model-selection 相同的贡献/attach 两段式）。 */
+/** 子代理/父代理提示词注入装配（contribution/attach/bindParent 三段式 + 创建期 withPending）。 */
 export interface ChildPromptSetup {
   /** 经 registerContinuableSetup 注册的贡献（每个子代理创建时安装监听）。 */
   contribution: (childCtx: unknown) => () => void
-  /** 子代理创建完成后由 runner 调用：写入节点级提示词状态。 */
+  /**
+   * 在 startContinuable 调用前后夹住节点级状态：作用域内注册的贡献可同步取得
+   * 本次创建对应的状态，并立即写入 WeakMap，避免首轮组装竞态。
+   */
+  withPending<T>(state: ChildPromptState, operation: () => Promise<T>): Promise<T>
+  /** 子代理创建完成后由 runner 调用：写入节点级提示词状态（兜底/复用覆盖）。 */
   attach(childCtx: unknown, state: ChildPromptState): void
+  /**
+   * 把父代理（会话根 Agent）的提示词状态写入其 ctx（运行时直接调用）。
+   * 同一 sessionId 只注册一次（此后仅更新可变状态）；注册后的段/过滤对根 Agent 全程生效，
+   * 跨会话不影响。非侵入：仅挂载，不修改官方源码。
+   */
+  bindParent(ctx: unknown, state: ChildPromptState, sessionId: string): void
+}
+
+/** 可变状态引用（section 文本以函数读取，attach/bindParent 后即时生效）。 */
+interface PromptStateRef {
+  systemPrompt: string
+  injectSystemPrompt: boolean
 }
 
 /** system-prompt/assemble 事件的最小组装形状（零官方类型依赖）。 */
@@ -43,60 +70,125 @@ interface PromptAssemblyLike {
   variables?: Record<string, unknown>
 }
 
-/** 子代理上下文最小结构（on/apply 用于挂 waterfall 监听）。 */
+/** 子代理/父代理上下文最小结构（on + systemPrompt.section 用于挂瀑布与注册角色段）。 */
 interface PromptChildContextLike {
   on(name: string, listener: (assembly: unknown, context: unknown, next: () => Promise<unknown>) => Promise<unknown>): () => void
+  systemPrompt?: { section?(input: { name: string; order: number; text: unknown }): () => void }
 }
 
 /**
- * 创建子代理提示词注入装配。
+ * 在同一 ctx 上装配「角色 Prompt 段 + 开关过滤瀑布」，返回合并 disposer。
+ * 供子代理 contribution 与父代理 bindParent 共用（逻辑一致）。
+ */
+function registerPromptOnCtx(childCtx: PromptChildContextLike, ref: PromptStateRef): () => void {
+  const disposers: Array<() => void> = []
+
+  // 官方 systemPrompt.section API 可用：把角色 Prompt 注册为独立命名段（注入一次）
+  let sectionRegistered = false
+  const sys = childCtx.systemPrompt
+  if (typeof sys?.section === 'function') {
+    try {
+      const disposer = sys.section({
+        name: VISUAL_WORKFLOW_PROMPT_SECTION,
+        order: VISUAL_WORKFLOW_PROMPT_ORDER,
+        text: () => ref.systemPrompt,
+      })
+      sectionRegistered = true
+      if (typeof disposer === 'function') disposers.push(disposer)
+    } catch {
+      // section 注册失败（如顺序冲突）：降级为瀑布兜底注入（见下面 ON/OFF 分支）
+      sectionRegistered = false
+    }
+  }
+
+  // 开关过滤瀑布：OFF 时仅保留角色段 + tool:* 段 + 工具 schema，清空官方段/上下文。
+  // ON（默认）时官方已优化，不做任何改动（仅当 section API 不可用时兜底前置角色段）。
+  const disposeAssembly = childCtx.on('system-prompt/assemble', async (rawAssembly, _rawContext, next) => {
+    const assembly = (await next()) as PromptAssemblyLike | null
+    const roleText = String(ref.systemPrompt ?? '')
+    if (ref.injectSystemPrompt) {
+      if (!sectionRegistered && roleText.trim()) {
+        const sections = Array.isArray(assembly?.sections) ? [...assembly.sections] : []
+        return { ...assembly, sections: [{ name: VISUAL_WORKFLOW_PROMPT_SECTION, text: roleText }, ...sections] }
+      }
+      return assembly
+    }
+    // OFF：section API 不可用时兜底先行注入角色段，再过滤为「角色段 + tool:*」
+    let baseSections = Array.isArray(assembly?.sections) ? [...assembly.sections] : []
+    if (!sectionRegistered && roleText.trim()) {
+      baseSections = [{ name: VISUAL_WORKFLOW_PROMPT_SECTION, text: roleText }, ...baseSections]
+    }
+    const sections = baseSections.filter(
+      (section) => section.name === VISUAL_WORKFLOW_PROMPT_SECTION || String(section.name).startsWith('tool:'),
+    )
+    return { ...assembly, sections, contexts: [] }
+  }) as () => void
+  disposers.push(disposeAssembly)
+
+  return () => {
+    for (const dispose of disposers) {
+      try {
+        dispose()
+      } catch {
+        // 撤销尽力而为
+      }
+    }
+  }
+}
+
+/**
+ * 创建子代理/父代理提示词注入装配。
  *
- * @returns contribution + attach 两段式：contribution 在子代理创建窗口安装
- * `system-prompt/assemble` 监听；attach 在子代理启动后写入节点级状态。
+ * @returns contribution + attach + withPending + bindParent 四段式接口。
  */
 export function createChildPromptSetup(): ChildPromptSetup {
-  const states = new WeakMap<object, ChildPromptState>()
+  const states = new WeakMap<object, PromptStateRef>()
+  const pending = new AsyncLocalStorage<ChildPromptState>()
+
+  // 父代理（根 Agent）按 sessionId 的绑定表：每会话只注册一次，更新走可变状态。
+  const parentRefs = new Map<string, PromptStateRef>()
+  const parentDisposers = new Map<string, () => void>()
 
   const contribution = (rawChildCtx: unknown): (() => void) => {
     const childCtx = rawChildCtx as PromptChildContextLike
     if (typeof childCtx?.on !== 'function') return () => {}
 
-    const dispose = childCtx.on('system-prompt/assemble', async (rawAssembly, _rawContext, next) => {
-      const assembly = (await next()) as PromptAssemblyLike | null
-      const state = states.get(childCtx as object)
-      if (!state) return assembly
-      const sections = Array.isArray(assembly?.sections) ? [...assembly.sections] : []
+    // 创建窗口内若存在 pending 状态，立即落 WeakMap（首轮组装前保证就绪）
+    const pendingState = pending.getStore()
+    const ref: PromptStateRef = {
+      systemPrompt: pendingState ? String(pendingState.systemPrompt ?? '') : '',
+      injectSystemPrompt: pendingState ? pendingState.injectSystemPrompt !== false : true,
+    }
+    states.set(childCtx as object, ref)
 
-      if (state.complete) {
-        // 标准模式：完整替换系统提示词。空字符串也作为 complete 段保留，
-        // renderPrompt 会过滤空段，从而实现「System Prompt 为空时提示词即为空」。
-        const customSections: Array<{ name: string; text: string }> = [
-          { name: 'visual-workflow:persona', text: String(state.systemPrompt ?? '').trim() },
-        ]
-        if (String(state.collabPrompt ?? '').trim()) {
-          customSections.push({ name: 'visual-workflow:collab', text: buildCollabPrompt(state.collabPrompt) })
-        }
-        return { ...assembly, sections: customSections }
-      }
-
-      // Code Mode：仅追加协作 Prompt，保留官方工具调用提示词与 persona 段。
-      if (String(state.collabPrompt ?? '').trim()) {
-        sections.push({ name: 'visual-workflow:collab', text: buildCollabPrompt(state.collabPrompt) })
-      }
-      return { ...assembly, sections }
-    }) as () => void
-
-    return dispose
+    return registerPromptOnCtx(childCtx, ref)
   }
+
+  const withPending = <T>(state: ChildPromptState, operation: () => Promise<T>): Promise<T> =>
+    pending.run(state, operation)
 
   const attach = (childCtx: unknown, state: ChildPromptState): void => {
     if (!childCtx || typeof childCtx !== 'object') return
-    states.set(childCtx as object, {
-      systemPrompt: String(state.systemPrompt ?? ''),
-      collabPrompt: String(state.collabPrompt ?? ''),
-      complete: state.complete === true,
-    })
+    const ref = states.get(childCtx as object)
+    if (!ref) return // 该 child 未走本贡献（如非延续子代理/其他 provider）：静默忽略
+    ref.systemPrompt = String(state.systemPrompt ?? '')
+    ref.injectSystemPrompt = state.injectSystemPrompt !== false
   }
 
-  return { contribution, attach }
+  const bindParent = (ctx: unknown, state: ChildPromptState, sessionId: string): void => {
+    if (!ctx || typeof ctx !== 'object') return
+    let ref = parentRefs.get(sessionId)
+    if (!ref) {
+      ref = {
+        systemPrompt: String(state.systemPrompt ?? ''),
+        injectSystemPrompt: state.injectSystemPrompt !== false,
+      }
+      parentRefs.set(sessionId, ref)
+      parentDisposers.set(sessionId, registerPromptOnCtx(ctx as PromptChildContextLike, ref))
+    }
+    ref.systemPrompt = String(state.systemPrompt ?? '')
+    ref.injectSystemPrompt = state.injectSystemPrompt !== false
+  }
+
+  return { contribution, withPending, attach, bindParent }
 }

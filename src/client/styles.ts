@@ -95,12 +95,13 @@ export const styles = `
 /* 已选文件列表（文件表单，按钮下方显示；用户验收标注） */
 .wf-file-list{display:flex;flex-direction:column;gap:4px;padding:6px;border:1px solid var(--wf-border);border-radius:8px;background:var(--wf-layer-2);max-height:120px;overflow:auto;scrollbar-width:thin}
 .wf-file-chip{display:block;font-size:11px;color:var(--wf-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:2px 6px;border-radius:6px;background:color-mix(in srgb,var(--wf-brand) 8%,transparent)}
-.wf-group__members{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:4px;margin-top:6px;padding:4px;border:1px solid var(--wf-border);border-radius:8px;background:var(--wf-layer-2);scrollbar-width:thin}
-.wf-group__member{position:relative;display:flex;align-items:center;gap:6px;border:0;background:transparent;color:var(--wf-ink);padding:3px 6px 3px 26px;font-size:11px;text-align:left}
-.wf-group__member:hover{background:color-mix(in srgb,var(--wf-brand) 8%,transparent);border-radius:6px}
+.wf-group__members{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:5px;margin-top:6px;padding:6px;border:1px solid var(--wf-border);border-radius:8px;background:var(--wf-layer-2);scrollbar-width:thin}
+/* 组内成员 = 缩小版角色卡：仅名称+状态，数据库/上下文接点，无流程接点（用户批注 Q2） */
+.wf-group__member{position:relative;display:flex;align-items:center;gap:6px;min-height:36px;border:1px solid var(--wf-border-strong);border-radius:8px;background:color-mix(in srgb,var(--wf-layer) 90%,var(--wf-brand) 10%);color:var(--wf-ink);padding:6px 10px;font-size:11px;text-align:left;box-shadow:0 2px 6px color-mix(in srgb,var(--wf-ink) 8%,transparent);transition:border-color .16s ease,box-shadow .16s ease}
+.wf-group__member:hover{border-color:color-mix(in srgb,var(--wf-brand) 55%,var(--wf-border-strong));box-shadow:0 2px 10px color-mix(in srgb,var(--wf-ink) 12%,transparent)}
 .wf-graph__handle--mini{width:9px;height:9px;border-width:1px}
 .wf-graph__handle--mini:hover{transform:translateY(-50%) scale(1.25)}
-.wf-group__member-name{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wf-group__member-name{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:650}
 .wf-group__resize{position:absolute;z-index:6;right:-4px;bottom:-4px;width:14px;height:14px;border-right:3px solid var(--wf-border-strong);border-bottom:3px solid var(--wf-border-strong);border-radius:0 0 6px 0;cursor:nwse-resize}
 .wf-group__resize:hover{border-color:var(--wf-brand)}
 .wf-canvas-empty{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none}

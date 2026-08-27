@@ -280,6 +280,8 @@ export class VisualWorkflowHost extends Service {
       store: this.store,
       runner: this.runner,
       agents: this.agents,
+      promptSetup: this.childPrompt,
+      modelSelection: this.modelSelection,
       config: {
         outputFullLimit: config.outputFullLimit,
         documentTextLimit: config.documentTextLimit,

@@ -10,6 +10,7 @@
 
 import type { WorkflowDocument, GraphNode, Line } from '../../host/shared/graph-model.js'
 import type { ServiceState, RoleTemplate, FileTemplate, DatabaseTemplate, ToolCombo, RunSnapshot } from '../../host/shared/types.js'
+import { consolidateGroups } from '../lib/graph-model.js'
 
 /** 左侧栏 Tab（需求 §4.5.4：工作流 / 角色 / 数据（文件+数据库）/ 其他（阶段+协作组））。 */
 export type LibTab = 'workflow' | 'role' | 'data' | 'other'
@@ -243,12 +244,13 @@ export type StudioAction =
 /** 工作流文档 → 画布投影（节点全量内联，位置缺省落默认格点）。 */
 export function flowToCanvas(flow: WorkflowDocument): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
   return {
-    nodes: (flow.nodes ?? []).map((node) => ({
+    // 合并重复协作组节点（memberIds 并集），治愈历史数据的重复组节点，避免「删成员误删多个」
+    nodes: consolidateGroups((flow.nodes ?? []).map((node) => ({
       id: node.id,
       kind: node.kind,
       position: node.position ?? { x: 120, y: 80 },
       data: (node as { data?: Record<string, unknown> }).data ?? {},
-    })),
+    }))),
     edges: (flow.lines ?? []).map((line) => ({
       id: line.id,
       source: line.source,
@@ -263,12 +265,12 @@ export function flowToCanvas(flow: WorkflowDocument): { nodes: CanvasNode[]; edg
 /** 服务文档 → 画布投影（与工作流同构）。 */
 export function serviceToCanvas(service: ServiceState): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
   return {
-    nodes: (service.nodes ?? []).map((node) => ({
+    nodes: consolidateGroups((service.nodes ?? []).map((node) => ({
       id: node.id,
       kind: node.kind,
       position: node.position ?? { x: 120, y: 80 },
       data: (node as { data?: Record<string, unknown> }).data ?? {},
-    })),
+    }))),
     edges: (service.lines ?? []).map((line) => ({
       id: line.id,
       source: line.source,
@@ -585,7 +587,8 @@ export function editorDataOf(state: StudioState): EditorData | null {
     if (node.kind === 'file') return { kind: 'file', data, name: String(data.label ?? ''), nodeId: node.id }
     if (node.kind === 'database') return { kind: 'database', data, name: String(data.label ?? ''), nodeId: node.id }
     if (node.kind === 'group') {
-      const memberIds = (data.memberIds as string[] | undefined) ?? []
+      // 去重展示（历史数据可能残留重复 memberIds），与删除逻辑保持一致，避免出现「重复成员行/计数虚高」
+      const memberIds = [...new Set((data.memberIds as string[] | undefined) ?? [])]
       const members = memberIds.map((memberId) => {
         const member = state.canvas.nodes.find((item) => item.id === memberId)
         return { id: memberId, label: String((member?.data as { label?: unknown } | undefined)?.label ?? memberId) }

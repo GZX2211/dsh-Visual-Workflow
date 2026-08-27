@@ -20,4 +20,4 @@ export {
 // 三个提示词模板构建器（纯函数，无副作用、不读时钟/随机源）。
 export { buildOrchestrationDirective, type OrchestrationDirectiveParams } from './orchestration.js'
 export { buildNodeTaskBlock, type NodeTaskBlockParams } from './node-task.js'
-export { buildCollabPrompt } from './collab.js'
+export { buildCollabBlock, type CollabBlockParams } from './collab.js'

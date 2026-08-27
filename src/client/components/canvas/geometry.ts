@@ -14,9 +14,9 @@ export const GRAPH_STAGE_HEIGHT = 88
 export const GRAPH_STAGE_SIZE = { w: GRAPH_STAGE_WIDTH, h: GRAPH_STAGE_HEIGHT }
 export const GRAPH_GROUP_WIDTH = 300
 export const GRAPH_GROUP_HEIGHT = 220
-/** 组内成员行高/列表起始（与 GroupCard 布局一致，连线锚点用）。 */
-export const GROUP_MEMBER_ROW_H = 26
-export const GROUP_MEMBER_LIST_TOP = 72
+/** 组内成员行高/列表起始（与 GroupCard 布局一致，连线锚点用；成员为迷你角色卡，略高于纯文本行）。 */
+export const GROUP_MEMBER_ROW_H = 38
+export const GROUP_MEMBER_LIST_TOP = 78
 export const GRAPH_MIN_ZOOM = 0.5
 export const GRAPH_MAX_ZOOM = 2.5
 
@@ -105,4 +105,29 @@ export function edgeGeometry(edge: CanvasEdge, byId: Map<string, CanvasNode>): E
 export function connectionTargetAt(clientX: number, clientY: number): string | null {
   const element = document.elementFromPoint(clientX, clientY)
   return element?.closest?.('[data-wf-node-id]')?.getAttribute('data-wf-node-id') ?? null
+}
+
+/**
+ * 协作组表面命中（入组判定，用户批注 §4.2.5.2 收紧：仅组卡片表面可入组）：
+ *  - 跳过不在协作组内的元素（画布空白/连线 SVG/其他节点等装饰层）；
+ *  - 跳过被拖拽本体节点（拖拽时节点被挪到鼠标下方，若不排除会遮蔽组表面命中）；
+ *  - 命中 `.wf-graph__handle`（连接点）→ 返回 null：连接点**不具入组功能**。
+ * 返回命中的协作组 id；否则 null。纯函数接收元素数组，便于 jsdom 单测。
+ */
+export function groupSurfaceFromElements(elements: Element[], excludeNodeId?: string | null): string | null {
+  for (const el of elements) {
+    const groupEl = el.closest?.('.wf-group-node') as HTMLElement | null
+    if (!groupEl) continue
+    const hostNodeId = el.closest?.('[data-wf-node-id]')?.getAttribute('data-wf-node-id') ?? null
+    if (excludeNodeId && hostNodeId === excludeNodeId) continue
+    if (el.closest?.('.wf-graph__handle')) return null
+    return groupEl.getAttribute('data-wf-node-id')
+  }
+  return null
+}
+
+/** 鼠标坐标下的协作组表面（入组落点；封装 elementsFromPoint，供拖拽 onMove/onUp 共用）。 */
+export function groupSurfaceUnderPoint(clientX: number, clientY: number, excludeNodeId?: string | null): string | null {
+  if (typeof document.elementsFromPoint !== 'function') return null
+  return groupSurfaceFromElements(document.elementsFromPoint(clientX, clientY), excludeNodeId)
 }

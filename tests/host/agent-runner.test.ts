@@ -148,7 +148,7 @@ async function makeHarness(): Promise<RunnerHarness> {
   const toolsView = new FakeToolsView()
   const react = { setLimit: vi.fn(), drop: vi.fn(), consumeCapped: vi.fn(() => false) }
   const modelSelection = { contribution: vi.fn(() => () => {}), attach: vi.fn() }
-  const promptSetup = { contribution: vi.fn(() => () => {}), attach: vi.fn() }
+    const promptSetup = { contribution: vi.fn(() => () => {}), withPending: vi.fn((_state, operation) => operation()), attach: vi.fn() }
   const runner = new NodeAgentRunner({
     store,
     agents: () => agents,
@@ -182,16 +182,17 @@ describe('childKey / nodeChildSignature / pickProviderName', () => {
     expect(childKey('s1', 'f1', 'n1')).toBe('s1:f1:n1')
   })
 
-  it('nodeChildSignature：工具清单排序；persona/provider/model/reasoning/presetId/tools 任一变化即签名变化', () => {
+  it('nodeChildSignature：工具清单排序；rolePrompt/injectSystemPrompt/provider/model/reasoning/presetId/tools 任一变化即签名变化', () => {
     const base = agentNode('n-a1')
-    const signature = nodeChildSignature(base, ['read', 'bash'])
-    expect(nodeChildSignature(base, ['bash', 'read'])).toBe(signature) // 排序无关
-    expect(nodeChildSignature(agentNode('n-a1', { systemPrompt: '改' }), ['read', 'bash'])).not.toBe(signature)
-    expect(nodeChildSignature(agentNode('n-a1', { provider: 'openai' }), ['read', 'bash'])).not.toBe(signature)
-    expect(nodeChildSignature(agentNode('n-a1', { model: 'gpt-4' }), ['read', 'bash'])).not.toBe(signature)
-    expect(nodeChildSignature(agentNode('n-a1', { reasoning: 'high' }), ['read', 'bash'])).not.toBe(signature)
-    expect(nodeChildSignature(agentNode('n-a1', { presetId: 'combo-c2' }), ['read', 'bash'])).not.toBe(signature)
-    expect(nodeChildSignature(base, ['read'])).not.toBe(signature)
+    const signature = nodeChildSignature(base, ['read', 'bash'], '')
+    expect(nodeChildSignature(base, ['bash', 'read'], '')).toBe(signature) // 排序无关
+    expect(nodeChildSignature(base, ['read', 'bash'], '改')).not.toBe(signature) // rolePrompt 变化
+    expect(nodeChildSignature(base, ['read', 'bash'], '', false)).not.toBe(signature) // injectSystemPrompt 关闭
+    expect(nodeChildSignature(agentNode('n-a1', { provider: 'openai' }), ['read', 'bash'], '')).not.toBe(signature)
+    expect(nodeChildSignature(agentNode('n-a1', { model: 'gpt-4' }), ['read', 'bash'], '')).not.toBe(signature)
+    expect(nodeChildSignature(agentNode('n-a1', { reasoning: 'high' }), ['read', 'bash'], '')).not.toBe(signature)
+    expect(nodeChildSignature(agentNode('n-a1', { presetId: 'combo-c2' }), ['read', 'bash'], '')).not.toBe(signature)
+    expect(nodeChildSignature(base, ['read'], '')).not.toBe(signature)
   })
 
   it('pickProviderName：首选序 fork>spawn>codex>claude-code>dsh-sdk>acp；无首选回退首个；空清单 null', () => {
@@ -318,7 +319,7 @@ describe('resolveAgentTools 白名单解析（§4.2 L219）', () => {
 // ---------------------------------------------------------------------------
 
 describe('NodeAgentRunner 创建/复用/派发', () => {
-  it('首次创建：startContinuable 调用（provider 首选/任务块首条注入/persona/白名单/agentOptions）+ 护栏登记', async () => {
+  it('首次创建：startContinuable 调用（provider 首选/任务块首条注入/不再传 persona/白名单/agentOptions）+ 护栏登记', async () => {
     const h = await makeHarness()
     await h.store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read', 'wf_ask'], mcpServers: [] })
     const result = await h.runner.startNodeTask(taskInput({ thinking: 'high' }))
@@ -329,13 +330,13 @@ describe('NodeAgentRunner 创建/复用/派发', () => {
     expect(spec.provider).toBe('fork') // 首选序
     expect(spec.label).toBe('visual-workflow:flow-1:n-a1')
     expect(spec.request.prompt).toEqual([{ type: 'text', text: '任务块' }]) // 首条消息=完整任务块
-    expect(spec.request.persona).toBe('任务：n-a1')
+    expect(spec.request.persona).toBeUndefined() // 角色 Prompt 改为 system prompt 段，不再传官方 persona
     expect(spec.request.toolFilter).toEqual({ allow: ['read', 'wf_ask'] }) // 勾选∩可见（wf_ask 勾选注入）
     expect(spec.request.agentOptions).toEqual({ provider: 'deepseek', model: 'deepseek-chat' })
     expect(h.react.setLimit).toHaveBeenCalledWith('child-1', 7)
   })
 
-  it('签名一致复用：不重建；签名变化（persona）→ 重建（旧子代理保留历史）', async () => {
+  it('签名一致复用：不重建；签名变化（rolePrompt）→ 重建（旧子代理保留历史）', async () => {
     const h = await makeHarness()
     await h.store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read'], mcpServers: [] })
     const first = await h.runner.ensureNodeChild(taskInput())

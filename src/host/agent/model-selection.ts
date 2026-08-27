@@ -94,6 +94,12 @@ export interface ModelSelectionSetup {
    * childCtx 以对象身份匹配（contribition 执行时的同一 childCtx = Agent.ctx）。
    */
   attach(childCtx: SelectionChildContext, selection: ModelSelectionLike): void
+  /**
+   * 把父代理（会话根 Agent）的模型选择写入其 ctx（运行时直接调用）。
+   * 同一 sessionId 只注册一次（此后仅更新 selection.current）；
+   * 服务商/模型/思考强度在会话内可调（官方 ModelSelection 语义），非侵入仅挂载。
+   */
+  bindParent(ctx: unknown, selection: ModelSelectionLike, sessionId: string): void
 }
 
 /**
@@ -104,6 +110,10 @@ export interface ModelSelectionSetup {
  */
 export function createModelSelectionSetup(): ModelSelectionSetup {
   const selections = new WeakMap<object, ModelSelectionRefLike>()
+
+  // 父代理（根 Agent）按 sessionId 的绑定表：每会话只注册一次，更新走 selection.current。
+  const parentRefs = new Map<string, ModelSelectionRefLike>()
+  const parentDisposers = new Map<string, () => void>()
 
   const contribution = (rawChildCtx: unknown): (() => void) => {
     const childCtx = rawChildCtx as SelectionChildContext
@@ -118,5 +128,16 @@ export function createModelSelectionSetup(): ModelSelectionSetup {
     ref.current = { ...selection }
   }
 
-  return { contribution, attach }
+  const bindParent = (ctx: unknown, selection: ModelSelectionLike, sessionId: string): void => {
+    if (!ctx || typeof ctx !== 'object') return
+    let ref = parentRefs.get(sessionId)
+    if (!ref) {
+      ref = { current: undefined, assembled: undefined }
+      parentRefs.set(sessionId, ref)
+      parentDisposers.set(sessionId, installModelSelectionLike(ctx as SelectionChildContext, ref))
+    }
+    ref.current = { ...selection }
+  }
+
+  return { contribution, attach, bindParent }
 }

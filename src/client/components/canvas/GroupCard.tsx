@@ -23,7 +23,8 @@ interface GroupCardProps {
 
 export function GroupCard({ node, copy, members, selected, dropTarget, onPointerDown, onHandlePointerDown, onMemberSelect, onResizeStart }: GroupCardProps) {
   const size = nodeSizeOf(node)
-  const memberIds = (node.data.memberIds as string[] | undefined) ?? []
+  // 去重计数（历史数据可能残留重复 memberIds，避免计数虚高）
+  const memberIds = [...new Set((node.data.memberIds as string[] | undefined) ?? [])]
   // 组卡片提供流程入/出接点（居中；成员节点的上下文/数据库连线走成员自身接点）
   return (
     <div
@@ -53,19 +54,26 @@ export function GroupCard({ node, copy, members, selected, dropTarget, onPointer
                 >
                   <span className="wf-group__member-name">{member.label || member.id}</span>
                   {member.status ? <span className={`wf-status-dot is-${member.status}`} /> : null}
-                  {/* 组内成员只有上下文/数据库接点（流程接点由组卡片承担，需求 §4.2.5.2 规则 4） */}
-                  {['db-in', 'ctx-in'].map((handle) => (
-                    <span
-                      key={handle}
-                      className="wf-graph__handle wf-graph__handle--target wf-graph__handle--mini"
-                      style={handle === 'ctx-in' ? { left: 10 } : undefined}
-                      data-handle={handle}
-                      title={handle}
-                      onPointerDown={(event) => { event.stopPropagation(); onHandlePointerDown(event, member.id, handle) }}
-                    />
-                  ))}
+                  {/* 组内成员仅数据库/上下文接点，无流程接点（流程由组卡片承担，§4.2.5.2 规则 4）；
+                      成员为缩小版角色卡：仅名称 + 状态（用户批注，Q2） */}
+                  {/* 左侧 db-in / ctx-in 拉大垂直间距，避免左右两个接点贴在一起（用户批注） */}
+                  <span
+                    className="wf-graph__handle wf-graph__handle--target wf-graph__handle--mini"
+                    style={{ top: '30%' }}
+                    data-handle="db-in"
+                    title="db-in"
+                    onPointerDown={(event) => { event.stopPropagation(); onHandlePointerDown(event, member.id, 'db-in') }}
+                  />
+                  <span
+                    className="wf-graph__handle wf-graph__handle--target wf-graph__handle--mini"
+                    style={{ top: '64%' }}
+                    data-handle="ctx-in"
+                    title="ctx-in"
+                    onPointerDown={(event) => { event.stopPropagation(); onHandlePointerDown(event, member.id, 'ctx-in') }}
+                  />
                   <span
                     className="wf-graph__handle wf-graph__handle--source wf-graph__handle--mini"
+                    style={{ top: '47%' }}
                     data-handle="ctx-out"
                     title="ctx-out"
                     onPointerDown={(event) => { event.stopPropagation(); onHandlePointerDown(event, member.id, 'ctx-out') }}

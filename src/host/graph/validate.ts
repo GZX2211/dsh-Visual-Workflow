@@ -302,6 +302,8 @@ export function normalizeFlow(flow: Partial<WorkflowDocument>): WorkflowDocument
           reactLimit: node.data.reactLimit ?? null,
           inputSchema: node.data.inputSchema ?? '',
           outputSchema: node.data.outputSchema ?? '',
+          injectSystemPrompt: node.data.injectSystemPrompt !== false,
+          promptFilePath: node.data.promptFilePath ?? undefined,
           groupId: node.data.groupId ?? null,
           proxySourceId: node.data.proxySourceId ?? null,
         },

@@ -66,6 +66,20 @@ export interface RoleNode extends BaseNode {
     outputSchema?: string
     /** System Prompt 来源文件名（从 .md 加载时记录，左侧栏卡片展示用，需求文档 §4.2.3.1）。 */
     systemPromptSource?: string
+    /**
+     * 官方系统提示词注入开关（默认 true）。
+     * true（开）= 官方 harness:identity / 人设 / 系统 / 上下文段正常注入；
+     * false（关）= 仅保留角色 Prompt 段（visual-workflow:prompt）与 tool:* 段 + 工具 schema，
+     *              清空官方系统提示词段（不再对官方段做任何插入/替换）。
+     * 父/子代理节点均有此字段。
+     */
+    injectSystemPrompt?: boolean
+    /**
+     * 角色 Prompt 的宿主绝对路径（可选）。设置后运行时每次节点创建从该文件读取注入，
+     * 文件指纹（mtime+size）纳入子代理签名：文件改动时签名变化 → 重建子代理 → 自动重载新内容；
+     * 未改动时复用原子代理、不重复读取。为空则直接使用 systemPrompt 文本。
+     */
+    promptFilePath?: string
     /** 所属协作组 id（组内成员节点字段，需求文档 §4.2.5.2）。 */
     groupId?: string | null
     /** 虚拟节点引用主节点 id：仅 kind='proxy' 的虚拟节点携带（需求文档 §4.2.3.2 规则 4/7）。 */

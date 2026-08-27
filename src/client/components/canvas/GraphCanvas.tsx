@@ -11,7 +11,7 @@ import type { CanvasEdge, CanvasNode } from '../../studio/studio-state.js'
 import { conditionLabel } from '../../lib/graph-model.js'
 import { FlowNode } from './FlowNode.js'
 import { GroupCard } from './GroupCard.js'
-import { connectionTargetAt, edgeGeometry, GRAPH_NODE_SIZE, GRAPH_MIN_ZOOM, GRAPH_MAX_ZOOM, nodeSizeOf, clamp } from './geometry.js'
+import { connectionTargetAt, groupSurfaceUnderPoint, edgeGeometry, GRAPH_NODE_SIZE, GRAPH_MIN_ZOOM, GRAPH_MAX_ZOOM, nodeSizeOf, clamp } from './geometry.js'
 
 export interface CanvasApi {
   fitView(options?: { padding?: number; nodes?: CanvasNode[] }): void
@@ -62,6 +62,8 @@ export function GraphCanvas(props: GraphCanvasProps) {
   const [viewport, setViewport] = useState<Viewport>({ x: 32, y: 32, zoom: 0.8 })
   const [panning, setPanning] = useState<{ startX: number; startY: number; originX: number; originY: number } | null>(null)
   const [draggingNode, setDraggingNode] = useState<{ nodeId: string; startClientX: number; startClientY: number; originX: number; originY: number } | null>(null)
+  /** 画布内节点拖拽时悬停的协作组 id（组卡片高亮 + 「放开以入组」提示）。 */
+  const [dragHoverGroupId, setDragHoverGroupId] = useState<string | null>(null)
   const [connectionDraft, setConnectionDraft] = useState<{ source: string; sourceHandle: string; clientX: number; clientY: number; start: { x: number; y: number } } | null>(null)
   const byId = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes])
   const highlightedSet = useMemo(() => new Set(highlightedNodeIds), [highlightedNodeIds])
@@ -176,6 +178,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
     if (!node) return
     onNodeSelect?.(nodeId)
     onNodeDragStart?.()
+    setDragHoverGroupId(null)
     setDraggingNode({
       nodeId,
       startClientX: event.clientX,
@@ -195,20 +198,26 @@ export function GraphCanvas(props: GraphCanvasProps) {
         x: Math.round(draggingNode.originX + dx),
         y: Math.round(draggingNode.originY + dy),
       })
+      // 悬停检测：仅「角色节点」拖到协作组表面才高亮（排除被拖拽本体；连接点不具入组功能；
+      // 角色以外的卡片（文件/数据库/阶段/虚拟）不显示悬浮提示、也不能入组，用户批注）
+      const dragged = byId.get(draggingNode.nodeId)
+      const canJoinGroup = !!dragged && (dragged.kind === 'parent' || dragged.kind === 'agent')
+      setDragHoverGroupId(canJoinGroup ? groupSurfaceUnderPoint(event.clientX, event.clientY, draggingNode.nodeId) : null)
     }
     const onUp = (event: PointerEvent): void => {
-      // 拖入协作组：角色节点落在组卡片上（组内成员行也是组卡片后代）
+      // 拖入协作组：角色节点落在协作组表面（不含连接点）时入组；被拖拽节点已排除，
+      // 避免「节点覆盖在组上方」导致 elementFromPoint 命中自身而无法入组（用户批注）。
       const node = byId.get(draggingNode.nodeId)
-      const target = document.elementFromPoint(event.clientX, event.clientY)
-      const groupEl = target?.closest?.('.wf-group-node') as HTMLElement | null
-      const groupId = groupEl?.getAttribute('data-wf-node-id') ?? null
+      const groupId = groupSurfaceUnderPoint(event.clientX, event.clientY, draggingNode.nodeId)
       if (node && (node.kind === 'parent' || node.kind === 'agent') && groupId && groupId !== node.id
         && !((node.data.groupId as string | null | undefined) ?? null)) {
         onNodeDropToGroup?.(node.id, groupId)
         setDraggingNode(null)
+        setDragHoverGroupId(null)
         return
       }
       setDraggingNode(null)
+      setDragHoverGroupId(null)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
@@ -216,7 +225,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
     }
-  }, [draggingNode, byId, onNodeMove, onNodeDropToGroup])
+  }, [draggingNode, byId, onNodeMove, onNodeDropToGroup, setDragHoverGroupId])
 
   // ---- 连线 ----
   const beginConnection = useCallback((event: React.PointerEvent, nodeId: string, handle: string): void => {
@@ -363,15 +372,16 @@ export function GraphCanvas(props: GraphCanvasProps) {
     return main ? { ...node, data: { ...node.data, label: String((main.data as { label?: unknown }).label ?? '') } } : node
   })
   const groupNodes = nodes.filter((node) => node.kind === 'group')
+  // 组内成员 id（以 group.data.memberIds 为准并对重复 id 去重；与右侧「组合成员」及删除逻辑一致）
   const memberIdsOf = new Set<string>()
   for (const group of groupNodes) {
-    for (const memberId of (group.data.memberIds as string[] | undefined) ?? []) memberIdsOf.add(memberId)
+    for (const memberId of [...new Set((group.data.memberIds as string[] | undefined) ?? [])]) memberIdsOf.add(memberId)
   }
   // 组内成员仅在组卡片内显示迷你卡（不在画布重复渲染大卡，需求 §4.2.5.2 规则 9）
   const standalone = renderedNodes.filter((node) => node.kind !== 'group' && !memberIdsOf.has(node.id))
   const groupMembers = new Map<string, { id: string; label: string; status: string | null }[]>()
   for (const group of groupNodes) {
-    const members = ((group.data.memberIds as string[] | undefined) ?? []).map((memberId) => {
+    const members = [...new Set((group.data.memberIds as string[] | undefined) ?? [])].map((memberId) => {
       const member = byId.get(memberId)
       return { id: memberId, label: String((member?.data as { label?: unknown } | undefined)?.label ?? memberId), status: runStatusOf(memberId)?.status ?? null }
     })
@@ -413,7 +423,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
               copy={copy}
               members={groupMembers.get(node.id) ?? []}
               selected={node.id === selectedNode}
-              dropTarget={dropTargetGroupId === node.id}
+              dropTarget={dropTargetGroupId === node.id || dragHoverGroupId === node.id}
               onPointerDown={beginNodeDrag}
               onHandlePointerDown={beginConnection}
               onMemberSelect={onNodeSelect}

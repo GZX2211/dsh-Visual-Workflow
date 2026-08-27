@@ -128,6 +128,8 @@ export function newRoleNode(kind: 'parent' | 'agent', label: string, position = 
       reactLimit: null,
       inputSchema: '',
       outputSchema: '',
+      injectSystemPrompt: true,
+      promptFilePath: undefined,
       groupId: null,
       proxySourceId: null,
     },
