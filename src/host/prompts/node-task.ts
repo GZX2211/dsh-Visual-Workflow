@@ -8,13 +8,13 @@
 //
 // 稳定布局（§13.1）：
 //   ① 首段 = 该节点最重要的约束（仅用自身 System Prompt / 工具白名单边界 /
-//            失败语义：回流重试上限 + ReAct 软截停 / 成功时调用 report 回传结论摘要）
+//            失败语义：回流重试上限 + ReAct 软截停 / ）
 //   ② 中段 = 过程性信息（上游产出上下文（ctx 连线注入）/ 文件路径索引 / 数据库工具说明）
 //   ③ 末段 = 重申 + 动态态信息（本次执行的动态状态仅注入末尾）
 //
 // 为什么上游产出等长文本置于中段（§13.1.2 lost-in-the-middle）：长文本放入任务主体
 // 中部之后（本模板即中段），关键约束保持在首段与末段两端最受注意力关注的位置；关键
-// 结论不由子代理粘贴大段原文，而由 report 摘要回传父代理（工具描述 §8 索引 #8/#19）。
+// 结论由子代理在其最终消息中直接输出（不再要求 report 摘要），父代理据此汇总。
 //
 // 构建器为纯函数：不读 Date.now/随机源，同一 params 两次构建字节相同；动态值仅注入末段。
 
@@ -86,13 +86,11 @@ export interface NodeTaskBlockParams {
  */
 export const NODE_HARD_CONSTRAINTS = {
   /** 仅用自身 System Prompt（不继承父代理提示词）。 */
-  ownPromptOnly: 'work from your own System Prompt only',
+  ownPromptOnly: '仅使用你自己的 System Prompt',
   /** 工具白名单边界：仅调用允许清单内的工具。 */
-  allowlistOnly: 'call only tools within your allow-list',
+  allowlistOnly: '只调用你允许清单（allow-list）内的工具',
   /** 失败语义：回流量试上限 / ReAct 软截停。 */
-  retryAndReact: 'retry is bounded; reaching the ReAct iteration limit force-closes your turn',
-  /** 成功收尾：调用 report 回传结论摘要。 */
-  reportSummary: 'call report once before finishing with a self-contained summary',
+  retryAndReact: '重试有上限；达到 ReAct 迭代上限会强制结束本轮',
 } as const
 
 /**
@@ -102,7 +100,7 @@ export const NODE_HARD_CONSTRAINTS = {
  * 之后仅追加本次动态态信息。不读时钟、不随机。
  *
  * @param params - 模板入参（facts 静态事实 + dynamic 末段动态态信息）。
- * @returns 注入子代理的任务文本（面向模型，英文）。
+ * @returns 注入子代理的任务文本（面向模型，中文）。
  */
 export function buildNodeTaskBlock(params: NodeTaskBlockParams): string {
   const { facts, dynamic } = params
@@ -111,39 +109,38 @@ export function buildNodeTaskBlock(params: NodeTaskBlockParams): string {
   const head = [
     HEAD_MARKER,
     '',
-    `You are executing node "${facts.nodeLabel}".`,
+    `你正在执行节点「${facts.nodeLabel}」。`,
     '',
-    `1. ${NODE_HARD_CONSTRAINTS.ownPromptOnly}: do not inherit any parent-agent prompt, memory, or context.`,
-    `2. ${NODE_HARD_CONSTRAINTS.allowlistOnly}${facts.toolAllowlistNote ? ` (${facts.toolAllowlistNote})` : ''}; wf_run_node / wf_finish are never available to you.`,
-    `3. ${NODE_HARD_CONSTRAINTS.retryAndReact}; after that, still emit your final conclusion and finish normally.`,
-    `4. On success: ${NODE_HARD_CONSTRAINTS.reportSummary} — one conclusion plus key outputs/decisions (do not paste large raw text back to the parent).`,
+    `1. ${NODE_HARD_CONSTRAINTS.ownPromptOnly}。`,
+    `2. ${NODE_HARD_CONSTRAINTS.allowlistOnly}${facts.toolAllowlistNote ? `（${facts.toolAllowlistNote}）` : ''}；wf_run_node / wf_finish 对你始终不可用。`,
+    `3. ${NODE_HARD_CONSTRAINTS.retryAndReact}；之后仍需输出你的最终结论并正常结束。`,
   ].join('\n')
 
   // —— 中段：过程性信息（上游产出 / 文件路径索引 / 数据库工具说明）——
   const midParts: string[] = [
     MID_MARKER,
     '',
-      `Your task is defined in your own System Prompt; it is not repeated here. Execute workflow node "${facts.nodeLabel}" from that prompt.`,
+      `你的任务定义在你自己的 System Prompt 中，此处不重复。请依据该提示词执行工作流节点「${facts.nodeLabel}」。`,
   ]
 
   if (facts.upstreamContext.length > 0) {
-    midParts.push('', 'Upstream output (injected via ctx edges):')
+    midParts.push('', '上游产出（经 ctx 连线注入）：')
     for (const entry of facts.upstreamContext) {
-      midParts.push(`- ${entry.source}: ${entry.content}`)
+      midParts.push(`- ${entry.source}：${entry.content}`)
     }
   } else {
-    midParts.push('', 'Upstream output: (none — no ctx edge into this node)')
+    midParts.push('', '上游产出：（无——本节点无 ctx 连线进入）')
   }
 
   if (facts.filePaths.length > 0) {
-    midParts.push('', 'Managed file path index (read these files yourself via your read tools):')
+    midParts.push('', '受管文件路径索引（请用你的读取工具自行读取这些文件）：')
     for (const filePath of facts.filePaths) {
       midParts.push(`- ${filePath}`)
     }
   }
 
   if (facts.dbToolHint.trim()) {
-    midParts.push('', `Database tool note: ${facts.dbToolHint.trim()}`)
+    midParts.push('', `数据库工具说明：${facts.dbToolHint.trim()}`)
   }
 
   const mid = midParts.join('\n')
@@ -153,9 +150,8 @@ export function buildNodeTaskBlock(params: NodeTaskBlockParams): string {
     TAIL_MARKER,
     '',
     TAIL_RESTATE_MARKER,
-    `- ${NODE_HARD_CONSTRAINTS.ownPromptOnly}.`,
-    `- ${NODE_HARD_CONSTRAINTS.allowlistOnly}.`,
-    `- ${NODE_HARD_CONSTRAINTS.reportSummary}.`,
+    `- ${NODE_HARD_CONSTRAINTS.ownPromptOnly}。`,
+    `- ${NODE_HARD_CONSTRAINTS.allowlistOnly}。`,
     '',
     renderDynamicState(dynamic),
   ].join('\n')
@@ -167,23 +163,23 @@ export function buildNodeTaskBlock(params: NodeTaskBlockParams): string {
  * 渲染末段动态态信息（内部纯函数）：仅依赖 dynamic 字段，输出不稳定内容。
  */
 function renderDynamicState(dynamic: NodeTaskBlockParams['dynamic']): string {
-  const lines: string[] = ['Current execution state:']
+  const lines: string[] = ['当前执行状态：']
 
-  lines.push(`- Retry limit: ${dynamic.retryLimit ?? 3}`)
+  lines.push(`- 重试上限：${dynamic.retryLimit ?? 3}`)
 
   if (dynamic.reactLimit !== undefined) {
-    lines.push(`- ReAct iteration limit: ${dynamic.reactLimit} (soft cap; tool calls are refused past it, then conclude).`)
+    lines.push(`- ReAct 迭代上限：${dynamic.reactLimit}（软上限；超过后拒绝工具调用，随后结束本节点）。`)
   } else {
-    lines.push('- ReAct iteration limit: (unset)')
+    lines.push('- ReAct 迭代上限：（未设置）')
   }
 
   const pauseIds = dynamic.pauseNodeIds && dynamic.pauseNodeIds.length > 0 ? dynamic.pauseNodeIds : null
   if (pauseIds) {
-    lines.push(`- Pause nodes: [${pauseIds.join(', ')}]. If you are one of these, your node acts as a pure flow gate (pauses the run).`)
+    lines.push(`- 暂停节点：[${pauseIds.join(', ')}]。若你属于其中之一，本节点作为纯流程门（暂停运行）。`)
   } else {
-    lines.push('- This node is a normal task node (no pause semantics).')
+    lines.push('- 本节点为普通任务节点（无暂停语义）。')
   }
 
-  lines.push(`- Run context: ${(dynamic.runContextText ?? '').trim() || '(none)'}`)
+  lines.push(`- 运行上下文：${(dynamic.runContextText ?? '').trim() || '（无）'}`)
   return lines.join('\n')
 }

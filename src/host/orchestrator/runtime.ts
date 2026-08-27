@@ -1271,7 +1271,9 @@ export class OrchestratorRuntime {
       entry.lastActiveAt = this.now()
       if (s.status !== 'running' && s.status !== 'paused') return
       const stopReason = String(info?.stopReason ?? '')
-      const completed = stopReason === 'completed' || stopReason === 'max-tokens'
+      // max-tokens = 模型输出被硬截断（内容不完整），不能视为成功（Bug 19）；
+      // 仅 completed 才算节点成功；ReAct 软截停由 consumeReactCapped 另判 react-capped。
+      const completed = stopReason === 'completed'
       const outputText = lastAssistantText(info?.lastAssistantMessage, OUTPUT_SUMMARY_LIMIT)
       // 软截停（护栏）：触达 ReAct 上限仍正常产出——标记 react-capped（非失败）
       const reactCapped = this.deps.runner.consumeReactCapped?.(childId) === true
@@ -1413,7 +1415,11 @@ export class OrchestratorRuntime {
   /** 重读当前（运行的）工作流最新快照：每节点执行前读一次，运行中调整即时生效（双向同步①）。 */
   async currentResolvedFlow(entry: RunEntry): Promise<WorkflowDocument> {
     try {
-      const raw = await this.deps.store.getWorkflow(entry.snapshot.sessionId, entry.snapshot.flowId)
+      // 模式二运行的服务文档在 services/ 目录，必须按 mode 分派读取；
+      // 固定读 workflows/ 会让 mode2 运行「读错文档/读到 null 隐式回退」（Bug 20）。
+      const raw = entry.snapshot.mode === 'mode2'
+        ? await this.deps.store.getServiceAsFlow(entry.snapshot.flowId)
+        : await this.deps.store.getWorkflow(entry.snapshot.sessionId, entry.snapshot.flowId)
       if (raw) return raw
     } catch {
       // 读失败回退起始快照

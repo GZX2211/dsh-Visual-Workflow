@@ -138,6 +138,80 @@ describe('studioReducer', () => {
     expect(state.canvas.nodes[0]!.position).toEqual(initialPos)
   })
 
+  it('Bug 2：flowToCanvas 投影保留虚拟节点顶层 proxySourceId（打开工作流不丢引用）', () => {
+    const state = studioReducer(baseState(), {
+      type: 'OPEN_FLOW',
+      flow: {
+        id: 'wf-p', sessionId: 's-1', mode: 'mode1', name: '', description: '',
+        nodes: [
+          node({ id: 'n1', kind: 'agent', data: { label: 'A' } }),
+          { id: 'p1', kind: 'proxy', position: { x: 0, y: 0 }, data: {}, proxySourceId: 'n1' } as never,
+        ],
+        lines: [],
+      } as never,
+    })
+    const proxy = state.canvas.nodes.find((item) => item.kind === 'proxy') as { proxySourceId?: unknown }
+    expect(proxy?.proxySourceId).toBe('n1')
+  })
+
+  it('Bug 4：删除角色主节点时级联删除全部关联虚拟节点（§4.2.3.2 规则 5）', () => {
+    let state = baseState()
+    state = studioReducer(state, { type: 'OPEN_FLOW', flow: {
+      id: 'wf-1', sessionId: 's-1', mode: 'mode1', name: '', description: '',
+      nodes: [node({ id: 'n1', kind: 'agent', data: { label: 'A' } })], lines: [],
+    } as never })
+    state = studioReducer(state, { type: 'NODE_ADDED', node: { id: 'p1', kind: 'proxy', position: { x: 0, y: 0 }, data: {}, proxySourceId: 'n1' } as CanvasNode })
+    state = studioReducer(state, { type: 'NODE_ADDED', node: { id: 'p2', kind: 'proxy', position: { x: 0, y: 0 }, data: {}, proxySourceId: 'n1' } as CanvasNode })
+    // 删除主节点 → 两个虚拟引用一并删除
+    state = studioReducer(state, { type: 'NODE_REMOVED', id: 'n1' })
+    expect(state.canvas.nodes.map((n) => n.id).sort()).toEqual([])
+  })
+
+  it('Bug 8：UNDO/REDO 后选中与编辑器引用失效时被清空', () => {
+    let state = baseState()
+    state = studioReducer(state, { type: 'GRAPH_REPLACED', nodes: [node({ id: 'n1', kind: 'agent' })], edges: [], dirty: false })
+    // 记录含 n1 的快照 → 删除 n1（画布空）→ 模拟「选中已删除节点」的残留状态
+    state = studioReducer(state, { type: 'HISTORY_PUSH', snapshot: graphSnapshotOf(state) })
+    state = studioReducer(state, { type: 'NODE_REMOVED', id: 'n1' })
+    state = studioReducer(state, { type: 'SELECT_NODE', id: 'n1' })
+    // UNDO 恢复含 n1 的画布：n1 重新存在 → 选中保持有效
+    state = studioReducer(state, { type: 'UNDO' })
+    expect(state.selection.nodeId).toBe('n1')
+    // REDO 恢复删除后的空画布：选中/编辑器引用失效 → 清空，不再指向幽灵节点
+    state = studioReducer(state, { type: 'REDO' })
+    expect(state.selection.nodeId).toBeNull()
+    expect(state.editor).toBeNull()
+  })
+
+  it('Bug 17：撤销/重做回到已保存状态时 dirty=false（不误弹未保存守卫）', () => {
+    // 场景 A：打开后编辑、撤销回打开初始态（从未保存过）→ dirty=false
+    let state = baseState()
+    state = studioReducer(state, {
+      type: 'OPEN_FLOW',
+      flow: { id: 'wf-1', sessionId: 's-1', mode: 'mode1', name: '', description: '', nodes: [node({ id: 'n1', kind: 'agent' })], lines: [] } as never,
+    })
+    expect(state.dirty).toBe(false)
+    state = studioReducer(state, { type: 'HISTORY_PUSH', snapshot: graphSnapshotOf(state) })
+    state = studioReducer(state, { type: 'NODE_ADDED', node: node({ id: 'n2', kind: 'end' }) })
+    expect(state.dirty).toBe(true)
+    state = studioReducer(state, { type: 'UNDO' })
+    expect(state.canvas.nodes.map((n) => n.id)).toEqual(['n1'])
+    expect(state.dirty).toBe(false) // 回到初始保存状态 → 不再误判未保存
+
+    // 场景 B：保存后编辑再撤销回保存态 → dirty=false；重做离开 → dirty=true
+    state = studioReducer(state, { type: 'HISTORY_PUSH', snapshot: graphSnapshotOf(state) })
+    state = studioReducer(state, { type: 'NODE_ADDED', node: node({ id: 'n2', kind: 'end' }) })
+    state = studioReducer(state, { type: 'MARK_SAVED' })
+    expect(state.dirty).toBe(false)
+    state = studioReducer(state, { type: 'HISTORY_PUSH', snapshot: graphSnapshotOf(state) })
+    state = studioReducer(state, { type: 'NODE_DATA_PATCH', id: 'n1', patch: { label: '改名' } })
+    expect(state.dirty).toBe(true)
+    state = studioReducer(state, { type: 'UNDO' })
+    expect(state.dirty).toBe(false) // 撤销回保存时状态 = 磁盘态
+    state = studioReducer(state, { type: 'REDO' })
+    expect(state.dirty).toBe(true) // 重做离开保存态 → 未保存
+  })
+
   it('SELECT_LIB：父代理模板选择（右侧面板无显示）', () => {
     let state = baseState()
     state = studioReducer(state, { type: 'SELECT_LIB', kind: 'parentTemplate', id: 'p-1' })

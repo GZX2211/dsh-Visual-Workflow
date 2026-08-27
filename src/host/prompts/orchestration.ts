@@ -89,26 +89,26 @@ export interface OrchestrationDirectiveParams {
 
 /**
  * 关键约束的核心短语（首段与末段同时出现，供 W-02 双位测试断言与组装任务引用）。
- * 用英文面向模型（W-03）；保持措辞独立于动态值，避免前缀漂移。
+ * 用中文面向模型（W-04）；工具名与工具 schema 描述保留英文（W-03）；保持措辞独立于动态值，避免前缀漂移。
  */
 export const ORCH_HARD_CONSTRAINTS = {
   /** 父代理「仅调度不执行」核心短语（首段硬约束 + 末段重申双位出现）。 */
-  dispatchOnly: 'orchestrate only — never execute node tasks yourself',
+  dispatchOnly: '仅编排：你只负责调度子代理，不亲自执行节点任务',
   /** 调用协议：模式一 wf_run_node 异步启动。 */
-  runNodeAsync: 'use wf_run_node in mode1: it starts a node subagent asynchronously and returns immediately',
+  runNodeAsync: '模式一用 wf_run_node：异步启动节点子代理并立即返回',
   /** 调用协议：模式二 wf_run_node_wait 阻塞等待。 */
-  runNodeBlocking: 'use wf_run_node_wait in mode2: it starts a node subagent and blocks until the node finishes',
+  runNodeBlocking: '模式二用 wf_run_node_wait：阻塞启动节点子代理直至节点完成',
   /** 收尾协议：wf_finish 幂等收尾、释放锁。 */
-  finishIdempotent: 'finish with wf_finish exactly once — it is idempotent and releases the run lock',
+  finishIdempotent: '以 wf_finish 收尾（只调用一次，幂等，并释放运行锁）',
   /** 失败语义：节点失败需显式处置，不静默跳过。 */
-  failureSemantics: 'never silently skip a failed node',
+  failureSemantics: '绝不静默跳过失败节点',
   /** 条件连线语义：条件分支由父代理按上游实际产出语义判断。 */
-  conditionSemantics: 'you decide conditional branches semantically',
+  conditionSemantics: '条件分支由你依据上游节点的实际产出进行语义判断',
   /** 护栏：失控立即 wf_finish(failed)。 */
-  failureImmediate: "call wf_finish({ status: 'failed' }) immediately if you detect loss of control",
+  failureImmediate: "检测到失控时立即调用 wf_finish({ status: 'failed' })",
   /** 协作通信超时处置：征询用户后 resolve 三动作。 */
   askAgentTimeout:
-    'on a wf_ask_agent ask-timeout notice, consult the user with ask_user_question, then settle with wf_ask_agent resolve (continue / resend / abort)',
+    '收到 wf_ask_agent 的 ask 超时通知时，先用 ask_user_question 征询用户，再用 wf_ask_agent resolve（continue / resend / abort）定案',
 } as const
 
 /**
@@ -118,7 +118,7 @@ export const ORCH_HARD_CONSTRAINTS = {
  * 末段重申固定，之后仅追加本次动态状态（facts/dynamic 决定）。不读时钟、不随机。
  *
  * @param params - 模板入参（facts 静态事实 + dynamic 末段动态状态）。
- * @returns 注入父代理的编排指令文本（面向模型，英文）。
+ * @returns 注入父代理的编排指令文本（面向模型，中文）。
  */
 export function buildOrchestrationDirective(params: OrchestrationDirectiveParams): string {
   const { facts, dynamic } = params
@@ -127,38 +127,37 @@ export function buildOrchestrationDirective(params: OrchestrationDirectiveParams
   const nodeList = facts.nodes.map((n) => `- ${n.id} (${n.label})`).join('\n')
   const collabText =
     facts.collabGroups.length === 0
-      ? 'No collaboration groups.'
+      ? '无协作组。'
       : facts.collabGroups
-          .map((g) => `- ${g.groupId} (${g.label}): start members [${g.memberIds.join(', ')}] in parallel`)
+          .map((g) => `- ${g.groupId}（${g.label}）：并行启动成员 [${g.memberIds.join(', ')}]`)
           .join('\n')
 
   const head = [
     HEAD_MARKER,
     '',
-    `You are the workflow orchestration parent agent for workflow "${facts.workflowName}".`,
+    `你是工作流「${facts.workflowName}」的编排父代理。`,
     '',
-    `1. ${ORCH_HARD_CONSTRAINTS.dispatchOnly}.`,
-    `2. Calling protocol: ${ORCH_HARD_CONSTRAINTS.runNodeAsync}.`,
-      `   ${ORCH_HARD_CONSTRAINTS.runNodeBlocking}.`,
-    `3. Finish protocol: ${ORCH_HARD_CONSTRAINTS.finishIdempotent}.`,
-    `4. Failure semantics: ${ORCH_HARD_CONSTRAINTS.failureSemantics}; retry within the node's limit, ask the user, or fail the run explicitly.`,
-    `5. Conditional edges: ${ORCH_HARD_CONSTRAINTS.conditionSemantics}, from the upstream node's actual output.`,
-    `6. Guardrails: global call cap 500 wf_run_node calls; idle timeout when no node is in flight.`,
-    `7. Loss of control: ${ORCH_HARD_CONSTRAINTS.failureImmediate}.`,
-    `8. In-group communication uses wf_ask_agent; ${ORCH_HARD_CONSTRAINTS.askAgentTimeout}.`,
+    `1. ${ORCH_HARD_CONSTRAINTS.dispatchOnly}。`,
+    `2. 调用协议：${ORCH_HARD_CONSTRAINTS.runNodeAsync}；${ORCH_HARD_CONSTRAINTS.runNodeBlocking}。`,
+    `3. 收尾协议：${ORCH_HARD_CONSTRAINTS.finishIdempotent}。`,
+    `4. 失败语义：${ORCH_HARD_CONSTRAINTS.failureSemantics}；在节点限额内重试、询问用户，或显式终止本次运行。`,
+    `5. 条件连线：${ORCH_HARD_CONSTRAINTS.conditionSemantics}。`,
+    `6. 护栏：wf_run_node 全局调用上限 500 次；无节点在途时触发空闲超时。`,
+    `7. 失控处理：${ORCH_HARD_CONSTRAINTS.failureImmediate}。`,
+    `8. 组内通信：${ORCH_HARD_CONSTRAINTS.askAgentTimeout}。`,
   ].join('\n')
 
   // —— 中段：过程性信息（节点清单 / 事实源路径 / 协作组并行说明）——
   const mid = [
     MID_MARKER,
     '',
-    `Workflow source of truth (read-only file): ${facts.definitionPath} — read it first for the full node list and line semantics.`,
-    `Workflow goal: ${facts.workflowGoal.trim() || '(no description)'}`,
+    `工作流事实源（只读文件）：${facts.definitionPath} —— 请先读取它，以获取完整节点列表与连线语义。`,
+    `工作流目标：${facts.workflowGoal.trim() || '（无描述）'}`,
     '',
-    'Nodes to orchestrate:',
+    '待编排节点：',
     nodeList,
     '',
-    'Collaboration groups (parallel members):',
+    '协作组（并行成员）：',
     collabText,
   ].join('\n')
 
@@ -167,9 +166,9 @@ export function buildOrchestrationDirective(params: OrchestrationDirectiveParams
     TAIL_MARKER,
     '',
     TAIL_RESTATE_MARKER,
-    `- ${ORCH_HARD_CONSTRAINTS.dispatchOnly}.`,
-    `- ${ORCH_HARD_CONSTRAINTS.finishIdempotent}.`,
-    `- ${ORCH_HARD_CONSTRAINTS.failureSemantics}; ${ORCH_HARD_CONSTRAINTS.failureImmediate} if loss of control.`,
+    `- ${ORCH_HARD_CONSTRAINTS.dispatchOnly}。`,
+    `- ${ORCH_HARD_CONSTRAINTS.finishIdempotent}。`,
+    `- ${ORCH_HARD_CONSTRAINTS.failureSemantics}；${ORCH_HARD_CONSTRAINTS.failureImmediate}（失控时）。`,
     '',
     renderDynamicState(dynamic),
   ].join('\n')
@@ -181,29 +180,29 @@ export function buildOrchestrationDirective(params: OrchestrationDirectiveParams
  * 渲染末段动态状态（内部纯函数）：仅依赖 dynamic 字段，输出不稳定内容。
  */
 function renderDynamicState(dynamic: OrchestrationDirectiveParams['dynamic']): string {
-  const lines: string[] = ['Current run state:']
+  const lines: string[] = ['当前运行状态：']
   const pauseIds = dynamic.pauseNodeIds && dynamic.pauseNodeIds.length > 0 ? dynamic.pauseNodeIds : null
 
   if (dynamic.isResume) {
-    lines.push(`- Resuming a prior run (resumedFromRunId: ${dynamic.resumedFromRunId ?? '(unknown)'}).`)
+    lines.push(`- 正在恢复先前运行（resumedFromRunId：${dynamic.resumedFromRunId ?? '（未知）'}）。`)
     lines.push(
-      `- Already-ok nodes must NOT be re-run; start from node ${dynamic.resumeFromNodeId ?? '(unspecified)'} using the checkpoint outputs for ctx injection.`,
+      `- 已 ok 的节点不得重跑；从节点 ${dynamic.resumeFromNodeId ?? '（未指定）'} 开始，使用检查点产出注入 ctx。`,
     )
   } else {
-    lines.push('- Fresh run; no checkpoint to resume from.')
+    lines.push('- 全新运行；无可恢复的检查点。')
   }
 
   if (pauseIds) {
     lines.push(
-      `- Pause nodes: [${pauseIds.join(', ')}]. Calling wf_run_node with one of these nodeIds pauses the run and persists a checkpoint; continue later by resuming from its flow-out.`,
+      `- 暂停节点：[${pauseIds.join(', ')}]。以其中任一 nodeId 调用 wf_run_node 会暂停运行并持久化检查点；之后从其 flow-out 恢复继续。`,
     )
   } else {
-    lines.push('- No pause nodes in this workflow.')
+    lines.push('- 本工作流无暂停节点。')
   }
 
-  lines.push(`- Run parameters: ${(dynamic.runParamsText ?? '').trim() || '(none)'}`)
+  lines.push(`- 运行参数：${(dynamic.runParamsText ?? '').trim() || '（无）'}`)
   if (dynamic.question) {
-    lines.push(`- User question (service mode): ${dynamic.question}`)
+    lines.push(`- 用户问题（服务模式）：${dynamic.question}`)
   }
   return lines.join('\n')
 }

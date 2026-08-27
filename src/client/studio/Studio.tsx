@@ -36,7 +36,7 @@ import { RunHistory } from '../components/run-history/RunHistory.js'
 import { ServiceConsole } from '../components/service-console/ServiceConsole.js'
 import { ComboManager } from '../components/combo-manager/ComboManager.js'
 import {
-  connectionProblem, connectionProblemMessage, consolidateGroups, dropNodeFlowLines, flowToCanvasLines, templateToNodeData,
+  connectionProblem, connectionProblemMessage, consolidateGroups, dropNodeFlowLines, flowToCanvasLines, layoutNodes, templateToNodeData,
   joinNodeToGroup, runStatusMap, stageTemplateKinds, type CanvasLine,
 } from '../lib/graph-model.js'
 import { readFileAsText, readFileAsBase64, download } from '../lib/files.js'
@@ -103,10 +103,13 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
         notify('info', t.currentSessionUnavailable)
       }
       try {
-        await templates.loadTemplates()
+        // Bug 5：loadTemplates 直接返回三类结果（已含 role），消除重复发起的
+        // EP_LIST_TEMPLATES 叠加请求——原先查询与创建之间无同步，创建成功但
+        // 列表未刷新（部分更新）时内置父代理模板缺失。
+        const loaded = await templates.loadTemplates()
         // 内置父代理模板：模板库首次启动时补齐（角色 Tab 置顶固定显示，§4.2.3.1）
-        const roleItems = await remote.call(EP.EP_LIST_TEMPLATES, { kind: 'role' }) as Array<Record<string, unknown>>
-        if (!(roleItems ?? []).some((item) => item.kind === 'parent')) {
+        const roleItems = loaded.role ?? []
+        if (!roleItems.some((item) => (item as { kind?: string }).kind === 'parent')) {
           await templates.saveTemplate('role', {
             id: 'role-parent-builtin',
             kind: 'parent',
@@ -120,7 +123,8 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
             inputSchema: '',
             outputSchema: '',
           } as never)
-          await templates.loadTemplates()
+          if (cancelled) return // 卸载后不再刷新（避免卸载后 dispatch）
+          await templates.loadTemplates() // 刷新列表（含新建内置模板）
         }
       } catch (error) {
         if (!cancelled) toastError(error)
@@ -177,7 +181,8 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
       try {
         const saved = await workflows.saveWorkflow(flow, state.canvas.nodes, state.canvas.edges)
         if (saved) {
-          dispatch({ type: 'SET_DIRTY', dirty: false })
+          // MARK_SAVED：同时记录「已保存图快照」，供撤销/重做精确判定 dirty（Bug 17）
+          dispatch({ type: 'MARK_SAVED' })
           notify('success', t.toastSaved)
         }
         return saved
@@ -192,7 +197,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
       try {
         const saved = await serviceControl.saveService(service, state.canvas.nodes, state.canvas.edges)
         if (saved) {
-          dispatch({ type: 'SET_DIRTY', dirty: false })
+          dispatch({ type: 'MARK_SAVED' })
           notify('success', t.toastSaved)
         }
         return saved
@@ -296,7 +301,9 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
 
   const tidyGraph = useCallback(() => {
     history.remember()
-    const next = flowLayout(state.canvas.nodes, state.canvas.edges)
+    // 布局统一走 lib/graph-model 的 layoutNodes（Bug 25：删除了 Studio.tsx 内
+    // 重复实现的 flowLayout，避免两份布局算法漂移）。
+    const next = layoutNodes(state.canvas.nodes, flowToCanvasLines(state.canvas.edges))
     dispatch({ type: 'GRAPH_REPLACED', nodes: next, edges: state.canvas.edges, dirty: true })
     notify('success', t.toastTidy)
   }, [dispatch, history, notify, state.canvas.edges, state.canvas.nodes, t.toastTidy])
@@ -351,16 +358,24 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
     // 组内成员离开协作组：清除成员关系（§4.2.5.2）
     const node = state.canvas.nodes.find((item) => item.id === id)
     const groupId = node?.kind === 'parent' || node?.kind === 'agent' ? (node.data.groupId as string | null | undefined) : null
+    // 级联删除集合：主节点 + 其全部虚拟引用节点（需求 §4.2.3.2 规则 5 / Bug 4）
+    const removed = new Set<string>([id])
+    if (node && (node.kind === 'parent' || node.kind === 'agent')) {
+      for (const item of state.canvas.nodes) {
+        if (item.kind === 'proxy' && (item as { proxySourceId?: unknown }).proxySourceId === id) removed.add(item.id)
+      }
+    }
     if (groupId) {
       dispatch({
         type: 'GRAPH_REPLACED',
-        nodes: state.canvas.nodes.filter((item) => item.id !== id).map((item) => item.kind === 'group' && ((item.data.memberIds as string[] | undefined) ?? []).includes(id)
+        nodes: state.canvas.nodes.filter((item) => !removed.has(item.id)).map((item) => item.kind === 'group' && ((item.data.memberIds as string[] | undefined) ?? []).includes(id)
           ? { ...item, data: { ...item.data, memberIds: (item.data.memberIds as string[]).filter((memberId) => memberId !== id) } }
           : item),
-        edges: state.canvas.edges.filter((edge) => edge.source !== id && edge.target !== id),
+        edges: state.canvas.edges.filter((edge) => !removed.has(edge.source) && !removed.has(edge.target)),
         dirty: true,
       })
     } else {
+      // NODE_REMOVED reducer 已实现同级联删除（虚拟引用随主节点一并移除）
       dispatch({ type: 'NODE_REMOVED', id })
     }
     dispatch({ type: 'CLEAR_SELECTION' })
@@ -819,7 +834,8 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
     const flow = currentFlowOf(state)
     if (!flow) return
     try {
-      const items = await remote.call(EP.EP_RUN_HISTORY, { flowId: flow.id }) as unknown[]
+      // 会话隔离：历史查询必须携带当前会话（Bug 14）
+      const items = await remote.call(EP.EP_RUN_HISTORY, { sessionId: state.sessionId, flowId: flow.id }) as unknown[]
       dispatch({ type: 'RUN_HISTORY_LOADED', items: Array.isArray(items) ? items as [] : [] })
     } catch (error) {
       toastError(error)
@@ -1114,12 +1130,9 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
   const parentTemplate = useMemo(() => (state.templates.role as import('../../host/shared/types.js').RoleTemplate[]).find((item) => item.kind === 'parent') ?? null, [state.templates.role])
   const roleTemplates = useMemo(() => (state.templates.role as import('../../host/shared/types.js').RoleTemplate[]).filter((item) => item.kind !== 'parent'), [state.templates.role])
   const edgeList = useMemo(() => flowToCanvasLines(state.canvas.edges), [state.canvas.edges])
-  const highlightedNodeIds = useMemo(() => {
-    const lib = state.selection.lib
-    if (!lib || lib.kind !== 'role' && lib.kind !== 'file' && lib.kind !== 'database') return []
-    const kindMap: Record<string, string> = { role: 'agent', file: 'file', database: 'database' }
-    return []
-  }, [state.selection.lib])
+  // Bug 18：highlightedNodeIds 原实现是无条件返回 [] 的死代码（kindMap 计算后
+  // 被丢弃），却保留了完整依赖与 useMemo 开销——直接常量化为空数组。
+  const highlightedNodeIds: string[] = []
 
   const toolbarRunning = state.mode === 'mode2' ? currentService?.status === 'running' : running
 
@@ -1357,43 +1370,8 @@ function sanitizeRolePatch(patch: Record<string, unknown>, node: CanvasNode): Re
   return clean
 }
 
-function flowLayout(nodes: CanvasNode[], edges: CanvasEdge[]): CanvasNode[] {
-  // 简化布局（旧项目 layoutNodes 算法在 lib/graph-model.ts；此处用带位置缺省的直方布局）
-  const byId = new Map(nodes.map((node) => [node.id, node]))
-  const indegree = new Map(nodes.map((node) => [node.id, 0]))
-  const outgoing = new Map(nodes.map((node) => [node.id, [] as string[]]))
-  for (const edge of edges) {
-    if (edge.sourceHandle !== 'flow-out') continue
-    if (!byId.has(edge.source) || !byId.has(edge.target)) continue
-    indegree.set(edge.target, (indegree.get(edge.target) ?? 0) + 1)
-    outgoing.get(edge.source)?.push(edge.target)
-  }
-  const queue = nodes.filter((node) => (indegree.get(node.id) ?? 0) === 0).map((node) => node.id)
-  const level = new Map(queue.map((id) => [id, 0]))
-  const order: string[] = []
-  while (queue.length) {
-    const id = queue.shift() as string
-    order.push(id)
-    for (const next of outgoing.get(id) ?? []) {
-      level.set(next, Math.max(level.get(next) ?? 0, (level.get(id) ?? 0) + 1))
-      indegree.set(next, (indegree.get(next) ?? 0) - 1)
-      if ((indegree.get(next) ?? 0) === 0) queue.push(next)
-    }
-  }
-  nodes.forEach((node) => {
-    if (!level.has(node.id)) {
-      const maxLevel = order.length > 0 ? Math.max(...level.values()) : -1
-      level.set(node.id, maxLevel + 1)
-    }
-  })
-  const rows = new Map<number, number>()
-  return nodes.map((node) => {
-    const column = level.get(node.id) ?? 0
-    const row = rows.get(column) ?? 0
-    rows.set(column, row + 1)
-    return { ...node, position: { x: 70 + column * 270, y: 80 + row * 180 } }
-  })
-}
+// Bug 25：原 flowLayout 与 lib/graph-model.ts 的 layoutNodes 完全重复（同一套
+// 拓扑分层 + 直方排布算法），已删除，统一走 layoutNodes（tidyGraph 调用处）。
 
 function copyDbSuccess(t: Dict): string {
   return t.dbTestSuccess

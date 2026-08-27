@@ -157,6 +157,26 @@ describe('T-011 崩溃恢复：残留临时文件与锁文件', () => {
     expect(await readJson(file, null)).toEqual({ ok: 1 })
   })
 
+  it('Bug 13：持有进程存活的 .tmp 临时文件不被清理（并发写不误删）', async () => {
+    const dir = makeTmpDir()
+    // 本测试进程即「活着」的写者：文件名带当前 pid，正等待 rename 的文件必须保留
+    const alive = join(dir, `.tmp-${process.pid}-abcdef`)
+    // 已死 pid 的崩溃残留 + 解析不出 pid 的畸形文件：应清理
+    const dead = join(dir, '.tmp-99999999-deadbeef')
+    const odd = join(dir, '.tmp-weird-suffix')
+    await writeFile(alive, 'in-flight', 'utf8')
+    await writeFile(dead, 'partial', 'utf8')
+    await writeFile(odd, 'partial', 'utf8')
+
+    const cleaned = await cleanupStaleTemp(dir)
+    expect(cleaned).not.toContain(alive)
+    expect(cleaned).toContain(dead)
+    expect(cleaned).toContain(odd)
+    // 活跃临时文件原样保留（并发写者的数据不被破坏）
+    await expect(readFile(alive, 'utf8')).resolves.toBe('in-flight')
+    await expect(readFile(dead, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
   it('残留锁文件（持有 pid 已死）被 cleanupStaleTemp 回收，之后可正常获取锁', async () => {
     const dir = makeTmpDir()
     const file = join(dir, 'state.json')

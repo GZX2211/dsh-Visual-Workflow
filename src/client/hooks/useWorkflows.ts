@@ -29,6 +29,11 @@ export function serializeWorkflow(flow: WorkflowDocument, nodes: CanvasNode[], e
       kind: node.kind,
       position: node.position,
       data: node.data,
+      // 虚拟节点顶层 proxySourceId 保留（Bug 2）：与画布投影对称，
+      // 保存后后端 validateFlow 不再报 proxySourceMissing。
+      ...((node as { proxySourceId?: unknown }).proxySourceId !== undefined
+        ? { proxySourceId: (node as { proxySourceId?: string }).proxySourceId }
+        : {}),
     })) as WorkflowDocument['nodes'],
     lines: edges.map((edge) => ({
       id: edge.id,

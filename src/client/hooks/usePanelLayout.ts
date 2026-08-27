@@ -99,6 +99,8 @@ export function usePanelLayout(
     const onUp = (): void => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+      window.removeEventListener('blur', onUp)
       splitter?.classList?.remove('is-dragging')
       document.body.style.cursor = oldCursor
       document.body.style.userSelect = oldSelect
@@ -126,6 +128,11 @@ export function usePanelLayout(
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
+    // Bug 7：鼠标移出浏览器窗口后松开时 pointerup 可能不触发（取决于 OS），
+    // 必须用 pointercancel + 窗口失焦兜底清理，否则 body cursor 永久停留在
+    // col-resize、监听器残留，用户必须刷新页面才能恢复。
+    window.addEventListener('pointercancel', onUp)
+    window.addEventListener('blur', onUp)
   }, [dispatch, state.panels])
 
   return { beginResize }

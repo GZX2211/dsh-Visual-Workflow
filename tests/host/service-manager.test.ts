@@ -198,6 +198,62 @@ describe('ServiceManager.start', () => {
     expect(h.spawns.length).toBe(0)
   })
 
+  it('Bug 11：并发 start 同一服务仅 spawn 一次（竞态护栏）', async () => {
+    const store = await makeStore()
+    await store.saveService(makeService('svc-1', validFlow('svc-1')), 'session-1')
+    const spawns: SpawnRecord[] = []
+    const children: FakeChild[] = []
+    let portCalls = 0
+    let release!: () => void
+    const gate = new Promise<void>((rs) => { release = rs })
+    // findPort 处设置门闩：两个并发 start 都通过首次 has 检查后停在等待点
+    const manager = new ServiceManager({
+      store,
+      dataDir: store.root,
+      config: { servicePortBase: 17860, apiKey: null, maxConcurrentPerService: 50 },
+      dshCommand: 'C:\\dsh\\dsh.cmd',
+      findPort: async () => { portCalls += 1; await gate; return 17860 },
+      spawn: ((command: string, args: string[], spawnOptions: { cwd: string; shell: boolean; stdio: readonly ('ignore' | 'pipe')[] }) => {
+        spawns.push({ command, args, options: spawnOptions })
+        const child = new FakeChild()
+        children.push(child)
+        return child as never
+      }) as never,
+    })
+    const p1 = manager.start('svc-1')
+    // 立即挂上 p2 的拒绝断言，避免 release 前其 rejected 变成 unhandled rejection
+    const p2 = manager.start('svc-1')
+    const p2Assertion = expect(p2).rejects.toMatchObject({ code: SERVICE_ERR.RUNNING })
+    // 互斥登记在 start 开头同步完成：第二个并发调用在 findPort（首个异步点）前即被拦截
+    await new Promise((rs) => setTimeout(rs, 20))
+    expect(portCalls).toBe(1)
+    release()
+    // 修复前：两个都 spawn → 双进程/双端口（孤儿 + 泄漏）；修复后：仅首个成功
+    await expect(p1).resolves.toMatchObject({ serviceId: 'svc-1', status: 'running', port: 17860 })
+    await p2Assertion
+    expect(spawns).toHaveLength(1)
+    expect(children).toHaveLength(1)
+  })
+
+  it('Bug 12：persistRuntime 失败 → 回滚已启动进程并抛 START_FAILED', async () => {
+    const store = await makeStore()
+    await store.saveService(makeService('svc-1', validFlow('svc-1')), 'session-1')
+    const h = makeManager(store, store.root)
+    // 破坏 saveService：persistRuntime 的写入首次调用抛错（模拟磁盘故障）
+    const original = store.saveService.bind(store)
+    const saveSpy = vi.fn(original)
+    ;(store as unknown as { saveService: unknown }).saveService = saveSpy.mockRejectedValueOnce(new Error('disk full')) as never
+
+    await expect(h.manager.start('svc-1')).rejects.toMatchObject({ code: SERVICE_ERR.START_FAILED })
+    // 回滚：子进程被杀 + 内存登记注销（文档状态保持 stopped，无幽灵运行）
+    expect(h.children[0]?.killed).toContain('SIGTERM')
+    const saved = await store.getServiceById('svc-1')
+    expect(saved?.status).toBe('stopped')
+    // 登记已清理：再次启动不应报 RUNNING，且这次持久化成功
+    await expect(h.manager.start('svc-1')).resolves.toMatchObject({ status: 'running' })
+    expect(h.spawns).toHaveLength(2)
+  })
+
   it('apiKey 配置时文档写入 apiKeyHash', async () => {
     const store = await makeStore()
     await store.saveService(makeService('svc-1', validFlow('svc-1')), 'session-1')

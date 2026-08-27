@@ -478,8 +478,10 @@ export async function atomicReplaceFile(
  * 清理目录下残留的临时文件与陈旧锁文件（崩溃恢复入口）。
  * 目标：进程崩溃可能留下 `.tmp-<pid>-<rand>` 残留或 `.lock` 锁文件。
  * 规则（保守安全）：
- *   - `.tmp` 前缀的残留：直接删除（临时文件无后续用途；若某进程仍活着且正在用，
- *     其文件名随机，当前目录并发清理到它属于极小概率，且清理是幂等的）。
+ *   - `.tmp` 前缀的残留：仅删除「持有进程已死」的临时文件（文件名携带创建进程
+ *     pid：`.tmp-<pid>-<rand>`）。pid 存活 → 该进程正在使用（已创建尚未 rename），
+ *     跳过不删，避免并发写不同文件时互相误删活跃临时文件导致 rename 失败/数据丢失；
+ *     pid 已死 → 崩溃残留，删除；解析不出 pid（畸形文件）→ 保守删除（与旧行为一致）。
  *   - 锁文件：仅回收「持有 pid 已死」的陈旧锁（复用 tryReapStaleLock 的安全逻辑）；
  *     活泼锁（pid 存活）绝不删除，避免干扰其他进程正在进行的临界区。
  * 每次写路径（atomicWriteJson → 本函数）都调用，保证「下次写自动回收」；也可显式调用。
@@ -488,6 +490,12 @@ export async function atomicReplaceFile(
  * @param opts 陈旧锁阈值与时钟注入。
  * @returns 被清理的文件路径数组。
  */
+/** 解析临时文件名携带的创建进程 pid（格式 `.tmp-<pid>-<rand>`；非该格式返回 undefined）。 */
+function tempFileOwnerPid(entry: string): number | undefined {
+  const match = /^\.tmp-(\d+)-/.exec(entry)
+  return match ? Number(match[1]) : undefined
+}
+
 export async function cleanupStaleTemp(dir: string, opts?: DiskLockOptions): Promise<string[]> {
   const target = resolve(dir)
   const staleAfterMs = opts?.staleAfterMs ?? DEFAULT_STALE_LOCK_MS
@@ -501,6 +509,9 @@ export async function cleanupStaleTemp(dir: string, opts?: DiskLockOptions): Pro
     const full = join(target, entry)
     // 模式 1：残留临时文件——历史上所有版本都以 `.tmp` 开头（TEMP_PREFIX 前缀即唯一标识）。
     if (entry.startsWith(TEMP_PREFIX)) {
+      const pid = tempFileOwnerPid(entry)
+      // 持有者进程存活：是正在进行的原子写（已创建、尚未 rename），不能误删。
+      if (pid !== undefined && isProcessAlive(pid)) continue
       await rm(full, { force: true })
       cleaned.push(full)
       continue

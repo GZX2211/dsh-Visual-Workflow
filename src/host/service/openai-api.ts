@@ -40,6 +40,12 @@ export const OPENAI_POLL_MS = 200
 /** SSE 文本块最大长度（打字机分块粒度；超长文本分多块）。 */
 export const SSE_CHUNK_LIMIT = 120
 
+/** SSE 流式响应超时默认值（需求文档 §5：默认 5 分钟，可配置）。 */
+export const DEFAULT_SSE_TIMEOUT_MS = 5 * 60 * 1000
+
+/** 客户端断开时的内部错误码（streamResponse 用于静默收尾）。 */
+export const CLIENT_CLOSED_CODE = 'client_closed'
+
 export interface OpenAiApiDeps {
   /** 数据层（userId 映射/断点查找）。 */
   store: FlowStore
@@ -59,8 +65,18 @@ export interface OpenAiApiDeps {
   sweep(): Promise<void>
   /** 轮询间隔（测试可控）。 */
   pollMs?: number
+  /** SSE 流式响应超时（毫秒；需求文档 §5 默认 5 分钟，缺省取默认值）。 */
+  sseTimeoutMs?: number
   /** 日志缝。 */
   logger?: { warn?(message: string): void }
+}
+
+/** runChat 扩展选项（客户端断开信号 + 超时控制，Bug 22/23）。 */
+export interface RunChatOptions {
+  /** 客户端断开信号：aborted 时停止后台运行并抛 client_closed 错误。 */
+  signal?: AbortSignal
+  /** 等待超时（毫秒）；缺省取 deps.sseTimeoutMs ?? DEFAULT_SSE_TIMEOUT_MS。 */
+  timeoutMs?: number
 }
 
 /** 解析后的聊天请求。 */
@@ -168,6 +184,7 @@ export class OpenAiApi {
   async runChat(
     input: ParsedChatRequest,
     onDelta?: (delta: string) => void,
+    options: RunChatOptions = {},
   ): Promise<ChatRunResult> {
     const sessionId = await this.deps.resolveSession(input.userId)
     const { agent } = await this.deps.ensureRootAgent(sessionId)
@@ -191,7 +208,28 @@ export class OpenAiApi {
     let text = ''
     let turnEnded = false
     const pollMs = this.deps.pollMs ?? OPENAI_POLL_MS
+    // 等待上界（需求 §5：SSE 超时；Bug 22——之前无限轮询，超时后停止运行并抛错）
+    const timeoutMs = options.timeoutMs ?? this.deps.sseTimeoutMs ?? DEFAULT_SSE_TIMEOUT_MS
+    const deadline = Date.now() + timeoutMs
+    // 客户端提前断开：终止后台运行（Bug 23——之前轮询继续、并发槽被占满）
+    const isAborted = (): boolean => options.signal?.aborted === true
+    const abort = async (): Promise<void> => {
+      await this.deps.orchestrator.stopRun(runId).catch(() => {})
+    }
     for (;;) {
+      if (isAborted()) {
+        await abort()
+        throw new OpenAiError(499, 'client_error', CLIENT_CLOSED_CODE, '客户端已断开连接，已停止后台编排运行')
+      }
+      if (Date.now() >= deadline) {
+        await abort()
+        throw new OpenAiError(
+          504,
+          'server_error',
+          'generation_timeout',
+          `SSE 流式响应超时（${Math.round(timeoutMs / 1000)} 秒），已停止后台编排运行`,
+        )
+      }
       await this.deps.sweep()
       const events = agentLike.session?.events ?? []
       for (let index = baseSeq; index < events.length; index += 1) {
@@ -346,9 +384,12 @@ export function registerOpenAiApi(
           if (input.stream) {
             await streamResponse(api, input, req as never, res as never)
           } else {
+            // 非流式同样支持客户端断开与 5 分钟超时（Bug 22/23）
+            const controller = new AbortController()
+            ;(req as { on?(event: string, listener: () => void): unknown })?.on?.('close', () => controller.abort())
             const release = api.acquire()
             try {
-              const result = await api.runChat(input)
+              const result = await api.runChat(input, undefined, { signal: controller.signal })
               if (result.status !== 'completed') {
                 sendJson(res as never, 500, { error: { message: result.error ?? '编排运行失败', type: 'server_error' } })
                 return
@@ -359,6 +400,8 @@ export function registerOpenAiApi(
             }
           }
         } catch (error) {
+          // 客户端已断开：不写任何响应
+          if (error instanceof OpenAiError && error.code === CLIENT_CLOSED_CODE) return
           sendJson(res as never, error instanceof OpenAiError ? error.status : 500, errorJson(error instanceof OpenAiError ? error : new OpenAiError(500, 'server_error', 'internal_error', String(error instanceof Error ? error.message : error))))
         }
       },
@@ -391,7 +434,7 @@ export function registerOpenAiApi(
   }
 }
 
-/** 流式响应：SSE 头 + 逐块 flush + [DONE] 收尾。 */
+/** 流式响应：SSE 头 + 逐块 flush + [DONE] 收尾（监听客户端断开，Bug 23）。 */
 async function streamResponse(
   api: OpenAiApi,
   input: ParsedChatRequest,
@@ -407,12 +450,19 @@ async function streamResponse(
     'Cache-Control': 'no-store',
     Connection: 'keep-alive',
   })
+  // 客户端断开监听：req 'close' 触发 AbortController → runChat 停止后台运行并抛
+  // client_closed（否则恶意客户端断开后运行继续、并发槽被占满，Bug 23）。
+  const controller = new AbortController()
+  const onClose = (): void => controller.abort()
+  req.on('close', onClose)
   try {
     const result = await api.runChat(input, (delta) => {
+      if (controller.signal.aborted) return
       for (let offset = 0; offset < delta.length; offset += SSE_CHUNK_LIMIT) {
         res.write(chunk(id, model, delta.slice(offset, offset + SSE_CHUNK_LIMIT), null))
       }
-    })
+    }, { signal: controller.signal })
+    if (controller.signal.aborted) return // 客户端已断开：不再写任何 SSE
     if (result.status === 'completed') {
       res.write(chunk(id, model, '', 'stop'))
     } else {
@@ -420,8 +470,14 @@ async function streamResponse(
     }
     res.write(sseDone())
   } catch (error) {
-    res.write(sseError(error instanceof Error ? error.message : String(error)))
-    res.write(sseDone())
+    // 客户端断开场景静默收尾（连接已不存在，写响应无意义且可能抛错）
+    if (error instanceof OpenAiError && error.code === CLIENT_CLOSED_CODE) return
+    try {
+      res.write(sseError(error instanceof Error ? error.message : String(error)))
+      res.write(sseDone())
+    } catch {
+      // 响应通道已失效：忽略（断开竞态）
+    }
   } finally {
     release()
   }

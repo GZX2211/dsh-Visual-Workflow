@@ -30,27 +30,27 @@ export interface CollabBlockParams {
  * 再追加用户自定义协作说明（若有）。始终包含成员清单，与 custom 是否为空无关。
  *
  * @param params - 成员清单 + 自定义协作说明。
- * @returns 追加到成员用户消息的协作块（面向模型，英文；含成员 ID + 角色名清单）。
+ * @returns 追加到成员用户消息的协作块（面向模型，中文；含成员 ID + 角色名清单）。
  */
 export function buildCollabBlock(params: CollabBlockParams): string {
   const lines: string[] = [
-    'You are a member of a collaboration group. The members in this group are:',
+    '你是协作组的成员。本组成员为：',
   ]
   const members = Array.isArray(params?.members) ? params.members : []
   if (members.length === 0) {
-    lines.push('- (no other members)')
+    lines.push('- （无其他成员）')
   } else {
     for (const member of members) {
       const id = String(member?.id ?? '')
       const label = String(member?.label ?? '').trim()
-      lines.push(`- ${label || id} (id: ${id})`)
+      lines.push(`- ${label || id}（id：${id}）`)
     }
   }
-  lines.push('You may send a wf_ask_agent message to any member above; a timeout is arbitrated by the parent agent.')
+  lines.push('你可以向以上任一成员发送 wf_ask_agent 消息；超时由父代理仲裁。')
 
   const custom = String(params?.custom ?? '').trim()
   if (custom) {
-    lines.push('', 'Group instructions:', custom)
+    lines.push('', '组内说明：', custom)
   }
   return lines.join('\n')
 }

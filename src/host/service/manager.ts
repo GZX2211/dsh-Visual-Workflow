@@ -103,6 +103,8 @@ interface ManagedChild {
  */
 export class ServiceManager {
   private readonly children = new Map<string, ManagedChild>()
+  /** in-flight 启动集合（Bug 11 并发启动互斥：start 开头同步登记，finally 注销）。 */
+  private readonly starting = new Set<string>()
 
   constructor(private readonly deps: ServiceManagerDeps) {}
 
@@ -114,12 +116,29 @@ export class ServiceManager {
     return new Date(this.deps.now?.() ?? Date.now()).toISOString()
   }
 
-  /** 启动服务（幂等护栏：已运行 → 冲突错误）。 */
+  /** 启动服务（幂等护栏：已运行/正在启动 → 冲突错误）。 */
   async start(serviceId: string): Promise<{ serviceId: string; status: string; port: number; pid?: number }> {
     const id = sanitizeServiceId(serviceId)
     if (this.children.has(id)) {
       throw new ServiceManagerError(SERVICE_ERR.RUNNING, `服务 ${id} 正在运行中`)
     }
+    // 并发启动互斥（Bug 11）：children.has 与 children.set 之间跨越多个 await
+    // （读服务/读流程/校验/找端口/写 patch）。启动开头同步登记 in-flight，
+    // 使并发 start 在第一个异步点之前即被拦截——不再双写 patch 文件（Windows
+    // rename EPERM）、不再双 spawn 子进程、不再双分配端口；finally 中注销。
+    if (this.starting.has(id)) {
+      throw new ServiceManagerError(SERVICE_ERR.RUNNING, `服务 ${id} 正在启动中`)
+    }
+    this.starting.add(id)
+    try {
+      return await this.startInner(id)
+    } finally {
+      this.starting.delete(id)
+    }
+  }
+
+  /** start 实际执行体（starting 互斥集合保护下运行）。 */
+  private async startInner(id: string): Promise<{ serviceId: string; status: string; port: number; pid?: number }> {
     const service = await this.deps.store.getServiceById(id)
     if (!service) {
       throw new ServiceManagerError(SERVICE_ERR.NOT_FOUND, `服务不存在：${id}`)
@@ -151,6 +170,13 @@ export class ServiceManager {
       }), 'utf8'),
     )
 
+    // 并发启动护栏：上方首次 has 检查与 children.set 之间跨越多个 await
+    // （读服务/读流程/校验/找端口/写 patch），两个并发 start 会同时通过检查
+    // 并各自 spawn 子进程（孤儿进程 + 端口泄漏）。此处二次检查与 children.set
+    // 之间无 await（同一同步块），先登记的一方成功后另一方在此被拦截。
+    if (this.children.has(id)) {
+      throw new ServiceManagerError(SERVICE_ERR.RUNNING, `服务 ${id} 正在运行中`)
+    }
     const dshCommand = this.deps.dshCommand ?? resolveDshCommand()
     const child = this.spawnChild(dshCommand, id, port, patchPath)
     const managed: ManagedChild = { child, port, stopping: false, forceKill: null }
@@ -195,12 +221,28 @@ export class ServiceManager {
       void this.persistRuntime(id, { status: 'crashed', lastStoppedAt: this.isoNow() }).catch(() => {})
     })
 
-    await this.persistRuntime(id, {
-      status: 'running',
-      port,
-      lastStartedAt: this.isoNow(),
-      ...(this.deps.config.apiKey ? { apiKeyHash: hashApiKey(this.deps.config.apiKey) } : { apiKeyHash: undefined }),
-    })
+    try {
+      await this.persistRuntime(id, {
+        status: 'running',
+        port,
+        lastStartedAt: this.isoNow(),
+        ...(this.deps.config.apiKey ? { apiKeyHash: hashApiKey(this.deps.config.apiKey) } : { apiKeyHash: undefined }),
+      })
+    } catch (error) {
+      // 状态持久化失败 ≠ 启动成功：子进程已 fork，若不回滚会出现「用户看到
+      // 启动失败但进程存活」的半启动状态（进程占端口、文档还是 stopped）。
+      // 回滚 = 终止进程树 + 注销内存登记 + 抛明确错误。
+      this.log().warn?.(`[service:${id}] 状态持久化失败（${error instanceof Error ? error.message : String(error)}），回滚已启动的进程`)
+      managed.stopping = true
+      try {
+        child.kill('SIGTERM')
+      } catch {
+        // 尽力而为（子进程可能已退出）
+      }
+      killProcessTree(Number(child.pid ?? 0))
+      this.forget(id)
+      throw new ServiceManagerError(SERVICE_ERR.START_FAILED, `服务状态持久化失败：${error instanceof Error ? error.message : String(error)}`)
+    }
     // 终端启动反馈（dsh web 控制台）：服务已启动 + 端口 + REST API 访问方式。
     // 用户要求：此信息必须出现在 dsh web 启动终端（不是 DSH 主界面/工作台）。
     // 关键事实：dsh web 的 cordis logger 不会输出到进程 stdout（实测只有

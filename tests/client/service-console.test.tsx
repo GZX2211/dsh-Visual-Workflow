@@ -101,9 +101,10 @@ describe('服务控制台', () => {
   })
 
   it('调试发送：SSE 增量追加到输出（打字机），结束后按钮恢复', async () => {
+    // Bug 3：SSE 数据必须用后端 sseChunk 的真实形态（choices[0].delta.content）
     const fetchMock = vi.fn(async () => sseResponse([
-      'data: {"delta":{"content":"你"}}\n\n',
-      'data: {"delta":{"content":"好"}}\n\n',
+      'data: {"choices":[{"index":0,"delta":{"content":"你"},"finish_reason":null}]}\n\n',
+      'data: {"choices":[{"index":0,"delta":{"content":"好"},"finish_reason":null}]}\n\n',
       'data: [DONE]\n\n',
     ]))
     vi.stubGlobal('fetch', fetchMock)

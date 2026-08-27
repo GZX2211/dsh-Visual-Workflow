@@ -5,8 +5,8 @@
 // 导入冲突按「名称」判定：重名返回 conflict（client 选择 rename / overwrite），
 // 模板/组合重名复用已有（id 重映射），id 冲突换新 id。
 
-import type { FlowStore } from '../storage/flow-store.js'
-import type { BundleV2, GroupTemplate, RoleTemplate, ToolCombo } from '../shared/types.js'
+import type { FlowStore, Template, TemplateKind } from '../storage/flow-store.js'
+import type { BundleV2, DatabaseTemplate, FileTemplate, GroupTemplate, RoleTemplate, ToolCombo } from '../shared/types.js'
 import type { WorkflowDocument } from '../shared/graph-model.js'
 
 function safeClone<T>(value: T): T {
@@ -30,6 +30,41 @@ function groupsOf(flow: WorkflowDocument): GroupTemplate[] {
     }))
 }
 
+/**
+ * 嵌入模板入库（Bug 16）：角色/文件/数据库模板随 bundle 携带，导入时
+ * 按「名称」判定冲突——重名复用已有（不覆盖），id 冲突换新 id 后创建。
+ * 与工具组合（combos）的导入语义一致（架构文档 §6.4 embedded 逐字段）。
+ */
+async function importEmbeddedTemplates(
+  store: FlowStore,
+  embedded: BundleV2['embedded'] | undefined,
+): Promise<number> {
+  let imported = 0
+  const groups: Array<{ kind: TemplateKind; entries: RoleTemplate[] | FileTemplate[] | DatabaseTemplate[] }> = [
+    { kind: 'role', entries: embedded?.roles ?? [] },
+    { kind: 'file', entries: embedded?.files ?? [] },
+    { kind: 'database', entries: embedded?.databases ?? [] },
+  ]
+  for (const group of groups) {
+    const existing = await store.listTemplates(group.kind).catch(() => [] as Template[])
+    for (const entry of group.entries) {
+      const t = entry as Template
+      if (!t?.id || !String(t.name ?? '').trim()) continue
+      if (existing.some((item) => item.name === t.name)) continue // 重名复用已有
+      const idTaken = existing.some((item) => item.id === t.id)
+      if (idTaken) {
+        // id 冲突：换新 id（前缀保持 kind 约定）
+        const prefix = group.kind === 'role' ? 'role-' : 'data-'
+        ;(t as { id: string }).id = prefix + Math.random().toString(36).slice(2, 8)
+      }
+      await store.saveTemplate(group.kind, t)
+      imported += 1
+      existing.push(t)
+    }
+  }
+  return imported
+}
+
 /** 导出工作流/服务为自包含 bundle（格式化 JSON 字符串；模式二走 service 字段）。 */
 export async function exportWorkflowBundle(store: FlowStore, sessionId: string, flowId: string): Promise<string> {
   const flow = await store.getWorkflow(sessionId, flowId)
@@ -37,7 +72,12 @@ export async function exportWorkflowBundle(store: FlowStore, sessionId: string, 
     // 模式二：服务文档（同一入口，按 id 回退服务表）
     const service = await store.getService(sessionId, flowId)
     if (!service) throw httpError(404, `工作流/服务不存在：${flowId}`)
-    const combos = await store.listToolCombos().catch(() => [])
+    const [combos, roles, files, databases] = await Promise.all([
+      store.listToolCombos().catch(() => []),
+      store.listTemplates('role').catch(() => []),
+      store.listTemplates('file').catch(() => []),
+      store.listTemplates('database').catch(() => []),
+    ])
     const bundle: BundleV2 = {
       format: 'dsh-vw-bundle',
       version: 2,
@@ -49,13 +89,21 @@ export async function exportWorkflowBundle(store: FlowStore, sessionId: string, 
         lines: safeClone(service.lines ?? []),
       },
       embedded: {
+        roles: safeClone(roles),
+        files: safeClone(files),
+        databases: safeClone(databases),
         groups: groupsOf(service as unknown as WorkflowDocument),
         combos: safeClone(combos),
       },
     }
     return JSON.stringify(bundle, null, 2)
   }
-  const combos = await store.listToolCombos().catch(() => [])
+  const [combos, roles, files, databases] = await Promise.all([
+    store.listToolCombos().catch(() => []),
+    store.listTemplates('role').catch(() => []),
+    store.listTemplates('file').catch(() => []),
+    store.listTemplates('database').catch(() => []),
+  ])
   const bundle: BundleV2 = {
     format: 'dsh-vw-bundle',
     version: 2,
@@ -67,6 +115,9 @@ export async function exportWorkflowBundle(store: FlowStore, sessionId: string, 
       lines: safeClone(flow.lines ?? []),
     },
     embedded: {
+      roles: safeClone(roles),
+      files: safeClone(files),
+      databases: safeClone(databases),
       groups: groupsOf(flow),
       combos: safeClone(combos),
     },
@@ -130,6 +181,10 @@ export async function importWorkflowBundle(
     }
     await store.saveToolCombo(final)
   }
+
+  // 嵌入式模板入库（Bug 16）：roles/files/databases 随 bundle 携带，导入时
+  // 重建模板库（重名复用已有、id 冲突换新 id），保证导入后模板可继续拖拽复用。
+  await importEmbeddedTemplates(store, bundle.embedded)
 
   if (mode === 'mode2') {
     const now = new Date().toISOString()

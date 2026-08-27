@@ -17,6 +17,28 @@ export interface ServiceConsoleProps {
   busy: boolean
 }
 
+/**
+ * 解析后端 SSE data 行的内容增量（Bug 3）。
+ * 后端 openai-api 的 sseChunk 把正文放在 choices[0].delta.content；
+ * 为兼容旧增量格式（delta.content）做回退取值。
+ * @returns { content?, error? } 增量文本或错误消息（无匹配返回空对象）。
+ */
+export function parseSseDelta(data: string): { content?: string; error?: string } {
+  let parsed: {
+    choices?: Array<{ delta?: { content?: unknown } }>
+    delta?: { content?: unknown }
+    error?: { message?: unknown }
+  }
+  try {
+    parsed = JSON.parse(data)
+  } catch {
+    return {}
+  }
+  if (parsed.error?.message) return { error: String(parsed.error.message) }
+  const content = parsed.choices?.[0]?.delta?.content ?? parsed.delta?.content
+  return typeof content === 'string' && content ? { content } : {}
+}
+
 export function ServiceConsole({ copy, service, sessionId, busy }: ServiceConsoleProps) {
   const [prompt, setPrompt] = useState('')
   const [output, setOutput] = useState('')
@@ -63,19 +85,12 @@ export function ServiceConsole({ copy, service, sessionId, busy }: ServiceConsol
           if (!line.startsWith('data: ')) return
           const data = line.slice(6).trim()
           if (!data || data === '[DONE]') return
-          try {
-            const parsed = JSON.parse(data) as { delta?: { content?: unknown }; error?: { message?: unknown } }
-            const errorMessage = parsed.error?.message
-            if (errorMessage) {
-              setOutput((prev) => `${prev ? `${prev}\n\n` : ''}[错误] ${String(errorMessage)}`)
-              return
-            }
-            const content = parsed.delta?.content
-            if (typeof content === 'string' && content) {
-              setOutput((prev) => prev + content)
-            }
-          } catch {
-            // 非 JSON 数据行：忽略
+          // Bug 3：正文路径必须走 choices[0].delta.content（parseSseDelta 已兼容旧格式）
+          const delta = parseSseDelta(data)
+          if (delta.error) {
+            setOutput((prev) => `${prev ? `${prev}\n\n` : ''}[错误] ${delta.error}`)
+          } else if (delta.content) {
+            setOutput((prev) => prev + delta.content!)
           }
         },
         controller.signal,

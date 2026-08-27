@@ -455,8 +455,13 @@ describe('运行端点', () => {
     await h.runtime.handleSubagentEnd({ id: 'child-1', stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: 'A' }] })
     await h.runtime.wfRunNode({ isChild: false, sessionId: 'session-1' }, { nodeId: 'n-pause' })
 
-    const history = (await h.api.handle('runHistory', { flowId: 'flow-1' })) as Array<{ id?: string }>
+    // Bug 14：runHistory 必须携带 sessionId（会话隔离契约）
+    await expect(h.api.handle('runHistory', { flowId: 'flow-1' })).rejects.toMatchObject({ status: 400 })
+    const history = (await h.api.handle('runHistory', { sessionId: 'session-1', flowId: 'flow-1' })) as Array<{ id?: string }>
     expect(history.some((run) => run.id === 'run-1')).toBe(true)
+    // 跨会话不可见：其他会话查询同一 flowId 查不到 run
+    const other = (await h.api.handle('runHistory', { sessionId: 'session-other', flowId: 'flow-1' })) as Array<{ id?: string }>
+    expect(other.some((run) => run.id === 'run-1')).toBe(false)
 
     const resumed = await h.api.handle('runResume', { sessionId: 'session-1', flowId: 'flow-1', runId: 'run-1' })
     expect(resumed).toMatchObject({ runId: 'run-2', resumedFromRunId: 'run-1' })
@@ -586,6 +591,41 @@ describe('导入导出', () => {
     await expect(h.api.handle('importWorkflow', { sessionId: 'session-1', json: JSON.stringify({ format: 'x' }) })).rejects.toMatchObject({
       status: 422,
     })
+  })
+
+  it('Bug 16：导出 bundle 携带 roles/files/databases 模板；导入重建模板库', async () => {
+    const h = await makeHarness()
+    await h.store.saveWorkflow(makeFlow(), 'session-1', { force: true })
+    await h.api.handle('putTemplate', {
+      kind: 'role',
+      template: { id: 'role-1', kind: 'agent', name: '研究员', systemPrompt: 'x', provider: '', model: '', presetId: 'standard', retryLimit: 3 },
+    })
+    await h.api.handle('putTemplate', {
+      kind: 'file',
+      template: { id: 'file-1', name: '资料.pdf', fileKind: 'file', managedPath: 'data/files/x.pdf', fileName: '资料.pdf' },
+    })
+    await h.api.handle('putTemplate', {
+      kind: 'database',
+      template: { id: 'db-1', name: '本地库', description: 'd', dbType: 'local', dbKind: 'sqlite', localPath: '/tmp/x.db' },
+    })
+
+    const { json } = (await h.api.handle('exportWorkflow', { sessionId: 'session-1', id: 'flow-1' })) as { json: string }
+    const bundle = JSON.parse(json) as {
+      embedded?: { roles?: Array<{ id?: string }>; files?: Array<{ id?: string }>; databases?: Array<{ id?: string }> }
+    }
+    // 导出必须包含三类模板（架构文档 §6.4 embedded 逐字段）
+    expect(bundle.embedded?.roles?.map((t) => t.id)).toEqual(['role-1'])
+    expect(bundle.embedded?.files?.map((t) => t.id)).toEqual(['file-1'])
+    expect(bundle.embedded?.databases?.map((t) => t.id)).toEqual(['db-1'])
+
+    // 导入到另一会话：模板全局共享 → 落库可复用
+    await h.api.handle('importWorkflow', { sessionId: 'session-2', json, conflictMode: 'rename' })
+    const roles = await h.store.listTemplates('role')
+    expect(roles.some((t) => t.name === '研究员')).toBe(true)
+    const files = await h.store.listTemplates('file')
+    expect(files.some((t) => t.name === '资料.pdf')).toBe(true)
+    const dbs = await h.store.listTemplates('database')
+    expect(dbs.some((t) => t.name === '本地库')).toBe(true)
   })
 })
 

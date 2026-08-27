@@ -77,6 +77,14 @@ export function buildResumedSnapshot(input: {
   const { prev, runId, flow, sessionId, mode } = input
   const now = input.now ?? Date.now()
   const prevByNode = new Map(prev.nodes.map((node) => [node.nodeId, node]))
+  // 续跑起点（Bug 21）：暂停断点继承 prev.resumeFromNodeId（暂停节点 id）；
+  // interrupted（宿主重启中断）时 prev 无暂停点，推断为「首个未完成节点」
+  // （已 ok/react-capped 节点继承后不重跑，恢复从这里继续），避免起点不明确。
+  const resumeFromNodeId = prev.resumeFromNodeId
+    ?? flow.nodes.find((node) => {
+      const prevNode = prevByNode.get(node.id)
+      return !prevNode || (prevNode.status !== 'ok' && prevNode.status !== 'react-capped')
+    })?.id
   const nodes = (flow.nodes ?? []).map((node) => {
     const prevNode = prevByNode.get(node.id)
     if (prevNode && (prevNode.status === 'ok' || prevNode.status === 'react-capped')) {
@@ -112,7 +120,7 @@ export function buildResumedSnapshot(input: {
     endedAt: null,
     summary: '',
     resumedFromRunId: prev.id,
-    resumeFromNodeId: prev.resumeFromNodeId,
+    resumeFromNodeId,
     nodes,
   }
 }

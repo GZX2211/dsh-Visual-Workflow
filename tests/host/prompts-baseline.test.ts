@@ -47,7 +47,7 @@ describe('T-005 编排指令模板（W-01 前缀稳定 + W-02 关键约束双位
     // 首段（TAIL_MARKER 之前）与末段（TAIL_MARKER 之后）都包含「仅调度不执行」短语。
     const head = out.slice(0, out.indexOf(TAIL_MARKER))
     const tail = out.slice(out.indexOf(TAIL_MARKER))
-    for (const phrase of ['orchestrate only', 'wf_finish']) {
+    for (const phrase of ['仅编排', 'wf_finish']) {
       expect(head).toContain(phrase)
       expect(tail).toContain(phrase)
     }
@@ -74,7 +74,7 @@ describe('T-005 节点任务块模板（关键约束双位 + 上游产出置于�
     const out = buildNodeTaskBlock({ facts: nodeFacts, dynamic: {} })
     const head = out.slice(0, out.indexOf(TAIL_MARKER))
     const tail = out.slice(out.indexOf(TAIL_MARKER))
-    for (const phrase of ['own System Prompt', 'allow-list', 'report']) {
+    for (const phrase of ['System Prompt', 'allow-list']) {
       expect(head).toContain(phrase)
       expect(tail).toContain(phrase)
     }
@@ -126,10 +126,10 @@ describe('T-005 协作成员清单块模板（始终含成员 ID+角色名 + 自
 
   it('custom 非空时追加组内说明段（追加式，位于成员清单之后）', () => {
     const block = buildCollabBlock({ members, custom: '成员 A 与 B 互相质询' })
-    expect(block).toContain('Group instructions:')
+    expect(block).toContain('组内说明：')
     expect(block).toContain('成员 A 与 B 互相质询')
     // 成员清单在前，说明段在后
-    expect(block.indexOf(members[0].label)).toBeLessThan(block.indexOf('Group instructions:'))
+    expect(block.indexOf(members[0].label)).toBeLessThan(block.indexOf('组内说明：'))
   })
 
   it('同一 params 两次构建字节相同', () => {

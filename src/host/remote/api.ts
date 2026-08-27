@@ -651,10 +651,13 @@ export class VisualWorkflowApi {
     return { stopped: true }
   }
 
-  async runHistory(args: { flowId?: unknown }): Promise<unknown> {
+  async runHistory(args: { sessionId?: unknown; flowId?: unknown }): Promise<unknown> {
+    const sessionId = String(args?.sessionId ?? '')
     const flowId = String(args?.flowId ?? '')
-    if (!flowId) throw httpError(400, 'requires flowId')
-    return this.host.store.listRuns(flowId)
+    if (!sessionId || !flowId) throw httpError(400, 'requires sessionId and flowId')
+    // 会话隔离（Bug 14）：运行历史必须限定当前会话，否则可按 flowId 读到
+    // 其他会话的 run 记录（多租户隔离，架构文档 §9）。
+    return this.host.store.listRuns(flowId, sessionId)
   }
 
   /** 断点续跑（历史面板「恢复」入口；runId 缺省取该工作流最近可恢复记录）。 */

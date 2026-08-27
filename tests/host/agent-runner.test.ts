@@ -328,7 +328,7 @@ describe('NodeAgentRunner 创建/复用/派发', () => {
     expect(h.subagents.started).toHaveLength(1)
     const spec = h.subagents.started[0]
     expect(spec.provider).toBe('fork') // 首选序
-    expect(spec.label).toBe('visual-workflow:flow-1:n-a1')
+    expect(spec.label).toBe('节点n-a1')
     expect(spec.request.prompt).toEqual([{ type: 'text', text: '任务块' }]) // 首条消息=完整任务块
     expect(spec.request.persona).toBeUndefined() // 角色 Prompt 改为 system prompt 段，不再传官方 persona
     expect(spec.request.toolFilter).toEqual({ allow: ['read', 'wf_ask'] }) // 勾选∩可见（wf_ask 勾选注入）

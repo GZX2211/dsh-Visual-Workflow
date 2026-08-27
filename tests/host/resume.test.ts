@@ -238,6 +238,29 @@ describe('buildResumedSnapshot', () => {
     const snapshot = buildResumedSnapshot({ prev, runId: 'run-2', flow, sessionId: 'session-1', mode: 'mode1', now: 1 })
     expect(snapshot.nodes.find((n) => n.nodeId === 'n-a3')).toMatchObject({ status: 'pending' })
   })
+
+  it('Bug 21：interrupted（无暂停点）恢复时推断 resumeFromNodeId = 首个未完成节点', async () => {
+    // 宿主重启中断：prev 无 resumeFromNodeId（中断发生在任意节点，无暂停门）
+    const interrupted: import('../../src/host/shared/types.js').RunSnapshot = {
+      ...prev,
+      status: 'interrupted',
+      resumeFromNodeId: undefined,
+      nodes: [
+        { nodeId: 'n-start', status: 'ok', attempts: 1, startedAt: 't1', endedAt: 't2', output: '', outputSummary: '' },
+        { nodeId: 'n-a1', status: 'ok', attempts: 1, startedAt: 't1', endedAt: 't2', output: 'A 的最终产出', outputSummary: 'A 的最终产出' },
+        { nodeId: 'n-pause', status: 'running', attempts: 1, startedAt: 't1', endedAt: null, output: '', outputSummary: '' },
+        { nodeId: 'n-a2', status: 'pending', attempts: 0, startedAt: null, endedAt: null, output: '', outputSummary: '' },
+        { nodeId: 'n-end', status: 'pending', attempts: 0, startedAt: null, endedAt: null, output: '', outputSummary: '' },
+      ],
+    }
+    const snapshot = buildResumedSnapshot({ prev: interrupted, runId: 'run-2', flow: makeFlow(), sessionId: 'session-1', mode: 'mode1', now: 1 })
+    // 恢复起点 = 第一个未完成节点（n-pause 被中断时 running，回退重跑）
+    expect(snapshot.resumeFromNodeId).toBe('n-pause')
+
+    // 暂停断点仍继承显式暂停节点 id（不覆盖）
+    const paused = buildResumedSnapshot({ prev, runId: 'run-3', flow: makeFlow(), sessionId: 'session-1', mode: 'mode1', now: 1 })
+    expect(paused.resumeFromNodeId).toBe('n-pause')
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -301,9 +324,9 @@ describe('runtime.resumeRun', () => {
     const injected = h.agents.roots.get('session-1')!.messages
     expect(injected.length).toBe(2)
     const directive = injected[1].content.map((b) => b.text).join('')
-    expect(directive).toContain('Resuming a prior run (resumedFromRunId: run-1)')
-    expect(directive).toContain('Already-ok nodes must NOT be re-run')
-    expect(directive).toContain('start from node n-pause')
+    expect(directive).toContain('正在恢复先前运行（resumedFromRunId：run-1）')
+    expect(directive).toContain('已 ok 的节点不得重跑')
+    expect(directive).toContain('从节点 n-pause 开始')
 
     // 续跑后 wf_run_node 可正常调度（新 run 上下文）
     const started = await h.runtime.wfRunNode(rootCaller, { nodeId: 'n-a2' })

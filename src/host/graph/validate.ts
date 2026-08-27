@@ -254,6 +254,13 @@ export function validateFlow(flow: Partial<WorkflowDocument>): ValidateResult {
   }
 
   // —— 协作组成员一致性：成员 id 必须真实存在（§4.2.5.2）——
+  // 幽灵组员防护：角色节点声明 groupId 指向不存在的组 id 时必须报错。
+  const groupIds = new Set(nodes.filter((n) => n.kind === 'group').map((n) => n.id))
+  for (const node of nodes) {
+    if ((node.kind === 'parent' || node.kind === 'agent') && node.data.groupId && !groupIds.has(node.data.groupId)) {
+      issues.push({ code: 'groupGhost', message: `节点 ${node.id} 声明属于协作组 ${node.data.groupId}，但该组不存在`, id: node.id })
+    }
+  }
   for (const node of nodes) {
     if (node.kind !== 'group') continue
     for (const mid of node.data.memberIds ?? []) {
@@ -318,6 +325,9 @@ export function normalizeFlow(flow: Partial<WorkflowDocument>): WorkflowDocument
           content: node.data.content ?? '',
           managedPath: node.data.managedPath,
           fileName: node.data.fileName ?? '',
+          // 多选文件列表：只读契约字段（{fileName, managedPath}[]），
+          // 归一化必须原样保留，否则保存后多选数据丢失（Bug 15）。
+          ...(Array.isArray(node.data.files) && node.data.files.length > 0 ? { files: node.data.files } : {}),
         },
       }
     }

@@ -390,8 +390,12 @@ export class FlowStore {
 
   // ---- 运行历史（runs/<runId>.json 单文件；按 flowId 过滤） ------------------
 
-  /** 列出某工作流的全部 run（按 startedAt 倒序）。 */
-  async listRuns(flowId: string): Promise<RunSnapshot[]> {
+  /**
+   * 列出某工作流的全部 run（按 startedAt 倒序）。
+   * @param sessionId 可选会话过滤：传入时仅返回归属该会话的 run（历史查询端点
+   *   必须传，防跨会话运行历史泄露；resume 侧因调用前已按会话定位 flow 可不传）。
+   */
+  async listRuns(flowId: string, sessionId?: string): Promise<RunSnapshot[]> {
     const dir = join(this.root, 'runs')
     let names: string[] = []
     try {
@@ -403,7 +407,7 @@ export class FlowStore {
     for (const name of names) {
       if (!name.endsWith('.json')) continue
       const run = await readJson<RunSnapshot | null>(join(dir, name), null)
-      if (run && run.flowId === flowId) items.push(run)
+      if (run && run.flowId === flowId && (sessionId === undefined || run.sessionId === sessionId)) items.push(run)
     }
     return items.sort((a, b) => String(b.startedAt ?? '').localeCompare(String(a.startedAt ?? '')))
   }
@@ -549,6 +553,7 @@ export class FlowStore {
         data: {
           label: r.name,
           systemPrompt: r.systemPrompt,
+          systemPromptSource: r.systemPromptSource,
           provider: r.provider,
           model: r.model,
           reasoning: r.reasoning,
@@ -594,7 +599,9 @@ export class FlowStore {
         fileKind: f.fileKind,
         content: f.content ?? '',
         managedPath: f.managedPath,
-        fileName: f.managedPath ? f.managedPath.split(/[\\/]/).pop() : '',
+        // 源文件名优先取模板显式字段（.md/.txt 等源名称），
+        // 仅当模板未记录时才回退从受管路径推断 basename（Bug 26）。
+        fileName: f.fileName ?? (f.managedPath ? f.managedPath.split(/[\\/]/).pop() : ''),
         ...(files.length > 0 ? { files } : {}),
       },
     }

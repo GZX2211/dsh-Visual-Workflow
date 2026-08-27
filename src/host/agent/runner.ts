@@ -510,7 +510,7 @@ export class NodeAgentRunner implements NodeRunner {
     }
     const started = await this.deps.promptSetup.withPending(promptState, () => subagents.startContinuable({
       provider,
-      label: `visual-workflow:${input.flowId}:${node.id}`,
+      label: node.data.label || `visual-workflow:${input.flowId}:${node.id}`,
       request: {
         // 首条消息 = 完整任务块（任务 + 上下文），杜绝创建即空转；角色 Prompt 由
         // prompt-setup 注册为系统提示词独立段，不再经官方 request.persona 占用官方人设

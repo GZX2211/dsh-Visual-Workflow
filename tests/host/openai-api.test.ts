@@ -40,6 +40,7 @@ class FakeStore {
 class FakeOrchestrator {
   startCalls: Array<{ sessionId: string; flowId: string; mode: string; question: string }> = []
   resumeCalls: Array<{ sessionId: string; flowId: string }> = []
+  stopCalls: string[] = []
   status: RunStatus = 'completed'
   nextRunId = 'run-1'
   async startRun(input: { sessionId: string; flowId: string; mode: string; question?: string }) {
@@ -49,6 +50,10 @@ class FakeOrchestrator {
   async resumeRun(input: { sessionId: string; flowId: string }) {
     this.resumeCalls.push(input)
     return { runId: 'run-resumed', defPath: '/def.json' }
+  }
+  async stopRun(runId: string) {
+    this.stopCalls.push(runId)
+    this.status = 'stopped'
   }
   runSnapshot(): { status: RunStatus; summary: string } | null {
     return { status: this.status, summary: '摘要' }
@@ -247,6 +252,36 @@ describe('OpenAiApi.runChat', () => {
     const h = makeHarness()
     await h.api.runChat({ userId: 'user-1', question: 'q', stream: false })
     expect(h.sweeps.count).toBeGreaterThan(0)
+  })
+
+  it('Bug 22：runChat 等待超时（默认 5 分钟起步，可配置）→ 终止运行并抛 generation_timeout', async () => {
+    const h = makeHarness({ status: 'running' }) // run 永不终态：靠超时兜底
+    await expect(h.api.runChat(
+      { userId: 'user-1', question: 'q', stream: false },
+      undefined,
+      { timeoutMs: 1 },
+    )).rejects.toMatchObject({ status: 504, code: 'generation_timeout' })
+    // 后台编排运行被显式停止（此前无限轮询，运行与并发槽长期占用）
+    expect(h.orchestrator.stopCalls).toContain('run-1')
+  })
+
+  it('Bug 23：客户端断开（signal aborted）→ 停止后台运行并抛 client_closed', async () => {
+    const h = makeHarness({ status: 'running' })
+    const controller = new AbortController()
+    controller.abort()
+    await expect(h.api.runChat(
+      { userId: 'user-1', question: 'q', stream: true },
+      undefined,
+      { signal: controller.signal },
+    )).rejects.toMatchObject({ code: 'client_closed' })
+    expect(h.orchestrator.stopCalls).toContain('run-1')
+  })
+
+  it('缺省超时不生效于正常快路径（默认 5 分钟上界不截断已完成请求）', async () => {
+    const h = makeHarness()
+    const result = await h.api.runChat({ userId: 'user-1', question: 'q', stream: false })
+    expect(result.status).toBe('completed')
+    expect(h.orchestrator.stopCalls).toHaveLength(0)
   })
 })
 

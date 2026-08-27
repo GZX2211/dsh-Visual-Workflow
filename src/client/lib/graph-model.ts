@@ -300,13 +300,23 @@ export function graphSnapshot(nodes: CanvasNode[], lines: CanvasLine[]): { nodes
   return JSON.parse(JSON.stringify({ nodes, lines }))
 }
 
-/** 层次布局：按 flow 边拓扑排序分列排布（照搬旧项目 layoutNodes）。 */
-export function layoutNodes(nodes: CanvasNode[], lines: CanvasLine[]): CanvasNode[] {
+/** 布局输入的最小结构（仅依赖 id 与 position，兼容各类节点投影）。 */
+export interface LayoutNodeLike {
+  id: string
+  position: { x: number; y: number }
+}
+
+/** 层次布局：按 flow 边拓扑排序分列排布（照搬旧项目 layoutNodes；泛型保留节点形状）。 */
+export function layoutNodes<T extends LayoutNodeLike>(nodes: T[], lines: CanvasLine[]): T[] {
   return layoutGraph(nodes, lines, (line) => line.sourceHandle === 'flow-out')
 }
 
 /** 布局原语：可传边缘筛选函数。 */
-export function layoutGraph(nodes: CanvasNode[], lines: CanvasLine[], channelFilter: (line: Line) => boolean): CanvasNode[] {
+export function layoutGraph<T extends LayoutNodeLike>(
+  nodes: T[],
+  lines: CanvasLine[],
+  channelFilter: (line: Line) => boolean,
+): T[] {
   const edges = (lines ?? []).filter((line) => channelFilter(line))
   const byId = new Map(nodes.map((node) => [node.id, node]))
   const indegree = new Map(nodes.map((node) => [node.id, 0]))

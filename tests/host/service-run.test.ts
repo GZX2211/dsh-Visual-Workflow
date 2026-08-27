@@ -247,7 +247,7 @@ describe('用户问题注入', () => {
     expect(input?.output).toBe('今天天气如何')
     expect(input?.outputSummary).toBe('今天天气如何')
     // 编排指令 dynamic 段（W-01：不稳定内容仅末段）
-    expect(lastDirective(h)).toContain('User question (service mode): 今天天气如何')
+    expect(lastDirective(h)).toContain('用户问题（服务模式）：今天天气如何')
   })
 
   it('空问题不预填输入节点', async () => {
@@ -304,6 +304,6 @@ describe('resumeRun mode2（服务断点续跑）', () => {
     expect(input?.output).toBe('问题A')
     expect(input?.resumed).toBe(true)
     // 断点继续指令
-    expect(lastDirective(h)).toContain('Resuming a prior run')
+    expect(lastDirective(h)).toContain('正在恢复先前运行')
   })
 })

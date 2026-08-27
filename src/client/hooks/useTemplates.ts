@@ -13,7 +13,8 @@ import { EP } from '../lib/remote.js'
 export type AnyTemplate = RoleTemplate | FileTemplate | DatabaseTemplate
 
 export interface TemplatesFace {
-  loadTemplates(): Promise<void>
+  /** 三类模板并行加载；返回按 kind 聚合的结果（某类失败不影响其他类，Bug 9）。 */
+  loadTemplates(): Promise<{ role: AnyTemplate[]; file: AnyTemplate[]; database: AnyTemplate[] }>
   /** 新建本地草稿（id 正式格式；保存落库后 id 不变，画布引用不失效）。 */
   createTemplateDraft(kind: TemplateKind): AnyTemplate
   saveTemplate(kind: TemplateKind, template: AnyTemplate): Promise<void>
@@ -45,15 +46,22 @@ function draftOf(kind: TemplateKind): AnyTemplate {
 export function useTemplates(dispatch: Dispatch<StudioAction>, remote: RemoteFace): TemplatesFace {
   const loadTemplates = useCallback(async () => {
     const kinds: TemplateKind[] = ['role', 'file', 'database']
-    const results = await Promise.all(
+    // Bug 9：并行加载用 allSettled——某类模板端点失败时其余类型仍正常加载，
+    // 不因单个失败导致全部模板不可用（原先 Promise.all 一损俱损）。
+    const results = await Promise.allSettled(
       kinds.map(async (kind) => {
         const items = await remote.call(EP.EP_LIST_TEMPLATES, { kind })
         return { kind, items: Array.isArray(items) ? (items as AnyTemplate[]) : [] }
       }),
     )
-    for (const { kind, items } of results) {
+    const aggregated: { role: AnyTemplate[]; file: AnyTemplate[]; database: AnyTemplate[] } = { role: [], file: [], database: [] }
+    for (const result of results) {
+      if (result.status !== 'fulfilled') continue // 失败类跳过（下轮加载重试），不影响其他类
+      const { kind, items } = result.value
+      aggregated[kind] = items
       dispatch({ type: 'TEMPLATES_LOADED', kind, items })
     }
+    return aggregated
   }, [dispatch, remote])
 
   const createTemplateDraft = useCallback((kind: TemplateKind): AnyTemplate => {

@@ -61,6 +61,10 @@ export function useServiceControl(dispatch: Dispatch<StudioAction>, remote: Remo
         kind: node.kind,
         position: node.position,
         data: node.data,
+        // 虚拟节点顶层 proxySourceId 保留（Bug 2）
+        ...((node as { proxySourceId?: unknown }).proxySourceId !== undefined
+          ? { proxySourceId: (node as { proxySourceId?: string }).proxySourceId }
+          : {}),
       })) as ServiceState['nodes'],
       lines: edges.map((edge) => ({
         id: edge.id,

@@ -121,7 +121,12 @@ export interface StudioState {
   canvas: { nodes: CanvasNode[]; edges: CanvasEdge[] }
   selection: { nodeId: string | null; edgeId: string | null; lib: { kind: LibSelKind; id: string } | null }
   editor: EditorRef
+  /** 未保存修改标记（§4.5.9 未保存守卫）。 */
   dirty: boolean
+  /** 最近一次「已保存」的画布图快照：打开文档/保存成功时更新；
+   *  UNDO/REDO 用它精确判定是否回到已保存状态（Bug 17——避免撤销回初始
+   *  保存状态仍被误判为未保存而弹确认框）。 */
+  savedGraph: GraphSnapshot | null
   run: { runId: string | null; snapshot: RunSnapshot | null }
   toasts: ToastItem[]
   message: string
@@ -163,6 +168,7 @@ export function createInitialState(sessionId: string): StudioState {
     selection: { nodeId: null, edgeId: null, lib: null },
     editor: null,
     dirty: false,
+    savedGraph: null,
     run: { runId: null, snapshot: null },
     toasts: [],
     message: '',
@@ -219,6 +225,7 @@ export type StudioAction =
   | { type: 'EDGE_PATCH'; id: string; patch: Record<string, unknown> }
   | { type: 'DOC_PATCH'; patch: { name?: string; description?: string } }
   | { type: 'SET_DIRTY'; dirty: boolean }
+  | { type: 'MARK_SAVED' }
   | { type: 'RUN_STARTED'; runId: string }
   | { type: 'RUN_SNAPSHOT'; snapshot: RunSnapshot }
   | { type: 'RUN_CLEARED' }
@@ -250,6 +257,11 @@ export function flowToCanvas(flow: WorkflowDocument): { nodes: CanvasNode[]; edg
       kind: node.kind,
       position: node.position ?? { x: 120, y: 80 },
       data: (node as { data?: Record<string, unknown> }).data ?? {},
+      // 虚拟节点顶层 proxySourceId 必须保留（Bug 2）：否则打开工作流后
+      // 虚拟节点退化为孤儿，保存时后端校验报缺主引用。
+      ...((node as { proxySourceId?: unknown }).proxySourceId !== undefined
+        ? { proxySourceId: (node as { proxySourceId?: string }).proxySourceId }
+        : {}),
     }))),
     edges: (flow.lines ?? []).map((line) => ({
       id: line.id,
@@ -270,6 +282,10 @@ export function serviceToCanvas(service: ServiceState): { nodes: CanvasNode[]; e
       kind: node.kind,
       position: node.position ?? { x: 120, y: 80 },
       data: (node as { data?: Record<string, unknown> }).data ?? {},
+      // 虚拟节点顶层 proxySourceId 保留（Bug 2，同 flowToCanvas）
+      ...((node as { proxySourceId?: unknown }).proxySourceId !== undefined
+        ? { proxySourceId: (node as { proxySourceId?: string }).proxySourceId }
+        : {}),
     }))),
     edges: (service.lines ?? []).map((line) => ({
       id: line.id,
@@ -284,16 +300,18 @@ export function serviceToCanvas(service: ServiceState): { nodes: CanvasNode[]; e
 
 /** 打开工作流/服务时的选中与编辑器重置（可选保留画布选择）。 */
 function openDocument(state: StudioState, canvas: { nodes: CanvasNode[]; edges: CanvasEdge[] }, kind: 'workflow' | 'service', id: string): StudioState {
-  return {
+  const opened: StudioState = {
     ...state,
     currentKind: kind,
     currentId: id,
     canvas,
     dirty: false,
+    savedGraph: graphSnapshotOf({ ...state, canvas }),
     run: { runId: null, snapshot: null },
     selection: { nodeId: null, edgeId: null, lib: { kind: kind === 'workflow' ? 'workflow' : 'service', id } },
     editor: kind === 'workflow' ? { source: 'workflow', id } : { source: 'service', id },
   }
+  return opened
 }
 
 export function studioReducer(state: StudioState, action: StudioAction): StudioState {
@@ -369,15 +387,25 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         canvas: { ...state.canvas, nodes: state.canvas.nodes.map((node) => (node.id === action.id ? { ...node, position: action.position } : node)) },
         dirty: true,
       }
-    case 'NODE_REMOVED':
+    case 'NODE_REMOVED': {
+      // 级联删除（需求 §4.2.3.2 规则 5）：删除角色主节点时同时删除其全部
+      // 虚拟引用节点，避免画布残留孤儿虚拟节点（Bug 4）。
+      const removed = new Set<string>([action.id])
+      const main = state.canvas.nodes.find((node) => node.id === action.id)
+      if (main && (main.kind === 'parent' || main.kind === 'agent')) {
+        for (const node of state.canvas.nodes) {
+          if (node.kind === 'proxy' && (node as { proxySourceId?: unknown }).proxySourceId === action.id) removed.add(node.id)
+        }
+      }
       return {
         ...state,
         canvas: {
-          nodes: state.canvas.nodes.filter((node) => node.id !== action.id),
-          edges: state.canvas.edges.filter((edge) => edge.source !== action.id && edge.target !== action.id),
+          nodes: state.canvas.nodes.filter((node) => !removed.has(node.id)),
+          edges: state.canvas.edges.filter((edge) => !removed.has(edge.source) && !removed.has(edge.target)),
         },
         dirty: true,
       }
+    }
     case 'EDGE_ADDED':
       return { ...state, canvas: { ...state.canvas, edges: [...state.canvas.edges, action.edge] }, dirty: true }
     case 'EDGE_REMOVED':
@@ -430,6 +458,8 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
           : state
     case 'SET_DIRTY':
       return { ...state, dirty: action.dirty }
+    case 'MARK_SAVED':
+      return { ...state, dirty: false, savedGraph: graphSnapshotOf(state) }
     case 'RUN_STARTED':
       return { ...state, run: { runId: action.runId, snapshot: null } }
     case 'RUN_SNAPSHOT':
@@ -450,22 +480,27 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
     case 'UNDO': {
       const previous = state.history.past.at(-1)
       if (!previous) return state
-      return {
+      const next: StudioState = {
         ...state,
         canvas: { nodes: previous.nodes, edges: previous.edges },
-        dirty: true,
         history: { past: state.history.past.slice(0, -1), future: [...state.history.future, graphSnapshotOf(state)] },
       }
+      // BP（Bug 17）：撤销后是否「未保存」取决于是否回到已保存快照，
+      // 而非一律 true——连续撤销回初始保存状态时不应再弹未保存确认。
+      // BP（Bug 8）：canvas 变化后校验选中/编辑器引用存在性。
+      return { ...next, ...sanitizeSelectionAfterCanvas(next), dirty: !graphSnapshotsEqual(next.canvas, state.savedGraph) }
     }
     case 'REDO': {
       const next = state.history.future.at(-1)
       if (!next) return state
-      return {
+      const applied: StudioState = {
         ...state,
         canvas: { nodes: next.nodes, edges: next.edges },
-        dirty: true,
         history: { past: [...state.history.past, graphSnapshotOf(state)], future: state.history.future.slice(0, -1) },
       }
+      // 同 UNDO：重做后同样按「是否回到已保存状态」判定（Bug 17）与
+      // 选中/编辑器校验（Bug 8）。
+      return { ...applied, ...sanitizeSelectionAfterCanvas(applied), dirty: !graphSnapshotsEqual(applied.canvas, state.savedGraph) }
     }
     case 'PANELS_SET':
       return { ...state, panels: { ...state.panels, ...action.panels } }
@@ -508,6 +543,39 @@ export function graphSnapshotOf(state: StudioState): GraphSnapshot {
       ...(edge.condition ? { condition: { ...edge.condition } } : {}),
     })),
   }
+}
+
+/**
+ * 图快照是否一致（Bug 17 的 dirty 精确判定用）。
+ * 快照元素均为「内容不可变」结构（节点位置/数据、连线/条件），
+ * 直接序列化比较即可（节点/连线顺序即文档事实源顺序）。
+ */
+export function graphSnapshotsEqual(a: { nodes: CanvasNode[]; edges: CanvasEdge[] } | null, b: GraphSnapshot | null): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  return JSON.stringify(a) === JSON.stringify(b)
+}
+
+/**
+ * 画布变化后的选中/编辑器校验（Bug 8）：UNDO/REDO 恢复画布后，selection 与
+ * editor 可能仍指向已不存在的节点/连线（如 REDO 一个删除操作后选中残留），
+ * 返回清理后的 selection/editor —— 引用失效的项置空，避免键盘删除误删与
+ * Inspector 渲染空数据。
+ */
+function sanitizeSelectionAfterCanvas(state: StudioState): Pick<StudioState, 'selection' | 'editor'> {
+  const nodeExists = (id: string | null | undefined): boolean => id != null && state.canvas.nodes.some((node) => node.id === id)
+  const edgeExists = (id: string | null | undefined): boolean => id != null && state.canvas.edges.some((edge) => edge.id === id)
+  const selection: StudioState['selection'] = {
+    nodeId: nodeExists(state.selection.nodeId) ? state.selection.nodeId : null,
+    edgeId: edgeExists(state.selection.edgeId) ? state.selection.edgeId : null,
+    lib: state.selection.lib,
+  }
+  let editor = state.editor
+  if (editor) {
+    if (editor.source === 'node' && !nodeExists(editor.id)) editor = null
+    else if (editor.source === 'edge' && !edgeExists(editor.id)) editor = null
+  }
+  return { selection, editor }
 }
 
 // ---------------------------------------------------------------------------

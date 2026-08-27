@@ -602,8 +602,8 @@ describe('wfRunNode 异步路径与护栏', () => {
     expect(text.slice(tailAt)).toContain(NODE_HARD_CONSTRAINTS.ownPromptOnly)
       // 自定义 System Prompt 已注入系统提示词，任务块不再重复（避免排队消息重复）
       expect(text).not.toContain('任务：子任务A')
-      expect(text).toContain('not repeated here')
-      expect(text.slice(tailAt)).toContain('Retry limit: 3')
+      expect(text).toContain('此处不重复')
+      expect(text.slice(tailAt)).toContain('重试上限：3')
     })
   it('文档 ctx-in：文本内容注入（超限截断）+ 受管文件路径索引', async () => {
     const h = await makeHarness()
@@ -696,8 +696,8 @@ describe('wfRunNode 异步路径与护栏', () => {
     expect(input.iterationLimit).toBe(7)
     expect(input.thinking).toBe('high')
     const tail = input.blocks[0].text.slice(input.blocks[0].text.indexOf(TAIL_MARKER))
-    expect(tail).toContain('Retry limit: 5')
-    expect(tail).toContain('ReAct iteration limit: 7')
+    expect(tail).toContain('重试上限：5')
+    expect(tail).toContain('ReAct 迭代上限：7')
   })
 
   it('护栏：nodeId 缺失 WF_BAD_ARGS；节点不存在 WF_NODE_MISSING；非 agent 节点 WF_NODE_KIND', async () => {
@@ -896,19 +896,28 @@ describe('wait 阻塞（§4.4.2 规则 1，模式二调度）', () => {
 // ---------------------------------------------------------------------------
 
 describe('subagent/end 观察回写（§8 #21）', () => {
-  it('completed/max-tokens → 节点 ok；其他 stopReason → fail；inflight 清空', async () => {
+  it('completed/max-tokens → 节点状态区分（Bug 19：截断不再标记 ok）；其他 stopReason → fail；inflight 清空', async () => {
     const h = await makeHarness()
     const { entry } = await start(h, makeFlow())
     await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
     expect(entry.inflight.has('child-1')).toBe(true)
 
+    // Bug 19：max-tokens = 模型输出被硬截断（内容不完整），不能再视为成功
     await h.runtime.handleSubagentEnd({ id: 'child-1', stopReason: 'max-tokens', lastAssistantMessage: [{ type: 'text', text: '结论' }] })
-    expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-a1')!.status).toBe('ok')
+    expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-a1')!.status).toBe('fail')
     expect(entry.inflight.has('child-1')).toBe(false)
 
     await h.runtime.wfRunNode(caller, { nodeId: 'n-a2' })
     await h.runtime.handleSubagentEnd({ id: 'child-2', stopReason: 'error' })
     expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-a2')!.status).toBe('fail')
+  })
+
+  it('completed 仍标记 ok（Bug 19 修复不误伤正常完成）', async () => {
+    const h = await makeHarness()
+    const { entry } = await start(h, makeFlow())
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    await h.runtime.handleSubagentEnd({ id: 'child-1', stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: '完成' }] })
+    expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-a1')!.status).toBe('ok')
   })
 
   it('未知 childId / 已终止运行：忽略不回写', async () => {
@@ -1229,6 +1238,41 @@ describe('currentResolvedFlow 双向同步（§4.7 规则 1 ①）', () => {
     }
     const result = await h.runtime.wfRunNode(caller, { nodeId: 'n-a2' })
     expect(result.status).toBe('started') // baseFlow 中 n-a2 存在
+  })
+
+  it('Bug 20：mode2 运行中 currentResolvedFlow 读服务文档（修复前回退 baseFlow 读错文档）', async () => {
+    const h = await makeHarness()
+    const parentNode: RoleNode = {
+      id: 'n-p', kind: 'parent', position: { x: 0, y: 0 },
+      data: { label: '父代理', systemPrompt: '', provider: '', model: '', presetId: null, retryLimit: 3, reactLimit: null, inputSchema: '', outputSchema: '', groupId: null, proxySourceId: null },
+    }
+    const service = {
+      id: 'svc-2',
+      sessionId: 'session-1',
+      mode: 'mode2',
+      name: '服务',
+      description: '初始描述',
+      revision: 1,
+      status: 'stopped',
+      nodes: [stage('n-in', 'start', 'mode2'), parentNode, agent('n-a1', '任务'), stage('n-out', 'end', 'mode2')],
+      lines: [
+        { id: 's1', source: 'n-in', target: 'n-p', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+        { id: 's2', source: 'n-p', target: 'n-a1', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+        { id: 's3', source: 'n-a1', target: 'n-out', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+      ],
+    } as never
+    await h.store.saveService(service, 'session-1', { force: true })
+    await h.runtime.startRun({ sessionId: 'session-1', flowId: 'svc-2', mode: 'mode2' })
+    const entry = h.runtime.activeRunForSession('session-1')
+    expect(entry).toBeTruthy()
+
+    // 运行中调整服务文档
+    const updated = { ...(service as Record<string, unknown>), description: '运行中调整后的描述' } as never
+    await h.store.saveService(updated, 'session-1', { force: true })
+
+    const resolved = await h.runtime.currentResolvedFlow(entry!)
+    // 修复前：固定读 workflows/ 下文档（svc-2 不存在）→ 回退 baseFlow 旧描述
+    expect(resolved.description).toBe('运行中调整后的描述')
   })
 
   it('runSnapshot 返回深拷贝：修改副本不影响内部状态', async () => {

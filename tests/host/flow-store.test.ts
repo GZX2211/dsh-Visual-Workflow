@@ -189,6 +189,23 @@ describe('模板 CRUD（全局共享）与子类过滤', () => {
     expect(fileNode!.kind).toBe('file')
     expect((fileNode as { data: { fileName: string } }).data.fileName).toBe('a.pdf')
   })
+
+  it('Bug 26：templateToNode 保留 systemPromptSource 与模板源文件名', async () => {
+    // 角色模板带 .md 提示词来源：拖入画布后来源文件名必须保留（左侧栏卡片展示）
+    const role = { ...makeRoleTemplate('r1'), systemPromptSource: '角色说明.md' }
+    const roleNode = store.templateToNode(role, 'node-src', { x: 0, y: 0 })
+    expect((roleNode as { data: { systemPromptSource?: string } }).data.systemPromptSource).toBe('角色说明.md')
+
+    // 文件模板显式记录源文件名：不得回退为受管路径 basename 的猜测值
+    const fileT: FileTemplate = { id: 'ft2', name: '文件', fileKind: 'file', managedPath: 'data/files/abc/报告-final.pdf', fileName: '报告-final.pdf' }
+    const fileNode = store.templateToNode(fileT, 'node-file', { x: 0, y: 0 })
+    const fileData = (fileNode as { data: { fileName?: string } }).data
+    expect(fileData.fileName).toBe('报告-final.pdf')
+    // 模板缺 fileName 时仍回退 basename（向后兼容）
+    const legacy: FileTemplate = { id: 'ft3', name: '遗留', fileKind: 'file', managedPath: 'data/files/old/legacy.txt' }
+    const legacyNode = store.templateToNode(legacy, 'node-legacy', { x: 0, y: 0 })
+    expect((legacyNode as { data: { fileName?: string } }).data.fileName).toBe('legacy.txt')
+  })
 })
 
 describe('运行历史（runs/<runId>.json）', () => {
@@ -217,6 +234,18 @@ describe('运行历史（runs/<runId>.json）', () => {
     expect(await store.runExists('run-1')).toBe(true)
     expect(await store.runExists('ghost')).toBe(false)
     expect((await store.listAllRunIds()).sort()).toEqual(['run-1', 'run-2', 'run-3'].sort())
+  })
+
+  it('Bug 14：listRuns 可按 sessionId 过滤（跨会话历史不可见）', async () => {
+    const a = { ...makeRun('run-1', 'f1'), sessionId: 's1' }
+    const b = { ...makeRun('run-2', 'f1'), sessionId: 's2' } // 另一会话的同名工作流 run
+    await store.saveRun(a)
+    await store.saveRun(b)
+    // 传 sessionId 时只返回该会话的记录
+    expect((await store.listRuns('f1', 's1')).map((r) => r.id)).toEqual(['run-1'])
+    expect((await store.listRuns('f1', 's2')).map((r) => r.id)).toEqual(['run-2'])
+    // 不传（旧语义）仍返回全部（resume 内部定位用）
+    expect((await store.listRuns('f1')).map((r) => r.id).sort()).toEqual(['run-1', 'run-2'].sort())
   })
 })
 

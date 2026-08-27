@@ -311,6 +311,40 @@ describe('normalizeFlow 归一化', () => {
     expect(flow.mode).toBe('mode1')
     expect(flow.description).toBe('')
   })
+
+  it('Bug 15：normalizeFlow 保留文件节点多选 files 字段（保存不丢数据）', () => {
+    const f = newFileNode('file', '资料')
+    ;(f.data as { files?: Array<{ fileName: string; managedPath: string }> }).files = [
+      { fileName: 'a.pdf', managedPath: 'data/files/a.pdf' },
+      { fileName: 'b.pdf', managedPath: 'data/files/b.pdf' },
+    ]
+    const flow = normalizeFlow(makeFlow([f]))
+    const n = flow.nodes[0]
+    expect(n.kind).toBe('file')
+    expect((n as { data: { files?: unknown[] } }).data.files).toEqual([
+      { fileName: 'a.pdf', managedPath: 'data/files/a.pdf' },
+      { fileName: 'b.pdf', managedPath: 'data/files/b.pdf' },
+    ])
+  })
+
+  it('Bug 27：角色节点声明 groupId 但组不存在 → groupGhost 报错', () => {
+    const a = newRoleNode('agent', '幽灵')
+    a.id = 'a-ghost'
+    a.data.groupId = 'group-nope' // 指向不存在的组
+    const issues = validateFlow(makeFlow([a]))
+    expect(issues.ok).toBe(false)
+    expect(codes(makeFlow([a]))).toContain('groupGhost')
+
+    // 组真实存在且成员双向一致 → 不报幽灵组员
+    const g = newGroupNode('组')
+    g.id = 'group-ok'
+    const m = newRoleNode('agent', '成员')
+    m.id = 'm-1'
+    m.data.groupId = 'group-ok'
+    g.data.memberIds = ['m-1']
+    const ok = validateFlow(makeFlow([g, m]))
+    expect(ok.issues.filter((i) => i.code === 'groupGhost')).toHaveLength(0)
+  })
 })
 
 describe('入口解析与拓扑助手', () => {
