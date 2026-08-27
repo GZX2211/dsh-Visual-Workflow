@@ -293,28 +293,46 @@ export function GraphCanvas(props: GraphCanvasProps) {
   }, [updateViewport])
 
   // ---- 协作组拉伸 ----
-  const beginGroupResize = useCallback((event: React.PointerEvent, nodeId: string, direction: string): void => {
+  const [groupResize, setGroupResize] = useState<{ nodeId: string; startX: number; startY: number; startSize: { w: number; h: number } } | null>(null)
+  const beginGroupResize = useCallback((event: React.PointerEvent, nodeId: string): void => {
     if (event.button !== undefined && event.button !== 0) return
     event.stopPropagation()
     const node = byId.get(nodeId)
     if (!node) return
-    const startSize = nodeSizeOf(node)
-    const startX = event.clientX
-    const startY = event.clientY
+    // 只记录拖拽起点，不直接在回调里注册 window 监听（Bug 14 修正定位：原先
+    // addEventListener 在 callback 内、仅 onUp 移除——组件卸载/指针丢失时监听器
+    // 残留并持续向已卸载组件回调）。监听与清理统一由下方 useEffect 管理。
+    setGroupResize({
+      nodeId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startSize: nodeSizeOf(node),
+    })
+  }, [byId])
+
+  useEffect(() => {
+    if (!groupResize) return undefined
     const onMove = (moveEvent: PointerEvent): void => {
-      const dx = moveEvent.clientX - startX
-      const dy = moveEvent.clientY - startY
-      const nextW = Math.max(240, startSize.w + dx)
-      const nextH = Math.max(150, startSize.h + dy)
-      onGroupResize?.(nodeId, { w: Math.round(nextW), h: Math.round(nextH) })
+      const dx = moveEvent.clientX - groupResize.startX
+      const dy = moveEvent.clientY - groupResize.startY
+      const nextW = Math.max(240, groupResize.startSize.w + dx)
+      const nextH = Math.max(150, groupResize.startSize.h + dy)
+      onGroupResize?.(groupResize.nodeId, { w: Math.round(nextW), h: Math.round(nextH) })
     }
-    const onUp = (): void => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-    }
+    const onUp = (): void => setGroupResize(null)
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
-  }, [byId, onGroupResize])
+    // 鼠标移出浏览器窗口/失焦时 pointerup 可能不触发（Bug 7 同款兜底），
+    // pointercancel + blur 一并清理，避免监听器残留与 onGroupResize 空转。
+    window.addEventListener('pointercancel', onUp)
+    window.addEventListener('blur', onUp)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+      window.removeEventListener('blur', onUp)
+    }
+  }, [groupResize, onGroupResize])
 
   // ---- 连线渲染 ----
   const edgeViews = nodes.length === 0 ? [] : edges.map((edge) => {

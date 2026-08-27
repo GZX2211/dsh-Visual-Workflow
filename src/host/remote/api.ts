@@ -279,7 +279,17 @@ export class VisualWorkflowApi {
     if (!manager || typeof manager[action] !== 'function') {
       throw httpError(501, '服务管理器尚未启用（模式二服务管理未装配）', 'WF_SERVICE_MANAGER_UNAVAILABLE')
     }
-    return manager[action](serviceId)
+    // 合并返回完整服务状态（Bug 22）：manager 结果只含 serviceId/status/port/pid 等
+    // 运行时字段，不能整体替代 ServiceState——否则前端 SERVICE_UPDATED 用残缺对象替换
+    // 列表项（name/nodes/lines/revision/sessionId 全部丢失），或因 id 键不匹配变成
+    // 静默空操作（启动/停止后状态永不刷新）。以完整文档为基、运行时字段覆盖后返回。
+    const result = (await manager[action](serviceId)) as Record<string, unknown>
+    return {
+      ...service,
+      ...(result.status !== undefined ? { status: result.status } : {}),
+      ...(result.port !== undefined ? { port: result.port } : {}),
+      ...(result.pid !== undefined ? { pid: result.pid } : {}),
+    }
   }
 
   // ---------- 模板（角色/文件/数据库） ----------
@@ -836,7 +846,10 @@ export function registerRoutes(
                 : code === 'WF_FLOW_INVALID'
                   ? 422
                   : 500
-        sendJson(res as never, status, { ok: false, error: { message: error instanceof Error ? error.message : String(error) } })
+        // 错误响应携带稳定 code（HttpError.code / 引擎 WfError.code），供前端按错误码分支
+        // （如 FLOW_REVISION_CONFLICT 冲突时自动刷新，而非仅展示通用 message，Bug 20）。
+        const message = error instanceof Error ? error.message : String(error)
+        sendJson(res as never, status, { ok: false, error: { message, ...(code ? { code } : {}) } })
       }
     },
   })

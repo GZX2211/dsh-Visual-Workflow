@@ -282,7 +282,8 @@ describe('服务与模板端点', () => {
       status: 501,
       code: 'WF_SERVICE_MANAGER_UNAVAILABLE',
     })
-    // 管理器装配后透传调用
+    // 管理器装配后：返回「文档为基 + 运行时字段合并」的完整服务状态（Bug 22），
+    // 而非 manager 返回的残缺结果——前端 SERVICE_UPDATED 需要完整 ServiceState。
     const calls: string[] = []
     h.host.serviceManager = {
       start: async (id) => { calls.push(`start:${id}`); return { started: true } },
@@ -290,8 +291,50 @@ describe('服务与模板端点', () => {
       status: async () => ({}),
     }
     const started = await h.api.handle('serviceStart', { sessionId: 'session-1', serviceId: 'svc-1' })
-    expect(started).toEqual({ started: true })
+    // manager 未提供运行时字段时回退文档原状：完整字段（id/name/revision/nodes/lines）不得丢失
+    expect(started).toMatchObject({ id: 'svc-1', name: '服务A', revision: 1, nodes: [], lines: [] })
     expect(calls).toEqual(['start:svc-1'])
+  })
+
+  it('serviceStart/stop 返回完整服务状态（Bug 22：manager 残缺结果不得替换列表项）', async () => {
+    const h = await makeHarness()
+    await h.api.handle('putService', {
+      sessionId: 'session-1',
+      service: {
+        id: 'svc-2',
+        sessionId: 'session-1',
+        name: '服务B',
+        description: 'desc',
+        revision: 0,
+        nodes: [{ id: 'n1', kind: 'start', position: { x: 0, y: 0 }, data: { label: '输入' } }],
+        lines: [],
+        createdAt: '2026-08-24T00:00:00.000Z',
+        updatedAt: '2026-08-24T00:00:00.000Z',
+        status: 'stopped',
+      },
+    })
+    // manager 只返回运行时字段（与真实 ServiceManager.start/stop 形态一致：
+    // { serviceId, status, port, pid }——缺 id/name/nodes/lines/revision/sessionId）
+    h.host.serviceManager = {
+      start: async () => ({ serviceId: 'svc-2', status: 'running', port: 7860, pid: 4242 }),
+      stop: async () => ({ serviceId: 'svc-2', status: 'stopped' }),
+      status: async () => ({ serviceId: 'svc-2', status: 'running', port: 7860 }),
+    }
+    const started = (await h.api.handle('serviceStart', { sessionId: 'session-1', serviceId: 'svc-2' })) as Record<string, unknown>
+    // 完整字段保留 + 运行时字段合并（前端 SERVICE_UPDATED 直接可用，不污染列表项）
+    expect(started).toMatchObject({
+      id: 'svc-2',
+      sessionId: 'session-1',
+      name: '服务B',
+      revision: 1,
+      status: 'running',
+      port: 7860,
+      nodes: [{ id: 'n1', kind: 'start', position: { x: 0, y: 0 }, data: { label: '输入' } }],
+      lines: [],
+    })
+    expect(started.pid).toBe(4242)
+    const stopped = (await h.api.handle('serviceStop', { sessionId: 'session-1', serviceId: 'svc-2' })) as Record<string, unknown>
+    expect(stopped).toMatchObject({ id: 'svc-2', name: '服务B', status: 'stopped', revision: 1 })
   })
 
   it('模板 CRUD 与删除预览（解耦语义：受影响节点恒为 0）', async () => {
@@ -723,6 +766,14 @@ describe('路由注册与下载', () => {
     // 未知端点 → 404
     await registered!.handler!(reqOf('POST', '/visual-workflow/nope'), res)
     expect(responses[3].status).toBe(404)
+
+    // 错误响应携带稳定 code（Bug 20）：revision 冲突 → 409 + code 字段
+    const conflictFlow = { id: 'flow-code-1', sessionId: 'session-1', mode: 'mode1', name: 'c', description: '', revision: 0, nodes: [], lines: [] }
+    await registered!.handler!(reqOf('POST', '/visual-workflow/putWorkflow', JSON.stringify({ args: { sessionId: 'session-1', flow: conflictFlow } })), res)
+    expect(responses[4].status).toBe(200)
+    await registered!.handler!(reqOf('POST', '/visual-workflow/putWorkflow', JSON.stringify({ args: { sessionId: 'session-1', flow: conflictFlow } })), res)
+    expect(responses[5].status).toBe(409)
+    expect(JSON.parse(responses[5].body)).toMatchObject({ ok: false, error: { message: expect.any(String), code: 'FLOW_REVISION_CONFLICT' } })
 
     // disposer 生效
     dispose()

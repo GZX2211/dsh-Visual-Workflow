@@ -20,14 +20,19 @@ export async function remoteCall(endpoint: string, args: Record<string, unknown>
   } catch (error) {
     throw new Error(`无法连接工作流服务：${error instanceof Error ? error.message : String(error)}`)
   }
-  let payload: { ok?: unknown; value?: unknown; error?: { message?: unknown } } = {}
+  let payload: { ok?: unknown; value?: unknown; error?: { message?: unknown; code?: unknown } } = {}
   try {
     payload = (await response.json()) as typeof payload
   } catch {
     // 非 JSON 响应
   }
   if (!response.ok || payload.ok === false) {
-    throw new Error(String(payload?.error?.message ?? `工作流服务错误（HTTP ${response.status}）`))
+    // 稳定错误码随 Error 携带（Bug 20）：后端错误响应 { message, code }，调用方可
+    // 按 code 分支处理（如 FLOW_REVISION_CONFLICT 冲突时自动刷新），而非仅通用 message。
+    const error = new Error(String(payload?.error?.message ?? `工作流服务错误（HTTP ${response.status}）`)) as Error & { code?: string }
+    const code = (payload?.error as { code?: unknown } | undefined)?.code
+    if (typeof code === 'string' && code) error.code = code
+    throw error
   }
   return payload.value
 }
@@ -57,13 +62,19 @@ export async function streamCall(
   }
   if (!response.ok) {
     let message = `工作流服务错误（HTTP ${response.status}）`
+    let code: string | undefined
     try {
-      const payload = (await response.json()) as { error?: { message?: unknown } }
+      const payload = (await response.json()) as { error?: { message?: unknown; code?: unknown } }
       if (payload?.error?.message) message = String(payload.error.message)
+      const rawCode = payload?.error?.code
+      if (typeof rawCode === 'string' && rawCode) code = rawCode
     } catch {
       // 非 JSON 响应：保留兜底文案
     }
-    throw new Error(message)
+    // 稳定错误码随 Error 携带（与 remoteCall 一致，Bug 20）
+    const error = new Error(message) as Error & { code?: string }
+    if (code) error.code = code
+    throw error
   }
   if (!response.body) throw new Error('流式响应无内容')
   const reader = response.body.getReader()

@@ -43,6 +43,20 @@ describe('remoteCall', () => {
     await expect(remoteCall('getWorkflow')).rejects.toThrow('工作流不存在')
   })
 
+  it('错误：抛出 Error 携带后端稳定 code（Bug 20 契约，调用方可按码分支）', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      ok: false,
+      error: { message: '资源在加载后被修改', code: 'FLOW_REVISION_CONFLICT' },
+    }), { status: 409 })))
+    const error = await remoteCall('putWorkflow', { sessionId: 's-1' }).then(
+      () => null,
+      (err: unknown) => err as Error & { code?: string },
+    )
+    expect(error).not.toBeNull()
+    expect(error!.message).toBe('资源在加载后被修改')
+    expect(error!.code).toBe('FLOW_REVISION_CONFLICT')
+  })
+
   it('非 JSON 响应：兜底文案', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('oops', { status: 500 })))
     await expect(remoteCall('x')).rejects.toThrow('工作流服务错误')
