@@ -28,7 +28,7 @@ import type { ReactGuardBridge } from '../../src/host/agent/guards.js'
 import type { ModelSelectionSetup } from '../../src/host/agent/model-selection.js'
 import type { ChildPromptSetup } from '../../src/host/agent/prompt-setup.js'
 import type { NodeStartInput } from '../../src/host/orchestrator/runtime.js'
-import type { RoleNode } from '../../src/host/shared/graph-model.js'
+import type { RoleNode, WorkflowDocument } from '../../src/host/shared/graph-model.js'
 
 const cleanups: Array<() => Promise<void>> = []
 
@@ -70,6 +70,8 @@ class FakeSubagents implements SubagentsServiceLike {
   interrupts: Array<{ childId: string; authority: { kind: 'user'; parentSessionId: string } }> = []
   setups: Array<(childCtx: unknown) => () => void> = []
   failStart: unknown = null
+  /** 时序断言钩子（followup 触发时回调，用于验证 setLimit 先于派发）。 */
+  onFollowup?: () => void
   private seq = 0
   list(): string[] {
     return [...this.providers]
@@ -85,6 +87,7 @@ class FakeSubagents implements SubagentsServiceLike {
     return { childId: `child-${this.seq}` }
   }
   async followup(parent: unknown, childId: string, content: unknown[], options: { source: unknown; signal?: AbortSignal }): Promise<void> {
+    this.onFollowup?.()
     this.followups.push({ parent, childId, content, source: options.source, signal: options.signal })
   }
   async interrupt(childId: string, authority: { kind: 'user'; parentSessionId: string }): Promise<void> {
@@ -311,6 +314,36 @@ describe('resolveAgentTools 白名单解析（§4.2 L219）', () => {
     })
     expect(withoutDb).not.toContain('wf_db_query')
   })
+
+  it('模式二 db-in 连线同样注入 wf_db_query（服务文档按 mode 分派读取）', async () => {
+    const h = await makeHarness()
+    await saveCombo(h, 'combo-c1', ['read'])
+    // 服务文档存于 services/ 目录（getWorkflow 读 workflows/ 恒为 null）
+    const serviceFlow: WorkflowDocument = {
+      id: 'svc-flow-1', sessionId: 'session-1', mode: 'mode2', name: '服务', description: '', revision: 1,
+      nodes: [
+        { id: 'n-db', kind: 'database', position: { x: 0, y: 0 }, data: { label: '库', description: '', dbType: 'local', dbKind: 'sqlite', localPath: '' } },
+        agentNode('n-a1'),
+      ],
+      lines: [{ id: 'l-db', source: 'n-db', target: 'n-a1', sourceHandle: 'db-out', targetHandle: 'db-in' }],
+    }
+    await h.store.saveService(serviceFlow as never, 'session-1', { force: true })
+
+    // 修复前：hasDbInLine 固定走 getWorkflow → null → wf_db_query 永不注入
+    const withDb = await resolveAgentTools({
+      store: h.store, toolsView: h.toolsView, sessionId: 'session-1', flowId: 'svc-flow-1', mode: 'mode2',
+      node: agentNode('n-a1'),
+    })
+    expect(withDb).toContain('wf_db_query')
+    // 服务无 db 连线 → 不注入
+    const noLineFlow: WorkflowDocument = { ...serviceFlow, id: 'svc-flow-2', lines: [] }
+    await h.store.saveService(noLineFlow as never, 'session-1', { force: true })
+    const withoutDb = await resolveAgentTools({
+      store: h.store, toolsView: h.toolsView, sessionId: 'session-1', flowId: 'svc-flow-2', mode: 'mode2',
+      node: agentNode('n-a1'),
+    })
+    expect(withoutDb).not.toContain('wf_db_query')
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -392,6 +425,22 @@ describe('NodeAgentRunner 创建/复用/派发', () => {
     expect(followup.content).toEqual([{ type: 'text', text: '第二轮' }])
     expect(followup.source).toEqual({ kind: 'coordinator', form: 'relay', senderSessionId: 'session-1' })
     expect(followup.signal).toBe(signal)
+  })
+
+  it('复用路径：setLimit 先于 followup 派发（软截停上限按次覆盖立即生效）', async () => {
+    const h = await makeHarness()
+    await h.store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read'], mcpServers: [] })
+    await h.runner.startNodeTask(taskInput()) // 首次创建
+    h.react.setLimit.mockClear()
+    const order: string[] = []
+    const setLimitSpy = vi.fn((_childId: string, limit: number | undefined) => order.push(`setLimit:${limit}`))
+    h.react.setLimit = setLimitSpy
+    h.subagents.onFollowup = () => order.push('followup')
+    // 第二轮复用并按次覆盖 limit：修复前 setLimit 在 followup（await）之后执行，
+    // 新回合第一步 pre-step 会读到旧上限；修复后必须先在派发前登记
+    await h.runner.startNodeTask(taskInput({ iterationLimit: 3, blocks: blocks('第二轮') }))
+    expect(h.react.setLimit).toHaveBeenCalledWith('child-1', 3)
+    expect(order).toEqual(['setLimit:3', 'followup'])
   })
 
   it('创建后挂接模型选择（经 child agent ctx）+ 复用派发后刷新护栏上限', async () => {

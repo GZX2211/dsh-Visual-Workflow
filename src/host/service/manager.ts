@@ -322,7 +322,7 @@ export class ServiceManager {
     if (!service) throw new ServiceManagerError(SERVICE_ERR.NOT_FOUND, `服务不存在：${id}`)
     return {
       serviceId: id,
-      status: managed ? service.status : service.status,
+      status: service.status,
       port: service.port,
       ...(managed ? { pid: managed.child.pid } : {}),
     }

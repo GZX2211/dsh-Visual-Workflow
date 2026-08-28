@@ -313,6 +313,12 @@ export interface ResolveToolsInput {
   flowId: string
   /** 已解析为主节点的角色节点（虚拟节点在 T-021 已解析）。 */
   node: RoleNode
+  /**
+   * 运行模式（缺省按模式一处理，向后兼容）。模式二的服务文档存储在
+   * services/ 目录、须经 getServiceAsFlow 读取——db-in 连线检测必须按
+   * 模式分派，否则模式二下 getWorkflow 恒返回 null 导致 wf_db_query 永不注入。
+   */
+  mode?: 'mode1' | 'mode2'
 }
 
 /** 子代理永不可见的三工具（§4.4.2 规则 7）：白名单排除 + tools.restrict 双保险第一层。 */
@@ -372,7 +378,12 @@ export async function resolveAgentTools(input: ResolveToolsInput): Promise<strin
 /** 该节点是否存在 db-in 连线（运行中读最新流程，双向同步①；读失败按无连线处理）。 */
 async function hasDbInLine(input: ResolveToolsInput): Promise<boolean> {
   try {
-    const flow = await input.store.getWorkflow(input.sessionId, input.flowId)
+    // 模式二的服务文档在 services/ 目录，getWorkflow 读 workflows/ 恒为 null——
+    // 必须按 mode 分派（与 runtime.currentResolvedFlow 的 Bug 20 修复同源），
+    // 否则模式二下数据库连线检测失效、wf_db_query 永不注入（需求 §4.4.3 规则 5）。
+    const flow = input.mode === 'mode2'
+      ? await input.store.getServiceAsFlow(input.flowId)
+      : await input.store.getWorkflow(input.sessionId, input.flowId)
     if (!flow) return false
     return dbInEdges(flow, input.node.id).length > 0
   } catch {
@@ -431,6 +442,11 @@ export class NodeAgentRunner implements NodeRunner {
    */
   async startNodeTask(input: NodeStartInput): Promise<{ childId: string; created: boolean }> {
     const { childId, created } = await this.ensureNodeChild(input)
+    // 每轮派发前刷新护栏上限与模型选择（节点级参数可按次覆盖；官方 selection 可变态）。
+    // 【时序】setLimit 必须位于任何 await 之前：子代理本轮第一步推理的 pre-step 事件
+    // 一旦触发就读 limits 表——若先 followup 再登记，新回合（可能换了 limit）的第一步
+    // 会读到旧上限/未登记值，软截停延迟生效（guards.ts 对 unknown childId 直接放行）。
+    this.deps.react.setLimit(childId, input.iterationLimit)
     const subagents = this.requireSubagents()
     const parent = this.requireParent(input.sessionId)
     if (!created) {
@@ -440,8 +456,6 @@ export class NodeAgentRunner implements NodeRunner {
         ...(input.signal ? { signal: input.signal } : {}),
       })
     }
-    // 每轮派发后刷新护栏上限与模型选择（节点级参数可按次覆盖；官方 selection 可变态）
-    this.deps.react.setLimit(childId, input.iterationLimit)
     this.attachModelSelection(childId, input)
       await this.attachPromptState(childId, input)
     return { childId, created }
@@ -486,6 +500,7 @@ export class NodeAgentRunner implements NodeRunner {
       sessionId: input.sessionId,
       flowId: input.flowId,
       node,
+      ...(input.mode ? { mode: input.mode } : {}),
     })
     const collabPrompt = String(input.collabPrompt ?? '').trim()
     // 角色 Prompt 实际注入文本（.md 路径设置时读取文件当前内容；未设置用内联文本）
@@ -523,6 +538,11 @@ export class NodeAgentRunner implements NodeRunner {
     }))
     this.nodeChildren.set(key, { childId: started.childId, signature })
     this.childIds.add(started.childId)
+    // 创建即开始推理（官方 startContinuable 语义）：软截停上限必须在 startContinuable
+    // 返回后的同步块内立即登记（startNodeTask 会再次刷新，幂等）。保证事件循环中任何
+    // pre-step 事件（宏任务）晚于登记发生；极端情况下官方在 resolve 前同步触发 pre-step
+    // 仍无法覆盖，但该窗口已缩到官方内部实现边界（startNodeTask 复用路径已另行前置）。
+    this.deps.react.setLimit(started.childId, input.iterationLimit)
     return { childId: started.childId, created: true }
   }
 

@@ -4,6 +4,12 @@
 // 组协作 Prompt 与工具组合作为嵌入式资源随包携带；角色模板导出 = 单模板 JSON。
 // 导入冲突按「名称」判定：重名返回 conflict（client 选择 rename / overwrite），
 // 模板/组合重名复用已有（id 重映射），id 冲突换新 id。
+//
+// embedded.groups 语义（架构文档 §6.4 对齐）：协作组信息（id/name/collabPrompt）
+// 已内联在工作流节点（kind=group）中随 bundle 往返，**不作为独立模板库重建**
+// （store 的 TemplateKind 仅 role/file/database 三类，client 左侧栏「其他」Tab 的
+// 协作组为静态入口而非模板列表）。故导入仅重建 roles/files/databases 与 combos，
+// 返回值 importedTemplates 记录这三类实际导入数量（不含 groups，避免虚报）。
 
 import type { FlowStore, Template, TemplateKind } from '../storage/flow-store.js'
 import type { BundleV2, DatabaseTemplate, FileTemplate, GroupTemplate, RoleTemplate, ToolCombo } from '../shared/types.js'
@@ -33,7 +39,8 @@ function groupsOf(flow: WorkflowDocument): GroupTemplate[] {
 /**
  * 嵌入模板入库（Bug 16）：角色/文件/数据库模板随 bundle 携带，导入时
  * 按「名称」判定冲突——重名复用已有（不覆盖），id 冲突换新 id 后创建。
- * 与工具组合（combos）的导入语义一致（架构文档 §6.4 embedded 逐字段）。
+ * 与工具组合（combos）的导入语义一致（架构文档 §6.4 embedded 逐字段；
+ * embedded.groups 不在此重建，见文件头部注释）。
  */
 async function importEmbeddedTemplates(
   store: FlowStore,
@@ -184,7 +191,8 @@ export async function importWorkflowBundle(
 
   // 嵌入式模板入库（Bug 16）：roles/files/databases 随 bundle 携带，导入时
   // 重建模板库（重名复用已有、id 冲突换新 id），保证导入后模板可继续拖拽复用。
-  await importEmbeddedTemplates(store, bundle.embedded)
+  // embedded.groups 随工作流节点内联保留、不在此重建（见文件头部注释）。
+  const importedCount = await importEmbeddedTemplates(store, bundle.embedded)
 
   if (mode === 'mode2') {
     const now = new Date().toISOString()
@@ -204,7 +212,7 @@ export async function importWorkflowBundle(
     if (existing && options.conflictMode === 'overwrite' && existing.id !== saved.id) {
       await store.deleteService(sessionId, existing.id)
     }
-    return { service: saved, importedGroups: (bundle.embedded?.groups ?? []).length }
+    return { service: saved, importedTemplates: importedCount }
   }
 
   const flow: WorkflowDocument = {
@@ -221,7 +229,7 @@ export async function importWorkflowBundle(
   if (existing && options.conflictMode === 'overwrite' && existing.id !== saved.id) {
     await store.deleteWorkflow(sessionId, existing.id)
   }
-  return { workflow: saved, importedGroups: (bundle.embedded?.groups ?? []).length }
+  return { workflow: saved, importedTemplates: importedCount }
 }
 
 /** 导出角色模板为单模板 JSON 字符串。 */

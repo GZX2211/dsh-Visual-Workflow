@@ -117,6 +117,16 @@ describe('sanitizeReadOnlySql 白名单', () => {
   it('列名含黑名单词不误伤（词边界）', () => {
     expect(sanitizeReadOnlySql('SELECT status FROM t WHERE name = \'update\' LIMIT 1')).toMatchObject({ ok: true })
   })
+
+  it('字符串字面量内分号不误判为多语句（先剥离字面量再查分号）', () => {
+    expect(sanitizeReadOnlySql('SELECT \'a;b\' AS x FROM t LIMIT 1')).toEqual({ ok: true, sql: 'SELECT \'a;b\' AS x FROM t LIMIT 1' })
+    expect(sanitizeReadOnlySql('SELECT \';\' FROM t LIMIT 1')).toMatchObject({ ok: true })
+  })
+
+  it('真实多语句仍被拒绝（字面量剥离不影响语句分隔判定）', () => {
+    expect(sanitizeReadOnlySql('SELECT 1 LIMIT 1; SELECT 2 LIMIT 1')).toMatchObject({ ok: false })
+    expect(sanitizeReadOnlySql('SELECT \'x\' FROM t LIMIT 1; DROP TABLE t')).toMatchObject({ ok: false })
+  })
 })
 
 // ---------------------------------------------------------------------------

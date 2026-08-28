@@ -72,11 +72,12 @@ describe('chunkText 分块', () => {
     expect(chunks[3].text).toBe('IJ')
   })
 
-  it('overlap ≥ chunkSize 时步长钳制为 1（防死循环）', () => {
-    const chunks = chunkText('abcdef', 3, 10)
-    expect(chunks.length).toBe(6)
-    expect(chunks[0].text).toBe('abc')
-    expect(chunks[1].text).toBe('bcd')
+  it('overlap ≥ chunkSize 抛 RangeError（fail-fast：拒绝步长 ≤ 0 的参数组合）', () => {
+    // 旧实现把步长钳为 1，生成数量接近文本长度的巨量块（长文本内存飙升）；
+    // 修复后直接抛错，让调用方在源头修正参数（护栏 fail-closed）
+    expect(() => chunkText('abcdef', 3, 10)).toThrow(RangeError)
+    expect(() => chunkText('abcdef', 3, 3)).toThrow(RangeError)
+    expect(() => chunkText('abcdef', 3, 100)).toThrow(/overlap.*必须小于.*chunkSize/)
   })
 
   it('默认参数：384 字符/重叠 128；1000 字符文本块数正确', () => {

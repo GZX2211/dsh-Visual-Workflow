@@ -11,6 +11,7 @@
 
 import { readFile, writeFile, copyFile, mkdir, rename } from 'node:fs/promises'
 import { join, basename, extname } from 'node:path'
+import { randomBytes } from 'node:crypto'
 
 /**
  * 受管文件名消毒：仅剔除路径分隔符与 Windows/会话危险字符，保留中文等
@@ -33,6 +34,23 @@ export function managedFilePath(dataDir: string, name: string): string {
 }
 
 /**
+ * 带重试的原子 rename（Windows 语义）：并发写同一受管文件时，多个 rename
+ * 同时替换同一目标可能触发 EPERM（MoveFileEx 替换竞争）。短重试让
+ * 「最后完成者胜」：失败方在下一次尝试时目标已被释放，最终二者都成功。
+ */
+async function renameWithRetry(from: string, to: string, attempts = 5): Promise<void> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      await rename(from, to)
+      return
+    } catch (error) {
+      if (attempt === attempts - 1) throw error
+      await new Promise((resolve) => setTimeout(resolve, 15))
+    }
+  }
+}
+
+/**
  * 受管拷贝：base64 内容或本地源文件 → data/files/<safeName>（原子发布）。
  * 返回受管相对路径（managedPath）与文件名。
  */
@@ -44,9 +62,11 @@ export async function copyIntoManagedFile(
   const target = managedFilePath(dataDir, fileName)
   await mkdir(join(dataDir, 'data', 'files'), { recursive: true })
   if (typeof input.base64 === 'string' && input.base64) {
-    const temporary = `${target}.${process.pid}.tmp`
+    // 临时名含 pid + 随机后缀：并发写同一受管文件（如快速连续保存同模板）时
+    // 各写各自独立临时文件，避免互相覆盖后 rename 源被删导致写入失败/内容交叉
+    const temporary = `${target}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`
     await writeFile(temporary, Buffer.from(input.base64, 'base64'))
-    await rename(temporary, target)
+    await renameWithRetry(temporary, target)
   } else if (typeof input.sourcePath === 'string' && input.sourcePath) {
     await copyFile(input.sourcePath, target)
   } else {

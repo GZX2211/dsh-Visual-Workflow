@@ -9,6 +9,7 @@ import { readFile, writeFile, mkdir, rename } from 'node:fs/promises'
 import { readdirSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
+import { randomBytes } from 'node:crypto'
 
 const MCP_CLIENT = '@deepseek-ai/dsh-mcp-client'
 const START = '# >>> dsh-visual-workflow'
@@ -304,7 +305,9 @@ async function writeRegion(nextRows: McpServerRow[], nextToggles: Array<[string,
   head = head.replace(/\[\]\s*$/, '')
   const region = renderRegion(nextRows, nextToggles) || '[]'
   const next = [head.trimEnd(), region, tail.replace(/^\s+/, '')].filter((part) => part !== '').join('\n') + '\n'
-  const temporary = `${patch}.${process.pid}.tmp`
+  // 临时名含 pid + 随机后缀：并发 upsert/remove/toggle（GUI 串行为主，但同一
+  // profile patch 的双写竞态理论上存在）时各写独立临时文件，rename 源互不干扰
+  const temporary = `${patch}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`
   await writeFile(temporary, next, 'utf8')
   await rename(temporary, patch)
 }

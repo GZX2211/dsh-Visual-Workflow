@@ -33,7 +33,10 @@ export function normalizeWhitespace(text: string): string {
  * 规则：
  *   - 空/空白文本 → 空数组；
  *   - 文本长度 ≤ chunkSize → 单块；
- *   - 步长 = chunkSize - overlap；overlap ≥ chunkSize 时步长钳制为 1（防死循环）；
+ *   - 步长 = chunkSize - overlap（overlap 必须 < chunkSize）；
+ *   - overlap ≥ chunkSize 为非法参数（步长 ≤ 0）：旧实现钳制步长为 1 会生成
+ *     数量接近文本长度的巨量块（长文本内存飙升），改为 fail-fast 抛 RangeError，
+ *     让调用方在源头修正参数（护栏 fail-closed，与 SQL 白名单同姿态）；
  *   - 末块不足 chunkSize 也保留（内容不丢失）。
  */
 export function chunkText(
@@ -44,7 +47,11 @@ export function chunkText(
   const normalized = normalizeWhitespace(text)
   if (!normalized) return []
   const size = Math.max(1, Math.floor(chunkSize))
-  const step = Math.max(1, size - Math.max(0, Math.floor(overlap)))
+  const overlapClamped = Math.max(0, Math.floor(overlap))
+  if (overlapClamped >= size) {
+    throw new RangeError(`chunkText 参数非法：overlap（${overlapClamped}）必须小于 chunkSize（${size}）`)
+  }
+  const step = Math.max(1, size - overlapClamped)
   if (normalized.length <= size) return [{ index: 0, text: normalized }]
   const chunks: TextChunk[] = []
   let index = 0

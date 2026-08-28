@@ -97,6 +97,12 @@ export interface NodeRunner {
 export interface NodeStartInput {
   sessionId: string
   flowId: string
+  /**
+   * 运行模式（缺省按模式一处理）。模式二的服务文档存储在 services/ 目录，
+   * 子代理引擎须据此分派 db-in 连线检测的读取源（getServiceAsFlow），
+   * 否则模式二下 wf_db_query 永不注入（需求 §4.4.3 规则 5）。
+   */
+  mode?: 'mode1' | 'mode2'
   /** 已解析为角色主节点的节点（虚拟节点在进入本缝前解析）。 */
   node: GraphNode
   /** 任务块（首条 prompt / followup 内容）。 */
@@ -794,10 +800,14 @@ export class OrchestratorRuntime {
       throw new WfError(`流程定义文件写入失败：${messageOf(error)}`, 'WF_DEF_WRITE_FAILED')
     }
 
-    // 断点继续指令：isResume 动态态注入末段（已 ok 不重跑；从 resumeFromNodeId 继续）
+    // 断点继续指令：isResume 动态态注入末段（已 ok 不重跑；从 resumeFromNodeId 继续）。
+    // 起点必须取自 buildResumedSnapshot 计算出的新快照（resume.ts 已推断：暂停断点用
+    // prev.resumeFromNodeId，interrupted 中断无暂停点时取首个未完成节点）——若直接用
+    // prev.resumeFromNodeId，宿主重启中断的恢复会因 undefined 注入「（未指定）」，
+    // 父代理无从定位起点、可能从头重调度已 ok 节点（违反 §4.7 规则 6 已执行节点不重跑）。
     const directive = buildOrchestrationDirective(
       directiveParams(flow, defPath, prev.mode, {
-        resume: { resumeFromNodeId: prev.resumeFromNodeId, resumedFromRunId: prev.id },
+        resume: { resumeFromNodeId: snapshot.resumeFromNodeId, resumedFromRunId: prev.id },
       }),
     )
     try {
@@ -962,6 +972,7 @@ export class OrchestratorRuntime {
       const { childId } = await this.deps.runner.startNodeTask({
         sessionId: run.snapshot.sessionId,
         flowId: run.snapshot.flowId,
+        mode: run.snapshot.mode,
         node,
         blocks,
         signal: run.controller.signal,
@@ -1591,8 +1602,22 @@ function buildNodeBlocks(input: {
           source: src.data.label ?? src.id,
           content: truncateText(src.data.content, input.documentTextLimit),
         })
-      } else if (src.data.managedPath) {
-        filePaths.push(src.data.managedPath)
+      } else {
+        // 受管文件路径索引（需求 §4.2.4.1：文本直通，非文本文件注入路径索引）：
+        // 单选 managedPath 与多选 files 列表都要注入——多选配置下 managedPath 通常
+        // 为空、路径存在 files 数组中，只认单字段会导致下游收不到任何文件索引（Bug 21）。
+        const seen = new Set(filePaths)
+        if (src.data.managedPath) {
+          filePaths.push(src.data.managedPath)
+          seen.add(src.data.managedPath)
+        }
+        for (const item of src.data.files ?? []) {
+          const p = String(item?.managedPath ?? '').trim()
+          if (p && !seen.has(p)) {
+            filePaths.push(p)
+            seen.add(p)
+          }
+        }
       }
       continue
     }
