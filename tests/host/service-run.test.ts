@@ -52,7 +52,6 @@ function parentNode(id: string): RoleNode {
       inputSchema: '',
       outputSchema: '',
       groupId: null,
-      proxySourceId: null,
     },
   }
 }
@@ -73,7 +72,6 @@ function agent(id: string, label: string): RoleNode {
       inputSchema: '',
       outputSchema: '',
       groupId: null,
-      proxySourceId: null,
     },
   }
 }

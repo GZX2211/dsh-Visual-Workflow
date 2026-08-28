@@ -111,7 +111,6 @@ function agent(id: string, label: string, kind: 'agent' | 'parent' = 'agent'): R
       inputSchema: '',
       outputSchema: '',
       groupId: null,
-      proxySourceId: null,
     },
   }
 }

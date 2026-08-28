@@ -565,7 +565,6 @@ export class FlowStore {
           injectSystemPrompt: r.injectSystemPrompt !== false,
           promptFilePath: r.promptFilePath ?? undefined,
           groupId: null,
-          proxySourceId: null,
         },
       }
     }

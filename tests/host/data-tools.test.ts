@@ -322,7 +322,6 @@ function role(id: string, kind: 'parent' | 'agent', label: string): RoleNode {
       inputSchema: '',
       outputSchema: '',
       groupId: null,
-      proxySourceId: null,
     },
   }
 }

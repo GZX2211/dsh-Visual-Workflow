@@ -82,8 +82,6 @@ export interface RoleNode extends BaseNode {
     promptFilePath?: string
     /** 所属协作组 id（组内成员节点字段，需求文档 §4.2.5.2）。 */
     groupId?: string | null
-    /** 虚拟节点引用主节点 id：仅 kind='proxy' 的虚拟节点携带（需求文档 §4.2.3.2 规则 4/7）。 */
-    proxySourceId?: string | null
   }
 }
 
@@ -152,7 +150,7 @@ export interface GroupNode extends BaseNode {
   data: {
     /** 组名称（左侧栏/右侧属性栏展示）。 */
     label: string
-    /** 协作 Prompt：追加注入到组内所有成员 System Prompt 末尾（需求文档 §4.2.5.2 规则 2）。 */
+    /** 协作 Prompt：追加到组内所有成员**首条用户消息（任务块）末尾**，不注入系统提示词；无论文本是否为空都默认列出组内全部成员 ID + 角色名（需求文档 §4.2.5.2 规则 2；架构文档 §13.1 第 4 条）。 */
     collabPrompt: string
     /** 组内成员节点 id 列表（成员为角色节点，并行启动，规则 3）。 */
     memberIds: string[]
@@ -165,9 +163,9 @@ export interface GroupNode extends BaseNode {
  * 虚拟节点（ProxyNode）：主节点的别名引用，用于拓扑复用。
  * 无独立配置——运行时 wf_run_node 指向虚拟节点时解析为主节点 key，与主节点共享
  * 同一子代理执行实例与上下文（需求文档 §4.2.3.2 规则 4/6/7）。
- * 架构文档 §4.2 代码块中未单列 ProxyNode，此处为补充定义（数据模型将 proxySourceId
- * 承载于 RoleNode.data 以承载 role 型主节点的引用了；本判别联合以 kind='proxy'
- * 显式标识虚拟节点，避免与被引用的主节点 RoleNode 混淆）。
+ * 引用主节点 id 由**节点接口顶层**的 proxySourceId 字段承载（非 data 内）；
+ * 架构文档 §4.2 代码块未单列 ProxyNode，此处为补充定义，并以 kind='proxy'
+ * 显式标识虚拟节点，避免与被引用的主节点 RoleNode 混淆。
  */
 export interface ProxyNode extends BaseNode {
   kind: 'proxy'

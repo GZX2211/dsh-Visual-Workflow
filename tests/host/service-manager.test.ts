@@ -43,7 +43,7 @@ function parent(id: string): RoleNode {
     id,
     kind: 'parent',
     position: { x: 0, y: 0 },
-    data: { label: '父代理', systemPrompt: '服务角色', provider: 'deepseek', model: 'deepseek-chat', presetId: null, retryLimit: 3, reactLimit: null, inputSchema: '', outputSchema: '', groupId: null, proxySourceId: null },
+    data: { label: '父代理', systemPrompt: '服务角色', provider: 'deepseek', model: 'deepseek-chat', presetId: null, retryLimit: 3, reactLimit: null, inputSchema: '', outputSchema: '', groupId: null },
   }
 }
 
@@ -52,7 +52,7 @@ function role(id: string): RoleNode {
     id,
     kind: 'agent',
     position: { x: 0, y: 0 },
-    data: { label: '子任务', systemPrompt: '任务', provider: 'deepseek', model: 'deepseek-chat', presetId: null, retryLimit: 3, reactLimit: null, inputSchema: '', outputSchema: '', groupId: null, proxySourceId: null },
+    data: { label: '子任务', systemPrompt: '任务', provider: 'deepseek', model: 'deepseek-chat', presetId: null, retryLimit: 3, reactLimit: null, inputSchema: '', outputSchema: '', groupId: null },
   }
 }
 

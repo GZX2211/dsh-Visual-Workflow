@@ -131,7 +131,6 @@ export function templateToNodeData(
       injectSystemPrompt: role.injectSystemPrompt !== false,
       promptFilePath: String(role.promptFilePath ?? '') || undefined,
       groupId: null,
-      proxySourceId: null,
     }
   }
   if (kind === 'file') {

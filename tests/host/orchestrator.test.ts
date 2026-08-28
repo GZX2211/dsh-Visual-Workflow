@@ -73,7 +73,6 @@ function agent(id: string, label: string, extra: Partial<RoleNode['data']> = {})
       inputSchema: '',
       outputSchema: '',
       groupId: null,
-      proxySourceId: null,
       ...extra,
     },
   }
@@ -1244,7 +1243,7 @@ describe('currentResolvedFlow 双向同步（§4.7 规则 1 ①）', () => {
     const h = await makeHarness()
     const parentNode: RoleNode = {
       id: 'n-p', kind: 'parent', position: { x: 0, y: 0 },
-      data: { label: '父代理', systemPrompt: '', provider: '', model: '', presetId: null, retryLimit: 3, reactLimit: null, inputSchema: '', outputSchema: '', groupId: null, proxySourceId: null },
+      data: { label: '父代理', systemPrompt: '', provider: '', model: '', presetId: null, retryLimit: 3, reactLimit: null, inputSchema: '', outputSchema: '', groupId: null },
     }
     const service = {
       id: 'svc-2',

@@ -131,7 +131,6 @@ export function newRoleNode(kind: 'parent' | 'agent', label: string, position = 
       injectSystemPrompt: true,
       promptFilePath: undefined,
       groupId: null,
-      proxySourceId: null,
     },
   }
 }

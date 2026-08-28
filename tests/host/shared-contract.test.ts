@@ -50,6 +50,7 @@ import type {
   NodeOutputRecord,
   RoleTemplate,
   RunSnapshot,
+  RunStatus,
   ServiceState,
   ToolCombo,
   UserIdMap,
@@ -192,6 +193,16 @@ describe('T-014 graph-model 纯类型形态', () => {
     // 虚拟节点 proxySourceId 引用主节点（ProxyNode 无独立 data 配置）。
     expect(_minProxy.proxySourceId).toBe('n2')
   })
+
+  it('RoleNode.data 不含冗余 proxySourceId（虚拟节点引用仅由 ProxyNode 顶层承载，Bug 2）', () => {
+    // 编译期守卫：若 RoleNode.data 再次混入 proxySourceId，ValidRoleData 收缩为 false，
+    // 赋值即编译失败（typecheck 回归），防止冗余字段回潮误导实现。
+    type ValidRoleData = 'proxySourceId' extends keyof RoleNode['data'] ? false : true
+    const guard: ValidRoleData = true
+    expect(guard).toBe(true)
+    // 虚拟节点顶层 proxySourceId 为唯一承载处（运行期人工确认）。
+    expect(_minProxy.proxySourceId).toBe('n2')
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -297,10 +308,14 @@ describe('T-014 protocol.ts 工具名常量与可见性', () => {
 // protocol.ts 状态/模式枚举与颜色变量
 // ---------------------------------------------------------------------------
 describe('T-014 protocol.ts 状态/模式/颜色常量', () => {
-  it('RUN_STATUSES 七态齐全（§4.3 状态机）', () => {
+  it('RUN_STATUSES 六态齐全且与 RunStatus 类型一致（§4.3 持久化状态机 / §6.1）', () => {
     expect(RUN_STATUSES).toEqual([
-      'pending', 'running', 'paused', 'completed', 'failed', 'stopped', 'interrupted',
+      'running', 'paused', 'completed', 'failed', 'stopped', 'interrupted',
     ])
+    // 编译期守卫：RUN_STATUSES 全元素必须属于 RunStatus——若协议层混入非持久化
+    // 状态（如 pending）或类型层漂移，typecheck 即失败，防止两端再次不一致。
+    const _runStatusesAll: RunStatus[] = [...RUN_STATUSES]
+    expect(_runStatusesAll.length).toBe(RUN_STATUSES.length)
   })
 
   it('NODE_STATUSES 六态齐全（§6.1 nodes[].status）', () => {

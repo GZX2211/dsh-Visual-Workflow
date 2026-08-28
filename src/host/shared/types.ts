@@ -217,7 +217,9 @@ export interface DatabaseTemplate {
 /**
  * 协作组模板（架构文档 §6.4 BundleV2.embedded.groups 引用）。
  * 架构文档 §6.3 未单独列出 GroupTemplate，此接口为架构文档 §6.4 嵌入式 groups
- * 的约束形状；协作 Prompt 追加注入组内成员 System Prompt 末尾（需求文档 §4.2.5.2 规则 2）。
+ * 的约束形状；协作 Prompt 追加到组内成员**首条用户消息（任务块）末尾**、不注入
+ * 系统提示词，且无论文本是否为空都默认列出组内全部成员 ID + 角色名
+ * （需求文档 §4.2.5.2 规则 2；架构文档 §13.1 第 4 条）。
  */
 export interface GroupTemplate {
   /** 模板稳定标识。 */

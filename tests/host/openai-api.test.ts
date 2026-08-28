@@ -290,7 +290,7 @@ describe('OpenAiApi.models', () => {
     const h = makeHarness()
     h.store.service = {
       id: 'svc-1', sessionId: 's', name: '服务', description: '', revision: 1,
-      nodes: [{ id: 'n-parent', kind: 'parent', position: { x: 0, y: 0 }, data: { label: '父', systemPrompt: '', provider: 'deepseek', model: 'deepseek-chat', presetId: null, retryLimit: 3, reactLimit: null, inputSchema: '', outputSchema: '', groupId: null, proxySourceId: null } }],
+      nodes: [{ id: 'n-parent', kind: 'parent', position: { x: 0, y: 0 }, data: { label: '父', systemPrompt: '', provider: 'deepseek', model: 'deepseek-chat', presetId: null, retryLimit: 3, reactLimit: null, inputSchema: '', outputSchema: '', groupId: null } }],
       lines: [], createdAt: '', updatedAt: '', status: 'running',
     } as ServiceState
     const models = await h.api.models()

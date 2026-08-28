@@ -181,12 +181,15 @@ export const TOOL_VISIBILITY = {
 // ---------------------------------------------------------------------------
 
 /**
- * 运行状态枚举（RUN_STATUSES）：与架构文档 §4.3 状态机 / §6.1 RunSnapshot.status 一致。
- * pending -> running <-> paused -> completed / failed / stopped；宿主重启后
+ * 运行状态枚举（RUN_STATUSES）：与 types.ts 的 RunStatus / 架构文档 §6.1
+ * RunSnapshot.status 逐字一致（六态）。
+ * running <-> paused -> completed / failed / stopped；宿主重启后
  * running/paused -> interrupted（可恢复）（架构文档 §4.3）。
+ * 注意：pending 仅为**节点级**待执行状态（NODE_STATUSES，§6.1 nodes[].status），
+ * 不作为 run 级持久化状态——run 快照创建即进入 running，不存在「排队/待启动」
+ * 的持久化中间态（需求文档 §4.7 规则 3 断点数据字段同样不含 pending）。
  */
 export const RUN_STATUSES = [
-  'pending', // 排队/待启动（状态机起点）
   'running', // 运行中
   'paused', // 已暂停（暂停门，保留锁）
   'completed', // 已完成

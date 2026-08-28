@@ -53,7 +53,6 @@ function agentNode(id: string, extra: Partial<RoleNode['data']> = {}): RoleNode 
       inputSchema: '',
       outputSchema: '',
       groupId: null,
-      proxySourceId: null,
       ...extra,
     },
   }
