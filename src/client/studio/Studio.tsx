@@ -12,19 +12,22 @@ import { useStudioState } from '../hooks/useStudioState.js'
 import { useRemote, type RemoteFace } from '../hooks/useRemote.js'
 import { useToast } from '../hooks/useToast.js'
 import { useWorkflows } from '../hooks/useWorkflows.js'
+import { useFlowTemplates } from '../hooks/useFlowTemplates.js'
 import { useTemplates } from '../hooks/useTemplates.js'
 import { useSelection } from '../hooks/useSelection.js'
 import { useGraphHistory } from '../hooks/useGraphHistory.js'
 import { useUnsavedGuard } from '../hooks/useUnsavedGuard.js'
 import { useRunControl } from '../hooks/useRunControl.js'
 import { useRunPolling } from '../hooks/useRunPolling.js'
+import { useFlowFileSync } from '../hooks/useFlowFileSync.js'
 import { useServiceControl } from '../hooks/useServiceControl.js'
 import { useModeSwitch } from '../hooks/useModeSwitch.js'
 import { usePanelLayout } from '../hooks/usePanelLayout.js'
 import {
-  currentFlowOf, currentServiceOf, editorDataOf, isRunningOf,
+  currentFlowOf, currentServiceOf, currentFlowTemplateOf, editorDataOf, isRunningOf,
   type CanvasNode, type CanvasEdge, type LibSelKind, type LibTab,
 } from './studio-state.js'
+import type { WorkflowDocument } from '../../host/shared/graph-model.js'
 import { EP } from '../lib/remote.js'
 import { GraphCanvas, type CanvasApi } from '../components/canvas/GraphCanvas.js'
 import { groupSurfaceUnderPoint } from '../components/canvas/geometry.js'
@@ -36,7 +39,7 @@ import { RunHistory } from '../components/run-history/RunHistory.js'
 import { ServiceConsole } from '../components/service-console/ServiceConsole.js'
 import { ComboManager } from '../components/combo-manager/ComboManager.js'
 import {
-  connectionProblem, connectionProblemMessage, consolidateGroups, dropNodeFlowLines, flowToCanvasLines, layoutNodes, templateToNodeData,
+  connectionProblem, connectionProblemMessage, consolidateGroups, dropNodeFlowLines, flowToCanvasLines, layoutNodes, runningNodeIds, templateToNodeData,
   joinNodeToGroup, runStatusMap, stageTemplateKinds, type CanvasLine,
 } from '../lib/graph-model.js'
 import { readFileAsText, readFileAsBase64, download } from '../lib/files.js'
@@ -60,6 +63,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
   const { state, dispatch } = useStudioState(sessionId)
   const { toast, toastError } = useToast(dispatch)
   const workflows = useWorkflows(dispatch, remote, state.sessionId)
+  const flowTemplates = useFlowTemplates(dispatch, remote)
   const templates = useTemplates(dispatch, remote)
   const selection = useSelection(dispatch)
   const history = useGraphHistory(state, dispatch)
@@ -73,16 +77,19 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
   const canvasApiRef = useRef<CanvasApi | null>(null)
   const canvasShellRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<{ payload: DragPayload; startX: number; startY: number; preview: { x: number; y: number } | null } | null>(null)
-  const importInputRef = useRef<HTMLInputElement | null>(null)
   const libraryImportRef = useRef<HTMLInputElement | null>(null)
   const personaInputRef = useRef<HTMLInputElement | null>(null)
   const groupMdInputRef = useRef<HTMLInputElement | null>(null)
 
   const currentFlow = currentFlowOf(state)
   const currentService = currentServiceOf(state)
+  const currentFlowTemplate = currentFlowTemplateOf(state)
   const editorData = editorDataOf(state)
   const running = isRunningOf(state)
   const runStatusByNode = useMemo(() => runStatusMap(state.run.snapshot), [state.run.snapshot])
+  // 运行中双向同步（需求 §4.5.8）：当前运行节点高亮 = 快照中 status=running 的节点
+  // id 列表（GraphCanvas 渲染 is-highlighted；防回环：只写视图，不进保存/撤销历史）。
+  const highlightedNodeIds = useMemo(() => runningNodeIds(state.run.snapshot), [state.run.snapshot])
 
   // ---------- 初始化加载 ----------
   useEffect(() => {
@@ -94,6 +101,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
         try {
           await Promise.all([
             workflows.loadWorkflows(),
+            flowTemplates.loadFlowTemplates(),
             serviceControl.loadServices(state.sessionId),
           ])
         } catch (error) {
@@ -143,6 +151,34 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
         dispatch({ type: 'COMBOS_LOADED', items: Array.isArray(combos) ? combos : [] })
       }
       await enums()
+
+      // 「进入工作台自动选中实例」（用户新增需求）：每次点击悬浮窗进入时（浮窗关闭
+      // 即卸载 Studio、重开重新 mount → boot 重跑），若实例列表非空则默认选中并显示
+      // 在画布——优先正在运行的实例（activeRuns 查询，running 优先于 paused），否则
+      // 列表第一个；实例列表为空则保持空白画布。
+      if (cancelled || !state.sessionId) return
+      try {
+        const activeRuns = await remote.call(EP.EP_ACTIVE_RUNS, { sessionId: state.sessionId }) as Array<{ flowId: string; status: string }> | null
+        // 按当前模式选择目标实例列表：mode1=工作流实例、mode2=服务实例
+        if (state.mode === 'mode1') {
+          const flows = state.workflows
+          if (flows.length === 0) return // 空列表保持空白画布
+          const targetId = pickInitialInstance(flows.map((f) => ({ id: f.id, name: f.name })), activeRuns ?? [])
+          if (targetId) openFlowById(targetId)
+        } else {
+          const services = state.services
+          if (services.length === 0) return
+          const targetId = pickInitialInstance(services.map((s) => ({ id: s.id, name: s.name })), activeRuns ?? [])
+          if (targetId) openServiceById(targetId)
+        }
+      } catch {
+        // 活跃 run 查询失败不阻断自动选中（回退到列表第一个实例）
+        if (state.mode === 'mode1' && state.workflows.length > 0) {
+          openFlowById(state.workflows[0].id)
+        } else if (state.mode === 'mode2' && state.services.length > 0) {
+          openServiceById(state.services[0].id)
+        }
+      }
     }
     void boot()
     return () => {
@@ -159,6 +195,9 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
   const notify = useCallback((kind: 'info' | 'success' | 'error', text: string) => {
     toast(kind, text)
   }, [toast])
+
+  // 双向同步②「流程文件→画布」：外部修改实例文件后轮询检测并响应（自动刷新/提示）
+  useFlowFileSync(state, dispatch, remote, useCallback((message: string) => notify('error', message), [notify]))
 
   // ---------- 模式名映射 ----------
   const modeName = useCallback((presetId: string | null | undefined): string => {
@@ -191,6 +230,22 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
         return null
       }
     }
+    if (state.currentKind === 'flowTemplate') {
+      // 模板态：属性栏「保存」= 保存模板全部内容（覆盖模板库，改模板不改实例）
+      const template = currentFlowTemplateOf(state)
+      if (!template) return null
+      try {
+        const saved = await flowTemplates.saveFlowTemplate(template, state.canvas.nodes, state.canvas.edges)
+        if (saved) {
+          dispatch({ type: 'MARK_SAVED' })
+          notify('success', t.toastSaved)
+        }
+        return saved
+      } catch (error) {
+        toastError(error)
+        return null
+      }
+    }
     if (state.currentKind === 'service') {
       const service = currentServiceOf(state)
       if (!service) return null
@@ -207,7 +262,68 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
       }
     }
     return null
-  }, [dispatch, notify, state, toastError, workflows, serviceControl, t.toastSaved])
+  }, [dispatch, notify, state, toastError, workflows, flowTemplates, serviceControl, t.toastSaved])
+
+  /**
+   * 创建实例（图2 交互改造核心）：把当前画布内容保存为「当前会话的实例」。
+   *  - 模板态：以模板内容创建新实例（模板不变；实例名 = 模板名，重名追加序号），
+   *    保存成功后切到实例态（画布绑定新实例，左栏新实例卡高亮）。
+   *  - 实例态：等价于保存实例（名称动态为「保存实例/保存服务」）。
+   */
+  const createInstanceFromCanvas = useCallback(async (): Promise<WorkflowDocument | null> => {
+    // 实例态直接走保存（不变更 id/名称；保存结果可能是服务实例，忽略类型细分）
+    if (state.currentKind === 'workflow' || state.currentKind === 'service') {
+      const saved = await saveCanvas()
+      // 模板→实例仅用于模板态；实例态下返回保存结果（类型上仅工作流文档是运行目标）
+      return (state.currentKind === 'workflow' ? saved as WorkflowDocument | null : null)
+    }
+    if (state.currentKind !== 'flowTemplate') return null
+    const template = currentFlowTemplateOf(state)
+    if (!template) return null
+    try {
+      const draft = workflows.instantiateFromTemplate(template)
+      // 名称去重：模板名 + 序号（与现有实例名称比较）
+      const existing = state.workflows.map((item) => item.name)
+      let name = draft.name
+      let index = 2
+      while (existing.includes(name)) {
+        name = `${draft.name} (${index})`
+        index += 1
+      }
+      draft.name = name
+      const saved = await workflows.saveWorkflow(draft, state.canvas.nodes, state.canvas.edges)
+      if (saved) {
+        dispatch({ type: 'MARK_SAVED' })
+        workflows.openFlow(saved)
+        notify('success', t.toastCreatedInstance)
+      }
+      return saved
+    } catch (error) {
+      toastError(error)
+      return null
+    }
+  }, [dispatch, notify, state, toastError, workflows, flowTemplates, saveCanvas, t.toastCreatedInstance])
+
+  /** 实例 → 模板（另存为模板）：当前实例内容复制为全局共享的工作流模板。 */
+  const saveCurrentAsFlowTemplate = useCallback(async (): Promise<void> => {
+    const source = state.currentKind === 'workflow'
+      ? currentFlowOf(state)
+      : state.currentKind === 'service'
+        ? currentServiceOf(state)
+        : null
+    if (!source) return
+    try {
+      const template = flowTemplates.createFlowTemplateDraft(state.mode)
+      template.name = source.name
+      template.description = source.description ?? ''
+      template.nodes = JSON.parse(JSON.stringify(state.canvas.nodes)) as never
+      template.lines = JSON.parse(JSON.stringify(state.canvas.edges)) as never
+      const saved = await flowTemplates.saveFlowTemplate(template, state.canvas.nodes, state.canvas.edges)
+      if (saved) notify('success', t.toastSavedAsTemplate)
+    } catch (error) {
+      toastError(error)
+    }
+  }, [dispatch, flowTemplates, notify, state, t.toastSavedAsTemplate, toastError])
 
   const openFlowById = useCallback((id: string) => {
     const flow = state.workflows.find((item) => item.id === id)
@@ -221,7 +337,13 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
     dispatch({ type: 'OPEN_SERVICE', service })
   }, [dispatch, state.services])
 
-  /** 打开工作流/服务（未保存守卫后切换）。 */
+  const openFlowTemplateById = useCallback((id: string) => {
+    const template = state.flowTemplates.find((item) => item.id === id)
+    if (!template) return
+    flowTemplates.openFlowTemplate(template)
+  }, [state.flowTemplates, flowTemplates])
+
+  /** 打开工作流/服务/模板（未保存守卫后切换；模板只在画布中显示、可编辑保存回模板库）。 */
   const selectWorkflow = useCallback((id: string) => {
     if (state.mode === 'mode1') {
       guard.guard(() => openFlowById(id))
@@ -230,16 +352,23 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
     }
   }, [guard, openFlowById, openServiceById, state.mode])
 
+  /** 打开工作流模板（未保存守卫后切换；模板态：编辑模板 or 创建实例）。 */
+  const selectFlowTemplate = useCallback((id: string) => {
+    guard.guard(() => openFlowTemplateById(id))
+  }, [guard, openFlowTemplateById])
+
   // ---------- 新建 ----------
-  const createNew = useCallback((tab: LibTab, section?: 'file' | 'database') => {
+  const createNew = useCallback((tab: LibTab, section?: 'file' | 'database' | 'flowTemplate') => {
     if (tab === 'workflow') {
-      if (state.mode === 'mode2') {
-        serviceControl.createServiceDraft(t.newWorkflow, state.sessionId)
+      if (section === 'flowTemplate') {
+        // 图2 交互改造：+ 号新建「工作流模板」（空白模板，编辑后保存回模板库；
+        // 实例只能从模板拖入画布「创建实例」后产生——实例列表无 + 号）。
+        const draft = flowTemplates.createFlowTemplateDraft(state.mode)
+        flowTemplates.openFlowTemplate(draft)
         notify('info', t.newWorkflow)
         return
       }
-      const draft = workflows.createWorkflowDraft(t.newWorkflow)
-      workflows.openFlow(draft)
+      // 兼容路径：非模板区 + 号（不再提供「新建实例」；提示用户从模板创建）
       notify('info', t.newWorkflow)
       return
     }
@@ -259,7 +388,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
       notify('info', t.newTemplate)
       return
     }
-  }, [notify, selection, serviceControl, state.mode, state.sessionId, t.newTemplate, t.newWorkflow, templates, workflows])
+  }, [notify, selection, serviceControl, state.mode, state.sessionId, t.newTemplate, t.newWorkflow, flowTemplates, templates, workflows])
 
   // ---------- 画布操作 ----------
   const rememberGraph = useCallback(() => {
@@ -589,6 +718,10 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
       selectWorkflow(id)
       return
     }
+    if (kind === 'workflowTemplate') {
+      selectFlowTemplate(id)
+      return
+    }
     selection.selectLib(kind, id)
     if (kind === 'parentTemplate') {
       // 父代理模板点击：右侧属性栏无显示（§4.5.5）
@@ -602,13 +735,13 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
     const editorKindMap: Record<string, 'role' | 'file' | 'database'> = { role: 'role', file: 'file', database: 'database' }
     const editorKind = editorKindMap[kind]
     if (editorKind) selection.selectEditor({ source: 'template', kind: editorKind, id })
-  }, [selectWorkflow, selection])
+  }, [selectWorkflow, selectFlowTemplate, selection])
 
   // ---------- 编辑器 patch ----------
   const patchEditor = useCallback((patch: Record<string, unknown>) => {
     const editor = state.editor
     if (!editor) return
-    if (editor.source === 'workflow' || editor.source === 'service') {
+    if (editor.source === 'workflow' || editor.source === 'service' || editor.source === 'flowTemplate') {
       dispatch({ type: 'DOC_PATCH', patch: { name: patch.name as string | undefined, description: patch.description as string | undefined } })
       return
     }
@@ -641,6 +774,11 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
     const editor = state.editor
     if (!editor) return
     if (editor.source === 'workflow' || editor.source === 'service') {
+      await saveCanvas()
+      return
+    }
+    if (editor.source === 'flowTemplate') {
+      // 模板态：属性栏「保存」= 保存模板全部内容（与画布上方「创建实例」职责二分）
       await saveCanvas()
       return
     }
@@ -725,6 +863,35 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
       })
       return
     }
+    if (editor.source === 'flowTemplate') {
+      const template = state.flowTemplates.find((item) => item.id === editor.id)
+      if (!template) return
+      if ((template as { _draft?: boolean })._draft === true) {
+        dispatch({ type: 'FLOW_TEMPLATE_REMOVED', id: template.id })
+        dispatch({ type: 'CLEAR_CANVAS' })
+        dispatch({ type: 'CLEAR_SELECTION' })
+        notify('info', t.toastDeleted)
+        return
+      }
+      dispatch({
+        type: 'CONFIRM_SET',
+        confirm: {
+          kind: 'confirmText',
+          title: t.deleteFlow,
+          message: `${t.confirmDelete}（${template.name}）`,
+          onConfirm: () => {
+            void flowTemplates.deleteFlowTemplate(template.id).then(() => {
+              dispatch({ type: 'CLEAR_CANVAS' })
+              notify('info', t.toastDeleted)
+            }).catch((error) => {
+              toastError(error)
+              dispatch({ type: 'CONFIRM_SET', confirm: null })
+            })
+          },
+        },
+      })
+      return
+    }
     if (editor.source === 'template') {
       const template = state.templates[editor.kind].find((item) => item.id === editor.id)
       if (!template) return
@@ -761,7 +928,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
     if (editor.source === 'edge') {
       removeLine(editor.id)
     }
-  }, [dispatch, notify, removeLine, removeSelected, state.editor, state.sessionId, state.templates, t.confirmDelete, t.deleteFlow, t.deleteTemplateMessage, t.deleteTemplateTitle, t.toastDeleted, templates, toastError, workflows])
+  }, [dispatch, notify, removeLine, removeSelected, state.editor, state.sessionId, state.templates, state.flowTemplates, t.confirmDelete, t.deleteFlow, t.deleteTemplateMessage, t.deleteTemplateTitle, t.toastDeleted, templates, flowTemplates, toastError, workflows])
 
   // ---------- 虚拟节点（复制） ----------
   const copyToProxy = useCallback(() => {
@@ -811,6 +978,26 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
   // ---------- 运行（模式一） ----------
   const startRun = useCallback(async () => {
     if (state.mode !== 'mode1') return
+    // 模板态：运行前自动「创建实例」再运行（用户裁决 q4：实例名 = 模板名 + 序号，
+    // 零打断；模板本身不变）。
+    if (state.currentKind === 'flowTemplate') {
+      const created = await createInstanceFromCanvas()
+      if (!created) return
+      // 创建成功后画布已切到实例态，直接运行该实例（无需再次读取 state）
+      const hasStart = state.canvas.nodes.some((node) => node.kind === 'start')
+      const hasEnd = state.canvas.nodes.some((node) => node.kind === 'end')
+      if (!hasStart || !hasEnd) {
+        notify('error', t.needStartAndEnd)
+        return
+      }
+      try {
+        const runId = await runControl.startRun(state.sessionId, created.id)
+        if (runId) notify('success', t.toastRunning)
+      } catch (error) {
+        toastError(error)
+      }
+      return
+    }
     const flow = currentFlowOf(state)
     if (!flow) return
     const hasStart = state.canvas.nodes.some((node) => node.kind === 'start')
@@ -827,7 +1014,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
     } catch (error) {
       toastError(error)
     }
-  }, [notify, runControl, saveCanvas, state.canvas.nodes, state.mode, state.sessionId, t.needStartAndEnd, t.toastRunning, toastError])
+  }, [notify, runControl, saveCanvas, createInstanceFromCanvas, state.canvas.nodes, state.mode, state.sessionId, t.needStartAndEnd, t.toastRunning, toastError])
 
   const stopRun = useCallback(async () => {
     if (!state.run.runId) return
@@ -871,6 +1058,32 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
   const serviceRunning = currentService?.status === 'running'
 
   const startService = useCallback(async () => {
+    // 模板态：运行前自动「创建服务实例」再启动（与模式一模板运行语义一致）
+    if (state.currentKind === 'flowTemplate') {
+      const template = currentFlowTemplateOf(state)
+      if (!template) return
+      const hasInput = state.canvas.nodes.some((node) => node.kind === 'start')
+      const hasOutput = state.canvas.nodes.some((node) => node.kind === 'end')
+      const hasParent = state.canvas.nodes.some((node) => node.kind === 'parent')
+      if (!hasInput || !hasOutput) {
+        notify('error', t.needStartAndEnd)
+        return
+      }
+      if (!hasParent) {
+        notify('error', t.needParentForService)
+        return
+      }
+      const draft = serviceControl.instantiateFromTemplate(template, state.sessionId)
+      const saved = await serviceControl.saveService(draft, state.canvas.nodes, state.canvas.edges)
+      if (!saved) return
+      try {
+        await serviceControl.startService(saved.id, saved.sessionId)
+        notify('success', t.toastServiceStarted)
+      } catch (error) {
+        toastError(error)
+      }
+      return
+    }
     const service = currentServiceOf(state)
     if (!service) return
     const hasInput = state.canvas.nodes.some((node) => node.kind === 'start')
@@ -979,7 +1192,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
         notify('success', t.toastImported)
         return
       }
-      const result = await remote.call(EP.EP_IMPORT_WORKFLOW, { sessionId: state.sessionId, json }) as { conflict?: boolean; existingName?: string; workflow?: unknown }
+      const result = await remote.call(EP.EP_IMPORT_WORKFLOW, { json }) as { conflict?: boolean; existingName?: string; template?: unknown }
       if (result?.conflict) {
         dispatch({
           type: 'CONFIRM_SET',
@@ -993,13 +1206,14 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
         })
         return
       }
-      // 导入的 bundle 可能带 mode2（服务）：工作流与服务列表都刷新
-      await Promise.all([workflows.loadWorkflows(), serviceControl.loadServices(state.sessionId)])
+      // 图2 交互改造：导入一律落为「工作流模板」（全局共享，跨会话可见），
+      // 用户需在画布中「创建实例」后才能运行——故只刷新模板列表，不动实例列表。
+      await flowTemplates.loadFlowTemplates()
       notify('success', t.toastImported)
     } catch (error) {
       toastError(error)
     }
-  }, [dispatch, notify, remote, serviceControl, state.sessionId, t.importConflictMessage, t.toastImported, templates, toastError, workflows])
+  }, [dispatch, notify, remote, t.importConflictMessage, t.toastImported, templates, flowTemplates, toastError, workflows])
 
   const resolveImportConflict = useCallback(async (mode: 'rename' | 'overwrite') => {
     const confirm = state.confirm
@@ -1011,14 +1225,14 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
         await remote.call(EP.EP_IMPORT_AGENT_TEMPLATE, { json, conflictMode: mode })
         await templates.loadTemplates()
       } else {
-        await remote.call(EP.EP_IMPORT_WORKFLOW, { sessionId: state.sessionId, json, conflictMode: mode })
-        await workflows.loadWorkflows()
+        await remote.call(EP.EP_IMPORT_WORKFLOW, { json, conflictMode: mode })
+        await flowTemplates.loadFlowTemplates()
       }
       notify('success', t.toastImported)
     } catch (error) {
       toastError(error)
     }
-  }, [dispatch, notify, remote, state.confirm, state.sessionId, t.toastImported, templates, toastError, workflows])
+  }, [dispatch, notify, remote, state.confirm, t.toastImported, templates, flowTemplates, toastError])
 
   // ---------- 文件选择（文件模板/节点：文本直接读；非文本读 base64 交后端受管拷贝） ----------
   /** 角色系统提示词 .md 加载（§4.2.3.1 卡片设计）。 */
@@ -1141,9 +1355,6 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
   const parentTemplate = useMemo(() => (state.templates.role as import('../../host/shared/types.js').RoleTemplate[]).find((item) => item.kind === 'parent') ?? null, [state.templates.role])
   const roleTemplates = useMemo(() => (state.templates.role as import('../../host/shared/types.js').RoleTemplate[]).filter((item) => item.kind !== 'parent'), [state.templates.role])
   const edgeList = useMemo(() => flowToCanvasLines(state.canvas.edges), [state.canvas.edges])
-  // Bug 18：highlightedNodeIds 原实现是无条件返回 [] 的死代码（kindMap 计算后
-  // 被丢弃），却保留了完整依赖与 useMemo 开销——直接常量化为空数组。
-  const highlightedNodeIds: string[] = []
 
   const toolbarRunning = state.mode === 'mode2' ? currentService?.status === 'running' : running
 
@@ -1207,7 +1418,15 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
           open={state.panels.leftOpen}
           width={state.panels.leftWidth}
           mode={state.mode}
-          workflows={state.mode === 'mode2' ? state.services : state.workflows}
+          workflows={(state.mode === 'mode2' ? state.services : state.workflows).map((item) => ({
+            id: item.id,
+            name: item.name,
+            description: item.description,
+            nodes: item.nodes,
+            // 运行状态徽标：当前 run 的快照归属该实例且未终态时显示「运行中」
+            running: state.run.runId !== null && state.run.snapshot?.flowId === item.id && state.run.snapshot?.status === 'running',
+          }))}
+          flowTemplates={(state.flowTemplates ?? []).filter((item) => item.mode === state.mode)}
           parentTemplate={parentTemplate}
           roleTemplates={roleTemplates}
           fileTemplates={state.templates.file as import('../../host/shared/types.js').FileTemplate[]}
@@ -1216,6 +1435,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
           libSelection={state.selection.lib}
           modeName={modeName}
           onSelectWorkflow={selectWorkflow}
+          onSelectFlowTemplate={selectFlowTemplate}
           onSelectLib={selectLibraryCard}
           onPlaceTemplate={placeTemplateNode}
           onPlaceTemplateIntoGroup={placeTemplateIntoGroup}
@@ -1237,13 +1457,18 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
           <Toolbar
             copy={t}
             mode={state.mode}
+            // 图2 交互改造：保存按钮按当前对象态动态命名——模板态「创建实例/创建服务」
+            // （画布内容保存为新实例，模板不变）；实例态「保存实例/保存服务」（保存到当前实例）。
+            saveLabel={state.currentKind === 'flowTemplate'
+              ? (state.mode === 'mode2' ? t.createService : t.createInstance)
+              : (state.mode === 'mode2' ? t.saveServiceInstance : t.saveInstance)}
             onUndo={history.undo}
             onRedo={history.redo}
             onClear={clearGraph}
             canClear={state.canvas.nodes.length > 0}
             onTidy={tidyGraph}
             canTidy={state.canvas.nodes.length > 0}
-            onSave={() => { void saveCanvas() }}
+            onSave={() => { void (state.currentKind === 'flowTemplate' ? createInstanceFromCanvas() : saveCanvas()) }}
             canSave={Boolean(state.currentId)}
             running={toolbarRunning}
             onStop={() => { void (state.mode === 'mode2' ? stopService() : stopRun()) }}
@@ -1307,6 +1532,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
           onPatch={patchEditor}
           onDelete={() => { void deleteEditor() }}
           onSave={() => { void saveEditor() }}
+          onSaveAsTemplate={() => { void saveCurrentAsFlowTemplate() }}
           onCopyProxy={copyToProxy}
           onRemoveMember={removeGroupMember}
           onFileSelect={(files) => { void onFileSelect(files) }}
@@ -1372,13 +1598,26 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
 // 纯函数辅助
 // ---------------------------------------------------------------------------
 
-/** 角色节点 patch 消毒：proxySourceId/groupId 由系统维护。 */
-function sanitizeRolePatch(patch: Record<string, unknown>, node: CanvasNode): Record<string, unknown> {
-  const clean = { ...patch }
-  delete clean.proxySourceId
-  delete clean.kind
-  if (clean.groupId === undefined && node.kind === 'parent') clean.groupId = null
-  return clean
+/**
+ * 进入工作台自动选中实例（用户新增需求）：从实例列表中选出默认打开的实例 id。
+ * 规则（优先级）：
+ *   1. 正在运行的实例——activeRuns 中 status='running' 的 flowId 对应实例；
+ *   2. 已暂停的实例——activeRuns 中 status='paused' 的 flowId 对应实例；
+ *   3. 实例列表第一个；
+ * 校验：activeRuns 的 flowId 必须在实例列表中（否则忽略该条目，防止引用不存在实例）；
+ * 实例列表为空时返回 null（保持空白画布，当前状态）。
+ */
+export function pickInitialInstance(
+  instances: Array<{ id: string; name?: string }>,
+  activeRuns: Array<{ flowId: string; status: string }>,
+): string | null {
+  if (!instances || instances.length === 0) return null
+  const idSet = new Set(instances.map((item) => item.id))
+  const running = activeRuns.find((run) => run.status === 'running' && idSet.has(run.flowId))
+  if (running) return running.flowId
+  const paused = activeRuns.find((run) => run.status === 'paused' && idSet.has(run.flowId))
+  if (paused) return paused.flowId
+  return instances[0].id
 }
 
 // Bug 25：原 flowLayout 与 lib/graph-model.ts 的 layoutNodes 完全重复（同一套

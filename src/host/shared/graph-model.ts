@@ -230,6 +230,32 @@ export interface Line {
 export type WorkflowMode = 'mode1' | 'mode2'
 
 /**
+ * 工作流模板（WorkflowTemplate）：图2 交互改造新增——左侧「工作流模板」列表的
+ * 模板实体，与工作流实例同构（nodes/lines 全量内联），但**全局共享、跨会话可见**
+ * （不按 sessionId 隔离），拖入画布保存后通过「创建实例」转为当前会话的实例。
+ */
+export interface WorkflowTemplate {
+  /** 模板稳定标识（模板库内唯一）。 */
+  id: string
+  /** 运行模式（mode1 模板 / mode2 服务模板）。 */
+  mode: WorkflowMode
+  /** 模板名称（可编辑）。 */
+  name: string
+  /** 模板描述（可编辑）。 */
+  description: string
+  /** 节点列表（全量内联，判别联合）。 */
+  nodes: GraphNode[]
+  /** 连线列表（全量内联）。 */
+  lines: Line[]
+  /** 修订版本号（可选，与实例保存对齐）。 */
+  revision?: number
+  /** 创建时间（ISO 字符串）。 */
+  createdAt?: string
+  /** 最近更新时间（ISO 字符串）。 */
+  updatedAt?: string
+}
+
+/**
  * 工作流文档（WorkflowDocument）：完整编排流程定义，关联画布所有节点与连线
  * （需求文档 §4.2.2 工作流实例定义）。
  * 「节点 JSON 即事实源」：nodes/lines 为全量内联快照，不含 templateId 引用

@@ -23,6 +23,8 @@ export interface InspectorProps {
   onPatch(patch: Record<string, unknown>): void
   onDelete(): void
   onSave(): void
+  /** 图2 交互改造：实例 → 模板（另存为模板；用户裁决提供入口）。 */
+  onSaveAsTemplate?(): void
   onCopyProxy(): void
   onRemoveMember(memberId: string): void
   onFileSelect(files: File[]): void
@@ -37,7 +39,7 @@ export interface InspectorProps {
 export function Inspector(props: InspectorProps) {
   const {
     copy: t, open, width, editorData, presets, tools, models, combos, flowMeta,
-    onPatch, onDelete, onSave, onCopyProxy, onRemoveMember, onFileSelect, onLoadMd, onLoadGroupMd, onTestDb,
+    onPatch, onDelete, onSave, onSaveAsTemplate, onCopyProxy, onRemoveMember, onFileSelect, onLoadMd, onLoadGroupMd, onTestDb,
     saveDisabled, importBusy,
   } = props
   void tools
@@ -119,6 +121,15 @@ export function Inspector(props: InspectorProps) {
       footer.push(
         <button key="copy" type="button" className="wf-btn" onClick={onCopyProxy} disabled={importBusy}>
           {t.inspectorCopy}
+        </button>,
+      )
+    }
+    // 图2 交互改造：实例态（工作流/服务实例）提供「另存为模板」——当前实例内容
+    // 复制为全局共享的工作流模板（模板库 + 号也能新建空白模板，二者均可）。
+    if ((kind === 'workflow' || kind === 'service') && !editorData.template && onSaveAsTemplate) {
+      footer.push(
+        <button key="save-as-template" type="button" className="wf-btn" onClick={onSaveAsTemplate} disabled={importBusy}>
+          {String(t.saveAsTemplate ?? '')}
         </button>,
       )
     }

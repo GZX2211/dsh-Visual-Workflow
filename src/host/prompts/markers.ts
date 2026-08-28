@@ -27,7 +27,3 @@ export const TAIL_MARKER = '# 动态状态'
 // 尾段重申标识：末段对首段关键约束的重申小节标题。
 // 保证测试可断言「关键约束短语同时出现在首段与末段」的明确位置。
 export const TAIL_RESTATE_MARKER = '## 重申约束'
-
-// 协作 Prompt 段落前缀（§13.1.4）：协作块以 `collab:` 起段，追加到子代理
-// persona/任务文本末尾，对既有前缀零失效；与 `task:` 任务段分隔以便后续稳定引用。
-export const COLLAB_PREFIX = 'collab:'

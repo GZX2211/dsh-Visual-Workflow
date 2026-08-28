@@ -13,7 +13,7 @@
 
 | 文件 | 作用 |
 |---|---|
-| `index.ts` | 统一出口：共享段落标记常量（`HEAD_MARKER` / `MID_MARKER` / `TAIL_MARKER` / `TAIL_RESTATE_MARKER` / `COLLAB_PREFIX`） + 三个构建器的 re-export |
+| `index.ts` | 统一出口：共享段落标记常量（`HEAD_MARKER` / `MID_MARKER` / `TAIL_MARKER` / `TAIL_RESTATE_MARKER`） + 三个构建器的 re-export |
 | `orchestration.ts` | 编排指令模板构建器 `buildOrchestrationDirective(params)`（注入父代理） |
 | `node-task.ts` | 节点任务块构建器 `buildNodeTaskBlock(params)`（注入节点子代理） |
 | `collab.ts` | 协作成员清单块构建器 `buildCollabBlock({ members, custom })`（追加到组成员用户消息，始终列出成员 ID + 角色名） |

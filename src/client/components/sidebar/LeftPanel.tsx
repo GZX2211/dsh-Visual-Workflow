@@ -7,9 +7,10 @@
 import type { Dict } from '../../i18n.js'
 import type { LibTab } from '../../studio/studio-state.js'
 import type { RoleTemplate, FileTemplate, DatabaseTemplate } from '../../../host/shared/types.js'
+import type { WorkflowTemplate } from '../../../host/shared/graph-model.js'
 
 export interface LibSelectionInfo {
-  kind: 'workflow' | 'role' | 'file' | 'database' | 'parentTemplate' | 'stage' | 'groupTemplate' | 'service'
+  kind: 'workflow' | 'workflowTemplate' | 'role' | 'file' | 'database' | 'parentTemplate' | 'stage' | 'groupTemplate' | 'service'
   id: string
 }
 
@@ -28,7 +29,9 @@ export interface LeftPanelProps {
   open: boolean
   width: number
   mode: 'mode1' | 'mode2'
-  workflows: Array<{ id: string; name: string; description?: string; nodes?: unknown[] }>
+  workflows: Array<{ id: string; name: string; description?: string; nodes?: unknown[]; running?: boolean }>
+  /** 工作流模板列表（全局共享；按当前 mode 过滤后传入；图2 交互改造）。 */
+  flowTemplates: WorkflowTemplate[]
   parentTemplate: RoleTemplate | null
   roleTemplates: RoleTemplate[]
   fileTemplates: FileTemplate[]
@@ -37,6 +40,7 @@ export interface LeftPanelProps {
   libSelection: LibSelectionInfo | null
   modeName(presetId: string | null | undefined): string
   onSelectWorkflow(id: string): void
+  onSelectFlowTemplate(id: string): void
   onSelectLib(kind: LibSelectionInfo['kind'], id: string): void
   onPlaceTemplate(kind: 'role' | 'file' | 'database', id: string, position: { x: number; y: number }): void
   /** 角色模板拖入协作组：生成节点并直接入组。 */
@@ -44,7 +48,7 @@ export interface LeftPanelProps {
   onPlaceStage(kind: string, position: { x: number; y: number }): void
   onPlaceGroup(position: { x: number; y: number }): void
   onPlaceParent(id: string, position: { x: number; y: number }): void
-  onCreateNew(tab: LibTab, section?: 'file' | 'database'): void
+  onCreateNew(tab: LibTab, section?: 'file' | 'database' | 'flowTemplate'): void
   onBeginDrag(event: React.PointerEvent, payload: DragPayload): void
 }
 
@@ -75,9 +79,9 @@ function fileSubline(template: FileTemplate): string {
 
 export function LeftPanel(props: LeftPanelProps) {
   const {
-    copy: t, libTab, onSetTab, open, width, mode, workflows, parentTemplate,
+    copy: t, libTab, onSetTab, open, width, mode, workflows, flowTemplates, parentTemplate,
     roleTemplates, fileTemplates, databaseTemplates, stageKinds, libSelection,
-    modeName, onSelectWorkflow, onSelectLib, onPlaceTemplate, onPlaceTemplateIntoGroup, onPlaceStage,
+    modeName, onSelectWorkflow, onSelectFlowTemplate, onSelectLib, onPlaceTemplate, onPlaceTemplateIntoGroup, onPlaceStage,
     onPlaceGroup, onPlaceParent, onCreateNew, onBeginDrag,
   } = props
 
@@ -90,7 +94,7 @@ export function LeftPanel(props: LeftPanelProps) {
 
   const isActive = (kind: string, id: string): boolean => libSelection?.kind === kind && libSelection?.id === id
 
-  function itemCard(key: string, kind: string, id: string, icon: string, name: string, sub: string, payload: DragPayload, pinned = false) {
+  function itemCard(key: string, kind: string, id: string, icon: string, name: string, sub: string, payload: DragPayload, pinned = false, running = false) {
     return (
       <button
         key={key}
@@ -103,24 +107,40 @@ export function LeftPanel(props: LeftPanelProps) {
           <span className="wf-docitem__label">{name}</span>
           <span className="wf-docitem__path">{sub}</span>
         </span>
+        {running ? <span className="wf-docitem__badge">{t.instanceRunning}</span> : null}
       </button>
     )
   }
 
-  const sections: Array<{ key: string; title: string; plus: boolean; plusKind?: 'file' | 'database'; cards: React.ReactNode[] }> = []
+  const sections: Array<{ key: string; title: string; plus: boolean; plusKind?: 'file' | 'database' | 'flowTemplate'; cards: React.ReactNode[] }> = []
 
   if (libTab === 'workflow') {
+    // 图2 交互改造：左侧「工作流」Tab 拆两区——上方实例列表（无 + 号；运行中卡片
+    // 名称右侧显示运行状态），下方工作流模板列表（+ 号新建空白模板；全局共享）。
+    const instances = (workflows ?? []).map((item) => itemCard(
+      item.id, 'workflow', item.id, '▦', String(item.name ?? ''),
+      item.description ? truncate(item.description, 60) : `${item.nodes?.length ?? 0} ${t.nodes ?? ''}`,
+      {
+        label: String(item.name ?? ''),
+        onClick: () => onSelectWorkflow(item.id),
+        onDrop: () => onSelectWorkflow(item.id),
+      },
+      false,
+      item.running === true,
+    ))
+    sections.push({ key: 'instances', title: t.flowInstances, plus: false, cards: instances })
     sections.push({
-      key: 'list',
-      title: mode === 'mode2' ? t.services : t.workflows,
+      key: 'flowTemplates',
+      title: t.flowTemplates,
       plus: true,
-      cards: (workflows ?? []).map((item) => itemCard(
-        item.id, 'workflow', item.id, '▦', String(item.name ?? ''),
+      plusKind: 'flowTemplate',
+      cards: (flowTemplates ?? []).map((item) => itemCard(
+        item.id, 'workflowTemplate', item.id, '▦', String(item.name ?? ''),
         item.description ? truncate(item.description, 60) : `${item.nodes?.length ?? 0} ${t.nodes ?? ''}`,
         {
           label: String(item.name ?? ''),
-          onClick: () => onSelectWorkflow(item.id),
-          onDrop: () => onSelectWorkflow(item.id),
+          onClick: () => onSelectFlowTemplate(item.id),
+          onDrop: () => onSelectFlowTemplate(item.id),
         },
       )),
     })

@@ -2,12 +2,17 @@
 //
 // 画布控制栏（照搬旧项目 toolbar.js 布局，TSX 化，按需求 §4.5.3 顺序）：
 // 撤销 / 重做 / 清空 / 整理布局 / 保存 / 运行·停止（模式二 = 启动·停止服务 + 状态指示）/ 运行历史。
+//
+// 图2 交互改造：画布上方「保存」按钮按当前对象态动态命名——模板态 = 「创建实例/创建服务」
+// （将画布内容保存为新实例，模板不变），实例态 = 「保存实例/保存服务」（保存到当前实例）。
 
 import type { Dict } from '../../i18n.js'
 
 export interface ToolbarProps {
   copy: Dict
   mode: 'mode1' | 'mode2'
+  /** 当前画布对象态（模板态显示「创建实例/创建服务」；实例态显示「保存实例/保存服务」）。 */
+  saveLabel: string
   onUndo(): void
   onRedo(): void
   onClear(): void
@@ -26,7 +31,7 @@ export interface ToolbarProps {
 
 export function Toolbar(props: ToolbarProps) {
   const {
-    copy: t, mode, onUndo, onRedo, onClear, canClear, onTidy, canTidy,
+    copy: t, mode, saveLabel, onUndo, onRedo, onClear, canClear, onTidy, canTidy,
     onSave, canSave, running, onStop, onRun, onOpenHistory, canHistory, serviceStatus,
   } = props
   const isMode2 = mode === 'mode2'
@@ -46,7 +51,7 @@ export function Toolbar(props: ToolbarProps) {
       <button type="button" className="wf-btn wf-iconbtn is-ghost" title={`${t.redo} · Ctrl/Cmd+Shift+Z`} aria-label={t.redo} onClick={onRedo}>↷</button>
       <button type="button" className="wf-btn is-ghost" title={t.clearCanvas} onClick={onClear} disabled={!canClear}>{t.clear}</button>
       <button type="button" className="wf-btn is-ghost" title={t.tidy} onClick={onTidy} disabled={!canTidy}>{t.tidy}</button>
-      <button type="button" className="wf-btn" onClick={onSave} disabled={!canSave}>{t.save}</button>
+      <button type="button" className="wf-btn" onClick={onSave} disabled={!canSave}>{saveLabel}</button>
       {running
         ? <button type="button" className="wf-btn is-danger" onClick={onStop}>{t.stop}</button>
         : <button type="button" className="wf-btn is-primary" onClick={onRun} disabled={!canSave}>{isMode2 ? t.startService : t.run}</button>}

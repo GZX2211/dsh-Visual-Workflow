@@ -12,7 +12,7 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import React from 'react'
-import { Studio } from '../../src/client/studio/Studio.js'
+import { Studio, pickInitialInstance } from '../../src/client/studio/Studio.js'
 import { zh } from '../../src/client/i18n.js'
 import type { RemoteFace } from '../../src/client/hooks/useRemote.js'
 import { EP } from '../../src/client/lib/remote.js'
@@ -51,6 +51,15 @@ function remoteStub(): RemoteFace & { calls: Array<{ endpoint: string; args: Rec
         return [{ id: 'run-9', flowId: 'x', status: 'interrupted', startedAt: '2026-08-23T10:00:00.000Z', summary: '中断于节点' }]
       }
       if (endpoint === EP.EP_RUN_RESUME) return { runId: 'run-10' }
+      if (endpoint === EP.EP_ACTIVE_RUNS) return [] // 无活跃 run（默认）
+      if (endpoint === EP.EP_LIST_WORKFLOWS) return [] // 无实例（默认；自动选中保持空白画布）
+      if (endpoint === EP.EP_PUT_WORKFLOW || endpoint === EP.EP_PUT_FLOW_TEMPLATE) {
+        // 保存端点须回传完整文档（含 id/revision），否则调用方后续 openFlow 拿到
+        // 缺失 id 的假对象，画布无法绑定实例（图2 改造：模板→实例链路依赖此回传）
+        const doc = args?.flow ?? args?.template
+        return { ...(doc as object), revision: 1 }
+      }
+      if (endpoint === EP.EP_LIST_FLOW_TEMPLATES) return []
       return []
     }),
   }
@@ -98,7 +107,8 @@ describe('Studio 装配', () => {
     expect(toolbar).toBeTruthy()
     expect(toolbar?.querySelector('[title*="撤销"]')).toBeTruthy()
     expect(toolbar?.querySelector('[title*="重做"]')).toBeTruthy()
-    expect(textOf('.wf-toolbar .wf-btn')).toEqual(expect.arrayContaining(['清空', '整理布局', '保存', '运行', '运行历史']))
+    // 图2 改造：初始无选中对象 → 实例态按钮文案为「保存实例」
+    expect(textOf('.wf-toolbar .wf-btn')).toEqual(expect.arrayContaining(['清空', '整理布局', '保存实例', '运行', '运行历史']))
   })
 
   it('保存按钮只写入工作流，不触发运行（单一职责）', async () => {
@@ -106,7 +116,9 @@ describe('Studio 装配', () => {
     await renderStudioWith(remote)
     await createDraft()
     await act(async () => {
-      Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-toolbar button')).find((item) => item.textContent === zh.save)?.click()
+      // 图2 改造：+ 号新建的是模板草稿，工具栏按钮为「创建实例」；
+      // 点击后应保存实例（PUT_WORKFLOW）而不触发运行（EP_RUN）。
+      Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-toolbar button')).find((item) => item.textContent === zh.createInstance)?.click()
     })
     await act(async () => {
       await Promise.resolve()
@@ -252,6 +264,18 @@ describe('Studio 交互', () => {
     const remote = remoteStub()
     await renderStudioWith(remote)
     await createDraft()
+    // 图2 改造：+ 号新建模板草稿；运行历史属于实例——先「创建实例」切到实例态
+    await act(async () => {
+      Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-toolbar button')).find((item) => item.textContent === zh.createInstance)?.click()
+    })
+    // 刷新完整微任务链（saveWorkflow → WORKFLOW_UPDATED → openFlow 多级 dispatch）
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    // 实例态确认：工具栏按钮应变为「保存实例」
+    expect(textOf('.wf-toolbar .wf-btn')).toContain(zh.saveInstance)
     await act(async () => {
       Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-toolbar button')).find((item) => item.textContent === zh.history)?.click()
     })
@@ -366,5 +390,52 @@ describe('Studio 交互', () => {
     const memberMini = Array.from(document.querySelectorAll('.wf-group__member-name')).map((s) => s.textContent ?? '')
     expect(memberMini).not.toContain('全栈开发工程师')
     expect(memberMini).toContain('研究员')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// pickInitialInstance：进入工作台自动选中实例（用户新增需求）
+// ---------------------------------------------------------------------------
+
+describe('pickInitialInstance：进入工作台自动选中实例', () => {
+  const instances = [
+    { id: 'flow-a', name: '流程A' },
+    { id: 'flow-b', name: '流程B' },
+    { id: 'flow-c', name: '流程C' },
+  ]
+
+  it('实例列表为空 → null（保持空白画布）', () => {
+    expect(pickInitialInstance([], [])).toBeNull()
+  })
+
+  it('无活跃 run → 选列表第一个', () => {
+    expect(pickInitialInstance(instances, [])).toBe('flow-a')
+    expect(pickInitialInstance(instances, [{ flowId: '不存在', status: 'running' }])).toBe('flow-a')
+  })
+
+  it('有 running 实例 → 优先运行中的（即使不是第一个）', () => {
+    const active = [
+      { flowId: 'flow-b', status: 'running' },
+      { flowId: 'flow-c', status: 'paused' },
+    ]
+    expect(pickInitialInstance(instances, active)).toBe('flow-b')
+  })
+
+  it('无 running 但有 paused → 选暂停的实例', () => {
+    const active = [{ flowId: 'flow-c', status: 'paused' }]
+    expect(pickInitialInstance(instances, active)).toBe('flow-c')
+  })
+
+  it('activeRuns 的 flowId 不在实例列表中 → 忽略该条目，回退列表第一个', () => {
+    const active = [{ flowId: 'flow-ghost', status: 'running' }]
+    expect(pickInitialInstance(instances, active)).toBe('flow-a')
+  })
+
+  it('running 优先于 paused（同列表存在时）', () => {
+    const active = [
+      { flowId: 'flow-c', status: 'paused' },
+      { flowId: 'flow-a', status: 'running' },
+    ]
+    expect(pickInitialInstance(instances, active)).toBe('flow-a')
   })
 })

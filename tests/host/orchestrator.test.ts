@@ -621,6 +621,26 @@ describe('wfRunNode 异步路径与护栏', () => {
     expect(text).toContain('data/files/b.pdf')
   })
 
+  it('文档 ctx-in 多选 files：全部受管路径注入任务块（不因 managedPath 为空而丢失，§4.2.4.1）', async () => {
+    const h = await makeHarness()
+    const flow = makeFlow()
+    flow.nodes.splice(1, 0, fileNode('n-file-multi', '多选文档', {
+      fileKind: 'file',
+      files: [
+        { fileName: 'a.pdf', managedPath: 'data/files/a.pdf' },
+        { fileName: 'b.pdf', managedPath: 'data/files/b.pdf' },
+      ],
+    }))
+    flow.lines.push({ id: 'l-ctx-multi', source: 'n-file-multi', target: 'n-a1', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' })
+    await start(h, flow)
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    const text = h.runner.calls[0].blocks[0].text
+    expect(text).toContain('data/files/a.pdf')
+    expect(text).toContain('data/files/b.pdf')
+    // 单选 managedPath 与多选重复时不重复列出（去重）
+    expect(text.match(/data\/files\/a\.pdf/g)).toHaveLength(1)
+  })
+
   it('ctx-in 角色节点：上游 ok/react-capped 产出注入下游（截断），来源标签正确', async () => {
     const h = await makeHarness()
     const flow = makeFlow()
@@ -1283,5 +1303,38 @@ describe('currentResolvedFlow 双向同步（§4.7 规则 1 ①）', () => {
     expect(h.runtime.runSnapshot('run-1')!.status).toBe('running')
     expect(h.runtime.runSnapshot('run-1')!.nodes[0].status).toBe('pending')
     expect(h.runtime.runSnapshot('run-none')).toBeNull()
+  })
+})
+
+describe('refreshActiveDefinitions：画布保存 → 运行事实源实时刷新（双向同步①）', () => {
+  it('运行中保存实例：刷新对应 run 的 orchestrations 事实源（父代理读到最新拓扑）', async () => {
+    const h = await makeHarness()
+    const flow = makeFlow()
+    const { result } = await start(h, flow)
+    const defBefore = await h.store.readOrchestration(result.runId)
+    expect(defBefore?.nodes).toHaveLength(6) // start/a1/pause/a2/end/proxy
+
+    // 模拟画布保存：新增一个节点后的最新文档
+    const updated = { ...flow, revision: 2, nodes: [...flow.nodes, agent('n-a3', '子任务C')] }
+    await h.store.saveWorkflow(updated, 'session-1', { force: true })
+    await h.runtime.refreshActiveDefinitions('flow-1', 'session-1', updated)
+
+    // 运行事实源文件已刷新：父代理 read 该文件可见新增节点（冲突根因修复）
+    const defAfter = await h.store.readOrchestration(result.runId)
+    expect(defAfter?.nodes.map((n) => n.id)).toContain('n-a3')
+    // 快照节点状态不受影响（只刷新流程定义，不重置节点记录）
+    expect(h.runtime.runSnapshot(result.runId)?.nodes).toHaveLength(6)
+  })
+
+  it('已结束的 run 不刷新；无匹配 run 为空操作（幂等）', async () => {
+    const h = await makeHarness()
+    const flow = makeFlow()
+    const { result } = await start(h, flow)
+    await h.runtime.stopRun(result.runId)
+
+    const updated = { ...flow, revision: 3, nodes: [...flow.nodes, agent('n-a4', '新任务')] }
+    await h.runtime.refreshActiveDefinitions('flow-1', 'session-1', updated)
+    // 已完成 run 的事实源不应被改写（历史追溯语料保持原样）
+    expect((await h.store.readOrchestration(result.runId))?.nodes).toHaveLength(6)
   })
 })

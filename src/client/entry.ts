@@ -26,8 +26,8 @@ function currentSessionOf(ctx: { get?(name: string): unknown }): string {
   const sessions = ctx.get?.('sessions') as
     | {
         list?: {
-          getSnapshot?(): { current?: unknown }
-          get?(): { current?: unknown }
+          getSnapshot?(): { current?: unknown; byId?: Record<string, unknown> }
+          get?(): { current?: unknown; byId?: Record<string, unknown> }
         }
       }
     | null
@@ -35,6 +35,40 @@ function currentSessionOf(ctx: { get?(name: string): unknown }): string {
   const snapshot = sessions?.list?.getSnapshot?.() ?? sessions?.list?.get?.()
   const current = snapshot?.current
   return typeof current === 'string' ? current : ''
+}
+
+/**
+ * 会话树根 id 解析（疑点二修复）：DSH 中每个子代理对话持有独立 childSessionId
+ * （官方 dsh-subagent：childId = SessionId(randomUUID())，header.parentSession 记录
+ * 父链），若工作台直接绑定「当前选中会话」，在子代理对话界面打开时列表按子代理
+ * 会话过滤为空，实例被误认为「跟随代理 ID」。实例/服务按**会话树根**隔离：
+ * 沿官方 sessions.list summaries 的 parentSessionId 上溯到无父（根）会话，
+ * 主代理与其全部后代子代理共享同一实例列表。快照无该字段（旧运行时）时回退
+ * 当前会话自身（行为不变，单代理场景无回归）。
+ */
+export function rootSessionIdOf(
+  current: string,
+  sessions: {
+    list?: {
+      getSnapshot?(): { current?: unknown; byId?: Record<string, unknown> }
+      get?(): { current?: unknown; byId?: Record<string, unknown> }
+    }
+  } | null
+    | undefined,
+): string {
+  if (!current) return ''
+  const snapshot = sessions?.list?.getSnapshot?.() ?? sessions?.list?.get?.()
+  if (!snapshot?.byId) return current
+  let cursor = current
+  const seen = new Set<string>()
+  while (cursor && !seen.has(cursor)) {
+    seen.add(cursor)
+    const entry = snapshot.byId[cursor] as { parentSessionId?: unknown } | undefined
+    const parent = typeof entry?.parentSessionId === 'string' ? entry.parentSessionId : ''
+    if (!parent || !snapshot.byId[parent]) return cursor
+    cursor = parent
+  }
+  return cursor
 }
 
 // 无硬依赖：样式/DOM 全部自持；locale/sessions 经 ctx.get 守卫（测试/降级友好）。
@@ -84,7 +118,9 @@ export function apply(ctx: {
           t,
           children: ({ close, drag }) => React.createElement(Studio, {
             t: t as Dict,
-            sessionId,
+            // 疑点二修复：实例/服务按「会话树根 id」隔离——主代理与其全部后代
+            // 子代理共享同一实例列表；在子代理对话界面打开工作台亦可见。
+            sessionId: rootSessionIdOf(currentSessionOf(ctx), ctx.get?.('sessions') as never),
             onClose: close,
             // 单一标题栏：工作台标题顶栏兼任窗口标题栏（可拖动）
             onTitlebarDrag: drag,

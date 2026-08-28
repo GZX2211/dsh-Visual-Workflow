@@ -7,6 +7,7 @@
 //   roles/<roleId>.json                  角色模板（全局共享）
 //   data/<dataId>.json                   数据模板（文件/数据库，全局共享）
 //   data/files/                          受管文件副本（T-026 拷贝）
+//   flow-templates/<templateId>.json     工作流模板（全局共享；图2 交互改造新增）
 //   combos.json                          工具组合列表（全局共享）
 //   runs/<runId>.json                    运行历史（RunSnapshot，含 flowId/断点/节点产出）
 //   orchestrations/<runId>.json          运行时流程定义（父代理只读的事实源）
@@ -23,8 +24,8 @@
 
 import { mkdir, readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { atomicWriteJson, readJson, withJsonLock } from './atomic.js'
-import type { WorkflowDocument, GraphNode } from '../shared/graph-model.js'
+import { atomicWriteJson, readJson, withJsonLock, CorruptJsonError } from './atomic.js'
+import type { WorkflowDocument, GraphNode, WorkflowTemplate } from '../shared/graph-model.js'
 import type {
   ServiceState,
   RoleTemplate,
@@ -79,6 +80,20 @@ function safeFilePart(value: string): string {
 /** 前端快照标记字段（保存时剥除，绝不落盘——旧实现把 _draft 写盘导致已入库对象被误判草稿）。 */
 const CLIENT_META_KEYS = ['_draft', '_clientMeta'] as const
 
+/**
+ * 列表场景逐文件读取：单个文件损坏（CorruptJsonError）时跳过该文件返回 null，
+ * 不阻塞整个列表——一个损坏的 JSON 不应让同目录其他正常文件全部不可见（Bug 21）。
+ * 其余读取失败（EACCES 等）仍上浮（保留可诊断性，防止把权限问题伪装成空列表）。
+ */
+async function readListEntry<T>(dir: string, name: string): Promise<T | null> {
+  try {
+    return await readJson<T | null>(join(dir, name), null)
+  } catch (error) {
+    if (error instanceof CorruptJsonError) return null
+    throw error
+  }
+}
+
 /** 剥除前端快照标记（浅拷贝，不修改入参）。 */
 function stripClientMeta<T>(value: T): T {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return value
@@ -125,7 +140,7 @@ function isDatabaseTemplate(t: Template): t is DatabaseTemplate {
 
 export class FlowStore {
   /** 全部子目录名（init 时创建，常量表供测试断言）。 */
-  static readonly DIRS = ['workflows', 'services', 'roles', 'data', 'data/files', 'runs', 'orchestrations'] as const
+  static readonly DIRS = ['workflows', 'services', 'roles', 'data', 'data/files', 'runs', 'orchestrations', 'flow-templates'] as const
 
   constructor(public readonly root: string) {}
 
@@ -155,6 +170,11 @@ export class FlowStore {
     return join(this.root, dir, `${safeFilePart(id)}.json`)
   }
 
+  /** 工作流模板文件路径（flow-templates/ 目录，全局共享）。 */
+  private flowTemplatePath(templateId: string): string {
+    return join(this.root, 'flow-templates', `${safeFilePart(templateId)}.json`)
+  }
+
   private runsPath(runId: string): string {
     return join(this.root, 'runs', `${safeFilePart(runId)}.json`)
   }
@@ -181,7 +201,7 @@ export class FlowStore {
     const items: WorkflowDocument[] = []
     for (const name of names) {
       if (!name.endsWith('.json')) continue
-      const doc = await readJson<WorkflowDocument | null>(join(dir, name), null)
+      const doc = await readListEntry<WorkflowDocument>(dir, name)
       if (doc && doc.sessionId === sessionId) items.push(doc)
     }
     return items.sort((a, b) => String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? '')))
@@ -240,7 +260,7 @@ export class FlowStore {
     const items: ServiceState[] = []
     for (const name of names) {
       if (!name.endsWith('.json') || name.endsWith('.sessions.json')) continue
-      const doc = await readJson<ServiceState | null>(join(dir, name), null)
+      const doc = await readListEntry<ServiceState>(dir, name)
       if (doc && doc.sessionId === sessionId) items.push(doc)
     }
     return items.sort((a, b) => String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? '')))
@@ -270,7 +290,7 @@ export class FlowStore {
     const items: ServiceState[] = []
     for (const name of names) {
       if (!name.endsWith('.json') || name.endsWith('.sessions.json')) continue
-      const doc = await readJson<ServiceState | null>(join(dir, name), null)
+      const doc = await readListEntry<ServiceState>(dir, name)
       if (doc) items.push(doc)
     }
     return items.sort((a, b) => String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? '')))
@@ -349,7 +369,7 @@ export class FlowStore {
     const items: Template[] = []
     for (const name of names) {
       if (!name.endsWith('.json')) continue
-      const t = await readJson<Template | null>(join(dir, name), null)
+      const t = await readListEntry<Template>(dir, name)
       if (!t) continue
       // 数据模板同目录混存：file 与 database 以 dbType 字段判别（§6 目录规划）
       if (kind === 'file' && isDatabaseTemplate(t)) continue
@@ -388,6 +408,61 @@ export class FlowStore {
     })
   }
 
+  // ---- 工作流模板（flow-templates/，全局共享，不按会话隔离；图2 交互改造） ----
+
+  /** 列出全部工作流模板（按 updatedAt 倒序；全局共享，所有会话可见）。 */
+  async listFlowTemplates(): Promise<WorkflowTemplate[]> {
+    const dir = join(this.root, 'flow-templates')
+    let names: string[] = []
+    try {
+      names = await readdir(dir)
+    } catch {
+      return []
+    }
+    const items: WorkflowTemplate[] = []
+    for (const name of names) {
+      if (!name.endsWith('.json')) continue
+      const t = await readListEntry<WorkflowTemplate>(dir, name)
+      if (t) items.push(t)
+    }
+    return items.sort((a, b) => String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? '')))
+  }
+
+  /** 按 id 读取单个工作流模板（无则 null）。 */
+  async getFlowTemplate(templateId: string): Promise<WorkflowTemplate | null> {
+    return readJson<WorkflowTemplate | null>(this.flowTemplatePath(templateId), null)
+  }
+
+  /** 保存工作流模板（新建/更新统一；revision 递增 + 冲突保护 + 原子写；无 sessionId 隔离）。 */
+  async saveFlowTemplate(template: WorkflowTemplate, options: SaveOptions = {}): Promise<WorkflowTemplate> {
+    if (!template?.id) throw new Error('saveFlowTemplate 需要模板 id')
+    const path = this.flowTemplatePath(template.id)
+    return withJsonLock(path, async () => {
+      const current = await readJson<WorkflowTemplate | null>(path, null)
+      const revision = nextFlowRevision(template, current, options)
+      const now = new Date().toISOString()
+      const saved: WorkflowTemplate = {
+        ...stripClientMeta(template),
+        revision,
+        createdAt: template.createdAt ?? current?.createdAt ?? now,
+        updatedAt: now,
+      }
+      await atomicWriteJson(path, saved)
+      return saved
+    })
+  }
+
+  /** 删除工作流模板（仅删文件，不影响已生成的实例——模板/实例深拷贝解耦语义）。 */
+  async deleteFlowTemplate(templateId: string): Promise<boolean> {
+    const path = this.flowTemplatePath(templateId)
+    return withJsonLock(path, async () => {
+      const exists = (await readJson<WorkflowTemplate | null>(path, null)) !== null
+      if (!exists) return false
+      await rm(path, { force: true })
+      return true
+    })
+  }
+
   // ---- 运行历史（runs/<runId>.json 单文件；按 flowId 过滤） ------------------
 
   /**
@@ -406,7 +481,7 @@ export class FlowStore {
     const items: RunSnapshot[] = []
     for (const name of names) {
       if (!name.endsWith('.json')) continue
-      const run = await readJson<RunSnapshot | null>(join(dir, name), null)
+      const run = await readListEntry<RunSnapshot>(dir, name)
       if (run && run.flowId === flowId && (sessionId === undefined || run.sessionId === sessionId)) items.push(run)
     }
     return items.sort((a, b) => String(b.startedAt ?? '').localeCompare(String(a.startedAt ?? '')))

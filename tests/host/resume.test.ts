@@ -332,18 +332,27 @@ describe('runtime.resumeRun', () => {
     expect(started.status).toBe('started')
   })
 
-  it('interrupted 恢复（磁盘记录、无内存条目）同样成功', async () => {
+  it('interrupted 恢复（磁盘记录、无内存条目、无暂停点）同样成功', async () => {
     const h = await makeHarness()
     await makePausedRun(h)
-    // 模拟宿主重启：内存清空 + 磁盘记录标记 interrupted
+    // 模拟宿主重启：内存清空 + 磁盘记录标记 interrupted；真实中断发生在任意节点、
+    // 无暂停门 → resumeFromNodeId 缺失（undefined），续跑起点需由快照推断。
     h.runtime.dispose()
     const disk = await h.store.getRun('run-1')
-    await h.store.saveRun({ ...disk!, status: 'interrupted', summary: '宿主进程重启，运行已中断（可恢复）' })
+    await h.store.saveRun({ ...disk!, resumeFromNodeId: undefined, status: 'interrupted', summary: '宿主进程重启，运行已中断（可恢复）' })
 
     const result = await h.runtime.resumeRun({ sessionId: 'session-1', flowId: 'flow-1' })
     expect(result.resumedFromRunId).toBe('run-1')
     const snapshot = await h.store.getRun(result.runId)
     expect(snapshot?.nodes.find((n) => n.nodeId === 'n-a1')).toMatchObject({ status: 'ok', resumed: true })
+    // 推断起点 = 引擎快照中首个未完成节点（start 节点不派生子代理、快照保持 pending，
+    // a1 已 ok 继承 → 故为 n-start）；断点继续指令必须用该推断值，而非 undefined「（未指定）」。
+    expect(snapshot?.resumeFromNodeId).toBe('n-start')
+    // BugF 回归：注入的断点继续指令必须与快照推断起点一致，且不出现「（未指定）」占位。
+    const injected = h.agents.roots.get('session-1')!.messages
+    const directive = injected.map((m) => m.content.map((b) => b.text).join('')).join('\n')
+    expect(directive).toContain('从节点 n-start 开始')
+    expect(directive).not.toContain('（未指定）')
   })
 
   it('无断点 → WF_NO_RESUME_POINT；指定不可恢复 → WF_NOT_RESUMABLE；指定不存在 → WF_NOT_FOUND', async () => {

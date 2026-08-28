@@ -354,6 +354,32 @@ describe('服务与模板端点', () => {
     expect(deleted).toEqual({ deleted: true })
     await expect(h.api.handle('deleteTemplate', { kind: 'role', id: 'role-1' })).rejects.toMatchObject({ status: 404 })
   })
+
+  it('工作流模板端点 CRUD（图2 改造：全局共享，无会话隔离）', async () => {
+    const h = await makeHarness()
+    // 初态为空
+    expect(await h.api.handle('listFlowTemplates', {})).toEqual([])
+
+    // 保存（revision 0 → 1）
+    const saved = (await h.api.handle('putFlowTemplate', {
+      template: { id: 'tpl-1', mode: 'mode1', name: '流程模板', description: 'd', revision: 0, nodes: [], lines: [] },
+    })) as { id?: string; revision?: number }
+    expect(saved.id).toBe('tpl-1')
+    expect(saved.revision).toBe(1)
+
+    // 乐观锁：携带过期的 expected revision 保存被拒（409）
+    await expect(h.api.handle('putFlowTemplate', {
+      template: { id: 'tpl-1', mode: 'mode1', name: '旧快照', description: '', revision: 99, nodes: [], lines: [] },
+    })).rejects.toMatchObject({ status: 409 })
+
+    // 列表可见（无 sessionId 参数——全局共享）
+    const list = (await h.api.handle('listFlowTemplates', {})) as unknown[]
+    expect(list).toHaveLength(1)
+
+    // 删除与 404
+    expect(await h.api.handle('deleteFlowTemplate', { id: 'tpl-1' })).toEqual({ deleted: true })
+    await expect(h.api.handle('deleteFlowTemplate', { id: 'tpl-1' })).rejects.toMatchObject({ status: 404 })
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -490,6 +516,26 @@ describe('运行端点', () => {
     await expect(h.api.handle('runStatus', { sessionId: 'session-1', runId: 'run-nope' })).rejects.toMatchObject({ status: 404 })
   })
 
+  it('activeRuns：会话当前活跃 run 列表（running/paused 保留锁；用于进入工作台自动选中实例）', async () => {
+    const h = await makeHarness()
+    await saveFlow(h)
+    await h.api.handle('run', { sessionId: 'session-1', flowId: 'flow-1' })
+    // running 中：应返回该 flowId
+    const runningRuns = (await h.api.handle('activeRuns', { sessionId: 'session-1' })) as Array<{ flowId: string; status: string; runId: string }>
+    expect(runningRuns).toHaveLength(1)
+    expect(runningRuns[0]).toMatchObject({ flowId: 'flow-1', status: 'running', runId: 'run-1' })
+
+    // 无 sessionId → 400
+    await expect(h.api.handle('activeRuns', {})).rejects.toMatchObject({ status: 400 })
+
+    // 停止后：活跃列表为空
+    await h.api.handle('runStop', { sessionId: 'session-1', runId: 'run-1' })
+    expect((await h.api.handle('activeRuns', { sessionId: 'session-1' })) as unknown[]).toHaveLength(0)
+
+    // 跨会话隔离：其他会话看不到本会话的活跃 run
+    expect((await h.api.handle('activeRuns', { sessionId: 'session-other' })) as unknown[]).toHaveLength(0)
+  })
+
   it('runStop/runHistory/runResume（显式恢复指定 runId）', async () => {
     const h = await makeHarness()
     await saveFlow(h)
@@ -558,7 +604,7 @@ describe('数据库端点', () => {
 // ---------------------------------------------------------------------------
 
 describe('导入导出', () => {
-  it('exportWorkflow → importWorkflow：冲突/rename/overwrite', async () => {
+  it('exportWorkflow → importWorkflow：冲突/rename/overwrite（图2 改造：导入落为模板）', async () => {
     const h = await makeHarness()
     await h.store.saveWorkflow(makeFlow(), 'session-1', { force: true })
 
@@ -567,26 +613,34 @@ describe('导入导出', () => {
     expect(bundle.format).toBe('dsh-vw-bundle')
     expect(bundle.version).toBe(2)
 
-    // 导入同名单 → conflict
-    const conflict = (await h.api.handle('importWorkflow', { sessionId: 'session-1', json })) as { conflict?: boolean }
+    // 首次导入：模板库为空 → 直接创建模板（不落实例）
+    const first = (await h.api.handle('importWorkflow', { json })) as { template?: { id?: string; name?: string } }
+    expect(first.template?.name).toBe('测试流程')
+    expect((await h.store.listWorkflows('session-1')).length).toBe(1) // 实例数不变
+    expect((await h.store.listFlowTemplates()).length).toBe(1)
+
+    // 二次导入同名单 → conflict（模板库重名判定）
+    const conflict = (await h.api.handle('importWorkflow', { json })) as { conflict?: boolean }
     expect(conflict.conflict).toBe(true)
 
-    // rename → 新名称保存
-    const renamed = (await h.api.handle('importWorkflow', { sessionId: 'session-1', json, conflictMode: 'rename' })) as {
-      workflow?: { id?: string; name?: string }
+    // rename → 新名称模板
+    const renamed = (await h.api.handle('importWorkflow', { json, conflictMode: 'rename' })) as {
+      template?: { id?: string; name?: string }
     }
-    expect(renamed.workflow?.name).toBe('测试流程 (2)')
-    expect((await h.store.listWorkflows('session-1')).length).toBe(2)
+    expect(renamed.template?.name).toBe('测试流程 (2)')
+    expect((await h.store.listWorkflows('session-1')).length).toBe(1) // 实例数不变
+    expect((await h.store.listFlowTemplates()).length).toBe(2)
 
-    // overwrite → 覆盖同名（数量不变，id 保持）
-    const overwritten = (await h.api.handle('importWorkflow', { sessionId: 'session-1', json, conflictMode: 'overwrite' })) as {
-      workflow?: { id?: string }
+    // overwrite → 覆盖同名模板（'测试流程'；数量不变，id 保持为首个模板 id）
+    const firstId = first.template?.id
+    const overwritten = (await h.api.handle('importWorkflow', { json, conflictMode: 'overwrite' })) as {
+      template?: { id?: string }
     }
-    expect(overwritten.workflow?.id).toBe('flow-1')
-    expect((await h.store.listWorkflows('session-1')).length).toBe(2)
+    expect(overwritten.template?.id).toBe(firstId)
+    expect((await h.store.listFlowTemplates()).length).toBe(2)
   })
 
-  it('模式二服务导出/导入往返（service 字段、落到 services/、冲突语义）', async () => {
+  it('模式二服务导出/导入往返（service 字段、落到模板库、冲突语义）', async () => {
     const h = await makeHarness()
     const service = {
       id: 'svc-1',
@@ -607,13 +661,21 @@ describe('导入导出', () => {
     expect(bundle.mode).toBe('mode2')
     expect(bundle.service?.name).toBe('示例服务')
 
-    // 同名单 → conflict；rename → 新服务（services 表而非 workflows）
-    const conflict = (await h.api.handle('importWorkflow', { sessionId: 'session-1', json })) as { conflict?: boolean }
+    // 首次导入 → mode2 模板（模板库为空不 conflict）
+    const first = (await h.api.handle('importWorkflow', { json })) as { template?: { id?: string; name?: string; mode?: string } }
+    expect(first.template?.name).toBe('示例服务')
+    expect(first.template?.mode).toBe('mode2')
+    expect((await h.store.listServices('session-1')).length).toBe(1) // 服务实例不变
+    expect((await h.store.listFlowTemplates()).length).toBe(1)
+
+    // 同名单 → conflict；rename → 新名称 mode2 模板
+    const conflict = (await h.api.handle('importWorkflow', { json })) as { conflict?: boolean }
     expect(conflict.conflict).toBe(true)
-    const renamed = (await h.api.handle('importWorkflow', { sessionId: 'session-1', json, conflictMode: 'rename' })) as { service?: { id?: string; name?: string } }
-    expect(renamed.service?.name).toBe('示例服务 (2)')
-    expect((await h.store.listServices('session-1')).length).toBe(2)
-    expect((await h.store.listWorkflows('session-1')).length).toBe(0)
+    const renamed = (await h.api.handle('importWorkflow', { json, conflictMode: 'rename' })) as { template?: { id?: string; name?: string; mode?: string } }
+    expect(renamed.template?.name).toBe('示例服务 (2)')
+    expect(renamed.template?.mode).toBe('mode2')
+    expect((await h.store.listServices('session-1')).length).toBe(1)
+    expect((await h.store.listFlowTemplates()).length).toBe(2)
   })
 
   it('角色模板导出/导入往返；非法文件 400/422', async () => {

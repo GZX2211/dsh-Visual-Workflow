@@ -4,7 +4,6 @@
 // 运行环境：node（host 测试默认，不引入 jsdom）。
 import { describe, expect, it } from 'vitest'
 import {
-  COLLAB_PREFIX,
   HEAD_MARKER,
   MID_MARKER,
   TAIL_MARKER,
@@ -138,11 +137,10 @@ describe('T-005 协作成员清单块模板（始终含成员 ID+角色名 + 自
 })
 
 describe('T-005 共享段落标记常量（供测试与后续组装引用）', () => {
-  it('导出 TAIL_MARKER / HEAD_MARKER / MID_MARKER / TAIL_RESTATE_MARKER / COLLAB_PREFIX', () => {
+  it('导出 TAIL_MARKER / HEAD_MARKER / MID_MARKER / TAIL_RESTATE_MARKER', () => {
     expect(typeof TAIL_MARKER).toBe('string')
     expect(typeof HEAD_MARKER).toBe('string')
     expect(typeof MID_MARKER).toBe('string')
     expect(typeof TAIL_RESTATE_MARKER).toBe('string')
-    expect(COLLAB_PREFIX).toBe('collab:')
   })
 })

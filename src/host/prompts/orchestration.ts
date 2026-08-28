@@ -1,4 +1,4 @@
-﻿// src/host/prompts/orchestration.ts
+// src/host/prompts/orchestration.ts
 //
 // 编排指令模板构建器。
 //
@@ -152,9 +152,10 @@ export function buildOrchestrationDirective(params: OrchestrationDirectiveParams
     MID_MARKER,
     '',
     `工作流事实源（只读文件）：${facts.definitionPath} —— 请先读取它，以获取完整节点列表与连线语义。`,
+    `⚠ 运行期间画布保存会刷新本文件（双向同步）：节点清单可能变化，请每次调度前重新读取事实源文件，以文件最新内容为准（下方「待编排节点」仅作启动时快照参考，不作为调度依据）。`,
     `工作流目标：${facts.workflowGoal.trim() || '（无描述）'}`,
     '',
-    '待编排节点：',
+    '待编排节点（启动时快照，非权威）：',
     nodeList,
     '',
     '协作组（并行成员）：',

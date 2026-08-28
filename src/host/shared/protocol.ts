@@ -56,6 +56,12 @@ export const EP_LIST_TEMPLATES = 'listTemplates'
 export const EP_PUT_TEMPLATE = 'putTemplate'
 /** 删除模板。 */
 export const EP_DELETE_TEMPLATE = 'deleteTemplate'
+/** 工作流模板列表端点名（图2 交互改造：工作流模板全局共享，跨会话可见）。 */
+export const EP_LIST_FLOW_TEMPLATES = 'listFlowTemplates'
+/** 保存工作流模板（新建/更新统一；模板全局共享，不按会话隔离）。 */
+export const EP_PUT_FLOW_TEMPLATE = 'putFlowTemplate'
+/** 删除工作流模板。 */
+export const EP_DELETE_FLOW_TEMPLATE = 'deleteFlowTemplate'
 /** 删除模板预览（角色/文件/数据库）。 */
 export const EP_DELETE_TEMPLATE_PREVIEW = 'deleteTemplatePreview'
 /** 受管文件上传端点名（非文本文件：base64 内容 → data/files/ 受管拷贝，§4.2.4.1 规则 2）。 */
@@ -89,6 +95,8 @@ export const EP_MCP_TOGGLE = 'mcpToggle'
 export const EP_RUN = 'run'
 /** 运行状态轮询端点名。 */
 export const EP_RUN_STATUS = 'runStatus'
+/** 会话活跃 run 列表端点名（工作台进入时自动选中运行中实例用；running/paused 保留锁）。 */
+export const EP_ACTIVE_RUNS = 'activeRuns'
 /** 运行停止端点名。 */
 export const EP_RUN_STOP = 'runStop'
 /** 运行历史端点名。 */

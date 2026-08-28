@@ -143,6 +143,38 @@ describe('服务 CRUD 与会话隔离', () => {
   })
 })
 
+describe('列表容错：损坏 JSON 不阻塞整个列表（Bug 21）', () => {
+  it('listWorkflows 跳过损坏文件，正常文件仍返回', async () => {
+    const { writeFile } = await import('node:fs/promises')
+    await store.saveWorkflow(makeFlow('good', 's1'), 's1')
+    await writeFile(join(dir, 'workflows', 'corrupt.json'), '{ broken json', 'utf8')
+    const list = await store.listWorkflows('s1')
+    expect(list.map((f) => f.id)).toEqual(['good'])
+  })
+
+  it('listServices/listServicesAll/listTemplates/listRuns 同样跳过损坏文件', async () => {
+    const { writeFile } = await import('node:fs/promises')
+    await store.saveService(makeService('svc1', 's1'), 's1')
+    await store.saveTemplate('role', makeRoleTemplate('r1'))
+    const run: RunSnapshot = {
+      id: 'run-1', flowId: 'f1', flowName: '流程', sessionId: 's1', mode: 'mode1', status: 'completed',
+      startedAt: '2026-08-24T00:00:00.000Z', endedAt: null, summary: '', nodes: [],
+    }
+    await store.saveRun(run)
+    await writeFile(join(dir, 'workflows', 'bad.json'), '{', 'utf8')
+    await writeFile(join(dir, 'services', 'bad.json'), '{', 'utf8')
+    await writeFile(join(dir, 'roles', 'bad.json'), '{', 'utf8')
+    await writeFile(join(dir, 'data', 'bad.json'), '{', 'utf8')
+    await writeFile(join(dir, 'runs', 'bad.json'), '{', 'utf8')
+    expect((await store.listServices('s1')).map((s) => s.id)).toEqual(['svc1'])
+    expect((await store.listServicesAll()).map((s) => s.id)).toEqual(['svc1'])
+    expect((await store.listTemplates('role')).map((t) => t.id)).toEqual(['r1'])
+    expect((await store.listRuns('f1')).map((r) => r.id)).toEqual(['run-1'])
+    // 非列表读取（getWorkflow）对损坏文件仍保留可诊断性：不伪装成不存在
+    await expect(store.getWorkflow('s1', 'bad')).rejects.toMatchObject({ name: 'CorruptJsonError' })
+  })
+})
+
 describe('模板 CRUD（全局共享）与子类过滤', () => {
   it('角色/文件/数据库三类模板增删查', async () => {
     const role = makeRoleTemplate('r1')
@@ -330,5 +362,48 @@ describe('原子性与锁一致性', () => {
     expect((await store.listWorkflows('s1')).length).toBe(2)
     expect((await store.listTemplates('role')).length).toBe(1)
     expect((await store.listToolCombos()).length).toBe(1)
+  })
+})
+
+describe('工作流模板 CRUD（图2 交互改造：flow-templates/ 全局共享）', () => {
+  function makeTemplate(id: string, name: string, mode: 'mode1' | 'mode2' = 'mode1') {
+    return {
+      id,
+      mode,
+      name,
+      description: '',
+      revision: 0,
+      nodes: [],
+      lines: [],
+    }
+  }
+
+  it('保存/列出/读取：mode 过滤按需，模板全局共享不隔离', async () => {
+    await store.saveFlowTemplate(makeTemplate('tpl-1', '流程模板'))
+    await store.saveFlowTemplate(makeTemplate('tpl-2', '服务模板', 'mode2'))
+    const all = await store.listFlowTemplates()
+    expect(all.map((t) => t.id).sort()).toEqual(['tpl-1', 'tpl-2'])
+    expect((await store.getFlowTemplate('tpl-1'))?.name).toBe('流程模板')
+    // 模板无 sessionId 隔离：不传会话也能读到（全局共享语义）
+    expect((await store.getFlowTemplate('tpl-2'))?.mode).toBe('mode2')
+  })
+
+  it('revision 递增 + 乐观锁冲突保护（与实例同语义）', async () => {
+    const saved = await store.saveFlowTemplate(makeTemplate('tpl-3', '模板A'))
+    expect(saved.revision).toBe(1)
+    await store.saveFlowTemplate({ ...makeTemplate('tpl-3', '模板A改'), revision: 1 }, { expectedRevision: 1 })
+    await expect(
+      store.saveFlowTemplate({ ...makeTemplate('tpl-3', '旧快照'), revision: 1 }, { expectedRevision: 1 }),
+    ).rejects.toMatchObject({ code: 'FLOW_REVISION_CONFLICT' })
+  })
+
+  it('删除仅删模板文件，不影响已生成的实例（解耦语义）', async () => {
+    await store.saveFlowTemplate(makeTemplate('tpl-4', '模板'))
+    // 同名实例独立保存（实例属会话，模板全局——两者互不干扰）
+    await store.saveWorkflow({ ...makeFlow('f-tpl', 's1'), name: '模板' }, 's1')
+    expect(await store.deleteFlowTemplate('tpl-4')).toBe(true)
+    expect(await store.getFlowTemplate('tpl-4')).toBeNull()
+    // 实例仍在
+    expect((await store.getWorkflow('s1', 'f-tpl'))?.name).toBe('模板')
   })
 })

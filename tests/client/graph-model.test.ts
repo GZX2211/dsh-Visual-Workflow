@@ -23,8 +23,9 @@ import {
   stageLabels,
   stageTemplateKinds,
   flowToCanvasLines,
+  runningNodeIds,
 } from '../../src/client/lib/graph-model.js'
-import type { RoleTemplate, FileTemplate, DatabaseTemplate } from '../../src/host/shared/types.js'
+import type { RoleTemplate, FileTemplate, DatabaseTemplate, RunSnapshot } from '../../src/host/shared/types.js'
 
 const roleTemplate: RoleTemplate = {
   id: 'r-1', kind: 'agent', name: '研究', systemPrompt: '你是研究员', provider: 'deepseek', model: 'deepseek-chat',
@@ -56,6 +57,27 @@ describe('模板 → 节点深拷贝（§4.2.1）', () => {
     expect(data.fileKind).toBe('file')
     expect(data.managedPath).toBe('data/files/a.pdf')
     expect(data.fileName).toBe('a.pdf')
+  })
+
+  it('file 模板 → 节点 data：多选 files 列表完整传递（需求 §4.2.4.1 可多选所有类型）', () => {
+    const data = templateToNodeData('file', {
+      ...fileTemplate,
+      fileKind: 'file',
+      files: [
+        { fileName: 'a.pdf', managedPath: 'data/files/a.pdf' },
+        { fileName: 'b.docx', managedPath: 'data/files/b.docx' },
+      ],
+    }) as Record<string, unknown>
+    expect(data.files).toEqual([
+      { fileName: 'a.pdf', managedPath: 'data/files/a.pdf' },
+      { fileName: 'b.docx', managedPath: 'data/files/b.docx' },
+    ])
+  })
+
+  it('file 模板 → 节点 data：files 为空时节点不带 files 字段（兼容单选旧字段）', () => {
+    const data = templateToNodeData('file', { ...fileTemplate, fileKind: 'file', managedPath: 'data/files/a.pdf', files: [] }) as Record<string, unknown>
+    expect(data.files).toBeUndefined()
+    expect(data.managedPath).toBe('data/files/a.pdf')
   })
 
   it('database 模板 → 节点 data', () => {
@@ -287,5 +309,37 @@ describe('协作组成员（原子入组 / 一致显示，§4.2.5.2 + 用户批�
     const group = base.find((n) => n.id === 'g')!
     const deduped = [...new Set((group.data.memberIds as string[]) ?? [])]
     expect([...new Set(deduped.filter((i) => i !== 'a'))]).toEqual(['b'])
+  })
+})
+
+describe('运行状态派生（需求 §4.5.8 节点高亮）', () => {
+  it('runningNodeIds：仅返回 status=running 的节点 id', () => {
+    const snapshot: RunSnapshot = {
+      id: 'run-1',
+      flowId: 'f-1',
+      flowName: '示例',
+      sessionId: 's-1',
+      mode: 'mode1',
+      status: 'running',
+      startedAt: '2026-08-25T00:00:00.000Z',
+      endedAt: null,
+      summary: '',
+      nodes: [
+        { nodeId: 'a', status: 'running', attempts: 1, startedAt: null, endedAt: null, output: '', outputSummary: '' },
+        { nodeId: 'b', status: 'ok', attempts: 1, startedAt: null, endedAt: null, output: '', outputSummary: '' },
+        { nodeId: 'c', status: 'pending', attempts: 0, startedAt: null, endedAt: null, output: '', outputSummary: '' },
+      ],
+    }
+    expect(runningNodeIds(snapshot)).toEqual(['a'])
+  })
+
+  it('runningNodeIds：空/无 running 快照返回空数组', () => {
+    expect(runningNodeIds(null)).toEqual([])
+    const snapshot: RunSnapshot = {
+      id: 'run-2', flowId: 'f-1', flowName: '示例', sessionId: 's-1', mode: 'mode1', status: 'failed',
+      startedAt: '2026-08-25T00:00:00.000Z', endedAt: '2026-08-25T00:01:00.000Z', summary: '',
+      nodes: [{ nodeId: 'a', status: 'fail', attempts: 2, startedAt: null, endedAt: null, output: '', outputSummary: '' }],
+    }
+    expect(runningNodeIds(snapshot)).toEqual([])
   })
 })

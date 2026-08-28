@@ -136,12 +136,18 @@ export function templateToNodeData(
   if (kind === 'file') {
     const file = template as FileTemplate
     const managedPath = String(file.managedPath ?? '')
+    // files 列表（多选）优先；兼容单选旧字段（fileName/managedPath）——与后端
+    // FlowStore.templateToNode 逐字段对齐，拖入画布不丢失多选文件路径（需求 §4.2.4.1）。
+    const files = Array.isArray(file.files) && file.files.length > 0
+      ? file.files.map((item) => ({ fileName: String(item?.fileName ?? ''), managedPath: String(item?.managedPath ?? '') }))
+      : []
     return {
       label,
       fileKind: file.fileKind === 'file' ? 'file' : 'text',
       content: String(file.content ?? ''),
       managedPath: managedPath || undefined,
       fileName: String(managedPath ? managedPath.split(/[\\/]/).pop() : ''),
+      ...(files.length > 0 ? { files } : {}),
     }
   }
   const db = template as DatabaseTemplate
@@ -159,15 +165,6 @@ export function templateToNodeData(
 /** 画布节点 kind 统一读取（顶层 kind 优先，兼容 data.kind 历史数据）。 */
 export function nodeKindOf(node: GraphNode | { kind?: string; data?: { kind?: string } } | null | undefined): string {
   return node?.kind ?? node?.data?.kind ?? 'agent'
-}
-
-/** flow → 画布节点（画布与存储同构：节点 JSON 即事实源；仅补齐视图需要的字段）。 */
-export function flowToCanvasNodes(flow: WorkflowDocument | null | undefined): CanvasNode[] {
-  return (flow?.nodes ?? []).map((node) => {
-    const kind = nodeKindOf(node)
-    const data = { ...((node as { data?: Record<string, unknown> }).data ?? {}), kind } as Record<string, unknown>
-    return { id: node.id, kind: kind as CanvasNode['kind'], position: node.position ?? { x: 120, y: 80 }, data } as unknown as CanvasNode
-  })
 }
 
 /** flow → 画布连线（line 条件对象 → 显示标签/颜色）。 */
@@ -361,6 +358,13 @@ export function runStatusMap(snapshot: RunSnapshot | null | undefined): Record<s
     if (node?.nodeId) map[node.nodeId] = { status: node.status, attempts: node.attempts, outputSummary: node.outputSummary }
   }
   return map
+}
+
+/** 运行中节点 id 列表（需求 §4.5.8「当前运行节点高亮」；画布高亮数据源，防回环只写视图）。 */
+export function runningNodeIds(snapshot: RunSnapshot | null | undefined): string[] {
+  return (snapshot?.nodes ?? [])
+    .filter((node) => node?.nodeId && node.status === 'running')
+    .map((node) => node.nodeId as string)
 }
 
 // ---------------------------------------------------------------------------

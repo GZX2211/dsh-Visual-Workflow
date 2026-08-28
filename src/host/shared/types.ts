@@ -12,7 +12,7 @@
 //   - 结构逐字对齐架构文档 AD-001 §6.1~§6.4。
 //   - 每个字段以中文 JSDoc 说明业务语义，并引用需求条款号（PRD §4.x.y）。
 
-import type { GraphNode, Line } from './graph-model.js'
+import type { GraphNode, Line, WorkflowTemplate } from './graph-model.js'
 
 // ---------------------------------------------------------------------------
 // run 快照（runs/<runId>.json，架构文档 §6.1）
@@ -213,6 +213,13 @@ export interface DatabaseTemplate {
   /** 向量检索模式。 */
   vectorSource?: 'embedding' | 'bm25'
 }
+
+/**
+ * 工作流模板（架构文档 §6.3 扩展）：图2 交互改造后左侧「工作流模板」列表实体，
+ * 与 WorkflowDocument 同构但**全局共享**（跨会话可见，无 sessionId 隔离；
+ * 拖入画布 → 保存/「创建实例」→ 转为当前会话实例）。
+ */
+export type { WorkflowTemplate }
 
 /**
  * 协作组模板（架构文档 §6.4 BundleV2.embedded.groups 引用）。

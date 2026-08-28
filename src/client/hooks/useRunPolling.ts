@@ -10,7 +10,7 @@ import type { StudioAction } from '../studio/studio-state.js'
 import type { RemoteFace } from './useRemote.js'
 import { EP } from '../lib/remote.js'
 
-/** 轮询间隔（旧项目 RUN_POLL_MS）。 */
+/** 轮询间隔（旧项目 RUN_POLL_MS）。当前固定 600ms；后端 runPollMs 配置键预留未接入。 */
 export const RUN_POLL_MS = 600
 
 /** 终态集合（轮询停止判定）。 */
@@ -44,5 +44,7 @@ export function useRunPolling(
       cancelled = true
       clearInterval(timer)
     }
-  }, [dispatch, remote, runId])
+    // sessionId 必须入依赖数组：轮询请求携带 sessionId，若 runId 不变而会话切换
+    // （实际场景极罕见），旧会话 id 会导致按错会话请求（400/数据错乱）。
+  }, [dispatch, remote, runId, sessionId])
 }

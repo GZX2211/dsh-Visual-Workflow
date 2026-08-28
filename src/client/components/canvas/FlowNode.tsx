@@ -14,7 +14,7 @@
 import type { Dict } from '../../i18n.js'
 import type { CanvasNode } from '../../studio/studio-state.js'
 import { HANDLES } from '../../lib/graph-model.js'
-import { nodeSizeOf } from './geometry.js'
+import { handleY, nodeSizeOf } from './geometry.js'
 
 interface FlowNodeProps {
   node: CanvasNode
@@ -123,7 +123,7 @@ export function FlowNode({ node, copy, mode, selected, highlighted, dragging, ru
           <span
             key={handle}
             className="wf-graph__handle wf-graph__handle--target"
-            style={{ top: `${handleYOf(handle) * 100}%` }}
+            style={{ top: `${handleY(handle) * 100}%` }}
             data-handle={handle}
             title={handle}
             onPointerDown={(event) => onHandlePointerDown(event, node.id, handle)}
@@ -133,7 +133,7 @@ export function FlowNode({ node, copy, mode, selected, highlighted, dragging, ru
           <span
             key={handle}
             className="wf-graph__handle wf-graph__handle--source"
-            style={{ top: `${handleYOf(handle) * 100}%` }}
+            style={{ top: `${handleY(handle) * 100}%` }}
             data-handle={handle}
             title={handle}
             onPointerDown={(event) => onHandlePointerDown(event, node.id, handle)}
@@ -142,11 +142,4 @@ export function FlowNode({ node, copy, mode, selected, highlighted, dragging, ru
       </div>
     </div>
   )
-}
-
-/** 接点垂直位置（百分比）：单点（输入/输出）居中，其余 db 最上、ctx 上、flow 下。 */
-function handleYOf(handle: string): number {
-  if (handle === 'db-in' || handle === 'db-out') return 0.22
-  if (handle === 'ctx-in' || handle === 'ctx-out') return 0.42
-  return 0.72
 }

@@ -40,17 +40,19 @@
 | 序号 | 风险等级 | 问题类型 | 代码文件 | 位置 | 问题描述 | 影响/未对齐点 |
 |------|----------|----------|----------|-----------|----------|---------------|
 | 1 | P0 | 需求未对齐 | `src/client/studio/Studio.tsx` | L177-L179 | `templates.loadTemplates()` 仅在 `state.sessionId` 存在时执行（L163 条件包裹）。若用户在无会话（新 DSH 窗口未发送消息）时打开工作台，`sessionId` 为空，`templates.loadTemplates()` 被跳过，导致**内置父代理模板永远无法创建**（L182-L194 的创建逻辑依赖 L177 的 load 完成）。需求 §4.2.3.1 要求"父代理模板在角色 Tab 置顶固定显示"，无会话时用户仍应能看到模板库。 | 违反需求 §4.2.3.1（父代理模板应始终可用），导致新用户首次打开工作台时角色 Tab 为空。 |
-| 2 | P0 | 编译阻塞 | `src/client/styles.ts` | - | 文件内容为 CSS 注释，无 `export const styles` 导出。`entry.ts` 中 `import { styles } from './styles.js'` 将因找不到导出而编译失败 | 前端构建失败 |
-| 3 | P0 | 契约冲突 | `Studio.tsx` `copyToProxy` + `studio-state.ts` `flowToCanvas` + `useWorkflows.ts` `serializeWorkflow` | - | 虚拟节点 `proxySourceId` 在创建时正确置于顶层，但 `flowToCanvas` 投影和序列化均只复制 `id/kind/position/data`，导致打开工作流后 `proxySourceId` 静默丢失，保存后后端 `validateFlow` 报 `proxySourceMissing` | 虚拟节点功能全链路不可用 |
-| 4 | P0 | 契约冲突 | `ServiceConsole.tsx` | `sendDebug` L75-L88 | SSE 解析字段路径错误：后端 `sseChunk` 返回 `choices[0].delta.content`，前端解析 `parsed.delta?.content` | 调试台流式输出永远为空 |
-| 5 | P1 | 逻辑 Bug | `src/client/studio/Studio.tsx` | `removeSelected()` 函数，L1240-1270 | 删除主节点时弹窗提示虚拟引用数量，但确认回调 `removeNodeNow()` 中未实现虚拟节点级联删除（仅执行 `dispatch({ type: 'NODE_REMOVED', id })`），所有关联虚拟节点未被删除，画布残留孤儿节点。 | 违反需求文档 §4.2.3.2 规则 5："删除主节点时如有其对应的虚拟节点存在，提前弹窗提示……确认后级联删除所有关联虚拟节点。" |
-| 6 | P1 | 需求未对齐 | `src/client/studio/Studio.tsx` | 初始化 effect，L192-260 | 初始化逻辑中 `templates.loadTemplates()` 与 `remote.call(EP_LIST_TEMPLATES)` 叠加调用，且内置父代理模板创建后再次调用 `loadTemplates()`，若创建过程中出现网络错误，状态可能部分更新（TEMPLATE_ADDED 已执行但 TEMPLATES_LOADED 覆盖），导致模板列表不一致。 | 需求文档 §4.2.3.1："父代理节点在"角色"Tab 的左侧栏置顶固定显示"；当前实现可能因竞态导致父代理模板重复创建或缺失。架构文档 §4.6 remote/ 端点约定"POST /visual-workflow/<endpoint>，响应 { ok, value / error }"，未规定幂等行为，前端应避免连续调用。 |
-| 7 | P1 | 逻辑 Bug | `src/client/studio/studio-state.ts` | `SELECT_EDITOR` / `SELECT_LIB` 处理，L254-258 | 父代理模板点击时，`selectLibraryCard` 中调用了 `selection.selectLib('parentTemplate', id)` 后又调用 `selection.selectEditor(null)`，导致 `state.selection.lib` 被设置为 `{kind:'parentTemplate', id}` 但 `state.editor` 为 `null`，状态不一致。 | 需求文档 §4.2.3.1："父代理模板不可删除（点击无属性显示）"——右侧无显示是符合需求的，但左侧高亮状态与编辑状态未同步可能引发后续操作误判（如保存/删除按钮仍不可用但用户以为已选中）。 |
-| 8 | P1 | 逻辑 Bug | `src/client/hooks/usePanelLayout.ts` | `beginResize()` 中的 pointer 事件，L88-130 | 拖拽面板宽度时若鼠标移出浏览器窗口，`pointermove` 事件不再触发，但 `pointerup` 在外部松开鼠标时可能不触发（取决于操作系统），导致 `body.style.cursor` 永久变为 `col-resize`，用户交互异常。 | 交互体验严重受损，用户无法恢复鼠标指针，必须刷新页面。架构文档 §10 要求"面板几何 localStorage 持久化"，未对异常松开场景做兜底处理。 |
-| 9 | P1 | 逻辑 Bug | `src/client/components/canvas/GraphCanvas.tsx` | `beginNodeDrag()` 的 onUp 回调，L348-370 | 已属于某协作组的角色节点（`data.groupId` 非空）拖拽到另一个组卡片时，因条件判断 `!((node.data.groupId as string | null | undefined) ?? null)` 而被阻止入组，无法实现"将角色从一个组移到另一个组"的操作。 | 需求文档 §4.2.5.2 规则 1："将角色节点拖入协作组后，形成协作组合，支持拖入多个角色"——未明确禁止移动，但实际场景中用户期望可调整组成员，当前实现限制了灵活性。 |
-| 10 | P1 | 状态管理缺陷 | `studio-state.ts` | `UNDO` / `REDO` case（第 221-238 行） | `UNDO`/`REDO` 恢复 canvas 后，`selection`、`editor` 未被清理或验证，可能指向已删除/不存在的节点 ID。 | 选中状态与实际 canvas 不一致，导致键盘删除操作（Delete/Backspace）可能尝试删除不存在的节点，或 `Inspector` 渲染空数据。 |
-| 11 | P1 | 需求未对齐 | `hooks/useTemplates.ts` | `loadTemplates()` 函数（第 48-59 行） | 使用 `Promise.all` 并行加载三种模板，任一模板加载失败导致整个 `loadTemplates` 失败，其他类型模板也无法加载。 | 应使用 `Promise.allSettled` 或分别 try-catch，使某类模板加载失败不影响其他类型。违反鲁棒性设计要求。 |
-| 12 | P1 | 竞态条件 | `hooks/useRunPolling.ts` | `useEffect` 轮询逻辑（第 19-44 行） | `poll()` 是异步函数，在 `setInterval` 回调中执行 `void poll()`。若组件在 `poll()` 的 `remote.call` 等待期间卸载，`cancelled` 标志被设置为 `true`，但 `poll()` 内部的检查在 `await` 之后，若远程调用恰好在卸载瞬间完成，仍会执行 `dispatch`。 | React 警告 "Can't perform a React state update on an unmounted component"，虽不崩溃但表明存在内存泄漏风险。 |
+| 2 | P0 | 契约冲突 | `Studio.tsx` `copyToProxy` + `studio-state.ts` `flowToCanvas` + `useWorkflows.ts` `serializeWorkflow` | - | 虚拟节点 `proxySourceId` 在创建时正确置于顶层，但 `flowToCanvas` 投影和序列化均只复制 `id/kind/position/data`，导致打开工作流后 `proxySourceId` 静默丢失，保存后后端 `validateFlow` 报 `proxySourceMissing` | 虚拟节点功能全链路不可用 |
+| 3 | P0 | 契约冲突 | `ServiceConsole.tsx` | `sendDebug` L75-L88 | SSE 解析字段路径错误：后端 `sseChunk` 返回 `choices[0].delta.content`，前端解析 `parsed.delta?.content` | 调试台流式输出永远为空 |
+| 4 | P1 | 逻辑 Bug | `src/client/studio/Studio.tsx` | `removeSelected()` 函数，L1240-1270 | 删除主节点时弹窗提示虚拟引用数量，但确认回调 `removeNodeNow()` 中未实现虚拟节点级联删除（仅执行 `dispatch({ type: 'NODE_REMOVED', id })`），所有关联虚拟节点未被删除，画布残留孤儿节点。 | 违反需求文档 §4.2.3.2 规则 5："删除主节点时如有其对应的虚拟节点存在，提前弹窗提示……确认后级联删除所有关联虚拟节点。" |
+| 5 | P1 | 需求未对齐 | `src/client/studio/Studio.tsx` | 初始化 effect，L192-260 | 初始化逻辑中 `templates.loadTemplates()` 与 `remote.call(EP_LIST_TEMPLATES)` 叠加调用，且内置父代理模板创建后再次调用 `loadTemplates()`，若创建过程中出现网络错误，状态可能部分更新（TEMPLATE_ADDED 已执行但 TEMPLATES_LOADED 覆盖），导致模板列表不一致。 | 需求文档 §4.2.3.1："父代理节点在"角色"Tab 的左侧栏置顶固定显示"；当前实现可能因竞态导致父代理模板重复创建或缺失。架构文档 §4.6 remote/ 端点约定"POST /visual-workflow/<endpoint>，响应 { ok, value / error }"，未规定幂等行为，前端应避免连续调用。 |
+| 6 | P1 | 逻辑 Bug | `src/client/studio/studio-state.ts` | `SELECT_EDITOR` / `SELECT_LIB` 处理，L254-258 | 父代理模板点击时，`selectLibraryCard` 中调用了 `selection.selectLib('parentTemplate', id)` 后又调用 `selection.selectEditor(null)`，导致 `state.selection.lib` 被设置为 `{kind:'parentTemplate', id}` 但 `state.editor` 为 `null`，状态不一致。 | 需求文档 §4.2.3.1：右侧无显示是符合需求的，但左侧高亮状态与编辑状态未同步可能引发后续操作误判（如保存/删除按钮仍不可用但用户以为已选中）。 |
+| 7 | P1 | 逻辑 Bug | `src/client/hooks/usePanelLayout.ts` | `beginResize()` 中的 pointer 事件，L88-130 | 拖拽面板宽度时若鼠标移出浏览器窗口，`pointermove` 事件不再触发，但 `pointerup` 在外部松开鼠标时可能不触发（取决于操作系统），导致 `body.style.cursor` 永久变为 `col-resize`，用户交互异常。 | 交互体验严重受损，用户无法恢复鼠标指针，必须刷新页面。架构文档 §10 要求"面板几何 localStorage 持久化"，未对异常松开场景做兜底处理。 |
+| 8 | P1 | 状态管理缺陷 | `studio-state.ts` | `UNDO` / `REDO` case（第 221-238 行） | `UNDO`/`REDO` 恢复 canvas 后，`selection`、`editor` 未被清理或验证，可能指向已删除/不存在的节点 ID。 | 选中状态与实际 canvas 不一致，导致键盘删除操作（Delete/Backspace）可能尝试删除不存在的节点，或 `Inspector` 渲染空数据。 |
+| 9 | P1 | 需求未对齐 | `hooks/useTemplates.ts` | `loadTemplates()` 函数（第 48-59 行） | 使用 `Promise.all` 并行加载三种模板，任一模板加载失败导致整个 `loadTemplates` 失败，其他类型模板也无法加载。 | 应使用 `Promise.allSettled` 或分别 try-catch，使某类模板加载失败不影响其他类型。违反鲁棒性设计要求。 |
+| 10 | P1 | 竞态条件 | `hooks/useRunPolling.ts` | `useEffect` 轮询逻辑（第 19-44 行） | `poll()` 是异步函数，在 `setInterval` 回调中执行 `void poll()`。若组件在 `poll()` 的 `remote.call` 等待期间卸载，`cancelled` 标志被设置为 `true`，但 `poll()` 内部的检查在 `await` 之后，若远程调用恰好在卸载瞬间完成，仍会执行 `dispatch`。 | React 警告 "Can't perform a React state update on an unmounted component"，虽不崩溃但表明存在内存泄漏风险。 |
+
+---
+| 序号 | 风险等级 | 问题类型 | 代码文件 | 位置 | 问题描述 | 影响/未对齐点 |
+|------|----------|----------|----------|-----------|----------|---------------|
 | 13 | P1 | 空值安全 | `hooks/useTemplates.ts` | `saveTemplate()` 函数（第 70-74 行） | `remote.call` 返回 `saved` 后直接 `dispatch({ type: 'TEMPLATE_UPDATED', kind, template: saved })`，若后端返回 `null` 或非模板对象，`studio-state.ts` 中的 reducer 会尝试用 `null` 替换数组中的模板条目。 | 编辑器数据可能被置为 `null`，导致右侧属性栏崩溃或显示空白。需要增加 `if (!saved) return` 守卫。 |
 | 14 | P1 | 内存泄漏 | `src/client/components/canvas/GraphCanvas.tsx` | L168-L176 | `beginConnection` 中的 `onMove`/`onUp` 监听器在组件卸载时未清理（`useEffect` 返回清理函数仅清理了内部闭包，但 `window.addEventListener` 在 `useEffect` 外部注册）。若用户在拖拽连线过程中卸载组件（如快速切换工作流），监听器残留。 | 内存泄漏 + 可能导致状态更新在已卸载组件上执行（React 警告）。 |
 | 15 | P1 | 需求未对齐 | `src/client/studio/Studio.tsx` | L786-L798 | `switchMode` 在切换模式时调用 `dispatch({ type: 'CLEAR_CANVAS' })` 清空画布，且仅调用 `workflows.loadWorkflows()` 或 `serviceControl.loadServices()`，但**未清空 `state.editor` 和 `state.selection`**。用户从模式一切换到模式二后，右侧属性栏可能仍显示上一个模式选中对象的编辑器引用，导致点击保存时操作错误的对象。 | 违反需求 §4.1.1 验收标准 1（"画布区域重置为空白画布"且无残留选中状态）。 |
@@ -61,11 +63,12 @@
 | 20 | P1 | 契约不一致/错误码映射 | `src/client/lib/remote.ts` + `src/host/remote/api.ts` | 前端 L28-L30、后端 L206-L209 | 后端 `HttpError` 的 `code` 字段（如 `FLOW_REVISION_CONFLICT`、`WF_LOCKED`）在响应中序列化为 `{ ok: false, error: { message, code } }`，但前端 `remoteCall` 仅抛出 `Error(message)`，丢弃了 `code` 字段。前端无法根据错误码做分支（如 409 冲突时自动刷新，而非仅 Toast 提示）。 | 前端错误处理退化：所有后端错误均显示为通用错误消息，无法针对性引导用户（如 revision 冲突时自动重新加载）。 |
 | 21 | P1 | 逻辑Bug（状态不一致） | `src/client/hooks/useWorkflows.ts` | L75-L85 (`saveWorkflow`) | 前端在 `createWorkflowDraft` 中创建带 `_draft: true` 标记的草稿 → `saveWorkflow` 将 `serialized`（含 `_draft`）发送至后端 → 后端 `api.ts` `putWorkflow` 调用 `stripClientMeta` 移除 `_draft` → 保存成功，返回的 `saved` 对象无 `_draft` 标记 → 前端用 `saved` 更新 `state.workflows`，但 `saved` 可能**缺少原草稿的某些前端临时字段**（如 `_clientMeta`）。 | 草稿保存后，前端状态中的工作流对象被替换为后端返回的“干净”对象，可能丢失前端专属的标记或元数据，导致后续操作（如再次保存、删除）行为异常。 |
 | 22 | P1 | 数据污染 | `useServiceControl.ts` | `startService`/`stopService` L62-L74 | 后端 `manager.start()` 返回 `{serviceId,status,port,pid}`，前端 cast 为 `ServiceState` 后 `SERVICE_UPDATED` 整体替换列表项 | 服务列表项被残缺对象污染，nodes/lines/revision 丢失 |
-| 23 | P1 | 资源泄漏 | `orchestrator/runtime.ts` | `handleSubagentEnd` L530-L558 | childIndex 永不清理 | 内存增长 + 已结束子代理仍可被 ask 目标 |
-| 24 | P1 | 安全 | `shared/types.ts` + `flow-store.ts` | - | 数据库密码明文落盘 | 敏感凭证明文存储 |
+
+--- 
 | 25 | P1 | 资源泄漏 | `agent/runner.ts` | `ensureNodeChild` L370-L384 | 子代理重建旧 childId 未清理 | 内存泄漏 + 孤儿子代理累积 |
-| 26 | P1 | 架构未对齐 | `agent/runner.ts` | `resolveAgentTools` | 白名单未验证 ⊆ 父代理工具集 | 子代理可获得父代理工具集之外工具 |
-| 27 | P1 | 架构未对齐 | `agent/runner.ts` | `ensureNodeChild` L350-L368 | 空白名单不传 toolFilter 导致继承全部工具 | 子代理可获 wf_run_node/wf_finish |
+
+| 序号 | 风险等级 | 问题类型 | 代码文件 | 位置 | 问题描述 | 影响/未对齐点 |
+|------|----------|----------|----------|-----------|----------|---------------|
 | 28 | P1 | 契约冲突 | `lib/graph-model.ts` + `FlowNode.tsx` | `nodeHandles` | start/end 的 ctx 连接点在两处被裁剪，与后端 `NODE_HANDLES` 冲突 | 模式二下无法创建输入→下游 ctx 连线、父代理→输出 ctx 连线 |
 | 29 | P1 | 状态丢失 | `useRunPolling.ts` | L31-L35 | 终态后 `RUN_CLEARED` 清除 snapshot，画布高亮与节点状态徽标消失 | 违反需求 §4.5 规则 8“运行状态实时回显” |
 | 30 | P2 | 需求未对齐 | `src/client/studio/Studio.tsx` + `src/client/components/panels/inspector/Inspector.tsx` | `testDbConnection` 调用链 | 数据库“测试连接”按钮仅在编辑器来源为 `node` 时可用；模板编辑时（`source: 'template'`）按钮存在但点击无响应 | 需求文档 §4.2.4.2 要求数据库节点的“测试连接”功能在**右侧属性栏中**可用，未限定仅画布节点。模板编辑时也应能测试连接 |
@@ -76,14 +79,19 @@
 | 35 | P2 | 重复代码 | `src/client/studio/studio-state.ts` | `flowToCanvas()` / `serviceToCanvas()`，L190-220 | 工作流与服务在 client 侧画布投影逻辑完全相同（节点和连线的字段结构一致），但写成了两个独立函数，代码高度重复。 | 违反 DRY 原则，后续若增加字段需同时修改两处，易引入遗漏。 |
 | 36 | P2 | 性能/内存 | `src/client/hooks/useRunPolling.ts` | `useEffect`，L30-52 | 轮询定时器在 `runId` 变化时重新创建，但 `poll()` 函数在每次 effect 执行时重新定义，未用 `useCallback` 缓存。若 `runId` 频繁变化（如连续快速启动/停止运行），可能导致旧定时器未被正确清理（`setInterval` 的清理依赖 `clearInterval(timer)` 在 cleanup 中执行，但若 effect 快速重新执行，`timer` 变量可能被覆盖）。 | 潜在内存泄漏风险，极端情况下可能叠加多个轮询定时器。 |
 | 37 | P2 | 交互缺失 | `src/client/studio/Studio.tsx` | 各异步操作按钮，L400-600 | 运行、保存、导入、导出等异步操作按钮在操作进行中未设置 `disabled` 状态，用户可重复点击导致多次请求并发。 | 需求文档 §4.5.3 未明确要求禁用状态，但用户体验受损（如导入过程中再次点击导入会触发多个文件选择器）。 |
+
+---
+
 | 38 | P2 | 错误处理 | `src/client/hooks/useTemplates.ts` | `saveTemplate()` / `deleteTemplate()`，L70-80 | `saveTemplate` 和 `deleteTemplate` 远端调用失败时，已 dispatch 的 `TEMPLATE_ADDED`/`TEMPLATE_REMOVED` 状态变更无法回滚，导致本地状态与后端不一致。 | 用户看到模板列表已更新，但实际保存失败，刷新后数据丢失。 |
-| 39 | P2 | 逻辑 Bug | `components/canvas/GraphCanvas.tsx` | `connectionTargetAt()` 函数（第 292-295 行） | 使用 `document.elementFromPoint(clientX, clientY)` 检测悬停目标，在画布有缩放/平移时，屏幕坐标到世界坐标的转换未考虑画布的 `transform` 矩阵，仅用于检测 DOM 元素，实际上元素位置已在 DOM 中通过 `transform` 定位，`elementFromPoint` 工作正常。但若鼠标在组卡片的成员行上悬停，可能错误识别为组节点而非成员节点（因为成员行也是 `data-wf-node-id` 元素）。 | 连线拖拽到协作组卡片时，可能错误将连线目标识别为组节点而非组内成员节点，导致连线连接到组卡片而非成员。 |
 | 40 | P2 | 代码质量 | `studio/Studio.tsx` | 多处（约 30+ 处 `as` 类型断言） | 大量使用 `as` 类型断言绕过 TypeScript 检查，如 `as WorkflowDocument`、`as never`、`as CanvasNode`、`as ServiceState` 等。 | 降低类型安全性，隐藏了潜在的运行时类型不匹配问题。 |
-| 41 | P2 | 逻辑 Bug | `studio/studio-state.ts` | `flowToCanvas()` 函数（第 126-142 行） | 当 `node.position` 为 `undefined` 时，使用默认 `{ x: 120, y: 80 }`。但 `GraphNode` 类型中 `position` 为必填字段，理论上不应出现 `undefined`。若后端返回的节点缺少 `position`，此兜底逻辑生效。但未处理 `node.data` 为 `undefined` 的情况（`(node as { data?: Record<string, unknown> }).data ?? {}` 已处理）。 | 逻辑正确，但依赖类型断言，可能存在未预见的数据缺失场景。 |
+
 | 42 | P2 | 未清理的副作用 | `components/canvas/GraphCanvas.tsx` | `beginGroupResize()` 函数（第 236-251 行） | `beginGroupResize` 在 `onPointerDown` 中向 `window` 添加 `pointermove`/`pointerup` 监听器，但未在组件卸载时清理这些监听器。若用户在拖拽过程中切换页面/卸载组件，监听器会残留。 | 潜在的内存泄漏和拖拽状态残留。需要使用 `useEffect` 清理或使用 `setPointerCapture` 自动释放。 |
 | 43 | P2 | 竞态条件 | `studio/Studio.tsx` | 初始化 `useEffect`（第 155-208 行） | `boot()` 函数中 `templates.loadTemplates()` 和 `enums()` 并行执行，但 `cancelled` 标志只在一个层级检查。如果组件在 `templates.loadTemplates()` 完成前卸载，`cancelled` 变为 `true`，但 `enums()` 可能仍在执行并最终调用 `dispatch`。 | 同上，可能导致 "Can't perform a React state update on an unmounted component" 警告。 |
-| 44 | P2 | 交互缺陷 | `components/canvas/GraphCanvas.tsx` | `onUp` 中拖入协作组判定（第 197-210 行） | 拖入协作组的判定仅检查节点是否为 `parent`/`agent` 且 `groupId` 为 `null`。但未检查目标节点是否已在其他组内，也未检查目标组容量（8 人上限）是否已满。虽有后续 `addNodeToGroup` 中的容量检查，但拖拽判定时缺少视觉反馈。 | 用户拖拽角色节点到已满的协作组时，节点仍会移动过去但随后被拒绝，体验不一致。 |
+
 | 45 | P2 | 错误处理 | `src/client/hooks/useRunPolling.ts` | L27-L29 | 轮询中 `catch` 捕获错误后**完全静默**（`// 轮询偶发失败下一轮重试`），未做任何日志上报或降级处理。若后端持续返回 500，用户会看到节点状态卡在"运行中"永不更新。 | 故障静默，用户无法感知轮询失败，误以为流程仍在执行。 |
+
+
+
 | 46 | P2 | 逻辑Bug（级联删除状态残留） | `src/client/studio/Studio.tsx` | `removeNodeNow` | 删除主节点并级联删除虚拟节点后，未清除 `selection` 中可能指向已删除虚拟节点的引用 | 用户删除节点后，右侧属性栏可能短暂残留旧数据（直到下次点击） |
 | 47 | P2 | 性能/无限循环风险 | `src/host/orchestrator/runtime.ts` | L395-L407（`GLOBAL_RUN_CALL_LIMIT`） | 全局调用上限 `GLOBAL_RUN_CALL_LIMIT = 500` 硬编码，未从配置读取。若工作流节点数超 500（协作组嵌套等场景），父代理达到上限后编排被强制终止，但 `wfFinish` 可能未调用，运行锁残留。 | 大工作流（>500 节点）无法完成编排；上限硬编码无法通过配置调整。 |
 | 48 | P2 | 数据一致性/陈旧锁竞态 | `src/host/storage/atomic.ts` | L346-L369（`tryReapStaleLock`） | 陈旧锁回收逻辑：先 `stat` 取 mtime/size，删除前再 `stat` 比对。但两次 `stat` 之间锁文件可能被新持有者重建（极小窗口），且重建后的文件可能恰好 mtime/size 与旧锁一致（哈希碰撞级概率），导致误删新锁。 | 虽概率极低，但一旦发生会导致两个进程同时持有磁盘锁（`acquireDiskLock` 的 EEXIST 检查失效），引发数据损坏。 |

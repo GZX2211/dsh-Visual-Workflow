@@ -14,7 +14,6 @@ export {
   MID_MARKER,
   TAIL_MARKER,
   TAIL_RESTATE_MARKER,
-  COLLAB_PREFIX,
 } from './markers.js'
 
 // 三个提示词模板构建器（纯函数，无副作用、不读时钟/随机源）。

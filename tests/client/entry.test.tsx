@@ -10,7 +10,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act } from 'react'
-import { apply } from '../../src/client/entry.js'
+import { apply, rootSessionIdOf } from '../../src/client/entry.js'
 import { zh } from '../../src/client/i18n.js'
 
 const cleanups: Array<() => void> = []
@@ -112,5 +112,41 @@ describe('apply 装配', () => {
     expect(document.querySelector('style[data-plugin="visual-workflow"]')).toBeNull()
     expect(document.getElementById('visual-workflow-float-host')).toBeNull()
     expect(document.querySelector('.wf-fab')).toBeNull()
+  })
+})
+
+describe('rootSessionIdOf：会话树根解析（疑点二修复）', () => {
+  /** 构造 sessions.list 快照：byId 含 parentSessionId 链。 */
+  function snapshotOf(entries: Array<{ id: string; parentSessionId?: string }>) {
+    const byId: Record<string, unknown> = {}
+    for (const e of entries) byId[e.id] = { parentSessionId: e.parentSessionId }
+    return { list: { get: () => ({ current: entries[0]?.id, byId }) } }
+  }
+
+  it('根会话自身：无父链时返回自身（行为不变）', () => {
+    const snap = snapshotOf([{ id: 'session-root' }])
+    expect(rootSessionIdOf('session-root', snap as never)).toBe('session-root')
+  })
+
+  it('子代理会话：沿 parentSessionId 上溯到根（主代理及其后代共享实例列表）', () => {
+    // child-1 → root；child-2 → child-1 → root（两级子树）
+    const snap = snapshotOf([
+      { id: 'root', parentSessionId: undefined },
+      { id: 'child-1', parentSessionId: 'root' },
+      { id: 'child-2', parentSessionId: 'child-1' },
+    ])
+    expect(rootSessionIdOf('child-1', snap as never)).toBe('root')
+    expect(rootSessionIdOf('child-2', snap as never)).toBe('root')
+    expect(rootSessionIdOf('root', snap as never)).toBe('root')
+  })
+
+  it('快照不含 byId（旧运行时）或父不在表内时回退自身', () => {
+    expect(rootSessionIdOf('session-x', { list: { get: () => ({ current: 'session-x' }) } } as never)).toBe('session-x')
+    const snap = snapshotOf([{ id: 'orphan', parentSessionId: 'missing-parent' }])
+    expect(rootSessionIdOf('orphan', snap as never)).toBe('orphan')
+  })
+
+  it('空会话 id 返回空串（未激活守卫）', () => {
+    expect(rootSessionIdOf('', snapshotOf([]) as never)).toBe('')
   })
 })

@@ -190,7 +190,12 @@ export class VisualWorkflowApi {
     if (!Number.isFinite(expected)) throw httpError(400, 'requires a numeric revision')
     const flow = { ...stripClientMeta(raw as Record<string, unknown>), sessionId } as WorkflowDocument
     try {
-      return await this.host.store.saveWorkflow(flow, sessionId, { expectedRevision: expected })
+      const saved = await this.host.store.saveWorkflow(flow, sessionId, { expectedRevision: expected })
+      // 双向同步①「画布→编排」：保存成功后刷新活跃 run 的编排事实源
+      // （orchestrations/<runId>.json），父代理（definitionPath 指向该文件）
+      // 在运行中即可读到最新拓扑（新增节点/连线/修改即时生效）。
+      await this.host.orchestrator.refreshActiveDefinitions(flow.id, sessionId, saved)
+      return saved
     } catch (error) {
       const code = (error as { code?: string })?.code ?? ''
       if (code === 'FLOW_REVISION_CONFLICT') throw httpError(409, String((error as Error).message), code)
@@ -231,8 +236,21 @@ export class VisualWorkflowApi {
     if (!raw || !String(raw.id ?? '').trim()) throw httpError(400, 'requires a service id')
     const expected = Number(raw.revision)
     if (!Number.isFinite(expected)) throw httpError(400, 'requires a numeric revision')
+    const serviceId = String(raw.id ?? '').trim()
     try {
-      return await this.host.store.saveService(stripClientMeta(raw) as never, sessionId, { expectedRevision: expected })
+      const saved = await this.host.store.saveService(stripClientMeta(raw) as never, sessionId, { expectedRevision: expected })
+      // 双向同步①「画布→编排」（模式二同理）：保存成功后刷新活跃 run 事实源。
+      await this.host.orchestrator.refreshActiveDefinitions(serviceId, sessionId, {
+        id: saved.id,
+        sessionId: saved.sessionId,
+        mode: 'mode2',
+        name: saved.name,
+        description: saved.description,
+        nodes: saved.nodes,
+        lines: saved.lines,
+        revision: saved.revision,
+      } as WorkflowDocument)
+      return saved
     } catch (error) {
       const code = (error as { code?: string })?.code ?? ''
       if (code === 'FLOW_REVISION_CONFLICT') throw httpError(409, String((error as Error).message), code)
@@ -334,6 +352,37 @@ export class VisualWorkflowApi {
     if (!id) throw httpError(400, 'requires a template id')
     const deleted = await this.host.store.deleteTemplate(kind as 'role' | 'file' | 'database', id)
     if (!deleted) throw httpError(404, `模板不存在：${id}`)
+    return { deleted: true }
+  }
+
+  // ---------- 工作流模板（flow-templates/，全局共享；图2 交互改造） ----------
+
+  /** 工作流模板列表（全部返回，客户端按 mode 过滤；模板跨会话共享不隔离）。 */
+  async listFlowTemplates(): Promise<unknown> {
+    return this.host.store.listFlowTemplates()
+  }
+
+  /** 保存工作流模板（新建/更新统一；revision 递增 + 冲突保护）。 */
+  async putFlowTemplate(args: { template?: unknown }): Promise<unknown> {
+    const raw = args?.template as Record<string, unknown> | null | undefined
+    if (!raw || !String(raw.id ?? '').trim()) throw httpError(400, 'requires a flow template id')
+    const expected = Number(raw.revision)
+    if (!Number.isFinite(expected)) throw httpError(400, 'requires a numeric revision')
+    try {
+      return await this.host.store.saveFlowTemplate(stripClientMeta(raw) as never, { expectedRevision: expected })
+    } catch (error) {
+      const code = (error as { code?: string })?.code ?? ''
+      if (code === 'FLOW_REVISION_CONFLICT') throw httpError(409, String((error as Error).message), code)
+      throw error
+    }
+  }
+
+  /** 删除工作流模板（仅删模板文件，不影响已生成的实例）。 */
+  async deleteFlowTemplate(args: { id?: unknown }): Promise<unknown> {
+    const id = String(args?.id ?? '')
+    if (!id) throw httpError(400, 'requires a flow template id')
+    const deleted = await this.host.store.deleteFlowTemplate(id)
+    if (!deleted) throw httpError(404, `工作流模板不存在：${id}`)
     return { deleted: true }
   }
 
@@ -643,6 +692,13 @@ export class VisualWorkflowApi {
     return disk
   }
 
+  /** 会话活跃 run 列表（workbench 进入时自动选中运行中实例用；running/paused 保留锁）。 */
+  async activeRuns(args: { sessionId?: unknown }): Promise<unknown> {
+    const sessionId = String(args?.sessionId ?? '')
+    if (!sessionId) throw httpError(400, 'requires sessionId')
+    return this.host.orchestrator.activeRunsForSession(sessionId)
+  }
+
   async runStop(args: { sessionId?: unknown; runId?: unknown }): Promise<unknown> {
     const sessionId = String(args?.sessionId ?? '')
     const runId = String(args?.runId ?? '')
@@ -733,10 +789,10 @@ export class VisualWorkflowApi {
     return { json: await exportWorkflowBundle(this.host.store, sessionId, id) }
   }
 
-  async importWorkflow(args: { sessionId?: unknown; json?: unknown; conflictMode?: unknown }): Promise<unknown> {
-    const sessionId = String(args?.sessionId ?? '')
-    if (!sessionId) throw httpError(400, 'requires sessionId')
-    return importWorkflowBundle(this.host.store, sessionId, args?.json, {
+  async importWorkflow(args: { json?: unknown; conflictMode?: unknown }): Promise<unknown> {
+    // 图2 交互改造：导入一律落为「工作流模板」（全局共享），不再直接创建实例——
+    // 用户需在画布中「创建实例」后才能运行（sessionId 参数不再需要）。
+    return importWorkflowBundle(this.host.store, args?.json, {
       conflictMode: args?.conflictMode as 'rename' | 'overwrite' | undefined,
     })
   }

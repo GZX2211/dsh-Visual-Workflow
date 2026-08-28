@@ -358,18 +358,18 @@ export class VisualWorkflowHost extends Service {
     // 数据目录结构初始化（幂等）
     await this.store.init()
 
-    // 陈旧记录对账：上次宿主异常关闭残留的 running/paused → interrupted（可恢复）。
-    // 服务进程装配（skipReconcile）跳过：磁盘运行记录属主进程，服务进程不接管。
+    // 陈旧记录对账与模式二服务自动恢复（上次运行中 status=running 的服务重启）。
+    // 服务进程装配（skipReconcile）整块跳过：磁盘运行记录与服务状态属主进程，
+    // 服务进程不接管——否则服务进程启动后会扫描到「自己」（主进程 fork 前已把
+    // 该服务置为 running）并再次 start 自身 -> 自我 fork，子进程无限复制。
+    // 自动恢复失败仅告警，不阻断主进程启动。
     if (!this.skipReconcile) {
       await reconcileStaleRuns(this.store)
-    }
-
-    // 模式二自动恢复：上次运行中（status=running）的服务重启（端口冲突重分配）。
-    // 恢复失败仅告警，不阻断主进程启动。
-    try {
-      await this.serviceManager.autoRecover()
-    } catch (error) {
-      this.ctx.logger.warn(`[visual-workflow] 服务自动恢复失败：${error instanceof Error ? error.message : String(error)}`)
+      try {
+        await this.serviceManager.autoRecover()
+      } catch (error) {
+        this.ctx.logger.warn(`[visual-workflow] 服务自动恢复失败：${error instanceof Error ? error.message : String(error)}`)
+      }
     }
 
     // 事件观察：

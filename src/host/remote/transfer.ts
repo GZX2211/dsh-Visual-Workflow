@@ -13,7 +13,7 @@
 
 import type { FlowStore, Template, TemplateKind } from '../storage/flow-store.js'
 import type { BundleV2, DatabaseTemplate, FileTemplate, GroupTemplate, RoleTemplate, ToolCombo } from '../shared/types.js'
-import type { WorkflowDocument } from '../shared/graph-model.js'
+import type { WorkflowDocument, WorkflowTemplate } from '../shared/graph-model.js'
 
 function safeClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value ?? null)) as T
@@ -133,12 +133,14 @@ export async function exportWorkflowBundle(store: FlowStore, sessionId: string, 
 }
 
 /**
- * 导入工作流/服务 bundle（模式按 bundle.mode 落到 workflows/ 或 services/）。
+ * 导入工作流/服务 bundle（图2 交互改造：**一律导入为工作流模板**，不直接创建实例；
+ * 模板全局共享，跨会话可见，由用户在画布中「创建实例」后运行）。
+ * 冲突按「名称」判定（重名返回 conflict；rename/overwrite 语义与模板库一致），
+ * 嵌入式模板/组合入库逻辑不变（重名复用、id 冲突换新 id）。
  * @param conflictMode rename | overwrite；缺省且重名时返回 { conflict }。
  */
 export async function importWorkflowBundle(
   store: FlowStore,
-  sessionId: string,
   json: unknown,
   options: { conflictMode?: 'rename' | 'overwrite' } = {},
 ): Promise<unknown> {
@@ -156,22 +158,18 @@ export async function importWorkflowBundle(
   if (!payload?.name) {
     throw httpError(422, mode === 'mode2' ? '服务导出文件缺少服务信息' : '工作流导出文件缺少工作流信息')
   }
-  const existing = mode === 'mode2'
-    ? (await store.listServices(sessionId)).find((item) => item.name === payload.name)
-    : (await store.listWorkflows(sessionId)).find((flow) => flow.name === payload.name)
+  const existing = (await store.listFlowTemplates()).find((item) => item.mode === mode && item.name === payload.name)
   if (existing && options.conflictMode !== 'rename' && options.conflictMode !== 'overwrite') {
     return { conflict: true, existingName: existing.name, existingId: existing.id }
   }
   let name = payload.name
   if (existing && options.conflictMode === 'rename') {
-    const names = mode === 'mode2'
-      ? (await store.listServices(sessionId)).map((item) => item.name)
-      : (await store.listWorkflows(sessionId)).map((flow) => flow.name)
+    const names = (await store.listFlowTemplates()).filter((item) => item.mode === mode).map((item) => item.name)
     name = uniqueName(name, names)
   }
   // overwrite 的原子性：新条目落库成功后再删除旧条目
   const overwriteTargetId = existing && options.conflictMode === 'overwrite' ? existing.id : undefined
-  const newId = overwriteTargetId ?? `wf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  const newId = overwriteTargetId ?? `tpl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
   // 组合并入：重名复用已有，否则创建（id 冲突换新 id）
   const combos = bundle.embedded?.combos ?? []
@@ -194,42 +192,23 @@ export async function importWorkflowBundle(
   // embedded.groups 随工作流节点内联保留、不在此重建（见文件头部注释）。
   const importedCount = await importEmbeddedTemplates(store, bundle.embedded)
 
-  if (mode === 'mode2') {
-    const now = new Date().toISOString()
-    const service = {
-      id: newId,
-      sessionId,
-      name,
-      description: String(payload.description ?? ''),
-      revision: 0,
-      nodes: safeClone(payload.nodes ?? []),
-      lines: safeClone(payload.lines ?? []),
-      createdAt: now,
-      updatedAt: now,
-      status: 'stopped',
-    }
-    const saved = await store.saveService(service as never, sessionId, { force: true })
-    if (existing && options.conflictMode === 'overwrite' && existing.id !== saved.id) {
-      await store.deleteService(sessionId, existing.id)
-    }
-    return { service: saved, importedTemplates: importedCount }
-  }
-
-  const flow: WorkflowDocument = {
+  const now = new Date().toISOString()
+  const template: WorkflowTemplate = {
     id: newId,
-    sessionId,
     mode,
     name,
     description: String(payload.description ?? ''),
     revision: 0,
     nodes: safeClone(payload.nodes ?? []),
     lines: safeClone(payload.lines ?? []),
+    createdAt: now,
+    updatedAt: now,
   }
-  const saved = await store.saveWorkflow(flow, sessionId, { force: true })
+  const saved = await store.saveFlowTemplate(template, { force: true })
   if (existing && options.conflictMode === 'overwrite' && existing.id !== saved.id) {
-    await store.deleteWorkflow(sessionId, existing.id)
+    await store.deleteFlowTemplate(existing.id)
   }
-  return { workflow: saved, importedTemplates: importedCount }
+  return { template: saved, importedTemplates: importedCount }
 }
 
 /** 导出角色模板为单模板 JSON 字符串。 */

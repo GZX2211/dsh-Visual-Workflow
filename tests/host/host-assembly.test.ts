@@ -5,14 +5,15 @@
 // ③ fiber 卸载后事件监听与显式清理生效（dispose 幂等）。断言依据：架构文档 §4.1/
 // §9.6、SKILL §4.3 Effect 所有权、任务清单 T-015 DoD。
 
-import { describe, expect, it, afterEach } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
+import { describe, expect, it, afterEach, vi } from 'vitest'
+import { Context, Service } from '@deepseek-ai/cordis'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { VisualWorkflowHost, VisualWorkflowHostServiceName, type Config } from '../../src/host/index.js'
 import { FlowStore } from '../../src/host/storage/flow-store.js'
+import { ServiceManager } from '../../src/host/service/manager.js'
 
 /** 构造含临时 dataDir 的完整配置（其余键取 schema 默认）。 */
 function makeConfig(dir: string): Config {
@@ -93,5 +94,37 @@ describe('VisualWorkflowHost 装配', () => {
       root.emit('agent/error', {})
     }).not.toThrow()
     await root.fiber.dispose()
+  })
+
+  it('skipReconcile 装配不执行 autoRecover（服务进程防自我 fork 回归）', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vw-host-'))
+    cleanups.push(() => rm(dir, { recursive: true, force: true }))
+    const spy = vi.spyOn(ServiceManager.prototype, 'autoRecover').mockResolvedValue([])
+    try {
+      const root = new Context()
+      // 服务进程装配语义（service-runner.ts 同款：手动 new + { skipReconcile: true }）
+      const host = new VisualWorkflowHost(root, makeConfig(dir), { skipReconcile: true })
+      await (host as unknown as { [Service.init](): Promise<void> })[Service.init]()
+      // 服务进程只负责服务自身，不得扫描 status=running 的服务再次 start（自我 fork）
+      expect(spy).not.toHaveBeenCalled()
+      await root.fiber.dispose()
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('默认装配执行 autoRecover（主进程恢复上次运行中服务）', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vw-host-'))
+    cleanups.push(() => rm(dir, { recursive: true, force: true }))
+    const spy = vi.spyOn(ServiceManager.prototype, 'autoRecover').mockResolvedValue([])
+    try {
+      const root = new Context()
+      const host = new VisualWorkflowHost(root, makeConfig(dir))
+      await (host as unknown as { [Service.init](): Promise<void> })[Service.init]()
+      expect(spy).toHaveBeenCalled()
+      await root.fiber.dispose()
+    } finally {
+      spy.mockRestore()
+    }
   })
 })

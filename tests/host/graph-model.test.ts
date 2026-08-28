@@ -327,6 +327,17 @@ describe('normalizeFlow 归一化', () => {
     ])
   })
 
+  it('Bug 21：normalizeFlow 保留角色节点 systemPromptSource（保存不丢来源文件名，§4.2.3.1）', () => {
+    const a = newRoleNode('agent', '角色')
+    a.data.systemPromptSource = '角色说明.md'
+    const flow = normalizeFlow(makeFlow([a]))
+    const n = flow.nodes[0]
+    expect(n.kind).toBe('agent')
+    if (n.kind === 'agent' || n.kind === 'parent') {
+      expect(n.data.systemPromptSource).toBe('角色说明.md')
+    }
+  })
+
   it('Bug 27：角色节点声明 groupId 但组不存在 → groupGhost 报错', () => {
     const a = newRoleNode('agent', '幽灵')
     a.id = 'a-ghost'

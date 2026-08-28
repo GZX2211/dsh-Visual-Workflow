@@ -543,6 +543,22 @@ export class OrchestratorRuntime {
     return null
   }
 
+  /**
+   * 某会话的全部活跃 run（running/paused 均保留运行锁；返回 flowId/status/runId 摘要）。
+   * 用途：工作台「进入时自动选中实例」——判断哪个实例正在运行（running 优先，
+   * 否则 paused），从而在实例列表中优先展示运行中的实例（图2 交互改造补充需求）。
+   */
+  activeRunsForSession(sessionId: string): Array<{ flowId: string; status: RunStatus; runId: string }> {
+    const out: Array<{ flowId: string; status: RunStatus; runId: string }> = []
+    for (const entry of this.runs.values()) {
+      const s = entry.snapshot
+      if (s.sessionId !== sessionId) continue
+      if (s.status !== 'running' && s.status !== 'paused') continue
+      out.push({ flowId: s.flowId, status: s.status, runId: s.id })
+    }
+    return out
+  }
+
   /** 某会话+工作流的暂停 run（断点恢复入口）。 */
   pausedRun(sessionId: string, flowId: string): RunEntry | null {
     for (const entry of this.runs.values()) {
@@ -1436,6 +1452,31 @@ export class OrchestratorRuntime {
       // 读失败回退起始快照
     }
     return entry.baseFlow
+  }
+
+  /**
+   * 刷新实例保存后的运行事实源（双向同步①「画布→编排」的闭环补全）：
+   * 画布保存（putWorkflow/putService）会更新 workflows/services 目录，但运行
+   * 事实源 orchestrations/<runId>.json 是 startRun 时的一次性快照——若不同步
+   * 刷新，父代理（编排指令的 definitionPath 指向该文件）永远读到旧拓扑，
+   * 新增节点/连线在运行中不可见（本缺陷已验证）。此处对属于该实例且处于
+   * running/paused 的活跃 run，用最新保存内容重写其事实源文件。
+   * 幂等：无活跃 run 时为空操作；不打断正在执行的子代理。
+   */
+  async refreshActiveDefinitions(flowId: string, sessionId: string, flow: WorkflowDocument): Promise<void> {
+    for (const entry of this.runs.values()) {
+      const s = entry.snapshot
+      if (s.flowId !== flowId || s.sessionId !== sessionId) continue
+      if (s.status !== 'running' && s.status !== 'paused') continue
+      try {
+        await this.deps.store.saveOrchestration(s.id, flow)
+        this.log().debug(`[visual-workflow] 运行事实源已随画布保存刷新：run=${s.id} flow=${flowId}`)
+      } catch (error) {
+        // 事实源刷新失败不阻断保存主流程（next 调度前 currentResolvedFlow 仍会
+        // 显式重读最新实例，双向同步①的兜底路径生效）。
+        this.log().warn(`[visual-workflow] 运行事实源刷新失败：${messageOf(error)}`)
+      }
+    }
   }
 
   // ---- 清理 -------------------------------------------------------------------

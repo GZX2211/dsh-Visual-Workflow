@@ -8,14 +8,14 @@
 // 数据模型对齐后端共享契约：工作流文档 { nodes, lines }（全量内联，无模板
 // 引用）；模板 role/file/database 三类；模式 mode1/mode2。
 
-import type { WorkflowDocument, GraphNode, Line } from '../../host/shared/graph-model.js'
+import type { WorkflowDocument, GraphNode, Line, WorkflowTemplate } from '../../host/shared/graph-model.js'
 import type { ServiceState, RoleTemplate, FileTemplate, DatabaseTemplate, ToolCombo, RunSnapshot } from '../../host/shared/types.js'
 import { consolidateGroups } from '../lib/graph-model.js'
 
 /** 左侧栏 Tab（需求 §4.5.4：工作流 / 角色 / 数据（文件+数据库）/ 其他（阶段+协作组））。 */
 export type LibTab = 'workflow' | 'role' | 'data' | 'other'
-/** 左侧库选中种类（模板 kind + 固定卡片）。 */
-export type LibSelKind = 'workflow' | 'service' | 'role' | 'file' | 'database' | 'parentTemplate' | 'stage' | 'groupTemplate'
+/** 左侧库选中种类（模板 kind + 固定卡片 + 工作流模板）。 */
+export type LibSelKind = 'workflow' | 'service' | 'workflowTemplate' | 'role' | 'file' | 'database' | 'parentTemplate' | 'stage' | 'groupTemplate'
 /** 模板种类（与后端 listTemplates 契约一致）。 */
 export type TemplateKind = 'role' | 'file' | 'database'
 
@@ -62,6 +62,7 @@ export type Drafted<T> = T & { _draft: true }
 export type EditorRef =
   | { source: 'workflow'; id: string }
   | { source: 'service'; id: string }
+  | { source: 'flowTemplate'; id: string }
   | { source: 'template'; kind: TemplateKind; id: string }
   | { source: 'node'; id: string }
   | { source: 'edge'; id: string }
@@ -110,14 +111,16 @@ export interface StudioState {
   mode: 'mode1' | 'mode2'
   workflows: WorkflowDocument[]
   services: ServiceState[]
+  /** 工作流模板列表（全局共享；部分仅含当前 mode 的模板，模板拖入画布后经「创建实例」转实例）。 */
+  flowTemplates: WorkflowTemplate[]
   templates: Record<TemplateKind, Array<RoleTemplate | FileTemplate | DatabaseTemplate>>
   combos: ToolCombo[]
   presets: PresetItem[]
   tools: ToolItem[]
   models: ModelItem[]
-  /** 当前画布对象（工作流或服务）。 */
+  /** 当前画布对象（工作流/服务实例，或工作流模板）。 */
   currentId: string | null
-  currentKind: 'workflow' | 'service' | null
+  currentKind: 'workflow' | 'service' | 'flowTemplate' | null
   canvas: { nodes: CanvasNode[]; edges: CanvasEdge[] }
   selection: { nodeId: string | null; edgeId: string | null; lib: { kind: LibSelKind; id: string } | null }
   editor: EditorRef
@@ -137,8 +140,6 @@ export interface StudioState {
   runHistory: RunSnapshot[]
   selectedRunId: string | null
   comboOpen: boolean
-  servicesOpen: boolean
-  importBusy: boolean
 }
 
 /** 撤销重做栈上限（旧项目 HISTORY_LIMIT）。 */
@@ -157,6 +158,7 @@ export function createInitialState(sessionId: string): StudioState {
     mode: 'mode1',
     workflows: [],
     services: [],
+    flowTemplates: [],
     templates: { role: [], file: [], database: [] },
     combos: [],
     presets: [],
@@ -179,8 +181,6 @@ export function createInitialState(sessionId: string): StudioState {
     runHistory: [],
     selectedRunId: null,
     comboOpen: false,
-    servicesOpen: false,
-    importBusy: false,
   }
 }
 
@@ -196,6 +196,10 @@ export type StudioAction =
   | { type: 'WORKFLOW_ADDED'; flow: WorkflowDocument }
   | { type: 'WORKFLOW_UPDATED'; flow: WorkflowDocument }
   | { type: 'WORKFLOW_REMOVED'; id: string }
+  | { type: 'FLOW_TEMPLATES_LOADED'; items: WorkflowTemplate[] }
+  | { type: 'FLOW_TEMPLATE_ADDED'; template: WorkflowTemplate }
+  | { type: 'FLOW_TEMPLATE_UPDATED'; template: WorkflowTemplate }
+  | { type: 'FLOW_TEMPLATE_REMOVED'; id: string }
   | { type: 'SERVICES_LOADED'; items: ServiceState[] }
   | { type: 'SERVICE_UPDATED'; service: ServiceState }
   | { type: 'SERVICE_REMOVED'; id: string }
@@ -209,6 +213,7 @@ export type StudioAction =
   | { type: 'MODELS_LOADED'; items: ModelItem[] }
   | { type: 'OPEN_FLOW'; flow: WorkflowDocument }
   | { type: 'OPEN_SERVICE'; service: ServiceState }
+  | { type: 'OPEN_FLOW_TEMPLATE'; template: WorkflowTemplate }
   | { type: 'CLEAR_CANVAS' }
   | { type: 'GRAPH_REPLACED'; nodes: CanvasNode[]; edges: CanvasEdge[]; dirty: boolean }
   | { type: 'NODE_ADDED'; node: CanvasNode }
@@ -241,15 +246,13 @@ export type StudioAction =
   | { type: 'RUN_HISTORY_LOADED'; items: RunSnapshot[] }
   | { type: 'RUN_HISTORY_SELECT'; id: string }
   | { type: 'COMBO_OPEN'; open: boolean }
-  | { type: 'SERVICES_OPEN'; open: boolean }
-  | { type: 'IMPORT_BUSY'; busy: boolean }
 
 // ---------------------------------------------------------------------------
 // Reducer
 // ---------------------------------------------------------------------------
 
-/** 工作流文档 → 画布投影（节点全量内联，位置缺省落默认格点）。 */
-export function flowToCanvas(flow: WorkflowDocument): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
+/** 工作流文档/模板 → 画布投影（节点全量内联，位置缺省落默认格点）。 */
+export function flowToCanvas(flow: Pick<WorkflowDocument, 'nodes' | 'lines'>): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
   return {
     // 合并重复协作组节点（memberIds 并集），治愈历史数据的重复组节点，避免「删成员误删多个」
     nodes: consolidateGroups((flow.nodes ?? []).map((node) => ({
@@ -298,8 +301,10 @@ export function serviceToCanvas(service: ServiceState): { nodes: CanvasNode[]; e
   }
 }
 
-/** 打开工作流/服务时的选中与编辑器重置（可选保留画布选择）。 */
-function openDocument(state: StudioState, canvas: { nodes: CanvasNode[]; edges: CanvasEdge[] }, kind: 'workflow' | 'service', id: string): StudioState {
+/** 打开工作流/服务/模板时的选中与编辑器重置（可选保留画布选择）。 */
+function openDocument(state: StudioState, canvas: { nodes: CanvasNode[]; edges: CanvasEdge[] }, kind: 'workflow' | 'service' | 'flowTemplate', id: string): StudioState {
+  const libKind: LibSelKind = kind === 'workflow' ? 'workflow' : kind === 'service' ? 'service' : 'workflowTemplate'
+  const editor: EditorRef = kind === 'workflow' ? { source: 'workflow', id } : kind === 'service' ? { source: 'service', id } : { source: 'flowTemplate', id }
   const opened: StudioState = {
     ...state,
     currentKind: kind,
@@ -308,8 +313,8 @@ function openDocument(state: StudioState, canvas: { nodes: CanvasNode[]; edges: 
     dirty: false,
     savedGraph: graphSnapshotOf({ ...state, canvas }),
     run: { runId: null, snapshot: null },
-    selection: { nodeId: null, edgeId: null, lib: { kind: kind === 'workflow' ? 'workflow' : 'service', id } },
-    editor: kind === 'workflow' ? { source: 'workflow', id } : { source: 'service', id },
+    selection: { nodeId: null, edgeId: null, lib: { kind: libKind, id } },
+    editor,
   }
   return opened
 }
@@ -330,6 +335,14 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       return { ...state, workflows: state.workflows.map((flow) => (flow.id === action.flow.id ? action.flow : flow)) }
     case 'WORKFLOW_REMOVED':
       return { ...state, workflows: state.workflows.filter((flow) => flow.id !== action.id) }
+    case 'FLOW_TEMPLATES_LOADED':
+      return { ...state, flowTemplates: action.items }
+    case 'FLOW_TEMPLATE_ADDED':
+      return { ...state, flowTemplates: [action.template, ...state.flowTemplates] }
+    case 'FLOW_TEMPLATE_UPDATED':
+      return { ...state, flowTemplates: state.flowTemplates.map((template) => (template.id === action.template.id ? action.template : template)) }
+    case 'FLOW_TEMPLATE_REMOVED':
+      return { ...state, flowTemplates: state.flowTemplates.filter((template) => template.id !== action.id) }
     case 'SERVICES_LOADED':
       return { ...state, services: action.items }
     case 'SERVICE_UPDATED':
@@ -365,6 +378,14 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         ? state.services.map((service) => (service.id === action.service.id ? action.service : service))
         : [action.service, ...state.services]
       return openDocument({ ...state, services }, serviceToCanvas(action.service), 'service', action.service.id)
+    }
+    case 'OPEN_FLOW_TEMPLATE': {
+      // 模板打开 = 画布显示模板流程图（编辑态）；「创建实例」后转为实例态。
+      const exists = state.flowTemplates.some((template) => template.id === action.template.id)
+      const flowTemplates = exists
+        ? state.flowTemplates.map((template) => (template.id === action.template.id ? action.template : template))
+        : [action.template, ...state.flowTemplates]
+      return openDocument({ ...state, flowTemplates }, flowToCanvas(action.template), 'flowTemplate', action.template.id)
     }
     case 'CLEAR_CANVAS':
       return {
@@ -447,15 +468,23 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
               : flow)),
             dirty: true,
           }
-        : state.currentKind === 'service'
+        : state.currentKind === 'flowTemplate'
           ? {
               ...state,
-              services: state.services.map((service) => (service.id === state.currentId
-                ? { ...service, ...(action.patch.name !== undefined ? { name: action.patch.name } : {}), ...(action.patch.description !== undefined ? { description: action.patch.description } : {}) }
-                : service)),
+              flowTemplates: state.flowTemplates.map((template) => (template.id === state.currentId
+                ? { ...template, ...(action.patch.name !== undefined ? { name: action.patch.name } : {}), ...(action.patch.description !== undefined ? { description: action.patch.description } : {}) }
+                : template)),
               dirty: true,
             }
-          : state
+          : state.currentKind === 'service'
+            ? {
+                ...state,
+                services: state.services.map((service) => (service.id === state.currentId
+                  ? { ...service, ...(action.patch.name !== undefined ? { name: action.patch.name } : {}), ...(action.patch.description !== undefined ? { description: action.patch.description } : {}) }
+                  : service)),
+                dirty: true,
+              }
+            : state
     case 'SET_DIRTY':
       return { ...state, dirty: action.dirty }
     case 'MARK_SAVED':
@@ -514,10 +543,6 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       return { ...state, selectedRunId: action.id }
     case 'COMBO_OPEN':
       return { ...state, comboOpen: action.open }
-    case 'SERVICES_OPEN':
-      return { ...state, servicesOpen: action.open }
-    case 'IMPORT_BUSY':
-      return { ...state, importBusy: action.busy }
     default:
       return state
   }
@@ -588,6 +613,12 @@ export function currentFlowOf(state: StudioState): WorkflowDocument | null {
   return state.workflows.find((flow) => flow.id === state.currentId) ?? null
 }
 
+/** 当前工作流模板文档（模板态画布）。 */
+export function currentFlowTemplateOf(state: StudioState): WorkflowTemplate | null {
+  if (state.currentKind !== 'flowTemplate' || !state.currentId) return null
+  return state.flowTemplates.find((template) => template.id === state.currentId) ?? null
+}
+
 /** 当前服务文档。 */
 export function currentServiceOf(state: StudioState): ServiceState | null {
   if (state.currentKind !== 'service' || !state.currentId) return null
@@ -624,6 +655,12 @@ export function editorDataOf(state: StudioState): EditorData | null {
     const flow = state.workflows.find((item) => item.id === editor.id)
     return flow
       ? { kind: 'workflow', data: { name: flow.name, description: flow.description }, name: flow.name }
+      : null
+  }
+  if (editor.source === 'flowTemplate') {
+    const template = state.flowTemplates.find((item) => item.id === editor.id)
+    return template
+      ? { kind: 'workflow', data: { name: template.name, description: template.description }, name: template.name, template: true, templateId: template.id }
       : null
   }
   if (editor.source === 'service') {

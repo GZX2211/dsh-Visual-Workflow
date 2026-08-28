@@ -5,6 +5,7 @@
 import { useCallback } from 'react'
 import type { Dispatch } from 'react'
 import type { ServiceState } from '../../host/shared/types.js'
+import type { WorkflowTemplate } from '../../host/shared/graph-model.js'
 import type { Drafted, StudioAction, CanvasNode, CanvasEdge } from '../studio/studio-state.js'
 import type { RemoteFace } from './useRemote.js'
 import { EP } from '../lib/remote.js'
@@ -13,6 +14,8 @@ export interface ServiceControlFace {
   loadServices(sessionId: string): Promise<void>
   /** 新建本地服务草稿（_draft 标记；首次保存时经 putService 真实入库）。 */
   createServiceDraft(name: string, sessionId: string): ServiceState
+  /** 模板 → 服务实例（图2 交互改造：模板拖入画布「创建服务」后转服务实例；深拷贝断引用）。 */
+  instantiateFromTemplate(template: WorkflowTemplate, sessionId: string): ServiceState
   /** 保存服务（草稿入库 / 正式带 revision 更新）。 */
   saveService(service: ServiceState, nodes: CanvasNode[], edges: CanvasEdge[]): Promise<ServiceState | null>
   /** 启动服务：携带会话 id 供后端归属校验。 */
@@ -47,6 +50,25 @@ export function useServiceControl(dispatch: Dispatch<StudioAction>, remote: Remo
       updatedAt: now,
       status: 'stopped' as const,
       // 草稿标记（前端 UI 状态；后端 putService 经 stripClientMeta 剥除，绝不落盘）
+      _draft: true,
+    } as Drafted<ServiceState>
+    dispatch({ type: 'OPEN_SERVICE', service: draft })
+    return draft
+  }, [dispatch])
+
+  const instantiateFromTemplate = useCallback((template: WorkflowTemplate, sessionId: string): ServiceState => {
+    const now = new Date().toISOString()
+    const draft = {
+      id: `svc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      sessionId,
+      name: template.name ?? '未命名服务',
+      description: template.description ?? '',
+      revision: 0,
+      nodes: JSON.parse(JSON.stringify(template.nodes ?? [])) as ServiceState['nodes'],
+      lines: JSON.parse(JSON.stringify(template.lines ?? [])) as ServiceState['lines'],
+      createdAt: now,
+      updatedAt: now,
+      status: 'stopped' as const,
       _draft: true,
     } as Drafted<ServiceState>
     dispatch({ type: 'OPEN_SERVICE', service: draft })
@@ -93,5 +115,5 @@ export function useServiceControl(dispatch: Dispatch<StudioAction>, remote: Remo
     dispatch({ type: 'SERVICE_UPDATED', service })
   }, [dispatch, remote])
 
-  return { loadServices, createServiceDraft, saveService, startService, stopService }
+  return { loadServices, createServiceDraft, instantiateFromTemplate, saveService, startService, stopService }
 }

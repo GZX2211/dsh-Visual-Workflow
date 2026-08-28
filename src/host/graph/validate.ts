@@ -161,16 +161,17 @@ export function validateFlow(flow: Partial<WorkflowDocument>): ValidateResult {
   }
   for (const [key, arr] of inByTarget) {
     const [targetId] = key.split('|')
-    const proxyIds = new Set(nodes.filter((n) => n.kind === 'proxy').map((n) => n.id))
     const seenSources = new Set<string>()
     for (const l of arr) {
       const sourceId = l.source
       const source = nodeMap.get(sourceId)
       if (!source) continue
-      // 主节点与其任一虚拟节点视为同一执行代理：同 target+handle 上二者并存即互斥
+      // 主节点与其任一虚拟节点视为同一执行代理：同 target+handle 上二者并存即互斥。
+      // 分支判定 source 为主节点即可（id 全画布唯一，主节点 id 不可能出现在 proxy
+      // 节点集合中，无需再做 proxyIds 排除——原恒真条件已删，Bug 21 冗余清理）。
       const effectiveIds = new Set<string>([sourceId])
       if (source.kind === 'proxy' && source.proxySourceId) effectiveIds.add(source.proxySourceId)
-      if ((source.kind === 'parent' || source.kind === 'agent') && proxyIds.has(sourceId) === false) {
+      if (source.kind === 'parent' || source.kind === 'agent') {
         // 主节点：收集其虚拟节点 id
         for (const p of nodes) {
           if (p.kind === 'proxy' && p.proxySourceId === sourceId) effectiveIds.add(p.id)
@@ -309,6 +310,9 @@ export function normalizeFlow(flow: Partial<WorkflowDocument>): WorkflowDocument
           reactLimit: node.data.reactLimit ?? null,
           inputSchema: node.data.inputSchema ?? '',
           outputSchema: node.data.outputSchema ?? '',
+          // System Prompt 来源文件名（需求 §4.2.3.1 卡片展示）必须原样保留，
+          // 否则保存后左侧栏角色卡片无法展示来源（Bug 21 字段丢失）。
+          systemPromptSource: node.data.systemPromptSource,
           injectSystemPrompt: node.data.injectSystemPrompt !== false,
           promptFilePath: node.data.promptFilePath ?? undefined,
           groupId: node.data.groupId ?? null,

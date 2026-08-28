@@ -206,7 +206,8 @@ describe('T-014 graph-model 纯类型形态', () => {
 })
 
 // ---------------------------------------------------------------------------
-// protocol.ts 端点清单逐字比对（架构文档 §4.6 全部 39 端点）
+// protocol.ts 端点清单逐字比对（架构文档 §4.6 全部 41 端点；图2 交互改造新增
+// 工作流模板 3 端点：listFlowTemplates/putFlowTemplate/deleteFlowTemplate）
 // ---------------------------------------------------------------------------
 const EXPECTED_ENDPOINTS: string[] = [
   // 工作流
@@ -215,12 +216,14 @@ const EXPECTED_ENDPOINTS: string[] = [
   'listServices', 'getService', 'putService', 'deleteService', 'serviceStart', 'serviceStop', 'serviceStatus', 'serviceDebug',
   // 模板
   'listTemplates', 'putTemplate', 'deleteTemplate', 'deleteTemplatePreview', 'fileUpload',
+  // 工作流模板（图2 交互改造：模板库全局共享）
+  'listFlowTemplates', 'putFlowTemplate', 'deleteFlowTemplate',
   // 预设/工具/模型
   'presets', 'tools', 'models',
   // 工具组合 / 插件 / MCP
   'toolCombos', 'toolComboPut', 'toolComboDelete', 'pluginCatalog', 'mcpList', 'mcpPut', 'mcpDelete', 'mcpToggle',
   // 运行
-  'run', 'runStatus', 'runStop', 'runHistory', 'runResume',
+  'run', 'runStatus', 'activeRuns', 'runStop', 'runHistory', 'runResume',
   // 数据库
   'dbTest', 'dbSchema', 'dbSearchPreview',
   // 导入导出 v2
@@ -242,10 +245,10 @@ function readProtocolEndpoints(): string[] {
 }
 
 describe('T-014 protocol.ts 端点清单（§4.6 全部端点）', () => {
-  it('端点常量定义 41 个且无重复', () => {
+  it('端点常量定义 45 个且无重复', () => {
     const eps = readProtocolEndpoints()
-    expect(eps).toHaveLength(41)
-    expect(new Set(eps).size).toBe(41) // 41 端点名全部唯一（无重复常量）
+    expect(eps).toHaveLength(45)
+    expect(new Set(eps).size).toBe(45) // 45 端点名全部唯一（无重复常量）
   })
 
   it('端点名逐字覆盖 §4.6 清单（正反向双向一致）', () => {
