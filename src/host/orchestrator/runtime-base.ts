@@ -51,7 +51,7 @@ export class RuntimeBase {
   /**
    * 把父代理（会话根 Agent）节点的配置注入到根 Agent 的 ctx：
    *   - 角色 Prompt（含 .md 路径读取）注册为系统提示词段 visual-workflow:prompt；
-   *   - injectSystemPrompt 开关控制官方系统提示词注入（OFF 仅保留角色段 + tool:* + 工具）；
+   *   - injectSystemPrompt 开关控制官方系统提示词注入；injectToolSections 控制工具散文段；
    *   - 服务商/模型/思考强度写入根 Agent 的模型选择。
    * 非侵入：仅挂载到根 Agent 的 ctx，只对本会话生效；缺父代理节点/根无 ctx 时静默跳过。
    */
@@ -67,6 +67,7 @@ export class RuntimeBase {
       this.deps.promptSetup.bindParent(ctx, {
         systemPrompt: rolePrompt,
         injectSystemPrompt: parentNode.data.injectSystemPrompt !== false,
+        injectToolSections: parentNode.data.injectToolSections !== false,
       }, sessionId)
       const data = parentNode.data
       this.deps.modelSelection.bindParent(ctx, {

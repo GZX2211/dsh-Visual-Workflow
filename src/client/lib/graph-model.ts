@@ -129,6 +129,7 @@ export function templateToNodeData(
       inputSchema: String(role.inputSchema ?? ''),
       outputSchema: String(role.outputSchema ?? ''),
       injectSystemPrompt: role.injectSystemPrompt !== false,
+      injectToolSections: role.injectToolSections !== false,
       promptFilePath: String(role.promptFilePath ?? '') || undefined,
       groupId: null,
     }

@@ -165,6 +165,8 @@ export interface RoleTemplate {
   systemPromptSource?: string
   /** 官方系统提示词注入开关（默认 true）。 */
   injectSystemPrompt?: boolean
+  /** 工具提示词（tool:* 散文段）注入开关（默认 true；false 仅移除 tool:* 段，保留 Code Mode 协议段与工具 Schema）。 */
+  injectToolSections?: boolean
   /** 角色 Prompt 的宿主绝对路径（可选；设置后运行时从文件读取，文件指纹纳入签名）。 */
   promptFilePath?: string
 }

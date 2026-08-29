@@ -638,6 +638,7 @@ export class FlowStore {
           inputSchema: r.inputSchema ?? '',
           outputSchema: r.outputSchema ?? '',
           injectSystemPrompt: r.injectSystemPrompt !== false,
+          injectToolSections: r.injectToolSections !== false,
           promptFilePath: r.promptFilePath ?? undefined,
           groupId: null,
         },

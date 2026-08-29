@@ -28,7 +28,7 @@ function draftOf(kind: TemplateKind): AnyTemplate {
     return {
       id, kind: 'agent', name: '新角色模板', systemPrompt: '', provider: '', model: '',
       presetId: null, retryLimit: 3, reactLimit: null, inputSchema: '', outputSchema: '',
-      injectSystemPrompt: true, promptFilePath: undefined, createdAt: now, updatedAt: now,
+      injectSystemPrompt: true, injectToolSections: true, promptFilePath: undefined, createdAt: now, updatedAt: now,
       // 草稿标记：前端 UI 状态，后端 putTemplate 经 stripClientMeta 剥除、绝不落盘
       _draft: true,
     } as Drafted<RoleTemplate>

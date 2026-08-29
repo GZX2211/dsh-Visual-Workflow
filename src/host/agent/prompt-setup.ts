@@ -10,9 +10,16 @@
 //   - 角色 Prompt（节点自定义 System Prompt）注册为**独立命名段** `visual-workflow:prompt`
 //     （order 1），注入一次、会话/回合间稳定不变（KV 缓存前缀友好）；
 //   - **不再整段替换/插入**官方 system prompt，也**不再传** `request.persona` 占用官方人设；
-//   - 新增开关 `injectSystemPrompt`（默认 true）：ON（开）= 官方系统提示词正常注入（不改动）；
-//     OFF（关）= 仅保留角色段 + `tool:*` 段 + 工具 schema，清空官方 harness:identity /
-//     人设 / 系统 / 上下文段——但 Code Mode 的工具调用提示词（`tool:*` 段）必须保留。
+//   - 开关一 `injectSystemPrompt`（默认 true）：ON（开）= harness:identity / 人设 /
+//     系统 / 上下文段正常注入；OFF（关）= 清空这些官方段（仅保留角色段 + 工具相关段）。
+//   - 开关二 `injectToolSections`（默认 true）：ON（开）= 各工具包注册的 `tool:*` 散文段
+//     正常注入；OFF（关）= 移除所有 `tool:*` 散文段。
+//   - **无论两个开关如何组合，Code Mode 协议段 `tools:sdk` / `tools:code-only` 与
+//     tools[] 工具 Schema 都**始终保留**：前者是 Code Mode 的调用协议声明（旧实现用
+//     `startsWith('tool:')` 误用了单数匹配，把复数的 `tools:*` 一并清掉，属操作失误）；
+//     后者决定工具是否可被调用，与散文段注入无关。
+//   - 工具能否被调用**只由 tools[] Schema 决定**；移除 `tool:*` 散文段仅去掉使用指引，
+//     不改变调用能力。
 //
 // 两类 Agent 的注入路径：
 //   - 子代理：经 registerContinuableSetup 的 contribution（创建窗口读取 withPending 状态，
@@ -35,6 +42,8 @@ export interface ChildPromptState {
   systemPrompt: string
   /** 官方系统提示词注入开关（默认 true）。 */
   injectSystemPrompt: boolean
+  /** 工具提示词（tool:* 散文段）注入开关（默认 true）。 */
+  injectToolSections: boolean
 }
 
 /** 子代理/父代理提示词注入装配（contribution/attach/bindParent 三段式 + 创建期 withPending）。 */
@@ -60,6 +69,7 @@ export interface ChildPromptSetup {
 interface PromptStateRef {
   systemPrompt: string
   injectSystemPrompt: boolean
+  injectToolSections: boolean
 }
 
 /** system-prompt/assemble 事件的最小组装形状（零官方类型依赖）。 */
@@ -74,6 +84,27 @@ interface PromptAssemblyLike {
 interface PromptChildContextLike {
   on(name: string, listener: (assembly: unknown, context: unknown, next: () => Promise<unknown>) => Promise<unknown>): () => void
   systemPrompt?: { section?(input: { name: string; order: number; text: unknown }): () => void }
+}
+
+/** Code Mode 协议段：无论系统提示词/工具段开关如何，都始终保留（移除会破坏 Code Mode 调用协议）。 */
+const CODE_PROTOCOL_SECTIONS = ['tools:sdk', 'tools:code-only'] as const
+
+/** 是否为 Code Mode 协议段（tools:sdk / tools:code-only；复数命名且以 `tools:` 开头）。 */
+function isCodeProtocolSection(name: string): boolean {
+  return CODE_PROTOCOL_SECTIONS.includes(name as (typeof CODE_PROTOCOL_SECTIONS)[number])
+}
+
+/** 是否为工具使用指引散文段（单数命名，`tool:` 开头；不含复数的 tools:* 协议段）。 */
+function isToolProseSection(name: string): boolean {
+  return name.startsWith('tool:')
+}
+
+/** 是否保留某个段：角色段与 Code 协议段恒保留；tool:* 段按 injectToolSections；其余官方段按 injectSystemPrompt。 */
+function shouldKeepSection(name: string, ref: PromptStateRef): boolean {
+  if (name === VISUAL_WORKFLOW_PROMPT_SECTION) return true // 角色 Prompt 段始终保留
+  if (isCodeProtocolSection(name)) return true // Code Mode 协议段始终保留
+  if (isToolProseSection(name)) return ref.injectToolSections // 工具散文段按工具开关
+  return ref.injectSystemPrompt // 其余官方段（人设/身份/系统）按系统提示词开关
 }
 
 /**
@@ -96,32 +127,33 @@ function registerPromptOnCtx(childCtx: PromptChildContextLike, ref: PromptStateR
       sectionRegistered = true
       if (typeof disposer === 'function') disposers.push(disposer)
     } catch {
-      // section 注册失败（如顺序冲突）：降级为瀑布兜底注入（见下面 ON/OFF 分支）
+      // section 注册失败（如顺序冲突）：降级为瀑布兜底注入（见下面分支）
       sectionRegistered = false
     }
   }
 
-  // 开关过滤瀑布：OFF 时仅保留角色段 + tool:* 段 + 工具 schema，清空官方段/上下文。
-  // ON（默认）时官方已优化，不做任何改动（仅当 section API 不可用时兜底前置角色段）。
+  // 开关过滤瀑布：两个开关都开启时返回官方原有装配（不改动，保持官方缓存/稳定性优化）；
+  // 任一关闭时按 shouldKeepSection 保留角色段 + Code 协议段 + 按开关的工具段/官方段。
+  // 工具调用能力仅由 tools[] Schema 决定，本瀑布从不改动 assembly.tools。
   const disposeAssembly = childCtx.on('system-prompt/assemble', async (rawAssembly, _rawContext, next) => {
     const assembly = (await next()) as PromptAssemblyLike | null
     const roleText = String(ref.systemPrompt ?? '')
-    if (ref.injectSystemPrompt) {
+    if (ref.injectSystemPrompt && ref.injectToolSections) {
+      // 默认路径：官方已优化，不做改动（仅当 section API 不可用时兜底前置角色段）
       if (!sectionRegistered && roleText.trim()) {
         const sections = Array.isArray(assembly?.sections) ? [...assembly.sections] : []
         return { ...assembly, sections: [{ name: VISUAL_WORKFLOW_PROMPT_SECTION, text: roleText }, ...sections] }
       }
       return assembly
     }
-    // OFF：section API 不可用时兜底先行注入角色段，再过滤为「角色段 + tool:*」
+    // 任一开关关闭：section API 不可用时兜底先行注入角色段，再按 shouldKeepSection 过滤。
     let baseSections = Array.isArray(assembly?.sections) ? [...assembly.sections] : []
     if (!sectionRegistered && roleText.trim()) {
       baseSections = [{ name: VISUAL_WORKFLOW_PROMPT_SECTION, text: roleText }, ...baseSections]
     }
-    const sections = baseSections.filter(
-      (section) => section.name === VISUAL_WORKFLOW_PROMPT_SECTION || String(section.name).startsWith('tool:'),
-    )
-    return { ...assembly, sections, contexts: [] }
+    const sections = baseSections.filter((section) => shouldKeepSection(String(section.name), ref))
+    // 上下文（运行时快照）属官方系统信息，随 injectSystemPrompt 开关；与工具段无关
+    return { ...assembly, sections, contexts: ref.injectSystemPrompt ? (assembly?.contexts ?? []) : [] }
   }) as () => void
   disposers.push(disposeAssembly)
 
@@ -158,6 +190,7 @@ export function createChildPromptSetup(): ChildPromptSetup {
     const ref: PromptStateRef = {
       systemPrompt: pendingState ? String(pendingState.systemPrompt ?? '') : '',
       injectSystemPrompt: pendingState ? pendingState.injectSystemPrompt !== false : true,
+      injectToolSections: pendingState ? pendingState.injectToolSections !== false : true,
     }
     states.set(childCtx as object, ref)
 
@@ -173,6 +206,7 @@ export function createChildPromptSetup(): ChildPromptSetup {
     if (!ref) return // 该 child 未走本贡献（如非延续子代理/其他 provider）：静默忽略
     ref.systemPrompt = String(state.systemPrompt ?? '')
     ref.injectSystemPrompt = state.injectSystemPrompt !== false
+    ref.injectToolSections = state.injectToolSections !== false
   }
 
   const bindParent = (ctx: unknown, state: ChildPromptState, sessionId: string): void => {
@@ -182,12 +216,14 @@ export function createChildPromptSetup(): ChildPromptSetup {
       ref = {
         systemPrompt: String(state.systemPrompt ?? ''),
         injectSystemPrompt: state.injectSystemPrompt !== false,
+        injectToolSections: state.injectToolSections !== false,
       }
       parentRefs.set(sessionId, ref)
       parentDisposers.set(sessionId, registerPromptOnCtx(ctx as PromptChildContextLike, ref))
     }
     ref.systemPrompt = String(state.systemPrompt ?? '')
     ref.injectSystemPrompt = state.injectSystemPrompt !== false
+    ref.injectToolSections = state.injectToolSections !== false
   }
 
   return { contribution, withPending, attach, bindParent }

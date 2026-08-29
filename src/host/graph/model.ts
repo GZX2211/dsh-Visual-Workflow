@@ -129,6 +129,7 @@ export function newRoleNode(kind: 'parent' | 'agent', label: string, position = 
       inputSchema: '',
       outputSchema: '',
       injectSystemPrompt: true,
+      injectToolSections: true,
       promptFilePath: undefined,
       groupId: null,
     },

@@ -136,6 +136,18 @@ export function RoleForm({ data, copy, presets, models, combos, onPatch, onLoadM
               {copy.injectSystemPromptLabel}：{data.injectSystemPrompt === false ? copy.injectSystemPromptNotInjected : copy.injectSystemPromptInjected}
             </span>
           </div>
+          {/* 工具提示词（tool:* 段）开关：贴左边框；复选框需覆盖 .wf-inspector input{width:100%} 全局样式（否则被撑成大方框、不贴边） */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-start' }}>
+            <input
+              type="checkbox"
+              checked={data.injectToolSections !== false}
+              onChange={(event) => onPatch({ injectToolSections: event.target.checked })}
+              style={{ width: 'auto', flex: '0 0 auto', padding: 0, margin: 0, minWidth: 0, accentColor: 'var(--wf-brand)' }}
+            />
+            <span className="wf-hint" style={{ whiteSpace: 'nowrap' }}>
+              {copy.injectToolSectionsLabel}：{data.injectToolSections === false ? copy.injectToolSectionsNotInjected : copy.injectToolSectionsInjected}
+            </span>
+          </div>
           {/* Prompt 文件宿主路径：提示语置于输入框上方（设置后运行时自动读取该 .md，文件改动自动重载） */}
           <span className="wf-hint">{copy.promptFilePathHint}</span>
           <input

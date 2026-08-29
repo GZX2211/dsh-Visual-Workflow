@@ -55,10 +55,10 @@ export function childKey(sessionId: string, flowId: string, nodeId: string): str
  * 影响子代理组成的配置签名（变化即重建；工具为解析后的清单）。
  * 字段依据架构文档 §4.2 L218：rolePrompt/provider/model/工具清单/reasoning
  * （另含 presetId——其决定工具清单，签名内显式保留以抵御同名清单歧义；
- * injectSystemPrompt 决定官方系统提示词开关；rolePrompt 为角色 Prompt 的实际注入文本——
- * 当 .md 文件路径设置时为其当前内容，文件改动即重建）。
+ * injectSystemPrompt 决定官方系统提示词开关；injectToolSections 决定工具散文段开关；
+ * rolePrompt 为角色 Prompt 的实际注入文本——当 .md 文件路径设置时为其当前内容，文件改动即重建）。
  */
-export function nodeChildSignature(node: GraphNode, resolvedTools: string[], rolePrompt: string, injectSystemPrompt = true, collabPrompt = ''): string {
+export function nodeChildSignature(node: GraphNode, resolvedTools: string[], rolePrompt: string, injectSystemPrompt = true, injectToolSections = true, collabPrompt = ''): string {
   const data = node.kind === 'parent' || node.kind === 'agent' ? node.data : undefined
   return JSON.stringify({
     rolePrompt: String(rolePrompt ?? ''),
@@ -68,6 +68,7 @@ export function nodeChildSignature(node: GraphNode, resolvedTools: string[], rol
     presetId: String(data?.presetId ?? ''),
     tools: [...resolvedTools].sort(),
     injectSystemPrompt: injectSystemPrompt !== false,
+    injectToolSections: injectToolSections !== false,
     // 协作 Prompt 属于组级配置；变化时同样重建子代理，避免旧协作信息残留
     collabPrompt,
   })
@@ -506,7 +507,8 @@ export class NodeAgentRunner implements NodeRunner {
     // 角色 Prompt 实际注入文本（.md 路径设置时读取文件当前内容；未设置用内联文本）
     const rolePrompt = await resolveRolePrompt(node)
     const injectSystemPrompt = node.data?.injectSystemPrompt !== false
-    const signature = nodeChildSignature(node, tools, rolePrompt, injectSystemPrompt, collabPrompt)
+    const injectToolSections = node.data?.injectToolSections !== false
+    const signature = nodeChildSignature(node, tools, rolePrompt, injectSystemPrompt, injectToolSections, collabPrompt)
     const existing = this.nodeChildren.get(key)
     if (existing && existing.signature === signature) return { childId: existing.childId, created: false }
 
@@ -522,6 +524,7 @@ export class NodeAgentRunner implements NodeRunner {
     const promptState: ChildPromptState = {
       systemPrompt: rolePrompt,
       injectSystemPrompt,
+      injectToolSections,
     }
     const started = await this.deps.promptSetup.withPending(promptState, () => subagents.startContinuable({
       provider,
@@ -587,9 +590,10 @@ export class NodeAgentRunner implements NodeRunner {
   }
 
   /**
-   * 把节点级角色 Prompt 与官方系统提示词开关写入该 child 的 prompt setup。
+   * 把节点级角色 Prompt、官方系统提示词开关与工具散文段开关写入该 child 的 prompt setup。
    * 角色 Prompt 由 prompt-setup 注册为系统提示词独立段；injectSystemPrompt=false 时
-   * 开关过滤瀑布会清空官方段（仅保留角色段 + tool:* 段 + 工具 schema）。
+   * 开关过滤瀑布会清空官方段；injectToolSections=false 时移除 tool:* 散文段。
+   * Code Mode 协议段（tools:sdk/tools:code-only）与工具 Schema 始终保留，不受两开关影响。
    * 角色文本经 resolveRolePrompt 解析（.md 路径设置时读取文件当前内容），与创建期一致。
    */
   private async attachPromptState(childId: string, input: NodeStartInput): Promise<void> {
@@ -602,6 +606,7 @@ export class NodeAgentRunner implements NodeRunner {
       this.deps.promptSetup.attach(agent.ctx, {
         systemPrompt: rolePrompt,
         injectSystemPrompt: node.data?.injectSystemPrompt !== false,
+        injectToolSections: node.data?.injectToolSections !== false,
       })
     } catch (error) {
       this.deps.logger?.warn(`[visual-workflow] prompt setup attach failed: ${String(error)}`)

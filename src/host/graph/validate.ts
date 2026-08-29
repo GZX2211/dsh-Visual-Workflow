@@ -314,6 +314,7 @@ export function normalizeFlow(flow: Partial<WorkflowDocument>): WorkflowDocument
           // 否则保存后左侧栏角色卡片无法展示来源（Bug 21 字段丢失）。
           systemPromptSource: node.data.systemPromptSource,
           injectSystemPrompt: node.data.injectSystemPrompt !== false,
+          injectToolSections: node.data.injectToolSections !== false,
           promptFilePath: node.data.promptFilePath ?? undefined,
           groupId: node.data.groupId ?? null,
         },

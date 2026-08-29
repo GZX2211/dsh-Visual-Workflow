@@ -75,6 +75,15 @@ export interface RoleNode extends BaseNode {
      */
     injectSystemPrompt?: boolean
     /**
+     * 工具提示词（tool:* 散文段）注入开关（默认 true）。
+     * true（开）= 各工具包注册的使用指引段正常注入（tool:read / tool:write / tool:pwsh…）；
+     * false（关）= 移除所有 tool:* 散文段，但**始终保留** Code Mode 协议段
+     *              （tools:sdk / tools:code-only）与 tools[] 工具 Schema（模型仍能看到工具清单）。
+     * 注意：与 injectSystemPrompt 独立；关闭它不改变工具能否被调用（调用能力由 Schema 决定）。
+     * 父/子代理节点均有此字段。
+     */
+    injectToolSections?: boolean
+    /**
      * 角色 Prompt 的宿主绝对路径（可选）。设置后运行时每次节点创建从该文件读取注入，
      * 文件指纹（mtime+size）纳入子代理签名：文件改动时签名变化 → 重建子代理 → 自动重载新内容；
      * 未改动时复用原子代理、不重复读取。为空则直接使用 systemPrompt 文本。
