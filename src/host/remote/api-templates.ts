@@ -14,16 +14,16 @@ export class VisualWorkflowApiTemplates extends VisualWorkflowApiWorkflows {
 
   async listTemplates(args: { kind?: unknown }): Promise<unknown> {
     const kind = String(args?.kind ?? '')
-    if (kind !== 'role' && kind !== 'file' && kind !== 'database') {
-      throw httpError(400, 'requires kind: role|file|database')
+    if (kind !== 'role' && kind !== 'file' && kind !== 'database' && kind !== 'group') {
+      throw httpError(400, 'requires kind: role|file|database|group')
     }
-    return this.host.store.listTemplates(kind as 'role' | 'file' | 'database')
+    return this.host.store.listTemplates(kind as 'role' | 'file' | 'database' | 'group')
   }
 
   async putTemplate(args: { kind?: unknown; template?: unknown }): Promise<unknown> {
     const kind = String(args?.kind ?? '')
-    if (kind !== 'role' && kind !== 'file' && kind !== 'database') {
-      throw httpError(400, 'requires kind: role|file|database')
+    if (kind !== 'role' && kind !== 'file' && kind !== 'database' && kind !== 'group') {
+      throw httpError(400, 'requires kind: role|file|database|group')
     }
     const template = args?.template as Record<string, unknown> | null | undefined
     if (!template || !String(template.id ?? '').trim()) throw httpError(400, 'requires a template id')
@@ -31,13 +31,13 @@ export class VisualWorkflowApiTemplates extends VisualWorkflowApiWorkflows {
       template.kind = 'agent'
     }
     // 剥除前端快照标记（_draft 等），防止已入库模板刷新后被误判为草稿
-    return this.host.store.saveTemplate(kind as 'role' | 'file' | 'database', stripClientMeta(template) as never)
+    return this.host.store.saveTemplate(kind as 'role' | 'file' | 'database' | 'group', stripClientMeta(template) as never)
   }
 
   /** 删除预览：模板与画布节点深拷贝解耦，删除模板不影响任何已有节点。 */
   async deleteTemplatePreview(args: { kind?: unknown; id?: unknown }): Promise<unknown> {    const kind = String(args?.kind ?? '')
-    if (kind !== 'role' && kind !== 'file' && kind !== 'database') {
-      throw httpError(400, 'requires kind: role|file|database')
+    if (kind !== 'role' && kind !== 'file' && kind !== 'database' && kind !== 'group') {
+      throw httpError(400, 'requires kind: role|file|database|group')
     }
     if (!String(args?.id ?? '').trim()) throw httpError(400, 'requires a template id')
     return { affectedNodes: 0, detached: true }
@@ -46,11 +46,11 @@ export class VisualWorkflowApiTemplates extends VisualWorkflowApiWorkflows {
   async deleteTemplate(args: { kind?: unknown; id?: unknown }): Promise<unknown> {
     const kind = String(args?.kind ?? '')
     const id = String(args?.id ?? '')
-    if (kind !== 'role' && kind !== 'file' && kind !== 'database') {
-      throw httpError(400, 'requires kind: role|file|database')
+    if (kind !== 'role' && kind !== 'file' && kind !== 'database' && kind !== 'group') {
+      throw httpError(400, 'requires kind: role|file|database|group')
     }
     if (!id) throw httpError(400, 'requires a template id')
-    const deleted = await this.host.store.deleteTemplate(kind as 'role' | 'file' | 'database', id)
+    const deleted = await this.host.store.deleteTemplate(kind as 'role' | 'file' | 'database' | 'group', id)
     if (!deleted) throw httpError(404, `模板不存在：${id}`)
     return { deleted: true }
   }

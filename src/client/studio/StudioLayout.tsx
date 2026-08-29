@@ -21,7 +21,7 @@ import type { PanelLayoutFace } from '../hooks/usePanelLayout.js'
 import type { RemoteFace } from '../hooks/useRemote.js'
 import type { ToastFace } from '../hooks/useToast.js'
 import type { WorkflowDocument } from '../../host/shared/graph-model.js'
-import type { RoleTemplate, ServiceState } from '../../host/shared/types.js'
+import type { GroupTemplate, RoleTemplate, ServiceState } from '../../host/shared/types.js'
 import type { flowToCanvasLines, runStatusMap, runningNodeIds, stageTemplateKinds } from '../lib/graph-model.js'
 import { EP } from '../lib/remote.js'
 import type { CanvasApi } from '../components/canvas/GraphCanvas.js'
@@ -51,10 +51,13 @@ export interface StudioLayoutProps {
   stageKinds: ReturnType<typeof stageTemplateKinds>
   parentTemplate: RoleTemplate | null
   roleTemplates: RoleTemplate[]
+  groupTemplates: GroupTemplate[]
   toolbarRunning: boolean
   runStatusByNode: ReturnType<typeof runStatusMap>
   highlightedNodeIds: ReturnType<typeof runningNodeIds>
   modeName: (presetId: string | null | undefined) => string
+  /** 画布左上角工作流名称角标（实例/模板 + 名称）。 */
+  canvasCaption: string
   // ---- DOM 引用 ----
   canvasApiRef: React.RefObject<CanvasApi | null>
   canvasShellRef: React.RefObject<HTMLDivElement | null>
@@ -88,12 +91,12 @@ export interface StudioLayoutProps {
 export function StudioLayout(props: StudioLayoutProps) {
   const {
     t, state, sessionId, remote, onClose, onTitlebarDrag,
-    currentFlow, currentService, editorData, edgeList, stageKinds, parentTemplate, roleTemplates,
+    currentFlow, currentService, editorData, edgeList, stageKinds, parentTemplate, roleTemplates, groupTemplates,
     toolbarRunning, runStatusByNode, highlightedNodeIds, modeName,
     canvasApiRef, canvasShellRef, libraryImportRef, personaInputRef, groupMdInputRef,
     dispatch, doc, canvas, editor, run, transfer, selection, history, guard, panels, toast,
     beginLibraryDrag, dragPreview, dropGroupId,
-    modeMenuOpen, setModeMenuOpen, switchMode, requestClose,
+    modeMenuOpen, setModeMenuOpen, switchMode, requestClose, canvasCaption,
   } = props
 
   return (
@@ -168,6 +171,7 @@ export function StudioLayout(props: StudioLayoutProps) {
           roleTemplates={roleTemplates}
           fileTemplates={state.templates.file as import('../../host/shared/types.js').FileTemplate[]}
           databaseTemplates={state.templates.database as import('../../host/shared/types.js').DatabaseTemplate[]}
+          groupTemplates={groupTemplates}
           stageKinds={stageKinds}
           libSelection={state.selection.lib}
           modeName={modeName}
@@ -178,6 +182,7 @@ export function StudioLayout(props: StudioLayoutProps) {
           onPlaceTemplateIntoGroup={canvas.placeTemplateIntoGroup}
           onPlaceStage={canvas.placeStageNode}
           onPlaceGroup={canvas.placeGroupNode}
+          onPlaceGroupFromTemplate={canvas.placeGroupFromTemplate}
           onPlaceParent={canvas.placeParentNode}
           onCreateNew={doc.createNew}
           onBeginDrag={beginLibraryDrag}
@@ -241,11 +246,13 @@ export function StudioLayout(props: StudioLayoutProps) {
             onConnect={canvas.onConnect}
             onConnectionRejected={canvas.onConnectionRejected}
             onGroupResize={canvas.onGroupResize}
+            onSwapPorts={canvas.swapNodePorts}
             dropTargetGroupId={dropGroupId}
             fitLabel={t.fitView}
             zoomInLabel={t.zoomIn}
             zoomOutLabel={t.zoomOut}
             emptyHint={t.emptyHint}
+            workflowCaption={canvasCaption}
           />
         </div>
 

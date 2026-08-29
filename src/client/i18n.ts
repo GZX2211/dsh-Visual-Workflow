@@ -174,6 +174,8 @@ export const zh = {
   groupMembers: '组合成员',
   groupMemberHint: '把角色拖入组内（或删除成员以移出）',
   groupDefaultName: '协作组',
+  /** 卡片右上角「交换左右连接点」按钮提示（用户批注：美化布线防交叉）。 */
+  swapPorts: '交换左右连接点',
   proxyMainLabel: '主节点',
   proxyReadonlyHint: '虚拟节点不存储独立配置，与主节点共享执行实例；修改主节点实时同步',
   parentTemplateHint: '父代理模板无独立属性（画布中的父代理节点可编辑）',
@@ -471,6 +473,7 @@ export const en: Dict = {
   groupMembers: 'Members',
   groupMemberHint: 'Drag agents into the group (or remove members to exit)',
   groupDefaultName: 'Group',
+  swapPorts: 'Swap left/right ports',
   proxyMainLabel: 'Main node',
   proxyReadonlyHint: 'Proxy nodes share the main node instance; edits on the main node sync automatically',
   parentTemplateHint: 'The parent template has no standalone properties (canvas parent nodes are editable)',

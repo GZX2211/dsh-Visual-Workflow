@@ -45,6 +45,10 @@ function remoteStub(): RemoteFace & { calls: Array<{ endpoint: string; args: Rec
           { id: 'r-3', kind: 'agent', name: '全栈开发工程师', systemPrompt: '' },
         ]
       }
+      // 协作组模板列表（用户批注：+ 新增/点击编辑；测试拖入「协作组」卡建组节点）
+      if (endpoint === EP.EP_LIST_TEMPLATES && String(args?.kind ?? '') === 'group') {
+        return [{ id: 'g-1', name: '协作组', collabPrompt: '' }]
+      }
       if (endpoint === EP.EP_PRESETS) return [{ id: 'standard', name: '标准' }]
       if (endpoint === EP.EP_MODELS) return [{ provider: 'deepseek', model: 'deepseek-chat' }]
       if (endpoint === EP.EP_RUN_HISTORY) {

@@ -41,12 +41,16 @@ export interface GraphCanvasProps {
   onConnect(connection: { source: string; target: string; sourceHandle: string; targetHandle: string }): void
   onConnectionRejected(): void
   onGroupResize(id: string, size: { w: number; h: number }): void
+  /** 交换节点左右连接点（用户批注：美化布线防交叉）。 */
+  onSwapPorts(id: string): void
   /** 左栏拖拽悬停的协作组 id（组卡片高亮 + 「放开以入组」提示）。 */
   dropTargetGroupId?: string | null
   fitLabel: string
   zoomInLabel: string
   zoomOutLabel: string
   emptyHint: string
+  /** 画布左上角工作流名称角标（实例/模板 + 名称）。 */
+  workflowCaption?: string
 }
 
 interface Viewport { x: number; y: number; zoom: number }
@@ -55,7 +59,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
   const {
     nodes, edges, copy, mode, selectedNode, selectedEdge, runStatusByNode, highlightedNodeIds,
     onInit, onNodeDragStart, onNodeMove, onNodeDropToGroup, onNodeSelect, onEdgeSelect, onPaneClick,
-    onConnect, onConnectionRejected, onGroupResize, dropTargetGroupId, fitLabel, zoomInLabel, zoomOutLabel, emptyHint,
+    onConnect, onConnectionRejected, onGroupResize, onSwapPorts, dropTargetGroupId, fitLabel, zoomInLabel, zoomOutLabel, emptyHint, workflowCaption,
   } = props
   const rootRef = useRef<HTMLDivElement | null>(null)
   const viewportRef = useRef<Viewport>({ x: 32, y: 32, zoom: 0.8 })
@@ -460,9 +464,11 @@ export function GraphCanvas(props: GraphCanvasProps) {
               runStatus={runStatusOf(node.id)}
               onPointerDown={beginNodeDrag}
               onHandlePointerDown={beginConnection}
+              onToggleSwap={onSwapPorts}
             />
           ))}
         </div>
+        {workflowCaption ? <div className="wf-canvas-caption">{workflowCaption}</div> : null}
         {nodes.length === 0 ? (
           <div className="wf-canvas-empty">
             <div className="wf-canvas-empty__hint">

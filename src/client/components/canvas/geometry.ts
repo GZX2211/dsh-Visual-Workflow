@@ -70,7 +70,16 @@ export function memberAnchor(group: CanvasNode, memberId: string, side: 'left' |
   return { x: side === 'left' ? group.position.x : group.position.x + size.w, y }
 }
 
-/** 连线贝塞尔几何（源右侧 → 目标左侧；组卡片流程接点居中，组内成员锚到成员行）。 */
+/**
+ * 节点是否交换了左右连接点（卡片右上角切换按钮，用户批注：美化布线防交叉）。
+ * 交换后：出点移到左侧、入点移到右侧；节点 JSON 即事实源，swapPorts 随节点持久化。
+ */
+export function swappedOf(node: CanvasNode | null | undefined): boolean {
+  return (node?.data as { swapPorts?: unknown } | undefined)?.swapPorts === true
+}
+
+/** 连线贝塞尔几何（源右侧 → 目标左侧；组卡片流程接点居中，组内成员锚到成员行）。
+ *  交换过连接点的节点：源出点改在左边缘（start.x=左侧），目标入点改在右边缘（end.x=右侧）。 */
 export function edgeGeometry(edge: CanvasEdge, byId: Map<string, CanvasNode>): EdgeGeometry | null {
   const source = byId.get(edge.source)
   const target = byId.get(edge.target)
@@ -79,16 +88,18 @@ export function edgeGeometry(edge: CanvasEdge, byId: Map<string, CanvasNode>): E
   const targetSize = nodeSizeOf(target)
   const sourceGroup = source.kind === 'group' ? null : groupOfMember(byId, source.id)
   const targetGroup = target.kind === 'group' ? null : groupOfMember(byId, target.id)
+  const sourceSwapped = swappedOf(source)
+  const targetSwapped = swappedOf(target)
   const start = sourceGroup
     ? memberAnchor(sourceGroup, source.id, 'right')!
     : {
-        x: source.position.x + sourceSize.w,
+        x: source.position.x + (sourceSwapped ? 0 : sourceSize.w),
         y: source.position.y + sourceSize.h * (source.kind === 'group' ? 0.5 : handleY(edge.sourceHandle ?? 'flow-out')),
       }
   const end = targetGroup
     ? memberAnchor(targetGroup, target.id, 'left')!
     : {
-        x: target.position.x,
+        x: target.position.x + (targetSwapped ? targetSize.w : 0),
         y: target.position.y + targetSize.h * (target.kind === 'group' ? 0.5 : handleY(edge.targetHandle ?? 'flow-in')),
       }
   const forward = Math.max(54, Math.abs(end.x - start.x) * 0.46)

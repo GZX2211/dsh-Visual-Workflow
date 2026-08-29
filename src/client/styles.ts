@@ -6,7 +6,7 @@
 // 新增：浮窗/FAB、协作组卡片、虚拟节点虚线角标、阶段/数据库节点配色、服务控制台、模式菜单。
 
 export const styles = `
-:root,.wf-root{--wf-border:var(--dsw-alias-border-l1);--wf-border-strong:var(--dsw-alias-border-l2);--wf-bg:var(--dsw-alias-bg-base);--wf-layer:var(--dsw-alias-bg-layer-1);--wf-layer-2:var(--dsw-alias-bg-layer-2);--wf-brand:var(--dsw-alias-brand-primary);--wf-on-brand:var(--dsw-alias-label-primary-inverse,var(--dsw-alias-label-reverse,#ffffff));--wf-ink:var(--dsw-alias-label-primary);--wf-ink-2:var(--dsw-alias-label-secondary);--wf-ok:var(--dsw-alias-state-success-primary);--wf-warn:var(--dsw-alias-state-warn-primary);--wf-err:var(--dsw-alias-state-error-primary);--wf-flow:#9aa7b8;--wf-context:#d9a441;--wf-database:#4a9fd8;--wf-pass:#3fbf7f;--wf-fail:#e05c5c;--wf-content:#9a7fd0}
+:root,.wf-root{--wf-border:var(--dsw-alias-border-l1);--wf-border-strong:var(--dsw-alias-border-l2);--wf-bg:var(--dsw-alias-bg-base);--wf-layer:var(--dsw-alias-bg-layer-1);--wf-layer-2:var(--dsw-alias-bg-layer-2);--wf-brand:var(--dsw-alias-brand-primary);--wf-on-brand:var(--dsw-alias-label-primary-inverse,var(--dsw-alias-label-reverse,#ffffff));--wf-ink:var(--dsw-alias-label-primary);--wf-ink-2:var(--dsw-alias-label-secondary);--wf-ok:var(--dsw-alias-state-success-primary);--wf-warn:var(--dsw-alias-state-warn-primary);--wf-err:var(--dsw-alias-state-error-primary);--wf-flow:#9aa7b8;--wf-context:#d9a441;--wf-database:#4a9fd8;--wf-pass:#3fbf7f;--wf-fail:#e05c5c;--wf-content:#9a7fd0;--wf-port-in:#3d8bfd;--wf-port-out:#ff8a4c}
 .wf-root{position:relative;inset:auto;width:100%;height:100%;max-height:100vh;min-height:0;display:grid;grid-template-rows:48px minmax(0,1fr);background:var(--wf-bg);color:var(--wf-ink);font:13px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;overflow:hidden}
 .wf-root *{box-sizing:border-box}
 .wf-root button,.wf-root input,.wf-root select,.wf-root textarea{font:inherit}
@@ -64,8 +64,14 @@ export const styles = `
 .wf-graph__node.is-dragging{cursor:grabbing}
 .wf-graph__handle{position:absolute;z-index:4;top:50%;width:13px;height:13px;padding:0;border:2px solid var(--wf-bg);border-radius:50%;background:var(--wf-brand);transform:translateY(-50%);cursor:crosshair;box-shadow:0 0 0 1px color-mix(in srgb,var(--wf-brand) 65%,var(--wf-border-strong));transition:transform .14s ease,box-shadow .14s ease}
 .wf-graph__handle:hover,.wf-graph__handle:focus-visible{transform:translateY(-50%) scale(1.18);box-shadow:0 0 0 5px color-mix(in srgb,var(--wf-brand) 18%,transparent);outline:0}
-.wf-graph__handle--target{left:-6px}
-.wf-graph__handle--source{right:-6px}
+/* 接点左右位置：普通卡片（角色/文件/数据库/阶段/虚拟）按交换状态动态指定 side；协作组卡固定 target/source */
+.wf-graph__handle.is-side-left{left:-6px}
+.wf-graph__handle.is-side-right{right:-6px}
+/* 接点颜色区分入口/出口（用户批注：入口=蓝、出口=橙；位置由交换决定，颜色标识方向） */
+.wf-graph__handle.is-in{background:var(--wf-port-in)}
+.wf-graph__handle.is-out{background:var(--wf-port-out)}
+.wf-graph__handle--target{left:-6px;background:var(--wf-port-in)}
+.wf-graph__handle--source{right:-6px;background:var(--wf-port-out)}
 .wf-graph__controls{position:absolute;z-index:8;left:12px;bottom:12px;display:grid;border:1px solid var(--wf-border-strong);border-radius:9px;overflow:hidden;background:var(--wf-layer);box-shadow:0 8px 20px color-mix(in srgb,var(--wf-ink) 9%,transparent)}
 .wf-graph__controls button{width:32px;height:30px;border:0;border-bottom:1px solid var(--wf-border);background:var(--wf-layer-2);color:var(--wf-ink);font-weight:750}
 .wf-graph__controls button:last-child{border-bottom:0}
@@ -79,6 +85,13 @@ export const styles = `
 .wf-node__label{font-weight:650;font-size:13px;word-break:break-word;display:flex;align-items:center;gap:6px}
 .wf-node__proxy-badge{flex:none;font-size:9px;font-weight:750;color:var(--wf-warn);border:1px solid var(--wf-warn);border-radius:999px;padding:0 5px;line-height:15px}
 .wf-node__prompt{margin-top:5px;font-size:11px;color:var(--wf-ink-2);white-space:pre-wrap;max-height:34px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+/* 卡片右上角「交换左右连接点」按钮（用户批注：美化布线防交叉；交换后连线端点随之换向） */
+.wf-node__swap{position:absolute;z-index:5;top:7px;right:8px;width:22px;height:22px;min-width:22px;padding:0;border:1px solid var(--wf-border-strong);border-radius:7px;background:var(--wf-layer-2);color:var(--wf-ink-2);font-size:13px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:border-color .14s ease,color .14s ease}
+.wf-node__swap:hover{border-color:var(--wf-brand);color:var(--wf-brand)}
+.wf-node__swap.is-active{border-color:var(--wf-brand);color:var(--wf-brand);background:color-mix(in srgb,var(--wf-brand) 10%,var(--wf-layer-2))}
+/* 画布左上角工作流名称角标（用户批注：模板/实例 + 名称；固定不随缩放平移） */
+.wf-canvas-caption{position:absolute;z-index:7;top:12px;left:14px;max-width:46%;padding:5px 11px;border:1px solid var(--wf-border-strong);border-radius:9px;background:var(--wf-layer);color:var(--wf-ink-2);font-size:11px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none;box-shadow:0 6px 16px color-mix(in srgb,var(--wf-ink) 8%,transparent)}
+.wf-canvas-caption strong{color:var(--wf-ink);font-weight:720}
 .wf-node--parent .wf-node__kind{color:var(--wf-brand)}
 .wf-node--agent .wf-node__kind{color:var(--wf-brand)}
 .wf-node--file .wf-node__kind{color:var(--wf-ink-2)}

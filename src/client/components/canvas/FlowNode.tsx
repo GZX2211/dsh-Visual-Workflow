@@ -10,6 +10,11 @@
 //     所选文件名列表（不显示「文件」前缀、超出省略）；
 //   - 虚拟节点「↻ 引用」徽标只渲染一处（原 label 行 + 元信息行各一处 → 重复）；
 //   - 输入/输出节点只保留一个连接点（用户验收：模式二输入=flow-out、输出=flow-in）。
+//
+// 功能与优化批注（2026.08.26）：
+//   - 卡片右上角新增「交换左右连接点」按钮（交换两侧连接点位置，美化布线防交叉）；
+//     交换后出点移到左侧、入点移到右侧，再次点击恢复；状态随节点持久化（swapPorts）；
+//   - 连接点按「入口/出口」区分颜色（左/右位置由交换决定，颜色区分方向）。协作组卡片不提供该按钮。
 
 import type { Dict } from '../../i18n.js'
 import type { CanvasNode } from '../../studio/studio-state.js'
@@ -26,10 +31,15 @@ interface FlowNodeProps {
   runStatus: { status: string; attempts: number } | null
   onPointerDown(event: React.PointerEvent, id: string): void
   onHandlePointerDown(event: React.PointerEvent, id: string, handle: string): void
+  /** 交换左右连接点（节点属性 swapPorts 取反）。 */
+  onToggleSwap(id: string): void
 }
 
-/** 连接点（按模式裁剪：输入/输出节点仅保留流程连接点，用户验收标注「应当只有一个」）。 */
-function nodeHandles(kind: string, mode: 'mode1' | 'mode2'): { left: string[]; right: string[] } {
+/**
+ * 连接点（按模式裁剪：输入/输出节点仅保留流程连接点，用户验收标注「应当只有一个」；
+ * 支持交换：swapped 时出点放左侧、入点放右侧，顺序由 handleY 决定，与批注一致）。
+ */
+function nodeHandles(kind: string, mode: 'mode1' | 'mode2', swapped: boolean): { left: string[]; right: string[] } {
   const def = HANDLES[kind] ?? HANDLES.agent
   // 启动/输入：仅右出 flow-out；结束/输出：仅左入 flow-in（原 ctx 连接点裁剪，
   // 外部问题已自动注入输入节点产出，流式返回亦不依赖输出节点 ctx-in 连线）
@@ -37,7 +47,10 @@ function nodeHandles(kind: string, mode: 'mode1' | 'mode2'): { left: string[]; r
   if (kind === 'end') return { left: ['flow-in'], right: [] }
   const inputs = (def.inputs ?? []).filter((handle) => !(mode === 'mode1' && kind === 'end' && handle === 'ctx-in'))
   const outputs = (def.outputs ?? []).filter((handle) => !(mode === 'mode1' && kind === 'start' && handle === 'ctx-out'))
-  return { left: [...inputs].reverse(), right: [...outputs].reverse() }
+  // 默认左入右出；交换后左出右入（批注：左侧上下文出、流程出；右侧数据库入、上下文入、流程入）
+  const left = swapped ? [...outputs].reverse() : [...inputs].reverse()
+  const right = swapped ? [...inputs].reverse() : [...outputs].reverse()
+  return { left, right }
 }
 
 /** 截断文本（按字符数；中文友好）。 */
@@ -82,11 +95,13 @@ function metaLinesOf(node: CanvasNode, copy: Dict & { modeName(id: string | null
   return out.filter((line) => String(line ?? '').trim())
 }
 
-export function FlowNode({ node, copy, mode, selected, highlighted, dragging, runStatus, onPointerDown, onHandlePointerDown }: FlowNodeProps) {
+export function FlowNode({ node, copy, mode, selected, highlighted, dragging, runStatus, onPointerDown, onHandlePointerDown, onToggleSwap }: FlowNodeProps) {
   const kind = node.kind
   const isProxy = kind === 'proxy'
+  // 交换状态随节点持久化（用户批注：作为节点属性保存，重载后保持）
+  const swapped = (node.data as { swapPorts?: unknown }).swapPorts === true
   const displayKind = isProxy ? 'agent' : kind
-  const handles = nodeHandles(displayKind, mode)
+  const handles = nodeHandles(displayKind, mode, swapped)
   const status = runStatus?.status ?? null
   const statusText = status ? String((copy.status as Record<string, string>)[status] ?? '') : ''
   const metaLines = metaLinesOf(node, copy)
@@ -101,6 +116,24 @@ export function FlowNode({ node, copy, mode, selected, highlighted, dragging, ru
     isProxy ? 'is-proxy' : '',
   ].filter(Boolean).join(' ')
 
+  // 单侧接点渲染：side 决定左右位置，dir 决定入口/出口颜色（批注：区分入口与出口）
+  const handleEl = (handle: string, side: 'left' | 'right'): React.ReactNode => {
+    const dir = handle.endsWith('-out') ? 'out' : 'in'
+    const style: React.CSSProperties = { top: `${handleY(handle) * 100}%` }
+    if (side === 'left') style.left = -6
+    else style.right = -6
+    return (
+      <span
+        key={handle}
+        className={`wf-graph__handle is-side-${side} is-${dir}`}
+        style={style}
+        data-handle={handle}
+        title={handle}
+        onPointerDown={(event) => onHandlePointerDown(event, node.id, handle)}
+      />
+    )
+  }
+
   return (
     <div
       className={`wf-graph__node${dragging ? ' is-dragging' : ''}`}
@@ -109,6 +142,14 @@ export function FlowNode({ node, copy, mode, selected, highlighted, dragging, ru
       onPointerDown={(event) => onPointerDown(event, node.id)}
     >
       <div className={cls}>
+        <button
+          type="button"
+          className={`wf-node__swap${swapped ? ' is-active' : ''}`}
+          title={String(copy.swapPorts ?? '交换左右连接点')}
+          aria-label={String(copy.swapPorts ?? '交换左右连接点')}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => { event.stopPropagation(); onToggleSwap(node.id) }}
+        >{swapped ? '⇆' : '⇄'}</button>
         <div className="wf-node__kind">
           <span>{String(copy.nodeKinds?.[displayKind] ?? displayKind)}</span>
           {statusText ? <span className={`wf-status-dot is-${status}`} /> : null}
@@ -119,26 +160,8 @@ export function FlowNode({ node, copy, mode, selected, highlighted, dragging, ru
           {String(node.data.label ?? copy.nodeKinds?.[displayKind] ?? '')}
         </div>
         {metaLines.length > 0 ? <div className="wf-node__prompt">{metaText}</div> : null}
-        {handles.left.map((handle) => (
-          <span
-            key={handle}
-            className="wf-graph__handle wf-graph__handle--target"
-            style={{ top: `${handleY(handle) * 100}%` }}
-            data-handle={handle}
-            title={handle}
-            onPointerDown={(event) => onHandlePointerDown(event, node.id, handle)}
-          />
-        ))}
-        {handles.right.map((handle) => (
-          <span
-            key={handle}
-            className="wf-graph__handle wf-graph__handle--source"
-            style={{ top: `${handleY(handle) * 100}%` }}
-            data-handle={handle}
-            title={handle}
-            onPointerDown={(event) => onHandlePointerDown(event, node.id, handle)}
-          />
-        ))}
+        {handles.left.map((handle) => handleEl(handle, 'left'))}
+        {handles.right.map((handle) => handleEl(handle, 'right'))}
       </div>
     </div>
   )

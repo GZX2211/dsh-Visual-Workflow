@@ -8,14 +8,14 @@
 // 模板引用）；模板 role/file/database 三类；模式 mode1/mode2。
 
 import type { WorkflowDocument, GraphNode, Line, WorkflowTemplate } from '../../host/shared/graph-model.js'
-import type { ServiceState, RoleTemplate, FileTemplate, DatabaseTemplate, ToolCombo, RunSnapshot } from '../../host/shared/types.js'
+import type { ServiceState, RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate, ToolCombo, RunSnapshot } from '../../host/shared/types.js'
 
 /** 左侧栏 Tab（需求 §4.5.4：工作流 / 角色 / 数据（文件+数据库）/ 其他（阶段+协作组））。 */
 export type LibTab = 'workflow' | 'role' | 'data' | 'other'
 /** 左侧库选中种类（模板 kind + 固定卡片 + 工作流模板）。 */
 export type LibSelKind = 'workflow' | 'service' | 'workflowTemplate' | 'role' | 'file' | 'database' | 'parentTemplate' | 'stage' | 'groupTemplate'
-/** 模板种类（与后端 listTemplates 契约一致）。 */
-export type TemplateKind = 'role' | 'file' | 'database'
+/** 模板种类（与后端 listTemplates 契约一致；group 为协作组模板，需求 §4.2.5.2）。 */
+export type TemplateKind = 'role' | 'file' | 'database' | 'group'
 
 /** 画布节点投影（位置/数据全量内联）。 */
 export interface CanvasNode {
@@ -111,7 +111,7 @@ export interface StudioState {
   services: ServiceState[]
   /** 工作流模板列表（全局共享；部分仅含当前 mode 的模板，模板拖入画布后经「创建实例」转实例）。 */
   flowTemplates: WorkflowTemplate[]
-  templates: Record<TemplateKind, Array<RoleTemplate | FileTemplate | DatabaseTemplate>>
+  templates: Record<TemplateKind, Array<RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate>>
   combos: ToolCombo[]
   presets: PresetItem[]
   tools: ToolItem[]

@@ -31,6 +31,7 @@ import type {
   RoleTemplate,
   FileTemplate,
   DatabaseTemplate,
+  GroupTemplate,
   ToolCombo,
   RunSnapshot,
 } from '../shared/types.js'
@@ -39,11 +40,11 @@ import type {
 // 类型与错误
 // ---------------------------------------------------------------------------
 
-/** 模板种类：角色 / 文件 / 数据库（§4.2.3/§4.2.4；左侧栏「角色」「数据」Tab）。 */
-export type TemplateKind = 'role' | 'file' | 'database'
+/** 模板种类：角色 / 文件 / 数据库 / 协作组（§4.2.3/§4.2.4/§4.2.5.2；左侧栏各 Tab）。 */
+export type TemplateKind = 'role' | 'file' | 'database' | 'group'
 
-/** 全部模板的判别联合（按目录区分；data/ 内 file/database 以字段判别）。 */
-export type Template = RoleTemplate | FileTemplate | DatabaseTemplate
+/** 全部模板的判别联合（按目录区分；data/ 内 file/database 以字段判别；groups/ 为协作组）。 */
+export type Template = RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate
 
 /** 保存选项：陈旧快照冲突保护（旧项目 nextFlowRevision 语义保留）。 */
 export interface SaveOptions {
@@ -140,7 +141,7 @@ function isDatabaseTemplate(t: Template): t is DatabaseTemplate {
 
 export class FlowStore {
   /** 全部子目录名（init 时创建，常量表供测试断言）。 */
-  static readonly DIRS = ['workflows', 'services', 'roles', 'data', 'data/files', 'runs', 'orchestrations', 'flow-templates'] as const
+  static readonly DIRS = ['workflows', 'services', 'roles', 'data', 'data/files', 'groups', 'runs', 'orchestrations', 'flow-templates'] as const
 
   constructor(public readonly root: string) {}
 
@@ -166,7 +167,7 @@ export class FlowStore {
   }
 
   private templatePath(kind: TemplateKind, id: string): string {
-    const dir = kind === 'role' ? 'roles' : 'data'
+    const dir = kind === 'role' ? 'roles' : kind === 'group' ? 'groups' : 'data'
     return join(this.root, dir, `${safeFilePart(id)}.json`)
   }
 
@@ -355,11 +356,13 @@ export class FlowStore {
   async listTemplates(kind: 'file'): Promise<FileTemplate[]>
   /** 列出数据库模板（data/ 下按字段判别过滤）。 */
   async listTemplates(kind: 'database'): Promise<DatabaseTemplate[]>
+  /** 列出协作组模板（groups/ 目录）。 */
+  async listTemplates(kind: 'group'): Promise<GroupTemplate[]>
   /** 列出某类模板（kind 联合兜底；具体子类型请用窄签名）。 */
   async listTemplates(kind: TemplateKind): Promise<Template[]>
-  /** 列出某类模板（roles/ 为角色模板；data/ 为文件+数据库模板，按字段判别过滤）。 */
+  /** 列出某类模板（roles/ 角色；groups/ 协作组；data/ 文件+数据库按字段判别过滤）。 */
   async listTemplates(kind: TemplateKind): Promise<Template[]> {
-    const dir = kind === 'role' ? join(this.root, 'roles') : join(this.root, 'data')
+    const dir = kind === 'role' ? join(this.root, 'roles') : kind === 'group' ? join(this.root, 'groups') : join(this.root, 'data')
     let names: string[] = []
     try {
       names = await readdir(dir)
@@ -657,6 +660,21 @@ export class FlowStore {
           localPath: template.localPath,
           conn: template.conn,
           vectorSource: template.vectorSource,
+        },
+      }
+    }
+    // 协作组模板 → GroupNode（§4.2.5.2；成员在画布内拖入组时登记，模板不固化成员）
+    if (typeof (template as GroupTemplate).collabPrompt === 'string') {
+      const g = template as GroupTemplate
+      return {
+        id,
+        kind: 'group',
+        position: { ...position },
+        data: {
+          label: g.name,
+          collabPrompt: g.collabPrompt ?? '',
+          memberIds: [],
+          size: { w: 300, h: 220 },
         },
       }
     }

@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FlowStore, FlowRevisionConflictError, type TemplateKind } from '../../src/host/storage/flow-store.js'
 import type { WorkflowDocument } from '../../src/host/shared/graph-model.js'
-import type { ServiceState, RoleTemplate, FileTemplate, DatabaseTemplate, ToolCombo, RunSnapshot } from '../../src/host/shared/types.js'
+import type { ServiceState, RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate, ToolCombo, RunSnapshot } from '../../src/host/shared/types.js'
 import { newRoleNode, newStageNode, newLine } from '../../src/host/graph/model.js'
 
 let dir: string
@@ -197,6 +197,25 @@ describe('模板 CRUD（全局共享）与子类过滤', () => {
     await store.saveTemplate('role', makeRoleTemplate('r1'))
     // 模板 API 无会话维度，直接可见
     expect((await store.listTemplates('role')).length).toBe(1)
+  })
+
+  it('协作组模板增删查 + templateToNode 深拷贝解耦（用户批注：协作组模板列表）', async () => {
+    const group: GroupTemplate = { id: 'gt1', name: '审查组', collabPrompt: '你们是双 Agent 协作组' }
+    await store.saveTemplate('group', group)
+    expect((await store.listTemplates('group')).map((t) => t.id)).toEqual(['gt1'])
+    expect(await store.getTemplate('group', 'gt1')).not.toBeNull()
+
+    // templateToNode → GroupNode：名称/协作 Prompt 内联，成员为空（§4.2.5.2）
+    const node = store.templateToNode(group, 'node-g', { x: 0, y: 0 })
+    expect(node!.kind).toBe('group')
+    const gd = (node as { data: { label: string; collabPrompt: string; memberIds: string[] } }).data
+    expect(gd.label).toBe('审查组')
+    expect(gd.collabPrompt).toBe('你们是双 Agent 协作组')
+    expect(gd.memberIds).toEqual([])
+
+    // 删除后列表为空（模板与画布节点深拷贝解耦：删模板不影响已生成节点）
+    expect(await store.deleteTemplate('group', 'gt1')).toBe(true)
+    expect(await store.listTemplates('group')).toEqual([])
   })
 
   it('templateToNode 深拷贝解耦：模板后续修改不影响节点（§4.2.1）', async () => {

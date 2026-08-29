@@ -32,8 +32,8 @@ export interface DocumentActionsFace {
   selectWorkflow(id: string): void
   /** 打开工作流模板（未保存守卫后切换）。 */
   selectFlowTemplate(id: string): void
-  /** 新建（工作流 Tab / 角色 / 数据分区；+ 号新建模板）。 */
-  createNew(tab: LibTab, section?: 'file' | 'database' | 'flowTemplate'): void
+  /** 新建（工作流 Tab / 角色 / 数据分区 / 协作组分区；+ 号新建模板）。 */
+  createNew(tab: LibTab, section?: 'file' | 'database' | 'flowTemplate' | 'group'): void
 }
 
 /** 文档生命周期面（保存失败抛错/提示由保存路径处理）。 */
@@ -196,7 +196,7 @@ export function useDocumentActions(
   }, [guard, openFlowTemplateById])
 
   // ---------- 新建 ----------
-  const createNew = useCallback((tab: LibTab, section?: 'file' | 'database' | 'flowTemplate') => {
+  const createNew = useCallback((tab: LibTab, section?: 'file' | 'database' | 'flowTemplate' | 'group') => {
     if (tab === 'workflow') {
       if (section === 'flowTemplate') {
         // 图2 交互改造：+ 号新建「工作流模板」（空白模板，编辑后保存回模板库；
@@ -223,6 +223,14 @@ export function useDocumentActions(
       const template = templates.createTemplateDraft(kind)
       selection.selectEditor({ source: 'template', kind, id: template.id })
       selection.selectLib(kind, (template as { id: string }).id)
+      notify('info', t.newTemplate)
+      return
+    }
+    if (tab === 'other' && section === 'group') {
+      // 用户批注：协作组像其他列表一样，标题右侧 + 号新建协作组模板。
+      const template = templates.createTemplateDraft('group')
+      selection.selectEditor({ source: 'template', kind: 'group', id: template.id })
+      selection.selectLib('groupTemplate', (template as { id: string }).id)
       notify('info', t.newTemplate)
       return
     }

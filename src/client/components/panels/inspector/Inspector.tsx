@@ -80,7 +80,7 @@ export function Inspector(props: InspectorProps) {
         content = <DatabaseForm data={data} copy={t} onPatch={onPatch} onTest={onTestDb} />
         break
       case 'group':
-        content = <GroupForm data={data} copy={t} members={editorData.members ?? []} onPatch={onPatch} onLoadMd={onLoadGroupMd} onRemoveMember={onRemoveMember} />
+        content = <GroupForm data={data} copy={t} members={editorData.members} onPatch={onPatch} onLoadMd={onLoadGroupMd} onRemoveMember={onRemoveMember} />
         break
       case 'stage':
         content = <StageForm data={data} copy={t} nodeLabel={String(data.label ?? '')} />

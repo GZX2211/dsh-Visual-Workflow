@@ -6,7 +6,7 @@
 
 import type { Dict } from '../../i18n.js'
 import type { LibTab } from '../../studio/studio-state.js'
-import type { RoleTemplate, FileTemplate, DatabaseTemplate } from '../../../host/shared/types.js'
+import type { RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate } from '../../../host/shared/types.js'
 import type { WorkflowTemplate } from '../../../host/shared/graph-model.js'
 
 export interface LibSelectionInfo {
@@ -36,6 +36,8 @@ export interface LeftPanelProps {
   roleTemplates: RoleTemplate[]
   fileTemplates: FileTemplate[]
   databaseTemplates: DatabaseTemplate[]
+  /** 协作组模板列表（全局共享；「其他」Tab 协作组分区，用户批注：+ 新增/点击编辑/删除）。 */
+  groupTemplates: GroupTemplate[]
   stageKinds: Array<{ kind: string; label: string }>
   libSelection: LibSelectionInfo | null
   modeName(presetId: string | null | undefined): string
@@ -47,8 +49,10 @@ export interface LeftPanelProps {
   onPlaceTemplateIntoGroup(kind: 'role', id: string, groupId: string, position: { x: number; y: number }): void
   onPlaceStage(kind: string, position: { x: number; y: number }): void
   onPlaceGroup(position: { x: number; y: number }): void
+  /** 协作组模板拖入画布：按模板内容生成协作组节点。 */
+  onPlaceGroupFromTemplate(id: string, position: { x: number; y: number }): void
   onPlaceParent(id: string, position: { x: number; y: number }): void
-  onCreateNew(tab: LibTab, section?: 'file' | 'database' | 'flowTemplate'): void
+  onCreateNew(tab: LibTab, section?: 'file' | 'database' | 'flowTemplate' | 'group'): void
   onBeginDrag(event: React.PointerEvent, payload: DragPayload): void
 }
 
@@ -80,9 +84,9 @@ function fileSubline(template: FileTemplate): string {
 export function LeftPanel(props: LeftPanelProps) {
   const {
     copy: t, libTab, onSetTab, open, width, mode, workflows, flowTemplates, parentTemplate,
-    roleTemplates, fileTemplates, databaseTemplates, stageKinds, libSelection,
+    roleTemplates, fileTemplates, databaseTemplates, groupTemplates, stageKinds, libSelection,
     modeName, onSelectWorkflow, onSelectFlowTemplate, onSelectLib, onPlaceTemplate, onPlaceTemplateIntoGroup, onPlaceStage,
-    onPlaceGroup, onPlaceParent, onCreateNew, onBeginDrag,
+    onPlaceGroup, onPlaceGroupFromTemplate, onPlaceParent, onCreateNew, onBeginDrag,
   } = props
 
   const tabDefs: Array<{ key: LibTab; label: string }> = [
@@ -112,7 +116,7 @@ export function LeftPanel(props: LeftPanelProps) {
     )
   }
 
-  const sections: Array<{ key: string; title: string; plus: boolean; plusKind?: 'file' | 'database' | 'flowTemplate'; cards: React.ReactNode[] }> = []
+  const sections: Array<{ key: string; title: string; plus: boolean; plusKind?: 'file' | 'database' | 'flowTemplate' | 'group'; cards: React.ReactNode[] }> = []
 
   if (libTab === 'workflow') {
     // 图2 交互改造：左侧「工作流」Tab 拆两区——上方实例列表（无 + 号；运行中卡片
@@ -218,14 +222,15 @@ export function LeftPanel(props: LeftPanelProps) {
     sections.push({
       key: 'groups',
       title: t.groupTemplates,
-      plus: false,
-      cards: [
-        itemCard('group-template', 'groupTemplate', 'group', '☰', String(t.nodeKinds?.group ?? '协作组'), String(t.groupHint ?? ''), {
-          label: String(t.nodeKinds?.group ?? '协作组'),
-          onClick: () => onSelectLib('groupTemplate', 'group'),
-          onDrop: (position) => onPlaceGroup(position ?? { x: 120, y: 80 }),
-        }),
-      ],
+      plus: true,
+      plusKind: 'group',
+      cards: (groupTemplates ?? []).map((item) => itemCard(
+        item.id, 'groupTemplate', item.id, '☰', String(item.name ?? ''), truncate(String((item as { collabPrompt?: unknown }).collabPrompt ?? ''), 60), {
+          label: String(item.name ?? ''),
+          onClick: () => onSelectLib('groupTemplate', item.id),
+          onDrop: (position) => onPlaceGroupFromTemplate(item.id, position ?? { x: 120, y: 80 }),
+        },
+      )),
     })
   }
 

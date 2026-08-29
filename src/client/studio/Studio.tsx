@@ -80,6 +80,14 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
   const currentFlowTemplate = currentFlowTemplateOf(state)
   const editorData = editorDataOf(state)
   const running = isRunningOf(state)
+  // 画布左上角工作流名称角标（用户批注：显示方式「模板/实例（工作流名称）」；采用「模板：名」「实例：名」）
+  const canvasCaption = currentFlowTemplate
+    ? `模板：${currentFlowTemplate.name ?? ''}`
+    : currentService
+      ? `实例：${currentService.name ?? ''}`
+      : currentFlow
+        ? `实例：${currentFlow.name ?? ''}`
+        : ''
   // 运行中双向同步（需求 §4.5.8）：当前运行节点高亮 = 快照中 status=running 的节点
   // id 列表（GraphCanvas 渲染 is-highlighted；防回环：只写视图，不进保存/撤销历史）。
   const highlightedNodeIds = useMemo(() => runningNodeIds(state.run.snapshot), [state.run.snapshot])
@@ -170,10 +178,12 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
       stageKinds={stageKinds}
       parentTemplate={parentTemplate}
       roleTemplates={roleTemplates}
+      groupTemplates={state.templates.group as import('../../host/shared/types.js').GroupTemplate[]}
       toolbarRunning={toolbarRunning}
       runStatusByNode={runStatusByNode}
       highlightedNodeIds={highlightedNodeIds}
       modeName={modeName}
+      canvasCaption={canvasCaption}
       canvasApiRef={canvasApiRef}
       canvasShellRef={canvasShellRef}
       libraryImportRef={libraryImportRef}

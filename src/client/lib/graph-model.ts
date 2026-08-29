@@ -7,7 +7,7 @@
 // 类型仅引用 src/host/shared/graph-model.ts（纯类型层，零运行时 import）。
 
 import type { GraphNode, Line, NodeKind, WorkflowDocument } from '../../host/shared/graph-model.js'
-import type { RoleTemplate, FileTemplate, DatabaseTemplate, RunSnapshot } from '../../host/shared/types.js'
+import type { RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate, RunSnapshot } from '../../host/shared/types.js'
 
 // ---------------------------------------------------------------------------
 // 连接点表（与 Host graph/model.ts 保持一致的客户端镜像）
@@ -108,10 +108,12 @@ export function templatesToMaps(
   }
 }
 
-/** 模板字段 → 节点 data（深拷贝快照；模板 name → 节点 label，共享类型逐字段对齐）。 */
+/** 模板字段 → 节点 data（深拷贝快照；模板 name → 节点 label，共享类型逐字段对齐）。
+ *  kind 限定 role/file/database；传入 GroupTemplate 时按 None 处理（协作组模板走
+ *  placeGroupFromTemplate，不进本函数）。 */
 export function templateToNodeData(
-  kind: TemplateKind,
-  template: RoleTemplate | FileTemplate | DatabaseTemplate | null | undefined,
+  kind: 'role' | 'file' | 'database',
+  template: RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate | null | undefined,
 ): Record<string, unknown> | null {
   if (!template) return null
   const label = String(template.name ?? '').trim() ? String(template.name) : ''

@@ -33,7 +33,7 @@ describe('studioReducer', () => {
     expect(state.sessionId).toBe('s-1')
     expect(state.mode).toBe('mode1')
     expect(state.libTab).toBe('workflow')
-    expect(state.templates).toEqual({ role: [], file: [], database: [] })
+    expect(state.templates).toEqual({ role: [], file: [], database: [], group: [] })
     expect(state.canvas).toEqual({ nodes: [], edges: [] })
   })
 

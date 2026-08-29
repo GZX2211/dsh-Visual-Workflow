@@ -68,6 +68,7 @@ function renderCanvas(onGroupResize: (id: string, size: { w: number; h: number }
     onConnect: () => {},
     onConnectionRejected: () => {},
     onGroupResize,
+    onSwapPorts: () => {},
     fitLabel: '',
     zoomInLabel: '',
     zoomOutLabel: '',

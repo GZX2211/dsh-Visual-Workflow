@@ -10,7 +10,7 @@ import type {
 } from './studio-types.js'
 import type { WorkflowDocument, WorkflowTemplate } from '../../host/shared/graph-model.js'
 import type {
-  ServiceState, RoleTemplate, FileTemplate, DatabaseTemplate, ToolCombo, RunSnapshot,
+  ServiceState, RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate, ToolCombo, RunSnapshot,
 } from '../../host/shared/types.js'
 
 export type StudioAction =
@@ -28,9 +28,9 @@ export type StudioAction =
   | { type: 'SERVICES_LOADED'; items: ServiceState[] }
   | { type: 'SERVICE_UPDATED'; service: ServiceState }
   | { type: 'SERVICE_REMOVED'; id: string }
-  | { type: 'TEMPLATES_LOADED'; kind: TemplateKind; items: Array<RoleTemplate | FileTemplate | DatabaseTemplate> }
-  | { type: 'TEMPLATE_ADDED'; kind: TemplateKind; template: RoleTemplate | FileTemplate | DatabaseTemplate }
-  | { type: 'TEMPLATE_UPDATED'; kind: TemplateKind; template: RoleTemplate | FileTemplate | DatabaseTemplate }
+  | { type: 'TEMPLATES_LOADED'; kind: TemplateKind; items: Array<RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate> }
+  | { type: 'TEMPLATE_ADDED'; kind: TemplateKind; template: RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate }
+  | { type: 'TEMPLATE_UPDATED'; kind: TemplateKind; template: RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate }
   | { type: 'TEMPLATE_REMOVED'; kind: TemplateKind; id: string }
   | { type: 'COMBOS_LOADED'; items: ToolCombo[] }
   | { type: 'PRESETS_LOADED'; items: PresetItem[] }

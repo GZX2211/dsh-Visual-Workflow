@@ -65,6 +65,25 @@ describe('画布几何（协作组/阶段）', () => {
     )
     expect(memberEdge!.start.x).toBe(400)
   })
+
+  it('edgeGeometry：交换连接点的节点——源出点在左缘、目标入点在右缘（用户批注：防交叉换向）', () => {
+    const src = nodeOf('src', 'agent', { swapPorts: true })
+    const tgt = nodeOf('tgt', 'agent', { swapPorts: true })
+    const normal = nodeOf('n', 'agent')
+    const normalTgt = nodeOf('nr', 'agent')
+    const byId = new Map<string, CanvasNode>([['src', src], ['tgt', tgt], ['n', normal], ['nr', normalTgt]])
+
+    // 源交换（出点移左侧）→ start.x 为源节点左缘（未交换为右缘 100+208）
+    const e1 = edgeGeometry({ id: 'e1', source: 'src', target: 'n', sourceHandle: 'flow-out', targetHandle: 'flow-in' }, byId)
+    expect(e1!.start.x).toBe(100)
+    // 目标交换（入点移右侧）→ end.x 为目标节点右缘（未交换为左缘 100）
+    const e2 = edgeGeometry({ id: 'e2', source: 'n', target: 'tgt', sourceHandle: 'flow-out', targetHandle: 'flow-in' }, byId)
+    expect(e2!.end.x).toBe(100 + 208)
+    // 未交换默认：源右缘、目标左缘（基线，防退化）
+    const e3 = edgeGeometry({ id: 'e3', source: 'n', target: 'nr', sourceHandle: 'flow-out', targetHandle: 'flow-in' }, byId)
+    expect(e3!.start.x).toBe(100 + 208)
+    expect(e3!.end.x).toBe(100)
+  })
 })
 
 describe('groupSurfaceFromElements（入组落点：仅协作组表面，连接点不具入组功能）', () => {

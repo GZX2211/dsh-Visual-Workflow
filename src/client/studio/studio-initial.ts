@@ -22,7 +22,7 @@ export function createInitialState(sessionId: string): StudioState {
     workflows: [],
     services: [],
     flowTemplates: [],
-    templates: { role: [], file: [], database: [] },
+    templates: { role: [], file: [], database: [], group: [] },
     combos: [],
     presets: [],
     tools: [],

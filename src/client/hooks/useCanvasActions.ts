@@ -30,11 +30,15 @@ export interface CanvasActionsFace {
   placeParentNode(templateId: string, position: { x: number; y: number }): void
   placeStageNode(kind: string, position: { x: number; y: number }): void
   placeGroupNode(position: { x: number; y: number }): void
+  /** 协作组模板拖入画布：按模板名称/协作 Prompt 生成协作组节点。 */
+  placeGroupFromTemplate(templateId: string, position: { x: number; y: number }): void
   placeTemplateIntoGroup(kind: 'role', templateId: string, groupId: string, position: { x: number; y: number }): void
   onGroupResize(id: string, size: { w: number; h: number }): void
   addNodeToGroup(nodeId: string, groupId: string): void
   copyToProxy(): void
   removeGroupMember(memberId: string): void
+  /** 交换节点左右连接点（节点属性 swapPorts 取反；可撤销）。 */
+  swapNodePorts(id: string): void
 }
 
 /** 画布编辑面（remember 需在变更 dispatch 前调用；远端无 IO）。 */
@@ -249,6 +253,30 @@ export function useCanvasActions(
     notify('success', t.toastNodeAdded)
   }, [dispatch, history, notify, state.currentId, t.groupDefaultName, t.toastNodeAdded])
 
+  /** 协作组模板拖入画布：按模板内容生成协作组节点（用户批注：协作组模板列表）。 */
+  const placeGroupFromTemplate = useCallback((templateId: string, position: { x: number; y: number }) => {
+    if (!state.currentId) return
+    const template = state.templates.group.find((item) => item.id === templateId)
+    const data = template
+      ? {
+          label: String((template as unknown as { name?: unknown }).name ?? ''),
+          collabPrompt: String((template as unknown as { collabPrompt?: unknown }).collabPrompt ?? ''),
+          memberIds: [],
+          size: { w: 300, h: 220 },
+        }
+      : { label: String(t.groupDefaultName ?? '协作组'), collabPrompt: '', memberIds: [], size: { w: 300, h: 220 } }
+    const node: CanvasNode = {
+      id: `group-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      kind: 'group',
+      position,
+      data,
+    }
+    history.remember()
+    dispatch({ type: 'NODE_ADDED', node })
+    dispatch({ type: 'SELECT_NODE', id: node.id })
+    notify('success', t.toastNodeAdded)
+  }, [dispatch, history, notify, state.currentId, state.templates.group, t.groupDefaultName, t.toastNodeAdded])
+
   /** 左栏角色模板拖入协作组：生成节点并直接登记为组内成员。 */
   const placeTemplateIntoGroup = useCallback((kind: 'role', templateId: string, groupId: string, position: { x: number; y: number }) => {
     if (!state.currentId) return
@@ -342,10 +370,18 @@ export function useCanvasActions(
     dispatch({ type: 'GRAPH_REPLACED', nodes, edges: state.canvas.edges, dirty: true })
   }, [dispatch, history, state.canvas.edges, state.canvas.nodes])
 
+  // ---------- 交换节点左右连接点（用户批注：美化布线防交叉；状态随节点持久化） ----------
+  const swapNodePorts = useCallback((id: string) => {
+    const node = state.canvas.nodes.find((item) => item.id === id)
+    if (!node) return
+    history.remember()
+    dispatch({ type: 'NODE_DATA_PATCH', id, patch: { swapPorts: (node.data as { swapPorts?: unknown }).swapPorts !== true } })
+  }, [dispatch, history, state.canvas.nodes])
+
   return {
     rememberGraph, moveNode, onNodeDragStart, onConnect, onConnectionRejected,
     tidyGraph, clearGraph, removeSelected, removeNodeNow, removeLine,
-    placeTemplateNode, placeParentNode, placeStageNode, placeGroupNode, placeTemplateIntoGroup,
-    onGroupResize, addNodeToGroup, copyToProxy, removeGroupMember,
+    placeTemplateNode, placeParentNode, placeStageNode, placeGroupNode, placeGroupFromTemplate, placeTemplateIntoGroup,
+    onGroupResize, addNodeToGroup, copyToProxy, removeGroupMember, swapNodePorts,
   }
 }

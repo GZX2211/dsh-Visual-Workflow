@@ -371,11 +371,11 @@ export function StageForm({ data, copy, nodeLabel }: { data: Record<string, unkn
   )
 }
 
-/** 协作组（名称/协作 Prompt/成员列表删除）。 */
+/** 协作组（名称/协作 Prompt/成员列表删除）。模板态无成员（成员在画布内拖入登记），隐藏成员区。 */
 export function GroupForm({ data, copy, members, onPatch, onLoadMd, onRemoveMember }: {
   data: Record<string, unknown>
   copy: Dict
-  members: Array<{ id: string; label: string }>
+  members?: Array<{ id: string; label: string }>
   onPatch(patch: Record<string, unknown>): void
   onLoadMd(): void
   onRemoveMember(memberId: string): void
@@ -397,20 +397,22 @@ export function GroupForm({ data, copy, members, onPatch, onLoadMd, onRemoveMemb
           </div>
         </div>
       </Field>
-      <Field label={copy.groupMembers}>
-        <div className="wf-check-list">
-          {members.length === 0 ? (
-            <span className="wf-hint">{copy.groupMemberHint}</span>
-          ) : (
-            members.map((member) => (
-              <label key={member.id} style={{ justifyContent: 'space-between' }}>
-                <span>{member.label || member.id}</span>
-                <button type="button" className="wf-btn is-danger" style={{ fontSize: 9, padding: '2px 6px' }} onClick={() => onRemoveMember(member.id)}>✕</button>
-              </label>
-            ))
-          )}
-        </div>
-      </Field>
+      {members !== undefined ? (
+        <Field label={copy.groupMembers}>
+          <div className="wf-check-list">
+            {members.length === 0 ? (
+              <span className="wf-hint">{copy.groupMemberHint}</span>
+            ) : (
+              members.map((member) => (
+                <label key={member.id} style={{ justifyContent: 'space-between' }}>
+                  <span>{member.label || member.id}</span>
+                  <button type="button" className="wf-btn is-danger" style={{ fontSize: 9, padding: '2px 6px' }} onClick={() => onRemoveMember(member.id)}>✕</button>
+                </label>
+              ))
+            )}
+          </div>
+        </Field>
+      ) : null}
     </div>
   )
 }
