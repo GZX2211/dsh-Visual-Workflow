@@ -3,8 +3,10 @@
 // 覆盖：
 //   1. cordis.patch.yml 文本断言——顶层 `- insert:`、id/name 正确、全部 config 键
 //      齐全且值正确（servicePortBase=7860 等）、dataDir 为 `!!js dshHomePath('visual-workflow')`。
-//   2. src/host/index.ts 文本断言——导出 name/inject/apply、Config schema、
+//   2. Host 入口契约文本断言——导出 name/inject/apply、Config schema、
 //      visualWorkflowHost Service 占位（Service.init 日志 + dispose 清理 + T-015 TODO）。
+//      契约文件拆分后分布在 index.ts / config.ts / visual-workflow-host.ts，
+//      断言对三文件串联文本进行（断言语义不变）。
 //
 // 说明：为不引入额外运行期（jsdom/yaml 解析），本测试直接对两个源文件做**文本级**断言
 // （t-001 的 package-contract.test.ts 同款最小语义校验思路），并做一次编译产物的
@@ -24,8 +26,13 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 
 /** 读取根 cordis.patch.yml 原文。 */
 const patchText = readFileSync(resolve(root, 'cordis.patch.yml'), 'utf8')
-/** 读取宿主入口源码原文（勿运行时 import，避免对构建产物时序产生硬依赖）。 */
-const entryText = readFileSync(resolve(root, 'src/host/index.ts'), 'utf8')
+/** 读取宿主入口契约源码原文（勿运行时 import，避免对构建产物时序产生硬依赖）。
+ * 拆分后契约分布：index.ts（apply/re-export）、config.ts（name/inject/Config）、
+ * visual-workflow-host.ts（Service），串联后断言与拆分前语义一致。 */
+const entryText =
+  readFileSync(resolve(root, 'src/host/index.ts'), 'utf8') +
+  readFileSync(resolve(root, 'src/host/config.ts'), 'utf8') +
+  readFileSync(resolve(root, 'src/host/visual-workflow-host.ts'), 'utf8')
 
 // 架构文档 §2.2 的 13 个 config 键 → 文本级期望值。
 //   key: 期望出现的「键: 值」片段（弱匹配，容忍 !!js 标签；null 值匹配字面 null）。
@@ -81,7 +88,7 @@ describe('T-002 cordis.patch.yml（insert 行语义）', () => {
   })
 })
 
-describe('T-002 src/host/index.ts（最小宿主入口骨架）', () => {
+describe('T-002 Host 入口契约（index/config/visual-workflow-host 拆分后串联）', () => {
   it('导出 name = dsh-visual-workflow 与空 inject 数组', () => {
     expect(entryText).toMatch(/export const name = 'dsh-visual-workflow'/)
     expect(entryText).toMatch(/export const inject: string\[\] = \[\]/)
