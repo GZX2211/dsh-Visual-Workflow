@@ -85,7 +85,7 @@ export function buildAskText(pending: Pick<PendingAsk, 'from' | 'fromNodeId' | '
     `[协作通信] 同工作流节点子代理「${pending.fromNodeId}」（会话 ${pending.from}）向你发送协作消息（askId: ${pending.askId}）：`,
     pending.message,
     '',
-    `请仅当你确有明确答复时回复：调用 wf_ask_agent({ cmd: "reply", targetChildId: "${pending.from}", askId: "${pending.askId}", message: "<你的回复文本>" })，回复会解除对方的阻塞等待。`,
+    `请仅当你确有明确答复时回复：调用 wf_ask_agent({ cmd: "reply", targetChildId: "${pending.fromNodeId}", askId: "${pending.askId}", message: "<你的回复文本>" })，回复会解除对方的阻塞等待。`,
   ].join('\n')
 }
 

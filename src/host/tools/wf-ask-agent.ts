@@ -87,12 +87,13 @@ export function registerWfAskAgent(
     name: WF_ASK_AGENT,
     description:
       'Exchange blocking messages between agent nodes of the running workflow. ' +
-      'Use inside a collaboration group: ask sends a message to a peer child agent and blocks until the peer replies (delivered at the peer\'s next step boundary, or cold-resumed when idle); ' +
+      'Use inside a collaboration group: ask sends a message to a peer and blocks until the peer replies; ' +
+      'targetChildId takes the peer node id from your collaboration block, or its child session id, and the peer is reachable even when idle or stopped (cold-resumed and woken); ' +
       'reply answers an ask by its askId and unblocks the sender; resolve settles an ask that timed out (default 120 s) — parent agent only, after consulting the user. ' +
       'Fails with WF_* codes on invalid targets, ownership violations, or after the run stops.',
     parameters: {
       cmd: { type: 'string', required: true, enum: ['ask', 'reply', 'resolve'] as const, description: 'ask: send and block; reply: answer an ask; resolve: settle a timed-out ask (parent only).' },
-      targetChildId: { type: 'string', description: 'Peer child session id: the ask target (ask), or the original sender to reply to (reply).' },
+      targetChildId: { type: 'string', description: 'Peer node id (from your collaboration block) or child session id: the ask target (ask), or the original sender to reply to (reply).' },
       askId: { type: 'string', description: 'Ask id to reply to (reply) or settle (resolve); returned by the ask caller via the delivered message.' },
       message: { type: 'string', description: 'Message text (ask/reply); optional explanatory note on resolve.' },
       action: { type: 'string', enum: ['continue', 'resend', 'abort'] as const, description: 'resolve action: continue waiting, resend the ask, or abort it (the sender gets a timeout error).' },

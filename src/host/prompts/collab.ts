@@ -46,7 +46,7 @@ export function buildCollabBlock(params: CollabBlockParams): string {
       lines.push(`- ${label || id}（id：${id}）`)
     }
   }
-  lines.push('你可以向以上任一成员发送 wf_ask_agent 消息；超时由父代理仲裁。')
+  lines.push('你可以向以上任一成员发送 wf_ask_agent 消息：ask 的 targetChildId 直接使用上列成员的 id（即节点 id）；目标即使当前空闲/未运行也会被唤醒。超时由父代理仲裁。')
 
   const custom = String(params?.custom ?? '').trim()
   if (custom) {

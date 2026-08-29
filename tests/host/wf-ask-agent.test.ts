@@ -583,6 +583,63 @@ describe('冷态回退（followup 冷恢复）', () => {
 })
 
 // ---------------------------------------------------------------------------
+// 节点 id 寻址（协作块成员稳定寻址）
+// ---------------------------------------------------------------------------
+
+describe('节点 id 寻址（协作块成员稳定寻址）', () => {
+  it('ask 按成员节点 id 寻址在线目标 → 投递给该节点的子代理；reply 按发起者节点 id 解除阻塞', async () => {
+    const h = await makeHarness()
+    await start(h)
+    const def = h.tools.definitions.get(WF_ASK_AGENT)!
+    const askPromise = def.execute({ cmd: 'ask', targetChildId: 'n-a2', message: '请把结果发给我' }, execOf(child1))
+    await vi.waitFor(() => expect(h.childSteers('child-2')).toHaveLength(1))
+    const askId = h.askIdOf()
+    // reply 用发起者节点 id（n-a1）而非会话 id（child-1）也能解除阻塞
+    await def.execute({ cmd: 'reply', targetChildId: 'n-a1', askId, message: '结果：21' }, execOf(child2))
+    await expect(askPromise).resolves.toMatchObject({ cmd: 'ask', from: 'child-1', to: 'child-2', reply: '结果：21' })
+  })
+
+  it('冷态目标：ask 按成员节点 id 寻址 → followup 冷恢复唤醒（目标已停止/离线也可达）', async () => {
+    const h = await makeHarness()
+    await start(h)
+    // 模拟目标已停止/离线：从 agents 注册表释放（激活已回收），但 childIndex 仍登记
+    h.agents.children.delete('child-2')
+    const def = h.tools.definitions.get(WF_ASK_AGENT)!
+    const askPromise = def.execute({ cmd: 'ask', targetChildId: 'n-a2', message: '请唤醒后回复' }, execOf(child1))
+    await vi.waitFor(() => expect(h.followups).toHaveLength(1))
+    const call = h.followups[0]
+    expect(call.childId).toBe('child-2') // 解析到该节点的子代理 id 后冷恢复
+    const askId = h.askIdOf()
+    const replyResult = (await def.execute({ cmd: 'reply', targetChildId: 'n-a1', askId, message: '已唤醒，结果：7' }, execOf(child2))) as { cmd?: string }
+    expect(replyResult.cmd).toBe('reply')
+    await expect(askPromise).resolves.toMatchObject({ reply: '已唤醒，结果：7' })
+  })
+
+  it('未知节点 id / 未启动节点 / 自己的节点 id → 拒绝', async () => {
+    const h = await makeHarness()
+    await start(h)
+    const def = h.tools.definitions.get(WF_ASK_AGENT)!
+    // 任意未知 id（既非子代理会话 id 也非本 run 节点 id）
+    await expect(def.execute({ cmd: 'ask', targetChildId: 'n-ghost', message: 'hi' }, execOf(child1))).rejects.toMatchObject({ code: 'WF_ASK_TARGET_UNKNOWN' })
+    // 本 run 存在但未启动的节点（start 阶段节点未派生子代理）
+    await expect(def.execute({ cmd: 'ask', targetChildId: 'n-start', message: 'hi' }, execOf(child1))).rejects.toMatchObject({ code: 'WF_ASK_TARGET_UNKNOWN' })
+    // 发起者自己的节点 id → 禁止自投
+    await expect(def.execute({ cmd: 'ask', targetChildId: 'n-a1', message: 'hi' }, execOf(child1))).rejects.toMatchObject({ code: 'WF_BAD_ARGS' })
+  })
+
+  it('子代理会话 id 寻址（兼容既有用法）与节点 id 寻址等价', async () => {
+    const h = await makeHarness()
+    await start(h)
+    const def = h.tools.definitions.get(WF_ASK_AGENT)!
+    const askPromise = def.execute({ cmd: 'ask', targetChildId: 'child-2', message: '用会话 id 也试试' }, execOf(child1))
+    await vi.waitFor(() => expect(h.childSteers('child-2')).toHaveLength(1))
+    const askId = h.askIdOf()
+    await def.execute({ cmd: 'reply', targetChildId: 'child-1', askId, message: 'ok' }, execOf(child2))
+    await expect(askPromise).resolves.toMatchObject({ reply: 'ok' })
+  })
+})
+
+// ---------------------------------------------------------------------------
 // 生命周期与审计
 // ---------------------------------------------------------------------------
 

@@ -19,7 +19,7 @@ import {
 import { statusText, truncateText } from './snapshot.js'
 import { messageOf } from './helpers.js'
 import type { RunEntry } from './run-types.js'
-import { WfError, type CallerInfo } from './seams.js'
+import { WfError, type CallerInfo, type ChildMeta } from './seams.js'
 import { RuntimeExecute } from './runtime-execute.js'
 
 export class RuntimeComm extends RuntimeExecute {
@@ -35,6 +35,20 @@ export class RuntimeComm extends RuntimeExecute {
       throw new WfError(`该工作流已${statusText(run.snapshot.status)}，无法继续通信`, 'WF_STOPPED')
     }
     return run
+  }
+
+  /**
+   * 节点 id → 本 run 的子代理会话 id 反查（协作成员稳定寻址）：
+   * childIndex 为 childId → 运行位置归属表，节点 id 寻址需反向扫描；
+   * 目标未启动/不属于本 run 返回 null（调用方按 WF_ASK_TARGET_UNKNOWN 处理）。
+   */
+  private childForNode(run: RunEntry, nodeId: string): { childId: string; meta: ChildMeta } | null {
+    for (const [childId, meta] of this.childIndex) {
+      if (meta.nodeId === nodeId && meta.sessionId === run.snapshot.sessionId && meta.flowId === run.snapshot.flowId) {
+        return { childId, meta }
+      }
+    }
+    return null
   }
 
   /**
@@ -71,13 +85,25 @@ export class RuntimeComm extends RuntimeExecute {
       if (!metaFrom || metaFrom.sessionId !== run.snapshot.sessionId || metaFrom.flowId !== run.snapshot.flowId) {
         throw new WfError('仅当前运行中的节点子代理可以发起协作通信', 'WF_ASK_FORBIDDEN')
       }
-      const to = String(args?.targetChildId ?? '').trim()
-      if (!to) throw new WfError('wf_ask_agent ask 需要 targetChildId（目标子代理会话 id）', 'WF_BAD_ARGS')
-      if (to === from) throw new WfError('不能向自己发起协作通信', 'WF_BAD_ARGS')
-      const metaTo = this.childIndex.get(to)
-      if (!metaTo || metaTo.sessionId !== run.snapshot.sessionId || metaTo.flowId !== run.snapshot.flowId) {
-        throw new WfError(`目标 ${to} 不是当前运行的节点子代理`, 'WF_ASK_TARGET_UNKNOWN')
+      const rawTo = String(args?.targetChildId ?? '').trim()
+      if (!rawTo) {
+        throw new WfError('wf_ask_agent ask 需要 targetChildId（目标节点 id 或子代理会话 id）', 'WF_BAD_ARGS')
       }
+      // 目标寻址支持两种形式：子代理会话 id（运行期随机 UUID）或 节点 id（协作块
+      // 列出的成员 id —— 组成员稳定、彼此可知的寻址）。解析后统一以子代理会话 id
+      // 记账；目标即使已结束/冷态仍在 childIndex（仅随 run 生命周期清理），投递缝
+      // 会以 followup 冷恢复直接唤醒，无需目标保持运行中。
+      let to = rawTo
+      let metaTo = this.childIndex.get(rawTo)
+      if (!metaTo || metaTo.sessionId !== run.snapshot.sessionId || metaTo.flowId !== run.snapshot.flowId) {
+        const byNode = this.childForNode(run, rawTo)
+        if (!byNode) {
+          throw new WfError(`目标 ${rawTo} 不是当前运行的节点子代理`, 'WF_ASK_TARGET_UNKNOWN')
+        }
+        to = byNode.childId
+        metaTo = byNode.meta
+      }
+      if (to === from) throw new WfError('不能向自己发起协作通信', 'WF_BAD_ARGS')
       const message = String(args?.message ?? '').trim()
       if (!message) throw new WfError('wf_ask_agent ask 需要 message', 'WF_BAD_ARGS')
       for (const existing of run.asks.values()) {
@@ -156,7 +182,10 @@ export class RuntimeComm extends RuntimeExecute {
       if (pending.to !== childId) throw new WfError('只有消息目标可以回复该协作通信', 'WF_ASK_MISMATCH')
       if (pending.state !== 'pending') throw new WfError('该协作通信已超时，等待父代理裁决', 'WF_ASK_NOT_PENDING')
       const target = String(args?.targetChildId ?? '').trim()
-      if (target && target !== pending.from) throw new WfError('回复对象与发起者不一致', 'WF_ASK_MISMATCH')
+      // 发起者可用「子代理会话 id」或「节点 id」任一形式回复（ask 消息文本中两值均含）
+      if (target && target !== pending.from && target !== pending.fromNodeId) {
+        throw new WfError('回复对象与发起者不一致', 'WF_ASK_MISMATCH')
+      }
       const message = String(args?.message ?? '').trim()
       if (!message) throw new WfError('wf_ask_agent reply 需要 message', 'WF_BAD_ARGS')
       if (pending.timer) clearTimeout(pending.timer)
