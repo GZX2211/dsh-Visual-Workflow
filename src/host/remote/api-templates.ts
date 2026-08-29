@@ -35,7 +35,8 @@ export class VisualWorkflowApiTemplates extends VisualWorkflowApiWorkflows {
   }
 
   /** 删除预览：模板与画布节点深拷贝解耦，删除模板不影响任何已有节点。 */
-  async deleteTemplatePreview(args: { kind?: unknown; id?: unknown }): Promise<unknown> {    const kind = String(args?.kind ?? '')
+  async deleteTemplatePreview(args: { kind?: unknown; id?: unknown }): Promise<unknown> {
+    const kind = String(args?.kind ?? '')
     if (kind !== 'role' && kind !== 'file' && kind !== 'database' && kind !== 'group') {
       throw httpError(400, 'requires kind: role|file|database|group')
     }

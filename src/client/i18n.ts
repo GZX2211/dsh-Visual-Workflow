@@ -198,7 +198,7 @@ export const zh = {
   newWorkflow: '新建工作流',
   deleteFlow: '删除工作流',
   // 模板
-  templateDefaultName: { workflow: '未命名工作流', role: '新角色模板', file: '新文件模板', database: '新数据库模板' },
+  templateDefaultName: { workflow: '未命名工作流', role: '新角色模板', file: '新文件模板', database: '新数据库模板', group: '新协作组模板' },
   deleteTemplateTitle: '删除模板',
   deleteTemplateMessage: '确定删除模板「{name}」？',
   // 确认框
@@ -493,7 +493,7 @@ export const en: Dict = {
   meta: 'Status',
   newWorkflow: 'New workflow',
   deleteFlow: 'Delete workflow',
-  templateDefaultName: { workflow: 'Untitled workflow', role: 'New agent template', file: 'New file template', database: 'New database template' },
+  templateDefaultName: { workflow: 'Untitled workflow', role: 'New agent template', file: 'New file template', database: 'New database template', group: 'New group template' },
   deleteTemplateTitle: 'Delete template',
   deleteTemplateMessage: 'Delete template "{name}"?',
   confirmDelete: 'Delete?',

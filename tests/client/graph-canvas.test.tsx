@@ -120,3 +120,52 @@ describe('GraphCanvas 协作组拉伸监听清理（Bug 14 修正定位）', () 
     expect(onGroupResize).not.toHaveBeenCalled()
   })
 })
+
+describe('FlowNode 交换按钮（阶段节点不渲染，审查 BUG-1 修复防回归）', () => {
+  it('start 阶段节点无 .wf-node__swap；角色节点有且点击触发 onSwapPorts', () => {
+    const onSwapPorts = vi.fn()
+    const startNode: CanvasNode = { id: 's1', kind: 'start', position: { x: 0, y: 0 }, data: { label: '启动' } }
+    const agentNode: CanvasNode = { id: 'a1', kind: 'agent', position: { x: 0, y: 0 }, data: { label: '子代理' } }
+    const props: GraphCanvasProps = {
+      nodes: [startNode, agentNode],
+      edges: [],
+      copy: { ...zh, modeName: () => '' },
+      mode: 'mode1',
+      selectedNode: null,
+      selectedEdge: null,
+      runStatusByNode: {},
+      highlightedNodeIds: [],
+      onInit: () => {},
+      onNodeDragStart: () => {},
+      onNodeMove: () => {},
+      onNodeDropToGroup: () => {},
+      onNodeSelect: () => {},
+      onEdgeSelect: () => {},
+      onPaneClick: () => {},
+      onConnect: () => {},
+      onConnectionRejected: () => {},
+      onGroupResize: () => {},
+      onSwapPorts,
+      fitLabel: '',
+      zoomInLabel: '',
+      zoomOutLabel: '',
+      emptyHint: '',
+    }
+    act(() => {
+      root = createRoot(container!)
+      root.render(<GraphCanvas {...props} />)
+    })
+
+    const startCard = container!.querySelector('.wf-graph__node[data-wf-node-id="s1"]')
+    const agentCard = container!.querySelector('.wf-graph__node[data-wf-node-id="a1"]')
+    // 阶段节点（start/end/pause）不渲染交换按钮（审查 BUG-1：交换无意义 + 防死数据）
+    expect(startCard?.querySelector('.wf-node__swap')).toBeNull()
+    // 角色节点渲染交换按钮；点击触发 onSwapPorts
+    const agentSwap = agentCard?.querySelector('.wf-node__swap') as HTMLButtonElement | null
+    expect(agentSwap).toBeTruthy()
+    act(() => {
+      agentSwap!.click()
+    })
+    expect(onSwapPorts).toHaveBeenCalledWith('a1')
+  })
+})

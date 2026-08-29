@@ -98,6 +98,9 @@ function metaLinesOf(node: CanvasNode, copy: Dict & { modeName(id: string | null
 export function FlowNode({ node, copy, mode, selected, highlighted, dragging, runStatus, onPointerDown, onHandlePointerDown, onToggleSwap }: FlowNodeProps) {
   const kind = node.kind
   const isProxy = kind === 'proxy'
+  // 阶段节点（启动/结束/暂停）：单/双流程连接点，交换无意义且会产生死数据（审查 BUG-1），
+  // 与协作组一致不渲染交换按钮。
+  const isStage = kind === 'start' || kind === 'end' || kind === 'pause'
   // 交换状态随节点持久化（用户批注：作为节点属性保存，重载后保持）
   const swapped = (node.data as { swapPorts?: unknown }).swapPorts === true
   const displayKind = isProxy ? 'agent' : kind
@@ -142,14 +145,16 @@ export function FlowNode({ node, copy, mode, selected, highlighted, dragging, ru
       onPointerDown={(event) => onPointerDown(event, node.id)}
     >
       <div className={cls}>
-        <button
-          type="button"
-          className={`wf-node__swap${swapped ? ' is-active' : ''}`}
-          title={String(copy.swapPorts ?? '交换左右连接点')}
-          aria-label={String(copy.swapPorts ?? '交换左右连接点')}
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => { event.stopPropagation(); onToggleSwap(node.id) }}
-        >{swapped ? '⇆' : '⇄'}</button>
+        {!isStage ? (
+          <button
+            type="button"
+            className={`wf-node__swap${swapped ? ' is-active' : ''}`}
+            title={String(copy.swapPorts ?? '交换左右连接点')}
+            aria-label={String(copy.swapPorts ?? '交换左右连接点')}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => { event.stopPropagation(); onToggleSwap(node.id) }}
+          >{swapped ? '⇆' : '⇄'}</button>
+        ) : null}
         <div className="wf-node__kind">
           <span>{String(copy.nodeKinds?.[displayKind] ?? displayKind)}</span>
           {statusText ? <span className={`wf-status-dot is-${status}`} /> : null}
