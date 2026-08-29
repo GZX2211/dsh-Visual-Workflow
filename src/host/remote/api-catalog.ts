@@ -5,7 +5,7 @@
 // （工具 ∪ MCP ∪ 已装载插件；含内置工具中文描述映射）。方法体逐字移动。
 
 import { RESERVED_TRANSPORT_TOOL } from '../shared/protocol.js'
-import { listMcpServers, upsertMcpServer, removeMcpServer, toggleMcpServer } from './mcp-registry.js'
+import { listMcpServers, upsertMcpServer, removeMcpServer, toggleMcpServer, renderCommandLine } from './mcp-registry.js'
 import { httpError } from './http.js'
 import { VisualWorkflowApiEcosystem } from './api-ecosystem.js'
 
@@ -82,19 +82,21 @@ export class VisualWorkflowApiCatalog extends VisualWorkflowApiEcosystem {
     return {
       items,
       loadedPlugins,
-      mcp: mcpServers.map((server: { id?: unknown; serverName?: unknown; url?: unknown; command?: unknown; transport?: unknown; disabled?: unknown; args?: unknown; env?: unknown }) => ({
+      mcp: mcpServers.map((server: { id?: unknown; serverName?: unknown; url?: unknown; command?: unknown; transport?: unknown; disabled?: unknown; args?: unknown; env?: unknown; headers?: unknown }) => ({
         id: server.id,
         name: server.serverName,
         serverName: server.serverName,
         description: server.url
           ? `MCP 服务器（streamable-http：${server.url}）`
-          : `MCP 服务器（stdio：${server.command}）`,
+          : `MCP 服务器（stdio：${renderCommandLine(String(server.command ?? ''), (server.args ?? []) as string[])}）`,
         transport: server.transport,
         disabled: server.disabled === true,
         // 组合管理「编辑」表单的字段来源：缺失时编辑后启动命令/参数恒为空
         command: String(server.command ?? ''),
         args: Array.isArray(server.args) ? server.args : [],
+        commandLine: renderCommandLine(String(server.command ?? ''), (Array.isArray(server.args) ? server.args : []) as string[]),
         env: server.env ?? {},
+        headers: server.headers ?? {},
         url: String(server.url ?? ''),
         category: 'mcp',
       })),
@@ -176,7 +178,9 @@ export class VisualWorkflowApiCatalog extends VisualWorkflowApiEcosystem {
       transport: server.transport,
       command: server.command ?? '',
       args: server.args ?? [],
+      commandLine: renderCommandLine(server.command ?? '', server.args ?? []),
       env: server.env ?? {},
+      headers: server.headers ?? {},
       url: server.url ?? '',
       disabled: server.disabled === true,
     }))

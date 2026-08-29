@@ -748,8 +748,12 @@ describe('MCP 端点', () => {
       server: { id: 'mcp-demo', serverName: 'demo', transport: 'stdio', command: 'npx -y demo-server', args: ['--port', '9000'] },
     })) as { id?: string; serverName?: string; command?: string; args?: string[] }
     expect(saved.id).toBe('mcp-demo')
-    expect(saved.command).toBe('npx')
-    expect(saved.args).toEqual(['-y', 'demo-server', '--port', '9000'])
+    // Windows 下 npx 是 .cmd 包装，Node≥20.12 不能直接 spawn → 展开为 cmd.exe /c
+    const isWin = process.platform === 'win32'
+    expect(saved.command).toBe(isWin ? 'cmd.exe' : 'npx')
+    expect(saved.args).toEqual(isWin
+      ? ['/d', '/c', 'npx', '-y', 'demo-server', '--port', '9000']
+      : ['-y', 'demo-server', '--port', '9000'])
 
     const list = (await h.api.handle('mcpList', {})) as Array<{ id?: string }>
     expect(list).toHaveLength(1)

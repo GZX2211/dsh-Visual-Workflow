@@ -11,9 +11,31 @@ import { EP } from '../../lib/remote.js'
 import type { RemoteFace } from '../../hooks/useRemote.js'
 
 interface CatalogItem { key: string; name: string; description?: string; disabled?: boolean; badge?: string; checked: boolean; onToggle(): void; onEdit?(): void; onToggleDisabled?(): void; onDelete?(): void }
-interface McpEntry { id: string; serverName: string; transport?: string; command?: string; args?: string[]; url?: string; disabled?: boolean; description?: string }
+interface McpEntry { id: string; serverName: string; transport?: string; command?: string; args?: string[]; commandLine?: string; env?: Record<string, string>; headers?: Record<string, string>; url?: string; disabled?: boolean; description?: string }
 interface ComboEntry { id: string; name: string; tools?: string[]; mcpServers?: string[] }
-interface McpFormState { id?: string; serverName: string; transport: string; command: string; args: string; url: string }
+interface McpFormState { id?: string; serverName: string; transport: string; commandLine: string; env: string; headers: string; url: string }
+
+/** 把 {command, args} 拼回一整行（含空格的 token 加引号），供导入时回填 commandLine。 */
+function joinCommandLine(command: string, args: string[]): string {
+  return [String(command ?? ''), ...(Array.isArray(args) ? args : []).map((arg) => String(arg))]
+    .filter((token) => token !== '')
+    .map((token) => {
+      if (/^[A-Za-z0-9_./\\:=@%+,\[\]{}#-]+$/.test(token) && !/["']/.test(token)) return token
+      if (!token.includes('"')) return `"${token}"`
+      if (!token.includes("'")) return `'${token}'`
+      return `"${token.replace(/"/g, '\\"')}"`
+    })
+    .join(' ')
+}
+
+/** 解析 env / headers 的 JSON 字符串为对象（空串 → {}）。 */
+function parseJsonObject(text: string): Record<string, string> {
+  const value = String(text ?? '').trim()
+  if (!value) return {}
+  const obj = JSON.parse(value)
+  if (obj && typeof obj === 'object' && !Array.isArray(obj)) return obj as Record<string, string>
+  throw new Error('环境变量/请求头需为 JSON 对象')
+}
 
 export interface ComboManagerProps {
   copy: Dict
@@ -34,6 +56,8 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
   const [busy, setBusy] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [mcpForm, setMcpForm] = useState<McpFormState | null>(null)
+  const [mcpImportOpen, setMcpImportOpen] = useState(false)
+  const [mcpImportText, setMcpImportText] = useState('')
   const loadedRef = useRef(false)
 
   const load = useCallback(async (): Promise<void> => {
@@ -186,14 +210,24 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
     if (!mcpForm) return
     setBusy(true)
     try {
+      // env / headers 为可选 JSON；空串或非法由 parseJsonObject 处理
+      let env: Record<string, string> = {}
+      let headers: Record<string, string> = {}
+      try {
+        env = parseJsonObject(mcpForm.env)
+        headers = parseJsonObject(mcpForm.headers)
+      } catch (error) {
+        onToast('error', String((error as Error)?.message ?? error))
+        setBusy(false)
+        return
+      }
       const server = {
         id: mcpForm.id ?? null,
         serverName: mcpForm.serverName,
         transport: mcpForm.transport,
-        command: mcpForm.transport === 'stdio' ? mcpForm.command : undefined,
-        args: mcpForm.transport === 'stdio'
-          ? String(mcpForm.args ?? '').split(/[,，]/).map((part) => part.trim()).filter(Boolean)
-          : undefined,
+        commandLine: mcpForm.transport === 'stdio' ? mcpForm.commandLine : undefined,
+        env: mcpForm.transport === 'stdio' && Object.keys(env).length > 0 ? env : undefined,
+        headers: mcpForm.transport === 'streamable-http' && Object.keys(headers).length > 0 ? headers : undefined,
         url: mcpForm.transport === 'streamable-http' ? mcpForm.url : undefined,
       }
       await remote.call(EP.EP_MCP_PUT, { server })
@@ -206,6 +240,37 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
       setBusy(false)
     }
   }, [copy.mcpSaved, load, mcpForm, onToast, remote])
+
+  /** 从 mcp.json 粘贴导入：支持 {mcpServers:{name:{...}}} 或单个 server 对象。 */
+  const importMcpJson = useCallback((): void => {
+    try {
+      const raw = String(mcpImportText ?? '').trim()
+      if (!raw) throw new Error('请先粘贴 mcp.json 配置')
+      let data = JSON.parse(raw) as Record<string, unknown>
+      if (data && typeof data === 'object' && data.mcpServers && typeof data.mcpServers === 'object') {
+        const entries = Object.entries(data.mcpServers as Record<string, unknown>)
+        if (entries.length === 0) throw new Error('mcpServers 配置为空')
+        const [name, server] = entries[0]
+        data = { ...(server as Record<string, unknown>), serverName: (server as Record<string, unknown>)?.serverName ?? name } as Record<string, unknown>
+      }
+      const transport = data.transport === 'streamable-http' || data.url ? 'streamable-http' : 'stdio'
+      const command = String(data.command ?? '')
+      const args = Array.isArray(data.args) ? (data.args as unknown[]).map((item) => String(item)) : []
+      setMcpForm({
+        id: undefined,
+        serverName: String((data.serverName as string) ?? (data.name as string) ?? ''),
+        transport,
+        commandLine: transport === 'stdio' ? joinCommandLine(command, args) : '',
+        env: data.env && typeof data.env === 'object' && Object.keys(data.env as object).length > 0 ? JSON.stringify(data.env) : '',
+        headers: data.headers && typeof data.headers === 'object' && Object.keys(data.headers as object).length > 0 ? JSON.stringify(data.headers) : '',
+        url: String(data.url ?? ''),
+      })
+      setMcpImportOpen(false)
+      onToast('success', copy.mcpImported)
+    } catch (error) {
+      onToast('error', String((error as Error)?.message ?? error))
+    }
+  }, [copy.mcpImported, mcpImportText, onToast])
 
   const tabs = [
     { key: 'plugins' as const, label: copy.comboTabDsh, count: catalog.items.length },
@@ -246,8 +311,9 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
               id: server.id,
               serverName: name,
               transport: server.transport ?? 'stdio',
-              command: server.command ?? '',
-              args: Array.isArray(server.args) ? server.args.join(', ') : '',
+              commandLine: String(server.commandLine ?? server.command ?? ''),
+              env: server.env && Object.keys(server.env).length > 0 ? JSON.stringify(server.env) : '',
+              headers: server.headers && Object.keys(server.headers).length > 0 ? JSON.stringify(server.headers) : '',
               url: server.url ?? '',
             }),
             onToggleDisabled: server.disabled === true
@@ -405,26 +471,30 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
             {(mcpForm.transport ?? 'stdio') === 'stdio'
               ? (
                   <div style={{ display: 'grid', gap: 8, padding: '0 14px 12px' }}>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <label style={{ flex: 1 }}>
-                        <span className="wf-hint">{copy.mcpCommand}</span>
-                        <input value={mcpForm.command ?? ''} placeholder="npx -y some-mcp-server" onChange={(event) => setMcpForm((form) => ({ ...form!, command: event.target.value }))} />
-                      </label>
-                      <label style={{ flex: 1 }}>
-                        <span className="wf-hint">{copy.mcpArgs}</span>
-                        <input value={mcpForm.args ?? ''} placeholder="--browser, msedge" onChange={(event) => setMcpForm((form) => ({ ...form!, args: event.target.value }))} />
-                      </label>
-                    </div>
+                    <label>
+                      <span className="wf-hint">{copy.mcpCommand}</span>
+                      <input value={mcpForm.commandLine ?? ''} placeholder="npx -y @playwright/mcp@latest --headless" onChange={(event) => setMcpForm((form) => ({ ...form!, commandLine: event.target.value }))} />
+                    </label>
+                    <label>
+                      <span className="wf-hint">{copy.mcpEnv}</span>
+                      <input value={mcpForm.env ?? ''} placeholder={'{"API_KEY":"..."}'} onChange={(event) => setMcpForm((form) => ({ ...form!, env: event.target.value }))} />
+                    </label>
                     {copy.mcpCommandHint
                       ? <span className="wf-hint" style={{ fontSize: 10, lineHeight: 1.5, color: 'var(--wf-ink-2)' }}>{copy.mcpCommandHint}</span>
                       : null}
                   </div>
                 )
               : (
-                  <label style={{ display: 'grid', gap: 4, padding: '0 14px 12px' }}>
-                    <span className="wf-hint">{copy.mcpUrl}</span>
-                    <input value={mcpForm.url ?? ''} placeholder="https://example.com/mcp" onChange={(event) => setMcpForm((form) => ({ ...form!, url: event.target.value }))} />
-                  </label>
+                  <div style={{ display: 'grid', gap: 8, padding: '0 14px 12px' }}>
+                    <label>
+                      <span className="wf-hint">{copy.mcpUrl}</span>
+                      <input value={mcpForm.url ?? ''} placeholder="https://example.com/mcp" onChange={(event) => setMcpForm((form) => ({ ...form!, url: event.target.value }))} />
+                    </label>
+                    <label>
+                      <span className="wf-hint">{copy.mcpHeaders}</span>
+                      <input value={mcpForm.headers ?? ''} placeholder={'{"Authorization":"Bearer ..."}'} onChange={(event) => setMcpForm((form) => ({ ...form!, headers: event.target.value }))} />
+                    </label>
+                  </div>
                 )}
             <div style={{ display: 'flex', gap: 8, padding: '0 14px 12px' }}>
               <button type="button" className="wf-btn is-primary" onClick={() => { void saveMcp() }} disabled={busy}>{copy.mcpSave}</button>
@@ -435,8 +505,32 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
         {tab === 'mcp' && !editingMcp ? (
           <div className="wf-mcp-form">
             <div className="wf-mcp-form__row">
-              <button type="button" className="wf-btn" onClick={() => setMcpForm({ serverName: '', transport: 'stdio', command: '', args: '', url: '' })} disabled={busy}>{`＋ ${copy.mcpNew}`}</button>
+              <button type="button" className="wf-btn" onClick={() => setMcpForm({ serverName: '', transport: 'stdio', commandLine: '', env: '', headers: '', url: '' })} disabled={busy}>{`＋ ${copy.mcpNew}`}</button>
+              <button type="button" className="wf-btn" onClick={() => setMcpImportOpen(true)} disabled={busy}>{copy.mcpImport}</button>
               <span className="wf-hint" style={{ alignSelf: 'center', flex: 1 }}>{copy.mcpRestartHint}</span>
+            </div>
+          </div>
+        ) : null}
+        {mcpImportOpen ? (
+          <div className="wf-combo-backdrop">
+            <div className="wf-combo" style={{ maxWidth: 560, height: 'auto', maxHeight: '82%' }}>
+              <div className="wf-combo__head">
+                <h4>{copy.mcpImport}</h4>
+                <button type="button" className="wf-btn wf-combo__close" onClick={() => setMcpImportOpen(false)}>✕</button>
+              </div>
+              <div style={{ padding: '0 14px 12px', display: 'grid', gap: 8 }}>
+                <span className="wf-hint" style={{ fontSize: 10, lineHeight: 1.5, color: 'var(--wf-ink-2)' }}>{copy.mcpImportHint}</span>
+                <textarea
+                  value={mcpImportText}
+                  onChange={(event) => setMcpImportText(event.target.value)}
+                  placeholder={'{"mcpServers":{"codegraph":{"command":"npx","args":["-y","@colbymchenry/codegraph"]}}}'}
+                  style={{ minHeight: 150, padding: 8, borderRadius: 8, border: '1px solid var(--wf-border-strong)', background: 'var(--wf-layer-2)', color: 'var(--wf-ink)', fontFamily: 'monospace', fontSize: 12 }}
+                />
+                <div className="wf-mcp-form__row">
+                  <button type="button" className="wf-btn is-primary" onClick={() => { void importMcpJson() }} disabled={busy}>{copy.mcpImportApply}</button>
+                  <button type="button" className="wf-btn" onClick={() => setMcpImportOpen(false)} disabled={busy}>{copy.importCancel ?? '取消'}</button>
+                </div>
+              </div>
             </div>
           </div>
         ) : null}

@@ -7,7 +7,7 @@
 
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises'
 import { readdirSync, statSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import { randomBytes } from 'node:crypto'
 
@@ -22,6 +22,7 @@ export interface McpServerRow {
   command: string
   args: string[]
   env: Record<string, string>
+  headers: Record<string, string>
   url: string
   disabled: boolean
 }
@@ -114,6 +115,84 @@ function splitCommandLine(commandLine: string): { command: string; args: string[
   if (tokenStarted) tokens.push(current)
   if (tokens.length === 0) return { command: '', args: [] }
   return { command: tokens[0], args: tokens.slice(1) }
+}
+
+// ---------------------------------------------------------------------------
+// shell 感知的启动解析（让「一条可粘贴的命令行」直接可用）
+// ---------------------------------------------------------------------------
+// 官方 dsh-mcp-client 的 stdio 传输用「非 shell」的 child_process.spawn。Windows
+// 下 npx/npm/yarn/pnpm 是 .cmd/.ps1 包装、.ps1 也不是可执行体，Node ≥ 20.12 因
+// CVE-2024-27980 加固拒绝直接 spawn .cmd/.bat，实测 spawn('npx') → ENOENT。因此
+// 保存时把这类 launcher 展开成 cmd.exe /c …（或 powershell -File …），使官方
+// 传输能真正拉起进程；Unix 下 launcher 本身可执行，直接 spawn 即可。
+
+/** 运行宿主平台（默认 process.platform，单测可注入固定平台）。 */
+type Platform = NodeJS.Platform | string
+
+/**
+ * 判断某条命令在目标平台是否需要 shell 包装。
+ * Windows 下很多「命令」其实是 .cmd/.ps1 包装（npx、任意 npm 全局 bin 如 codegraph），
+ * MCP SDK 的 stdio 用非 shell spawn 直接拉起会失败（Node≥20.12 对 .cmd/.bat 有
+ * CVE-2024-27980 加固，spawn('npx') → ENOENT）。规则：
+ *  - .ps1 → powershell.exe -File（包装）
+ *  - .cmd/.bat → cmd.exe /c（包装）
+ *  - 显式 .exe（含完整路径 + .exe）→ 直接 spawn
+ *  - node / node.exe → 直接 spawn（node.exe 是真实可执行，spawn('node') 实测可用）
+ *  - 其余裸命令（npx/npm/yarn/pnpm/任意全局 bin）→ 一律 cmd.exe /c，保证任一全局工具可拉起
+ * Unix 下无需包装（launcher 本身可执行），直接 spawn。
+ */
+function needsShellWrap(exec: string, platform: Platform): boolean {
+  if (String(platform) !== 'win32') return false
+  const lower = String(exec).toLowerCase()
+  if (/\.ps1$/i.test(lower)) return true
+  if (/\.(cmd|bat)$/i.test(lower)) return true
+  if (/\.exe$/i.test(lower)) return false
+  const base = basename(lower)
+  if (base === 'node' || base === 'node.exe') return false
+  return true
+}
+
+/**
+ * 把一条可粘贴的命令行解析为官方式可 spawn 的 {command, args}。
+ * - Windows + .ps1 → powershell.exe -NoProfile -ExecutionPolicy Bypass -File <exec> <args>
+ * - Windows + .cmd/.bat 或裸命令（npx/npm/任意全局 bin）→ cmd.exe /d /c <exec> <args>
+ * - Windows + 显式 .exe / node → 直接 spawn
+ * - Unix → 直接 spawn（launcher 可执行）
+ * platform 默认 process.platform；单测传入可确定分支。
+ */
+export function resolveSpawnCommandLine(commandLine: string, platform: Platform = process.platform): { command: string; args: string[] } {
+  const split = splitCommandLine(commandLine)
+  if (!split.command) return { command: '', args: [] }
+  const exec = split.command
+  const rest = split.args
+  if (needsShellWrap(exec, platform)) {
+    if (/\.ps1$/i.test(exec)) {
+      return { command: 'powershell.exe', args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', exec, ...rest] }
+    }
+    return { command: 'cmd.exe', args: ['/d', '/c', exec, ...rest] }
+  }
+  return { command: exec, args: rest }
+}
+
+/** 单个 shell token 加引号：token 含空格/引号等才包裹，便于回填后再次切分。 */
+function quoteShellToken(token: string): string {
+  const value = String(token)
+  // 无空格、无引号、无非 ASCII 空白的「安全 token」无需引号（反斜杠在 Windows 路径里是字面量，不转义）
+  if (/^[A-Za-z0-9_./\\:=@%+,\[\]{}#-]+$/.test(value) && !/["']/.test(value)) return value
+  // 含空格/特殊字符：用双引号包裹。splitCommandLine 不做反斜杠转义，故不 double 反斜杠；
+  // 若 token 本身含双引号，则回退单引号；两者都有才反转义双引号。
+  if (!value.includes('"')) return `"${value}"`
+  if (!value.includes("'")) return `'${value}'`
+  return `"${value.replace(/"/g, '\\"')}"`
+}
+
+/**
+ * 把 {command, args} 还原成一整行可粘贴的命令行（编辑表单回填用）。
+ * 含空格的路径自动加双引号，保证再次经 splitCommandLine 切分仍是一个完整 token。
+ */
+export function renderCommandLine(command: string, args: string[]): string {
+  const tokens = [String(command), ...(Array.isArray(args) ? args : []).map((arg) => String(arg))]
+  return tokens.filter((token) => token !== '').map(quoteShellToken).join(' ')
 }
 
 /** 解析 YAML 文本中的 MCP 行（托管区内 + 全文中 mcp-* 行）。 */
@@ -215,6 +294,7 @@ export function parseMcpRows(text: string): McpServerRow[] {
       command: String(config.command ?? ''),
       args: Array.isArray(config.args) ? config.args.map((item) => String(item)) : [],
       env: (config.env ?? {}) as Record<string, string>,
+      headers: (config.headers ?? {}) as Record<string, string>,
       url: String(config.url ?? ''),
       disabled: toggles.get(id) ?? false,
     }
@@ -269,6 +349,7 @@ function renderConfig(config: Record<string, unknown>): string {
       lines.push(`        ${key}:`)
       for (const item of value) lines.push(`          - ${yamlScalar(String(item))}`)
     } else if (typeof value === 'object') {
+      if (Object.keys(value as Record<string, unknown>).length === 0) continue
       lines.push(`        ${key}: ${JSON.stringify(value)}`)
     } else {
       lines.push(`        ${key}: ${yamlScalar(String(value))}`)
@@ -320,9 +401,12 @@ function validateEntry(input: Record<string, unknown>): { id: string; config: Re
   if (transport === 'streamable-http') {
     if (!String(input.url ?? '').trim()) throw new Error('streamable-http 服务器需要 url')
     config.url = String(input.url).trim()
+    if (input.headers && typeof input.headers === 'object') config.headers = input.headers
   } else {
-    const split = splitCommandLine(String(input.command ?? ''))
-    if (!split.command) throw new Error('stdio 服务器需要 command')
+    // 优先整行可粘贴的 commandLine，其次旧的 command（+ args）字段
+    const raw = String(input.commandLine ?? input.command ?? '').trim()
+    const split = resolveSpawnCommandLine(raw)
+    if (!split.command) throw new Error('stdio 服务器需要 command 或 commandLine')
     config.command = split.command
     const explicitArgs = Array.isArray(input.args) ? input.args.map((v) => String(v)) : []
     config.args = [...split.args, ...explicitArgs]
@@ -343,6 +427,7 @@ export async function upsertMcpServer(input: unknown): Promise<McpServerRow> {
     command: String(entry.config.command ?? ''),
     args: Array.isArray(entry.config.args) ? entry.config.args.map((item) => String(item)) : [],
     env: (entry.config.env ?? {}) as Record<string, string>,
+    headers: (entry.config.headers ?? {}) as Record<string, string>,
     url: String(entry.config.url ?? ''),
     disabled: existing.find((row) => row.id === entry.id)?.disabled ?? false,
   })
