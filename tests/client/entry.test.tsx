@@ -5,8 +5,9 @@
 //
 // tests/client/entry.test.tsx
 //
-// 入口单测（T-041）：样式注入（style[data-plugin]）、FAB 浮窗挂载（body 常驻）、
-// 会话绑定跟随、slot 注册（order/label/inject）、dispose 清理 DOM 与样式。
+// 入口单测（图1/图2 交互改造后契约）：样式注入（style[data-plugin]）、
+// body 常驻宿主容器（WorkbenchHost）、官方侧边栏入口注入与点击打开、
+// 会话绑定跟随、slot 注册（不再注册 conversation.view）、dispose 清理 DOM 与样式。
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act } from 'react'
@@ -61,31 +62,46 @@ function makeCtx(options: { currentSession?: string; locale?: unknown } = {}) {
   return { ctx, disposers, registered, locale, sessions }
 }
 
+/** 模拟官方侧边栏底部「设置」按钮（useWorkbenchView 在其上方注入插件入口）。 */
+function seedSettingButton(): HTMLButtonElement {
+  const wrap = document.createElement('div')
+  wrap.className = 'ds-x-settingsArea'
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = 'ds-x-trigger'
+  btn.innerText = '设置'
+  wrap.append(btn)
+  document.body.append(wrap)
+  return btn
+}
+
 describe('apply 装配', () => {
-  it('样式注入：style[data-plugin=visual-workflow] 进入 head', async () => {
+  it('样式注入：style[data-plugin=visual-workflow] 进入 head，含浮窗/分栏/入口样式', async () => {
     const { ctx, disposers } = makeCtx()
     await act(async () => { apply(ctx as never) })
     const tag = document.querySelector('style[data-plugin="visual-workflow"]') as HTMLStyleElement
     expect(tag).toBeTruthy()
-    expect(tag.textContent).toContain('.wf-fab')
     expect(tag.textContent).toContain('.wf-window')
+    expect(tag.textContent).toContain('.wf-titlebar__view')
+    expect(tag.textContent).toContain('.wf-split-pane')
     while (disposers.length > 0) disposers.pop()!()
   })
 
-  it('FAB 常驻 body：浮窗容器 + 圆形按钮；点击展开窗口', async () => {
-    const { ctx } = makeCtx({ currentSession: 'session-9' })
+  it('body 常驻宿主容器 + 官方侧边栏入口注入；点击打开浮窗工作台', async () => {
+    seedSettingButton()
+    const { ctx, disposers } = makeCtx({ currentSession: 'session-9' })
     await act(async () => { apply(ctx as never) })
-    const host = document.getElementById('visual-workflow-float-host')
+    const host = document.getElementById('visual-workflow-workbench-host')
     expect(host).toBeTruthy()
     expect(document.body.contains(host)).toBe(true)
-    const fab = document.querySelector('.wf-fab') as HTMLButtonElement
-    expect(fab).toBeTruthy()
-    expect(fab.getAttribute('aria-label')).toBe(zh.fabOpen)
-    await act(async () => { fab.click() })
+    const entry = document.querySelector('.wf-sidebar-entry') as HTMLButtonElement
+    expect(entry).toBeTruthy()
+    expect(document.querySelector('.wf-window')).toBeNull()
+    await act(async () => { entry.click() })
     const windowEl = document.querySelector('.wf-window') as HTMLElement
     expect(windowEl).toBeTruthy()
-    // 窗口内为工作台（标题顶栏 = 工作流设计器一行）
     expect(document.querySelector('.wf-titlebar__title')?.textContent).toBe(zh.studio)
+    while (disposers.length > 0) disposers.pop()!()
   })
 
   it('i18n 注册：locale.register 收到 zh/en 词典', async () => {
@@ -99,24 +115,22 @@ describe('apply 装配', () => {
   it('不再注册 conversation.view 会话页 tab（用户验收批注：不要在这里注册插件入口）', async () => {
     const { ctx, registered, disposers } = makeCtx()
     await act(async () => { apply(ctx as never) })
-    // registered 仅收集 slots 注册；插件入口仅保留 FAB + 浮窗
     expect(registered.find((entry) => entry.name === 'conversation.view')).toBeUndefined()
     while (disposers.length > 0) disposers.pop()!()
   })
 
-  it('dispose：样式移除 + 浮窗容器移除（FAB 消失）', async () => {
+  it('dispose：样式移除 + 宿主容器移除 + 入口移除', async () => {
+    seedSettingButton()
     const { ctx, disposers } = makeCtx()
     await act(async () => { apply(ctx as never) })
-    expect(document.querySelector('.wf-fab')).toBeTruthy()
+    expect(document.querySelector('.wf-sidebar-entry')).toBeTruthy()
     while (disposers.length > 0) disposers.pop()!()
     expect(document.querySelector('style[data-plugin="visual-workflow"]')).toBeNull()
-    expect(document.getElementById('visual-workflow-float-host')).toBeNull()
-    expect(document.querySelector('.wf-fab')).toBeNull()
+    expect(document.getElementById('visual-workflow-workbench-host')).toBeNull()
   })
 })
 
 describe('rootSessionIdOf：会话树根解析（疑点二修复）', () => {
-  /** 构造 sessions.list 快照：byId 含 parentSessionId 链。 */
   function snapshotOf(entries: Array<{ id: string; parentSessionId?: string }>) {
     const byId: Record<string, unknown> = {}
     for (const e of entries) byId[e.id] = { parentSessionId: e.parentSessionId }
@@ -128,8 +142,7 @@ describe('rootSessionIdOf：会话树根解析（疑点二修复）', () => {
     expect(rootSessionIdOf('session-root', snap as never)).toBe('session-root')
   })
 
-  it('子代理会话：沿 parentSessionId 上溯到根（主代理及其后代共享实例列表）', () => {
-    // child-1 → root；child-2 → child-1 → root（两级子树）
+  it('子代理会话：沿 parentSessionId 上溯到根', () => {
     const snap = snapshotOf([
       { id: 'root', parentSessionId: undefined },
       { id: 'child-1', parentSessionId: 'root' },

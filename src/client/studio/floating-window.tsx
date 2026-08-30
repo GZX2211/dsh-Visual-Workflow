@@ -72,6 +72,10 @@ export type ResizeDirection = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw'
 export interface FloatingWindowProps {
   /** 文案词典。 */
   t: Dict
+  /** 窗口是否打开（受控；由宿主 WorkbenchHost 决定）。 */
+  open: boolean
+  /** 关闭回调（受控；由宿主关闭工作台）。 */
+  onClose: () => void
   /** 窗口内容（工作台）；close 关闭窗口、drag 把拖动把手挂到内容标题栏。 */
   children: (api: { close(): void; drag(event: DragEventLike): void }) => ReactNode
 }
@@ -124,8 +128,7 @@ function clampBounds(next: WindowBounds): WindowBounds {
  * FAB + 浮窗宿主：FAB 固定右下角；打开后渲染可拖动/可缩放的窗口。
  * 几何状态本地管理（与工作台状态机解耦），持久化记忆。
  */
-export function FloatingWindow({ t, children }: FloatingWindowProps) {
-  const [open, setOpen] = useState(false)
+export function FloatingWindow({ t, open, onClose, children }: FloatingWindowProps) {
   const [bounds, setBounds] = useState<WindowBounds>(() => restoreBounds())
   const windowRef = useRef<HTMLElement | null>(null)
   /** 几何 CSSProperties：固定引用（React 重渲染跳过该 style diff，不覆盖直写值）。 */
@@ -311,21 +314,8 @@ export function FloatingWindow({ t, children }: FloatingWindowProps) {
 
   return (
     <>
-      {/* FAB：主界面右下角圆形入口（独立于 .wf-root，变量经 :root 全局化） */}
-      <button
-        type="button"
-        className="wf-fab"
-        aria-label={t.fabOpen}
-        title={t.fabOpen}
-        onClick={() => setOpen(true)}
-        hidden={open}
-      >
-        <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" style={{ color: 'currentColor' }}>
-          <path fill="currentColor" d="M3 5h18v2H3zm0 6h18v2H3zm0 6h12v2H3z" />
-        </svg>
-      </button>
-
-      {/* 浮窗：内容自身标题栏 = 窗口标题栏（可拖动 + 关闭）；边缘八方向缩放 */}
+      {/* 浮窗（受控）：入口不再自绘 FAB（改由官方侧边栏入口触发，见 useWorkbenchView）；
+          内容自身标题栏 = 窗口标题栏（可拖动 + 关闭）；边缘八方向缩放 */}
       {open ? (
         <section
           ref={windowRef}
@@ -334,7 +324,7 @@ export function FloatingWindow({ t, children }: FloatingWindowProps) {
           data-wf-window=""
         >
           <div className="wf-window__body">
-            {children({ close: () => setOpen(false), drag: beginDrag })}
+            {children({ close: onClose, drag: beginDrag })}
           </div>
           {(['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'] as ResizeDirection[]).map((direction) => (
             <div

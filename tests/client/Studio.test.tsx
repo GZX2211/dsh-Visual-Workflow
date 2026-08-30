@@ -102,7 +102,7 @@ describe('Studio 装配', () => {
     expect(buttons).toContain('组合')
     expect(buttons).toContain('导入')
     expect(buttons).toContain('导出')
-    expect(buttons).toContain('流程编排模式')
+    expect(buttons).toContain('流程编排')
   })
 
   it('画布控制栏：撤销/重做/清空/整理布局/保存/运行/运行历史', async () => {

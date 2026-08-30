@@ -36,7 +36,7 @@ async function drag(page, source, _target, absolute) {
 }
 
 async function openStudio(page) {
-  await page.locator('.wf-fab').first().click()
+  await page.locator('.wf-sidebar-entry').first().click()
   await page.waitForTimeout(1400)
 }
 

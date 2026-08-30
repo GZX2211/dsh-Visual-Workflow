@@ -288,6 +288,21 @@ export const styles = `
 .wf-service-dot.is-running{background:var(--wf-ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--wf-ok) 18%,transparent)}
 .wf-service-dot.is-stopped{background:var(--wf-ink-2)}
 .wf-service-dot.is-crashed{background:var(--wf-err)}
+/* ---- 图1/图2 交互改造：侧边栏入口 / 标题栏窗口切换 / 分栏窗口 ---- */
+/* 侧边栏入口样式复用官方「设置」按钮的 className（见 useWorkbenchView.buildSidebarEntryButton），
+   故此处不覆写 .wf-sidebar-entry 的布局/背景，避免覆盖官方 trigger 样式。 */
+.wf-sidebar-entry__label{white-space:nowrap}
+.wf-sidebar-entry--rail{justify-content:center}
+.wf-sidebar-entry--rail .wf-sidebar-entry__label{display:none}
+.wf-titlebar__view{display:inline-flex;align-items:center;justify-content:center;padding:6px;margin-left:2px}
+.wf-split-pane{position:fixed;top:0;right:0;bottom:0;width:var(--wf-split-w,640px);z-index:2147482010;display:flex;flex-direction:column;background:var(--wf-bg);border-left:1px solid var(--wf-border);min-height:0;overflow:hidden}
+.wf-split-pane__inner{display:flex;width:100%;height:100%;min-width:0;min-height:0}
+.wf-split-divider{position:relative;z-index:12;flex:none;width:9px;cursor:col-resize;touch-action:none}
+.wf-split-divider::before{content:"";position:absolute;inset:0 3px;background:var(--wf-border)}
+.wf-split-divider:hover::before,.wf-split-divider.is-dragging::before{inset:0 2px;background:var(--wf-ink-2)}
+.wf-split-pane__content{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}
+/* 分栏不修改官方 frame 网格（官方 frame 含 overlayLayer/handle 等子项，覆盖其 grid 会错位）。
+   分栏时仅由 useWorkbenchView 给官方 centerCol 设右内边距（让出右半），工作台以 fixed 覆盖右侧。 */
 @media(max-width:1180px){.wf-status{display:none}.wf-titlebar__note{display:none}}
 @media(max-width:760px){.wf-toolbar{padding:7px}.wf-tabs{padding:0 10px}.wf-titlebar__badge{display:none}.wf-lib-tab{font-size:10px}.wf-confirm__actions .wf-btn{flex:1}}
 `

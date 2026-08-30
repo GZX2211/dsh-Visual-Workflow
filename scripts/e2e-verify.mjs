@@ -39,7 +39,7 @@ async function main() {
   await page.waitForTimeout(3000)
 
   // ---------- 1. FAB → 浮窗工作台 ----------
-  const fab = page.locator('.wf-fab')
+  const fab = page.locator('.wf-sidebar-entry')
   check((await fab.count()) > 0, 'FAB 存在')
   await fab.first().click()
   await page.waitForTimeout(1200)
@@ -70,7 +70,7 @@ async function main() {
   }
 
   // ---------- 3. 打开工作台：会话可读（无「会话不可用」提示） ----------
-  await page.locator('.wf-fab').first().click()
+  await page.locator('.wf-sidebar-entry').first().click()
   await page.waitForTimeout(1500)
   const msgText = await page.locator('.wf-message').first().innerText().catch(() => '')
   check(!msgText.includes('会话不可用') && !msgText.includes('无法读取'), `会话可读（提示=${JSON.stringify(msgText.slice(0, 40))}）`)
@@ -136,7 +136,7 @@ async function main() {
   // 刷新页面 → 重开工作台 → 打开工作流 → 节点仍在（持久化）
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(3000)
-  await page.locator('.wf-fab').first().click()
+  await page.locator('.wf-sidebar-entry').first().click()
   await page.waitForTimeout(1500)
   const wfItem = page.locator('.wf-docitem', { hasText: '新工作流' }).first()
   if ((await wfItem.count()) === 0) {
@@ -155,7 +155,7 @@ async function main() {
   // ---------- 6. 组合管理 MCP tab 显示 playwright ----------
   await page.locator('.wf-titlebar__close').first().click().catch(() => {})
   await page.waitForTimeout(400)
-  await page.locator('.wf-fab').first().click()
+  await page.locator('.wf-sidebar-entry').first().click()
   await page.waitForTimeout(1200)
   const comboBtn = page.locator('.wf-tabs .wf-btn', { hasText: '组合' }).first()
   if ((await comboBtn.count()) > 0) {

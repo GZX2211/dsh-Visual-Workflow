@@ -6,12 +6,12 @@
 // 卸载：样式移除、浮窗 root 卸载、订阅释放（ctx.effect）。
 //
 // 变更（2026.08.25 用户验收批注）：**不再注册 conversation.view 会话页 tab**
-// （「不要在这里注册我的插件入口」）——插件入口仅保留 FAB + 浮窗工作台。
+// ——插件入口仅保留 FAB + 浮窗工作台。
 
 import React from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { Studio } from './studio/Studio.js'
 import { FloatingWindow } from './studio/floating-window.js'
+import { WorkbenchHost } from './studio/WorkbenchHost.js'
 import { zh, en, text, detectLanguage, type Dict } from './i18n.js'
 import { styles } from './styles.js'
 import './entry.css'
@@ -102,50 +102,24 @@ export function apply(ctx: {
     // 注册失败回退自持词典
   }
 
-  // 浮窗宿主：body 常驻容器（FAB + 窗口），与视图环激活态解耦
+  // 工作台宿主：body 常驻容器（由 WorkbenchHost 按视图模式渲染浮窗/分栏；
+  // 入口改为官方侧边栏注入，见 useWorkbenchView；会话绑定由 WorkbenchHost 自理）
   let root: Root | null = null
   let container: HTMLDivElement | null = null
-  let offSession: (() => void) | null = null
   ctx.effect?.(() => {
     container = document.createElement('div')
-    container.id = 'visual-workflow-float-host'
+    container.id = 'visual-workflow-workbench-host'
     document.body.append(container)
-    const render = (sessionId: string): void => {
-      const t = text(detectLanguage(ctx.get?.('locale')))
-      root ??= createRoot(container!)
-      root.render(
-        React.createElement(FloatingWindow, {
-          t,
-          children: ({ close, drag }) => React.createElement(Studio, {
-            t: t as Dict,
-            // 疑点二修复：实例/服务按「会话树根 id」隔离——主代理与其全部后代
-            // 子代理共享同一实例列表；在子代理对话界面打开工作台亦可见。
-            sessionId: rootSessionIdOf(currentSessionOf(ctx), ctx.get?.('sessions') as never),
-            onClose: close,
-            // 单一标题栏：工作台标题顶栏兼任窗口标题栏（可拖动）
-            onTitlebarDrag: drag,
-          }),
-        }),
-      )
-    }
-    render(currentSessionOf(ctx))
-    // 会话变化时跟随（无会话下拉：绑定当前会话，需求 §4.5.7）
-    const sessions = ctx.get?.('sessions') as
-      | { list?: { subscribe?(fn: () => void): () => void; get?(): unknown } }
-      | null
-      | undefined
-    if (sessions?.list?.subscribe) {
-      offSession = sessions.list.subscribe(() => {
-        render(currentSessionOf(ctx))
-      })
-    }
+    const t = text(detectLanguage(ctx.get?.('locale')))
+    root ??= createRoot(container!)
+    root.render(
+      React.createElement(WorkbenchHost, { ctx, t: t as Dict }),
+    )
     return () => {
-      offSession?.()
-      offSession = null
       root?.unmount()
       root = null
       container?.remove()
       container = null
     }
-  }, 'visual-workflow: floating window')
+  }, 'visual-workflow: workbench host')
 }

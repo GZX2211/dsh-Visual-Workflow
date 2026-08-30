@@ -51,9 +51,15 @@ export interface StudioProps {
   onClose?: () => void
   /** 窗口拖动把手回调（浮窗注入；工作台标题顶栏兼任窗口标题栏拖动）。 */
   onTitlebarDrag?: (event: React.PointerEvent) => void
+  /** 视图模式（浮窗/分栏）；分栏时工作台初始折叠自身左右栏。 */
+  viewMode?: 'float' | 'split'
+  /** 标题栏窗口切换按钮回调（float↔split，宿主持久化）。 */
+  onToggleView?: () => void
+  /** 运行联动：进入分栏模式（宿主持久化；配合运行触发）。 */
+  onEnterSplit?: () => void
 }
 
-export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDrag }: StudioProps) {
+export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDrag, viewMode, onToggleView, onEnterSplit }: StudioProps) {
   const remote = remoteProp ?? useRemote()
   const { state, dispatch } = useStudioState(sessionId)
   const { toast, toastError } = useToast(dispatch)
@@ -155,6 +161,24 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
     guard.guard(() => onClose())
   }, [guard, onClose])
 
+  // ---------- 运行联动（图2：点击「运行」→ 自动切分栏 + 折叠工作台自身左右栏） ----------
+  const handleRun = useCallback(() => {
+    // 1) 宿主切到分栏模式（持久化）
+    onEnterSplit?.()
+    // 2) 折叠工作台自身左右栏（左侧模板栏 + 右侧属性栏，中间保留画布栏）
+    dispatch({ type: 'PANELS_SET', panels: { leftOpen: false, rightOpen: false } })
+    // 3) 触发真正运行
+    void (state.mode === 'mode2' ? run.startService() : run.startRun())
+  }, [dispatch, onEnterSplit, run, state.mode])
+
+  // 分栏模式下工作台初始折叠自身左右栏（沉浸式；用户可再拖动展开）
+  useEffect(() => {
+    if (viewMode === 'split') {
+      dispatch({ type: 'PANELS_SET', panels: { leftOpen: false, rightOpen: false } })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // ---------- 派生 ----------
   const stageKinds = useMemo(() => stageTemplateKinds(state.mode), [state.mode])
   const parentTemplate = useMemo(() => (state.templates.role as import('../../host/shared/types.js').RoleTemplate[]).find((item) => item.kind === 'parent') ?? null, [state.templates.role])
@@ -207,6 +231,9 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
       setModeMenuOpen={setModeMenuOpen}
       switchMode={switchMode}
       requestClose={requestClose}
+      viewMode={viewMode}
+      onToggleView={onToggleView}
+      handleRun={handleRun}
     />
   )
 }

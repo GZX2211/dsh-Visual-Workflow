@@ -85,6 +85,12 @@ export interface StudioLayoutProps {
   setModeMenuOpen: React.Dispatch<React.SetStateAction<boolean>>
   switchMode: (mode: 'mode1' | 'mode2') => void
   requestClose: () => void
+  /** 视图模式（浮窗/分栏）。 */
+  viewMode?: 'float' | 'split'
+  /** 标题栏窗口切换按钮回调（float↔split）。 */
+  onToggleView?: () => void
+  /** 运行联动：切分栏 + 折叠自身左右栏 + 触发运行。 */
+  handleRun: () => void
 }
 
 /** 工作台渲染层（纯 JSX 组合；回调/数据全部来自 props）。 */
@@ -97,6 +103,7 @@ export function StudioLayout(props: StudioLayoutProps) {
     dispatch, doc, canvas, editor, run, transfer, selection, history, guard, panels, toast,
     beginLibraryDrag, dragPreview, dropGroupId,
     modeMenuOpen, setModeMenuOpen, switchMode, requestClose, canvasCaption,
+    onToggleView, handleRun,
   } = props
 
   return (
@@ -145,6 +152,14 @@ export function StudioLayout(props: StudioLayoutProps) {
             : null}
         </div>
         <button type="button" className="wf-btn" title={t.combos} onClick={() => dispatch({ type: 'COMBO_OPEN', open: true })}>{t.combos}</button>
+        {/* 图2：窗口切换按钮注册到「组合」右侧、「关闭」左侧；float↔split */}
+        {onToggleView
+          ? <button type="button" className="wf-btn wf-iconbtn wf-titlebar__view" title={t.toggleWindow} aria-label={t.toggleWindow} onClick={onToggleView}>
+              <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" style={{ color: 'currentColor' }}>
+                <path fill="none" stroke="currentColor" strokeWidth="2" d="M9 4v16M4 4h16v16H4z" />
+              </svg>
+            </button>
+          : null}
         {onClose
           ? <button type="button" className="wf-btn wf-iconbtn wf-titlebar__close" title={t.windowClose} aria-label={t.windowClose} onClick={requestClose}>✕</button>
           : null}
@@ -216,7 +231,7 @@ export function StudioLayout(props: StudioLayoutProps) {
             canSave={Boolean(state.currentId)}
             running={toolbarRunning}
             onStop={() => { void (state.mode === 'mode2' ? run.stopService() : run.stopRun()) }}
-            onRun={() => { void (state.mode === 'mode2' ? run.startService() : run.startRun()) }}
+            onRun={() => { handleRun() }}
             onOpenHistory={() => { void run.openHistory() }}
             canHistory={state.mode === 'mode1' && Boolean(currentFlow)}
             serviceStatus={state.mode === 'mode2' ? { port: currentService?.port, status: currentService?.status } : null}
