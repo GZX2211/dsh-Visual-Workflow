@@ -105,13 +105,19 @@ export function useStudioBoot(
       // 列表第一个；实例列表为空则保持空白画布。
       if (cancelled || !state.sessionId) return
       try {
-        const activeRuns = await remote.call(EP.EP_ACTIVE_RUNS, { sessionId: state.sessionId }) as Array<{ flowId: string; status: string }> | null
+        const activeRuns = await remote.call(EP.EP_ACTIVE_RUNS, { sessionId: state.sessionId }) as Array<{ flowId: string; status: string; runId: string }> | null
         // 按当前模式选择目标实例列表：mode1=工作流实例、mode2=服务实例
         if (state.mode === 'mode1') {
           const flows = state.workflows
           if (flows.length === 0) return // 空列表保持空白画布
           const targetId = pickInitialInstance(flows.map((f) => ({ id: f.id, name: f.name })), activeRuns ?? [])
-          if (targetId) openFlowById(targetId)
+          if (targetId) {
+            openFlowById(targetId)
+            // 图2-6：退出工作台再进入状态消失——若选中实例存在活动 run，恢复 runId，
+            // 从而触发 useRunPolling 重建轮询并拉回快照，画布节点/实例卡状态不再消失。
+            const active = (activeRuns ?? []).find((a) => a.flowId === targetId)
+            if (active?.runId) dispatch({ type: 'RUN_STARTED', runId: active.runId })
+          }
         } else {
           const services = state.services
           if (services.length === 0) return

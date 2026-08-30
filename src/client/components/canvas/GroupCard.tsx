@@ -53,7 +53,12 @@ export function GroupCard({ node, copy, members, selected, dropTarget, onPointer
                   onClick={(event) => { event.stopPropagation(); onMemberSelect(member.id) }}
                 >
                   <span className="wf-group__member-name">{member.label || member.id}</span>
-                  {member.status ? <span className={`wf-status-dot is-${member.status}`} /> : null}
+                  {member.status ? (
+                    <span className="wf-group__member-status">
+                      <span className={`wf-status-dot is-${member.status}`} />
+                      <span className="wf-hint">{String((copy.status as Record<string, string>)[member.status] ?? '')}</span>
+                    </span>
+                  ) : null}
                   {/* 组内成员仅数据库/上下文接点，无流程接点（流程由组卡片承担，§4.2.5.2 规则 4）；
                       成员为缩小版角色卡：仅名称 + 状态（用户批注，Q2） */}
                   {/* 左侧 db-in / ctx-in 拉大垂直间距，避免左右两个接点贴在一起（用户批注） */}

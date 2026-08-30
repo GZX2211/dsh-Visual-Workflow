@@ -73,6 +73,9 @@ export function createRunSnapshot(input: {
     startedAt,
     endedAt: null,
     summary: '',
+    // 注意：保留全量节点执行记录——mode2 输入节点承载用户问题（question 预填产出）、
+    // 阶段节点终态化（pending→skipped）、上游 ctx 传递（start/file/db 产出回填）
+    // 都依赖快照节点记录；「仅角色节点显示状态」由客户端按节点类型过滤，不在此剔除记录。
     nodes: (input.flow.nodes ?? []).map((node) => ({
       nodeId: node.id,
       status: 'pending' as const,
@@ -89,25 +92,39 @@ export function createRunSnapshot(input: {
 export interface SetNodeStatusOptions {
   /** 覆盖尝试计数（wf_run_node 每次调用递增）。 */
   attempts?: number
-  /** 节点完整输出（status='ok' 时写入：完整输出截断到 outputFullLimit、摘要截断到 6000 字）。 */
+  /** 节点完整输出（status='ok'|'react-capped' 时写入：完整输出截断到 outputFullLimit、摘要截断到 6000 字）。 */
   output?: string
   /** 完整输出持久化字节上限（缺省 100KB）。 */
   outputFullLimit?: number
   /** 时钟注入（时间戳字段用）。 */
   now?: number
+  /**
+   * 回合终止原因（P2-5）：stop/interrupt/fail/react-capped/completed。
+   * 写入该回合记录（turns[]）与节点级 stopReason，供父代理区分「用户停止」与「异常失败」。
+   */
+  stopReason?: string
+  /**
+   * 是否记为一次回合收尾（P0-2）：true 时在 nodes[].turns[] 追记一回合
+   * （startedAt=entry.startedAt、endedAt=now、stopReason、outputSummary），并刷新
+   * endedAt 为最近完成时间（不再冻结在首次完成）。
+   */
+  recordTurn?: boolean
 }
 
 /**
- * 更新快照中某节点的运行状态（与旧项目 setNodeStatus 同语义）：
+ * 更新快照中某节点的运行状态（与旧项目 setNodeStatus 同语义，扩展 armed/回合明细）：
  *   - running 且无 startedAt → 补开始时间；
+ *   - armed（待命，协作组成员回合结束但仍可被唤醒）：记结束时间、刷新 endedAt，但不写 output；
  *   - ok/fail/skipped/react-capped 且无 endedAt → 补结束时间；
  *   - ok 与 react-capped（软截停正常产出，T-022）均回写完整输出（output）与展示摘要
- *     （outputSummary）——react-capped 不是失败，产出与 ok 同等对待。
+ *     （outputSummary）——react-capped 不是失败，产出与 ok 同等对待；
+ *   - recordTurn=true 时追记回合明细，endedAt 随最近回合刷新（P0-2，不再冻结）。
  */
 export function setNodeStatus(snapshot: RunSnapshot, nodeId: string, status: NodeRunStatus, options: SetNodeStatusOptions = {}): void {
   const entry = snapshot.nodes.find((node) => node.nodeId === nodeId)
   if (!entry) return
   const now = options.now ?? Date.now()
+  const prevStatus = entry.status
   entry.status = status
   if (options.attempts !== undefined) entry.attempts = options.attempts
   if (status === 'ok' || status === 'react-capped') {
@@ -116,21 +133,45 @@ export function setNodeStatus(snapshot: RunSnapshot, nodeId: string, status: Nod
     entry.outputSummary = truncateText(text, OUTPUT_SUMMARY_LIMIT)
   }
   if (status === 'running' && !entry.startedAt) entry.startedAt = new Date(now).toISOString()
-  if (status === 'ok' || status === 'fail' || status === 'skipped' || status === 'react-capped') {
-    if (!entry.endedAt) entry.endedAt = new Date(now).toISOString()
+  const terminalOrArmed = status === 'ok' || status === 'fail' || status === 'skipped' || status === 'react-capped' || status === 'armed'
+  if (terminalOrArmed) {
+    // P0-2：endedAt 随回合刷新（最近完成时间），不再冻结在首次完成。
+    entry.endedAt = new Date(now).toISOString()
   }
+  if (options.recordTurn && (terminalOrArmed || prevStatus === 'running')) {
+    entry.turns ??= []
+    entry.turns.push({
+      startedAt: entry.startedAt,
+      endedAt: new Date(now).toISOString(),
+      stopReason: options.stopReason,
+      outputSummary: entry.outputSummary,
+    })
+  }
+  if (options.stopReason !== undefined) entry.stopReason = options.stopReason
 }
 
 /**
  * 终态化节点清单（运行收尾/终止时调用）：从未启动的 pending → skipped，
- * 正在执行的 running → fail（非 ok 不继承，续跑时重试，见文件头语义说明）。
+ * 正在执行的 running → fail（非 ok 不继承，续跑时重试，见文件头语义说明）；
+ * 待命 armed（仍在协作组内可唤醒）→ 运行收尾即视为可唤醒状态结束，normalize 为 ok
+ * （已产出回合，非失败）。
+ * @param stopReason 终止原因（stop/interrupt/fail/…），写入仍在 running 的节点的回合记录，
+ *                   供父代理区分「用户停止」与「异常失败」，避免误重启（P2-5）。
  */
-export function terminalizeNodes(snapshot: RunSnapshot, now?: number): void {
+export function terminalizeNodes(snapshot: RunSnapshot, now?: number, stopReason?: string): void {
   const endedAt = new Date(now ?? Date.now()).toISOString()
   for (const node of snapshot.nodes) {
     if (node.status === 'pending') node.status = 'skipped'
     else if (node.status === 'running') {
       node.status = 'fail'
+      if (!node.endedAt) node.endedAt = endedAt
+      if (stopReason) {
+        node.stopReason = stopReason
+        node.turns ??= []
+        node.turns.push({ startedAt: node.startedAt, endedAt, stopReason, outputSummary: '' })
+      }
+    } else if (node.status === 'armed') {
+      node.status = 'ok'
       if (!node.endedAt) node.endedAt = endedAt
     }
   }

@@ -28,6 +28,8 @@ export class RuntimeBase {
   readonly runs = new Map<string, RunEntry>()
   /** childId → 运行位置反查（subagent/end 观察回写用）。 */
   protected readonly childIndex = new Map<string, ChildMeta>()
+  /** nodeId → childId 反向索引（wf_ask_agent 节点 id 寻址 O(1)，P2-4）。 */
+  protected readonly childByNode = new Map<string, string>()
   /** dispose 标记：置位后迟到事件缓冲不再重试（插件卸载清理彻底）。 */
   protected disposed = false
 

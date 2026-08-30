@@ -37,7 +37,7 @@ export class RuntimeLifecycle extends RuntimeObserve {
     snapshot.status = options.status
     snapshot.summary = options.summary
     snapshot.endedAt = this.isoNow()
-    terminalizeNodes(snapshot, this.now())
+    terminalizeNodes(snapshot, this.now(), options.status === 'stopped' ? 'stop' : 'interrupt')
     this.rejectWaiters(entry)
     this.rejectAsks(entry)
     await this.persistWarn(entry)

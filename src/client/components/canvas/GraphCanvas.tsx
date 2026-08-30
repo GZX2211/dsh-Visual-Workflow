@@ -461,7 +461,8 @@ export function GraphCanvas(props: GraphCanvasProps) {
               selected={node.id === selectedNode}
               highlighted={highlightedSet.has(node.id)}
               dragging={draggingNode?.nodeId === node.id}
-              runStatus={runStatusOf(node.id)}
+              // 用户批注：仅角色（agent）节点显示/记录状态；阶段/文件/数据库/协作组不渲染状态徽标。
+              runStatus={node.kind === 'agent' ? runStatusOf(node.id) : null}
               onPointerDown={beginNodeDrag}
               onHandlePointerDown={beginConnection}
               onToggleSwap={onSwapPorts}

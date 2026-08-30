@@ -247,6 +247,7 @@ export const zh = {
   status: {
     pending: '等待',
     running: '运行中',
+    armed: '待命',
     ok: '完成',
     fail: '失败',
     skipped: '跳过',
@@ -538,6 +539,7 @@ export const en: Dict = {
   status: {
     pending: 'Pending',
     running: 'Running',
+    armed: 'Standby',
     ok: 'Done',
     fail: 'Failed',
     skipped: 'Skipped',

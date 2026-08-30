@@ -163,8 +163,10 @@ export function StudioLayout(props: StudioLayoutProps) {
             name: item.name,
             description: item.description,
             nodes: item.nodes,
-            // 运行状态徽标：当前 run 的快照归属该实例且未终态时显示「运行中」
-            running: state.run.runId !== null && state.run.snapshot?.flowId === item.id && state.run.snapshot?.status === 'running',
+            // 运行状态徽标：当前 run 的快照归属该实例且未终态时显示 run 状态
+            // （running/paused/completed/failed/stopped/interrupted，展示于卡片右侧，用户批注）
+            runStatus:
+              state.run.runId !== null && state.run.snapshot?.flowId === item.id ? state.run.snapshot.status : null,
           }))}
           flowTemplates={(state.flowTemplates ?? []).filter((item) => item.mode === state.mode)}
           parentTemplate={parentTemplate}

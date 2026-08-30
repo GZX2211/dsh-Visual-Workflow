@@ -31,8 +31,9 @@ export type RunStatus =
 export type NodeRunStatus =
   | 'pending' // 待执行
   | 'running' // 执行中
+  | 'armed' // 待命（协作组成员：回合结束但仍在协作组内可被唤醒，非终态；父代理 wf_finish 后终态化。修复 P0-1）
   | 'ok' // 成功（产出可回填）
-  | 'fail' // 失败
+  | 'fail' // 失败（异常/终止；非 ok 不继承，续跑重试）
   | 'skipped' // 已跳过
   | 'react-capped' // ReAct 软截停（非失败，正常收尾产出，架构文档 §4.4 护栏）
 
@@ -64,7 +65,7 @@ export interface RunSnapshot {
   resumedFromRunId?: string
   /** 断点续跑：从哪个节点恢复（暂停节点 id，需求文档 §4.7 规则 3）。 */
   resumeFromNodeId?: string
-  /** 节点执行记录列表（全量节点，含已 ok 节点继承标记）。 */
+  /** 节点执行记录列表（仅可执行 agent 节点；协作组/阶段/文件/数据库不做执行记录）。 */
   nodes: Array<{
     /** 节点 id。 */
     nodeId: string
@@ -74,7 +75,7 @@ export interface RunSnapshot {
     attempts: number
     /** 节点开始时间（ISO 字符串或 null）。 */
     startedAt: string | null
-    /** 节点结束时间（ISO 字符串或 null）。 */
+    /** 节点最近结束时间（ISO 字符串或 null；随回合刷新，P0-2）。 */
     endedAt: string | null
     /** 节点完整输出（默认上限 100KB，用于断点/上下文传递，需求文档 §4.7 规则 7）。 */
     output: string
@@ -82,6 +83,19 @@ export interface RunSnapshot {
     outputSummary: string
     /** 是否继承自旧 run（断点恢复，已 ok 节点不重跑，需求文档 §4.7 规则 6）。 */
     resumed?: boolean
+    /** 最近一次回合的终止原因（stop/interrupt/fail/react-capped/completed；用于父代理区分用户停止与异常失败，P2-5）。 */
+    stopReason?: string
+    /** 回合明细（可续跑节点每次被唤醒执行为一回合；P0-2）。 */
+    turns?: Array<{
+      /** 回合开始时间。 */
+      startedAt: string | null
+      /** 回合结束时间。 */
+      endedAt: string | null
+      /** 回合终止原因。 */
+      stopReason?: string
+      /** 回合输出摘要。 */
+      outputSummary: string
+    }>
   }>
 }
 

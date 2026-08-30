@@ -1017,6 +1017,37 @@ describe('subagent/end 观察回写（§8 #21）', () => {
     await h.runtime.handleSubagentEnd({ id: 'child-3', stopReason: 'error' })
     expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-group')!.status).toBe('ok')
   })
+
+  it('P0-1 组成员回合结束落 armed（非终态 ok）；非组内 agent 落 ok；armed 终态化收敛为 ok', async () => {
+    const h = await makeHarness()
+    const flow = makeFlow()
+    // a1 入组（协作组成员，组内成员无流程连线——仅组卡片 flow 出入），a2 保持普通 agent
+    flow.nodes = flow.nodes.map((n): GraphNode =>
+      n.id === 'n-a1'
+        ? { ...n, data: { ...(n as RoleNode).data, groupId: 'n-group' } } as RoleNode
+        : n,
+    )
+    flow.nodes.push({
+      id: 'n-group',
+      kind: 'group',
+      position: { x: 0, y: 0 },
+      data: { label: '协作组', collabPrompt: '', memberIds: ['n-a1'] },
+    })
+    // 移除 a1 的流程连线（组内成员不能连流程线），改由组卡片 flow 出入
+    flow.lines = flow.lines.filter((l) => l.source !== 'n-a1' && l.target !== 'n-a1')
+    flow.lines.push(
+      { id: 'lg1', source: 'n-start', target: 'n-group', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+      { id: 'lg2', source: 'n-group', target: 'n-pause', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+    )
+    const { entry } = await start(h, flow)
+    // 组内成员 n-a1 完成 → armed（待命，非终态 ok）
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    await h.runtime.handleSubagentEnd({ id: 'child-1', stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: 'A' }] })
+    expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-a1')!.status).toBe('armed')
+    // 运行收尾终态化：armed → ok（已产出一轮，非失败）
+    await h.runtime.wfFinish(caller, { status: 'completed', summary: '完毕' })
+    expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-a1')!.status).toBe('ok')
+  })
 })
 
 // ---------------------------------------------------------------------------

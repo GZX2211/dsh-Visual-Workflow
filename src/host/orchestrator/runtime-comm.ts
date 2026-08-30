@@ -18,6 +18,7 @@ import {
 } from './ask-types.js'
 import { statusText, truncateText } from './snapshot.js'
 import { messageOf } from './helpers.js'
+import type { WorkflowDocument } from '../shared/graph-model.js'
 import type { RunEntry } from './run-types.js'
 import { WfError, type CallerInfo, type ChildMeta } from './seams.js'
 import { RuntimeExecute } from './runtime-execute.js'
@@ -38,17 +39,53 @@ export class RuntimeComm extends RuntimeExecute {
   }
 
   /**
-   * 节点 id → 本 run 的子代理会话 id 反查（协作成员稳定寻址）：
-   * childIndex 为 childId → 运行位置归属表，节点 id 寻址需反向扫描；
+   * 节点 id → 本 run 的子代理会话 id 反查（协作成员稳定寻址，O(1)，P2-4）。
+   * 借助 childByNode（nodeId → childId）反向索引命中；命中后仍需按
+   * sessionId/flowId 归属校验（同一 nodeId 可能被不同 run/会话登记）。
    * 目标未启动/不属于本 run 返回 null（调用方按 WF_ASK_TARGET_UNKNOWN 处理）。
    */
   private childForNode(run: RunEntry, nodeId: string): { childId: string; meta: ChildMeta } | null {
-    for (const [childId, meta] of this.childIndex) {
-      if (meta.nodeId === nodeId && meta.sessionId === run.snapshot.sessionId && meta.flowId === run.snapshot.flowId) {
-        return { childId, meta }
-      }
+    const childId = this.childByNode.get(nodeId)
+    if (!childId) return null
+    const meta = this.childIndex.get(childId)
+    if (!meta) return null
+    if (meta.nodeId !== nodeId || meta.sessionId !== run.snapshot.sessionId || meta.flowId !== run.snapshot.flowId) return null
+    return { childId, meta }
+  }
+
+  /**
+   * 构造 WF_ASK_TARGET_UNKNOWN 的可行动提示（P2-3）：按情形区分并给出下一步指向。
+   *   - 目标等于发起者自身 → 提示不可自投；
+   *   - 目标是本工作流节点但未/非本 run 启动 → 提示该成员可能尚未被父代理调度，请稍后重试或请父代理调度；
+   *   - 目标不匹配任何成员 → 列出发起者协作块中的可用成员 id。
+   */
+  private async targetUnknownHint(run: RunEntry, from: string, metaFrom: ChildMeta, rawTo: string): Promise<string> {
+    if (rawTo === from || rawTo === metaFrom.nodeId) {
+      return '不能向自己发起协作通信（目标为发起者自身），请改用其他协作成员节点 id'
     }
-    return null
+    let flow: WorkflowDocument
+    try {
+      flow = await this.currentResolvedFlow(run)
+    } catch {
+      return `目标 ${rawTo} 不是当前运行的节点子代理，且暂时无法读取流程确认成员清单`
+    }
+    const nodes = flow.nodes ?? []
+    const isFlowNode = nodes.some((n) => n.id === rawTo)
+    // 发起者所在协作组的成员 id 清单（组内可发消息对象）
+    const group = nodes.find(
+      (n) => n.kind === 'group' && ((n.data.memberIds ?? []) as string[]).includes(metaFrom.nodeId),
+    ) as { data?: { memberIds?: string[]; label?: string } } | undefined
+    const memberIds = (group?.data?.memberIds ?? []) as string[]
+    if (isFlowNode) {
+      const labels = memberIds.map((id) => `「${id}」`).join('、')
+      return `目标 ${rawTo} 是该工作流的节点，但尚未被启动或不属于当前运行；该成员可能还未被父代理调度，请稍后重试或请父代理先行调度。${
+        labels ? `你可向组内成员发起：${labels}` : ''
+      }`
+    }
+    if (memberIds.length > 0) {
+      return `目标 ${rawTo} 不是协作块中的成员 id；你可向组内成员发起：${memberIds.map((id) => `「${id}」`).join('、')}`
+    }
+    return `目标 ${rawTo} 不是当前运行的节点子代理，也不是本流程中的节点 id`
   }
 
   /**
@@ -98,7 +135,8 @@ export class RuntimeComm extends RuntimeExecute {
       if (!metaTo || metaTo.sessionId !== run.snapshot.sessionId || metaTo.flowId !== run.snapshot.flowId) {
         const byNode = this.childForNode(run, rawTo)
         if (!byNode) {
-          throw new WfError(`目标 ${rawTo} 不是当前运行的节点子代理`, 'WF_ASK_TARGET_UNKNOWN')
+          // P2-3：按情形给出可行动指引，让成员可自助纠错而非求助父代理。
+          throw new WfError(await this.targetUnknownHint(run, from, metaFrom, rawTo), 'WF_ASK_TARGET_UNKNOWN')
         }
         to = byNode.childId
         metaTo = byNode.meta

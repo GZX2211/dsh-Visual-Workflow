@@ -28,5 +28,10 @@ Thumbs.db
 
 # AI 提示词工程文件
 prompt/
+
 # CodeGraph 本地索引（codegraph init 生成，不提交）
 .codegraph/
+
+# docs
+archive/
+bug/

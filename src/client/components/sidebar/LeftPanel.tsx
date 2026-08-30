@@ -29,7 +29,7 @@ export interface LeftPanelProps {
   open: boolean
   width: number
   mode: 'mode1' | 'mode2'
-  workflows: Array<{ id: string; name: string; description?: string; nodes?: unknown[]; running?: boolean }>
+  workflows: Array<{ id: string; name: string; description?: string; nodes?: unknown[]; runStatus?: string | null }>
   /** 工作流模板列表（全局共享；按当前 mode 过滤后传入；图2 交互改造）。 */
   flowTemplates: WorkflowTemplate[]
   parentTemplate: RoleTemplate | null
@@ -98,7 +98,8 @@ export function LeftPanel(props: LeftPanelProps) {
 
   const isActive = (kind: string, id: string): boolean => libSelection?.kind === kind && libSelection?.id === id
 
-  function itemCard(key: string, kind: string, id: string, icon: string, name: string, sub: string, payload: DragPayload, pinned = false, running = false) {
+  function itemCard(key: string, kind: string, id: string, icon: string, name: string, sub: string, payload: DragPayload, pinned = false, runStatus?: string | null) {
+    const statusText = runStatus ? String((t.status as Record<string, string>)[runStatus] ?? '') : ''
     return (
       <button
         key={key}
@@ -111,7 +112,7 @@ export function LeftPanel(props: LeftPanelProps) {
           <span className="wf-docitem__label">{name}</span>
           <span className="wf-docitem__path">{sub}</span>
         </span>
-        {running ? <span className="wf-docitem__badge">{t.instanceRunning}</span> : null}
+        {statusText ? <span className="wf-docitem__badge">{statusText}</span> : null}
       </button>
     )
   }
@@ -130,7 +131,7 @@ export function LeftPanel(props: LeftPanelProps) {
         onDrop: () => onSelectWorkflow(item.id),
       },
       false,
-      item.running === true,
+      item.runStatus,
     ))
     sections.push({ key: 'instances', title: t.flowInstances, plus: false, cards: instances })
     sections.push({

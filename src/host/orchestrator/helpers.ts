@@ -46,10 +46,15 @@ export function pauseNodeIdsOf(flow: WorkflowDocument): string[] {
   return flow.nodes.filter((n) => n.kind === 'pause').map((n) => n.id)
 }
 
-/** 编排指令 facts 的节点清单（可调度执行的角色与协作组；父代理节点即编排者本人，不列出）。 */
+/**
+ * 编排指令 facts 的节点清单（仅可执行 agent 节点；父代理即编排者本人不列）。
+ * 协作组是包裹层（无执行，只注入协作协议），proxy 镜像主节点 agent id 相同，
+ * 阶段/文件/数据库均非可执行节点——一律不列入待编排节点（用户批注，图3）。
+ * 协作组并行说明见 collabGroupList（单独成段，不并入节点清单）。
+ */
 export function orchestrationNodeList(flow: WorkflowDocument): Array<{ id: string; label: string }> {
   return flow.nodes
-    .filter((n) => n.kind === 'agent' || n.kind === 'group')
+    .filter((n) => n.kind === 'agent')
     .map((n) => ({ id: n.id, label: labelOf(n) }))
 }
 

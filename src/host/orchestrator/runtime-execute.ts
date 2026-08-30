@@ -153,6 +153,7 @@ export class RuntimeExecute extends RuntimeLaunch {
       })
       run.inflight.add(childId)
       this.childIndex.set(childId, { sessionId: run.snapshot.sessionId, flowId: run.snapshot.flowId, nodeId: resolvedNodeId })
+      this.childByNode.set(resolvedNodeId, childId)
       if (!waitRequested) return { nodeId: resolvedNodeId, status: 'started', childId }
     } catch (error) {
       if (waiter) run.waiters.delete(waitKey)
@@ -202,7 +203,7 @@ export class RuntimeExecute extends RuntimeLaunch {
     snapshot.status = isFailed ? 'failed' : 'completed'
     snapshot.summary = String(args?.summary ?? '')
     snapshot.endedAt = this.isoNow()
-    terminalizeNodes(snapshot, this.now())
+    terminalizeNodes(snapshot, this.now(), isFailed ? 'fail' : 'completed')
     await this.persistWarn(run)
     // 收尾完成即释放内存条目（终态已持久化；运行锁随状态自然释放）
     this.runs.delete(snapshot.id)
