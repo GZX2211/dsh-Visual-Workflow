@@ -222,6 +222,54 @@ describe('VectorIndex 重建与检索', () => {
     expect(result?.hits[0].text).toContain('北京')
   })
 
+  it('search 命中回传 rowKey（记录 → 分块 → 命中）', async () => {
+    const dir = await tempDir('vw-idx-')
+    const index = new VectorIndex(join(dir, 'idx.json'))
+    await index.rebuild({
+      dataId: 'db-1',
+      records: [
+        { text: '苹果 水果 甘甜', source: 'products', rowKey: '1' },
+        { text: '香蕉 水果 软糯', source: 'products', rowKey: '2' },
+      ],
+      engine: null,
+    })
+    const result = await index.search('水果', 5)
+    const keys = result!.hits.map((h) => h.rowKey)
+    expect(keys).toContain('1')
+    expect(keys).toContain('2')
+  })
+
+  it('search 支持相似度阈值：低于阈值的命中被过滤', async () => {
+    const dir = await tempDir('vw-idx-')
+    const index = new VectorIndex(join(dir, 'idx.json'))
+    await index.rebuild({
+      dataId: 'db-1',
+      records: [
+        { text: '苹果 水果 甘甜', source: 't1', rowKey: '1' },
+        { text: '香蕉 水果 软糯', source: 't1', rowKey: '2' },
+        { text: '汽车 引擎 轰鸣', source: 't2', rowKey: '3' },
+      ],
+      engine: fakeEngine(),
+    })
+    // 无阈值（默认 0）：保留正分命中（topK=5）
+    const loose = await index.search('水果', 5, fakeEngine())
+    expect(loose!.hits.length).toBeGreaterThan(0)
+    // 高阈值：只保留相似度较高的命中（分数从高到低），低分被过滤
+    const strict = await index.search('水果', 5, fakeEngine(), { threshold: 0.99 })
+    expect(strict!.hits.length).toBeLessThanOrEqual(loose!.hits.length)
+    expect(strict!.hits.every((hit) => hit.score > 0.99)).toBe(true)
+  })
+
+  it('bm25Search 命中回传 rowKey', () => {
+    const chunks = [
+      { index: 0, text: '北京 首都 城市', source: 't1', rowKey: '1' },
+      { index: 1, text: '上海 城市 港口', source: 't1', rowKey: '2' },
+    ]
+    const hits = bm25Search(chunks, tokenizeText('城市'), 5)
+    expect(hits.some((h) => h.rowKey === '1')).toBe(true)
+    expect(hits.some((h) => h.rowKey === '2')).toBe(true)
+  })
+
   it('search 索引缺失/为空 → null', async () => {
     const dir = await tempDir('vw-idx-')
     const index = new VectorIndex(join(dir, 'missing.json'))

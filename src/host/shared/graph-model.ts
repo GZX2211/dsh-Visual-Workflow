@@ -137,6 +137,22 @@ export interface DatabaseNode extends BaseNode {
     conn?: { host: string; port: number; user: string; password: string; db: string }
     /** 向量检索模式：语义嵌入或 BM25 降级（本地类型，架构文档 §6.5；需求文档 §4.2.4.2 规则 1）。 */
     vectorSource?: 'embedding' | 'bm25'
+    /**
+     * 检索高级选项（UI 高级选项区可调；均有内置默认值，未配置时用默认）：
+     * 召回条数 / 分块窗口 / 相似度阈值 / 索引构建行数上限。
+     */
+    vectorOptions?: {
+      /** 召回条数（默认 5，search 内夹到 [1,50]）。 */
+      topK?: number
+      /** 分块窗口大小（字符，默认 384）。 */
+      chunkSize?: number
+      /** 分块重叠长度（字符，默认 128，须小于 chunkSize）。 */
+      overlap?: number
+      /** 召回相似度阈值（仅保留余弦/BM25 得分 > 此值；默认 0）。 */
+      scoreThreshold?: number
+      /** 索引构建行数上限（默认 10000）。 */
+      maxRows?: number
+    }
   }
 }
 

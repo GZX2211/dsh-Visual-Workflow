@@ -4,7 +4,8 @@
 //
 // 需求语义（数据库节点）：
 //   - 本地 SQLite：向量检索（内置嵌入，不可用降级 BM25 并标注）+ 结构化只读查询；
-//   - 服务器 MySQL/PostgreSQL：结构化只读查询 + 表结构（不提供向量检索）；
+//   - 服务器 MySQL/PostgreSQL：同样支持向量检索（在本地构建向量/BM25 索引）；
+//     叠加结构化只读查询 + 表结构；
 //   - 数据库内容绝不直接注入上下文，仅经工具查询结果返回。
 //
 // 安全边界（架构安全章节）：
@@ -27,6 +28,7 @@ import { WfError } from '../orchestrator/runtime.js'
 import type { FlowStore } from '../storage/flow-store.js'
 import type { EmbeddingEngine } from '../embedding/engine.js'
 import { VectorIndex, type IndexRecord, type VectorIndexFile } from '../embedding/indexer.js'
+import { CHUNK_OVERLAP_DEFAULT, CHUNK_SIZE_DEFAULT } from '../embedding/chunker.js'
 import { WF_DB_QUERY } from '../shared/protocol.js'
 import { defineTool, type ToolDefinitionLike, type ToolExecLike } from './define-tool.js'
 import { textRender } from './text-render.js'
@@ -281,38 +283,115 @@ export async function testDatabaseConnection(node: DatabaseNode): Promise<{ ok: 
 // 索引构建（本地向量检索的数据来源；GUI 数据库面板触发）
 // ---------------------------------------------------------------------------
 
-/** 本地库索引构建上限（防超大库打爆内存；超限截断并返回截断标记）。 */
+/** 索引构建行数上限（防超大库打爆内存；超限截断并返回截断标记）。 */
 export const INDEX_MAX_ROWS = 10000
 
 /**
- * 为本地 SQLite 构建向量索引：全表全行文本化（列值 join）后按行分块。
- * 每行一条源记录（source=表名），行内超长由分块器切窗；原子持久化到
- * <dataDir>/data/vector/<dataId>.json。嵌入不可用时自动落 BM25 索引。
+ * 判定单元格是否为「向量/嵌入」型值：逗号分隔的浮点数组（≥16 个 token 且 ≥90% 为 float）。
+ * 用于索引文本构建排除向量列与 query 结果保护。纯函数。
+ */
+export function isVectorLikeValue(value: string): boolean {
+  const trimmed = String(value ?? '').trim()
+  if (!trimmed) return false
+  // 兼容 pgvector（'[0.1,0.2,…]'）、MySQL、以及常见括号包裹形态
+  const inner = trimmed.replace(/^[[{(]/, '').replace(/[\])}]$/, '')
+  const tokens = inner
+    .split(',')
+    .map((token) => token.trim())
+    .filter(Boolean)
+  if (tokens.length < 16) return false
+  const floatRe = /^[-+]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?$/
+  const floats = tokens.filter((token) => floatRe.test(token)).length
+  return floats / tokens.length >= 0.9
+}
+
+/**
+ * 识别需排除的「向量/嵌入」列（供索引文本构建跳过）：列名启发式 + 首行值形态双重判定。
+ * 向量列对语义检索文本无意义，且会大幅膨胀索引体积。纯函数。
+ */
+export function skipVectorColumns(columns: string[], rows: string[][]): Set<string> {
+  const nameRe = /(?:^|[_\\-])(embedding|embed|vector|vec)\b/i
+  const out = new Set<string>()
+  for (let ci = 0; ci < columns.length; ci += 1) {
+    const col = columns[ci] ?? ''
+    const nameHit = nameRe.test(col)
+    const valueHit = rows.length > 0 && isVectorLikeValue(rows[0][ci] ?? '')
+    if (nameHit || valueHit) out.add(col)
+  }
+  return out
+}
+
+/**
+ * 识别适用于做「行主键」的列下标（供命中回传 rowKey）：优先精确主键名（id/pk/uuid/key/编号/code），
+ * 其次任意含 id/key/code/no 的列名；找不到返回 -1。纯函数。
+ */
+export function detectKeyIndex(columns: string[]): number {
+  const normalized = columns.map((c) => String(c ?? '').trim().toLowerCase())
+  for (const exact of ['id', 'pk', 'uuid', 'key', '编号', 'code']) {
+    const i = normalized.indexOf(exact)
+    if (i >= 0) return i
+  }
+  for (const [i, name] of normalized.entries()) {
+    if (/(?:^|_)(id|key|code|no)(?:_|$)/.test(name)) return i
+  }
+  return -1
+}
+
+/**
+ * 按数据库类型生成标识符引用：SQLite/PostgreSQL 用双引号，MySQL 用反引号（转义内嵌引号）。
+ * 索引构建对表名做自动引用，避免服务器库（尤其 MySQL）对 `FROM "table"` 的语法误判。
+ */
+export function quoteDbIdentifier(node: DatabaseNode, name: string): string {
+  const kind = node.data?.dbKind
+  const quote = kind === 'mysql' ? '`' : '"'
+  const escaped = String(name).replace(new RegExp(quote, 'g'), `${quote}${quote}`)
+  return `${quote}${escaped}${quote}`
+}
+
+/**
+ * 为数据库节点（本地 SQLite / 服务器 MySQL-PostgreSQL）构建向量索引：
+ * 全表全行文本化（列值 join；跳过向量/嵌入列）后按行分块，原子持久化到
+ * <dataDir>/data/vector/<dataId>.json。嵌入可用时写入向量，否则自动落 BM25 索引。
+ * 本地与服务器共用同一套本地索引基础设施（一致性；服务器只需提供只读查询能力）。
  */
 export async function buildIndexForDatabase(
   dataDir: string,
   node: DatabaseNode,
   engine: EmbeddingEngine,
 ): Promise<{ file: VectorIndexFile; truncated: boolean }> {
-  if (node.data.dbType !== 'local' || !node.data.localPath) {
-    throw new WfError('仅本地 SQLite 数据库支持向量检索索引', 'WF_DB_MODE')
-  }
-  const driver = new SqliteDriver(node.data.localPath)
+  const driver = createDatabaseDriver(node)
+  // 高级选项（均有默认值）：分块窗口 / 重叠 / 行数上限（0 合法、NaN 回退默认）
+  const opts = node.data?.vectorOptions ?? {}
+  const chunkSizeRaw = Number(opts.chunkSize)
+  const chunkSize = Math.max(1, Math.floor(Number.isFinite(chunkSizeRaw) ? chunkSizeRaw : CHUNK_SIZE_DEFAULT))
+  const overlapRaw = Number(opts.overlap)
+  const overlap = Math.max(0, Math.floor(Number.isFinite(overlapRaw) ? overlapRaw : CHUNK_OVERLAP_DEFAULT))
+  const maxRowsRaw = Number(opts.maxRows)
+  const maxRows = Math.max(1, Math.floor(Number.isFinite(maxRowsRaw) && maxRowsRaw > 0 ? maxRowsRaw : INDEX_MAX_ROWS))
   let truncated = false
   try {
     const tables = await driver.schema()
     const records: IndexRecord[] = []
     for (const table of tables) {
-      if (records.length >= INDEX_MAX_ROWS) {
+      if (records.length >= maxRows) {
         truncated = true
         break
       }
-      const result = await driver.query(`SELECT * FROM "${table.name}" LIMIT ${INDEX_MAX_ROWS - records.length}`)
+      const tableRef = quoteDbIdentifier(node, table.name)
+      const result = await driver.query(`SELECT * FROM ${tableRef} LIMIT ${maxRows - records.length}`)
       const columns = result.columns
+      const skip = skipVectorColumns(columns, result.rows)
+      const keyIndex = detectKeyIndex(columns)
       for (const row of result.rows) {
+        const rowKey = keyIndex >= 0 ? row[keyIndex] : undefined
         records.push({
-          text: row.map((value, index) => `${columns[index]}: ${value}`).join('\n'),
+          text: row
+            .map((value, index) => ({ key: columns[index], value }))
+            .filter((cell) => cell.key !== undefined && !skip.has(cell.key))
+            .map((cell) => `${cell.key}: ${cell.value}`)
+            .join('\n'),
           source: table.name,
+          ...(rowKey !== undefined && rowKey !== '' ? { rowKey } : {}),
         })
       }
     }
@@ -321,6 +400,8 @@ export async function buildIndexForDatabase(
       dataId: node.id,
       records,
       engine,
+      chunkSize,
+      overlap,
     })
     return { file, truncated }
   } finally {
@@ -332,6 +413,38 @@ export async function buildIndexForDatabase(
 export function indexPathOf(dataDir: string, dataId: string): string {
   const safe = String(dataId ?? '').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120)
   return join(dataDir, 'data', 'vector', `${safe}.json`)
+}
+
+/**
+ * 为某角色节点的 db-in 所连数据库「确保索引已建立」。
+ * - 已存在且非空 → 复用（不重复重建，避免多节点共享同一库时反复全量嵌入）；
+ * - 缺失/为空 → 构建（本地与服务器库均可；嵌入不可用时自动落 BM25）；
+ * - 单库构建失败 → best-effort 记 warn 不抛错，交由 wf_db_query(mode=search) 惰性构建兜底。
+ * 运行期在启动节点子代理之前调用，把索引构建耗时吸收到启动阶段——
+ * 避免子代理首次检索才构建导致的延迟与「无索引」间歇。纯函数（数据注入、不读时钟）。
+ */
+export async function ensureDatabaseIndexes(
+  dataDir: string,
+  nodeId: string,
+  flow: WorkflowDocument,
+  engine: EmbeddingEngine,
+  logger?: { warn(message: string): void },
+): Promise<void> {
+  const sources = dbInEdges(flow, nodeId)
+    .map((line) => nodeById(flow, line.source))
+    .filter((n): n is DatabaseNode => n?.kind === 'database')
+  for (const node of sources) {
+    try {
+      const index = new VectorIndex(indexPathOf(dataDir, node.id))
+      const file = await index.load()
+      if (file && file.chunks.length > 0) continue
+      const { file: rebuilt } = await buildIndexForDatabase(dataDir, node, engine)
+      logger?.warn(`[visual-workflow] 已为数据节点「${node.data.label || node.id}」预建索引（${rebuilt.source}，${rebuilt.chunks.length} 块）`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      logger?.warn(`[visual-workflow] 数据节点「${node.data.label || node.id}」索引预建失败：${message}`)
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -348,6 +461,18 @@ export interface DataToolsHost {
 
 /** 查询结果行数上限（防结果集打爆上下文）。 */
 const QUERY_ROWS_LIMIT = 50
+
+/** 查询结果单元格值最大长度（超长截断防止向量/BLOB 列打爆上下文；追加标记）。 */
+export const QUERY_CELL_MAX_LENGTH = 240
+
+/** 单元格截断标记。 */
+const CELL_TRUNCATED_MARK = '…'
+
+/** 对单元格值做长度截断（超长时截断并追加标记；返回是否发生了截断）。 */
+function capQueryCell(value: string): { text: string; truncated: boolean } {
+  if (value.length <= QUERY_CELL_MAX_LENGTH) return { text: value, truncated: false }
+  return { text: `${value.slice(0, QUERY_CELL_MAX_LENGTH)}${CELL_TRUNCATED_MARK}`, truncated: true }
+}
 
 /** 运行中 run 的定位（root 按会话 / 子代理按 childIndex 反查）。 */
 function resolveActiveRun(
@@ -393,8 +518,9 @@ export function registerDataTools(ctx: { get(name: string): unknown }, host: Dat
     name: WF_DB_QUERY,
     description:
       'Query a database node of the active Visual Workflow run. Use only while an orchestration is running and your node is connected to the database via a db-in edge: pass the database node id and pick a mode — ' +
-      '"search" (local SQLite vector retrieval; falls back to BM25 when the embedding model is unavailable), ' +
-      '"query" (read-only SELECT with a mandatory LIMIT; local or server databases), or "schema" (read-only table list). ' +
+      '"search" (vector retrieval over any database, local or server, via a locally built index; falls back to BM25 when the embedding model is unavailable), ' +
+      '"query" (read-only SELECT with a mandatory LIMIT; local or server databases; long cell values are truncated and marked to protect the context), or "schema" (read-only table list). ' +
+      'Prefer "search" for semantic questions and avoid "SELECT *" when a table has large vector columns. ' +
       'Rejected with WF_DB_* codes for nodes without a db-in edge to the data node, blocked SQL, missing index, or after the run stops.',
     parameters: {
       dataId: { type: 'string', required: true, description: 'Database node id from the flow definition file (nodes[].id).' },
@@ -421,11 +547,12 @@ export function registerDataTools(ctx: { get(name: string): unknown }, host: Dat
                 index: { type: 'integer', required: true, description: 'Chunk index in the index file.' },
                 text: { type: 'string', required: true, description: 'Chunk text.' },
                 score: { type: 'number', required: true, description: 'Similarity score (higher is better).' },
+                rowKey: { type: 'string', description: 'Primary key value of the source row (when known); lets you map the hit back to a full row.' },
               },
             },
           },
           columns: { type: 'array', items: { type: 'string' }, description: 'Result column names (mode "query").' },
-          rows: { type: 'array', items: { type: 'array', items: { type: 'string' } }, description: 'Result rows as string values (mode "query", capped).' },
+          rows: { type: 'array', items: { type: 'array', items: { type: 'string' } }, description: 'Result rows as string values (mode "query", rows and long cells capped).' },
           tables: {
             type: 'array',
             description: 'Table names (mode "schema").',
@@ -435,7 +562,7 @@ export function registerDataTools(ctx: { get(name: string): unknown }, host: Dat
               properties: { name: { type: 'string', required: true, description: 'Table name.' } },
             },
           },
-          truncated: { type: 'boolean', description: 'True when the result set was capped.' },
+          truncated: { type: 'boolean', description: 'True when the result set was capped or long cell values were truncated.' },
         },
       },
       render: textRender,
@@ -464,14 +591,22 @@ export function registerDataTools(ctx: { get(name: string): unknown }, host: Dat
       host.orchestrator.touchRun(run)
 
       if (mode === 'search') {
-        if (dataNode.data.dbType !== 'local') {
-          throw new WfError('仅本地 SQLite 数据库支持向量检索（服务器类型请用 query/schema）', 'WF_DB_MODE')
-        }
         const queryText = String(args?.query ?? '').trim()
         if (!queryText) throw new WfError('wf_db_query mode=search 需要参数 query', 'WF_BAD_ARGS')
         const index = new VectorIndex(indexPathOf(host.dataDir, dataId))
-        const result = await index.search(queryText, Number(args?.topK) || 5, host.engine)
-        if (!result) throw new WfError('数据库索引未建立：请先在数据库面板为该数据节点建立索引', 'WF_DB_INDEX_MISSING')
+        // 索引缺失/为空时惰性自动构建（等价 GUI 数据库面板「建立索引」，仅首次触发、
+        // 落盘后复用）：运行期首次检索无需手动预建，嵌入不可用时自动落 BM25（结果标注）。
+        let file = await index.load()
+        if (!file || file.chunks.length === 0) {
+          file = (await buildIndexForDatabase(host.dataDir, dataNode, host.engine)).file
+        }
+        const result = await index.search(
+          queryText,
+          Number(args?.topK) || Number(dataNode.data?.vectorOptions?.topK) || 5,
+          host.engine,
+          { threshold: Number(dataNode.data?.vectorOptions?.scoreThreshold) || 0 },
+        )
+        if (!result) throw new WfError('数据库索引未建立：请确认该数据源有可检索内容', 'WF_DB_INDEX_MISSING')
         return { dataId, mode: 'search', source: result.source, hits: result.hits }
       }
 
@@ -482,9 +617,19 @@ export function registerDataTools(ctx: { get(name: string): unknown }, host: Dat
         const driver = createDatabaseDriver(dataNode)
         try {
           const result = await driver.query(checked.sql)
-          const truncated = result.rows.length > QUERY_ROWS_LIMIT
+          const truncatedRows = result.rows.length > QUERY_ROWS_LIMIT
           const rows = result.rows.slice(0, QUERY_ROWS_LIMIT)
-          return { dataId, mode: 'query', columns: result.columns, rows, ...(truncated ? { truncated: true } : {}) }
+          // 单元格超长（如向量/BLOB 列）截断，防止巨量字符串打爆上下文
+          let cellTruncated = false
+          const cappedRows = rows.map((row) =>
+            row.map((cell) => {
+              const capped = capQueryCell(cell)
+              if (capped.truncated) cellTruncated = true
+              return capped.text
+            }),
+          )
+          const truncated = truncatedRows || cellTruncated
+          return { dataId, mode: 'query', columns: result.columns, rows: cappedRows, ...(truncated ? { truncated: true } : {}) }
         } finally {
           driver.close()
         }

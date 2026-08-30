@@ -14,17 +14,34 @@ import { buildNodeTaskBlock } from '../prompts/node-task.js'
 import { buildCollabBlock } from '../prompts/collab.js'
 import { ctxInEdges, dbInEdges, nodeById } from '../graph/model.js'
 import { validateFlow } from '../graph/validate.js'
-import type { GraphNode, RoleNode, WorkflowDocument } from '../shared/graph-model.js'
+import type { DatabaseNode, GraphNode, RoleNode, WorkflowDocument } from '../shared/graph-model.js'
 import type { RunSnapshot } from '../shared/types.js'
 import { truncateText } from './snapshot.js'
 import type { RunNodeArgs } from './run-types.js'
 import { WfError } from './seams.js'
 
-/** 数据库连线提示（面向模型英文）。 */
-const DB_TOOL_HINT =
-  'Database nodes are connected via db-in edges. Access them only through wf_db_query: ' +
+/** 数据库访问工具的使用说明（面向模型英文；不随节点变化的三模式描述部分）。 */
+const DB_TOOL_HINT_MODES =
+  'Access them only through wf_db_query: ' +
   'mode "search" (vector retrieval), mode "query" (read-only SELECT with LIMIT), mode "schema" (table structure). ' +
   'Never read database files directly.'
+
+/**
+ * 生成某节点的数据库工具说明。
+ * - 存在 db-in 连线时，返回包含所连数据节点 id 与 label 的提示——子代理必须把该 id
+ *   作为 wf_db_query 的 dataId 传入（BUG 修复：此前提示未携带 id，子代理无法定位数据源，
+ *   只能用猜测的 id → WF_DB_BAD_DATA）。
+ * - 无 db-in 连线时返回空串（工具白名单也不注入 wf_db_query）。
+ * 纯函数：输入同则输出同，不读时钟/随机源。
+ */
+export function dbToolHintOf(flow: WorkflowDocument, nodeId: string): string {
+  const sources = dbInEdges(flow, nodeId)
+    .map((line) => nodeById(flow, line.source))
+    .filter((n): n is DatabaseNode => n?.kind === 'database')
+  if (sources.length === 0) return ''
+  const ids = sources.map((n) => `${n.id} (${labelOf(n)})`).join('; ')
+  return `Connected database node(s) via db-in edge(s): ${ids}. ${DB_TOOL_HINT_MODES}`
+}
 
 /** 错误消息提取（Error 或任意值）。 */
 export function messageOf(error: unknown): string {
@@ -183,7 +200,7 @@ export function buildNodeBlocks(input: {
       content: truncateText(output, input.documentTextLimit),
     })
   }
-  const dbHint = dbInEdges(flow, node.id).length > 0 ? DB_TOOL_HINT : ''
+  const dbHint = dbToolHintOf(flow, node.id)
 
   const text = buildNodeTaskBlock({
     facts: {

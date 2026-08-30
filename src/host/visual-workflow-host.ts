@@ -106,6 +106,7 @@ export class VisualWorkflowHost extends Service {
         reactIterationLimitDefault: config.reactIterationLimitDefault,
         wfAskAgentTimeoutMs: config.wfAskAgentTimeoutMs,
       },
+      dbIndexer: { dataDir: config.dataDir, engine: this.embedding },
       logger: cordisLogger(ctx),
     })
     this.serviceManager = new ServiceManager({

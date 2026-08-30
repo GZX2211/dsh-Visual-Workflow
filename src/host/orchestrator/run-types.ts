@@ -12,6 +12,7 @@ import type { WorkflowDocument } from '../shared/graph-model.js'
 import type { RunSnapshot, RunStatus } from '../shared/types.js'
 import type { ChildPromptSetup } from '../agent/prompt-setup.js'
 import type { ModelSelectionSetup } from '../agent/model-selection.js'
+import type { EmbeddingEngine } from '../embedding/engine.js'
 import type { AgentHost, NodeRunner, OrchestratorConfig, OrchestratorLogger } from './seams.js'
 import type { AskAgentResult, PendingAsk } from './ask-types.js'
 
@@ -96,6 +97,12 @@ export interface OrchestratorDeps {
   modelSelection?: ModelSelectionSetup
   /** 配置子集。 */
   config: OrchestratorConfig
+  /**
+   * 运行期数据库索引预建能力（宿主注入；缺省跳过预建，交由 wf_db_query(mode=search)
+   * 的惰性构建兜底）。用于在启动节点子代理之前为其 db-in 所连本地库预建索引，
+   * 吸收构建耗时、避免子代理首次检索才构建。
+   */
+  dbIndexer?: { dataDir: string; engine: EmbeddingEngine }
   /** 日志（缺省 console）。 */
   logger?: OrchestratorLogger
   /** 时钟注入（单测可控；缺省 Date.now）。 */

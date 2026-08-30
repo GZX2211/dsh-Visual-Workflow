@@ -228,6 +228,14 @@ export interface DatabaseTemplate {
   conn?: { host: string; port: number; user: string; password: string; db: string }
   /** 向量检索模式。 */
   vectorSource?: 'embedding' | 'bm25'
+  /** 检索高级选项（对应 DatabaseNode.data.vectorOptions，模板态可配置）。 */
+  vectorOptions?: {
+    topK?: number
+    chunkSize?: number
+    overlap?: number
+    scoreThreshold?: number
+    maxRows?: number
+  }
 }
 
 /**

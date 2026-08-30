@@ -117,15 +117,16 @@ export class VisualWorkflowApiRuns extends VisualWorkflowApiCatalog {
     const dataId = String(args?.dataId ?? '')
     const query = String(args?.query ?? '').trim()
     if (!dataId) throw httpError(400, 'requires dataId')
-    const topK = Number(args?.topK ?? 5)
+    const node = args?.node as DatabaseNode | null | undefined
+    const vectorOptions = node?.data?.vectorOptions
+    const topK = Number(args?.topK ?? 5) || Number(vectorOptions?.topK) || 5
     const index = new VectorIndex(indexPathOf(this.host.dataDir, dataId))
     if (args?.rebuild === true || (await index.load()) === null) {
-      const node = args?.node as DatabaseNode | null | undefined
       if (!node || node.kind !== 'database') throw httpError(422, '索引不存在且未提供数据库节点，无法构建')
       await buildIndexForDatabase(this.host.dataDir, node, this.host.engine)
     }
     if (!query) return { dataId, hits: [] }
-    const result = await index.search(query, topK, this.host.engine)
+    const result = await index.search(query, topK, this.host.engine, { threshold: Number(vectorOptions?.scoreThreshold) || 0 })
     return { dataId, ...(result ?? { hits: [] }) }
   }
   // ---------- 导入导出（v2 bundle） ----------

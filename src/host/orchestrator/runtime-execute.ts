@@ -5,6 +5,7 @@
 
 import { WF_RUN_NODE_WAIT } from '../shared/protocol.js'
 import { nodeById } from '../graph/model.js'
+import { ensureDatabaseIndexes } from '../tools/data-tools.js'
 import { buildNodeBlocks, collabPromptOf, effectiveReactLimitOf, effectiveRetryLimitOf, effectiveThinkingOf, labelOf, pauseNodeIdsOf } from './helpers.js'
 import { createWaiter, type FinishArgs, type FinishResult, type RunEntry, type RunNodeArgs, type RunNodeResult, type Waiter } from './run-types.js'
 import { setNodeStatus, statusText, terminalizeNodes } from './snapshot.js'
@@ -54,12 +55,12 @@ export class RuntimeExecute extends RuntimeLaunch {
     options: { expectedMode?: 'mode1' | 'mode2' } = {},
   ): Promise<RunNodeResult> {
     const run = this.requireActiveRootRun(caller, options?.expectedMode === 'mode2' ? WF_RUN_NODE_WAIT : 'wf_run_node')
-    // 模式与工具一一对应：wf_run_node 仅编排执行模式，wf_run_node_wait 仅后台服务模式
+    // 模式与工具一一对应：wf_run_node 仅流程编排模式，wf_run_node_wait 仅API服务模式
     if (options?.expectedMode && run.snapshot.mode !== options.expectedMode) {
       throw new WfError(
         options.expectedMode === 'mode2'
-          ? 'wf_run_node_wait 只能在后台服务模式（mode2）中使用'
-          : 'wf_run_node 只能在编排执行模式（mode1）中使用',
+          ? 'wf_run_node_wait 只能在API服务模式（mode2）中使用'
+          : 'wf_run_node 只能在流程编排模式（mode1）中使用',
         'WF_MODE_MISMATCH',
       )
     }
@@ -114,6 +115,19 @@ export class RuntimeExecute extends RuntimeLaunch {
     const effectiveReactLimit = effectiveReactLimitOf(node, args, this.deps.config.reactIterationLimitDefault)
     const thinking = effectiveThinkingOf(node, args)
     run.lastActiveAt = this.now()
+
+    // 启动子代理之前，为其 db-in 所连本地库预建索引：把构建耗时吸收到启动阶段，
+    // 避免子代理首次检索才构建（延迟/「无索引」间歇）。best-effort：构建缺失/失败
+    // 不阻塞节点启动，交由 wf_db_query(mode=search) 的惰性构建兜底。
+    if (this.deps.dbIndexer) {
+      await ensureDatabaseIndexes(
+        this.deps.dbIndexer.dataDir,
+        resolvedNodeId,
+        flow,
+        this.deps.dbIndexer.engine,
+        this.log(),
+      )
+    }
 
     setNodeStatus(run.snapshot, resolvedNodeId, 'running', { attempts: attempt, now: this.now() })
     const blocks = buildNodeBlocks({

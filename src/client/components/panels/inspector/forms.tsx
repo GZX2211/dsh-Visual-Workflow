@@ -20,10 +20,10 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   )
 }
 
-function InputField({ label, value, placeholder, onChange, type = 'text' }: { label: string; value: unknown; placeholder?: string; onChange(value: string): void; type?: string }) {
+function InputField({ label, value, placeholder, onChange, type = 'text', step }: { label: string; value: unknown; placeholder?: string; onChange(value: string): void; type?: string; step?: string }) {
   return (
     <Field label={label}>
-      <input type={type} value={String(value ?? '')} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />
+      <input type={type} value={String(value ?? '')} placeholder={placeholder} step={step} onChange={(event) => onChange(event.target.value)} />
     </Field>
   )
 }
@@ -305,6 +305,13 @@ export function DatabaseForm({ data, copy, onPatch, onTest }: {
 }) {
   const isServer = data.dbType === 'server'
   const conn = (data.conn ?? {}) as { host?: string; port?: number; user?: string; password?: string; db?: string }
+  const vectorOptions = (data.vectorOptions ?? {}) as Record<string, number | undefined>
+  const setOpt = (patch: Record<string, number | undefined>): void => onPatch({ vectorOptions: { ...vectorOptions, ...patch } })
+  const clampInt = (value: string, min: number, fallback: number, max?: number): number => {
+    const n = Number(value)
+    if (!Number.isFinite(n) || n < min) return min
+    return max === undefined ? n : Math.min(max, n)
+  }
   return (
     <div>
       <h3>{copy.nodeKinds.database}</h3>
@@ -349,6 +356,34 @@ export function DatabaseForm({ data, copy, onPatch, onTest }: {
           <span className="wf-hint">{copy.dbLocalHint}</span>
         </div>
       )}
+      {/* 检索高级选项：可折叠，内容读取已配置/默认值显示（不空白），右侧列阈值在上、分块窗口在下 */}
+      <details className="wf-advanced">
+        <summary>{copy.dbAdvanced}</summary>
+        <div className="wf-advanced__content">
+          <div style={{ display: 'grid', gap: 8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <Field label={copy.dbTopK}>
+                <input type="number" min={1} max={50} value={Number(vectorOptions.topK ?? 5)} onChange={(event) => setOpt({ topK: clampInt(event.target.value, 1, 5, 50) })} />
+              </Field>
+              <Field label={copy.dbScoreThreshold}>
+                <input type="number" step="0.1" value={Number(vectorOptions.scoreThreshold ?? 0)} onChange={(event) => setOpt({ scoreThreshold: Number(event.target.value) || 0 })} />
+              </Field>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <Field label={copy.dbOverlap}>
+                <input type="number" min={0} value={Number(vectorOptions.overlap ?? 128)} onChange={(event) => setOpt({ overlap: clampInt(event.target.value, 0, 0) })} />
+              </Field>
+              <Field label={copy.dbChunkSize}>
+                <input type="number" min={1} value={Number(vectorOptions.chunkSize ?? 384)} onChange={(event) => setOpt({ chunkSize: clampInt(event.target.value, 1, 1) })} />
+              </Field>
+            </div>
+            <Field label={copy.dbMaxRows}>
+              <input type="number" min={1} value={Number(vectorOptions.maxRows ?? 10000)} onChange={(event) => setOpt({ maxRows: clampInt(event.target.value, 1, 1) })} />
+            </Field>
+            <span className="wf-hint" style={{ whiteSpace: 'pre-line' }}>{copy.dbAdvancedHint}</span>
+          </div>
+        </div>
+      </details>
     </div>
   )
 }

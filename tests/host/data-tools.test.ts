@@ -8,12 +8,13 @@
 //   - wf_db_query 工具：归属校验（无运行/无连线/坏节点）、三模式执行、
 //     索引缺失错误、SQL 拒绝错误。
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { FlowStore } from '../../src/host/storage/flow-store.js'
+import { VectorIndex } from '../../src/host/embedding/indexer.js'
 import {
   OrchestratorRuntime,
   type AgentHost,
@@ -30,10 +31,16 @@ import {
   SqliteDriver,
   buildIndexForDatabase,
   createDatabaseDriver,
+  detectKeyIndex,
+  ensureDatabaseIndexes,
   indexPathOf,
+  isVectorLikeValue,
+  quoteDbIdentifier,
   registerDataTools,
   sanitizeReadOnlySql,
+  skipVectorColumns,
   testDatabaseConnection,
+  QUERY_CELL_MAX_LENGTH,
   type DataToolsHost,
 } from '../../src/host/tools/data-tools.js'
 import type { ToolDefinitionLike, ToolExecLike } from '../../src/host/tools/define-tool.js'
@@ -248,7 +255,7 @@ describe('buildIndexForDatabase', () => {
     expect(existsSync(indexPathOf(dir, 'd1'))).toBe(true)
   })
 
-  it('服务器类型 → 拒绝构建索引', async () => {
+  it('服务器类型：本地索引构建不再被拒（无驱动时报驱动/连接错误而非 WF_DB_MODE）', async () => {
     const dir = await tempDir('vw-idx-')
     const node: DatabaseNode = {
       id: 'd1',
@@ -259,9 +266,70 @@ describe('buildIndexForDatabase', () => {
         conn: { host: '127.0.0.1', port: 3306, user: 'u', password: 'p', db: 'd' },
       },
     }
-    await expect(
-      buildIndexForDatabase(dir, node, { source: 'bm25', dimension: 0, embed: async () => [], dispose() {} }),
-    ).rejects.toMatchObject({ code: 'WF_DB_MODE' })
+    const error = await buildIndexForDatabase(dir, node, { source: 'bm25', dimension: 0, embed: async () => [], dispose() {} }).catch((e) => e)
+    // 服务器类型已纳入本地索引构建，不再抛 WF_DB_MODE；测试环境驱动缺失/服务不可达 → 驱动或连接错误
+    expect(error?.code).not.toBe('WF_DB_MODE')
+  })
+
+  it('isVectorLikeValue：识别长浮点数组，拒绝短/普通文本', () => {
+    // 16 维向量 → true
+    const vector = Array.from({ length: 16 }, (_, i) => `${i}.${i + 1}`).join(',')
+    expect(isVectorLikeValue(vector)).toBe(true)
+    expect(isVectorLikeValue(`[${vector}]`)).toBe(true)
+    // 普通单元格 → false
+    expect(isVectorLikeValue('苹果')).toBe(false)
+    expect(isVectorLikeValue('5.5')).toBe(false)
+    expect(isVectorLikeValue('金融 产品 债券')).toBe(false)
+    expect(isVectorLikeValue('')).toBe(false)
+  })
+
+  it('skipVectorColumns：按列名/值形态识别向量列', () => {
+    const columns = ['id', 'name', 'embedding']
+    const rows = [['1', '短债基金', Array.from({ length: 16 }, (_, i) => '0.1').join(',')]]
+    const skip = skipVectorColumns(columns, rows)
+    expect(skip).toContain('embedding')
+    expect(skip).not.toContain('id')
+    expect(skip).not.toContain('name')
+  })
+
+  it('quoteDbIdentifier：SQLite/PostgreSQL 双引号，MySQL 反引号', () => {
+    const node = (dbKind: string): DatabaseNode => ({
+      id: 'd1', kind: 'database', position: { x: 0, y: 0 },
+      data: { label: '库', description: '', dbType: 'server', dbKind: dbKind as DatabaseNode['data']['dbKind'], conn: { host: 'h', port: 1, user: 'u', password: 'p', db: 'd' } },
+    })
+    expect(quoteDbIdentifier(node('sqlite'), 'products')).toBe('"products"')
+    expect(quoteDbIdentifier(node('postgresql'), 'products')).toBe('"products"')
+    expect(quoteDbIdentifier(node('mysql'), 'products')).toBe('`products`')
+  })
+
+  it('detectKeyIndex：优先精确主键名，其次含 id/key 列名，找不到为 -1', () => {
+    expect(detectKeyIndex(['name', 'price'])).toBe(-1)
+    expect(detectKeyIndex(['id', 'name'])).toBe(0)
+    expect(detectKeyIndex(['sku_code', 'title'])).toBe(0)
+    expect(detectKeyIndex(['product_id', 'title'])).toBe(0)
+    expect(detectKeyIndex(['编号', '名称'])).toBe(0)
+  })
+
+  it('buildIndexForDatabase：应用 vectorOptions 分块/容量并回传 rowKey', async () => {
+    const dir = await tempDir('vw-idx-')
+    const file = await makeSqliteDb(dir)
+    const node: DatabaseNode = {
+      id: 'd1',
+      kind: 'database',
+      position: { x: 0, y: 0 },
+      data: {
+        label: '库', description: '', dbType: 'local', dbKind: 'sqlite',
+        localPath: file,
+        vectorOptions: { chunkSize: 8, overlap: 2, maxRows: 2 },
+      },
+    }
+    const { file: indexFile } = await buildIndexForDatabase(dir, node, { source: 'bm25', dimension: 0, embed: async () => [], dispose() {} })
+    // products 表 3 行 + notes 表 2 行；maxRows=2 → 只索引 2 行（truncated）
+    // 但需验证 rowKey 落盘与分块窗口被采纳。
+    const chunkRows = indexFile.chunks.filter((c) => c.rowKey !== undefined)
+    expect(chunkRows.length).toBeGreaterThan(0)
+    expect(indexFile.chunkSize).toBe(8)
+    expect(indexFile.overlap).toBe(2)
   })
 })
 
@@ -475,6 +543,43 @@ describe('wf_db_query 工具执行', () => {
     expect(missing).toMatchObject({ dataId: 'd1', mode: 'search' })
   })
 
+  it('search 模式：索引未建时运行期惰性自动构建（无需手动预建），且仅首次触发', async () => {
+    const h = await makeHarness()
+    await h.store.saveWorkflow(makeFlow(h.dbFile), 'session-1', { force: true })
+    await h.runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })
+    await h.runtime.wfRunNode({ isChild: false, sessionId: 'session-1' }, { nodeId: 'a1' })
+    const def = h.tools.definitions.get(WF_DB_QUERY)!
+    // 不预建索引：直接 search，工具应在运行时自动构建（bm25 引擎 → source bm25）并返回命中
+    const result = await def.execute({ dataId: 'd1', mode: 'search', query: '数据库', topK: 3 }, childExec('child-1'))
+    expect(result).toMatchObject({ dataId: 'd1', mode: 'search', source: 'bm25' })
+    expect((result as { hits: Array<{ text: string }> }).hits.length).toBeGreaterThan(0)
+    // 再次检索命中已落盘的缓存索引，不重复构建、仍返回命中
+    const again = await def.execute({ dataId: 'd1', mode: 'search', query: '检索', topK: 3 }, childExec('child-1'))
+    expect(again).toMatchObject({ dataId: 'd1', mode: 'search' })
+    expect((again as { hits: Array<{ text: string }> }).hits.length).toBeGreaterThan(0)
+  })
+
+  it('ensureDatabaseIndexes：为 db-in 所连本地库预建索引；已存在则复用不重复重建', async () => {
+    const h = await makeHarness()
+    const flow = makeFlow(h.dbFile)
+    const warn = vi.fn()
+    // 首次：无索引 → 预建
+    await ensureDatabaseIndexes(h.dataDir, 'a1', flow, h.engine, { warn })
+    const index = new VectorIndex(indexPathOf(h.dataDir, 'd1'))
+    const file = await index.load()
+    expect(file).not.toBeNull()
+    expect(file!.chunks.length).toBeGreaterThan(0)
+    // 再次：已有索引 → 复用（chunks 数量不变，未触发重建）
+    const before = file!.chunks.length
+    await ensureDatabaseIndexes(h.dataDir, 'a1', flow, h.engine, { warn })
+    const file2 = await index.load()
+    expect(file2!.chunks.length).toBe(before)
+    // 无 db-in 连线的节点：不构建任何索引、不再额外触发 warn
+    const warnCount = warn.mock.calls.length
+    await ensureDatabaseIndexes(h.dataDir, 'a2', flow, h.engine, { warn })
+    expect(warn.mock.calls.length).toBe(warnCount)
+  })
+
   it('父代理（root）经 parent 节点连线调用同样被允许', async () => {
     const h = await makeHarness()
     await h.store.saveWorkflow(makeFlow(h.dbFile), 'session-1', { force: true })
@@ -484,7 +589,7 @@ describe('wf_db_query 工具执行', () => {
     expect(result).toMatchObject({ dataId: 'd1', mode: 'schema' })
   })
 
-  it('服务器类型 search → WF_DB_MODE', async () => {
+  it('服务器类型 search：不再以 WF_DB_MODE 拒绝（本地索引构建；驱动缺失/连接失败时给出驱动或连接错误）', async () => {
     const h = await makeHarness()
     const flow = makeFlow(h.dbFile)
     const serverNode: DatabaseNode = {
@@ -502,6 +607,41 @@ describe('wf_db_query 工具执行', () => {
     await h.runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })
     await h.runtime.wfRunNode({ isChild: false, sessionId: 'session-1' }, { nodeId: 'a1' })
     const def = h.tools.definitions.get(WF_DB_QUERY)!
-    await expect(def.execute({ dataId: 'd2', mode: 'search', query: 'x' }, childExec('child-1'))).rejects.toMatchObject({ code: 'WF_DB_MODE' })
+    const error = await (def.execute({ dataId: 'd2', mode: 'search', query: 'x' }, childExec('child-1')) as Promise<unknown>).then(
+      () => null,
+      (e: unknown) => e as { code?: string },
+    )
+    // 服务器类型已允许向量检索（不再抛 WF_DB_MODE）；测试环境无 mysql2 驱动/服务 → 驱动或连接错误
+    expect(error?.code).not.toBe('WF_DB_MODE')
+  })
+
+  it('query 模式：超长单元格值被截断并标记 truncated（防向量/BLOB 列打爆上下文）', async () => {
+    const h = await makeHarness()
+    const dir = h.dataDir
+    // 用含超长列的自建库（模拟向量列）
+    const file = join(dir, 'vectors.db')
+    {
+      const db = new DatabaseSync(file)
+      db.exec('CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, embedding TEXT)')
+      const vec = Array.from({ length: 128 }, (_, i) => `${i}.${i % 7}`).join(',')
+      const stmt = db.prepare('INSERT INTO products (name, embedding) VALUES (?, ?)')
+      stmt.run('短债基金', vec)
+      stmt.run('纯债基金', 'short')
+      db.close()
+    }
+    const flow = makeFlow(file)
+    await h.store.saveWorkflow(flow, 'session-1', { force: true })
+    await h.runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })
+    await h.runtime.wfRunNode({ isChild: false, sessionId: 'session-1' }, { nodeId: 'a1' })
+    const def = h.tools.definitions.get(WF_DB_QUERY)!
+    const result = await def.execute({ dataId: 'd1', mode: 'query', sql: 'SELECT id, name, embedding FROM products ORDER BY id LIMIT 10' }, childExec('child-1'))
+    expect(result).toMatchObject({ dataId: 'd1', mode: 'query', truncated: true })
+    const rows = (result as { rows: string[][] }).rows
+    expect(rows[0][1]).toBe('短债基金')
+    // 超长向量列被截断（长度 ≤ QUERY_CELL_MAX_LENGTH + 标记）
+    expect(rows[0][2].length).toBeLessThanOrEqual(QUERY_CELL_MAX_LENGTH + 1)
+    expect(rows[0][2].endsWith('…')).toBe(true)
+    // 短值不受影响
+    expect(rows[1][2]).toBe('short')
   })
 })
