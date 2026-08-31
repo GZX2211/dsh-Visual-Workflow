@@ -13,8 +13,10 @@ import { EP } from '../../lib/remote.js'
 import type { RemoteFace } from '../../hooks/useRemote.js'
 import type { ScheduledTask, ScheduledTaskView, TimeRangeConfig } from '../../../host/shared/types.js'
 import { DateRangePicker, type DateRangeValue } from '../date-picker/DateRangePicker.js'
+import { TimeInput } from '../time-input/TimeInput.js'
 import {
-  createTaskDraft, detectLocalTimezone, formatIso, newTaskId, taskFromView, validateTaskDraft, WEEKDAY_LABELS,
+  createTaskDraft, detectLocalTimezone, formatIso, localDateOnly, newTaskId, shiftDateOnly,
+  taskFromView, validateTaskDraft, WEEKDAY_LABELS,
 } from './scheduler-utils.js'
 
 /** 时区建议列表（UI 下拉用；权威校验在 host）。 */
@@ -227,9 +229,26 @@ export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: 
 
   const tzOptions = useMemo(() => timezones.map((tz) => <option key={tz} value={tz}>{tz}</option>), [timezones])
 
+  /** 日期不限开关：true = 忽略日期范围（仅 daysOfWeek + timeRanges）；关闭时补默认范围。 */
+  const unbounded = draft?.window?.unbounded === true
+  const toggleUnbounded = useCallback(() => {
+    setDraft((current) => {
+      if (!current) return current
+      const next = !(current.window.unbounded === true)
+      const window = { ...current.window, unbounded: next }
+      if (!next && !window.startDate && !window.endDate) {
+        const today = localDateOnly()
+        window.startDate = today
+        window.endDate = shiftDateOnly(today, 30)
+      }
+      return { ...current, window }
+    })
+  }, [])
+
+  /** 日期范围（把空串视为"未定" → null，使日历能在"仅起点"状态下继续点选终点）。 */
   const dateRangeValue: DateRangeValue = {
-    start: draft?.window?.startDate ?? null,
-    end: draft?.window?.endDate ?? null,
+    start: draft?.window.startDate || null,
+    end: draft?.window.endDate || null,
   }
   const statusText = (key: string): string => String((copy.schedulerStatus as Record<string, string>)[key] ?? key ?? '')
   const resultText = (key: string | null): string => key
@@ -297,21 +316,27 @@ export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: 
                 <Field label={`${copy.schedulerWindowDates}（${copy.schedulerWindowDateStart} ~ ${copy.schedulerWindowDateEnd}）`}>
                   <div className="wf-sched-dates">
                     <input type="text" readOnly
-                      value={draft ? `${draft.window.startDate} ~ ${draft.window.endDate}` : ''}
-                      placeholder={`${copy.schedulerWindowDateStart} ~ ${copy.schedulerWindowDateEnd}`} />
-                    <button type="button" className="wf-btn" onClick={() => setCalendarOpen((open) => !open)} disabled={!draft}>
+                      value={draft ? (unbounded ? copy.schedulerWindowUnbounded : `${draft.window.startDate || '…'} ~ ${draft.window.endDate || '…'}`) : ''}
+                      placeholder={copy.schedulerWindowDaysAll} />
+                    {/* 日期不限：左右月可独立切换、右月恒大于左月；点击后忽略日期范围 */}
+                    <button type="button" className={`wf-btn${unbounded ? ' is-primary' : ''}`}
+                      title={copy.schedulerWindowUnbounded}
+                      onClick={toggleUnbounded} disabled={!draft}>
+                      {copy.schedulerWindowUnbounded}
+                    </button>
+                    <button type="button" className="wf-btn" onClick={() => setCalendarOpen((open) => !open)} disabled={!draft || unbounded}>
                       {calendarOpen ? '▾' : '📅'}
                     </button>
                   </div>
                 </Field>
 
-                {calendarOpen && draft ? (
+                {calendarOpen && draft && !unbounded ? (
                   <div className="wf-cal-card">
                     <DateRangePicker
                       value={dateRangeValue}
                       onChange={(value) => patchWindow({
-                        startDate: value.start ?? draft.window.startDate,
-                        endDate: value.end ?? draft.window.startDate,
+                        startDate: value.start ?? '',
+                        endDate: value.end ?? '',
                       })}
                     />
                     <div className="wf-cal-card__foot">
@@ -329,7 +354,9 @@ export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: 
                         {label}
                       </button>
                     ))}
-                    <button type="button" className="wf-sched-day is-all"
+                    {/* 「每天」= daysOfWeek 为空；与具体星期互斥（选了任一星期即取消「每天」） */}
+                    <button type="button"
+                      className={`wf-sched-day is-all${((draft?.window.daysOfWeek ?? []).length === 0) ? ' is-active' : ''}`}
                       onClick={() => patchWindow({ daysOfWeek: [] })} disabled={!draft}>
                       {copy.schedulerWindowDaysAll}
                     </button>
@@ -341,9 +368,9 @@ export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: 
                     {(draft?.window.timeRanges ?? []).map((range, index) => (
                       /* eslint-disable-next-line react/no-array-index-key -- 行级编辑按索引定位 */
                       <div key={`${index}:${range.start}-${range.end}`} className="wf-sched-range-row">
-                        <input type="time" value={range.start} onChange={(event) => patchRange(index, { start: event.target.value })} />
+                        <TimeInput value={range.start} onChange={(value) => patchRange(index, { start: value })} ariaLabel={copy.schedulerRangeStart} />
                         <span>~</span>
-                        <input type="time" value={range.end} onChange={(event) => patchRange(index, { end: event.target.value })} />
+                        <TimeInput value={range.end} onChange={(value) => patchRange(index, { end: value })} ariaLabel={copy.schedulerRangeEnd} />
                         <button type="button" className="wf-btn wf-iconbtn" title={copy.inspectorDelete} onClick={() => removeRange(index)}>×</button>
                       </div>
                     ))}
@@ -373,7 +400,7 @@ export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: 
                       {(draft.dailyTimeConfig?.timePoints ?? []).map((point, index) => (
                         /* eslint-disable-next-line react/no-array-index-key -- 行级编辑按索引定位 */
                         <div key={`${index}:${point}`} className="wf-sched-range-row">
-                          <input type="time" value={point} onChange={(event) => patchTimePoint(index, event.target.value)} />
+                          <TimeInput value={point} onChange={(value) => patchTimePoint(index, value)} ariaLabel={copy.schedulerTimePoints} />
                           <button type="button" className="wf-btn wf-iconbtn" title={copy.inspectorDelete} onClick={() => removeTimePoint(index)}>×</button>
                         </div>
                       ))}
@@ -389,9 +416,9 @@ export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: 
                         disabled={!draft} />
                     </Field>
                     <Field label={copy.schedulerIntervalStartFrom}>
-                      <input type="time" value={draft?.intervalConfig?.startFrom ?? '09:00'}
-                        onChange={(event) => patch({ intervalConfig: { ...(draft?.intervalConfig ?? { intervalMinutes: 120, startFrom: '09:00' }), startFrom: event.target.value } })}
-                        disabled={!draft} />
+                      <TimeInput value={draft?.intervalConfig?.startFrom ?? '09:00'}
+                        onChange={(value) => patch({ intervalConfig: { ...(draft?.intervalConfig ?? { intervalMinutes: 120, startFrom: '09:00' }), startFrom: value } })}
+                        ariaLabel={copy.schedulerIntervalStartFrom} />
                     </Field>
                   </div>
                 )}

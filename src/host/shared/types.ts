@@ -375,6 +375,8 @@ export interface ScheduleWindowConfig {
   daysOfWeek: number[]
   /** 任务可执行的时间段（可多个；当前时刻落在任一区间内才算窗口内）。 */
   timeRanges: TimeRangeConfig[]
+  /** 是否不限有效日期（true = 忽略 startDate/endDate，仅按 daysOfWeek + timeRanges 判定；用户批注：日期不限按钮）。 */
+  unbounded?: boolean
 }
 
 /** 触发模式：定点时刻 / 固定间隔（二选一，互斥）。 */

@@ -134,6 +134,15 @@ describe('窗口判定', () => {
     expect(isValidDate('2026-09-06', weekday)).toBe(false) // 周日
   })
 
+  it('isValidDate：unbounded 忽略日期范围（仅 daysOfWeek 生效）', () => {
+    const unbound: ScheduleWindowConfig = { ...window, unbounded: true }
+    expect(isValidDate('2026-01-01', unbound)).toBe(true) // 任意日期
+    expect(isValidDate('2027-12-31', unbound)).toBe(true)
+    const unboundWeekday: ScheduleWindowConfig = { ...window, unbounded: true, daysOfWeek: [2] }
+    expect(isValidDate('2026-09-01', unboundWeekday)).toBe(true) // 周二
+    expect(isValidDate('2026-09-05', unboundWeekday)).toBe(false) // 周六
+  })
+
   it('isWithinWindow：时段边界 + 跨天午夜段（上海时区）', () => {
     // 2026-09-01 06:30 上海 = 2026-08-31 22:30Z（窗口起点后，含）
     expect(isWithinWindow(Date.UTC(2026, 7, 31, 22, 30, 0), window, TZ)).toBe(true)

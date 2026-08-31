@@ -5,7 +5,7 @@
 // 受控组件：value = { start, end }（"YYYY-MM-DD" | null），点选语义：
 //   无起点 → 设为起点；有起点无终点 → 设置终点（早于起点则重置起点）；双端已定 → 重置起点。
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 export interface DateRangeValue {
   start: string | null
@@ -99,30 +99,50 @@ export function DateRangePicker({ value, onChange, weekdays, prevLabel, nextLabe
   const end = parseDate(value.end)
   const startKey = start ? dayKey(start.year, start.month, start.day) : null
   const endKey = end ? dayKey(end.year, end.month, end.day) : null
-  // 视图锚点（左面板月份）；有起点时跟随起点
-  const [anchor, setAnchor] = useState<{ year: number; month: number }>(() => {
-    const base = start ?? { year: new Date().getFullYear(), month: new Date().getMonth() + 1 }
-    return { year: base.year, month: base.month }
-  })
   const weekHeader = weekdays ?? ['日', '一', '二', '三', '四', '五', '六']
 
-  const leftView = useMemo(() => buildMonthView(anchor.year, anchor.month), [anchor])
-  const rightMonth = anchor.month === 12 ? 1 : anchor.month + 1
-  const rightYear = anchor.month === 12 ? anchor.year + 1 : anchor.year
-  const rightView = useMemo(() => buildMonthView(rightYear, rightMonth), [anchor]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const shift = (delta: number): void => {
-    let month = anchor.month + delta
-    let year = anchor.year
-    if (month < 1) {
-      month = 12
-      year -= 1
-    } else if (month > 12) {
-      month = 1
-      year += 1
-    }
-    setAnchor({ year, month })
+  /** 月偏移（跨年归一）。 */
+  const addMonths = (year: number, month: number, delta: number): { year: number; month: number } => {
+    const total = year * 12 + (month - 1) + delta
+    return { year: Math.floor(total / 12), month: ((total % 12) + 12) % 12 + 1 }
   }
+  const monthIndex = (p: { year: number; month: number }): number => p.year * 12 + (p.month - 1)
+
+  /** 左/右月独立导航（右月恒 > 左月）；初始 = 起点所属月 + 次月。 */
+  const [range, setRange] = useState<{ left: { year: number; month: number }; right: { year: number; month: number } }>(() => {
+    const base = start ?? { year: new Date().getFullYear(), month: new Date().getMonth() + 1 }
+    return { left: { year: base.year, month: base.month }, right: addMonths(base.year, base.month, 1) }
+  })
+
+  // 外部 value.start 变化（如切换任务）→ 视图跳到起点所属月，右月取次月
+  const syncedRef = useRef<string | null>(value.start)
+  useEffect(() => {
+    if (value.start && value.start !== syncedRef.current) {
+      syncedRef.current = value.start
+      const s = parseDate(value.start)
+      if (s) {
+        const left = { year: s.year, month: s.month }
+        setRange({ left, right: addMonths(s.year, s.month, 1) })
+      }
+    }
+  }, [value.start])
+
+  /** 左月翻页：左月移动；若 ≥ 右月则右月跟进为左月+1。 */
+  const moveLeft = (delta: number): void => {
+    const nextLeft = addMonths(range.left.year, range.left.month, delta)
+    const nextRight = monthIndex(nextLeft) >= monthIndex(range.right) ? addMonths(nextLeft.year, nextLeft.month, 1) : range.right
+    setRange({ left: nextLeft, right: nextRight })
+  }
+
+  /** 右月翻页：右月移动；若 ≤ 左月则钳制为左月+1。 */
+  const moveRight = (delta: number): void => {
+    let nextRight = addMonths(range.right.year, range.right.month, delta)
+    if (monthIndex(nextRight) <= monthIndex(range.left)) nextRight = addMonths(range.left.year, range.left.month, 1)
+    setRange({ left: range.left, right: nextRight })
+  }
+
+  const leftView = useMemo(() => buildMonthView(range.left.year, range.left.month), [range])
+  const rightView = useMemo(() => buildMonthView(range.right.year, range.right.month), [range])
 
   const pick = (year: number, month: number, day: number): void => {
     const key = dayKey(year, month, day)
@@ -142,24 +162,20 @@ export function DateRangePicker({ value, onChange, weekdays, prevLabel, nextLabe
     if (!inMonth) return 'wf-cal-cell is-dim'
     const classes = ['wf-cal-cell']
     if (key === today) classes.push('is-today')
-    if (startKey !== null && endKey !== null && key > startKey && key < endKey) classes.push('is-in-range')
-    if (startKey === key) classes.push('is-start')
-    if (endKey === key) classes.push('is-end')
-    // 仅起点、无终点：起点即右侧端点（白底圆）
-    if (startKey === key && endKey === null) classes.push('is-end')
+    const isStart = startKey === key
+    const isEnd = endKey === key || (startKey === key && endKey === null)
+    if (isStart) classes.push('is-start')
+    if (isEnd) classes.push('is-end')
     return classes.join(' ')
   }
 
-  const renderMonth = (view: MonthView, withNav: boolean): React.JSX.Element => (
+  /** 渲染单个月（带 ‹ › 翻页；left/right 面板各自控制自己的月）。 */
+  const renderMonth = (view: MonthView, move: (delta: number) => void): React.JSX.Element => (
     <div className="wf-cal-month">
       <div className="wf-cal-month__head">
-        {withNav
-          ? <button type="button" className="wf-cal-nav" title={prevLabel ?? '上一月'} onClick={() => shift(-1)}>‹</button>
-          : <span className="wf-cal-nav is-placeholder" />}
+        <button type="button" className="wf-cal-nav" title={prevLabel ?? '上一月'} onClick={() => move(-1)}>‹</button>
         <span className="wf-cal-month__title">{`${view.year}年${view.month}月`}</span>
-        {withNav
-          ? <button type="button" className="wf-cal-nav" title={nextLabel ?? '下一月'} onClick={() => shift(1)}>›</button>
-          : <span className="wf-cal-nav is-placeholder" />}
+        <button type="button" className="wf-cal-nav" title={nextLabel ?? '下一月'} onClick={() => move(1)}>›</button>
       </div>
       <div className="wf-cal-grid">
         {weekHeader.map((label) => <span key={label} className="wf-cal-week">{label}</span>)}
@@ -167,6 +183,8 @@ export function DateRangePicker({ value, onChange, weekdays, prevLabel, nextLabe
       <div className="wf-cal-grid">
         {view.cells.map((cell) => {
           const key = dayKey(cell.year, cell.month, cell.day)
+          const isStart = cell.inMonth && startKey === key
+          const isEnd = cell.inMonth && (endKey === key || (startKey === key && endKey === null))
           return (
             <button
               key={cell.key}
@@ -176,7 +194,9 @@ export function DateRangePicker({ value, onChange, weekdays, prevLabel, nextLabe
               onClick={() => pick(cell.year, cell.month, cell.day)}
               tabIndex={cell.inMonth ? 0 : -1}
             >
-              {cell.day}
+              <span className="wf-cal-cell__num">{cell.day}</span>
+              {isStart ? <span className="wf-cal-cell__tag">开始</span> : null}
+              {isEnd ? <span className="wf-cal-cell__tag">结束</span> : null}
             </button>
           )
         })}
@@ -186,8 +206,8 @@ export function DateRangePicker({ value, onChange, weekdays, prevLabel, nextLabe
 
   return (
     <div className="wf-cal">
-      {renderMonth(leftView, true)}
-      {renderMonth(rightView, false)}
+      {renderMonth(leftView, moveLeft)}
+      {renderMonth(rightView, moveRight)}
     </div>
   )
 }

@@ -80,6 +80,18 @@ describe('定时任务 API 端点', () => {
     expect((await store.list()).map((t) => t.taskId)).toEqual(['task-put'])
   })
 
+  it('schedulerTaskPut：日期不限（unbounded）可省略日期范围', async () => {
+    const { api } = await makeApi()
+    const raw = makeTask('task-unbounded')
+    raw.window = { startDate: '', endDate: '', daysOfWeek: [], timeRanges: [{ start: '09:00', end: '18:00' }], unbounded: true }
+    const saved = await api.handle('schedulerTaskPut', { task: raw }) as ScheduledTask
+    expect(saved.window.unbounded).toBe(true)
+    // 非 unbounded 时缺日期范围应报错
+    const bounded = makeTask('task-bounded')
+    bounded.window = { ...bounded.window, startDate: '', endDate: '' }
+    await expect(api.handle('schedulerTaskPut', { task: bounded })).rejects.toThrow('起始日期无效')
+  })
+
   it('schedulerTaskPut：非法字段 400（中文消息）', async () => {
     const { api } = await makeApi()
     const bad = makeTask('task-bad')

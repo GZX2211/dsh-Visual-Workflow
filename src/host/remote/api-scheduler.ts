@@ -52,6 +52,7 @@ export class VisualWorkflowApiScheduler extends VisualWorkflowApiRuns {
               end: String(range?.end ?? ''),
             }))
           : [],
+        unbounded: raw.window?.unbounded === true,
       },
       triggerMode: raw.triggerMode === 'interval' ? 'interval' : 'daily_time',
       dailyTimeConfig: raw.dailyTimeConfig

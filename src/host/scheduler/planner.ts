@@ -183,15 +183,17 @@ export function timeInRanges(localMinutes: number, ranges: TimeRangeConfig[]): b
   return false
 }
 
-/** 日期（本地）是否有效：在 [startDate, endDate] 闭区间内且满足 daysOfWeek（空=每天）。 */
+/** 日期（本地）是否有效：unbounded 时忽略日期范围（仅 daysOfWeek）；否则须在 [startDate, endDate] 闭区间内且满足 daysOfWeek（空=每天）。 */
 export function isValidDate(dateOnly: string, window: ScheduleWindowConfig): boolean {
   const parsed = parseDateOnly(dateOnly)
   if (!parsed) return false
-  const start = parseDateOnly(window.startDate)
-  const end = parseDateOnly(window.endDate)
-  if (!start || !end) return false
   const key = (d: { year: number; month: number; day: number }): number => Date.UTC(d.year, d.month - 1, d.day)
-  if (key(parsed) < key(start) || key(parsed) > key(end)) return false
+  if (window.unbounded !== true) {
+    const start = parseDateOnly(window.startDate)
+    const end = parseDateOnly(window.endDate)
+    if (!start || !end) return false
+    if (key(parsed) < key(start) || key(parsed) > key(end)) return false
+  }
   const days = window.daysOfWeek ?? []
   if (days.length === 0) return true
   const weekday = new Date(key(parsed)).getUTCDay()
@@ -363,12 +365,14 @@ export function validateScheduledTask(task: Pick<
     return '时区无效'
   }
   const window = task.window
-  if (!parseDateOnly(window?.startDate)) return '起始日期无效'
-  if (!parseDateOnly(window?.endDate)) return '结束日期无效'
-  const start = parseDateOnly(window.startDate) as { year: number; month: number; day: number }
-  const end = parseDateOnly(window.endDate) as { year: number; month: number; day: number }
-  if (Date.UTC(start.year, start.month - 1, start.day) > Date.UTC(end.year, end.month - 1, end.day)) {
-    return '起始日期不能晚于结束日期'
+  if (window?.unbounded !== true) {
+    if (!parseDateOnly(window?.startDate)) return '起始日期无效'
+    if (!parseDateOnly(window?.endDate)) return '结束日期无效'
+    const start = parseDateOnly(window.startDate) as { year: number; month: number; day: number }
+    const end = parseDateOnly(window.endDate) as { year: number; month: number; day: number }
+    if (Date.UTC(start.year, start.month - 1, start.day) > Date.UTC(end.year, end.month - 1, end.day)) {
+      return '起始日期不能晚于结束日期'
+    }
   }
   const days = window.daysOfWeek ?? []
   if (!Array.isArray(days) || days.some((d) => !Number.isInteger(d) || d < 0 || d > 6)) {
@@ -415,6 +419,7 @@ export function normalizeScheduledTask(task: ScheduledTask): ScheduledTask {
       timeRanges: (task?.window?.timeRanges ?? [])
         .map((range) => ({ start: String(range?.start ?? ''), end: String(range?.end ?? '') }))
         .filter((range) => parseTime(range.start) !== null && parseTime(range.end) !== null),
+      unbounded: task?.window?.unbounded === true,
     },
     triggerMode: task?.triggerMode === 'interval' ? 'interval' : 'daily_time',
     dailyTimeConfig: task?.dailyTimeConfig

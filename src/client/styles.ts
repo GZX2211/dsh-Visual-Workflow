@@ -326,7 +326,7 @@ export const styles = `
 .wf-sched-days{display:flex;gap:4px;flex-wrap:wrap}
 .wf-sched-day{border:1px solid var(--wf-border);border-radius:8px;background:var(--wf-layer);color:var(--wf-ink-2);padding:5px 0;width:32px;font-size:11px;cursor:pointer;font-weight:600}
 .wf-sched-day:hover{border-color:var(--wf-brand);color:var(--wf-ink)}
-.wf-sched-day.is-active,.wf-sched-day.is-all{border-color:var(--wf-brand);background:color-mix(in srgb,var(--wf-brand) 12%,var(--wf-layer));color:var(--wf-brand)}
+.wf-sched-day.is-active{border-color:var(--wf-brand);background:color-mix(in srgb,var(--wf-brand) 12%,var(--wf-layer));color:var(--wf-brand)}
 .wf-sched-days .is-all{width:auto;padding:5px 10px}
 .wf-sched-ranges{display:flex;flex-direction:column;gap:6px}
 .wf-sched-ranges .wf-btn.is-ghost{align-self:flex-start;font-size:10px;padding:3px 8px}
@@ -359,15 +359,24 @@ export const styles = `
 .wf-cal-nav.is-placeholder{visibility:hidden}
 .wf-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
 .wf-cal-week{font-size:11px;font-weight:650;color:var(--wf-ink);text-align:center;padding:2px 0}
-.wf-cal-cell{border:0;background:transparent;color:var(--wf-ink-2);font-size:12px;font-variant-numeric:tabular-nums;height:30px;display:grid;place-items:center;position:relative;cursor:pointer;border-radius:50%;padding:0}
+.wf-cal-cell{border:0;background:transparent;color:var(--wf-ink-2);font-size:12px;font-variant-numeric:tabular-nums;height:36px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;position:relative;cursor:pointer;padding:0}
 .wf-cal-cell:disabled{cursor:default}
 .wf-cal-cell.is-dim{color:var(--wf-ink-3,#6b7075)}
-.wf-cal-cell:not(:disabled):hover{background:color-mix(in srgb,var(--wf-brand) 18%,transparent)}
-.wf-cal-cell.is-in-range{background:color-mix(in srgb,var(--wf-ink) 22%,transparent);border-radius:0}
-.wf-cal-cell.is-start{border-radius:50% 0 0 50%}
-.wf-cal-cell.is-end{border-radius:0 50% 50% 0}
-.wf-cal-cell.is-start,.wf-cal-cell.is-end{background:color-mix(in srgb,var(--wf-ink) 22%,transparent)}
-.wf-cal-cell.is-today{border:1px solid color-mix(in srgb,var(--wf-ink) 55%,transparent)}
-.wf-cal-cell.is-start::after,.wf-cal-cell.is-end::after{content:"";position:absolute;width:26px;height:26px;border-radius:50%;background:#f2f2f3;top:2px;left:50%;transform:translateX(-50%);z-index:-1}
-.wf-cal-cell.is-start.is-end::after{display:none}
+.wf-cal-cell:not(:disabled):hover .wf-cal-cell__num{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--wf-brand) 55%,transparent)}
+.wf-cal-cell__num{display:grid;place-items:center;width:26px;height:26px;border-radius:50%;position:relative;z-index:1;font-size:12px}
+.wf-cal-cell.is-start .wf-cal-cell__num,.wf-cal-cell.is-end .wf-cal-cell__num{background:var(--wf-brand);color:#ffffff}
+.wf-cal-cell__tag{font-size:7px;line-height:1;color:var(--wf-ink-2)}
+.wf-cal-cell.is-start .wf-cal-cell__tag,.wf-cal-cell.is-end .wf-cal-cell__tag{color:var(--wf-brand);font-weight:650}
+.wf-cal-cell.is-today .wf-cal-cell__num{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--wf-ink) 55%,transparent)}
+/* ---- 自定义时间输入（文本按位 + 双列滑轮，两次点击确认） ---- */
+.wf-time{display:inline-flex;align-items:center;gap:6px;position:relative;flex:1;min-width:0}
+.wf-time__field{flex:1;min-width:0;border:1px solid var(--wf-border-strong);border-radius:7px;background:var(--wf-layer);color:var(--wf-ink);padding:5px 7px;outline:0;font:inherit;font-size:12px;font-variant-numeric:tabular-nums}
+.wf-time__field:focus{border-color:var(--wf-brand)}
+.wf-time__clock{border:1px solid var(--wf-border);background:var(--wf-layer);color:var(--wf-ink-2);border-radius:7px;padding:5px 7px;cursor:pointer;font-size:11px}
+.wf-time__clock:hover{border-color:var(--wf-brand);color:var(--wf-ink)}
+.wf-time__picker{position:absolute;top:100%;left:0;z-index:60;display:flex;gap:2px;margin-top:4px;padding:6px;border:1px solid var(--wf-border-strong);border-radius:10px;background:var(--wf-layer);box-shadow:0 14px 38px color-mix(in srgb,var(--wf-ink) 16%,transparent)}
+.wf-time__col{display:flex;flex-direction:column;gap:2px;max-height:188px;overflow:auto;scrollbar-width:thin;min-width:46px}
+.wf-time__opt{border:0;background:transparent;color:var(--wf-ink-2);font-size:12px;font-variant-numeric:tabular-nums;padding:5px 8px;border-radius:7px;cursor:pointer}
+.wf-time__opt:hover{background:var(--wf-layer-2);color:var(--wf-ink)}
+.wf-time__opt.is-active{background:var(--wf-brand);color:#ffffff;font-weight:650}
 `
