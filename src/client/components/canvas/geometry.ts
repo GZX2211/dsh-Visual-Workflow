@@ -48,6 +48,10 @@ export function clamp(value: number, minimum: number, maximum: number): number {
 export interface EdgeGeometry {
   start: { x: number; y: number }
   end: { x: number; y: number }
+  /** 贝塞尔控制点 1（源端口向外伸出方向）。 */
+  c1: { x: number; y: number }
+  /** 贝塞尔控制点 2（目标端口外侧进入方向）。 */
+  c2: { x: number; y: number }
   label: { x: number; y: number }
   path: string
 }
@@ -78,8 +82,10 @@ export function swappedOf(node: CanvasNode | null | undefined): boolean {
   return (node?.data as { swapPorts?: unknown } | undefined)?.swapPorts === true
 }
 
-/** 连线贝塞尔几何（源右侧 → 目标左侧；组卡片流程接点居中，组内成员锚到成员行）。
- *  交换过连接点的节点：源出点改在左边缘（start.x=左侧），目标入点改在右边缘（end.x=右侧）。 */
+/** 连线贝塞尔几何（源端口 → 目标端口；组卡片流程接点居中，组内成员锚到成员行）。
+ *  交换过连接点的节点：源出点改在左边缘（start.x=左侧），目标入点改在右边缘（end.x=右侧）。
+ *  控制点方向跟随端口所在边缘（右缘向外 +x、左缘向外 -x），连线从正确一侧进出，不会
+ *  穿入卡片体被遮挡（用户批注：连线方向应当根据连接点确定，而非默认朝右）。 */
 export function edgeGeometry(edge: CanvasEdge, byId: Map<string, CanvasNode>): EdgeGeometry | null {
   const source = byId.get(edge.source)
   const target = byId.get(edge.target)
@@ -102,13 +108,23 @@ export function edgeGeometry(edge: CanvasEdge, byId: Map<string, CanvasNode>): E
         x: target.position.x + (targetSwapped ? targetSize.w : 0),
         y: target.position.y + targetSize.h * (target.kind === 'group' ? 0.5 : handleY(edge.targetHandle ?? 'flow-in')),
       }
-  const forward = Math.max(54, Math.abs(end.x - start.x) * 0.46)
-  const bend = end.x >= start.x ? forward : Math.max(90, forward * 0.7)
+  // 端口朝向（端口所在边缘的外法向）：右缘 +1、左缘 -1。组内成员沿用固定侧
+  // （成员出点=组卡片右缘、入点=组卡片左缘，见 memberAnchor）。
+  // 用户批注：连线方向应当根据连接点（左缘/右缘）确定，而非默认朝右。
+  const startDir = sourceGroup ? 1 : (sourceSwapped ? -1 : 1)
+  const endDir = targetGroup ? -1 : (targetSwapped ? 1 : -1)
+  // 控制点沿各自端口外法向延伸：出点从所在边缘向外伸出、入点从所在边缘外侧进入，
+  // 从而不会穿入节点卡片体导致被遮挡。标准「左→右相对（源右缘/目标左缘）」时与旧几何一致（回归安全）。
+  const bend = Math.max(54, Math.abs(end.x - start.x) * 0.46)
+  const c1 = { x: start.x + startDir * bend, y: start.y }
+  const c2 = { x: end.x + endDir * bend, y: end.y }
   return {
     start,
     end,
+    c1,
+    c2,
     label: { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 },
-    path: `M ${start.x} ${start.y} C ${start.x + bend} ${start.y}, ${end.x - bend} ${end.y}, ${end.x} ${end.y}`,
+    path: `M ${start.x} ${start.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${end.x} ${end.y}`,
   }
 }
 

@@ -11,7 +11,7 @@ import type { CanvasEdge, CanvasNode } from '../../studio/studio-state.js'
 import { conditionLabel } from '../../lib/graph-model.js'
 import { FlowNode } from './FlowNode.js'
 import { GroupCard } from './GroupCard.js'
-import { connectionTargetAt, groupSurfaceUnderPoint, edgeGeometry, GRAPH_NODE_SIZE, GRAPH_MIN_ZOOM, GRAPH_MAX_ZOOM, nodeSizeOf, clamp } from './geometry.js'
+import { connectionTargetAt, groupOfMember, groupSurfaceUnderPoint, swappedOf, edgeGeometry, GRAPH_NODE_SIZE, GRAPH_MIN_ZOOM, GRAPH_MAX_ZOOM, nodeSizeOf, clamp } from './geometry.js'
 
 export interface CanvasApi {
   fitView(options?: { padding?: number; nodes?: CanvasNode[] }): void
@@ -380,8 +380,12 @@ export function GraphCanvas(props: GraphCanvasProps) {
     const mouseWorld = rect
       ? { x: (connectionDraft.clientX - rect.left - current.x) / current.zoom, y: (connectionDraft.clientY - rect.top - current.y) / current.zoom }
       : connectionDraft.start
+    // 草稿线起始控制点方向跟随源端口朝向（与 edgeGeometry 一致；仅出点可发起连线）。
+    // 源为组内成员时出点固定在组卡片右缘（+1）；交换节点出点在左缘（-1）；默认右缘（+1）。
+    const sourceNode = byId.get(connectionDraft.source)
+    const draftStartDir = sourceNode ? (groupOfMember(byId, sourceNode.id) ? 1 : (swappedOf(sourceNode) ? -1 : 1)) : 1
     const bend = Math.max(54, Math.abs(mouseWorld.x - connectionDraft.start.x) * 0.46)
-    draftPath = `M ${connectionDraft.start.x} ${connectionDraft.start.y} C ${connectionDraft.start.x + bend} ${connectionDraft.start.y}, ${mouseWorld.x - bend} ${mouseWorld.y}, ${mouseWorld.x} ${mouseWorld.y}`
+    draftPath = `M ${connectionDraft.start.x} ${connectionDraft.start.y} C ${connectionDraft.start.x + draftStartDir * bend} ${connectionDraft.start.y}, ${mouseWorld.x - bend} ${mouseWorld.y}, ${mouseWorld.x} ${mouseWorld.y}`
   }
 
   const transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`

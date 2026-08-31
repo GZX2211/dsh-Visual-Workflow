@@ -84,7 +84,60 @@ describe('画布几何（协作组/阶段）', () => {
     expect(e3!.start.x).toBe(100 + 208)
     expect(e3!.end.x).toBe(100)
   })
+
+  it('edgeGeometry：控制点方向跟随端口朝向，而非默认朝右（用户批注）', () => {
+    const normal = nodeOf('n', 'agent')
+    const normalTgt = nodeOf('nr', 'agent')
+    const srcSwap = nodeOf('ss', 'agent', { swapPorts: true })
+    const tgtSwap = nodeOf('tt', 'agent', { swapPorts: true })
+    const byId = new Map<string, CanvasNode>([
+      ['n', normal], ['nr', normalTgt], ['ss', srcSwap], ['tt', tgtSwap],
+    ])
+
+    // 标准相对（未交换）：源出点在右缘 → c1 在 start 右侧；目标入点在左缘 → c2 在 end 左侧
+    const std = edgeGeometry({ id: 'e', source: 'n', target: 'nr', sourceHandle: 'flow-out', targetHandle: 'flow-in' }, byId)!
+    expect(std.c1.x).toBeGreaterThan(std.start.x)
+    expect(std.c2.x).toBeLessThan(std.end.x)
+
+    // 源交换（出点移左缘）：控制点应向左伸出（start 左缘 100，c1<100），否则穿入自身卡片体被遮挡
+    const srcEdge = edgeGeometry({ id: 'e', source: 'ss', target: 'nr', sourceHandle: 'flow-out', targetHandle: 'flow-in' }, byId)!
+    expect(srcEdge.c1.x).toBeLessThan(srcEdge.start.x)
+
+    // 目标交换（入点移右缘）：控制点应从右侧进入（end 右缘 308，c2>308），否则穿入目标卡片体被遮挡
+    const tgtEdge = edgeGeometry({ id: 'e', source: 'n', target: 'tt', sourceHandle: 'flow-out', targetHandle: 'flow-in' }, byId)!
+    expect(tgtEdge.c2.x).toBeGreaterThan(tgtEdge.end.x)
+  })
+
+  it('edgeGeometry：同侧（都在右缘）——曲线不穿入左卡卡片体（批注：被隐藏到后面）', () => {
+    // 左卡(交换,入点右缘 x=368)、右卡(正常,出点右缘 x=768)；流向右→左，端口同在右缘
+    const L = nodeOf('L', 'agent', { swapPorts: true })
+    L.position = { x: 160, y: 300 }
+    const R = nodeOf('R', 'agent')
+    R.position = { x: 560, y: 300 }
+    const byId = new Map<string, CanvasNode>([['L', L], ['R', R]])
+
+    const edge = edgeGeometry({ id: 'e', source: 'R', target: 'L', sourceHandle: 'flow-out', targetHandle: 'flow-in' }, byId)!
+    // 左卡卡片体 x∈[160,368]；曲线若穿入左卡，min x 会 < 368（旧逻辑为 351）。修复后应保持 >= 左卡右缘。
+    const range = pathXRange(edge.path)
+    expect(range.min).toBeGreaterThanOrEqual(368 - 0.5)
+  })
 })
+
+/** 采样贝塞尔路径的横坐标范围（按控制点重建，用于断言曲线不穿入节点卡片体）。 */
+function pathXRange(path: string): { min: number; max: number } {
+  const m = path.match(/M ([-\d.]+) ([-\d.]+) C ([-\d.]+) ([-\d.]+), ([-\d.]+) ([-\d.]+), ([-\d.]+) ([-\d.]+)/)
+  if (!m) return { min: NaN, max: NaN }
+  const [, sx, , c1x, , c2x, , ex] = m.map(Number)
+  let min = Infinity
+  let max = -Infinity
+  for (let i = 0; i <= 120; i++) {
+    const t = i / 120
+    const x = (1 - t) ** 3 * sx + 3 * (1 - t) ** 2 * t * c1x + 3 * (1 - t) * t ** 2 * c2x + t ** 3 * ex
+    if (x < min) min = x
+    if (x > max) max = x
+  }
+  return { min, max }
+}
 
 describe('groupSurfaceFromElements（入组落点：仅协作组表面，连接点不具入组功能）', () => {
   function groupEl(id: string): HTMLDivElement {

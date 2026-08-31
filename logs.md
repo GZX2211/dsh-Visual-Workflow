@@ -26,6 +26,15 @@
 
 ## 2026.08.30
 
+- git版本：[f08327d] [v0.1.0] [00:59]（feat：工作台改官方侧边栏入口 + 浮窗/分栏双视图）
+  - 【安装修正】之前 `dsh plugin add link:$PWD` 在沙箱下写 profile（C:\Users\GZX\.dsh）被拦（EPERM/sqlite），导致插件虽被软链接却没进 `dsh.profile.bundles`，host 从不加载、前端无入口；以更高权限重跑后正确挂载（bundles 含 dsh-visual-workflow、依赖写入、dump-config 组合树出现 visual-workflow 行、GUI 能 serve /plugins/dsh-visual-workflow/client.js）。
+  - 【入口改版】入口从右下角 FAB 改为官方侧边栏（注入到设置按钮上方），新增 SplitWindow/WorkbenchHost/useWorkbenchView；工作台支持浮窗与分栏两种视图模式，可切换、可拖动分栏宽度。
+  - 【修复时序】`useWorkbenchView` 的注入 observer 原来挂可能为空的 sidebarCol（插件加载早于官方侧边栏渲染），导致 `place()` 提前 return、入口永不注入；改为观察必然存在的 document.body，幂等重试到锚点出现。
+  - 【修复层级】官方设置按钮外包一层 display:contents 空 div，原 `anchor.parentElement` 取到空 wrapper，把入口插进 settingsArea 内部，折叠图标栏下与设置按钮同排挤压；改用 `closest('[class*="settingsArea"]')` 定位容器，使入口为 footArea(纵向) 中 settingsArea 的上方兄弟。
+  - 【新增开关】入口支持「再次点击关闭」(toggleOpen)：浮窗与分栏共用 open 态，关闭即收起宿主并还原官方对话区右内边距（exitSplit）。
+  - 【验证】pnpm typecheck 4 program 通过；全量 vitest 45+ 文件（host+client）678 例全通过；真实 GUI 验证：入口在设置按钮上方（展开/折叠两种状态）、点击开/关（浮窗+分栏）均正常。
+  - 【遗留】入口注入基于运行时 DOM（非侵入式），官方侧边栏/设置按钮结构若变更可能需同步选择器。
+
 - git版本：[6e4ee78] [v0.1.0] [00:30]（docs：运行复盘与改进清单）
   - 新增 `docs/运行复盘与改进清单.md`：自包含复盘（术语/当次运行时间线/自助取证路径/已修复项防回退/P0-P2 共 7 项待跟进问题），供无上下文的下一个 AI 直接接手。
   - 待跟进核心：待命成员被误判终态导致组卡片提前 ok；快照 endedAt 冻结而 output 覆盖（记录自相矛盾）；节点续跑=复用旧对话并整段重复汇报；协作类错误文案弱指向；组内失败退化为父代理桥接；childForNode O(n)；attempts 无终止原因。
