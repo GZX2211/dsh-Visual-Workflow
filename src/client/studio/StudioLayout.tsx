@@ -33,6 +33,7 @@ import { ConfirmDialog } from '../components/confirm-dialog/ConfirmDialog.js'
 import { RunHistory } from '../components/run-history/RunHistory.js'
 import { ServiceConsole } from '../components/service-console/ServiceConsole.js'
 import { ComboManager } from '../components/combo-manager/ComboManager.js'
+import { SchedulerManager } from '../components/scheduler/SchedulerManager.js'
 
 export interface StudioLayoutProps {
   t: Dict
@@ -151,6 +152,8 @@ export function StudioLayout(props: StudioLayoutProps) {
               )
             : null}
         </div>
+        {/* 定时任务：模式下拉右侧、「组合」左侧（新功能本阶段入口） */}
+        <button type="button" className="wf-btn" title={t.scheduler} onClick={() => dispatch({ type: 'SCHEDULER_OPEN', open: true })}>{t.scheduler}</button>
         <button type="button" className="wf-btn" title={t.combos} onClick={() => dispatch({ type: 'COMBO_OPEN', open: true })}>{t.combos}</button>
         {/* 图2：窗口切换按钮注册到「组合」右侧、「关闭」左侧；float↔split */}
         {onToggleView
@@ -336,6 +339,16 @@ export function StudioLayout(props: StudioLayoutProps) {
             onClose={() => dispatch({ type: 'COMBO_OPEN', open: false })}
             onToast={(kind, text) => toast(kind, text)}
             onChanged={() => { void remote.call(EP.EP_TOOL_COMBOS).then((items) => dispatch({ type: 'COMBOS_LOADED', items: Array.isArray(items) ? items : [] })).catch(() => {}) }}
+          />
+        : null}
+
+      {state.schedulerOpen
+        ? <SchedulerManager
+            copy={t}
+            remote={remote}
+            sessionId={sessionId}
+            onClose={() => dispatch({ type: 'SCHEDULER_OPEN', open: false })}
+            onToast={(kind, text) => toast(kind, text)}
           />
         : null}
 

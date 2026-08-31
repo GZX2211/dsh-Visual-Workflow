@@ -54,6 +54,25 @@ export class RuntimeLifecycle extends RuntimeObserve {
     await this.terminateRun(entry, { status: 'stopped', summary: '运行已停止', abortReason: 'user-stop' })
   }
 
+  /**
+   * 外部挂起运行（定时任务执行窗口 end：新功能本阶段，见 prompt/定时任务开发.md）：
+   *   - run → paused（保留运行锁，断点可续跑——与暂停节点同态）；
+   *   - 不中断正在执行的子代理（「等待仍在执行的角色节点执行完毕」：paused 态下
+   *     subagent/end 仍回写节点状态）；下一个角色节点由 requireActiveRootRun 的
+   *     WF_PAUSED 拦下（父代理不再调度新节点）；
+   *   - 续跑走现有 resumeRun（下一窗口 start 注入「继续运行」指令）。
+   * 幂等：非 running 返回 false（引擎按「轮次结束」处理）。
+   */
+  async suspendRun(runId: string, options: { summary?: string } = {}): Promise<boolean> {
+    const entry = this.runs.get(runId)
+    if (!entry || entry.snapshot.status !== 'running') return false
+    const snapshot = entry.snapshot
+    snapshot.status = 'paused'
+    snapshot.summary = options.summary ?? '执行窗口结束，已暂停（等待下一窗口继续）'
+    await this.persistWarn(entry)
+    return true
+  }
+
   /** 父代理回合以 error 结束（编排已死）→ 自动把运行标记为 failed。 */
   async failRunForParentError(entry: RunEntry, error: unknown): Promise<void> {
     const message = messageOf(error)

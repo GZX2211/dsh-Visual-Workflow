@@ -207,7 +207,9 @@ describe('T-014 graph-model 纯类型形态', () => {
 
 // ---------------------------------------------------------------------------
 // protocol.ts 端点清单逐字比对（架构文档 §4.6 全部 41 端点；图2 交互改造新增
-// 工作流模板 3 端点：listFlowTemplates/putFlowTemplate/deleteFlowTemplate）
+// 工作流模板 3 端点：listFlowTemplates/putFlowTemplate/deleteFlowTemplate；
+// 定时任务阶段新增 3 端点：schedulerTasks/schedulerTaskPut/schedulerTaskDelete
+// ——新功能端点以 prompt/定时任务开发.md 为准，用户指令不改写 docs/ 既有文档）
 // ---------------------------------------------------------------------------
 const EXPECTED_ENDPOINTS: string[] = [
   // 工作流
@@ -228,6 +230,8 @@ const EXPECTED_ENDPOINTS: string[] = [
   'dbTest', 'dbSchema', 'dbSearchPreview',
   // 导入导出 v2
   'exportWorkflow', 'importWorkflow', 'exportAgentTemplate', 'importAgentTemplate',
+  // 定时任务（新功能本阶段；需求见 prompt/定时任务开发.md）
+  'schedulerTasks', 'schedulerTaskPut', 'schedulerTaskDelete',
 ]
 
 /**
@@ -244,11 +248,11 @@ function readProtocolEndpoints(): string[] {
   return out
 }
 
-describe('T-014 protocol.ts 端点清单（§4.6 全部端点）', () => {
-  it('端点常量定义 45 个且无重复', () => {
+describe('T-014 protocol.ts 端点清单（§4.6 全部端点 + 定时任务 3 端点）', () => {
+  it('端点常量定义 48 个且无重复', () => {
     const eps = readProtocolEndpoints()
-    expect(eps).toHaveLength(45)
-    expect(new Set(eps).size).toBe(45) // 45 端点名全部唯一（无重复常量）
+    expect(eps).toHaveLength(48)
+    expect(new Set(eps).size).toBe(48) // 48 端点名全部唯一（无重复常量）
   })
 
   it('端点名逐字覆盖 §4.6 清单（正反向双向一致）', () => {

@@ -12,12 +12,12 @@ import * as EP from '../shared/protocol.js'
 import { HttpError, httpError, readBody, sendJson } from './http.js'
 import { openServiceDebug, pumpServiceDebug, ServiceDebugError, type SseSink } from './service-debug.js'
 import type { ApiHost, WebServerLike } from './api-base.js'
-import { VisualWorkflowApiRuns } from './api-runs.js'
+import { VisualWorkflowApiScheduler } from './api-scheduler.js'
 
 /**
  * GUI API 最终类：全部端点方法经继承链汇聚（端点白名单由共享协议常量派生）。
  */
-export class VisualWorkflowApi extends VisualWorkflowApiRuns {}
+export class VisualWorkflowApi extends VisualWorkflowApiScheduler {}
 
 export function registerRoutes(
   ctx: { get(name: string): unknown; logger?: { warn?(message: string): void } },

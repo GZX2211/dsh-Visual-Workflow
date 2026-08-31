@@ -305,4 +305,69 @@ export const styles = `
    分栏时仅由 useWorkbenchView 给官方 centerCol 设右内边距（让出右半），工作台以 fixed 覆盖右侧。 */
 @media(max-width:1180px){.wf-status{display:none}.wf-titlebar__note{display:none}}
 @media(max-width:760px){.wf-toolbar{padding:7px}.wf-tabs{padding:0 10px}.wf-titlebar__badge{display:none}.wf-lib-tab{font-size:10px}.wf-confirm__actions .wf-btn{flex:1}}
+/* ---- 定时任务（新功能本阶段；样式对齐组合管理 wf-combo 体系） ---- */
+.wf-sched__form{flex:1.25;min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--wf-border);overflow:hidden}
+.wf-sched__form-scroll{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:10px;padding:12px 14px;scrollbar-width:thin}
+.wf-sched__form-foot{flex:none;display:flex;gap:7px;padding:10px 14px;border-top:1px solid var(--wf-border)}
+.wf-sched__form-foot .wf-btn{flex:1;font-size:11px;padding:6px 10px}
+.wf-sched-field{display:grid;gap:4px;color:var(--wf-ink-2);font-size:11px}
+.wf-sched-field__label{font-weight:600;color:var(--wf-ink)}
+.wf-sched-field__hint{font-size:9px;line-height:1.55;color:var(--wf-ink-2)}
+.wf-sched-field select,.wf-sched-field input{border:1px solid var(--wf-border-strong);border-radius:7px;background:var(--wf-layer-2);color:var(--wf-ink);padding:6px 8px;outline:0;font:inherit;font-size:12px}
+.wf-sched-field select:focus,.wf-sched-field input:focus{border-color:var(--wf-brand)}
+.wf-sched-group{display:grid;gap:8px;padding:10px 12px;border:1px solid var(--wf-border);border-radius:11px;background:var(--wf-layer-2)}
+.wf-sched-group h5{margin:0;font-size:12px;color:var(--wf-ink)}
+.wf-sched-radios{display:flex;flex-direction:column;gap:6px}
+.wf-sched-radio{display:flex;align-items:center;gap:7px;color:var(--wf-ink);font-size:11px;cursor:pointer}
+.wf-sched-radio input{accent-color:var(--wf-brand)}
+.wf-sched-dates{display:flex;gap:7px}
+.wf-sched-dates input{flex:1;font-variant-numeric:tabular-nums}
+.wf-sched-dates .wf-btn{font-size:12px;padding:5px 10px}
+.wf-sched-days{display:flex;gap:4px;flex-wrap:wrap}
+.wf-sched-day{border:1px solid var(--wf-border);border-radius:8px;background:var(--wf-layer);color:var(--wf-ink-2);padding:5px 0;width:32px;font-size:11px;cursor:pointer;font-weight:600}
+.wf-sched-day:hover{border-color:var(--wf-brand);color:var(--wf-ink)}
+.wf-sched-day.is-active,.wf-sched-day.is-all{border-color:var(--wf-brand);background:color-mix(in srgb,var(--wf-brand) 12%,var(--wf-layer));color:var(--wf-brand)}
+.wf-sched-days .is-all{width:auto;padding:5px 10px}
+.wf-sched-ranges{display:flex;flex-direction:column;gap:6px}
+.wf-sched-ranges .wf-btn.is-ghost{align-self:flex-start;font-size:10px;padding:3px 8px}
+.wf-sched-range-row{display:flex;align-items:center;gap:6px}
+.wf-sched-range-row input{flex:1;min-width:0;border:1px solid var(--wf-border-strong);border-radius:7px;background:var(--wf-layer);color:var(--wf-ink);padding:5px 7px;outline:0;font:inherit;font-size:12px;font-variant-numeric:tabular-nums}
+.wf-sched-range-row input:focus{border-color:var(--wf-brand)}
+.wf-sched-range-row .wf-btn{padding:3px 7px;font-size:11px}
+.wf-sched-row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.wf-sched-status-grid{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:10px;color:var(--wf-ink-2)}
+.wf-sched-status-cell{display:inline-flex;align-items:center;gap:5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wf-sched-status-cell.is-error{color:var(--wf-err);white-space:normal;width:100%}
+.wf-sched-dot{width:8px;height:8px;border-radius:50%;background:var(--wf-ink-2);flex:none;display:inline-block}
+.wf-sched-dot.is-running{background:var(--wf-ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--wf-ok) 16%,transparent)}
+.wf-sched-dot.is-waiting{background:#e6b23c}
+.wf-sched-dot.is-paused{background:var(--wf-ink-2)}
+.wf-sched-dot.is-error{background:var(--wf-err)}
+.wf-sched-list-meta{display:inline-flex;align-items:center;gap:6px;min-width:0;font-size:9px;color:var(--wf-ink-2)}
+.wf-sched-enabled{flex:none;display:flex;align-items:center;gap:7px;padding:10px 14px;border-top:1px solid var(--wf-border);color:var(--wf-ink);font-size:11px}
+.wf-sched-enabled input{accent-color:var(--wf-brand)}
+/* ---- 双月日历（样式参考用户日历素材） ---- */
+.wf-cal-card{display:grid;gap:8px;padding:10px;border:1px solid var(--wf-border-strong);border-radius:12px;background:var(--wf-layer);box-shadow:0 14px 40px color-mix(in srgb,var(--wf-ink) 16%,transparent)}
+.wf-cal-card__foot{display:flex;justify-content:flex-end}
+.wf-cal-card__foot .wf-btn{font-size:11px;padding:5px 14px}
+.wf-cal{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:8px;border-radius:12px;background:color-mix(in srgb,var(--wf-bg) 78%,transparent)}
+.wf-cal-month{display:grid;gap:6px;min-width:0}
+.wf-cal-month__head{display:grid;grid-template-columns:26px 1fr 26px;align-items:center;gap:4px;color:var(--wf-ink)}
+.wf-cal-month__title{font-size:13px;font-weight:650;text-align:center;white-space:nowrap}
+.wf-cal-nav{border:0;background:transparent;color:var(--wf-ink-2);font-size:15px;line-height:1;padding:4px;cursor:pointer;border-radius:6px}
+.wf-cal-nav:hover{color:var(--wf-ink);background:var(--wf-layer-2)}
+.wf-cal-nav.is-placeholder{visibility:hidden}
+.wf-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+.wf-cal-week{font-size:11px;font-weight:650;color:var(--wf-ink);text-align:center;padding:2px 0}
+.wf-cal-cell{border:0;background:transparent;color:var(--wf-ink-2);font-size:12px;font-variant-numeric:tabular-nums;height:30px;display:grid;place-items:center;position:relative;cursor:pointer;border-radius:50%;padding:0}
+.wf-cal-cell:disabled{cursor:default}
+.wf-cal-cell.is-dim{color:var(--wf-ink-3,#6b7075)}
+.wf-cal-cell:not(:disabled):hover{background:color-mix(in srgb,var(--wf-brand) 18%,transparent)}
+.wf-cal-cell.is-in-range{background:color-mix(in srgb,var(--wf-ink) 22%,transparent);border-radius:0}
+.wf-cal-cell.is-start{border-radius:50% 0 0 50%}
+.wf-cal-cell.is-end{border-radius:0 50% 50% 0}
+.wf-cal-cell.is-start,.wf-cal-cell.is-end{background:color-mix(in srgb,var(--wf-ink) 22%,transparent)}
+.wf-cal-cell.is-today{border:1px solid color-mix(in srgb,var(--wf-ink) 55%,transparent)}
+.wf-cal-cell.is-start::after,.wf-cal-cell.is-end::after{content:"";position:absolute;width:26px;height:26px;border-radius:50%;background:#f2f2f3;top:2px;left:50%;transform:translateX(-50%);z-index:-1}
+.wf-cal-cell.is-start.is-end::after{display:none}
 `

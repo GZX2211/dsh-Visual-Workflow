@@ -44,5 +44,6 @@ export function createInitialState(sessionId: string): StudioState {
     runHistory: [],
     selectedRunId: null,
     comboOpen: false,
+    schedulerOpen: false,
   }
 }

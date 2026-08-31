@@ -71,3 +71,4 @@ export type StudioAction =
   | { type: 'RUN_HISTORY_LOADED'; items: RunSnapshot[] }
   | { type: 'RUN_HISTORY_SELECT'; id: string }
   | { type: 'COMBO_OPEN'; open: boolean }
+  | { type: 'SCHEDULER_OPEN'; open: boolean }

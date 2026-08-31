@@ -267,7 +267,7 @@ describe('buildResumedSnapshot', () => {
 // ---------------------------------------------------------------------------
 
 describe('findResumableRun', () => {
-  it('按 runId 命中 paused 记录；completed 不可恢复；归属不匹配返回 null', async () => {
+  it('按 runId 命中 paused 记录；stopped 也可恢复（用户裁决修正）；归属不匹配返回 null', async () => {
     const h = await makeHarness()
     await makePausedRun(h)
     const prev = await h.store.getRun('run-1')
@@ -276,11 +276,11 @@ describe('findResumableRun', () => {
     const found = await findResumableRun(h.store, { sessionId: 'session-1', flowId: 'flow-1', fromRunId: 'run-1' })
     expect(found?.id).toBe('run-1')
 
-    // 终态化后不可恢复（停止运行写 stopped）
+    // 停止运行写 stopped；定时任务阶段语义修正：stopped 可恢复（停止后点「运行/恢复」断点续跑）
     await h.runtime.stopRun('run-1')
     const stopped = await h.store.getRun('run-1')
     expect(stopped?.status).toBe('stopped')
-    expect(await findResumableRun(h.store, { sessionId: 'session-1', flowId: 'flow-1', fromRunId: 'run-1' })).toBeNull()
+    expect((await findResumableRun(h.store, { sessionId: 'session-1', flowId: 'flow-1', fromRunId: 'run-1' }))?.id).toBe('run-1')
   })
 
   it('未指定 runId 取最近可恢复记录（startedAt 倒序）', async () => {
@@ -355,14 +355,23 @@ describe('runtime.resumeRun', () => {
     expect(directive).not.toContain('（未指定）')
   })
 
-  it('无断点 → WF_NO_RESUME_POINT；指定不可恢复 → WF_NOT_RESUMABLE；指定不存在 → WF_NOT_FOUND', async () => {
+  it('无断点 → WF_NO_RESUME_POINT；指定不可恢复（completed）→ WF_NOT_RESUMABLE；指定不存在 → WF_NOT_FOUND', async () => {
     const h = await makeHarness()
     await h.store.saveWorkflow(makeFlow(), 'session-1', { force: true })
     await expect(h.runtime.resumeRun({ sessionId: 'session-1', flowId: 'flow-1' })).rejects.toMatchObject({ code: 'WF_NO_RESUME_POINT' })
 
+    // 用户停止（stopped）现在可恢复（定时任务阶段语义修正）：resumeRun 成功续跑
     await makePausedRun(h)
     await h.runtime.stopRun('run-1')
-    await expect(h.runtime.resumeRun({ sessionId: 'session-1', flowId: 'flow-1', fromRunId: 'run-1' })).rejects.toMatchObject({
+    const resumed = await h.runtime.resumeRun({ sessionId: 'session-1', flowId: 'flow-1', fromRunId: 'run-1' })
+    expect(resumed.resumedFromRunId).toBe('run-1')
+
+    // completed 仍不可恢复
+    const { createRunSnapshot } = await import('../../src/host/orchestrator/snapshot.js')
+    const done = createRunSnapshot({ runId: 'run-done', flow: makeFlow(), sessionId: 'session-1', mode: 'mode1', now: h.clock.now })
+    done.status = 'completed'
+    await h.store.saveRun(done)
+    await expect(h.runtime.resumeRun({ sessionId: 'session-1', flowId: 'flow-1', fromRunId: 'run-done' })).rejects.toMatchObject({
       code: 'WF_NOT_RESUMABLE',
     })
     await expect(h.runtime.resumeRun({ sessionId: 'session-1', flowId: 'flow-1', fromRunId: 'run-nope' })).rejects.toMatchObject({

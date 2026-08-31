@@ -3,7 +3,12 @@
 // 断点续跑纯函数与类型：恢复候选查找 + 继承快照构建。
 //
 // 续跑语义：
-//   - 仅 paused / interrupted 状态的 run 可恢复（暂停门触发或宿主重启中断）；
+//   - paused（暂停门/窗口挂起）、interrupted（宿主重启中断）、stopped（用户停止）
+//     三种状态的 run 可恢复：
+//       · paused/interrupted 为原有可恢复集（暂停节点/宿主重启）；
+//       · stopped 加入可恢复集（用户裁决修正：界面「停止」后点「运行/恢复」应断点
+//         续跑而非从头重跑；stopped 保留终态语义——运行锁已释放、历史文案不变，
+//         只有显式再运行才续跑）；
 //   - 每次续跑生成一条新 run 记录（resumedFromRunId 追溯继承链），旧记录保持原状；
 //   - 节点快照 = 全量节点：已 ok/react-capped 节点继承状态与完整输出（resumed 标记，
 //     不重跑），其余节点（含被中断时 running 的）统一回退 pending 重新执行；
@@ -14,8 +19,11 @@ import type { FlowStore } from '../storage/flow-store.js'
 import type { WorkflowDocument } from '../shared/graph-model.js'
 import type { NodeRunStatus, RunSnapshot } from '../shared/types.js'
 
-/** 可恢复的 run 状态集合（paused=暂停门断点；interrupted=宿主重启中断）。 */
-const RESUMABLE_STATUSES = ['paused', 'interrupted'] as const
+/**
+ * 可恢复的 run 状态集合：
+ *   paused=暂停门/窗口挂起断点；interrupted=宿主重启中断；stopped=用户停止（可续跑修正）。
+ */
+const RESUMABLE_STATUSES = ['paused', 'interrupted', 'stopped'] as const
 
 /** 断点续跑入参（runResume 端点与 run 端点自动续跑共用）。 */
 export interface ResumeInput {

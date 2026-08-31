@@ -315,4 +315,14 @@ describe('editorDataOf', () => {
     expect((state.canvas.nodes.find((n) => n.id === 'g')?.data as { memberIds?: string[] }).memberIds).toEqual(['a', 'c'])
     expect((state.canvas.nodes.find((n) => n.id === 'b')?.data as { groupId?: unknown }).groupId).toBeNull()
   })
+
+  it('SCHEDULER_OPEN：定时任务弹层开关（默认关闭 → 打开 → 关闭）', () => {
+    const state = baseState()
+    expect(state.schedulerOpen).toBe(false)
+    const opened = studioReducer(state, { type: 'SCHEDULER_OPEN', open: true })
+    expect(opened.schedulerOpen).toBe(true)
+    expect(opened.comboOpen).toBe(false) // 与组合管理开关独立
+    const closed = studioReducer(opened, { type: 'SCHEDULER_OPEN', open: false })
+    expect(closed.schedulerOpen).toBe(false)
+  })
 })

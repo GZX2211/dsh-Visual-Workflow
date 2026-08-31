@@ -138,6 +138,8 @@ export interface StudioState {
   runHistory: RunSnapshot[]
   selectedRunId: string | null
   comboOpen: boolean
+  /** 定时任务管理弹层开关（新功能本阶段；与组合管理并列入口）。 */
+  schedulerOpen: boolean
 }
 
 /** 编辑器数据（右侧面板渲染源；Inspector 按 kind 分发表单）。 */

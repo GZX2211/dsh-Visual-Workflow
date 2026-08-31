@@ -253,3 +253,16 @@ export const COLOR_VARS = [
   COLOR_VAR_FAIL,
   COLOR_VAR_CONTENT,
 ] as const
+
+// ---------------------------------------------------------------------------
+// 定时任务端点名常量（新功能：prompt/定时任务开发.md；host scheduler/ + client scheduler-ui）
+// ---------------------------------------------------------------------------
+// 说明：本功能独立于需求文档/架构文档（用户指令：新功能需求以 prompt/定时任务开发.md 为准，
+// 不改写既有两份文档）。端点挂载形态与其余端点一致（POST /visual-workflow/<endpoint>）。
+
+/** 定时任务列表端点名（含运行态合并视图）。 */
+export const EP_SCHEDULER_TASKS = 'schedulerTasks'
+/** 保存定时任务端点名（新建/更新统一）。 */
+export const EP_SCHEDULER_TASK_PUT = 'schedulerTaskPut'
+/** 删除定时任务端点名。 */
+export const EP_SCHEDULER_TASK_DELETE = 'schedulerTaskDelete'

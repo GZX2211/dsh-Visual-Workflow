@@ -1,8 +1,9 @@
 // src/client/components/run-history/RunHistory.tsx
 //
 // 运行历史面板（照搬旧项目 run-view.js，TSX 化 + 断点恢复入口）：
-// 按 run 记录展示状态/起止时间/节点状态摘要；paused|interrupted 可恢复
-// （断点续跑生成新 run，resumedFromRunId 追溯继承链，需求 §4.7）。
+// 按 run 记录展示状态/起止时间/节点状态摘要；paused|interrupted|stopped 可恢复
+// （断点续跑生成新 run，resumedFromRunId 追溯继承链，需求 §4.7；stopped 可续跑为
+// 定时任务阶段用户裁决修正：停止后点「运行/恢复」断点续跑而非从头重跑）。
 
 import type { Dict } from '../../i18n.js'
 import type { RunSnapshot } from '../../../host/shared/types.js'
@@ -32,7 +33,7 @@ function formatTime(value: string | null | undefined): string {
   }
 }
 
-const RESUMABLE = new Set(['paused', 'interrupted'])
+const RESUMABLE = new Set(['paused', 'interrupted', 'stopped'])
 
 export function RunHistory({ history, selectedRunId, copy, onSelect, onClose, onResume, canResume }: RunHistoryProps) {
   const items = Array.isArray(history) ? history : []

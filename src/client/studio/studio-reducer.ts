@@ -253,6 +253,8 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       return { ...state, selectedRunId: action.id }
     case 'COMBO_OPEN':
       return { ...state, comboOpen: action.open }
+    case 'SCHEDULER_OPEN':
+      return { ...state, schedulerOpen: action.open }
     default:
       return state
   }

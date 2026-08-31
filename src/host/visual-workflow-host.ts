@@ -31,6 +31,9 @@ import { registerRoutes } from './remote/api.js'
 import { registerDownloadRoute } from './remote/download.js'
 import { EmbeddingService } from './embedding/engine.js'
 import { ServiceManager } from './service/manager.js'
+import { SchedulerEngine } from './scheduler/engine.js'
+import { SchedulerTaskStore } from './scheduler/task-store.js'
+import { CordisSessionProvider, sessionCwdResolver } from './scheduler/session-provider.js'
 
 export const VisualWorkflowHostServiceName = 'visualWorkflowHost'
 
@@ -50,6 +53,10 @@ export class VisualWorkflowHost extends Service {
   readonly agents: CordisAgentHost
   /** 模式二服务管理器（fork 子进程生命周期/端口池/自动恢复）。 */
   readonly serviceManager: ServiceManager
+  /** 定时任务引擎（触发/窗口挂起/续跑；新功能本阶段）。 */
+  readonly scheduler: SchedulerEngine
+  /** 定时任务存储（scheduler-tasks.json）。 */
+  readonly schedulerTaskStore: SchedulerTaskStore
   /** ReAct 软截停护栏（桥供 runner/编排器，贡献注入子代理）。 */
   private readonly reactGuard = createReactGuard()
   /** 思考强度模型选择装配。 */
@@ -117,6 +124,19 @@ export class VisualWorkflowHost extends Service {
         apiKey: config.apiKey,
         maxConcurrentPerService: config.maxConcurrentPerService,
       },
+      logger: {
+        info: (message) => ctx.logger.info(message),
+        warn: (message) => ctx.logger.warn(message),
+        error: (message) => ctx.logger.error(message),
+      },
+    })
+    this.schedulerTaskStore = new SchedulerTaskStore(config.dataDir)
+    this.scheduler = new SchedulerEngine({
+      taskStore: this.schedulerTaskStore,
+      flowStore: this.store,
+      orchestrator: this.orchestrator,
+      sessionProvider: new CordisSessionProvider(ctx),
+      sessionCwdOf: sessionCwdResolver(ctx),
       logger: {
         info: (message) => ctx.logger.info(message),
         warn: (message) => ctx.logger.warn(message),
@@ -248,6 +268,9 @@ export class VisualWorkflowHost extends Service {
     // 看护定时器：空闲超时自动停止 / 父代理回合终态收尾（ctx.effect 持有 disposer）
     this.ctx.effect(() => scheduleIdleWatchdog(this.orchestrator), 'visualWorkflowHost.watchdog')
 
+    // 定时任务引擎：tick 扫描（触发/窗口挂起/续跑；disposer 随 fiber 注销）
+    this.ctx.effect(() => this.scheduler.start(), 'visualWorkflowHost.scheduler')
+
     // GUI API 路由：webServer 可用时挂载端点白名单分发与受管文件下载路由
     // （webServer 缺失时 register 内部告警降级；disposer 随 fiber 注销）
     try {
@@ -303,6 +326,7 @@ export class VisualWorkflowHost extends Service {
   dispose(): void {
     if (this._disposed) return
     this._disposed = true
+    this.scheduler.dispose()
     this.orchestrator.dispose()
     this.runner.dispose()
     this.embedding.dispose()
