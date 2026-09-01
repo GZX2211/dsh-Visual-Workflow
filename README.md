@@ -1,9 +1,15 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/流程编排模式.png" alt="界面预览" width="100%" />
+</p>
+
 <h1 align="center">Visual Workflow</h1>
 
 <p align="center">
-  可视化多 Agent 工作流设计器<br>
-  为 <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a> 量身打造<br>
-  拖拽编排、双模式运行、断点续跑、定时触发，让复杂协同触手可及
+  为 <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a> 量身打造的可视化多 Agent 工作流设计器
+</p>
+
+<p align="center">
+  <a href="README_EN.md">English</a> · <b>简体中文</b>
 </p>
 
 <p align="center">
@@ -13,98 +19,66 @@
   <a href="#"><img alt="pnpm" src="https://img.shields.io/badge/pnpm-11-orange"></a>
   <a href="#"><img alt="vitest" src="https://img.shields.io/badge/test-vitest-cyan"></a>
   <a href="#"><img alt="license" src="https://img.shields.io/badge/license-MIT-lightgrey"></a>
+  <a href="https://github.com/GZX2211/dsh-Visual-Workflow/releases"><img alt="version" src="https://img.shields.io/github/v/release/GZX2211/dsh-Visual-Workflow?label=version&color=0891b2"></a>
 </p>
-
-## 目录
-
-- [目录](#目录)
-- [核心亮点](#核心亮点)
-- [界面预览](#界面预览)
-- [核心概念](#核心概念)
-- [节点卡片](#节点卡片)
-  - [1. 角色节点（任务执行单元）](#1-角色节点任务执行单元)
-  - [2. 文件节点](#2-文件节点)
-  - [3. 数据库节点](#3-数据库节点)
-  - [4. 阶段节点（启动 / 结束 / 暂停）](#4-阶段节点启动--结束--暂停)
-  - [5. 协作组节点](#5-协作组节点)
-- [连接线](#连接线)
-- [编排工具](#编排工具)
-- [安装（Windows）](#安装windows)
-  - [安装问题速查](#安装问题速查)
-- [快速开始](#快速开始)
-- [数据存储](#数据存储)
-- [配置](#配置)
-- [本地开发](#本地开发)
-- [目录结构（核心）](#目录结构核心)
-- [未来规划](#未来规划)
-- [许可](#许可)
 
 ---
 
 ## 核心亮点
 
 ✦ **拖拽式编排**  
-  零代码拖拽连线，纯 SVG 画布流畅交互，点阵背景、发光连线、撤销重做一应俱全；支持无限画布、网格吸附、一键整理，复杂工作流触手可及。
+  - 零代码拖拽连线，纯 SVG 画布流畅交互、撤销重做一应俱全；无限画布、一键整理，复杂工作流触手可及。
 
 ✦ **双模式架构**  
   - **流程编排模式**：长流程多 Agent 智能调度，父代理自主推进，支持断点续跑与运行中实时编辑；
-  - **API服务模式**：一键发布为独立 REST API 服务（OpenAI 兼容协议），多租户会话隔离，SSE 流式响应，端口自动分配。
+  - **API服务模式**：一键发布为独立 REST API 服务（OpenAI 兼容协议），多租户会话隔离，端口自动分配。
 
-✦ **画布双向同步**  
-  画布修改保存后，编排器实时感知最新拓扑（新增节点/连线即时生效）；运行状态（节点高亮、状态徽标、输出摘要）实时回显画布；双向变更防回环，运行锁保护跨会话冲突，编排与画布始终一致。
-
-✦ **深度自定义**  
-  每个子代理节点独立配置 persona、LLM 模型、思考强度、工具组合（内置预设 / 自定义组合 + MCP 服务器）及 ReAct 迭代上限、回流重试上限；父代理亦可自由选择模型与调度模板，满足精细化编排需求。
-
-✦ **子代理交互**  
-  子代理需用户决策时，通过 `wf_ask` 投递问题至主会话，以官方同款提问卡片呈现（编号单选/多选/自由输入），回答后自动回传子代理继续执行；子代理之间可通过 `wf_ask_agent` 阻塞式通信，协作组内并行对话，交互自然无阻塞。
-
-✦ **协作组与虚拟节点**  
-  将多个角色节点拖入协作组，组内 Agent 并行执行并通过 `wf_ask_agent` 相互通信；虚拟节点作为主节点的别名引用，共享同一执行实例，拓扑复用更灵活。
-
-✦ **内置数据**  
-  数据库节点支持本地 SQLite 与服务器 MySQL/PostgreSQL，内置本地向量检索（bge-small-zh-v1.5，自动降级 BM25）与结构化只读查询；文件节点自动受管拷贝，非文本仅注入路径，安全可控。
-
-✦ **定时触发**  
-  工作台内置定时任务，选择工作流模板配置执行窗口与触发策略，自动创建实例并运行，错过窗口自动挂起/续跑，让自动化运维更省心。
-
-✦ **导入/导出**  
-  工作流以自包含 v2 bundle 导出（内嵌角色/文件/数据库/协作组/组合），导入时自动复用模板；单角色模板亦可独立导出，自由分享编排创意，轻松复用他人思路。
-
-✦ **零官方包依赖**  
-  所有 DSH 生态服务（LLM、子代理、工具、用户问题等）均通过 `ctx.get()` 运行时解析，Host 工具以纯对象定义注册，插件自身无任何官方包编译时依赖，升级兼容性更强。
-
----
-
-## 界面预览
-
-**Visual Workflow 的核心编排界面（流程编排模式）：**
-
-![界面预览](https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/流程编排模式.png)
-
-> 工作台以浮窗形式呈现于 dsh 主界面之上，可拖拽缩放，随会话自动绑定；运行中节点高亮、状态徽章实时更新。
-
-**API 服务模式（功能暂不稳定，持续优化中）：**
-
-<div style="display: flex; justify-content: center; align-items: center; gap: 10px;">
-  <img src="https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/API服务模式.png" style="height: 400px; width: auto; max-width: 100%;">
-  <img src="https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/终端输出.png" style="height: 400px; width: auto; max-width: 100%;">
-</div>
+<table>
+  <tr>
+    <td width="65%" valign="top">
+      <img src="https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/API服务模式.png" width="100%" />
+    </td>
+    <td width="35%" valign="top">
+      <img src="https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/终端输出.png" width="100%" />
+    </td>
+  </tr>
+</table>
 
 > 将 DSH 作为独立后端服务部署，持久化 无头Agent 后台运行，可连接外部APP（如QQ机器人、飞书）或自建前端。
 
-**组合管理界面（插件装卸、工具组合与 MCP 配置）：**
+✦ **画布双向同步**  
+  - 画布修改保存后，编排器实时感知最新拓扑（新增节点/连线即时生效）；运行状态（节点高亮、状态徽标）实时回显画布；双向变更防回环，运行锁保护跨会话冲突，编排与画布始终一致。
 
-![界面预览](https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/组合管理页.png)
-![界面预览](https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/MCP配置页.png)
+✦ **深度自定义**  
+  - 每个子代理节点独立配置 system prompt、LLM 模型、思考强度、工具组合（内置预设 / 自定义组合）及 ReAct 迭代上限、回流重试上限；父代理亦可自由选择模型与调度模板，满足精细化编排需求。
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/组合管理页.png" width="100%" />
+    </td>
+    <td width="50%" valign="top">
+      <img src="https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/MCP配置页.png" width="100%" />
+    </td>
+  </tr>
+</table>
 
 > 工具自由组合分配给各个代理，避免无用工具占据上下文；mcp服务器只需一行配置自动注册并支持热重载即时生效。
 
-**定时任务管理界面（工作流定时运行，全自动化运维）：**
+✦ **协作组与虚拟节点**  
+  - 将多个角色节点拖入协作组，组内 Agent 并行执行并通过 `wf_ask_agent` 相互通信；虚拟节点作为主节点的别名引用，共享同一执行实例，拓扑复用更灵活。
 
-![界面预览](https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/images/定时任务管理.png)
+✦ **定时触发**  
+  - 工作台内置定时任务，选择工作流模板配置执行窗口与触发策略，自动创建实例并运行，错过窗口自动挂起/续跑，支持错峰调用api，省钱又省心。
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/定时任务管理.png" width="100%" />
+</p>
 
 > 全自动化运维管理，定时自动运行工作流，可支持峰谷时段错时调用，自动暂停，保存流程数据，谷时自动运行。
+
+✦ **零官方包依赖**  
+  - 所有 DSH 生态服务（LLM、子代理、工具、用户问题等）均通过 `ctx.get()` 运行时解析，Host 工具以纯对象定义注册，插件自身无任何官方包编译时依赖，升级兼容性更强。
 
 ---
 
@@ -183,7 +157,7 @@
 - 右侧面板可配置连接信息、测试连接，并调整检索高级选项（召回条数、分块窗口、相似度阈值、索引容量）
 - **数据库检索**，转换为 `wf_db_query` 工具（单工具三模式：search/query/schema）供代理调用，代理需通过 db-in 连线获得该工具
 
-### 4. 阶段节点（启动 / 结束 / 暂停）
+### 4. 阶段节点
 
 - **启动（模式一） / 输入（模式二）**：流程入口；模式二下自动接收外部用户问题作为初始上下文
 - **结束（模式一） / 输出（模式二）**：流程终点；模式二下汇聚父代理最终输出并流式返回
@@ -199,18 +173,18 @@
 
 ---
 
-## 连接线
+## 连线
 
 **连线类型与颜色**：
 
 | 连线类型 | 语义说明 | 颜色 |
-|----------|----------|------|------|
-| 流程连线 | 控制执行顺序 | **冷灰 / 银白** |
-| 上下文连线 | 传递文本内容、文件索引 | **琥珀金** |
-| 数据库连线 | 传递数据库服务标识 | **天蓝** |
-| 条件：通过 | 条件判断为真，执行该分支 | **翠绿** |
-| 条件：不通过 | 条件判断为假，执行该分支或回流 | **珊瑚红** |
-| 条件：内容 | 自定义语义判断（路由标签） | **紫罗兰** |
+|----------|----------|------|
+| 流程连线 | 控制执行顺序 | ⚪ 冷灰 / 银白 |
+| 上下文连线 | 传递文本内容、文件索引 | 🟡 琥珀金 |
+| 数据库连线 | 传递数据库服务标识 | 🔵 天蓝 |
+| 条件：通过 | 条件判断为真，执行该分支 | 🟢 翠绿 |
+| 条件：不通过 | 条件判断为假，执行该分支或回流 | 🔴 珊瑚红 |
+| 条件：内容 | 自定义语义判断（路由标签） | 🟣 紫罗兰 |
 
 > 编辑条件后，条件颜色覆盖初始颜色；条件判断由父代理进行语义判断。
 
@@ -276,9 +250,7 @@ git config --global url."https://github.com/".insteadOf "git@github.com:"
 7. **断点续跑** – 暂停节点或关闭窗口后，再次运行从断点继续；历史面板可查看所有 run 记录并恢复中断的流程
 
 > **模式切换**：顶栏「模式」下拉选项可选择运行的模式，模式一面向长流程定时编排，模式二面向持久化API服务。
-
 > **组合管理**：顶栏「组合」按钮可创建自定义工具组合（官方工具/自建工具 + MCP 服务器），在角色模式中选用。
-
 > **定时任务**：顶栏「定时任务」入口，选择工作流模板，配置执行窗口与触发策略，即可自动调度运行。
 
 ---
