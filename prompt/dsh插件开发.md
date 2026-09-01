@@ -6,6 +6,7 @@
 1. `docs/需求文档.md`（已有草稿，需完善并定稿）
 2. `docs/架构文档.md`
 3. `docs/任务清单.md`
+4. 项目根目录的 `README.md` （含安装、使用、卸载说明）
 
 # 硬性约束
 1. **解耦与可插拔**：插件必须可随时挂载/卸载，不得污染 dsh 主框架核心。
@@ -58,18 +59,9 @@
 | P02 | **T-004** 🎯 | **里程碑**：完成后即可在浏览器验证交互设计，后续所有开发对着前端调试。 |
 | ... | ... | ... |
 
-- 完成交付
+- 等待我确认
 
-
-
-
-Failed to load plugins
-dsh-visual-workflow
-failed to apply loader entry e1f3ff6e (dsh-visual-workflow): Cannot read properties of undefined (reading 'effect')
-
-
-
-
-Failed to load plugins
-dsh-visual-workflow
-failed to apply loader entry 784b0b1c (dsh-visual-workflow): Cannot read properties of undefined (reading 'effect')
+## 阶段 5：实施与交付
+- 依照任务清单的执行顺序逐项开发，过程中严格遵守 `skill.md` 的规范。
+- 开发完成后，编写根目录 `README.md`，重点说明本插件的安装步骤、基础使用方法和卸载方式。
+- 交付完整代码及上述 4 份最终文档。

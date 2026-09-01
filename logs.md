@@ -24,6 +24,26 @@
   - ...
 ```
 
+## 2026.09.01
+
+- git版本：[48d554a] [v0.1.0] [02:40]（fix：定时任务界面按用户批注修复日期/时间/星期选择器）
+  - 【日期范围】修复"开始日期 > 结束日期"：日历点选由 end 强转旧 start 导致的错乱，改为未选时存空串（日历可先点起点再点终点）；host 校验保留"起始日期不能晚于结束日期"兜底。新增"日期不限"开关（window.unbounded）：点击后忽略日期范围，仅按有效星期+时间段执行；关闭时若日期为空自动补默认范围；非 unbounded 缺日期报错。
+  - 【双月日历】左右两月各自独立翻页（每面板都有 ‹ ›，右月恒大于左月，可跨全年任意日期）；去掉选中的连续片段条带，改为选中日期圆形高亮 + 数字下方"开始/结束"标签（用户批注：不渲染连续片段）。
+  - 【有效星期】"每天"按钮改为与具体星期互斥（daysOfWeek 为空时高亮，选了任一星期即自动取消"每天"）；修正周日按钮误高亮。
+  - 【时间输入】新增 components/time-input/TimeInput.tsx：文本支持按位输入（1125→11:25、925→9:25），双列滑轮（时/分）两次点击后才确认（不再一点即确认）；替换全部 `<input type="time">`（时间段、触发时刻、间隔起始时刻）；非法输入失焦回退原值。
+  - 【契约】shared/types.ts ScheduleWindowConfig 新增 unbounded；planner isValidDate/validateScheduledTask/normalize 支持 unbounded；api-scheduler 透传 unbounded。
+  - 【测】新增 time-input.test（纯函数+组件 5 例）；date-picker 用例按新交互更新（独立翻页/开始结束标签）；planner/api 增 unbounded 用例。全量 vitest 55 文件 741 例通过；typecheck 4 program / build / client-smoke 通过。
+
+- git版本：[b9a308c] [v0.1.0] [01:50]（feat：新增定时任务功能（host 调度引擎 + 组合管理风格 UI））
+  - 【新功能：定时任务】界面入口：工作台标题栏「定时任务」按钮（模式下拉右侧、「组合」左侧；需求见 prompt/定时任务开发.md，按用户指令不改写 docs/ 既有两份文档）。
+  - 【host 半区】新增 src/host/scheduler/（新文件夹，单一职责拆分）：planner.ts 纯函数（IANA 时区双向换算、定点/间隔触发点计算含跨天截断、执行窗口判定含跨天区间 22:00–06:00、nextTriggerAt/nextWindowStartAt、校验与规范化）；task-store.ts（scheduler-tasks.json 单文件，withJsonLock+atomicWriteJson 原子写，损坏 JSON 容忍）；engine.ts（tick 30s 状态机：触发=模板自动创建实例并运行、窗口end挂起、下一窗口续跑、concurrency=skip、missedTrigger=skip 不补打、用户手动接管自动失效、停用只影响未来触发）；instantiate.ts（模板→实例深拷贝+重名序号）；session-provider.ts（经 ctx.agents.create 以编程方式创建新会话+根 Agent，standard 预设+继承创建者 cwd，不可依赖用户手动激活会话）。
+  - 【运行时扩展】OrchestratorRuntime 新增 suspendRun（run→paused+保留锁+不中断在执行的子代理，等待其自然完成、下一个节点由 WF_PAUSED 拦下）；stopped 加入可恢复状态集（用户裁决：界面「停止」后点「运行/恢复」应断点续跑而非从头重跑；stopped 保留终态语义，锁释放，只有显式再运行才续跑）。
+  - 【API】shared/protocol.ts 新增 3 端点（schedulerTasks/schedulerTaskPut/schedulerTaskDelete）；shared/types.ts 新增 ScheduledTask/ScheduledTaskRuntime/TimeRangeConfig 等；api-scheduler.ts 挂在既有继承链末端（Runs 之后）；visual-workflow-host 装配引擎（init 启动定时器、dispose 清理）。
+  - 【client 半区】新增 components/scheduler/（SchedulerManager 弹层：左侧属性编辑栏——工作流选择器（仅模式一模板）+任务名称+会话策略（新会话/当前会话）+时区+执行窗口（双月日历 DateRangePicker+星期切换+时间段 rows）+触发策略（定点时刻 rows/固定间隔）+运行时策略只读说明；右侧任务列表+运行态徽标+删除/保存）与 components/date-picker/DateRangePicker（双月并排、‹›翻月、选中范围深色条带、端点白底圆、今日圆环、前后月灰显，样式参照用户日历素材）；studio 状态机新增 schedulerOpen/SCHEDULER_OPEN；i18n 中英文案；styles.ts 新增 wf-sched-*/wf-cal-*（大部分复用 wf-combo 体系）。
+  - 【单测】新增 8 个测试文件（planner 18 例、engine 10 例、task-store 5 例、orchestrator suspendRun/stopped 4 例、api 6 例、SchedulerManager 4 例、DateRangePicker 5 例、reducer 1 例）；resume/shared-contract 契约测试同步新语义（端点 45→48、stopped 可恢复）。
+  - 【验证】pnpm typecheck 4 program 通过；全量 vitest 54 文件 733 例全通过；pnpm build + client-smoke 通过。
+  - 【遗留】新会话模式依赖官方 agents.create（web profile 需 agent-loop 工厂）；触发失败（会话未激活/模板缺失）按策略跳过并记录 lastError 于任务运行态，可在定时任务面板查看。
+
 ## 2026.08.30
 
 - git版本：[f08327d] [v0.1.0] [00:59]（feat：工作台改官方侧边栏入口 + 浮窗/分栏双视图）
@@ -45,14 +65,3 @@
   - 【修复】① runtime-comm：ask 目标支持「子代理会话 id」与「节点 id」双寻址（节点 id 经 childIndex 反查本 run 子代理会话 id），reply 同样接受发起者两种 id；② 冷态可达确认：childIndex 仅随 run 生命周期清理、节点结束不注销，投递缝本就支持离线目标 followup 冷恢复唤醒——修复后「目标已停止也可被唤醒」真正可达；③ 工具 description/参数说明、协作块文案（targetChildId 直接填成员 id）、ask 消息回复指引（改用发起者节点 id）同步；④ 架构文档 5.3 同步寻址与唤醒语义。
   - 【新增测试】wf-ask-agent.test.ts +8：节点 id 寻址在线投递、冷态按节点 id followup 唤醒、未知 id/未启动节点/自投拒绝、会话 id 兼容等价。
   - 【回归验证】pnpm typecheck 4 program 通过；全量 vitest 45 文件 647 例全通过。
-
-## 2026.08.29
-
-- git版本：[47862ba] [v0.1.0] [23:49]（功能与优化批注：画布换向/连接点配色/工作流名称角标 + 协作组模板全局共享）
-  - 【任务：功能与优化批注实现】按《功能与优化批注.png》完成四项功能：
-    - ① 卡片右上角「交换左右连接点」按钮：默认左入右出；点击后两侧连接点交换（左出右入：左侧上下文出/流程出，右侧数据库入/上下文入/流程入），再次点击恢复；状态随节点 swapPorts 持久化（节点 JSON 即事实源）。FlowNode 渲染左右接点；geometry.edgeGeometry 按交换状态换向端点（源出点在左缘/目标入点在右缘），避免画布布线交叉。协作组卡片不提供该按钮。
-    - ② 连接点按「入口/出口」区分颜色：入口=蓝（--wf-port-in）、出口=橙（--wf-port-out）；左侧/右侧位置由交换状态动态决定（原 --target/--source 左右定位保留给协作组接点）。
-    - ③ 画布左上角工作流名称角标：显示方式「实例: 名称」「模板: 名称」，固定不随缩放平移（pointer-events:none）。
-    - ④ 协作组模板全局共享：host flow-store 新增 groups/ 目录与 group TemplateKind CRUD（listTemplates/saveTemplate/deleteTemplate/getTemplate/templateToNode→GroupNode），api-templates 端点允许 kind=group；client 扩展模板管线（useTemplates/studio-types/actions/initial/editor/LeftPanel/Inspector 新增协作组模板增删改查）。协作组标题右侧＋号新增模板；点击模板在右侧属性栏显示内容并可保存/删除；拖入画布按模板生成协作组节点（placeGroupFromTemplate）。
-  - 【契约与存储】host 复用既有 templates 端点（listTemplates/putTemplate/deleteTemplate），新增 kind=group；flow-store 目录 +groups/；未改动 shared/protocol.ts / shared/types.ts / shared/graph-model.ts（GroupTemplate 类型已预定义于 types.ts）。
-  - 【回测试】新增 edgeGeometry 换向、flow-store 协作组模板 CRUD/templateToNode（GroupNode）用例；修正 studio-state 初始 templates（补 group）、Studio 远程桩（补协作组模板）；graph-canvas 测试补 onSwapPorts。typecheck 4 program 通过；build + client bundle 通过；全量 vitest 641/642，唯一失败为 tests/host/service-manager.test.ts「status 内存存活」——沙箱 child_process.spawn 受 EPERM 限制（隔离复跑为 worker spawn EPERM），未触碰相关代码，属环境限制非改动引入；此前 atomic.test 高并发文件锁 EPERM 亦为同类环境抖动（全量复跑已通过）。

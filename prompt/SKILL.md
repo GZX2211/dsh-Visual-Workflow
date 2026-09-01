@@ -54,7 +54,19 @@ metadata:
 
 ### 2.3 官方仓库兜底层
 
-进入仓库后定位：
+官方仓库 `https://github.com/deepseek-ai/deepseek-harness` 是公开、MIT 许可的可引用证据源（默认分支 `master`；开发者预览阶段无 release tag，不 pin 版本）。需要兜底取证时：
+
+1. 选临时目录：用用户或环境提供的目录，例如 `SCRATCH="$(mktemp -d)"`；不要写死本机绝对路径。
+2. 复用已有 checkout：若 `$SCRATCH/dsh-official` 已存在，且 `git remote -v` 指向官方、根目录含 `AGENTS.md` 与 `LICENSE`，直接复用；需要更新时 `git -C "$SCRATCH/dsh-official" fetch --depth 1 origin master && git -C "$SCRATCH/dsh-official" reset --hard origin/master`（或删除后重克隆）。同一任务只维护这一个目录，避免反复克隆。
+3. 浅克隆（只读取证，无需 `pnpm install`）：
+
+   ```sh
+   git clone --depth 1 https://github.com/deepseek-ai/deepseek-harness.git "$SCRATCH/dsh-official"
+   ```
+
+4. 只克隆官方 `deepseek-ai/deepseek-harness`；不要访问或转述未授权的私有仓库内容。对克隆内容同样只读分析，不修改。
+
+进入后定位：
 
 1. 先读根 `AGENTS.md`（`CLAUDE.md` 是它的符号链接）：仓库布局、命令与约定一次讲清，是官方给 agent 的入口。
 2. 再用 `packages/README.md` 的 group 表确认目标包位于哪个 `packages/<group>/<pkg>`。
