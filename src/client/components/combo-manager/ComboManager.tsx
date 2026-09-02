@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Dict } from '../../i18n.js'
 import { EP } from '../../lib/remote.js'
 import type { RemoteFace } from '../../hooks/useRemote.js'
+import { buildToolTags, TAG_ALL, type ToolTag } from '../../lib/tool-tags.js'
 
 interface CatalogItem { key: string; name: string; description?: string; disabled?: boolean; badge?: string; checked: boolean; onToggle(): void; onEdit?(): void; onToggleDisabled?(): void; onDelete?(): void }
 interface McpEntry { id: string; serverName: string; transport?: string; command?: string; args?: string[]; commandLine?: string; env?: Record<string, string>; headers?: Record<string, string>; url?: string; disabled?: boolean; description?: string }
@@ -47,10 +48,12 @@ export interface ComboManagerProps {
 }
 
 export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChanged }: ComboManagerProps) {
-  const [catalog, setCatalog] = useState<{ items: Array<{ key: string; name: string; description: string }>; mcp: McpEntry[]; loadedPlugins: string[] }>({ items: [], mcp: [], loadedPlugins: [] })
+  const [catalog, setCatalog] = useState<{ items: Array<{ key: string; name: string; description: string }>; mcp: McpEntry[]; loadedPlugins: string[]; disabledTools: string[] }>({ items: [], mcp: [], loadedPlugins: [], disabledTools: [] })
   const [combos, setCombos] = useState<ComboEntry[]>([])
   const [tab, setTab] = useState<'plugins' | 'mcp'>('plugins')
   const [search, setSearch] = useState('')
+  const [activeTag, setActiveTag] = useState<string>(TAG_ALL)
+  const [disabledTools, setDisabledTools] = useState<ReadonlySet<string>>(new Set())
   const [activeComboId, setActiveComboId] = useState<string | null>(null)
   const [comboDraft, setComboDraft] = useState<{ name: string; tools: string[]; mcpServers: string[] }>({ name: '', tools: [], mcpServers: [] })
   const [busy, setBusy] = useState(false)
@@ -63,15 +66,18 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
   const load = useCallback(async (): Promise<void> => {
     try {
       const [catalogData, combosData] = await Promise.all([
-        remote.call(EP.EP_PLUGIN_CATALOG, { sessionId }).catch(() => ({ items: [], mcp: [], loadedPlugins: [] })),
+        remote.call(EP.EP_PLUGIN_CATALOG, { sessionId }).catch(() => ({ items: [], mcp: [], loadedPlugins: [], disabledTools: [] })),
         remote.call(EP.EP_TOOL_COMBOS).catch(() => []),
       ]) as [unknown, unknown]
-      const cat = (catalogData ?? {}) as { items?: Array<{ key: string; name: string; description: string }>; mcp?: McpEntry[]; loadedPlugins?: string[] }
+      const cat = (catalogData ?? {}) as { items?: Array<{ key: string; name: string; description: string }>; mcp?: McpEntry[]; loadedPlugins?: string[]; disabledTools?: string[] }
       setCatalog({
         items: Array.isArray(cat.items) ? cat.items : [],
         mcp: Array.isArray(cat.mcp) ? cat.mcp : [],
         loadedPlugins: Array.isArray(cat.loadedPlugins) ? cat.loadedPlugins : [],
+        disabledTools: Array.isArray(cat.disabledTools) ? cat.disabledTools : [],
       })
+      // 全局工具开关快照（关闭 = 父代理上下文不可见，列表置灰且无法勾选）
+      setDisabledTools(new Set(Array.isArray(cat.disabledTools) ? cat.disabledTools : []))
       const comboItems = Array.isArray(combosData) ? combosData as ComboEntry[] : []
       setCombos(comboItems)
       setActiveComboId((current) => {
@@ -179,6 +185,29 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
     }))
   }, [])
 
+  /**
+   * 单个工具的全局开关（父代理白名单「关闭」侧）：
+   *   - 关闭后该工具在所有会话的代理上下文中不可见（system-prompt/assemble 瀑布剔除）；
+   *   - 关闭的工具不得留在组合草稿（父代理不可用 → 子代理无法传入），自动去除勾选；
+   *   - 状态更新即全局即时生效（无需运行工作流）。
+   */
+  const toggleToolDisabled = useCallback(async (name: string, disabled: boolean): Promise<void> => {
+    setBusy(true)
+    try {
+      const result = await remote.call(EP.EP_TOOL_SWITCH_PUT, { name, disabled }) as { disabled?: unknown }
+      const next = new Set<string>(Array.isArray(result?.disabled) ? (result.disabled as string[]).map((item) => String(item)) : [])
+      setDisabledTools(next)
+      if (disabled) {
+        setComboDraft((draft) => ({ ...draft, tools: draft.tools.filter((item) => item !== name) }))
+      }
+      onToast('success', disabled ? copy.toolSwitchDisabled : copy.toolSwitchEnabled)
+    } catch (error) {
+      onToast('error', String((error as Error)?.message ?? error))
+    } finally {
+      setBusy(false)
+    }
+  }, [copy.toolSwitchDisabled, copy.toolSwitchEnabled, onToast, remote])
+
   const deleteMcp = useCallback(async (id: string): Promise<void> => {
     setBusy(true)
     try {
@@ -277,21 +306,41 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
     { key: 'mcp' as const, label: copy.comboTabMcp, count: catalog.mcp.length },
   ]
 
+  /** 筛选标签（动态构建）：[全部] + [官方工具] + MCP 服务器 Tag（按目录首次出现顺序） */
+  const toolTags: ToolTag[] = useMemo(
+    () => buildToolTags((catalog.items ?? []).map((item) => item.name), catalog.mcp),
+    [catalog.items, catalog.mcp],
+  )
+
   const gridItems: CatalogItem[] = useMemo(() => {
     try {
       const keyword = String(search ?? '').trim().toLowerCase()
       if (tab === 'plugins') {
         return (catalog.items ?? [])
+          // 先按激活 Tag 过滤（全部/官方工具/MCP 服务器），再按关键词过滤
+          .filter((item) => {
+            if (activeTag === TAG_ALL) return true
+            const isMcp = item.name.startsWith('mcp__')
+            if (activeTag === 'builtin') return !isMcp
+            if (activeTag.startsWith('mcp:')) return isMcp && item.name.startsWith(`mcp__${activeTag.slice(4)}__`)
+            return true
+          })
           .filter((item) => !keyword
             || String(item.name ?? '').toLowerCase().includes(keyword)
             || String(item.description ?? '').toLowerCase().includes(keyword))
-          .map((item) => ({
-            key: item.key ?? `item:${item.name}`,
-            name: item.name,
-            description: item.description,
-            checked: (comboDraft.tools ?? []).includes(item.name),
-            onToggle: () => toggleTool(item.name),
-          }))
+          .map((item) => {
+            // 被全局关闭的工具：置灰且无法勾选（父代理不可用 → 子代理无法传入）
+            const disabledTool = disabledTools.has(item.name)
+            return {
+              key: item.key ?? `item:${item.name}`,
+              name: item.name,
+              description: item.description,
+              disabled: disabledTool,
+              checked: !disabledTool && (comboDraft.tools ?? []).includes(item.name),
+              onToggle: disabledTool ? () => {} : () => toggleTool(item.name),
+              onToggleDisabled: () => { void toggleToolDisabled(item.name, !disabledTool) },
+            }
+          })
       }
       return (catalog.mcp ?? [])
         .filter((server) => !keyword
@@ -325,7 +374,7 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
     } catch {
       return []
     }
-  }, [catalog, comboDraft, search, tab, toggleMcp, toggleTool, deleteMcp, toggleMcpDisabled])
+  }, [catalog, comboDraft, search, tab, activeTag, disabledTools, toggleMcp, toggleTool, toggleToolDisabled, deleteMcp, toggleMcpDisabled])
 
   const selectedChips = useMemo(() => [
     ...comboDraft.tools.map((name) => ({ key: `t:${name}`, label: name, remove: () => toggleTool(name) })),
@@ -360,10 +409,22 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
             <div className="wf-combo__search">
               <input type="text" value={search} placeholder={copy.comboSearch} onChange={(event) => setSearch(event.target.value)} />
             </div>
-            {catalog.loadedPlugins.length > 0 && tab === 'plugins'
-              ? <div className="wf-hint" style={{ padding: '4px 12px 0', fontSize: 10, lineHeight: 1.5, color: 'var(--wf-ink-2)' }}>
-                  {String(copy.loadedPluginsLabel).replace('{count}', String(catalog.loadedPlugins.length))}
-                </div>
+            {/* 筛选标签：胶囊样式；[全部] + [官方工具] + 动态 MCP 服务器 Tag（单选；再点当前 Tag 回「全部」） */}
+            {tab === 'plugins' && toolTags.length > 1
+              ? (
+                  <div className="wf-combo__tags">
+                    {toolTags.map((tag) => (
+                      <button
+                        key={tag.key}
+                        type="button"
+                        className={`wf-combo-tag${activeTag === tag.key ? ' is-active' : ''}`}
+                        onClick={() => setActiveTag((current) => (current === tag.key ? TAG_ALL : tag.key))}
+                      >
+                        {tag.label}
+                      </button>
+                    ))}
+                  </div>
+                )
               : null}
             <div className="wf-combo__grid">
               {gridItems.length === 0
@@ -371,21 +432,23 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
                     {String(search ?? '').trim() ? copy.comboSearchEmpty : copy.comboEmpty}
                   </div>
                 : gridItems.map((item) => (
-                    <div key={item.key} className={`wf-combo-card${(item as { checked: boolean }).checked ? ' is-checked' : ''}`} style={{ position: 'relative' }}>
+                    <div key={item.key} className={`wf-combo-card${(item as { checked: boolean }).checked ? ' is-checked' : ''}${item.disabled ? ' is-disabled' : ''}`} style={{ position: 'relative' }}>
                       <button
                         type="button"
                         className="wf-combo-card__main"
-                        style={{ display: 'flex', gap: 9, alignItems: 'flex-start', textAlign: 'left', border: 0, background: 'transparent', padding: 0, paddingRight: 88, paddingBottom: 30, flex: 1, cursor: 'pointer' }}
+                        style={{ display: 'flex', gap: 9, alignItems: 'flex-start', textAlign: 'left', border: 0, background: 'transparent', padding: 0, paddingRight: 88, paddingBottom: 30, flex: 1, cursor: item.disabled ? 'default' : 'pointer' }}
                         onClick={item.onToggle}
                         title={item.name}
+                        disabled={item.disabled}
                       >
-                        <input type="checkbox" readOnly checked={(item as { checked: boolean }).checked === true} />
+                        <input type="checkbox" readOnly checked={(item as { checked: boolean }).checked === true} disabled={item.disabled} />
                         <span className="wf-combo-card__body">
                           <span className="wf-combo-card__name">{item.name}</span>
                           <span className="wf-combo-card__desc">{item.description}</span>
                           {item.badge ? <span className="wf-combo-card__badge">{item.badge}</span> : null}
                         </span>
                       </button>
+                      {/* 右侧操作：工具卡片 = 开启/关闭（全局开关，无编辑/删除）；MCP 卡片 = 编辑/启停/删除 */}
                       {(item.onEdit || item.onDelete || item.onToggleDisabled)
                         ? (
                             <span style={{ display: 'flex', gap: 4, position: 'absolute', right: 8, bottom: 8 }}>
@@ -393,7 +456,7 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
                                 ? <button type="button" className="wf-btn" style={{ fontSize: 9, padding: '2px 6px' }} onClick={(event) => { event.stopPropagation(); item.onEdit?.() }}>{copy.mcpEdit}</button>
                                 : null}
                               {item.onToggleDisabled
-                                ? <button type="button" className="wf-btn" style={{ fontSize: 9, padding: '2px 6px' }} onClick={(event) => { event.stopPropagation(); item.onToggleDisabled?.() }}>{item.disabled ? copy.mcpEnable : copy.mcpDisable}</button>
+                                ? <button type="button" className="wf-btn" style={{ fontSize: 9, padding: '2px 6px' }} onClick={(event) => { event.stopPropagation(); item.onToggleDisabled?.() }}>{item.disabled ? copy.toolEnable : copy.toolDisable}</button>
                                 : null}
                               {item.onDelete
                                 ? <button type="button" className="wf-btn is-danger" style={{ fontSize: 9, padding: '2px 6px' }} onClick={(event) => { event.stopPropagation(); item.onDelete?.() }}>{copy.mcpDelete}</button>

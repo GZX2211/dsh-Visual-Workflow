@@ -7,6 +7,7 @@
 import { httpError } from './http.js'
 import { VisualWorkflowApiRuns } from './api-runs.js'
 import { normalizeScheduledTask, validateScheduledTask } from '../scheduler/planner.js'
+import { resolveWorkspacePath } from '../workspace/verify.js'
 import type { ScheduledTask } from '../shared/types.js'
 
 /**
@@ -62,11 +63,22 @@ export class VisualWorkflowApiScheduler extends VisualWorkflowApiRuns {
         ? { intervalMinutes: Number(raw.intervalConfig.intervalMinutes), startFrom: String(raw.intervalConfig.startFrom ?? '') }
         : null,
       runtimePolicy: { missedTrigger: 'skip', concurrency: 'skip', configUpdate: 'immediate' },
+      // 新会话工作区（仅 new-session 模式生效；空值忽略）
+      ...(String(raw.workspacePath ?? '').trim() ? { workspacePath: String(raw.workspacePath).trim() } : {}),
       createdAt: String(raw.createdAt ?? now),
       updatedAt: now,
     }
     const validation = validateScheduledTask(task)
     if (validation !== null) throw httpError(400, validation)
+    // 新会话工作区校验（存在且为目录；new-session 模式下无效路径直接报错）
+    if (task.sessionMode === 'new-session' && String(task.workspacePath ?? '').trim()) {
+      try {
+        await resolveWorkspacePath(task.workspacePath)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        throw httpError(400, message)
+      }
+    }
     const store = this.host.schedulerTaskStore
     if (!store) throw httpError(501, '定时任务存储不可用')
     const saved = await store.save(normalizeScheduledTask(task))

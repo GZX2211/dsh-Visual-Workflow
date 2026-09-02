@@ -344,6 +344,41 @@ describe('resolveAgentTools 白名单解析（§4.2 L219）', () => {
     })
     expect(withoutDb).not.toContain('wf_db_query')
   })
+
+  it('全局关闭工具：组合勾选亦被剔除（父代理不可用 → 子代理不得携带，双保险第二层）', async () => {
+    const h = await makeHarness()
+    await saveCombo(h, 'combo-c1', ['read', 'write', 'wf_ask'], ['srv1'])
+    const tools = await resolveAgentTools({
+      store: h.store, toolsView: h.toolsView, sessionId: 'session-1', flowId: 'flow-1',
+      node: agentNode('n-a1'),
+      disabledTools: new Set(['write', 'mcp__srv1__a']),
+    })
+    expect(tools).toContain('read')
+    expect(tools).toContain('wf_ask')
+    expect(tools).toContain('mcp__srv1__b')
+    expect(tools).not.toContain('write')
+    expect(tools).not.toContain('mcp__srv1__a')
+  })
+
+  it('全局关闭工具：db-in 注入的 wf_db_query 同样被剔除', async () => {
+    const h = await makeHarness()
+    await saveCombo(h, 'combo-c1', ['read'])
+    await h.store.saveWorkflow({
+      id: 'flow-1', sessionId: 'session-1', mode: 'mode1', name: 'f', description: '', revision: 1,
+      nodes: [
+        { id: 'n-db', kind: 'database', position: { x: 0, y: 0 }, data: { label: '库', description: '', dbType: 'local', dbKind: 'sqlite', localPath: '' } },
+        agentNode('n-a1'),
+      ],
+      lines: [{ id: 'l-db', source: 'n-db', target: 'n-a1', sourceHandle: 'db-out', targetHandle: 'db-in' }],
+    }, 'session-1', { force: true })
+    const tools = await resolveAgentTools({
+      store: h.store, toolsView: h.toolsView, sessionId: 'session-1', flowId: 'flow-1',
+      node: agentNode('n-a1'),
+      disabledTools: new Set(['wf_db_query']),
+    })
+    expect(tools).not.toContain('wf_db_query')
+    expect(tools).toContain('read')
+  })
 })
 
 // ---------------------------------------------------------------------------

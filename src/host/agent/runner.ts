@@ -3,13 +3,6 @@
 // 节点子代理执行引擎（T-022）：ensureNodeChild / 配置签名复用 / 工具白名单解析 /
 // startNodeTask / interruptChild / 软截停消费。
 //
-// 语义来源：
-//   - 旧项目 VisualWorkflow/lib/agent-runner.js（childKey/signature/ensureNodeChild/
-//     startNodeTask 骨架，已完整通读）+ lib/plugin-catalog.js（白名单解析骨架）；
-//   - 架构文档 §4.2 L218-219（复用键、签名、白名单规则：无强制追加、wf_db_query
-//     仅 db-in 连线注入、wf_run_node/wf_run_node_wait/wf_finish 双保险隐藏）；
-//   - 需求文档 §4.2.3.2 规则 3（子代理复用）/ §4.4.2 规则 7（工具可见性）。
-//
 // 官方 seam 取证（§8 索引 #1/#6/#7，零官方运行时依赖 W-05）：
 //   - ctx.subagents.startContinuable({ provider, label, request: { prompt, parent,
 //     persona?, toolFilter?, agentOptions? }, signal }) → { childId, messageId }；
@@ -320,6 +313,12 @@ export interface ResolveToolsInput {
    * 模式分派，否则模式二下 getWorkflow 恒返回 null 导致 wf_db_query 永不注入。
    */
   mode?: 'mode1' | 'mode2'
+  /**
+   * 被全局关闭的工具名集合（tool-switches 模块的当前快照）。
+   * 关闭工具 = 父代理上下文不可见 → 子代理不得携带（双保险第二层，
+   * 第一层为 system-prompt/assemble 全局瀑布剔除）。
+   */
+  disabledTools?: ReadonlySet<string>
 }
 
 /** 子代理永不可见的三工具（§4.4.2 规则 7）：白名单排除 + tools.restrict 双保险第一层。 */
@@ -373,6 +372,10 @@ export async function resolveAgentTools(input: ResolveToolsInput): Promise<strin
   if (await hasDbInLine(input)) {
     if (!allow.includes('wf_db_query')) allow.push('wf_db_query')
   }
+  // 全局关闭的工具一律剔除（父代理不可见 → 子代理不得携带；配合 UI 置灰禁勾选）
+  if (input.disabledTools && input.disabledTools.size > 0) {
+    allow = allow.filter((name) => !input.disabledTools!.has(name))
+  }
   return allow
 }
 
@@ -411,6 +414,8 @@ export interface NodeAgentRunnerDeps {
   modelSelection: ModelSelectionSetup
   /** 子代理系统提示词注入装配（prompt-setup.ts）。 */
   promptSetup: ChildPromptSetup
+  /** 全局关闭工具集快照（tool-switches 模块；同步读取；缺省空集 = 不做过滤）。 */
+  toolSwitches?: () => ReadonlySet<string>
   logger?: OrchestratorLogger
 }
 
@@ -494,13 +499,14 @@ export class NodeAgentRunner implements NodeRunner {
     const node = input.node as RoleNode
     const key = childKey(input.sessionId, input.flowId, node.id)
 
-    // 运行时解析工具清单（组合修改即时生效）；白名单 = 勾选 ∩ 可见 + db-in 注入
+    // 运行时解析工具清单（组合修改即时生效）；白名单 = 勾选 ∩ 可见 + db-in 注入 - 全局关闭
     const tools = await resolveAgentTools({
       store: this.deps.store,
       toolsView: this.deps.toolsView,
       sessionId: input.sessionId,
       flowId: input.flowId,
       node,
+      disabledTools: this.deps.toolSwitches?.(),
       ...(input.mode ? { mode: input.mode } : {}),
     })
     const collabPrompt = String(input.collabPrompt ?? '').trim()

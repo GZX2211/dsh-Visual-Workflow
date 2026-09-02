@@ -215,6 +215,48 @@ describe('OpenAiApi.runChat', () => {
     expect(result.runId).toBe('run-resumed')
   })
 
+  it('服务级新会话：每请求新建会话（cwd=工作区）+ 全新启动（不复用断点）', async () => {
+    const h = makeHarness()
+    h.store.service = {
+      id: 'svc-1', sessionId: 'session-1', name: '服务', description: '', revision: 1,
+      nodes: [], lines: [], createdAt: '', updatedAt: '',
+      startNewSession: true, workspacePath: 'D:\\work\\svc-ws',
+      status: 'stopped',
+    }
+    // 断点存在也不续跑（新会话模式每请求全新会话）
+    h.store.runs.push(pausedRun('run-old'))
+    const created: Array<{ label?: string; cwd?: string }> = []
+    const api = new OpenAiApi({
+      store: h.store as never,
+      orchestrator: h.orchestrator as never,
+      serviceId: 'svc-1',
+      apiKey: null,
+      maxConcurrent: 50,
+      resolveSession: async () => { throw new Error('新会话模式不应走映射') },
+      createSession: async (options) => { created.push(options); return 'session-fresh' },
+      ensureRootAgent: async () => ({ agent: { followup() {}, session: { seq: 0, events: [] } } }),
+      sweep: async () => {},
+      pollMs: 1,
+    })
+    await api.runChat({ userId: 'user-1', question: 'q', stream: false })
+    expect(created).toHaveLength(1)
+    expect(created[0]).toMatchObject({ cwd: 'D:\\work\\svc-ws' })
+    expect(h.orchestrator.startCalls[0]).toMatchObject({ sessionId: 'session-fresh', mode: 'mode2' })
+    expect(h.orchestrator.resumeCalls).toHaveLength(0)
+  })
+
+  it('服务级新会话：createSession 能力缺失时回退会话映射（防御）', async () => {
+    const h = makeHarness()
+    h.store.service = {
+      id: 'svc-1', sessionId: 'session-1', name: '服务', description: '', revision: 1,
+      nodes: [], lines: [], createdAt: '', updatedAt: '',
+      startNewSession: true, status: 'stopped',
+    }
+    const result = await h.api.runChat({ userId: 'user-1', question: 'q', stream: false })
+    expect(h.orchestrator.startCalls[0]).toMatchObject({ sessionId: 'session-1' })
+    expect(result.runId).toBe('run-1')
+  })
+
   it('父代理回合事件增量驱动流式回调（assistant/message 文本增量）', async () => {
     const h = makeHarness()
     // 事件在请求前已存在：seq 0 起全部可见（回合未结束也先 flush 增量）

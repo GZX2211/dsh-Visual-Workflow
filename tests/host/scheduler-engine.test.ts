@@ -188,6 +188,39 @@ describe('调度引擎', () => {
     expect(h.orche.startCalls[0].sessionId).toBe('session-owner')
   })
 
+  it('触发：new-session 配置 workspacePath → 新会话 cwd 直传（不继承创建者 cwd）', async () => {
+    const h = await makeHarness(makeTask({ workspacePath: 'D:\\work\\auto' }))
+    await h.engine.sweep()
+    expect(h.sessions.created).toHaveLength(1)
+    expect(h.sessions.created[0]).toMatchObject({ cwd: 'D:\\work\\auto', agentPreset: 'standard' })
+  })
+
+  it('触发：new-session 无 workspacePath → 继承创建者会话 cwd（sessionCwdOf 解析）', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vw-sched-cwd-'))
+    cleanups.push(() => rm(dir, { recursive: true, force: true }))
+    const taskStore = new SchedulerTaskStore(dir)
+    const flowStore = new FlowStore(dir)
+    await flowStore.init()
+    await taskStore.save(makeTask())
+    await flowStore.saveFlowTemplate(makeTemplate(), { force: true })
+    const orche = new FakeOrchestrator()
+    const sessions = new FakeSessionProvider()
+    const clock = { now: Date.UTC(2026, 8, 1, 2, 0, 0) }
+    const engine = new SchedulerEngine({
+      taskStore,
+      flowStore,
+      orchestrator: orche,
+      sessionProvider: sessions,
+      sessionCwdOf: async () => 'D:\\work\\owner-cwd',
+      now: () => clock.now,
+      tickMs: 30_000,
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    })
+    ;(engine as unknown as { startedAtMs: number }).startedAtMs = clock.now - 60_000
+    await (engine as unknown as { sweep(): Promise<void> }).sweep()
+    expect(sessions.created[0]).toMatchObject({ cwd: 'D:\\work\\owner-cwd' })
+  })
+
   it('触发失败：模板缺失 → lastResult=failed 且同一触发点不重试', async () => {
     const h = await makeHarness(makeTask({ workflowTemplateId: 'tpl-missing' }))
     await h.engine.sweep() // 10:00 触发 → 失败

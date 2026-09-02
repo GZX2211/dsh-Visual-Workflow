@@ -273,6 +273,11 @@ export const zh = {
   resumedFrom: '续跑自',
   resumeFromNode: '断点节点',
   resumeRun: '恢复运行',
+  // 启动时开启新会话（运行历史右侧；保存于工作流/服务文档）
+  newSession: '启动时开启新会话',
+  newSessionHint: '开启后每次运行都在新建的独立会话中执行（可指定工作区路径；关闭则为当前会话运行）',
+  workspacePlaceholder: '如 D:\\work\\project（新会话工作区，须为存在的目录）',
+  workspaceHint: '新会话工作区路径（绝对路径目录）；该路径即会话 cwd，也是沙箱 workspace-write 根，保存时校验存在',
   // 组合管理
   combos: '组合',
   comboManager: '组合管理',
@@ -318,6 +323,11 @@ export const zh = {
   mcpRestartHint: 'MCP 增删改写入 profile 配置，重启 dsh web 后生效',
   presetCustom: '自定义清单',
   comboDeleteConfirm: '确认删除',
+  // 全局工具开关（父代理工具白名单「关闭」侧）
+  toolEnable: '开启',
+  toolDisable: '关闭',
+  toolSwitchEnabled: '工具已开启：所有会话的父代理均可见',
+  toolSwitchDisabled: '工具已关闭：所有会话的父代理与子代理均不再可见',
   // 定时任务
   scheduler: '定时任务',
   schedulerManager: '定时任务管理',
@@ -629,6 +639,11 @@ export const en: Dict = {
   resumedFrom: 'resumed from',
   resumeFromNode: 'checkpoint',
   resumeRun: 'Resume',
+  // Start in a new session (right of run history; persisted on the workflow/service document)
+  newSession: 'Start in new session',
+  newSessionHint: 'When on, every run executes in a freshly created session (a workspace path may be set); when off, it runs in the current session',
+  workspacePlaceholder: 'e.g. D:\\work\\project (new-session workspace; must exist)',
+  workspaceHint: 'Absolute path to the new-session workspace directory; it becomes the session cwd and sandbox workspace-write root (validated on save)',
   combos: 'Combos',
   comboManager: 'Combo Manager',
   comboTabDsh: 'Tools',
@@ -673,6 +688,11 @@ export const en: Dict = {
   mcpRestartHint: 'MCP changes are written to the profile config; restart dsh web to apply',
   presetCustom: 'Custom list',
   comboDeleteConfirm: 'Confirm delete',
+  // Global tool switches (parent tool whitelist "disabled" side)
+  toolEnable: 'Enable',
+  toolDisable: 'Disable',
+  toolSwitchEnabled: 'Tool enabled: visible to parent agents in every session',
+  toolSwitchDisabled: 'Tool disabled: hidden from parent agents and their subagents in every session',
   // Scheduled tasks
   scheduler: 'Schedule',
   schedulerManager: 'Scheduled Tasks',

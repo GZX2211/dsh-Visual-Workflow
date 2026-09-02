@@ -38,6 +38,7 @@ import { WATCHDOG_INTERVAL_MS, reconcileStaleRuns, scheduleIdleWatchdog, sweepWa
 import { HEAD_MARKER, MID_MARKER, TAIL_MARKER, TAIL_RESTATE_MARKER } from '../../src/host/prompts/markers.js'
 import { ORCH_HARD_CONSTRAINTS } from '../../src/host/prompts/orchestration.js'
 import { NODE_HARD_CONSTRAINTS } from '../../src/host/prompts/node-task.js'
+import { parentExecutorOf } from '../../src/host/orchestrator/helpers.js'
 import { stageLabel } from '../../src/host/graph/model.js'
 import type { FileNode, GraphNode, RoleNode, StageNode, WorkflowDocument } from '../../src/host/shared/graph-model.js'
 
@@ -144,6 +145,20 @@ class FakeAgents implements AgentHost {
   }  latestTurnEnd(): TurnEndInfo | null {
     return this.turnEnd
   }
+  /** 最近一条 assistant/message 文本（执行者模式回写用；沿官方事件扫描语义）。 */
+  latestRootAssistantText(sessionId: string, afterMs: number): string | null {
+    const root = this.roots.get(sessionId)
+    if (!root) return null
+    for (let index = root.session.events.length - 1; index >= 0; index -= 1) {
+      const event = root.session.events[index] as { type?: unknown; time?: unknown; data?: { message?: { content?: unknown } } } | null
+      if (!event || event.type !== 'assistant/message') continue
+      if ((Number(event.time) || 0) < afterMs) continue
+      const text = lastAssistantText(event.data?.message?.content, 0)
+      if (text) return text
+      return null
+    }
+    return null
+  }
   childRunning(id: string): boolean {
     return this.runningChildren.has(id)
   }
@@ -184,7 +199,10 @@ interface Harness {
 }
 
 /** 装配：临时目录真实 FlowStore + fake 依赖 + 可控时钟与 id 生成。 */
-async function makeHarness(config?: Partial<OrchestratorConfig>): Promise<Harness> {
+async function makeHarness(
+  config?: Partial<OrchestratorConfig>,
+  extra?: { sessionProvider?: { createSession(options: { label: string; agentPreset?: string; cwd?: string }): Promise<string> } },
+): Promise<Harness> {
   const dir = await mkdtemp(join(tmpdir(), 'vw-orch-'))
   cleanups.push(() => rm(dir, { recursive: true, force: true }))
   const store = new FlowStore(dir)
@@ -200,6 +218,7 @@ async function makeHarness(config?: Partial<OrchestratorConfig>): Promise<Harnes
     store,
     runner,
     agents,
+    ...(extra?.sessionProvider ? { sessionProvider: extra.sessionProvider } : {}),
     config: {
       outputFullLimit: 400,
       documentTextLimit: 200,
@@ -1367,5 +1386,182 @@ describe('refreshActiveDefinitions：画布保存 → 运行事实源实时刷�
     await h.runtime.refreshActiveDefinitions('flow-1', 'session-1', updated)
     // 已完成 run 的事实源不应被改写（历史追溯语料保持原样）
     expect((await h.store.readOrchestration(result.runId))?.nodes).toHaveLength(6)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 父代理执行者模式（被流程线连接 → 先执行自身节点任务再调度）
+// ---------------------------------------------------------------------------
+
+describe('父代理执行者模式', () => {
+  /** 父代理节点（kind='parent'）。 */
+  function parentAgent(id: string, label: string, extra: Partial<RoleNode['data']> = {}): RoleNode {
+    return { ...agent(id, label, extra), kind: 'parent' }
+  }
+
+  /** 父代理节点被流程线连接的流程：start → parent(flow-in) → a1 → parent(flow-out) → end。 */
+  function executorFlow(): WorkflowDocument {
+    return {
+      id: 'flow-exec',
+      sessionId: 'session-1',
+      mode: 'mode1',
+      name: '执行者流程',
+      description: '父代理先执行自身任务',
+      revision: 1,
+      nodes: [
+        stage('n-start', 'start', 'mode1'),
+        parentAgent('n-parent', '父代理', { presetId: 'standard' }),
+        agent('n-a1', '子任务A'),
+        stage('n-end', 'end', 'mode1'),
+      ],
+      lines: [
+        { id: 'l1', source: 'n-start', target: 'n-parent', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+        { id: 'l2', source: 'n-parent', target: 'n-a1', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+        { id: 'l2c', source: 'n-parent', target: 'n-a1', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' },
+        { id: 'l3', source: 'n-a1', target: 'n-end', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+      ],
+    }
+  }
+
+  it('prepare 前置：parentExecutorOf 仅当存在 flow-in 连线时命中', async () => {
+    const h = await makeHarness()
+    const flow = executorFlow()
+    const executor = parentExecutorOf(flow)
+    expect(executor).not.toBeNull()
+    expect(executor?.nodeId).toBe('n-parent')
+    // 去掉 flow-in 连线：纯调度者
+    const plain = { ...flow, lines: flow.lines.filter((l) => !(l.target === 'n-parent' && l.targetHandle === 'flow-in')) }
+    expect(parentExecutorOf(plain)).toBeNull()
+    void h
+  })
+
+  it('startRun 执行者模式：快照父代理节点 running + 指令含执行者措辞与任务块（ctx/db 提示注入）', async () => {
+    const h = await makeHarness()
+    const flow = executorFlow()
+    // 文件节点 ctx-out → 父代理 ctx-in + 数据库 db-out → 父代理 db-in
+    flow.nodes.push(fileNode('n-file', '规格', { fileKind: 'text', content: '需求文本' }))
+    flow.nodes.push({ id: 'n-db', kind: 'database', position: { x: 0, y: 0 }, data: { label: '库', description: '', dbType: 'local', dbKind: 'sqlite', localPath: '' } })
+    flow.lines.push(
+      { id: 'l-f', source: 'n-file', target: 'n-parent', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' },
+      { id: 'l-d', source: 'n-db', target: 'n-parent', sourceHandle: 'db-out', targetHandle: 'db-in' },
+    )
+    const { result, entry } = await start(h, flow)
+    const parentNode = h.runtime.runSnapshot(result.runId)?.nodes.find((n) => n.nodeId === 'n-parent')
+    expect(parentNode?.status).toBe('running')
+    expect(entry.executorParentId).toBe('n-parent')
+    const directive = h.agents.roots.get('session-1')!.messages[0].content.map((c) => c.text).join('\n')
+    expect(directive).toContain(ORCH_HARD_CONSTRAINTS.executorRole)
+    expect(directive).toContain('【你的节点任务】')
+    expect(directive).toContain('需求文本') // 文件文本经 ctx 连线直通
+    expect(directive).toContain('wf_db_query') // db 提示（Connected database node(s)…）
+    expect(directive).toContain('n-parent') // 执行节点标识
+  })
+
+  it('纯调度者（无 flow-in）：指令不含执行者措辞与任务块，父代理节点保持 pending', async () => {
+    const h = await makeHarness()
+    const flow = executorFlow()
+    const plain = { ...flow, lines: flow.lines.filter((l) => !(l.target === 'n-parent' && l.targetHandle === 'flow-in')) }
+    const { result } = await start(h, plain)
+    const parentNode = h.runtime.runSnapshot(result.runId)?.nodes.find((n) => n.nodeId === 'n-parent')
+    expect(parentNode?.status).toBe('pending')
+    const directive = h.agents.roots.get('session-1')!.messages[0].content.map((c) => c.text).join('\n')
+    expect(directive).not.toContain('【你的节点任务】')
+  })
+
+  it('wfRunNode 首次调度：父代理节点标记 ok，输出回写最近 assistant/message 文本', async () => {
+    const h = await makeHarness()
+    const { result } = await start(h, executorFlow())
+    // 父代理产出（官方 session.events 的 assistant/message 块数组形态）
+    const root = h.agents.roots.get('session-1')!
+    root.session.events.push({
+      type: 'assistant/message',
+      time: 1_000_100,
+      data: { message: { content: [{ type: 'text', text: '我已完成自身任务：分析结论 X' }] } },
+    })
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    const parentNode = h.runtime.runSnapshot(result.runId)?.nodes.find((n) => n.nodeId === 'n-parent')
+    expect(parentNode?.status).toBe('ok')
+    expect(parentNode?.output).toContain('分析结论 X')
+    // 下游 ctx 注入：a1 的任务块应包含父代理产出（上游角色产出注入）
+    const a1Call = h.runner.calls.find((call) => call.node.id === 'n-a1')
+    expect(a1Call?.blocks[0].text).toContain('分析结论 X')
+  })
+
+  it('wfFinish 收尾：父代理节点同步标记 ok（无后续调度的流程）', async () => {
+    const h = await makeHarness()
+    const flow = executorFlow()
+    // 父代理 flow-out 直连 end（无 agent 下游）
+    flow.lines = flow.lines.filter((l) => l.id !== 'l2')
+    const { result } = await start(h, flow)
+    await h.runtime.wfFinish(caller, { status: 'completed', summary: '完成' })
+    // 收尾后内存条目释放：查磁盘记录
+    const disk = await h.store.getRun(result.runId)
+    expect(disk?.nodes.find((n) => n.nodeId === 'n-parent')?.status).toBe('ok')
+  })
+
+  it('结束后 stop：父代理节点 running → fail（terminalize 语义）', async () => {
+    const h = await makeHarness()
+    const { result } = await start(h, executorFlow())
+    await h.runtime.stopRun(result.runId)
+    const parentNode = h.runtime.runSnapshot(result.runId)?.nodes.find((n) => n.nodeId === 'n-parent')
+    // 内存条目 terminated 后已释放：查磁盘记录
+    const disk = await h.store.getRun(result.runId)
+    expect(disk?.nodes.find((n) => n.nodeId === 'n-parent')?.status).toBe('fail')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 启动时开启新会话（startRun startNewSession）
+// ---------------------------------------------------------------------------
+
+describe('启动时开启新会话', () => {
+  it('startNewSession=true：经 sessionProvider 新建会话，根代理/快照归属新会话，返回 sessionId', async () => {
+    const sessions: Array<{ label: string; agentPreset?: string; cwd?: string }> = []
+    const h = await makeHarness(undefined, {
+      sessionProvider: {
+        async createSession(options) {
+          sessions.push(options)
+          h.agents.roots.set('session-new', new FakeRoot('session-new'))
+          return 'session-new'
+        },
+      },
+    })
+    const flow = makeFlow()
+    await h.store.saveWorkflow(flow, 'session-1', { force: true })
+    const result = await h.runtime.startRun({ sessionId: 'session-1', flowId: flow.id, startNewSession: true, workspacePath: 'D:\\work\\project' })
+    expect(sessions).toHaveLength(1)
+    expect(sessions[0]?.cwd).toBe('D:\\work\\project')
+    expect(sessions[0]?.agentPreset).toBe('standard')
+    expect(result.sessionId).toBe('session-new')
+    const snapshot = h.runtime.runSnapshot(result.runId)
+    expect(snapshot?.sessionId).toBe('session-new')
+    // 指令注入新会话根代理（原会话无消息）
+    expect(h.agents.roots.get('session-1')!.messages).toHaveLength(0)
+    expect(h.agents.roots.get('session-new')!.messages).toHaveLength(1)
+  })
+
+  it('workspacePath 空：新会话不带 cwd（继承宿主默认）', async () => {
+    const sessions: Array<{ cwd?: string }> = []
+    const h = await makeHarness(undefined, {
+      sessionProvider: {
+        async createSession(options) {
+          sessions.push(options)
+          h.agents.roots.set('session-new', new FakeRoot('session-new'))
+          return 'session-new'
+        },
+      },
+    })
+    const flow = makeFlow()
+    await h.store.saveWorkflow(flow, 'session-1', { force: true })
+    await h.runtime.startRun({ sessionId: 'session-1', flowId: flow.id, startNewSession: true })
+    expect(sessions[0]?.cwd).toBeUndefined()
+  })
+
+  it('sessionProvider 缺失：明确报错且不注入指令', async () => {
+    const h = await makeHarness()
+    const flow = makeFlow()
+    await h.store.saveWorkflow(flow, 'session-1', { force: true })
+    await expect(h.runtime.startRun({ sessionId: 'session-1', flowId: flow.id, startNewSession: true })).rejects.toThrow('「启动时开启新会话」不可用')
+    expect(h.agents.roots.get('session-1')!.messages).toHaveLength(0)
   })
 })

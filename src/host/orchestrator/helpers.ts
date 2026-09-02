@@ -224,6 +224,15 @@ export function buildNodeBlocks(input: {
   return [{ type: 'text', text: collabBlock ? `${text}\n\n${collabBlock}` : text }]
 }
 
+/** 父代理是否为执行者模式：父代理节点存在 flow-in 连线（被流程线连接 → 作为执行单元先执行自身任务）。 */
+export function parentExecutorOf(flow: WorkflowDocument): { nodeId: string; nodeLabel: string } | null {
+  const parent = flow.nodes.find((n) => n.kind === 'parent')
+  if (!parent) return null
+  const hasFlowIn = (flow.lines ?? []).some((line) => line.target === parent.id && line.targetHandle === 'flow-in')
+  if (!hasFlowIn) return null
+  return { nodeId: parent.id, nodeLabel: labelOf(parent) }
+}
+
 /** 编排指令参数组装（facts 静态事实 + dynamic 末段动态态，前缀稳定）。 */
 export function directiveParams(
   flow: WorkflowDocument,
@@ -234,6 +243,10 @@ export function directiveParams(
     resume?: { resumeFromNodeId?: string; resumedFromRunId: string }
     /** 模式二用户问题（不稳定内容，仅末段）。 */
     question?: string
+    /** 执行者模式事实（父代理节点被流程线连接；静态）。 */
+    parentAsNode?: { nodeId: string; nodeLabel: string }
+    /** 父代理节点任务块（执行者模式；动态值仅末段）。 */
+    parentTaskBlock?: string
   },
 ): OrchestrationDirectiveParams {
   return {
@@ -243,6 +256,7 @@ export function directiveParams(
       definitionPath: defPath,
       nodes: orchestrationNodeList(flow),
       collabGroups: collabGroupList(flow),
+      parentAsNode: extra?.parentAsNode ?? null,
     },
     dynamic: {
       pauseNodeIds: pauseNodeIdsOf(flow),
@@ -251,6 +265,7 @@ export function directiveParams(
           ? 'mode2 (service): use wf_run_node_wait to start each node and block until it finishes; never use wf_run_node.'
             : 'mode1 (orchestration): use wf_run_node to start each node asynchronously; never use wf_run_node_wait.',
       ...(extra?.question ? { question: extra.question } : {}),
+      ...(extra?.parentTaskBlock ? { parentTaskBlock: extra.parentTaskBlock } : {}),
       ...(extra?.resume
         ? { isResume: true, resumeFromNodeId: extra.resume.resumeFromNodeId, resumedFromRunId: extra.resume.resumedFromRunId }
         : {}),

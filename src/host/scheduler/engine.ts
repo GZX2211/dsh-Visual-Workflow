@@ -280,15 +280,20 @@ export class SchedulerEngine {
   private async fire(task: ScheduledTask, rt: PersistedRuntime, triggerAt: number): Promise<void> {
     rt.lastConsumedTriggerAt = triggerAt
     try {
+      // 新会话工作区：任务配置了 workspacePath 则直传（不继承创建者 cwd；
+      // 空则继承创建者 cwd——官方会话 header.cwd = 沙箱 workspace-write 根）
+      const workspacePath = String(task.workspacePath ?? '').trim()
       const sessionId = task.sessionMode === 'current-session'
         ? task.ownerSessionId
         : await this.deps.sessionProvider.createSession({
             label: `定时任务：${task.name}`,
             // 官方 standard 预设：父代理具备官方标准工具集（用户裁决：standard 预设+可追溯）
             agentPreset: 'standard',
-            ...(task.ownerSessionId && this.deps.sessionCwdOf
-              ? { cwd: await this.deps.sessionCwdOf(task.ownerSessionId).catch(() => undefined) }
-              : {}),
+            ...(workspacePath
+              ? { cwd: workspacePath }
+              : task.ownerSessionId && this.deps.sessionCwdOf
+                ? { cwd: await this.deps.sessionCwdOf(task.ownerSessionId).catch(() => undefined) }
+                : {}),
           })
       const template = await this.deps.flowStore.getFlowTemplate(task.workflowTemplateId)
       if (!template) throw new Error(`工作流模板不存在：${task.workflowTemplateId}`)

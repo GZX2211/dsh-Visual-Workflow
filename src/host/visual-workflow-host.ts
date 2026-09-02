@@ -34,6 +34,7 @@ import { ServiceManager } from './service/manager.js'
 import { SchedulerEngine } from './scheduler/engine.js'
 import { SchedulerTaskStore } from './scheduler/task-store.js'
 import { CordisSessionProvider, sessionCwdResolver } from './scheduler/session-provider.js'
+import { registerToolSwitchFilter, ToolSwitchStore } from './tools/tool-switches.js'
 
 export const VisualWorkflowHostServiceName = 'visualWorkflowHost'
 
@@ -57,6 +58,8 @@ export class VisualWorkflowHost extends Service {
   readonly scheduler: SchedulerEngine
   /** 定时任务存储（scheduler-tasks.json）。 */
   readonly schedulerTaskStore: SchedulerTaskStore
+  /** 全局工具开关存储（tool-switches.json；父代理工具白名单「关闭」侧，全局即时生效）。 */
+  readonly toolSwitches: ToolSwitchStore
   /** ReAct 软截停护栏（桥供 runner/编排器，贡献注入子代理）。 */
   private readonly reactGuard = createReactGuard()
   /** 思考强度模型选择装配。 */
@@ -83,6 +86,7 @@ export class VisualWorkflowHost extends Service {
     super(ctx, VisualWorkflowHostServiceName)
     this.skipReconcile = options.skipReconcile === true
     this.store = new FlowStore(config.dataDir)
+    this.toolSwitches = new ToolSwitchStore(config.dataDir)
     this.agents = new CordisAgentHost(ctx)
     this.embedding = new EmbeddingService({
       modelDir: config.embeddingModelDir,
@@ -94,6 +98,7 @@ export class VisualWorkflowHost extends Service {
       agents: () => agentsServiceLike(ctx),
       subagents: () => subagentsServiceLike(ctx),
       toolsView: new CordisToolsView(ctx),
+      toolSwitches: () => this.toolSwitches.currentDisabled(),
       react: this.reactGuard.bridge,
       modelSelection: this.modelSelection,
       promptSetup: this.childPrompt,
@@ -114,6 +119,7 @@ export class VisualWorkflowHost extends Service {
         wfAskAgentTimeoutMs: config.wfAskAgentTimeoutMs,
       },
       dbIndexer: { dataDir: config.dataDir, engine: this.embedding },
+      sessionProvider: new CordisSessionProvider(ctx),
       logger: cordisLogger(ctx),
     })
     this.serviceManager = new ServiceManager({
@@ -194,6 +200,12 @@ export class VisualWorkflowHost extends Service {
 
     // 数据目录结构初始化（幂等）
     await this.store.init()
+
+    // 全局工具开关装载：磁盘快照 → 内存权威集；随后注册 system-prompt/assemble
+    // 全局瀑布（unscoped ctx 对所有 agent 组装生效），关闭工具即时从所有会话
+    // 的代理上下文中剔除（独立于工作流运行状态，正菜单交互语义）。
+    await this.toolSwitches.load()
+    this.ctx.effect(() => registerToolSwitchFilter(this.ctx, this.toolSwitches), 'visualWorkflowHost.toolSwitches')
 
     // 陈旧记录对账与模式二服务自动恢复（上次运行中 status=running 的服务重启）。
     // 服务进程装配（skipReconcile）整块跳过：磁盘运行记录与服务状态属主进程，

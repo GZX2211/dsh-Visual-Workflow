@@ -443,3 +443,106 @@ describe('pickInitialInstance：进入工作台自动选中实例', () => {
     expect(pickInitialInstance(instances, active)).toBe('flow-a')
   })
 })
+
+// ---------------------------------------------------------------------------
+// 组合管理：筛选 Tag 动态构建 + 工具全局开关（父代理白名单「关闭」侧）
+// ---------------------------------------------------------------------------
+
+describe('组合管理：Tag 筛选与工具开关', () => {
+  const CATALOG = {
+    items: [
+      { key: 'tool:read', name: 'read', description: '读取文件' },
+      { key: 'tool:wf_run_node', name: 'wf_run_node', description: '调度' },
+      { key: 'tool:mcp__codegraph__codegraph_explore', name: 'mcp__codegraph__codegraph_explore', description: '探索' },
+      { key: 'tool:mcp__codegraph__codegraph_query', name: 'mcp__codegraph__codegraph_query', description: '查询' },
+      { key: 'tool:mcp__playwright_mcp__page_screenshot', name: 'mcp__playwright_mcp__page_screenshot', description: '截图' },
+    ],
+    mcp: [
+      { id: 'm1', serverName: 'codegraph', transport: 'stdio', commandLine: 'npx codegraph' },
+      { id: 'm2', serverName: 'playwright_mcp', transport: 'stdio', commandLine: 'npx playwright' },
+    ],
+    loadedPlugins: [],
+    disabledTools: ['read'],
+  }
+
+  async function openCombo(): Promise<{ calls: Array<{ endpoint: string; args: Record<string, unknown> }> }> {
+    const calls: Array<{ endpoint: string; args: Record<string, unknown> }> = []
+    const remote: RemoteFace = {
+      call: vi.fn(async (endpoint: string, args?: Record<string, unknown>) => {
+        calls.push({ endpoint, args: args ?? {} })
+        if (endpoint === EP.EP_PLUGIN_CATALOG) return CATALOG
+        if (endpoint === EP.EP_TOOL_COMBOS) return [{ id: 'combo-c1', name: '组合一', tools: ['read'], mcpServers: [] }]
+        if (endpoint === EP.EP_TOOL_SWITCH_PUT) {
+          const name = String(args?.name ?? '')
+          const disabled = args?.disabled !== false
+          return { disabled: disabled ? [...CATALOG.disabledTools, name] : CATALOG.disabledTools.filter((item) => item !== name) }
+        }
+        if (endpoint === EP.EP_LIST_TEMPLATES && String(args?.kind ?? '') === 'role') return []
+        if (endpoint === EP.EP_LIST_TEMPLATES && String(args?.kind ?? '') === 'group') return []
+        if (endpoint === EP.EP_PRESETS) return []
+        if (endpoint === EP.EP_MODELS) return []
+        if (endpoint === EP.EP_RUN_HISTORY) return []
+        if (endpoint === EP.EP_ACTIVE_RUNS) return []
+        if (endpoint === EP.EP_LIST_WORKFLOWS) return []
+        if (endpoint === EP.EP_LIST_FLOW_TEMPLATES) return []
+        return []
+      }),
+    }
+    await renderStudioWith(remote)
+    await act(async () => {
+      Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-tabs .wf-btn')).find((item) => item.textContent === zh.combos)?.click()
+    })
+    await act(async () => { await Promise.resolve() })
+    return { calls }
+  }
+
+  it('Tag 栏 = 全部 + 官方工具 + 动态 MCP（按目录首次出现顺序）；默认「全部」选中', async () => {
+    await openCombo()
+    const tags = textOf('.wf-combo-tag')
+    expect(tags).toEqual(['全部', '官方工具', 'codegraph', 'playwright_mcp'])
+    expect(document.querySelector('.wf-combo-tag.is-active')?.textContent).toBe('全部')
+  })
+
+  it('点击 MCP Tag 单选过滤列表；再点回「全部」', async () => {
+    await openCombo()
+    await act(async () => {
+      Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-combo-tag')).find((item) => item.textContent === 'codegraph')?.click()
+    })
+    const names = textOf('.wf-combo-card__name')
+    expect(names).toEqual(['mcp__codegraph__codegraph_explore', 'mcp__codegraph__codegraph_query'])
+    await act(async () => {
+      const active = document.querySelector('.wf-combo-tag.is-active')
+      ;(active as HTMLButtonElement | null)?.click()
+    })
+    expect(textOf('.wf-combo-card__name')).toHaveLength(5)
+  })
+
+  it('被全局关闭的工具：置灰 + 勾选框禁用（即使组合已勾选也不显示为已选）', async () => {
+    await openCombo()
+    // 组合一勾选了 read，但 read 处于全局关闭（disabledTools: ['read']）→ 卡片置灰且未勾选
+    const card = Array.from(document.querySelectorAll<HTMLElement>('.wf-combo-card'))
+      .find((item) => item.querySelector('.wf-combo-card__name')?.textContent === 'read')
+    expect(card?.classList.contains('is-disabled')).toBe(true)
+    const checkbox = card?.querySelector('input[type=checkbox]') as HTMLInputElement | null
+    expect(checkbox?.checked).toBe(false)
+    expect(checkbox?.disabled).toBe(true)
+  })
+
+  it('点击「开启」→ 调用 toolSwitchPut；工具解除置灰可再勾选', async () => {
+    const { calls } = await openCombo()
+    // read 初始为全局关闭（disabledTools: ['read']）→ 卡片按钮显示「开启」
+    const card = Array.from(document.querySelectorAll<HTMLElement>('.wf-combo-card'))
+      .find((item) => item.querySelector('.wf-combo-card__name')?.textContent === 'read')
+    expect(card?.classList.contains('is-disabled')).toBe(true)
+    await act(async () => {
+      const button = Array.from(card!.querySelectorAll('button')).find((item) => item.textContent === zh.toolEnable)
+      button?.click()
+    })
+    await act(async () => { await Promise.resolve() })
+    expect(calls.some((call) => call.endpoint === EP.EP_TOOL_SWITCH_PUT && call.args.name === 'read' && call.args.disabled === false)).toBe(true)
+    // 解除关闭 → 卡片恢复可勾选
+    const cardAfter = Array.from(document.querySelectorAll<HTMLElement>('.wf-combo-card'))
+      .find((item) => item.querySelector('.wf-combo-card__name')?.textContent === 'read')
+    expect(cardAfter?.classList.contains('is-disabled')).toBe(false)
+  })
+})

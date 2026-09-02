@@ -96,6 +96,9 @@ export function useWorkflows(
       name: template.name ?? '未命名工作流',
       description: template.description ?? '',
       revision: 0,
+      // 启动时开启新会话/工作区随模板继承（实例保存后可再编辑）
+      ...(template.startNewSession === true ? { startNewSession: true as const } : {}),
+      ...(String(template.workspacePath ?? '').trim() ? { workspacePath: String(template.workspacePath).trim() } : {}),
       nodes: JSON.parse(JSON.stringify(template.nodes ?? [])) as WorkflowDocument['nodes'],
       lines: JSON.parse(JSON.stringify(template.lines ?? [])) as WorkflowDocument['lines'],
       createdAt: now,

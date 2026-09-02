@@ -128,7 +128,7 @@ export interface StudioState {
    *  UNDO/REDO 用它精确判定是否回到已保存状态（Bug 17——避免撤销回初始
    *  保存状态仍被误判为未保存而弹确认框）。 */
   savedGraph: GraphSnapshot | null
-  run: { runId: string | null; snapshot: RunSnapshot | null }
+  run: { runId: string | null; sessionId: string | null; snapshot: RunSnapshot | null }
   toasts: ToastItem[]
   message: string
   history: { past: GraphSnapshot[]; future: GraphSnapshot[] }

@@ -82,6 +82,7 @@ export class VisualWorkflowApiCatalog extends VisualWorkflowApiEcosystem {
     return {
       items,
       loadedPlugins,
+      disabledTools: await this.host.toolSwitches?.readDisabled().catch(() => []) ?? [],
       mcp: mcpServers.map((server: { id?: unknown; serverName?: unknown; url?: unknown; command?: unknown; transport?: unknown; disabled?: unknown; args?: unknown; env?: unknown; headers?: unknown }) => ({
         id: server.id,
         name: server.serverName,
@@ -200,6 +201,25 @@ export class VisualWorkflowApiCatalog extends VisualWorkflowApiEcosystem {
     const id = String(args?.id ?? '')
     if (!id) throw httpError(400, 'requires id')
     return toggleMcpServer(id, args?.disabled !== false)
+  }
+
+  // ---------- 全局工具开关（父代理工具白名单「关闭」侧） ----------
+
+  /** 全局工具开关列表（被关闭 = 父代理上下文不可见；独立于工作流运行状态）。 */
+  async toolSwitches(): Promise<unknown> {
+    if (!this.host.toolSwitches) throw httpError(501, 'tool switches unavailable')
+    return { disabled: await this.host.toolSwitches.readDisabled() }
+  }
+
+  /** 设置单个工具开/关状态（全局即时生效；返回更新后的完整关闭清单）。 */
+  async toolSwitchPut(args: { name?: unknown; disabled?: unknown }): Promise<unknown> {
+    if (!this.host.toolSwitches) throw httpError(501, 'tool switches unavailable')
+    const name = String(args?.name ?? '')
+    if (!name) throw httpError(400, '工具开关需要 name')
+    if (name === RESERVED_TRANSPORT_TOOL) {
+      throw httpError(400, `${RESERVED_TRANSPORT_TOOL} 为官方保留传输名，不可关闭`)
+    }
+    return { disabled: await this.host.toolSwitches.setDisabled(name, args?.disabled !== false) }
   }
 }
 

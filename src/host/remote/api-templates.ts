@@ -7,6 +7,7 @@
 import { httpError } from './http.js'
 import { copyIntoManagedFile } from './download.js'
 import { stripClientMeta } from './api-base.js'
+import { resolveWorkspacePath } from '../workspace/verify.js'
 import { VisualWorkflowApiWorkflows } from './api-workflows.js'
 
 export class VisualWorkflowApiTemplates extends VisualWorkflowApiWorkflows {
@@ -69,8 +70,18 @@ export class VisualWorkflowApiTemplates extends VisualWorkflowApiWorkflows {
     if (!raw || !String(raw.id ?? '').trim()) throw httpError(400, 'requires a flow template id')
     const expected = Number(raw.revision)
     if (!Number.isFinite(expected)) throw httpError(400, 'requires a numeric revision')
+    // 新会话工作区校验（存在且为目录；模板保存同实例一致，实例化后运行时仍会再校验）
+    let workspacePath: string | undefined
     try {
-      return await this.host.store.saveFlowTemplate(stripClientMeta(raw) as never, { expectedRevision: expected })
+      workspacePath = await resolveWorkspacePath(raw.workspacePath)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw httpError(400, message)
+    }
+    const normalized: Record<string, unknown> = { ...stripClientMeta(raw), startNewSession: raw.startNewSession === true }
+    if (workspacePath) normalized.workspacePath = workspacePath
+    try {
+      return await this.host.store.saveFlowTemplate(normalized as never, { expectedRevision: expected })
     } catch (error) {
       const code = (error as { code?: string })?.code ?? ''
       if (code === 'FLOW_REVISION_CONFLICT') throw httpError(409, String((error as Error).message), code)

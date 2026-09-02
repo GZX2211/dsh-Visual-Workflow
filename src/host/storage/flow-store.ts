@@ -309,6 +309,8 @@ export class FlowStore {
       description: service.description,
       nodes: service.nodes,
       lines: service.lines,
+      startNewSession: service.startNewSession,
+      workspacePath: service.workspacePath,
       revision: service.revision,
       createdAt: service.createdAt,
       updatedAt: service.updatedAt,

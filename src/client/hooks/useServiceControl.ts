@@ -64,6 +64,9 @@ export function useServiceControl(dispatch: Dispatch<StudioAction>, remote: Remo
       name: template.name ?? '未命名服务',
       description: template.description ?? '',
       revision: 0,
+      // 启动时开启新会话/工作区随模板继承（服务保存后可再编辑）
+      ...(template.startNewSession === true ? { startNewSession: true as const } : {}),
+      ...(String(template.workspacePath ?? '').trim() ? { workspacePath: String(template.workspacePath).trim() } : {}),
       nodes: JSON.parse(JSON.stringify(template.nodes ?? [])) as ServiceState['nodes'],
       lines: JSON.parse(JSON.stringify(template.lines ?? [])) as ServiceState['lines'],
       createdAt: now,

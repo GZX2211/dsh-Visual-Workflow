@@ -38,6 +38,9 @@ export function instantiateFromTemplate(
     mode: template.mode,
     name,
     description: String(template.description ?? ''),
+    // 启动时开启新会话/工作区随模板继承（实例保存时可再编辑；定时任务另有独立字段）
+    ...(template.startNewSession === true ? { startNewSession: true } : {}),
+    ...(String(template.workspacePath ?? '').trim() ? { workspacePath: String(template.workspacePath).trim() } : {}),
     revision: 0,
     nodes: JSON.parse(JSON.stringify(template.nodes ?? [])) as WorkflowDocument['nodes'],
     lines: JSON.parse(JSON.stringify(template.lines ?? [])) as WorkflowDocument['lines'],

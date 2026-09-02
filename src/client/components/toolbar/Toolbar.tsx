@@ -27,12 +27,17 @@ export interface ToolbarProps {
   onOpenHistory(): void
   canHistory: boolean
   serviceStatus: { port?: number; status?: string } | null
+  /** 启动时开启新会话配置（工作流/服务文档字段；模板态同样可编辑，创建实例时继承）。 */
+  runConfig: { startNewSession: boolean; workspacePath: string }
+  /** 新会话/工作区变更回调（写回当前文档）。 */
+  onRunConfigChange(patch: { startNewSession?: boolean; workspacePath?: string }): void
 }
 
 export function Toolbar(props: ToolbarProps) {
   const {
     copy: t, mode, saveLabel, onUndo, onRedo, onClear, canClear, onTidy, canTidy,
     onSave, canSave, running, onStop, onRun, onOpenHistory, canHistory, serviceStatus,
+    runConfig, onRunConfigChange,
   } = props
   const isMode2 = mode === 'mode2'
   // 运行状态指示（控制栏最右侧）：模式二含服务状态（停止/启动中/运行中·端口/崩溃）
@@ -57,6 +62,28 @@ export function Toolbar(props: ToolbarProps) {
         : <button type="button" className="wf-btn is-primary" onClick={onRun} disabled={!canSave}>{isMode2 ? t.startService : t.run}</button>}
       <button type="button" className="wf-btn is-ghost" onClick={onOpenHistory} disabled={!canHistory}>{t.history}</button>
       {statusText ? <span className={`wf-status${statusRunning ? ' is-running' : ''}`}>{statusText}</span> : null}
+      {/* 启动时开启新会话（运行历史右侧；模式一/模式二共用，保存于工作流/服务文档）：
+          开启后右侧出现「选择工作区」输入框（路径即新会话 cwd = 沙箱工作区根） */}
+      <label className="wf-toolbar__switch" title={t.newSessionHint}>
+        <input
+          type="checkbox"
+          checked={runConfig.startNewSession}
+          onChange={(event) => onRunConfigChange({ startNewSession: event.target.checked })}
+        />
+        <span>{t.newSession}</span>
+      </label>
+      {runConfig.startNewSession
+        ? (
+            <input
+              type="text"
+              className="wf-toolbar__workspace"
+              value={runConfig.workspacePath}
+              placeholder={t.workspacePlaceholder}
+              title={t.workspaceHint}
+              onChange={(event) => onRunConfigChange({ workspacePath: event.target.value })}
+            />
+          )
+        : null}
     </div>
   )
 }

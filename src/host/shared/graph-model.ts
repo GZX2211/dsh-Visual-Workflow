@@ -272,6 +272,10 @@ export interface WorkflowTemplate {
   nodes: GraphNode[]
   /** 连线列表（全量内联）。 */
   lines: Line[]
+  /** 启动时是否开启新会话运行（实例化时继承模板配置，可再编辑；见 WorkflowDocument）。 */
+  startNewSession?: boolean
+  /** 新会话工作区（绝对路径目录；存实例时校验存在为目录；见 WorkflowDocument）。 */
+  workspacePath?: string
   /** 修订版本号（可选，与实例保存对齐）。 */
   revision?: number
   /** 创建时间（ISO 字符串）。 */
@@ -301,6 +305,15 @@ export interface WorkflowDocument {
   nodes: GraphNode[]
   /** 连线列表（全量内联）。 */
   lines: Line[]
+  /**
+   * 启动时是否开启新会话运行（默认 false）。
+   * true = 每次「运行」新建独立会话执行本条工作流（新会话 agentPreset=standard，
+   * cwd=workspacePath 即沙箱 workspace-write 根——官方 dsh-sandbox-policy 以会话
+   * header.cwd 为工作区边界）；false = 当前会话运行（现有语义）。
+   */
+  startNewSession?: boolean
+  /** 新会话工作区（绝对路径目录；startNewSession=true 时生效；保存时校验为存在目录）。 */
+  workspacePath?: string
   /** 修订版本号（可选，配合增量/缓存优化用，非必需）。 */
   revision?: number
   /** 创建时间（ISO 字符串）。 */

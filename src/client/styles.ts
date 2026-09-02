@@ -25,6 +25,10 @@ export const styles = `
 .wf-main{min-height:0;min-width:0;overflow:hidden;display:flex}
 .wf-toolbar{flex:none;height:52px;min-height:52px;display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--wf-layer);border-bottom:1px solid var(--wf-border);flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}
 .wf-toolbar>*{flex:none}
+.wf-toolbar__switch{display:inline-flex;align-items:center;gap:5px;color:var(--wf-ink-2);font-size:10px;cursor:pointer;white-space:nowrap}
+.wf-toolbar__switch input{width:auto;flex:0 0 auto;min-width:0;margin:0;accent-color:var(--wf-brand);cursor:pointer}
+.wf-toolbar__workspace{width:200px;border:1px solid var(--wf-border-strong);border-radius:7px;background:var(--wf-layer-2);color:var(--wf-ink);padding:5px 8px;font-size:10px;outline:0}
+.wf-toolbar__workspace:focus{border-color:var(--wf-brand)}
 .wf-btn{border:1px solid var(--wf-border-strong);border-radius:8px;background:var(--wf-layer-2);color:var(--wf-ink);padding:6px 11px;transition:border-color .15s ease,transform .15s ease,background .15s ease;white-space:nowrap}
 .wf-btn:hover{border-color:var(--wf-brand);transform:translateY(-1px)}
 /* 主按钮：采用 DSH 官方主按钮语义（--dsw-alias-button-primary-fill 与
@@ -226,6 +230,10 @@ export const styles = `
 .wf-combo__search{flex:none;padding:8px 12px 0}
 .wf-combo__search input{width:100%;border:1px solid var(--wf-border-strong);border-radius:8px;background:var(--wf-layer-2);color:var(--wf-ink);padding:7px 10px;outline:0}
 .wf-combo__search input:focus{border-color:var(--wf-brand)}
+.wf-combo__tags{flex:none;display:flex;flex-wrap:wrap;gap:5px;padding:8px 12px 0}
+.wf-combo-tag{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border:1px solid var(--wf-border);border-radius:999px;background:var(--wf-layer-2);color:var(--wf-ink-2);font-size:10px;cursor:pointer;transition:border-color .14s ease,background .14s ease,color .14s ease}
+.wf-combo-tag:hover{border-color:var(--wf-brand);color:var(--wf-ink)}
+.wf-combo-tag.is-active{border-color:var(--wf-brand);background:color-mix(in srgb,var(--wf-brand) 12%,var(--wf-layer-2));color:var(--wf-brand)}
 .wf-combo__head{flex:none;display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--wf-border)}
 .wf-combo__head h3{margin:0;font-size:14px;color:var(--wf-ink);flex:none}
 .wf-combo__head .wf-status{margin-left:0}
@@ -241,6 +249,8 @@ export const styles = `
 .wf-combo-card{display:flex;gap:9px;align-items:flex-start;text-align:left;border:1px solid var(--wf-border);border-radius:11px;background:var(--wf-layer-2);padding:10px 11px;cursor:pointer;transition:border-color .14s ease,background .14s ease}
 .wf-combo-card:hover{border-color:var(--wf-brand)}
 .wf-combo-card.is-checked{border-color:var(--wf-brand);background:color-mix(in srgb,var(--wf-brand) 8%,var(--wf-layer-2))}
+.wf-combo-card.is-disabled{opacity:.55;cursor:default;border-style:dashed}
+.wf-combo-card.is-disabled .wf-combo-card__name{color:var(--wf-ink-2)}
 .wf-combo-card input{flex:none;margin-top:2px;accent-color:var(--wf-brand)}
 .wf-combo-card__body{min-width:0;display:flex;flex-direction:column;gap:3px}
 .wf-combo-card__name{font-size:12px;font-weight:650;color:var(--wf-ink);word-break:break-all}
@@ -320,6 +330,7 @@ export const styles = `
 .wf-sched-radios{display:flex;flex-direction:column;gap:6px}
 .wf-sched-radio{display:flex;align-items:center;gap:7px;color:var(--wf-ink);font-size:11px;cursor:pointer}
 .wf-sched-radio input{accent-color:var(--wf-brand)}
+.wf-sched-workspace{margin-top:6px;font-variant-numeric:tabular-nums}
 .wf-sched-dates{display:flex;gap:7px}
 .wf-sched-dates input{flex:1;font-variant-numeric:tabular-nums}
 .wf-sched-dates .wf-btn{font-size:12px;padding:5px 10px}

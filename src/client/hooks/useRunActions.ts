@@ -38,6 +38,15 @@ export function useRunActions(
   createInstanceFromCanvas: DocumentActionsFace['createInstanceFromCanvas'],
 ): RunActionsFace {
   // ---------- 运行（模式一） ----------
+  /** 从流程文档提取运行选项（启动时开启新会话 + 工作区）。 */
+  const runOptionsOf = useCallback((flow: { startNewSession?: boolean; workspacePath?: string } | null): { startNewSession?: boolean; workspacePath?: string } => {
+    if (!flow) return {}
+    return {
+      ...(flow.startNewSession === true ? { startNewSession: true } : {}),
+      ...(String(flow.workspacePath ?? '').trim() ? { workspacePath: String(flow.workspacePath).trim() } : {}),
+    }
+  }, [])
+
   const startRun = useCallback(async () => {
     if (state.mode !== 'mode1') return
     // 模板态：运行前自动「创建实例」再运行（用户裁决 q4：实例名 = 模板名 + 序号，
@@ -53,7 +62,7 @@ export function useRunActions(
         return
       }
       try {
-        const runId = await runControl.startRun(state.sessionId, created.id)
+        const runId = await runControl.startRun(state.sessionId, created.id, runOptionsOf(created))
         if (runId) notify('success', t.toastRunning)
       } catch (error) {
         toastError(error)
@@ -71,22 +80,23 @@ export function useRunActions(
     const saved = await saveCanvas()
     if (!saved) return
     try {
-      const runId = await runControl.startRun(state.sessionId, saved.id)
+      const runId = await runControl.startRun(state.sessionId, saved.id, runOptionsOf(saved))
       if (runId) notify('success', t.toastRunning)
     } catch (error) {
       toastError(error)
     }
-  }, [notify, runControl, saveCanvas, createInstanceFromCanvas, state.canvas.nodes, state.mode, state.sessionId, t.needStartAndEnd, t.toastRunning, toastError])
+  }, [notify, runControl, saveCanvas, createInstanceFromCanvas, state.canvas.nodes, state.mode, state.sessionId, runOptionsOf, t.needStartAndEnd, t.toastRunning, toastError])
 
   const stopRun = useCallback(async () => {
     if (!state.run.runId) return
     try {
-      await runControl.stopRun(state.sessionId, state.run.runId)
+      // 实际执行会话（新会话运行时与当前会话不同）：按 run.sessionId 归属
+      await runControl.stopRun(state.run.sessionId ?? state.sessionId, state.run.runId)
       notify('info', t.toastStopped)
     } catch (error) {
       toastError(error)
     }
-  }, [notify, runControl, state.run.runId, state.sessionId, t.toastStopped, toastError])
+  }, [notify, runControl, state.run.runId, state.run.sessionId, state.sessionId, t.toastStopped, toastError])
 
   // ---------- 运行历史 / 断点恢复 ----------
   const openHistory = useCallback(async () => {
@@ -94,8 +104,9 @@ export function useRunActions(
     const flow = currentFlowOf(state)
     if (!flow) return
     try {
-      // 会话隔离：历史查询必须携带当前会话（Bug 14）
-      const items = await remote.call(EP.EP_RUN_HISTORY, { sessionId: state.sessionId, flowId: flow.id }) as unknown[]
+      // 会话隔离：历史查询必须携带会话（Bug 14）；新会话运行展示其实际执行会话的历史
+      const historySessionId = state.run.sessionId ?? state.sessionId
+      const items = await remote.call(EP.EP_RUN_HISTORY, { sessionId: historySessionId, flowId: flow.id }) as unknown[]
       dispatch({ type: 'RUN_HISTORY_LOADED', items: Array.isArray(items) ? items as [] : [] })
     } catch (error) {
       toastError(error)
@@ -106,9 +117,10 @@ export function useRunActions(
     const flow = currentFlowOf(state)
     if (!flow) return
     try {
-      const result = await remote.call(EP.EP_RUN_RESUME, { sessionId: state.sessionId, flowId: flow.id, runId }) as { runId?: unknown }
+      // 断点续跑在原执行会话内进行（新会话运行的恢复同样用 run.sessionId）
+      const result = await remote.call(EP.EP_RUN_RESUME, { sessionId: state.run.sessionId ?? state.sessionId, flowId: flow.id, runId }) as { runId?: unknown }
       const newRunId = String(result?.runId ?? '')
-      if (newRunId) dispatch({ type: 'RUN_STARTED', runId: newRunId })
+      if (newRunId) dispatch({ type: 'RUN_STARTED', runId: newRunId, ...(state.run.sessionId ? { runSessionId: state.run.sessionId } : {}) })
       dispatch({ type: 'HISTORY_OPEN', open: false })
       notify('success', t.toastResuming)
     } catch (error) {

@@ -224,6 +224,8 @@ const EXPECTED_ENDPOINTS: string[] = [
   'presets', 'tools', 'models',
   // 工具组合 / 插件 / MCP
   'toolCombos', 'toolComboPut', 'toolComboDelete', 'pluginCatalog', 'mcpList', 'mcpPut', 'mcpDelete', 'mcpToggle',
+  // 全局工具开关（父代理工具白名单「关闭」侧；全局即时生效）
+  'toolSwitches', 'toolSwitchPut',
   // 运行
   'run', 'runStatus', 'activeRuns', 'runStop', 'runHistory', 'runResume',
   // 数据库
@@ -248,11 +250,11 @@ function readProtocolEndpoints(): string[] {
   return out
 }
 
-describe('T-014 protocol.ts 端点清单（§4.6 全部端点 + 定时任务 3 端点）', () => {
-  it('端点常量定义 48 个且无重复', () => {
+describe('T-014 protocol.ts 端点清单（§4.6 全部端点 + 定时任务 3 端点 + 工具开关 2 端点）', () => {
+  it('端点常量定义 50 个且无重复', () => {
     const eps = readProtocolEndpoints()
-    expect(eps).toHaveLength(48)
-    expect(new Set(eps).size).toBe(48) // 48 端点名全部唯一（无重复常量）
+    expect(eps).toHaveLength(50)
+    expect(new Set(eps).size).toBe(50) // 50 端点名全部唯一（无重复常量）
   })
 
   it('端点名逐字覆盖 §4.6 清单（正反向双向一致）', () => {

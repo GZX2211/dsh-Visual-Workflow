@@ -15,11 +15,21 @@ import { VisualWorkflowApiCatalog } from './api-catalog.js'
 export class VisualWorkflowApiRuns extends VisualWorkflowApiCatalog {
   // ---------- 运行（父代理编排） ----------
 
-  /** 启动运行：存在可恢复断点（暂停/中断）时自动续跑，否则全新启动。 */
-  async run(args: { sessionId?: unknown; flowId?: unknown }): Promise<unknown> {
+  /** 启动运行：存在可恢复断点（暂停/中断）时自动续跑，否则全新启动；「启动时开启新会话」直接新会话启动。 */
+  async run(args: { sessionId?: unknown; flowId?: unknown; startNewSession?: unknown; workspacePath?: unknown }): Promise<unknown> {
     const sessionId = String(args?.sessionId ?? '')
     const flowId = String(args?.flowId ?? '')
     if (!sessionId || !flowId) throw httpError(400, 'requires sessionId and flowId')
+    const startNewSession = args?.startNewSession === true
+    if (startNewSession) {
+      // 新会话模式：每次运行都用独立会话（无当前会话断点续跑语义）
+      return this.host.orchestrator.startRun({
+        sessionId,
+        flowId,
+        startNewSession: true,
+        ...(String(args?.workspacePath ?? '').trim() ? { workspacePath: String(args.workspacePath).trim() } : {}),
+      })
+    }
     const prev = await findResumableRun(this.host.store, { sessionId, flowId })
     if (prev) {
       return this.host.orchestrator.resumeRun({ sessionId, flowId, fromRunId: prev.id })

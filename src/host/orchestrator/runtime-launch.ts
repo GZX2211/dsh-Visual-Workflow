@@ -19,6 +19,9 @@ export class RuntimeLaunch extends RuntimeBase {
    * 启动一次「父代理编排」运行（模式一入口）。
    * 流程：校验 → 运行锁 → 建 run 状态 → 写流程事实源文件 → 构造编排指令 →
    * followup 一次性注入+唤醒父代理 → 开始即落盘（崩溃后历史可追溯）。
+   * 「启动时开启新会话」：startNewSession=true 时先经 sessionProvider 新建会话
+   * （cwd=workspacePath，agentPreset=standard），随后一切按该新会话运行
+   * （root Agent / 指令注入 / 快照归属均用新会话 id）。
    */
   async startRun(input: { sessionId: string; flowId: string } & StartRunOptions): Promise<StartRunResult> {
     const sessionId = String(input.sessionId ?? '')
@@ -46,16 +49,30 @@ export class RuntimeLaunch extends RuntimeBase {
     if (!this.deps.agents.available()) {
       throw new WfError('Agent 能力不可用；父代理编排模式需要会话根 Agent 与可延续子代理', 'WF_AGENT_UNAVAILABLE')
     }
-    const root = this.deps.agents.getRootAgent(sessionId)
-    if (!root) throw new WfError('当前会话 Agent 未激活；请先在对话区发送一条消息后重试', 'WF_ROOT_INACTIVE')
+
+    // 「启动时开启新会话」：新建独立会话（工作区 cwd = 沙箱 workspace-write 根）
+    let runSessionId = sessionId
+    if (input.startNewSession === true) {
+      if (!this.deps.sessionProvider) {
+        throw new WfError('「启动时开启新会话」不可用：会话创建能力未装配', 'WF_AGENT_UNAVAILABLE')
+      }
+      runSessionId = await this.deps.sessionProvider.createSession({
+        label: `工作流：${flow.name ?? flow.id}`,
+        agentPreset: 'standard',
+        ...(String(input.workspacePath ?? '').trim() ? { cwd: String(input.workspacePath).trim() } : {}),
+      })
+    }
+
+    const root = this.deps.agents.getRootAgent(runSessionId)
+    if (!root) throw new WfError(runSessionId === sessionId ? '当前会话 Agent 未激活；请先在对话区发送一条消息后重试' : '新会话 Agent 未激活，无法启动', 'WF_ROOT_INACTIVE')
     if (root.status === 'running') throw new WfError('父代理当前正在忙碌，请稍后再运行', 'WF_ROOT_BUSY')
 
     // 父代理（会话根 Agent）配置注入：角色 Prompt 段（含 .md 路径读取）+ 官方系统提示词开关 +
     // 工具散文段开关 + 模型/思考强度。非侵入：挂载到根 Agent 的 ctx，仅对本会话生效，不修改官方源码。
-    await this.bindParentConfig(flow, root, sessionId)
+    await this.bindParentConfig(flow, root, runSessionId)
 
     const runId = this.deps.newRunId?.() ?? `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
-    const snapshot = createRunSnapshot({ runId, flow, sessionId, mode, now: this.now() })
+    const snapshot = createRunSnapshot({ runId, flow, sessionId: runSessionId, mode, now: this.now() })
     // 模式二：用户问题注入输入节点产出（无需连线即作为初始上下文；
     // 右出 ctx 连线经 buildNodeBlocks 的 start 源分支显式传递给下游）
     const question = typeof input.question === 'string' ? input.question.trim() : ''
@@ -97,7 +114,13 @@ export class RuntimeLaunch extends RuntimeBase {
 
     // 一次性注入 + 唤醒：官方 Message 契约要求 id 与 source 齐备（缺 source 父回合
     // 以 UNKNOWN 失败——旧项目根因复盘结论，必须保留）。
-    const directive = buildOrchestrationDirective(directiveParams(flow, defPath, mode, { question }))
+    // 执行者模式：父代理节点被流程线连接 → 先执行自身节点任务（任务块注入指令尾段），
+    // 完成后从本人节点 flow-out 调用 wf_run_node 继续调度。
+    const executor = await this.prepareParentExecutor(flow, entry)
+    const directive = buildOrchestrationDirective(directiveParams(flow, defPath, mode, {
+      ...(question ? { question } : {}),
+      ...(executor ? { parentAsNode: { nodeId: executor.nodeId, nodeLabel: executor.nodeLabel }, parentTaskBlock: executor.taskBlock } : {}),
+    }))
     try {
       this.deps.agents.followupRoot(root, {
         id: this.deps.uuid?.() ?? randomUUID(),
@@ -112,7 +135,7 @@ export class RuntimeLaunch extends RuntimeBase {
 
     // 运行记录：开始即落盘（中断/崩溃后历史面板仍有记录）
     await this.persistWarn(entry)
-    return { runId, defPath }
+    return { runId, defPath, sessionId: runSessionId }
   }
 
   // ---- 断点续跑（resumeRun） --------------------------------------------------
@@ -205,9 +228,14 @@ export class RuntimeLaunch extends RuntimeBase {
     // prev.resumeFromNodeId，interrupted 中断无暂停点时取首个未完成节点）——若直接用
     // prev.resumeFromNodeId，宿主重启中断的恢复会因 undefined 注入「（未指定）」，
     // 父代理无从定位起点、可能从头重调度已 ok 节点（违反 §4.7 规则 6 已执行节点不重跑）。
+    // 执行者模式：父代理节点未 ok（续跑继承外）时同样注入任务块继续执行自身任务。
+    // prepareParentExecutor 内部对已 ok/react-capped 的继承态直接返回 null（不重跑）；
+    // 未 ok 时标记 running + 产出任务块。
+    const executor = await this.prepareParentExecutor(flow, entry)
     const directive = buildOrchestrationDirective(
       directiveParams(flow, defPath, prev.mode, {
         resume: { resumeFromNodeId: snapshot.resumeFromNodeId, resumedFromRunId: prev.id },
+        ...(executor ? { parentAsNode: { nodeId: executor.nodeId, nodeLabel: executor.nodeLabel }, parentTaskBlock: executor.taskBlock } : {}),
       }),
     )
     try {

@@ -91,6 +91,11 @@ export const EP_MCP_DELETE = 'mcpDelete'
 /** 切换 MCP 服务器启用状态。 */
 export const EP_MCP_TOGGLE = 'mcpToggle'
 
+/** 全局工具开关列表端点名（父代理工具白名单「关闭」侧；关闭后所有会话的代理上下文中不可见）。 */
+export const EP_TOOL_SWITCHES = 'toolSwitches'
+/** 设置单个工具开/关状态端点名（全局即时生效）。 */
+export const EP_TOOL_SWITCH_PUT = 'toolSwitchPut'
+
 /** 运行启动端点名。 */
 export const EP_RUN = 'run'
 /** 运行状态轮询端点名。 */

@@ -51,6 +51,11 @@ export interface OrchestrationDirectiveParams {
      * 组内经 wf_ask_agent 阻塞通信，全部 ok 后组卡片记为 ok 并从其 flow-out 继续」。
      */
     collabGroups: Array<{ groupId: string; label: string; memberIds: string[] }>
+    /**
+     * 父代理执行者模式标识（静态事实）：父代理节点被流程线连接（存在 flow-in 连线）
+     * 时，父代理先作为执行节点执行自身任务，再继续调度。缺省/null = 纯调度者（当前形式）。
+     */
+    parentAsNode?: { nodeId: string; nodeLabel: string } | null
   }
   /**
    * 末段动态状态（不稳定内容，仅注入尾段，保证前中段前缀稳定）。
@@ -84,6 +89,11 @@ export interface OrchestrationDirectiveParams {
      * 模式二本次外部请求的用户问题（不稳定内容，仅末段注入；模式一无）。
      */
     question?: string
+    /**
+     * 父代理节点任务块（执行者模式注入；含上游上下文/文件索引/数据库提示/重试约定）。
+     * 本 run 内字节稳定；随运行重启（新 runId/新会话）变化——动态值仅注入末段。
+     */
+    parentTaskBlock?: string
   }
 }
 
@@ -109,6 +119,8 @@ export const ORCH_HARD_CONSTRAINTS = {
   /** 协作通信超时处置：征询用户后 resolve 三动作。 */
   askAgentTimeout:
     '收到 wf_ask_agent 的 ask 超时通知时，先用 ask_user_question 征询用户，再用 wf_ask_agent resolve（continue / resend / abort）定案',
+  /** 执行者模式核心短语：你本人也是执行节点，先执行自身任务再调度。 */
+  executorRole: '执行者模式：你本人也是执行节点，启动后必须先执行自身节点任务，完成后从本人节点的 flow-out 调用 wf_run_node 继续调度',
 } as const
 
 /**
@@ -145,6 +157,9 @@ export function buildOrchestrationDirective(params: OrchestrationDirectiveParams
     `6. 护栏：wf_run_node 全局调用上限 500 次；无节点在途时触发空闲超时。`,
     `7. 失控处理：${ORCH_HARD_CONSTRAINTS.failureImmediate}。`,
     `8. 组内通信：${ORCH_HARD_CONSTRAINTS.askAgentTimeout}。`,
+    ...(facts.parentAsNode
+      ? [`9. ${ORCH_HARD_CONSTRAINTS.executorRole}——你对应的节点「${facts.parentAsNode.nodeLabel}」（id=${facts.parentAsNode.nodeId}），以下方「你的节点任务」为准；该任务的执行者就是你自己，不得再下发子代理。`]
+      : []),
   ].join('\n')
 
   // —— 中段：过程性信息（节点清单 / 事实源路径 / 协作组并行说明）——
@@ -170,6 +185,7 @@ export function buildOrchestrationDirective(params: OrchestrationDirectiveParams
     `- ${ORCH_HARD_CONSTRAINTS.dispatchOnly}。`,
     `- ${ORCH_HARD_CONSTRAINTS.finishIdempotent}。`,
     `- ${ORCH_HARD_CONSTRAINTS.failureSemantics}；${ORCH_HARD_CONSTRAINTS.failureImmediate}（失控时）。`,
+    ...(facts.parentAsNode ? [`- ${ORCH_HARD_CONSTRAINTS.executorRole}。`] : []),
     '',
     renderDynamicState(dynamic),
   ].join('\n')
@@ -204,6 +220,12 @@ function renderDynamicState(dynamic: OrchestrationDirectiveParams['dynamic']): s
   lines.push(`- 运行参数：${(dynamic.runParamsText ?? '').trim() || '（无）'}`)
   if (dynamic.question) {
     lines.push(`- 用户问题（服务模式）：${dynamic.question}`)
+  }
+  // 执行者模式：节点任务块注入末段（动态值仅末段；本 run 内字节稳定）
+  if (dynamic.parentTaskBlock) {
+    lines.push('')
+    lines.push('【你的节点任务】（执行者模式：以下任务由你亲自执行，不得下发）：')
+    lines.push(dynamic.parentTaskBlock)
   }
   return lines.join('\n')
 }

@@ -22,7 +22,7 @@ function openDocument(state: StudioState, canvas: { nodes: CanvasNode[]; edges: 
     canvas,
     dirty: false,
     savedGraph: graphSnapshotOf({ ...state, canvas }),
-    run: { runId: null, snapshot: null },
+    run: { runId: null, sessionId: null, snapshot: null },
     selection: { nodeId: null, edgeId: null, lib: { kind: libKind, id } },
     editor,
   }
@@ -106,7 +106,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         selection: { nodeId: null, edgeId: null, lib: null },
         editor: null,
         dirty: false,
-        run: { runId: null, snapshot: null },
+        run: { runId: null, sessionId: null, snapshot: null },
       }
     case 'GRAPH_REPLACED':
       return { ...state, canvas: { nodes: action.nodes, edges: action.edges }, dirty: action.dirty }
@@ -170,11 +170,18 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         dirty: true,
       }
     case 'DOC_PATCH':
+      // 名/描述/新会话开关与工作区统一经 DOC_PATCH 落文档；undefined 不覆盖
       return state.currentKind === 'workflow'
         ? {
             ...state,
             workflows: state.workflows.map((flow) => (flow.id === state.currentId
-              ? { ...flow, ...(action.patch.name !== undefined ? { name: action.patch.name } : {}), ...(action.patch.description !== undefined ? { description: action.patch.description } : {}) }
+              ? {
+                  ...flow,
+                  ...(action.patch.name !== undefined ? { name: action.patch.name } : {}),
+                  ...(action.patch.description !== undefined ? { description: action.patch.description } : {}),
+                  ...(action.patch.startNewSession !== undefined ? { startNewSession: action.patch.startNewSession } : {}),
+                  ...(action.patch.workspacePath !== undefined ? { workspacePath: action.patch.workspacePath } : {}),
+                }
               : flow)),
             dirty: true,
           }
@@ -182,7 +189,13 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
           ? {
               ...state,
               flowTemplates: state.flowTemplates.map((template) => (template.id === state.currentId
-                ? { ...template, ...(action.patch.name !== undefined ? { name: action.patch.name } : {}), ...(action.patch.description !== undefined ? { description: action.patch.description } : {}) }
+                ? {
+                    ...template,
+                    ...(action.patch.name !== undefined ? { name: action.patch.name } : {}),
+                    ...(action.patch.description !== undefined ? { description: action.patch.description } : {}),
+                    ...(action.patch.startNewSession !== undefined ? { startNewSession: action.patch.startNewSession } : {}),
+                    ...(action.patch.workspacePath !== undefined ? { workspacePath: action.patch.workspacePath } : {}),
+                  }
                 : template)),
               dirty: true,
             }
@@ -190,7 +203,13 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
             ? {
                 ...state,
                 services: state.services.map((service) => (service.id === state.currentId
-                  ? { ...service, ...(action.patch.name !== undefined ? { name: action.patch.name } : {}), ...(action.patch.description !== undefined ? { description: action.patch.description } : {}) }
+                  ? {
+                      ...service,
+                      ...(action.patch.name !== undefined ? { name: action.patch.name } : {}),
+                      ...(action.patch.description !== undefined ? { description: action.patch.description } : {}),
+                      ...(action.patch.startNewSession !== undefined ? { startNewSession: action.patch.startNewSession } : {}),
+                      ...(action.patch.workspacePath !== undefined ? { workspacePath: action.patch.workspacePath } : {}),
+                    }
                   : service)),
                 dirty: true,
               }
@@ -200,11 +219,11 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
     case 'MARK_SAVED':
       return { ...state, dirty: false, savedGraph: graphSnapshotOf(state) }
     case 'RUN_STARTED':
-      return { ...state, run: { runId: action.runId, snapshot: null } }
+      return { ...state, run: { runId: action.runId, sessionId: action.runSessionId ?? null, snapshot: null } }
     case 'RUN_SNAPSHOT':
       return { ...state, run: { ...state.run, snapshot: action.snapshot } }
     case 'RUN_CLEARED':
-      return { ...state, run: { runId: null, snapshot: null } }
+      return { ...state, run: { runId: null, sessionId: null, snapshot: null } }
     case 'TOAST_PUSH':
       return { ...state, toasts: [...state.toasts, action.toast] }
     case 'TOAST_DROP':

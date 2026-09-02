@@ -20,7 +20,7 @@ import type { UnsavedGuardFace } from '../hooks/useUnsavedGuard.js'
 import type { PanelLayoutFace } from '../hooks/usePanelLayout.js'
 import type { RemoteFace } from '../hooks/useRemote.js'
 import type { ToastFace } from '../hooks/useToast.js'
-import type { WorkflowDocument } from '../../host/shared/graph-model.js'
+import type { WorkflowDocument, WorkflowTemplate } from '../../host/shared/graph-model.js'
 import type { GroupTemplate, RoleTemplate, ServiceState } from '../../host/shared/types.js'
 import type { flowToCanvasLines, runStatusMap, runningNodeIds, stageTemplateKinds } from '../lib/graph-model.js'
 import { EP } from '../lib/remote.js'
@@ -47,6 +47,7 @@ export interface StudioLayoutProps {
   // ---- 派生数据 ----
   currentFlow: WorkflowDocument | null
   currentService: ServiceState | null
+  currentFlowTemplate: WorkflowTemplate | null
   editorData: EditorData | null
   edgeList: ReturnType<typeof flowToCanvasLines>
   stageKinds: ReturnType<typeof stageTemplateKinds>
@@ -98,7 +99,7 @@ export interface StudioLayoutProps {
 export function StudioLayout(props: StudioLayoutProps) {
   const {
     t, state, sessionId, remote, onClose, onTitlebarDrag,
-    currentFlow, currentService, editorData, edgeList, stageKinds, parentTemplate, roleTemplates, groupTemplates,
+    currentFlow, currentService, currentFlowTemplate, editorData, edgeList, stageKinds, parentTemplate, roleTemplates, groupTemplates,
     toolbarRunning, runStatusByNode, highlightedNodeIds, modeName,
     canvasApiRef, canvasShellRef, libraryImportRef, personaInputRef, groupMdInputRef,
     dispatch, doc, canvas, editor, run, transfer, selection, history, guard, panels, toast,
@@ -238,6 +239,11 @@ export function StudioLayout(props: StudioLayoutProps) {
             onOpenHistory={() => { void run.openHistory() }}
             canHistory={state.mode === 'mode1' && Boolean(currentFlow)}
             serviceStatus={state.mode === 'mode2' ? { port: currentService?.port, status: currentService?.status } : null}
+            runConfig={{
+              startNewSession: (currentFlow ?? currentService ?? currentFlowTemplate)?.startNewSession === true,
+              workspacePath: String((currentFlow ?? currentService ?? currentFlowTemplate)?.workspacePath ?? ''),
+            }}
+            onRunConfigChange={(patch) => dispatch({ type: 'DOC_PATCH', patch })}
           />
           {state.mode === 'mode2'
             ? <ServiceConsole

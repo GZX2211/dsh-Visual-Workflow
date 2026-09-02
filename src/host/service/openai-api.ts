@@ -59,6 +59,12 @@ export interface OpenAiApiDeps {
   maxConcurrent: number
   /** userId → sessionId（SessionMap.resolve）。 */
   resolveSession(userId: string): Promise<string>
+  /**
+   * 新建会话（「服务级新会话」：服务文档 startNewSession=true 时每次请求新建
+   * 独立会话运行，cwd=服务工作区路径；弱化同一 userId 的跨请求连续性）。
+   * 缺省时回退 resolveSession（现有复用会话语义）。
+   */
+  createSession?(options: { label: string; agentPreset?: string; cwd?: string }): Promise<string>
   /** 按会话取/建根 Agent（服务进程内装配）。 */
   ensureRootAgent(sessionId: string): Promise<{ agent: unknown; provider?: string; model?: string }>
   /** watchdog 单次推进（回合终态/空闲判定）。 */
@@ -186,7 +192,20 @@ export class OpenAiApi {
     onDelta?: (delta: string) => void,
     options: RunChatOptions = {},
   ): Promise<ChatRunResult> {
-    const sessionId = await this.deps.resolveSession(input.userId)
+    // 「服务级新会话」：服务文档 startNewSession=true 时每请求新建独立会话（cwd=工作区），
+    // 请求间不连续（不复用断点）；关闭时保持 userId→sessionId 映射 + 断点续跑（现有语义）。
+    const serviceDoc = await this.deps.store.getServiceById(this.deps.serviceId).catch(() => null)
+    const startNewSession = serviceDoc?.startNewSession === true
+    const workspacePath = String(serviceDoc?.workspacePath ?? '').trim()
+    const sessionId = startNewSession
+      ? this.deps.createSession
+        ? await this.deps.createSession({
+            label: `服务请求：${input.userId}`,
+            agentPreset: 'standard',
+            ...(workspacePath ? { cwd: workspacePath } : {}),
+          })
+        : await this.deps.resolveSession(input.userId) // 能力缺失回退映射（防御）
+      : await this.deps.resolveSession(input.userId)
     const { agent } = await this.deps.ensureRootAgent(sessionId)
     const agentLike = (agent ?? null) as {
       followup?(message: unknown): unknown
@@ -196,8 +215,10 @@ export class OpenAiApi {
       throw new OpenAiError(500, 'server_error', 'agent_unavailable', '服务会话 Agent 不可用')
     }
 
-    // 有断点（暂停/中断）自动续跑；否则全新编排
-    const prev = await findResumableRun(this.deps.store, { sessionId, flowId: this.deps.serviceId })
+    // 有断点（暂停/中断）自动续跑；否则全新编排；新会话模式每请求全新启动
+    const prev = startNewSession
+      ? null
+      : await findResumableRun(this.deps.store, { sessionId, flowId: this.deps.serviceId })
     const started = prev
       ? await this.deps.orchestrator.resumeRun({ sessionId, flowId: this.deps.serviceId, fromRunId: prev.id })
       : await this.deps.orchestrator.startRun({ sessionId, flowId: this.deps.serviceId, mode: 'mode2', question: input.question })

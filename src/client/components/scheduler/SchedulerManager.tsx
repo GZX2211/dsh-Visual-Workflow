@@ -301,6 +301,20 @@ export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: 
                     <span>{copy.schedulerSessionCurrent}</span>
                   </label>
                 </div>
+                {/* 选择工作区：仅「新会话」模式显示（新会话 cwd = 沙箱工作区根；保存时校验存在） */}
+                {draft?.sessionMode === 'new-session'
+                  ? (
+                      <input
+                        type="text"
+                        className="wf-sched-workspace"
+                        value={String(draft.workspacePath ?? '')}
+                        placeholder={copy.workspacePlaceholder}
+                        title={copy.workspaceHint}
+                        onChange={(event) => patch({ workspacePath: event.target.value.trim() || undefined })}
+                        disabled={!draft}
+                      />
+                    )
+                  : null}
               </Field>
 
               <Field label={copy.schedulerTimezone}>

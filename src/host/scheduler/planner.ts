@@ -440,6 +440,11 @@ export function normalizeScheduledTask(task: ScheduledTask): ScheduledTask {
       configUpdate: 'immediate',
     },
   }
+  // 工作区路径仅新会话模式有意义：非 new-session 时剥除（避免旧数据残留污染）；
+  // new-session 时空值同样剥除（保持存储干净）
+  if (normalized.sessionMode !== 'new-session' || !String(normalized.workspacePath ?? '').trim()) {
+    delete normalized.workspacePath
+  }
   return normalized
 }
 

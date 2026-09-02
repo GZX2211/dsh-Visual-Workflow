@@ -126,6 +126,11 @@ export interface AgentHost {
   followupRoot(agent: RootAgentLike, message: RootInjectedMessage): void
   /** 根 Agent 会话在 afterMs 之后的最新 turn/end（无则 null；看护权威检测）。 */
   latestTurnEnd(sessionId: string, afterMs: number): TurnEndInfo | null
+  /**
+   * 最近一条父代理 assistant/message 文本（afterMs 之后；无则 null）。
+   * 执行者模式记录父代理自身节点任务产出用（官方 session.events 的 assistant/message 事件）。
+   */
+  latestRootAssistantText?(sessionId: string, afterMs: number): string | null
   /** 某子代理是否仍在运行（看护 inflight 自愈；查询失败保守返回 true）。 */
   childRunning(childId: string): boolean
 }

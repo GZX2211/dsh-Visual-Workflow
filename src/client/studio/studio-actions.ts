@@ -53,10 +53,10 @@ export type StudioAction =
   | { type: 'CLEAR_SELECTION' }
   | { type: 'NODE_DATA_PATCH'; id: string; patch: Record<string, unknown> }
   | { type: 'EDGE_PATCH'; id: string; patch: Record<string, unknown> }
-  | { type: 'DOC_PATCH'; patch: { name?: string; description?: string } }
+  | { type: 'DOC_PATCH'; patch: { name?: string; description?: string; startNewSession?: boolean; workspacePath?: string } }
   | { type: 'SET_DIRTY'; dirty: boolean }
   | { type: 'MARK_SAVED' }
-  | { type: 'RUN_STARTED'; runId: string }
+  | { type: 'RUN_STARTED'; runId: string; runSessionId?: string }
   | { type: 'RUN_SNAPSHOT'; snapshot: RunSnapshot }
   | { type: 'RUN_CLEARED' }
   | { type: 'TOAST_PUSH'; toast: ToastItem }

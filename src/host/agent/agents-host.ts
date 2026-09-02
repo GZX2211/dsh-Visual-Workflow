@@ -78,6 +78,39 @@ export class CordisAgentHost implements AgentHost {
     return null
   }
 
+  /**
+   * 最近一条父代理 assistant/message 文本（afterMs 之后；无则 null）。
+   * 官方 dsh-agent-loop 每步结束追加 assistant/message 事件（{ turn, step, message }，
+   * message.content 为 ContentBlock[]）——取事件流中时间 >= afterMs 的最后一条
+   * assistant/message 的 text 块拼接（执行者模式回写父代理节点输出用）。
+   */
+  latestRootAssistantText(sessionId: string, afterMs: number): string | null {
+    const root = this.getRootAgent(sessionId)
+    if (!root) return null
+    const events = root.session?.events
+    if (!Array.isArray(events)) return null
+    let text = ''
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index] as { type?: unknown; time?: unknown; data?: { message?: { content?: unknown } } } | null
+      if (!event || event.type !== 'assistant/message') continue
+      if ((Number(event.time) || 0) < afterMs) continue
+      const content = event.data?.message?.content
+      if (Array.isArray(content)) {
+        const joined = content
+          .map((block) => {
+            const value = block as { type?: unknown; text?: unknown } | null
+            return value && value.type === 'text' ? String(value.text ?? '') : ''
+          })
+          .filter(Boolean)
+          .join('\n')
+          .trim()
+        if (joined) text = joined
+      }
+      break // 最后一条即可（时间倒序首条命中）
+    }
+    return text || null
+  }
+
   childRunning(childId: string): boolean {
     const service = this.agentsService()
     if (!service) return false

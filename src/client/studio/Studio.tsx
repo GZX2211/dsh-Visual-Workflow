@@ -73,7 +73,8 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
   const serviceControl = useServiceControl(dispatch, remote)
   const modeSwitch = useModeSwitch(dispatch)
   const panels = usePanelLayout(state, dispatch)
-  useRunPolling(state.sessionId, state.run.runId, dispatch, remote)
+  // 运行状态轮询按实际执行会话归属（「启动时开启新会话」运行时与当前会话不同）
+  useRunPolling(state.run.sessionId ?? state.sessionId, state.run.runId, dispatch, remote)
 
   const canvasApiRef = useRef<CanvasApi | null>(null)
   const canvasShellRef = useRef<HTMLDivElement | null>(null)
@@ -197,6 +198,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
       onTitlebarDrag={onTitlebarDrag}
       currentFlow={currentFlow}
       currentService={currentService}
+      currentFlowTemplate={currentFlowTemplate}
       editorData={editorData}
       edgeList={edgeList}
       stageKinds={stageKinds}

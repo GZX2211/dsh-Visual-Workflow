@@ -68,6 +68,10 @@ export class RuntimeExecute extends RuntimeLaunch {
     if (!nodeId) throw new WfError('wf_run_node 需要参数 nodeId', 'WF_BAD_ARGS')
     if (run.controller.signal.aborted) throw new WfError('该工作流已停止', 'WF_CANCELLED')
 
+    // 执行者模式：父代理开始调度（首次 wf_run_node 成功前）→ 自身节点任务视为完成，
+    // 快照标记 ok 并把父代理最近产出回写（下游 ctx 连线可注入该产出）
+    this.markParentExecutorDone(run)
+
     // 双向同步①：每次调度前重读最新工作流快照（运行中画布调整即时生效）
     const flow = await this.currentResolvedFlow(run)
 
@@ -196,6 +200,8 @@ export class RuntimeExecute extends RuntimeLaunch {
     if (caller.isChild) throw new WfError('子代理无法调用 wf_finish（仅当前会话主 Agent 可收尾编排）', 'WF_NOT_ROOT')
     const sessionId = caller.sessionId
     const run = sessionId ? this.activeRunForSession(sessionId) : null
+    // 执行者模式：wf_finish 同样视为父代理自身任务完成（无后续调度、直接收尾的流程）
+    if (run) this.markParentExecutorDone(run)
     // 已停止/已完成的幂等：允许对已终止的同会话运行静默返回。
     // 终态条目已从内存释放（防内存膨胀），故幂等判定查磁盘历史（收尾调用频率极低）。
     if (!run) {

@@ -17,6 +17,7 @@ import z from '@deepseek-ai/schemastery'
 import { VisualWorkflowHost } from './index.js'
 import { SessionMap } from './service/sessions-map.js'
 import { OpenAiApi, registerOpenAiApi } from './service/openai-api.js'
+import { CordisSessionProvider } from './scheduler/session-provider.js'
 import { sweepWatchdogOnce } from './orchestrator/watchdog.js'
 import type { FlowStore } from './storage/flow-store.js'
 
@@ -132,6 +133,8 @@ async function boot(ctx: Context, config: Config, io: RunnerIo): Promise<void> {
     apiKey: config.apiKey,
     maxConcurrent: config.maxConcurrent,
     resolveSession: (userId) => sessions.resolve(userId),
+    // 「服务级新会话」：服务文档 startNewSession=true 时每请求新建会话（cwd=工作区）
+    createSession: (options) => new CordisSessionProvider(ctx).createSession(options),
     ensureRootAgent: (sessionId) => ensureRootAgent(ctx, host.store, serviceId, sessionId),
     sweep: () => sweepWatchdogOnce(host.orchestrator),
     logger: { warn: (message) => ctx.logger.warn(message) },

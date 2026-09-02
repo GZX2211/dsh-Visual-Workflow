@@ -125,6 +125,10 @@ export interface ServiceState {
   nodes: GraphNode[]
   /** 连线列表（工作流定义）。 */
   lines: Line[]
+  /** 启动时是否开启新会话运行（每次 API 请求新建独立会话执行；false = 请求复用会话并断点续跑）。 */
+  startNewSession?: boolean
+  /** 新会话工作区（绝对路径目录；startNewSession=true 时生效，作为会话 cwd = 沙箱工作区根）。 */
+  workspacePath?: string
   /** 创建时间（ISO 字符串）。 */
   createdAt: string
   /** 最近更新时间（ISO 字符串）。 */
@@ -425,6 +429,12 @@ export interface ScheduledTask {
   sessionMode: ScheduleSessionMode
   /** 创建者会话 id（current-session 模式复用；new-session 模式记录归属/审计）。 */
   ownerSessionId: string
+  /**
+   * 新会话工作区（绝对路径目录，可选；仅 new-session 模式生效）。
+   * 设置后新会话 cwd = 该路径（官方会话 header.cwd 即沙箱 workspace-write 根），
+   * 不继承创建者会话 cwd；保存时校验路径存在且为目录。
+   */
+  workspacePath?: string
   /** 是否启用（停用后不触发，配置保留）。 */
   enabled: boolean
   /** 时区（IANA 名称；所有 HH:mm 基于该时区解释，内部换算 UTC 比对）。 */

@@ -5,6 +5,7 @@
 // （含运行时字段合并的完整 ServiceState 返回）。方法体逐字移动。
 
 import type { WorkflowDocument } from '../shared/graph-model.js'
+import { resolveWorkspacePath } from '../workspace/verify.js'
 import { httpError } from './http.js'
 import { stripClientMeta } from './api-base.js'
 import { VisualWorkflowApiBase } from './api-base.js'
@@ -52,7 +53,10 @@ export class VisualWorkflowApiWorkflows extends VisualWorkflowApiBase {
     if (!raw || !String(raw.id ?? '').trim()) throw httpError(400, 'requires a flow id')
     const expected = Number(raw.revision)
     if (!Number.isFinite(expected)) throw httpError(400, 'requires a numeric revision')
-    const flow = { ...stripClientMeta(raw as Record<string, unknown>), sessionId } as WorkflowDocument
+    // 新会话工作区校验（存在且为目录；空值忽略）——保证「输入路径 → 新会话 cwd → 沙箱」联动
+    const workspacePath = await this.checkedWorkspacePath(raw.workspacePath)
+    const flow = { ...stripClientMeta(raw as Record<string, unknown>), sessionId, startNewSession: raw.startNewSession === true } as WorkflowDocument
+    if (workspacePath) flow.workspacePath = workspacePath
     try {
       const saved = await this.host.store.saveWorkflow(flow, sessionId, { expectedRevision: expected })
       // 双向同步①「画布→编排」：保存成功后刷新活跃 run 的编排事实源
@@ -100,9 +104,13 @@ export class VisualWorkflowApiWorkflows extends VisualWorkflowApiBase {
     if (!raw || !String(raw.id ?? '').trim()) throw httpError(400, 'requires a service id')
     const expected = Number(raw.revision)
     if (!Number.isFinite(expected)) throw httpError(400, 'requires a numeric revision')
+    // 新会话工作区校验（存在且为目录；空值忽略）
+    const workspacePath = await this.checkedWorkspacePath(raw.workspacePath)
     const serviceId = String(raw.id ?? '').trim()
     try {
-      const saved = await this.host.store.saveService(stripClientMeta(raw) as never, sessionId, { expectedRevision: expected })
+      const normalized = { ...stripClientMeta(raw), startNewSession: raw.startNewSession === true } as Record<string, unknown>
+      if (workspacePath) normalized.workspacePath = workspacePath
+      const saved = await this.host.store.saveService(normalized as never, sessionId, { expectedRevision: expected })
       // 双向同步①「画布→编排」（模式二同理）：保存成功后刷新活跃 run 事实源。
       await this.host.orchestrator.refreshActiveDefinitions(serviceId, sessionId, {
         id: saved.id,
@@ -112,6 +120,8 @@ export class VisualWorkflowApiWorkflows extends VisualWorkflowApiBase {
         description: saved.description,
         nodes: saved.nodes,
         lines: saved.lines,
+        startNewSession: saved.startNewSession,
+        workspacePath: saved.workspacePath,
         revision: saved.revision,
       } as WorkflowDocument)
       return saved
@@ -171,6 +181,16 @@ export class VisualWorkflowApiWorkflows extends VisualWorkflowApiBase {
       ...(result.status !== undefined ? { status: result.status } : {}),
       ...(result.port !== undefined ? { port: result.port } : {}),
       ...(result.pid !== undefined ? { pid: result.pid } : {}),
+    }
+  }
+
+  /** 校验可选工作区路径（存在且为目录；空值返回 undefined；异常转 400）。 */
+  private async checkedWorkspacePath(value: unknown): Promise<string | undefined> {
+    try {
+      return await resolveWorkspacePath(value)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw httpError(400, message)
     }
   }
 

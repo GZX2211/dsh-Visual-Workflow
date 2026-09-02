@@ -34,7 +34,7 @@ export function createInitialState(sessionId: string): StudioState {
     editor: null,
     dirty: false,
     savedGraph: null,
-    run: { runId: null, snapshot: null },
+    run: { runId: null, sessionId: null, snapshot: null },
     toasts: [],
     message: '',
     history: { past: [], future: [] },
