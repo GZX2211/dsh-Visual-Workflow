@@ -16,7 +16,14 @@ interface AgentsCreateLike {
     sessionId: string
     meta?: { cwd?: string; agentPreset?: string }
     agentOptions?: { provider?: string; model?: string }
+    setup?: (agentCtx: unknown) => Promise<unknown> | void
   }): Promise<{ agent: { id: unknown } }>
+}
+
+/** agentPresets 服务「解析 + 挂载」能力的最小结构（运行时守卫后收窄）。 */
+interface AgentPresetsLike {
+  resolve?(id?: string): Promise<{ id: string }>
+  mount?(agentCtx: unknown, id?: string): Promise<unknown>
 }
 
 /** 新会话创建缝（引擎依赖；单测 fake）。 */
@@ -39,12 +46,32 @@ export class CordisSessionProvider implements SessionProvider {
     if (!agents || typeof agents.create !== 'function') {
       throw new Error('agents 服务不支持创建会话（agent 工厂未安装），无法执行定时任务的「新会话」模式')
     }
+    // 预设装配：agentPreset 不只写入会话 header，还必须在创建 setup 里把所属 preset
+    // 挂载到该 Agent 的作用域（官方 api-proxy composeAgent 同源：先 resolve 得 resolved id
+    // 供 header 记录，再在 setup 内 agentPresets.mount，使官方工具/prompt 段对 agent 可见）。
+    // 只写 header 不 mount 会让新会话的根 Agent 仅继承全局层（宿主 + 插件 wf_* + MCP）工具，
+    // 官方 standard 预设的工具（bash/pwsh/fs/jobs/skill/goal/subagent/workflow/web…）全部缺失。
+    const presetId = options.agentPreset ?? 'standard'
+    const agentPresets = this.ctx.get('agentPresets') as AgentPresetsLike | null | undefined
+    if (agentPresets && typeof agentPresets.resolve === 'function' && typeof agentPresets.mount === 'function') {
+      const resolvedPresetId = (await agentPresets.resolve(presetId)).id
+      const mountPreset = (agentCtx: unknown): Promise<unknown> => agentPresets.mount!(agentCtx, resolvedPresetId)
+      const sessionId = `sched-${randomUUID().replace(/-/g, '').slice(0, 16)}`
+      await agents.create({
+        sessionId,
+        meta: {
+          ...(options.cwd ? { cwd: options.cwd } : {}),
+          agentPreset: resolvedPresetId,
+        },
+        setup: mountPreset,
+      })
+      return sessionId
+    }
     const sessionId = `sched-${randomUUID().replace(/-/g, '').slice(0, 16)}`
     await agents.create({
       sessionId,
       meta: {
         ...(options.cwd ? { cwd: options.cwd } : {}),
-        agentPreset: options.agentPreset ?? 'standard',
       },
     })
     return sessionId

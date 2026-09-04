@@ -17,6 +17,7 @@ import { mkdtemp, rm, writeFile, mkdir, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FlowStore } from '../../src/host/storage/flow-store.js'
+import { ToolSwitchStore } from '../../src/host/tools/tool-switches.js'
 import { DatabaseSync } from 'node:sqlite'
 import {
   OrchestratorRuntime,
@@ -200,7 +201,7 @@ async function saveFlow(h: Harness): Promise<void> {
 // ---------------------------------------------------------------------------
 
 describe('端点白名单与分发', () => {
-  it('白名单与共享协议常量完全一致（41 端点，零漂移）', () => {
+  it('白名单与共享协议常量完全一致（零漂移）', () => {
     const expected = new Set<string>((Object.values(EP) as unknown[]).filter((v): v is string => typeof v === 'string'))
     expect(VisualWorkflowApi.ENDPOINTS.size).toBe(expected.size)
     for (const name of expected) expect(VisualWorkflowApi.ENDPOINTS.has(name)).toBe(true)
@@ -474,9 +475,35 @@ describe('生态端点', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// 运行端点
-// ---------------------------------------------------------------------------
+describe('全局工具开关批量端点', () => {
+  it('toolSwitchPutMany：批量关闭并返回更新后清单；再次批量开启移出', async () => {
+    const h = await makeHarness()
+    h.host.toolSwitches = new ToolSwitchStore(h.dataDir)
+    await h.host.toolSwitches.load()
+
+    const closed = (await h.api.handle('toolSwitchPutMany', { names: ['read', 'grep', ''], disabled: true })) as { disabled?: string[] }
+    expect(closed.disabled?.sort()).toEqual(['grep', 'read'])
+
+    const opened = (await h.api.handle('toolSwitchPutMany', { names: ['read', 'grep'], disabled: false })) as { disabled?: string[] }
+    expect(opened.disabled).toEqual([])
+    expect(await h.host.toolSwitches.readDisabled()).toEqual([])
+  })
+
+  it('toolSwitchPutMany：空集合 / 官方保留传输名过滤后为空 → 400', async () => {
+    const h = await makeHarness()
+    h.host.toolSwitches = new ToolSwitchStore(h.dataDir)
+    await h.host.toolSwitches.load()
+    await expect(h.api.handle('toolSwitchPutMany', { names: [], disabled: true })).rejects.toThrow(/一个以上/)
+    await expect(h.api.handle('toolSwitchPutMany', { names: ['  '], disabled: true })).rejects.toThrow(/一个以上/)
+    // 官方保留传输名 run_code 不可关闭：过滤后为空 → 400（不误伤）
+    await expect(h.api.handle('toolSwitchPutMany', { names: ['run_code'], disabled: true })).rejects.toThrow(/一个以上/)
+  })
+
+  it('toolSwitchPutMany：toolSwitches 能力缺失 → 501', async () => {
+    const h = await makeHarness()
+    await expect(h.api.handle('toolSwitchPutMany', { names: ['read'], disabled: true })).rejects.toThrow(/tool switches unavailable/)
+  })
+})
 
 describe('运行端点', () => {
   it('run 无断点全新启动；有断点自动续跑（resumedFromRunId）', async () => {

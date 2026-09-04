@@ -193,4 +193,47 @@ describe('组合管理', () => {
     const del = state.calls.find((call) => call.endpoint === EP.EP_MCP_DELETE)
     expect(del?.args).toEqual({ id: 'mcp-1' })
   })
+
+  it('标签一键开关：选中 MCP 标签后批量 toolSwitchPutMany 该标签下全部工具', async () => {
+    const { remote, state } = makeRemote({
+      catalog: {
+        items: [
+          { key: 'tool:mcp__demo__fetch', name: 'mcp__demo__fetch', description: 'Fetch' },
+          { key: 'tool:mcp__demo__find', name: 'mcp__demo__find', description: 'Find' },
+          { key: 'tool:read', name: 'read', description: '读取文件' },
+        ],
+        mcp: [{ id: 'mcp-1', serverName: 'demo', transport: 'stdio', command: 'npx demo', args: [], url: '' }],
+        loadedPlugins: [],
+      },
+    })
+    await openComboManager(remote)
+    // 点击 demo 标签（胶囊栏内）
+    await clickButton('demo', true)
+    // 标签栏出现「一键关闭」；点击 → 批量关闭全部 mcp__demo__* 工具
+    await clickButton(zh.comboTagDisableAll, true)
+    const put = state.calls.find((call) => call.endpoint === EP.EP_TOOL_SWITCH_PUT_MANY)
+    expect(put).toBeTruthy()
+    expect(put!.args).toMatchObject({ disabled: true })
+    expect((put!.args.names as string[]).sort()).toEqual(['mcp__demo__fetch', 'mcp__demo__find'])
+  })
+
+  it('标签一键开关：官方工具标签批量开关不影响 MCP 工具', async () => {
+    const { remote, state } = makeRemote({
+      catalog: {
+        items: [
+          { key: 'tool:read', name: 'read', description: '读取文件' },
+          { key: 'tool:write', name: 'write', description: '写入文件' },
+          { key: 'tool:mcp__demo__fetch', name: 'mcp__demo__fetch', description: 'Fetch' },
+        ],
+        mcp: [],
+        loadedPlugins: [],
+      },
+    })
+    await openComboManager(remote)
+    await clickButton('官方工具', true)
+    await clickButton(zh.comboTagDisableAll, true)
+    const put = state.calls.find((call) => call.endpoint === EP.EP_TOOL_SWITCH_PUT_MANY)
+    expect(put).toBeTruthy()
+    expect((put!.args.names as string[]).sort()).toEqual(['read', 'write'])
+  })
 })

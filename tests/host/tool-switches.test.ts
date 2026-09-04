@@ -68,12 +68,23 @@ describe('ToolSwitchStore', () => {
     expect(await store.readDisabled()).toEqual(['wf_run_node'])
   })
 
-  it('持久化往返：新实例 load 后快照一致', async () => {
-    const { dir, store } = await makeStore()
-    await store.setDisabled('grep', true)
-    const reloaded = new ToolSwitchStore(dir)
-    await reloaded.load()
-    expect([...reloaded.currentDisabled()]).toEqual(['grep'])
+  it('setDisabledMany：批量关/开 + 幂等 + 空名忽略 + 内存快照即时更新', async () => {
+    const { store } = await makeStore()
+    await store.load()
+    await store.setDisabledMany(['read', 'grep', '  ', ''], true)
+    expect([...store.currentDisabled()].sort()).toEqual(['grep', 'read'])
+    // 已存在单工具关闭后，批量开启应从清单移出
+    await store.setDisabled('wf_run_node', true)
+    await store.setDisabledMany(['read', 'wf_run_node'], false)
+    expect([...store.currentDisabled()].sort()).toEqual(['grep'])
+    expect(await store.readDisabled()).toEqual(['grep'])
+  })
+
+  it('setDisabledMany：空数组为 no-op（不写盘、不报错）', async () => {
+    const { store } = await makeStore()
+    await store.setDisabled('read', true)
+    await store.setDisabledMany([], true)
+    expect(await store.readDisabled()).toEqual(['read'])
   })
 
   it('损坏 JSON 容忍：按空清单处置，后续保存重写', async () => {

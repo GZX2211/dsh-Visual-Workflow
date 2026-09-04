@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Dict } from '../../i18n.js'
 import { EP } from '../../lib/remote.js'
 import type { RemoteFace } from '../../hooks/useRemote.js'
-import { buildToolTags, TAG_ALL, type ToolTag } from '../../lib/tool-tags.js'
+import { buildToolTags, filterToolNamesByTag, TAG_ALL, type ToolTag } from '../../lib/tool-tags.js'
 
 interface CatalogItem { key: string; name: string; description?: string; disabled?: boolean; badge?: string; checked: boolean; onToggle(): void; onEdit?(): void; onToggleDisabled?(): void; onDelete?(): void }
 interface McpEntry { id: string; serverName: string; transport?: string; command?: string; args?: string[]; commandLine?: string; env?: Record<string, string>; headers?: Record<string, string>; url?: string; disabled?: boolean; description?: string }
@@ -208,6 +208,33 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
     }
   }, [copy.toolSwitchDisabled, copy.toolSwitchEnabled, onToast, remote])
 
+  /**
+   * 一键开关当前标签下全部工具（组合管理「标签」胶囊栏右侧按钮）：
+   *   - 仅作用于当前激活标签（官方工具 / MCP 服务器标签）命中的工具集合，
+   *     不影响其他标签或官方工具——filterToolNamesByTag 按标签语义收窄；
+   *   - 关闭状态目标 = 标签下所有工具是否已全部关闭：全部关闭则一键开启，
+   *     否则一键关闭（幂等；空标签或「全部」标签下无明确工具集合时禁用）；
+   *   - 关闭成功后将标签下工具从组合草稿移除（父代理不可用 → 子代理无法传入）。
+   */
+  const toggleTagBulkToolDisabled = useCallback(async (disabled: boolean): Promise<void> => {
+    const toolNames = filterToolNamesByTag((catalog.items ?? []).map((item) => item.name), activeTag)
+    if (toolNames.length === 0) return
+    setBusy(true)
+    try {
+      const result = await remote.call(EP.EP_TOOL_SWITCH_PUT_MANY, { names: toolNames, disabled }) as { disabled?: unknown }
+      const next = new Set<string>(Array.isArray(result?.disabled) ? (result.disabled as string[]).map((item) => String(item)) : [])
+      setDisabledTools(next)
+      if (disabled) {
+        setComboDraft((draft) => ({ ...draft, tools: draft.tools.filter((item) => !toolNames.includes(item)) }))
+      }
+      onToast('success', disabled ? copy.toolSwitchBatchDisabled : copy.toolSwitchBatchEnabled)
+    } catch (error) {
+      onToast('error', String((error as Error)?.message ?? error))
+    } finally {
+      setBusy(false)
+    }
+  }, [activeTag, catalog.items, copy.toolSwitchBatchDisabled, copy.toolSwitchBatchEnabled, onToast, remote])
+
   const deleteMcp = useCallback(async (id: string): Promise<void> => {
     setBusy(true)
     try {
@@ -312,6 +339,21 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
     [catalog.items, catalog.mcp],
   )
 
+  /**
+   * 当前激活标签命中的工具集合（一键开关目标；MCP 服务器标签 / 官方工具标签）。
+   * 「全部」标签回退为空集（无明确批量语义，按钮禁用）。
+   */
+  const tagToolNames: string[] = useMemo(
+    () => (activeTag === TAG_ALL ? [] : filterToolNamesByTag((catalog.items ?? []).map((item) => item.name), activeTag)),
+    [activeTag, catalog.items],
+  )
+
+  /** 当前标签下工具是否已全部关闭（一键开关按钮目标态：全部关闭 → 显示「一键开启」）。 */
+  const tagToolsAllDisabled = useMemo(
+    () => tagToolNames.length > 0 && tagToolNames.every((name) => disabledTools.has(name)),
+    [tagToolNames, disabledTools],
+  )
+
   const gridItems: CatalogItem[] = useMemo(() => {
     try {
       const keyword = String(search ?? '').trim().toLowerCase()
@@ -409,7 +451,9 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
             <div className="wf-combo__search">
               <input type="text" value={search} placeholder={copy.comboSearch} onChange={(event) => setSearch(event.target.value)} />
             </div>
-            {/* 筛选标签：胶囊样式；[全部] + [官方工具] + 动态 MCP 服务器 Tag（单选；再点当前 Tag 回「全部」） */}
+            {/* 筛选标签：胶囊样式；[全部] + [官方工具] + 动态 MCP 服务器 Tag（单选；再点当前 Tag 回「全部」）
+                右侧一键开关：仅当前激活标签（官方工具 / MCP 服务器）命中工具集合生效，
+                点击统一关闭/开启该标签下全部工具（不影响其他标签或官方工具）。 */}
             {tab === 'plugins' && toolTags.length > 1
               ? (
                   <div className="wf-combo__tags">
@@ -423,6 +467,19 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
                         {tag.label}
                       </button>
                     ))}
+                    {tagToolNames.length > 0
+                      ? (
+                          <button
+                            type="button"
+                            className="wf-combo-tag wf-combo-tag__bulk"
+                            onClick={() => { void toggleTagBulkToolDisabled(!tagToolsAllDisabled) }}
+                            disabled={busy}
+                            title={copy.comboTagBulkHint}
+                          >
+                            {tagToolsAllDisabled ? copy.comboTagEnableAll : copy.comboTagDisableAll}
+                          </button>
+                        )
+                      : null}
                   </div>
                 )
               : null}

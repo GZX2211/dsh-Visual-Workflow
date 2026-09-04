@@ -106,6 +106,33 @@ export class ToolSwitchStore {
     this.current = new Set(doc)
     return [...doc]
   }
+
+  /**
+   * 批量设置一组工具的开关状态（幂等；组合管理「标签一键开关」用）：
+   *   - 空名/空白名直接忽略（不报错——批量场景逐个校验收敛为「有效集合」）；
+   *   - disabled=true 全部加入关闭清单；false 全部移出；
+   *   - 单次原子落盘（与单工具 setDisabled 同一把锁），成功后一次性刷新内存快照。
+   * @returns 更新后的完整关闭清单。
+   */
+  async setDisabledMany(names: string[], disabled: boolean): Promise<string[]> {
+    const toolNames = (Array.isArray(names) ? names : [])
+      .map((name) => String(name ?? '').trim())
+      .filter(Boolean)
+    const path = this.path()
+    const doc = await withJsonLock(path, async () => {
+      const current = await this.readDoc()
+      const set = new Set(current.disabled)
+      for (const toolName of toolNames) {
+        if (disabled) set.add(toolName)
+        else set.delete(toolName)
+      }
+      const next = [...set]
+      await atomicWriteJson(path, { disabled: next })
+      return next
+    })
+    this.current = new Set(doc)
+    return [...doc]
+  }
 }
 
 // ---------------------------------------------------------------------------

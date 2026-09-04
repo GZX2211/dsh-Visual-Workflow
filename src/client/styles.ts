@@ -234,6 +234,9 @@ export const styles = `
 .wf-combo-tag{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border:1px solid var(--wf-border);border-radius:999px;background:var(--wf-layer-2);color:var(--wf-ink-2);font-size:10px;cursor:pointer;transition:border-color .14s ease,background .14s ease,color .14s ease}
 .wf-combo-tag:hover{border-color:var(--wf-brand);color:var(--wf-ink)}
 .wf-combo-tag.is-active{border-color:var(--wf-brand);background:color-mix(in srgb,var(--wf-brand) 12%,var(--wf-layer-2));color:var(--wf-brand)}
+.wf-combo-tag__bulk{margin-left:auto;border-color:var(--wf-border-strong);background:color-mix(in srgb,var(--wf-brand) 8%,var(--wf-layer-2));color:var(--wf-ink);font-weight:650}
+.wf-combo-tag__bulk:hover{border-color:var(--wf-brand);color:var(--wf-brand)}
+.wf-combo-tag__bulk:disabled{opacity:.45;cursor:default}
 .wf-combo__head{flex:none;display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--wf-border)}
 .wf-combo__head h3{margin:0;font-size:14px;color:var(--wf-ink);flex:none}
 .wf-combo__head .wf-status{margin-left:0}

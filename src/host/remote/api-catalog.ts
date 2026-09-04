@@ -221,6 +221,21 @@ export class VisualWorkflowApiCatalog extends VisualWorkflowApiEcosystem {
     }
     return { disabled: await this.host.toolSwitches.setDisabled(name, args?.disabled !== false) }
   }
+
+  /**
+   * 批量设置一组工具开/关状态（组合管理「标签一键开关」：把某标签下全部工具统一关/开）。
+   *   - names 必须非空数组；空白名忽略；官方保留传输名 run_code 静默跳过（不可关闭）；
+   *   - 单次原子落盘 + 刷新内存快照，全局即时生效。
+   * @returns 更新后的完整关闭清单。
+   */
+  async toolSwitchPutMany(args: { names?: unknown; disabled?: unknown }): Promise<unknown> {
+    if (!this.host.toolSwitches) throw httpError(501, 'tool switches unavailable')
+    const names = (Array.isArray(args?.names) ? args.names : [])
+      .map((name) => String(name ?? '').trim())
+      .filter((name) => name && name !== RESERVED_TRANSPORT_TOOL)
+    if (names.length === 0) throw httpError(400, '工具批量开关需要一个以上可设置的工具名')
+    return { disabled: await this.host.toolSwitches.setDisabledMany(names, args?.disabled !== false) }
+  }
 }
 
 /** 内置常用工具中文描述映射（未命中回退原文，英文加 [EN] 前缀）。 */

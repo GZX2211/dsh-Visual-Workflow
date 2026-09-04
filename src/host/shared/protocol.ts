@@ -95,6 +95,8 @@ export const EP_MCP_TOGGLE = 'mcpToggle'
 export const EP_TOOL_SWITCHES = 'toolSwitches'
 /** 设置单个工具开/关状态端点名（全局即时生效）。 */
 export const EP_TOOL_SWITCH_PUT = 'toolSwitchPut'
+/** 批量设置一组工具开/关状态端点名（组合管理「标签一键开关」用；全局即时生效）。 */
+export const EP_TOOL_SWITCH_PUT_MANY = 'toolSwitchPutMany'
 
 /** 运行启动端点名。 */
 export const EP_RUN = 'run'
