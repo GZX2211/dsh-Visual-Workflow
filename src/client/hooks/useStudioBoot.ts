@@ -7,13 +7,14 @@
 import { useEffect } from 'react'
 import type { Dispatch } from 'react'
 import type { ModelItem, PresetItem, StudioAction, StudioState, ToolItem } from '../studio/studio-state.js'
+import type { WorkflowDocument } from '../../host/shared/graph-model.js'
+import type { ServiceState } from '../../host/shared/types.js'
 import type { RemoteFace } from './useRemote.js'
 import type { WorkflowsFace } from './useWorkflows.js'
 import type { FlowTemplatesFace } from './useFlowTemplates.js'
 import type { TemplatesFace } from './useTemplates.js'
 import type { ServiceControlFace } from './useServiceControl.js'
 import type { ToastFace } from './useToast.js'
-import type { DocumentActionsFace } from './useDocumentActions.js'
 import type { Dict } from '../i18n.js'
 import { EP } from '../lib/remote.js'
 
@@ -35,22 +36,28 @@ export function useStudioBoot(
   flowTemplates: FlowTemplatesFace,
   templates: TemplatesFace,
   serviceControl: ServiceControlFace,
-  openFlowById: DocumentActionsFace['openFlowById'],
-  openServiceById: DocumentActionsFace['openServiceById'],
   pickInitialInstance: PickInitialInstance,
 ): void {
   useEffect(() => {
     let cancelled = false
+    // 用「加载返回的最新列表」而非闭包里的 state.workflows/services：
+    // boot 的 effect 依赖仅 [state.sessionId]，闭包中的 state 是首次渲染的空数组，
+    // 直接读 state.workflows 会误判「无实例」而提前 return，导致重挂载/重新进入后
+    // 画布空白、运行状态不恢复（图2-6 状态消失根因）。
+    let loadedWorkflows: WorkflowDocument[] = []
+    let loadedServices: ServiceState[] = []
     const boot = async (): Promise<void> => {
       // 会话未激活（浮窗路径下为空）：不请求需要 sessionId 的端点（避免 400），
       // 提示用户在对话区先发送一条消息激活会话（会话出现后经 subscribe 重新挂载）
       if (state.sessionId) {
         try {
-          await Promise.all([
+          const [flows, , services] = await Promise.all([
             workflows.loadWorkflows(),
             flowTemplates.loadFlowTemplates(),
             serviceControl.loadServices(state.sessionId),
           ])
+          loadedWorkflows = flows ?? []
+          loadedServices = services ?? []
         } catch (error) {
           if (!cancelled) toastError(error)
         }
@@ -102,34 +109,40 @@ export function useStudioBoot(
       // 「进入工作台自动选中实例」（用户新增需求）：每次点击悬浮窗进入时（浮窗关闭
       // 即卸载 Studio、重开重新 mount → boot 重跑），若实例列表非空则默认选中并显示
       // 在画布——优先正在运行的实例（activeRuns 查询，running 优先于 paused），否则
-      // 列表第一个；实例列表为空则保持空白画布。
+      // 列表第一个；实例列表为空则保持空白画布。用最新加载列表直接 dispatch 打开。
       if (cancelled || !state.sessionId) return
       try {
         const activeRuns = await remote.call(EP.EP_ACTIVE_RUNS, { sessionId: state.sessionId }) as Array<{ flowId: string; status: string; runId: string }> | null
         // 按当前模式选择目标实例列表：mode1=工作流实例、mode2=服务实例
         if (state.mode === 'mode1') {
-          const flows = state.workflows
+          const flows = loadedWorkflows
           if (flows.length === 0) return // 空列表保持空白画布
           const targetId = pickInitialInstance(flows.map((f) => ({ id: f.id, name: f.name })), activeRuns ?? [])
           if (targetId) {
-            openFlowById(targetId)
-            // 图2-6：退出工作台再进入状态消失——若选中实例存在活动 run，恢复 runId，
-            // 从而触发 useRunPolling 重建轮询并拉回快照，画布节点/实例卡状态不再消失。
+            const target = flows.find((f) => f.id === targetId)
+            if (target) dispatch({ type: 'OPEN_FLOW', flow: target })
+            // 图2-6：退出工作台再进入状态消失——若选中实例存在活动 run，在其打开后
+            // 恢复 runId，触发 useRunPolling 重建轮询并拉回快照，画布节点/实例卡状态不再消失。
             const active = (activeRuns ?? []).find((a) => a.flowId === targetId)
             if (active?.runId) dispatch({ type: 'RUN_STARTED', runId: active.runId })
           }
         } else {
-          const services = state.services
+          const services = loadedServices
           if (services.length === 0) return
           const targetId = pickInitialInstance(services.map((s) => ({ id: s.id, name: s.name })), activeRuns ?? [])
-          if (targetId) openServiceById(targetId)
+          if (targetId) {
+            const target = services.find((s) => s.id === targetId)
+            if (target) dispatch({ type: 'OPEN_SERVICE', service: target })
+            const active = (activeRuns ?? []).find((a) => a.flowId === targetId)
+            if (active?.runId) dispatch({ type: 'RUN_STARTED', runId: active.runId })
+          }
         }
       } catch {
-        // 活跃 run 查询失败不阻断自动选中（回退到列表第一个实例）
-        if (state.mode === 'mode1' && state.workflows.length > 0) {
-          openFlowById(state.workflows[0].id)
-        } else if (state.mode === 'mode2' && state.services.length > 0) {
-          openServiceById(state.services[0].id)
+        // 活跃 run 查询失败不阻断自动选中（回退到列表第一个实例；用最新加载列表直接 dispatch）
+        if (state.mode === 'mode1' && loadedWorkflows.length > 0) {
+          dispatch({ type: 'OPEN_FLOW', flow: loadedWorkflows[0] })
+        } else if (state.mode === 'mode2' && loadedServices.length > 0) {
+          dispatch({ type: 'OPEN_SERVICE', service: loadedServices[0] })
         }
       }
     }

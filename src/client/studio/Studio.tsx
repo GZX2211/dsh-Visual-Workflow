@@ -137,7 +137,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
   // ---------- 初始化加载 ----------
   useStudioBoot(
     state, dispatch, notify, toastError, t, remote, workflows, flowTemplates, templates, serviceControl,
-    doc.openFlowById, doc.openServiceById, pickInitialInstance,
+    pickInitialInstance,
   )
 
   // ---------- 模式切换（未保存守卫；需求 §4.1.1） ----------
@@ -171,6 +171,16 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
     // 3) 触发真正运行
     void (state.mode === 'mode2' ? run.startService() : run.startRun())
   }, [dispatch, onEnterSplit, run, state.mode])
+
+  // 批注：顶部「一键折叠/展开」左右侧栏（两侧联动）。折叠时不显示拖动线、不能拖出，
+  // 只能再次点击按钮展开后才能拖动边框调整宽度。两者都折叠才算「已折叠」。
+  const panelsCollapsed = !(state.panels.leftOpen && state.panels.rightOpen)
+  const togglePanels = useCallback(() => {
+    dispatch({
+      type: 'PANELS_SET',
+      panels: panelsCollapsed ? { leftOpen: true, rightOpen: true } : { leftOpen: false, rightOpen: false },
+    })
+  }, [dispatch, panelsCollapsed])
 
   // 分栏模式下工作台初始折叠自身左右栏（沉浸式；用户可再拖动展开）
   useEffect(() => {
@@ -236,6 +246,8 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
       viewMode={viewMode}
       onToggleView={onToggleView}
       handleRun={handleRun}
+      panelsCollapsed={panelsCollapsed}
+      onTogglePanels={togglePanels}
     />
   )
 }

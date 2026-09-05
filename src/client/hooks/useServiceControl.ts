@@ -11,7 +11,7 @@ import type { RemoteFace } from './useRemote.js'
 import { EP } from '../lib/remote.js'
 
 export interface ServiceControlFace {
-  loadServices(sessionId: string): Promise<void>
+  loadServices(sessionId: string): Promise<ServiceState[]>
   /** 新建本地服务草稿（_draft 标记；首次保存时经 putService 真实入库）。 */
   createServiceDraft(name: string, sessionId: string): ServiceState
   /** 模板 → 服务实例（图2 交互改造：模板拖入画布「创建服务」后转服务实例；深拷贝断引用）。 */
@@ -26,14 +26,16 @@ export interface ServiceControlFace {
 
 /** 服务控制面（远端失败抛错，由调用方 toast）。 */
 export function useServiceControl(dispatch: Dispatch<StudioAction>, remote: RemoteFace): ServiceControlFace {
-  const loadServices = useCallback(async (sessionId: string) => {
+  const loadServices = useCallback(async (sessionId: string): Promise<ServiceState[]> => {
     // 会话未激活时跳过（后端 requires sessionId 400）
     if (!sessionId) {
       dispatch({ type: 'SERVICES_LOADED', items: [] })
-      return
+      return []
     }
     const items = await remote.call(EP.EP_LIST_SERVICES, { sessionId })
-    dispatch({ type: 'SERVICES_LOADED', items: Array.isArray(items) ? (items as ServiceState[]) : [] })
+    const list = Array.isArray(items) ? (items as ServiceState[]) : []
+    dispatch({ type: 'SERVICES_LOADED', items: list })
+    return list
   }, [dispatch, remote])
 
   const createServiceDraft = useCallback((name: string, sessionId: string): ServiceState => {

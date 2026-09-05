@@ -29,6 +29,10 @@ export const styles = `
 .wf-toolbar__switch input{width:auto;flex:0 0 auto;min-width:0;margin:0;accent-color:var(--wf-brand);cursor:pointer}
 .wf-toolbar__workspace{width:200px;border:1px solid var(--wf-border-strong);border-radius:7px;background:var(--wf-layer-2);color:var(--wf-ink);padding:5px 8px;font-size:10px;outline:0}
 .wf-toolbar__workspace:focus{border-color:var(--wf-brand)}
+/* 顶部一键折叠/展开两侧按钮（批注：折叠时图标泛品牌色，提示当前可展开） */
+.wf-toolbar__panels svg{color:var(--wf-ink-2)}
+.wf-toolbar__panels.is-collapsed{border-color:color-mix(in srgb,var(--wf-brand) 45%,var(--wf-border-strong))}
+.wf-toolbar__panels.is-collapsed svg{color:var(--wf-brand)}
 .wf-btn{border:1px solid var(--wf-border-strong);border-radius:8px;background:var(--wf-layer-2);color:var(--wf-ink);padding:6px 11px;transition:border-color .15s ease,transform .15s ease,background .15s ease;white-space:nowrap}
 .wf-btn:hover{border-color:var(--wf-brand);transform:translateY(-1px)}
 /* 主按钮：采用 DSH 官方主按钮语义（--dsw-alias-button-primary-fill 与

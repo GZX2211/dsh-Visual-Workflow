@@ -93,6 +93,10 @@ export interface StudioLayoutProps {
   onToggleView?: () => void
   /** 运行联动：切分栏 + 折叠自身左右栏 + 触发运行。 */
   handleRun: () => void
+  /** 两侧侧栏是否都已折叠（顶部一键折叠/展开按钮用）。 */
+  panelsCollapsed: boolean
+  /** 顶部一键折叠/展开左右侧栏回调。 */
+  onTogglePanels: () => void
 }
 
 /** 工作台渲染层（纯 JSX 组合；回调/数据全部来自 props）。 */
@@ -105,7 +109,7 @@ export function StudioLayout(props: StudioLayoutProps) {
     dispatch, doc, canvas, editor, run, transfer, selection, history, guard, panels, toast,
     beginLibraryDrag, dragPreview, dropGroupId,
     modeMenuOpen, setModeMenuOpen, switchMode, requestClose, canvasCaption,
-    onToggleView, handleRun,
+    onToggleView, handleRun, panelsCollapsed, onTogglePanels,
   } = props
 
   return (
@@ -209,17 +213,24 @@ export function StudioLayout(props: StudioLayoutProps) {
           onBeginDrag={beginLibraryDrag}
         />
 
-        <div
-          className="wf-splitter"
-          role="separator"
-          aria-orientation="vertical"
-          onPointerDown={(event) => panels.beginResize('left', event)}
-        />
+        {/* 批注：折叠时隐藏「拖动线」（splitter）。仅当左侧栏展开时才渲染，折叠态无法拖出 */}
+        {state.panels.leftOpen
+          ? (
+              <div
+                className="wf-splitter"
+                role="separator"
+                aria-orientation="vertical"
+                onPointerDown={(event) => panels.beginResize('left', event)}
+              />
+            )
+          : null}
 
         <div className="wf-canvas-shell" ref={canvasShellRef}>
           <Toolbar
             copy={t}
             mode={state.mode}
+            panelsCollapsed={panelsCollapsed}
+            onTogglePanels={onTogglePanels}
             // 图2 交互改造：保存按钮按当前对象态动态命名——模板态「创建实例/创建服务」
             // （画布内容保存为新实例，模板不变）；实例态「保存实例/保存服务」（保存到当前实例）。
             saveLabel={state.currentKind === 'flowTemplate'
@@ -282,12 +293,17 @@ export function StudioLayout(props: StudioLayoutProps) {
           />
         </div>
 
-        <div
-          className="wf-splitter"
-          role="separator"
-          aria-orientation="vertical"
-          onPointerDown={(event) => panels.beginResize('right', event)}
-        />
+        {/* 批注：折叠时隐藏「拖动线」（splitter）。仅当右侧栏展开时才渲染 */}
+        {state.panels.rightOpen
+          ? (
+              <div
+                className="wf-splitter"
+                role="separator"
+                aria-orientation="vertical"
+                onPointerDown={(event) => panels.beginResize('right', event)}
+              />
+            )
+          : null}
 
         <Inspector
           copy={t}

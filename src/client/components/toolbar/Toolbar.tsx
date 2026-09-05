@@ -11,6 +11,10 @@ import type { Dict } from '../../i18n.js'
 export interface ToolbarProps {
   copy: Dict
   mode: 'mode1' | 'mode2'
+  /** 两侧侧栏是否都已折叠（顶部一键折叠/展开按钮用；批注：折叠时不显示拖动线）。 */
+  panelsCollapsed: boolean
+  /** 顶部一键折叠/展开左右侧栏回调。 */
+  onTogglePanels(): void
   /** 当前画布对象态（模板态显示「创建实例/创建服务」；实例态显示「保存实例/保存服务」）。 */
   saveLabel: string
   onUndo(): void
@@ -35,7 +39,7 @@ export interface ToolbarProps {
 
 export function Toolbar(props: ToolbarProps) {
   const {
-    copy: t, mode, saveLabel, onUndo, onRedo, onClear, canClear, onTidy, canTidy,
+    copy: t, mode, panelsCollapsed, onTogglePanels, saveLabel, onUndo, onRedo, onClear, canClear, onTidy, canTidy,
     onSave, canSave, running, onStop, onRun, onOpenHistory, canHistory, serviceStatus,
     runConfig, onRunConfigChange,
   } = props
@@ -52,6 +56,19 @@ export function Toolbar(props: ToolbarProps) {
 
   return (
     <div className="wf-toolbar">
+      {/* 批注：顶部一键折叠/展开左右侧栏（两侧联动；折叠时隐藏拖动线、不能拖出，展开后才可拖宽） */}
+      <button
+        type="button"
+        className={`wf-btn wf-iconbtn is-ghost wf-toolbar__panels${panelsCollapsed ? ' is-collapsed' : ''}`}
+        title={t.togglePanels}
+        aria-label={t.togglePanels}
+        onClick={onTogglePanels}
+      >
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" style={{ color: 'currentColor' }}>
+          <path fill="none" stroke="currentColor" strokeWidth="2" d="M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z" />
+          <path fill="none" stroke="currentColor" strokeWidth="2" d="M9 5v14M15 5v14" />
+        </svg>
+      </button>
       <button type="button" className="wf-btn wf-iconbtn is-ghost" title={`${t.undo} · Ctrl/Cmd+Z`} aria-label={t.undo} onClick={onUndo}>↶</button>
       <button type="button" className="wf-btn wf-iconbtn is-ghost" title={`${t.redo} · Ctrl/Cmd+Shift+Z`} aria-label={t.redo} onClick={onRedo}>↷</button>
       <button type="button" className="wf-btn is-ghost" title={t.clearCanvas} onClick={onClear} disabled={!canClear}>{t.clear}</button>

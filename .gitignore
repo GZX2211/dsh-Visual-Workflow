@@ -31,6 +31,7 @@ prompt/
 
 # CodeGraph 本地索引（codegraph init 生成，不提交）
 .codegraph/
+codegraph.json
 
 # docs
 bug/
