@@ -104,3 +104,48 @@ export function editorDataOf(state: StudioState): EditorData | null {
   }
   return null
 }
+
+// ---------------------------------------------------------------------------
+// 折叠切换循环（6 态）与面板显隐推导
+// ---------------------------------------------------------------------------
+
+/** 折叠/切换循环长度（共 6 态）。 */
+export const PANEL_CYCLE_LEN = 6
+/** 循环位置枚举：0=左栏展开 1=底栏展开 2=底栏收起(全隐) 3=底栏展开 4=左栏展开 5=左栏收起(全隐)。 */
+export const PANEL_MODE_LEFT = 0
+export const PANEL_MODE_BOTTOM = 1
+export const PANEL_MODE_NONE_BOTTOM = 2
+export const PANEL_MODE_BOTTOM2 = 3
+export const PANEL_MODE_LEFT2 = 4
+export const PANEL_MODE_NONE_LEFT = 5
+
+/** 折叠/切换下一步循环位置（左展→切底→底收→底展→切左→左收→左展）。 */
+export function nextPanelMode(mode: number): number {
+  return (mode + 1) % PANEL_CYCLE_LEN
+}
+
+/** 左栏是否展开（循环位置 0 或 4）。 */
+export function leftPanelOpenOf(state: StudioState): boolean {
+  return state.panels.mode === PANEL_MODE_LEFT || state.panels.mode === PANEL_MODE_LEFT2
+}
+
+/** 底栏是否展开（循环位置 1 或 3）。 */
+export function bottomPanelOpenOf(state: StudioState): boolean {
+  return state.panels.mode === PANEL_MODE_BOTTOM || state.panels.mode === PANEL_MODE_BOTTOM2
+}
+
+/** 是否处于「两侧全隐」态（循环位置 2 或 5；仅画布）。 */
+export function panelsFullyCollapsedOf(state: StudioState): boolean {
+  return state.panels.mode === PANEL_MODE_NONE_BOTTOM || state.panels.mode === PANEL_MODE_NONE_LEFT
+}
+
+/**
+ * 右侧属性栏是否显示：默认隐藏（折叠），仅当选中「具备属性」的对象时才展开。
+ * 判定 = 编辑对象存在且其属性栏类型不是「阶段」（阶段节点/侧栏阶段卡片不具备属性，不弹）；
+ * 其余（实例/工作流/服务/模板/角色/文件/数据库/协作组/连线/画布角色节点含父代理节点/虚拟节点）都弹。
+ * 注意：父代理模板也具备属性（属性栏显示模板内容），此处一并弹出。
+ */
+export function inspectorOpenOf(state: StudioState): boolean {
+  const data = editorDataOf(state)
+  return data != null && data.kind !== 'stage'
+}

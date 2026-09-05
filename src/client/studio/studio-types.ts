@@ -92,12 +92,19 @@ export interface ToastItem {
   text: string
 }
 
-/** 面板几何（localStorage 持久化由 usePanelLayout 负责）。 */
+/** 面板几何（localStorage 持久化由 usePanelLayout 负责）。
+ * 左栏/底栏显隐由「折叠切换循环位置 mode」（0..5）推导，右侧属性栏显隐由
+ * 选中对象是否具备属性推导（见 studio-selectors.inspectorOpenOf）。
+ * 本次改造：折叠按钮不再控制右侧栏，只控制左栏/底栏的展开、折叠、切换（6 态循环）。 */
 export interface PanelLayout {
-  leftOpen: boolean
+  /** 折叠/切换循环位置 0..5：
+   *  0=左栏展开 1=底栏展开 2=底栏收起(全隐) 3=底栏展开 4=左栏展开 5=左栏收起(全隐)。
+   *  默认 0（左栏展开）；next = (mode + 1) % 6。 */
+  mode: number
   leftWidth: number
-  rightOpen: boolean
   rightWidth: number
+  /** 底栏高度（px）。 */
+  bottomHeight: number
 }
 
 export interface StudioState {

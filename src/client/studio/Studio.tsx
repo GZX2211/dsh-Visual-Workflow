@@ -36,6 +36,8 @@ import { useStudioBoot, pickInitialInstanceForSession } from '../hooks/useStudio
 import { useKeyShortcuts } from '../hooks/useKeyShortcuts.js'
 import {
   currentFlowOf, currentServiceOf, currentFlowTemplateOf, editorDataOf, isRunningOf,
+  leftPanelOpenOf, bottomPanelOpenOf, inspectorOpenOf, panelsFullyCollapsedOf, nextPanelMode,
+  PANEL_MODE_NONE_BOTTOM,
 } from './studio-state.js'
 import { StudioLayout } from './StudioLayout.js'
 import type { CanvasApi } from '../components/canvas/GraphCanvas.js'
@@ -170,26 +172,23 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
   const handleRun = useCallback(() => {
     // 1) 宿主切到分栏模式（持久化）
     onEnterSplit?.()
-    // 2) 折叠工作台自身左右栏（左侧模板栏 + 右侧属性栏，中间保留画布栏）
-    dispatch({ type: 'PANELS_SET', panels: { leftOpen: false, rightOpen: false } })
+    // 2) 折叠工作台自身侧栏（左栏与底栏全部隐藏，仅留画布；右侧属性栏由选中推导，随之收起）
+    dispatch({ type: 'PANELS_SET', panels: { mode: PANEL_MODE_NONE_BOTTOM } })
     // 3) 触发真正运行
     void (state.mode === 'mode2' ? run.startService() : run.startRun())
   }, [dispatch, onEnterSplit, run, state.mode])
 
-  // 批注：顶部「一键折叠/展开」左右侧栏（两侧联动）。折叠时不显示拖动线、不能拖出，
-  // 只能再次点击按钮展开后才能拖动边框调整宽度。两者都折叠才算「已折叠」。
-  const panelsCollapsed = !(state.panels.leftOpen && state.panels.rightOpen)
+  // 批注：顶部折叠/切换按钮不再控制右侧栏，只控制左栏/底栏的展开、折叠、切换。
+  // 六态循环：左展→切底→底收→底展→切左→左收→左展（默认左栏展开）。
+  const panelsCollapsed = panelsFullyCollapsedOf(state)
   const togglePanels = useCallback(() => {
-    dispatch({
-      type: 'PANELS_SET',
-      panels: panelsCollapsed ? { leftOpen: true, rightOpen: true } : { leftOpen: false, rightOpen: false },
-    })
-  }, [dispatch, panelsCollapsed])
+    dispatch({ type: 'PANELS_SET', panels: { mode: nextPanelMode(state.panels.mode) } })
+  }, [dispatch, state.panels.mode])
 
-  // 分栏模式下工作台初始折叠自身左右栏（沉浸式；用户可再拖动展开）
+  // 分栏模式下工作台初始折叠自身左右栏（沉浸式；用户可再切换展开）
   useEffect(() => {
     if (viewMode === 'split') {
-      dispatch({ type: 'PANELS_SET', panels: { leftOpen: false, rightOpen: false } })
+      dispatch({ type: 'PANELS_SET', panels: { mode: PANEL_MODE_NONE_BOTTOM } })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -200,6 +199,10 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
   const roleTemplates = useMemo(() => (state.templates.role as import('../../host/shared/types.js').RoleTemplate[]).filter((item) => item.kind !== 'parent'), [state.templates.role])
   const edgeList = useMemo(() => flowToCanvasLines(state.canvas.edges), [state.canvas.edges])
   const toolbarRunning = state.mode === 'mode2' ? currentService?.status === 'running' : running
+  // 面板显隐推导：左栏/底栏由折叠循环位置推导，右侧属性栏由选中对象是否具备属性推导。
+  const leftOpen = leftPanelOpenOf(state)
+  const bottomOpen = bottomPanelOpenOf(state)
+  const inspectorOpen = inspectorOpenOf(state)
 
   // ---------- 渲染（委托 StudioLayout 纯展示层） ----------
   return (
@@ -224,6 +227,9 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
       highlightedNodeIds={highlightedNodeIds}
       modeName={modeName}
       canvasCaption={canvasCaption}
+      leftOpen={leftOpen}
+      bottomOpen={bottomOpen}
+      inspectorOpen={inspectorOpen}
       canvasApiRef={canvasApiRef}
       canvasShellRef={canvasShellRef}
       libraryImportRef={libraryImportRef}

@@ -7,7 +7,7 @@
 
 export const styles = `
 :root,.wf-root{--wf-border:var(--dsw-alias-border-l1);--wf-border-strong:var(--dsw-alias-border-l2);--wf-bg:var(--dsw-alias-bg-base);--wf-layer:var(--dsw-alias-bg-layer-1);--wf-layer-2:var(--dsw-alias-bg-layer-2);--wf-brand:var(--dsw-alias-brand-primary);--wf-on-brand:var(--dsw-alias-label-primary-inverse,var(--dsw-alias-label-reverse,#ffffff));--wf-ink:var(--dsw-alias-label-primary);--wf-ink-2:var(--dsw-alias-label-secondary);--wf-ok:var(--dsw-alias-state-success-primary);--wf-warn:var(--dsw-alias-state-warn-primary);--wf-err:var(--dsw-alias-state-error-primary);--wf-flow:#9aa7b8;--wf-context:#d9a441;--wf-database:#4a9fd8;--wf-pass:#3fbf7f;--wf-fail:#e05c5c;--wf-content:#9a7fd0;--wf-port-in:#3d8bfd;--wf-port-out:#ff8a4c}
-.wf-root{position:relative;inset:auto;width:100%;height:100%;max-height:100vh;min-height:0;display:grid;grid-template-rows:48px minmax(0,1fr);background:var(--wf-bg);color:var(--wf-ink);font:13px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;overflow:hidden}
+.wf-root{position:relative;inset:auto;width:100%;height:100%;max-height:100vh;min-height:0;display:flex;flex-direction:column;background:var(--wf-bg);color:var(--wf-ink);font:13px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;overflow:hidden}
 .wf-root *{box-sizing:border-box}
 .wf-root button,.wf-root input,.wf-root select,.wf-root textarea{font:inherit}
 .wf-root button{cursor:pointer}
@@ -22,7 +22,7 @@ export const styles = `
 .wf-mode-menu{position:absolute;z-index:60;right:0;top:calc(100% + 6px);min-width:170px;padding:6px;border:1px solid var(--wf-border-strong);border-radius:10px;background:var(--wf-layer);box-shadow:0 14px 34px color-mix(in srgb,var(--wf-ink) 22%,transparent);display:flex;flex-direction:column;gap:4px}
 .wf-mode-menu__item{text-align:left;border:0;border-radius:7px;background:transparent;color:var(--wf-ink);padding:7px 10px;font-size:12px}
 .wf-mode-menu__item:hover{background:color-mix(in srgb,var(--wf-brand) 10%,var(--wf-layer));color:var(--wf-brand)}
-.wf-main{min-height:0;min-width:0;overflow:hidden;display:flex}
+.wf-main{flex:1 1 0;min-height:0;min-width:0;overflow:hidden;display:flex}
 .wf-toolbar{flex:none;height:52px;min-height:52px;display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--wf-layer);border-bottom:1px solid var(--wf-border);flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}
 .wf-toolbar>*{flex:none}
 .wf-toolbar__switch{display:inline-flex;align-items:center;gap:5px;color:var(--wf-ink-2);font-size:10px;cursor:pointer;white-space:nowrap}
@@ -136,6 +136,30 @@ export const styles = `
 .wf-lib-tab{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:6px;border:0;border-radius:9px 9px 0 0;background:transparent;color:var(--wf-ink-2);padding:7px 4px;font-size:11px;font-weight:650;cursor:pointer}
 .wf-lib-tab:hover{color:var(--wf-ink);background:color-mix(in srgb,var(--wf-brand) 6%,transparent)}
 .wf-lib-tab.is-active{color:var(--wf-brand);background:color-mix(in srgb,var(--wf-brand) 10%,transparent);box-shadow:inset 0 -2px 0 var(--wf-brand)}
+/* Tag 区图标化（图片批注：以图标显示，不显示文字，共 4 个 tag） */
+.wf-lib-tab__icon{font-size:14px;line-height:1;display:inline-flex;align-items:center;justify-content:center}
+/* ---- 底栏（新增；与左栏相互切换；卡片横向 flex-wrap 动态追加排） ---- */
+.wf-bottombar{flex:none;display:flex;flex-direction:row;background:var(--wf-layer);border-top:1px solid var(--wf-border);min-height:0;overflow:hidden}
+.wf-bottombar.is-collapsed{visibility:hidden;pointer-events:none;height:0}
+.wf-bottombar__tags{flex:none;width:46px;display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 6px;border-right:1px solid var(--wf-border)}
+.wf-bottombar__tag{width:34px;height:34px;border:1px solid transparent;border-radius:9px;background:transparent;color:var(--wf-ink-2);display:flex;align-items:center;justify-content:center;font-size:15px;cursor:pointer}
+.wf-bottombar__tag:hover{color:var(--wf-ink);background:color-mix(in srgb,var(--wf-brand) 6%,transparent)}
+.wf-bottombar__tag.is-active{color:var(--wf-brand);background:color-mix(in srgb,var(--wf-brand) 10%,transparent);border-color:color-mix(in srgb,var(--wf-brand) 45%,var(--wf-border))}
+.wf-bottombar__tag-icon{line-height:1}
+.wf-bottombar__scroll{flex:1;min-width:0;min-height:0;overflow:auto;overscroll-behavior:contain;padding:8px 12px;display:flex;flex-direction:column;gap:8px;scrollbar-width:thin}
+.wf-bottombar__section{display:flex;flex-direction:column;gap:6px}
+.wf-bottombar__group{display:flex;align-items:center;gap:8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--wf-ink-2)}
+.wf-bottombar__group-title{flex:none;white-space:nowrap}
+.wf-bottombar__cards{display:flex;flex-wrap:wrap;gap:6px;align-content:flex-start}
+/* 底栏卡片：只显示名称（图片批注：不再显示描述和其他内容，包括图标） */
+.wf-hcard{max-width:180px;min-width:96px;height:32px;padding:0 12px;border:1px solid var(--wf-border);border-radius:8px;background:var(--wf-layer-2);color:var(--wf-ink);font-size:11px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:grab;touch-action:none;transition:border-color .14s ease,background .14s ease}
+.wf-hcard:hover{border-color:color-mix(in srgb,var(--wf-brand) 55%,var(--wf-border-strong))}
+.wf-hcard.is-active{border-color:color-mix(in srgb,var(--wf-brand) 45%,var(--wf-border));background:color-mix(in srgb,var(--wf-brand) 12%,var(--wf-layer));color:var(--wf-brand)}
+.wf-hcard__name{display:block;width:100%;overflow:hidden;text-overflow:ellipsis}
+/* 底栏上边界拖动线（上下调整大小；图片批注：边界线同样可拖动） */
+.wf-splitter--horizontal{position:relative;z-index:12;flex:none;min-height:9px;height:9px;cursor:row-resize;touch-action:none;background:var(--wf-layer-2);outline:0;border-top:1px solid var(--wf-border)}
+.wf-splitter--horizontal::before{content:"";position:absolute;inset:3px 0;background:var(--wf-border)}
+.wf-splitter--horizontal:hover::before,.wf-splitter--horizontal:focus-visible::before,.wf-splitter--horizontal.is-dragging::before{inset:2px 0;background:var(--wf-brand)}
 .wf-docgroup{display:flex;align-items:center;justify-content:space-between;padding:5px 7px 2px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--wf-ink-2)}
 .wf-docgroup__add{width:20px;height:20px;min-width:20px;border:1px solid var(--wf-border-strong);border-radius:6px;background:transparent;color:var(--wf-ink-2);font-size:13px;line-height:0;padding:0;display:flex;align-items:center;justify-content:center;cursor:pointer}
 .wf-docgroup__add:hover{border-color:var(--wf-brand);color:var(--wf-brand)}

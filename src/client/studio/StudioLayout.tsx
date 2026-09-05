@@ -27,6 +27,7 @@ import { EP } from '../lib/remote.js'
 import type { CanvasApi } from '../components/canvas/GraphCanvas.js'
 import { GraphCanvas } from '../components/canvas/GraphCanvas.js'
 import { LeftPanel } from '../components/sidebar/LeftPanel.js'
+import { BottomPanel } from '../components/sidebar/BottomPanel.js'
 import { Toolbar } from '../components/toolbar/Toolbar.js'
 import { Inspector } from '../components/panels/inspector/Inspector.js'
 import { ConfirmDialog } from '../components/confirm-dialog/ConfirmDialog.js'
@@ -60,6 +61,10 @@ export interface StudioLayoutProps {
   modeName: (presetId: string | null | undefined) => string
   /** 画布左上角工作流名称角标（实例/模板 + 名称）。 */
   canvasCaption: string
+  // ---- 面板显隐（由 Studio 从状态推导：左栏/底栏来自折叠循环，右侧属性栏来自选中） ----
+  leftOpen: boolean
+  bottomOpen: boolean
+  inspectorOpen: boolean
   // ---- DOM 引用 ----
   canvasApiRef: React.RefObject<CanvasApi | null>
   canvasShellRef: React.RefObject<HTMLDivElement | null>
@@ -109,8 +114,54 @@ export function StudioLayout(props: StudioLayoutProps) {
     dispatch, doc, canvas, editor, run, transfer, selection, history, guard, panels, toast,
     beginLibraryDrag, dragPreview, dropGroupId,
     modeMenuOpen, setModeMenuOpen, switchMode, requestClose, canvasCaption,
+    leftOpen, bottomOpen, inspectorOpen,
     onToggleView, handleRun, panelsCollapsed, onTogglePanels,
   } = props
+
+  // 左栏（LeftPanel）与底栏（BottomPanel）共用同一份库内容 props（内容/选中/拖拽逻辑一致，
+  // 本次仅显示布局不同）。仅 open/width 或 open/height 两处按各自布局传入。
+  const libraryProps = {
+    libTab: state.libTab,
+    onSetTab: (tab: import('../studio/studio-state.js').LibTab) => dispatch({ type: 'SET_LIB_TAB', tab }),
+    mode: state.mode,
+    // 工作台全局化：实例列表 = 全部会话实例（带各自 sessionId 供「当前」标签/状态徽标归属）。
+    // 状态徽标：当前实例快照优先（600ms 快轮询），否则全量活跃 run 摘要（2s 轮询）。
+    currentSessionId: state.sessionId,
+    workflows: (state.mode === 'mode2' ? state.services : state.workflows).map((item) => {
+      const active = state.activeRuns.find((a) => a.flowId === item.id && a.sessionId === item.sessionId)
+      const currentSnapshot = state.run.runId !== null && state.run.snapshot?.flowId === item.id
+        ? state.run.snapshot.status
+        : null
+      return {
+        id: item.id,
+        name: item.name,
+        description: item.description,
+        nodes: item.nodes,
+        sessionId: item.sessionId,
+        runStatus: currentSnapshot ?? active?.status ?? null,
+      }
+    }),
+    flowTemplates: (state.flowTemplates ?? []).filter((item) => item.mode === state.mode),
+    parentTemplate,
+    roleTemplates,
+    fileTemplates: state.templates.file as import('../../host/shared/types.js').FileTemplate[],
+    databaseTemplates: state.templates.database as import('../../host/shared/types.js').DatabaseTemplate[],
+    groupTemplates,
+    stageKinds,
+    libSelection: state.selection.lib,
+    modeName,
+    onSelectWorkflow: doc.selectWorkflow,
+    onSelectFlowTemplate: doc.selectFlowTemplate,
+    onSelectLib: editor.selectLibraryCard,
+    onPlaceTemplate: canvas.placeTemplateNode,
+    onPlaceTemplateIntoGroup: canvas.placeTemplateIntoGroup,
+    onPlaceStage: canvas.placeStageNode,
+    onPlaceGroup: canvas.placeGroupNode,
+    onPlaceGroupFromTemplate: canvas.placeGroupFromTemplate,
+    onPlaceParent: canvas.placeParentNode,
+    onCreateNew: doc.createNew,
+    onBeginDrag: beginLibraryDrag,
+  }
 
   return (
     <div className="wf-root" data-wf-immersive="true">
@@ -176,52 +227,13 @@ export function StudioLayout(props: StudioLayoutProps) {
       <main className="wf-main" data-wf-main="">
         <LeftPanel
           copy={t}
-          libTab={state.libTab}
-          onSetTab={(tab) => dispatch({ type: 'SET_LIB_TAB', tab })}
-          open={state.panels.leftOpen}
+          {...libraryProps}
+          open={leftOpen}
           width={state.panels.leftWidth}
-          mode={state.mode}
-          // 工作台全局化：实例列表 = 全部会话实例（带各自 sessionId 供「当前」标签/状态徽标归属）。
-          // 状态徽标：当前实例快照优先（600ms 快轮询），否则全量活跃 run 摘要（2s 轮询）。
-          currentSessionId={state.sessionId}
-          workflows={(state.mode === 'mode2' ? state.services : state.workflows).map((item) => {
-            const active = state.activeRuns.find((a) => a.flowId === item.id && a.sessionId === item.sessionId)
-            const currentSnapshot = state.run.runId !== null && state.run.snapshot?.flowId === item.id
-              ? state.run.snapshot.status
-              : null
-            return {
-              id: item.id,
-              name: item.name,
-              description: item.description,
-              nodes: item.nodes,
-              sessionId: item.sessionId,
-              runStatus: currentSnapshot ?? active?.status ?? null,
-            }
-          })}
-          flowTemplates={(state.flowTemplates ?? []).filter((item) => item.mode === state.mode)}
-          parentTemplate={parentTemplate}
-          roleTemplates={roleTemplates}
-          fileTemplates={state.templates.file as import('../../host/shared/types.js').FileTemplate[]}
-          databaseTemplates={state.templates.database as import('../../host/shared/types.js').DatabaseTemplate[]}
-          groupTemplates={groupTemplates}
-          stageKinds={stageKinds}
-          libSelection={state.selection.lib}
-          modeName={modeName}
-          onSelectWorkflow={doc.selectWorkflow}
-          onSelectFlowTemplate={doc.selectFlowTemplate}
-          onSelectLib={editor.selectLibraryCard}
-          onPlaceTemplate={canvas.placeTemplateNode}
-          onPlaceTemplateIntoGroup={canvas.placeTemplateIntoGroup}
-          onPlaceStage={canvas.placeStageNode}
-          onPlaceGroup={canvas.placeGroupNode}
-          onPlaceGroupFromTemplate={canvas.placeGroupFromTemplate}
-          onPlaceParent={canvas.placeParentNode}
-          onCreateNew={doc.createNew}
-          onBeginDrag={beginLibraryDrag}
         />
 
         {/* 批注：折叠时隐藏「拖动线」（splitter）。仅当左侧栏展开时才渲染，折叠态无法拖出 */}
-        {state.panels.leftOpen
+        {leftOpen
           ? (
               <div
                 className="wf-splitter"
@@ -301,7 +313,7 @@ export function StudioLayout(props: StudioLayoutProps) {
         </div>
 
         {/* 批注：折叠时隐藏「拖动线」（splitter）。仅当右侧栏展开时才渲染 */}
-        {state.panels.rightOpen
+        {inspectorOpen
           ? (
               <div
                 className="wf-splitter"
@@ -314,7 +326,7 @@ export function StudioLayout(props: StudioLayoutProps) {
 
         <Inspector
           copy={t}
-          open={state.panels.rightOpen}
+          open={inspectorOpen}
           width={state.panels.rightWidth}
           editorData={editorData}
           presets={state.presets}
@@ -336,6 +348,27 @@ export function StudioLayout(props: StudioLayoutProps) {
           importBusy={false}
         />
       </main>
+
+      {/* 底栏：与左栏相互切换（图片批注新增）。上方为可拖动边界线（上下调整大小）；
+          卡片横向 flex-wrap 动态追加排；Tag 区显示工作流/角色/数据/其他四图标。 */}
+      {bottomOpen
+        ? (
+            <>
+              <div
+                className="wf-splitter wf-splitter--horizontal"
+                role="separator"
+                aria-orientation="horizontal"
+                onPointerDown={(event) => panels.beginResize('bottom', event)}
+              />
+              <BottomPanel
+                copy={t}
+                {...libraryProps}
+                open={bottomOpen}
+                height={state.panels.bottomHeight}
+              />
+            </>
+          )
+        : null}
 
       {state.message ? <div className="wf-message">{state.message}</div> : null}
 

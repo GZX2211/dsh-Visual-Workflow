@@ -56,8 +56,10 @@ export function useEditorActions(
     }
     selection.selectLib(kind, id)
     if (kind === 'parentTemplate') {
-      // 父代理模板点击：右侧属性栏无显示（§4.5.5）
-      selection.selectEditor(null)
+      // 父代理模板点击：具备属性（属性栏显示模板内容），应展开右侧属性栏。
+      // 注意：此前逻辑为 selectEditor(null)（不弹）——经用户裁决修正（具备属性的才弹，
+      // 只有阶段节点/侧栏阶段卡片不弹），此处按 role 模板一样设置编辑器引用。
+      selection.selectEditor({ source: 'template', kind: 'role', id })
       return
     }
     if (kind === 'stage') {

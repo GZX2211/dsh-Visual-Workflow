@@ -1,14 +1,18 @@
 // src/client/components/sidebar/LeftPanel.tsx
 //
 // 左侧模板库（照搬旧项目 left-panel.js，TSX 化，按需求 §4.5.4 适配）：
-// 四 Tab：工作流 / 角色（父代理模板置顶）/ 数据（文件 + 数据库分区）/ 其他（阶段 + 协作组）；
-// 分区标题右侧 ＋ 新建空白模板；卡片支持 pointer 拖拽到画布生成节点。
+// 四 Tag：工作流 / 角色（父代理模板置顶）/ 数据（文件 + 数据库分区）/ 其他（阶段 + 协作组）。
+// 本次改动：四 Tag 由文字改为「图标」展示（图片批注：Tag 区以图标显示，不显示文字，
+// 共 4 个 tag；切换到不同 Tag 时下方列表内容随动，适配角色/数据/其他节点）。
+// 内容构建已提取到 library-model.ts（与底栏 BottomPanel 共用同一 builder，逻辑一致）。
 
 import type { Dict } from '../../i18n.js'
 import type { LibTab } from '../../studio/studio-state.js'
 import type { RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate } from '../../../host/shared/types.js'
 import type { WorkflowTemplate } from '../../../host/shared/graph-model.js'
+import { buildLibraryModel } from './library-model.js'
 
+// 以下类型由本文件导出（供 useLibraryDrag/library-model 等消费，保持既有导入路径不变）。
 export interface LibSelectionInfo {
   kind: 'workflow' | 'workflowTemplate' | 'role' | 'file' | 'database' | 'parentTemplate' | 'stage' | 'groupTemplate' | 'service'
   id: string
@@ -29,10 +33,8 @@ export interface LeftPanelProps {
   open: boolean
   width: number
   mode: 'mode1' | 'mode2'
-  /**
-   * 实例列表（工作台全局化：全部会话实例；每项带 sessionId 供归属判定）。
-   * runStatus 为 null 表示无活跃 run（不显示徽标）。
-   */
+  /** 实例列表（工作台全局化：全部会话实例；每项带 sessionId 供归属判定）。
+   * runStatus 为 null 表示无活跃 run（不显示徽标）。 */
   workflows: Array<{ id: string; name: string; description?: string; nodes?: unknown[]; runStatus?: string | null; sessionId?: string }>
   /** 当前主会话 id（会话树根）：实例列表中 sessionId 与之匹配的实例打「当前」标签。 */
   currentSessionId: string
@@ -62,206 +64,32 @@ export interface LeftPanelProps {
   onBeginDrag(event: React.PointerEvent, payload: DragPayload): void
 }
 
-function truncate(value: unknown, limit: number): string {
-  const text = String(value ?? '').trim()
-  return text.length > limit ? `${text.slice(0, limit)}…` : (text || '—')
-}
-
-/** 角色模板卡副行：System Prompt 截断展示（需求 §4.2.3.1：不可编辑，超过 20 字截断；
- *  从 .md 加载时显示所选 .md 文件名——用户验收标注）。 */
-function roleSubline(template: RoleTemplate): string {
-  const source = String((template as { systemPromptSource?: unknown }).systemPromptSource ?? '').trim()
-  if (source) return source
-  return truncate(String(template.systemPrompt ?? ''), 20)
-}
-
-/** 文件模板卡副行：文本类型显示内容（单行省略）；文件类型显示所选文件名列表
- *  （保留中文文件名；超出单行省略）——用户验收标注。 */
-function fileSubline(template: FileTemplate): string {
-  if (template.fileKind === 'file') {
-    const files = Array.isArray(template.files) && template.files.length > 0
-      ? template.files.map((item) => String(item?.fileName ?? '')).filter(Boolean)
-      : [String(template.fileName ?? '')].filter(Boolean)
-    return truncate(files.join('，'), 60)
-  }
-  return truncate(String(template.content ?? ''), 60)
-}
-
 export function LeftPanel(props: LeftPanelProps) {
   const {
-    copy: t, libTab, onSetTab, open, width, mode, workflows, currentSessionId, flowTemplates, parentTemplate,
-    roleTemplates, fileTemplates, databaseTemplates, groupTemplates, stageKinds, libSelection,
-    modeName, onSelectWorkflow, onSelectFlowTemplate, onSelectLib, onPlaceTemplate, onPlaceTemplateIntoGroup, onPlaceStage,
-    onPlaceGroup, onPlaceGroupFromTemplate, onPlaceParent, onCreateNew, onBeginDrag,
+    copy: t, libTab, onSetTab, open, width, onCreateNew, onBeginDrag,
   } = props
 
-  const tabDefs: Array<{ key: LibTab; label: string }> = [
-    { key: 'workflow', label: t.libTab.workflow },
-    { key: 'role', label: t.libTab.role },
-    { key: 'data', label: t.libTab.data },
-    { key: 'other', label: t.libTab.other },
-  ]
-
-  const isActive = (kind: string, id: string): boolean => libSelection?.kind === kind && libSelection?.id === id
-
-  function itemCard(key: string, kind: string, id: string, icon: string, name: string, sub: string, payload: DragPayload, pinned = false, runStatus?: string | null, isCurrent = false) {
-    const statusText = runStatus ? String((t.status as Record<string, string>)[runStatus] ?? '') : ''
-    return (
-      <button
-        key={key}
-        type="button"
-        className={`wf-docitem${pinned ? ' is-pinned' : ''}${isActive(kind, id) ? ' is-active' : ''}`}
-        onPointerDown={(event) => onBeginDrag(event, payload)}
-      >
-        <span className="wf-docitem__icon">{icon}</span>
-        <span>
-          <span className="wf-docitem__label">{name}</span>
-          {/* 工作台全局化：当前主会话对应的实例打「当前」标签（用于区分跨会话实例） */}
-          {isCurrent ? <span className="wf-docitem__badge is-current">{t.currentSessionBadge}</span> : null}
-          <span className="wf-docitem__path">{sub}</span>
-        </span>
-        {statusText ? <span className="wf-docitem__badge">{statusText}</span> : null}
-      </button>
-    )
-  }
-
-  const sections: Array<{ key: string; title: string; plus: boolean; plusKind?: 'file' | 'database' | 'flowTemplate' | 'group'; cards: React.ReactNode[] }> = []
-
-  if (libTab === 'workflow') {
-    // 图2 交互改造：左侧「工作流」Tab 拆两区——上方实例列表（无 + 号；运行中卡片
-    // 名称右侧显示运行状态；工作台全局化：全部会话实例 + 当前主会话实例「当前」标签），
-    // 下方工作流模板列表（+ 号新建空白模板；全局共享）。
-    const instances = (workflows ?? []).map((item) => itemCard(
-      item.id, 'workflow', item.id, '▦', String(item.name ?? ''),
-      item.description ? truncate(item.description, 60) : `${item.nodes?.length ?? 0} ${t.nodes ?? ''}`,
-      {
-        label: String(item.name ?? ''),
-        onClick: () => onSelectWorkflow(item.id),
-        onDrop: () => onSelectWorkflow(item.id),
-      },
-      false,
-      item.runStatus,
-      item.sessionId === currentSessionId,
-    ))
-    sections.push({ key: 'instances', title: t.flowInstances, plus: false, cards: instances })
-    sections.push({
-      key: 'flowTemplates',
-      title: t.flowTemplates,
-      plus: true,
-      plusKind: 'flowTemplate',
-      cards: (flowTemplates ?? []).map((item) => itemCard(
-        item.id, 'workflowTemplate', item.id, '▦', String(item.name ?? ''),
-        item.description ? truncate(item.description, 60) : `${item.nodes?.length ?? 0} ${t.nodes ?? ''}`,
-        {
-          label: String(item.name ?? ''),
-          onClick: () => onSelectFlowTemplate(item.id),
-          onDrop: () => onSelectFlowTemplate(item.id),
-        },
-      )),
-    })
-  } else if (libTab === 'role') {
-    if (parentTemplate) {
-      sections.push({
-        key: 'parent',
-        title: t.parentAgent,
-        plus: false,
-        cards: [
-          itemCard(
-            parentTemplate.id, 'parentTemplate', parentTemplate.id, '父', String(parentTemplate.name ?? t.parentAgent),
-            roleSubline(parentTemplate), {
-              label: String(parentTemplate.name ?? t.parentAgent),
-              onClick: () => onSelectLib('parentTemplate', parentTemplate.id),
-              onDrop: (position) => onPlaceParent(parentTemplate.id, position ?? { x: 120, y: 80 }),
-            }, true,
-          ),
-        ],
-      })
-    }
-    sections.push({
-      key: 'roles',
-      title: t.roleTemplates,
-      plus: true,
-      cards: (roleTemplates ?? []).map((item) => itemCard(
-        item.id, 'role', item.id, '◆', String(item.name ?? ''), roleSubline(item), {
-          label: String(item.name ?? ''),
-          onClick: () => onSelectLib('role', item.id),
-          onDrop: (position) => onPlaceTemplate('role', item.id, position ?? { x: 120, y: 80 }),
-          onDropIntoGroup: (groupId, position) => onPlaceTemplateIntoGroup('role', item.id, groupId, position ?? { x: 120, y: 80 }),
-        },
-      )),
-    })
-  } else if (libTab === 'data') {
-    sections.push({
-      key: 'files',
-      title: t.files,
-      plus: true,
-      plusKind: 'file',
-      cards: (fileTemplates ?? []).map((item) => itemCard(
-        item.id, 'file', item.id, '▤', String(item.name ?? ''), fileSubline(item), {
-          label: String(item.name ?? ''),
-          onClick: () => onSelectLib('file', item.id),
-          onDrop: (position) => onPlaceTemplate('file', item.id, position ?? { x: 120, y: 80 }),
-        },
-      )),
-    })
-    sections.push({
-      key: 'databases',
-      title: t.databases,
-      plus: true,
-      plusKind: 'database',
-      cards: (databaseTemplates ?? []).map((item) => itemCard(
-        item.id, 'database', item.id, '▦', String(item.name ?? ''), truncate(String(item.description ?? ''), 60), {
-          label: String(item.name ?? ''),
-          onClick: () => onSelectLib('database', item.id),
-          onDrop: (position) => onPlaceTemplate('database', item.id, position ?? { x: 120, y: 80 }),
-        },
-      )),
-    })
-  } else {
-    sections.push({
-      key: 'stages',
-      title: t.stages,
-      plus: false,
-      cards: (stageKinds ?? []).map((card) => itemCard(
-        card.kind, 'stage', card.kind, '⬢', String(card.label), String(t.stagePinHint ?? ''), {
-          label: String(card.label),
-          onClick: () => onSelectLib('stage', card.kind),
-          onDrop: (position) => onPlaceStage(card.kind, position ?? { x: 120, y: 80 }),
-        },
-      )),
-    })
-    sections.push({
-      key: 'groups',
-      title: t.groupTemplates,
-      plus: true,
-      plusKind: 'group',
-      cards: (groupTemplates ?? []).map((item) => itemCard(
-        item.id, 'groupTemplate', item.id, '☰', String(item.name ?? ''), truncate(String((item as { collabPrompt?: unknown }).collabPrompt ?? ''), 60), {
-          label: String(item.name ?? ''),
-          onClick: () => onSelectLib('groupTemplate', item.id),
-          onDrop: (position) => onPlaceGroupFromTemplate(item.id, position ?? { x: 120, y: 80 }),
-        },
-      )),
-    })
-  }
+  const model = buildLibraryModel(props)
 
   return (
     <aside className={`wf-docrail${open ? '' : ' is-collapsed'}`} style={{ width: open ? width : undefined }}>
       <div className="wf-lib-tabs" role="tablist">
-        {tabDefs.map((def) => (
+        {model.tabs.map((def) => (
           <button
             key={def.key}
             type="button"
             role="tab"
+            title={def.label}
+            aria-label={def.label}
             className={`wf-lib-tab${libTab === def.key ? ' is-active' : ''}`}
             onClick={() => onSetTab(def.key)}
           >
-            <span>{def.label}</span>
+            <span className="wf-lib-tab__icon" aria-hidden="true">{def.icon}</span>
           </button>
         ))}
       </div>
       <div className="wf-docrail__list">
-        {sections.map((section) => (
+        {model.sections.map((section) => (
           <div key={section.key}>
             <div className="wf-docgroup">
               <span>{section.title}</span>
@@ -271,7 +99,26 @@ export function LeftPanel(props: LeftPanelProps) {
             </div>
             {section.cards.length === 0
               ? <div className="wf-hint" style={{ padding: '2px 8px' }}>{t.libEmptyTemplates}</div>
-              : section.cards}
+              : section.cards.map((item) => {
+                  const statusText = item.runStatus ? String((t.status as Record<string, string>)[item.runStatus] ?? '') : ''
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      className={`wf-docitem${item.pinned ? ' is-pinned' : ''}${item.active ? ' is-active' : ''}`}
+                      onPointerDown={(event) => onBeginDrag(event, item.payload)}
+                    >
+                      <span className="wf-docitem__icon">{item.icon}</span>
+                      <span>
+                        <span className="wf-docitem__label">{item.name}</span>
+                        {/* 工作台全局化：当前主会话对应的实例打「当前」标签（用于区分跨会话实例） */}
+                        {item.isCurrent ? <span className="wf-docitem__badge is-current">{t.currentSessionBadge}</span> : null}
+                        <span className="wf-docitem__path">{item.sub}</span>
+                      </span>
+                      {statusText ? <span className="wf-docitem__badge">{statusText}</span> : null}
+                    </button>
+                  )
+                })}
           </div>
         ))}
       </div>

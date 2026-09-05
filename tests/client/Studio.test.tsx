@@ -94,6 +94,11 @@ function pointerClick(el: Element): void {
   el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 10, clientY: 10, button: 0 }))
 }
 
+/** 按 aria-label 定位 Tag（已图标化，文字不显示）。 */
+function libTab(label: string): HTMLButtonElement | undefined {
+  return Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-lib-tab')).find((item) => item.getAttribute('aria-label') === label)
+}
+
 describe('Studio 装配', () => {
   it('标题顶栏 = 工作流设计器一行（无额外标题栏）；导入/导出/模式/组合/关闭按钮', async () => {
     await renderStudio()
@@ -132,19 +137,17 @@ describe('Studio 装配', () => {
     expect(remote.calls.some((call) => call.endpoint === EP.EP_PUT_WORKFLOW)).toBe(true)
   })
 
-  it('左侧栏 4 Tab：工作流/角色/数据/其他；数据 Tab 含文件/数据库分区', async () => {
+  it('左侧栏 4 Tab：工作流/角色/数据/其他（Tag 图标化）；数据 Tab 含文件/数据库分区', async () => {
     await renderStudio()
-    expect(textOf('.wf-lib-tab')).toEqual(['工作流', '角色', '数据', '其他'])
+    expect(Array.from(document.querySelectorAll('.wf-lib-tab')).map((item) => item.getAttribute('aria-label'))).toEqual(['工作流', '角色', '数据', '其他'])
     await act(async () => {
-      const tab = Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-lib-tab')).find((item) => item.textContent === '数据')
-      tab?.click()
+      libTab('数据')?.click()
     })
     const groups = textOf('.wf-docgroup').join('|')
     expect(groups).toContain('文件')
     expect(groups).toContain('数据库')
     await act(async () => {
-      const tab = Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-lib-tab')).find((item) => item.textContent === '其他')
-      tab?.click()
+      libTab('其他')?.click()
     })
     const otherGroups = textOf('.wf-docgroup').join('|')
     expect(otherGroups).toContain('阶段')
@@ -155,8 +158,7 @@ describe('Studio 装配', () => {
     await renderStudio()
     expect(document.querySelector('.wf-canvas-empty')?.textContent).toContain('从左侧拖入卡片开始编排')
     await act(async () => {
-      const tab = Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-lib-tab')).find((item) => item.textContent === '角色')
-      tab?.click()
+      libTab('角色')?.click()
     })
     expect(textOf('.wf-docitem__label')).toEqual(expect.arrayContaining(['研究员']))
     await act(async () => {
@@ -215,7 +217,7 @@ describe('Studio 交互', () => {
     await renderStudio()
     await createDraft()
     await act(async () => {
-      Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-lib-tab')).find((item) => item.textContent === '角色')?.click()
+      libTab('角色')?.click()
     })
     await dragRoleToCanvas()
     expect(nodeCount()).toBe(1)
@@ -246,7 +248,7 @@ describe('Studio 交互', () => {
     await renderStudio()
     await createDraft()
     await act(async () => {
-      Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-lib-tab')).find((item) => item.textContent === '角色')?.click()
+      libTab('角色')?.click()
     })
     await dragRoleToCanvas()
 
@@ -303,14 +305,14 @@ describe('Studio 交互', () => {
     await createDraft()
     // 拖入协作组卡片（其他 Tab）
     await act(async () => {
-      Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-lib-tab')).find((item) => item.textContent === '其他')?.click()
+      libTab('其他')?.click()
     })
     await dragCardTo('协作组', 500, 300)
     expect(document.querySelector('.wf-node--group')).toBeTruthy()
 
     // 拖入角色节点（角色 Tab）
     await act(async () => {
-      Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-lib-tab')).find((item) => item.textContent === '角色')?.click()
+      libTab('角色')?.click()
     })
     await dragCardTo('研究员', 380, 380)
     const roleNode = document.querySelector<HTMLDivElement>('.wf-graph__node .wf-node--agent')
@@ -351,7 +353,7 @@ describe('Studio 交互', () => {
     await createDraft()
     // 放入协作组（其他 tab）
     await act(async () => {
-      Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-lib-tab')).find((item) => item.textContent === '其他')?.click()
+      libTab('其他')?.click()
     })
     await dragCardTo('协作组', 500, 300)
     const groupCard = document.querySelector('.wf-group-node') as HTMLElement
@@ -359,7 +361,7 @@ describe('Studio 交互', () => {
 
     // 角色 tab：依次拖入 3 个角色模板入组（mock elementsFromPoint 命中组表面）
     await act(async () => {
-      Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-lib-tab')).find((item) => item.textContent === '角色')?.click()
+      libTab('角色')?.click()
     })
     const original = document.elementFromPoint
     const originalMany = document.elementsFromPoint

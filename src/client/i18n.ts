@@ -49,8 +49,8 @@ export const zh = {
   clearCanvas: '清空画布',
   clearCanvasHint: '确定清空画布中所有节点？（可通过撤销恢复）',
   tidy: '整理布局',
-  // 批注：顶部一键折叠/展开左右侧栏（折叠时不显示拖动线、只能按键展开后再拖宽）
-  togglePanels: '展开/折叠侧栏',
+  // 批注：顶部折叠/切换按钮不再控制右侧栏；只控制左栏/底栏的展开、折叠、切换（6 态循环）
+  togglePanels: '切换左栏/底栏',
   save: '保存',
   createInstance: '创建实例',
   saveInstance: '保存实例',
@@ -446,7 +446,7 @@ export const en: Dict = {
   clearCanvas: 'Clear canvas',
   clearCanvasHint: 'Clear all nodes on the canvas? (undo supported)',
   tidy: 'Tidy layout',
-  togglePanels: 'Toggle panels',
+  togglePanels: 'Switch left/bottom panel',
   save: 'Save',
   createInstance: 'Create instance',
   saveInstance: 'Save instance',

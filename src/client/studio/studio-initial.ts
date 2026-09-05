@@ -8,9 +8,9 @@ import type { PanelLayout, StudioState } from './studio-types.js'
 /** 撤销重做栈上限（旧项目 HISTORY_LIMIT）。 */
 export const HISTORY_LIMIT = 60
 
-/** 初始面板几何。 */
+/** 初始面板几何：默认「左栏展开」（折叠切换循环位置 0），右侧属性栏默认隐藏（由选中推导）。 */
 export function defaultPanels(): PanelLayout {
-  return { leftOpen: true, leftWidth: 236, rightOpen: true, rightWidth: 300 }
+  return { mode: 0, leftWidth: 236, rightWidth: 300, bottomHeight: 180 }
 }
 
 /** 初始状态（会话 id 由调用方注入）。 */
