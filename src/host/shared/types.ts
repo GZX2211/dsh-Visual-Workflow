@@ -125,9 +125,15 @@ export interface ServiceState {
   nodes: GraphNode[]
   /** 连线列表（工作流定义）。 */
   lines: Line[]
-  /** 启动时是否开启新会话运行（每次 API 请求新建独立会话执行；false = 请求复用会话并断点续跑）。 */
+  /**
+   * 【已退役，仅旧数据兼容】「服务级新会话」（每次 API 请求新建独立会话执行）。
+   * 新语义（工作台全局化改版）：服务实例创建时「开启新会话」为一次性临时选项
+   * （实例绑定新建主会话），该字段不再写入——新服务实例恒等于 false（请求按
+   * userId 映射固定会话并断点续跑）；旧服务文档磁盘残留字段仍生效（兼容，
+   * 重新保存后被剥除）。
+   */
   startNewSession?: boolean
-  /** 新会话工作区（绝对路径目录；startNewSession=true 时生效，作为会话 cwd = 沙箱工作区根）。 */
+  /** 【已退役，仅旧数据兼容】新会话工作区（同上：仅旧数据读取）。 */
   workspacePath?: string
   /** 创建时间（ISO 字符串）。 */
   createdAt: string

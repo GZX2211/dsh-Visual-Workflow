@@ -181,16 +181,23 @@ export function StudioLayout(props: StudioLayoutProps) {
           open={state.panels.leftOpen}
           width={state.panels.leftWidth}
           mode={state.mode}
-          workflows={(state.mode === 'mode2' ? state.services : state.workflows).map((item) => ({
-            id: item.id,
-            name: item.name,
-            description: item.description,
-            nodes: item.nodes,
-            // 运行状态徽标：当前 run 的快照归属该实例且未终态时显示 run 状态
-            // （running/paused/completed/failed/stopped/interrupted，展示于卡片右侧，用户批注）
-            runStatus:
-              state.run.runId !== null && state.run.snapshot?.flowId === item.id ? state.run.snapshot.status : null,
-          }))}
+          // 工作台全局化：实例列表 = 全部会话实例（带各自 sessionId 供「当前」标签/状态徽标归属）。
+          // 状态徽标：当前实例快照优先（600ms 快轮询），否则全量活跃 run 摘要（2s 轮询）。
+          currentSessionId={state.sessionId}
+          workflows={(state.mode === 'mode2' ? state.services : state.workflows).map((item) => {
+            const active = state.activeRuns.find((a) => a.flowId === item.id && a.sessionId === item.sessionId)
+            const currentSnapshot = state.run.runId !== null && state.run.snapshot?.flowId === item.id
+              ? state.run.snapshot.status
+              : null
+            return {
+              id: item.id,
+              name: item.name,
+              description: item.description,
+              nodes: item.nodes,
+              sessionId: item.sessionId,
+              runStatus: currentSnapshot ?? active?.status ?? null,
+            }
+          })}
           flowTemplates={(state.flowTemplates ?? []).filter((item) => item.mode === state.mode)}
           parentTemplate={parentTemplate}
           roleTemplates={roleTemplates}
@@ -250,17 +257,17 @@ export function StudioLayout(props: StudioLayoutProps) {
             onOpenHistory={() => { void run.openHistory() }}
             canHistory={state.mode === 'mode1' && Boolean(currentFlow)}
             serviceStatus={state.mode === 'mode2' ? { port: currentService?.port, status: currentService?.status } : null}
-            runConfig={{
-              startNewSession: (currentFlow ?? currentService ?? currentFlowTemplate)?.startNewSession === true,
-              workspacePath: String((currentFlow ?? currentService ?? currentFlowTemplate)?.workspacePath ?? ''),
-            }}
-            onRunConfigChange={(patch) => dispatch({ type: 'DOC_PATCH', patch })}
+            // 「开启新会话」仅模板态显示（一次性临时选项；实例态不显示——实例只认绑定会话）
+            showNewSession={state.currentKind === 'flowTemplate'}
+            instanceOptions={state.instanceOptions}
+            onInstanceOptionsChange={(patch) => dispatch({ type: 'INSTANCE_OPTIONS_SET', options: patch })}
           />
           {state.mode === 'mode2'
             ? <ServiceConsole
                 copy={t}
                 service={currentService}
-                sessionId={sessionId}
+                // 服务调试身份用实例绑定的会话（工作台全局化：实例会话可能不是当前主会话）
+                sessionId={currentService?.sessionId ?? sessionId}
                 busy={state.run.runId !== null}
               />
             : null}

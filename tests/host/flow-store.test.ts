@@ -98,6 +98,16 @@ describe('工作流 CRUD 与会话隔离', () => {
     expect(await store.getWorkflow('s1', 'f1')).not.toBeNull()
   })
 
+  it('工作台全局化：listWorkflows 无 sessionId 返回全部会话实例（按 updatedAt 倒序）', async () => {
+    await store.saveWorkflow(makeFlow('f1', 's1'), 's1')
+    await store.saveWorkflow({ ...makeFlow('f2', 's2'), updatedAt: '2026-09-02T00:00:00.000Z' }, 's2')
+    const all = await store.listWorkflows()
+    expect(all.map((f) => f.id).sort()).toEqual(['f1', 'f2'])
+    expect(all.map((f) => f.sessionId).sort()).toEqual(['s1', 's2'])
+    // 首个 = updatedAt 最新（f2 显式更晚）
+    expect(all[0]?.id).toBe('f2')
+  })
+
   it('revision 自动递增', async () => {
     const f = makeFlow('f1', 's1')
     const v1 = await store.saveWorkflow(f, 's1')
@@ -140,6 +150,14 @@ describe('服务 CRUD 与会话隔离', () => {
     expect(await store.listServices('s2')).toEqual([])
     expect(await store.getService('s2', 'svc1')).toBeNull()
     expect(await store.deleteService('s2', 'svc1')).toBe(false)
+  })
+
+  it('工作台全局化：listServices 无 sessionId 返回全部会话服务实例', async () => {
+    await store.saveService(makeService('svc1', 's1'), 's1')
+    await store.saveService(makeService('svc2', 's2'), 's2')
+    const all = await store.listServices()
+    expect(all.map((s) => s.id).sort()).toEqual(['svc1', 'svc2'])
+    expect(all.map((s) => s.sessionId).sort()).toEqual(['s1', 's2'])
   })
 })
 

@@ -28,6 +28,8 @@ export type StudioAction =
   | { type: 'SERVICES_LOADED'; items: ServiceState[] }
   | { type: 'SERVICE_UPDATED'; service: ServiceState }
   | { type: 'SERVICE_REMOVED'; id: string }
+  | { type: 'ACTIVE_RUNS_LOADED'; items: Array<{ flowId: string; sessionId: string; status: string; runId: string }> }
+  | { type: 'INSTANCE_OPTIONS_SET'; options: Partial<{ newSession: boolean; workspacePath: string }> }
   | { type: 'TEMPLATES_LOADED'; kind: TemplateKind; items: Array<RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate> }
   | { type: 'TEMPLATE_ADDED'; kind: TemplateKind; template: RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate }
   | { type: 'TEMPLATE_UPDATED'; kind: TemplateKind; template: RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate }
@@ -53,7 +55,8 @@ export type StudioAction =
   | { type: 'CLEAR_SELECTION' }
   | { type: 'NODE_DATA_PATCH'; id: string; patch: Record<string, unknown> }
   | { type: 'EDGE_PATCH'; id: string; patch: Record<string, unknown> }
-  | { type: 'DOC_PATCH'; patch: { name?: string; description?: string; startNewSession?: boolean; workspacePath?: string } }
+  /** 文档元数据编辑（名称/描述；「开启新会话/工作区」已改为临时创建选项 INSTANCE_OPTIONS_SET，不再落文档）。 */
+  | { type: 'DOC_PATCH'; patch: { name?: string; description?: string } }
   | { type: 'SET_DIRTY'; dirty: boolean }
   | { type: 'MARK_SAVED' }
   | { type: 'RUN_STARTED'; runId: string; runSessionId?: string }

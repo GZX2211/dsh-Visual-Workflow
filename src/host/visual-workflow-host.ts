@@ -60,6 +60,10 @@ export class VisualWorkflowHost extends Service {
   readonly schedulerTaskStore: SchedulerTaskStore
   /** 全局工具开关存储（tool-switches.json；父代理工具白名单「关闭」侧，全局即时生效）。 */
   readonly toolSwitches: ToolSwitchStore
+  /** 新会话创建缝（「开启新会话」一次性动作：创建实例时新建主会话；API 端点使用）。 */
+  readonly sessionProvider: CordisSessionProvider
+  /** 会话工作目录解析（新会话继承创建者 cwd 用；API 端点使用）。 */
+  readonly sessionCwdOf: (sessionId: string) => Promise<string | undefined>
   /** ReAct 软截停护栏（桥供 runner/编排器，贡献注入子代理）。 */
   private readonly reactGuard = createReactGuard()
   /** 思考强度模型选择装配。 */
@@ -119,9 +123,12 @@ export class VisualWorkflowHost extends Service {
         wfAskAgentTimeoutMs: config.wfAskAgentTimeoutMs,
       },
       dbIndexer: { dataDir: config.dataDir, engine: this.embedding },
-      sessionProvider: new CordisSessionProvider(ctx),
       logger: cordisLogger(ctx),
     })
+    // 新会话创建缝：装配到宿主（API createSession 端点使用；运行器不再消费——
+    // 工作台全局化改版后运行只认实例绑定的会话，新会话仅在创建实例时创建）。
+    this.sessionProvider = new CordisSessionProvider(ctx)
+    this.sessionCwdOf = sessionCwdResolver(ctx)
     this.serviceManager = new ServiceManager({
       store: this.store,
       dataDir: config.dataDir,

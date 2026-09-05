@@ -12,7 +12,8 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import React from 'react'
-import { Studio, pickInitialInstance } from '../../src/client/studio/Studio.js'
+import { Studio } from '../../src/client/studio/Studio.js'
+import { pickInitialInstanceForSession } from '../../src/client/hooks/useStudioBoot.js'
 import { zh } from '../../src/client/i18n.js'
 import type { RemoteFace } from '../../src/client/hooks/useRemote.js'
 import { EP } from '../../src/client/lib/remote.js'
@@ -398,23 +399,23 @@ describe('Studio 交互', () => {
 })
 
 // ---------------------------------------------------------------------------
-// pickInitialInstance：进入工作台自动选中实例（用户新增需求）
+// pickInitialInstanceForSession：进入工作台自动选中实例（工作台全局化：当前主会话实例）
 // ---------------------------------------------------------------------------
 
-describe('pickInitialInstance：进入工作台自动选中实例', () => {
+describe('pickInitialInstanceForSession：进入工作台自动选中实例（当前主会话）', () => {
   const instances = [
-    { id: 'flow-a', name: '流程A' },
-    { id: 'flow-b', name: '流程B' },
-    { id: 'flow-c', name: '流程C' },
+    { id: 'flow-a', name: '流程A', updatedAt: '2026-08-23T10:00:00.000Z' },
+    { id: 'flow-b', name: '流程B', updatedAt: '2026-08-23T11:00:00.000Z' },
+    { id: 'flow-c', name: '流程C', updatedAt: '2026-08-23T12:00:00.000Z' },
   ]
 
   it('实例列表为空 → null（保持空白画布）', () => {
-    expect(pickInitialInstance([], [])).toBeNull()
+    expect(pickInitialInstanceForSession([], [])).toBeNull()
   })
 
-  it('无活跃 run → 选列表第一个', () => {
-    expect(pickInitialInstance(instances, [])).toBe('flow-a')
-    expect(pickInitialInstance(instances, [{ flowId: '不存在', status: 'running' }])).toBe('flow-a')
+  it('无活跃 run → 选列表第一个（最新 updatedAt）', () => {
+    expect(pickInitialInstanceForSession(instances, [])).toBe('flow-a')
+    expect(pickInitialInstanceForSession(instances, [{ flowId: '不存在', status: 'running' }])).toBe('flow-a')
   })
 
   it('有 running 实例 → 优先运行中的（即使不是第一个）', () => {
@@ -422,17 +423,17 @@ describe('pickInitialInstance：进入工作台自动选中实例', () => {
       { flowId: 'flow-b', status: 'running' },
       { flowId: 'flow-c', status: 'paused' },
     ]
-    expect(pickInitialInstance(instances, active)).toBe('flow-b')
+    expect(pickInitialInstanceForSession(instances, active)).toBe('flow-b')
   })
 
   it('无 running 但有 paused → 选暂停的实例', () => {
     const active = [{ flowId: 'flow-c', status: 'paused' }]
-    expect(pickInitialInstance(instances, active)).toBe('flow-c')
+    expect(pickInitialInstanceForSession(instances, active)).toBe('flow-c')
   })
 
   it('activeRuns 的 flowId 不在实例列表中 → 忽略该条目，回退列表第一个', () => {
     const active = [{ flowId: 'flow-ghost', status: 'running' }]
-    expect(pickInitialInstance(instances, active)).toBe('flow-a')
+    expect(pickInitialInstanceForSession(instances, active)).toBe('flow-a')
   })
 
   it('running 优先于 paused（同列表存在时）', () => {
@@ -440,7 +441,7 @@ describe('pickInitialInstance：进入工作台自动选中实例', () => {
       { flowId: 'flow-c', status: 'paused' },
       { flowId: 'flow-a', status: 'running' },
     ]
-    expect(pickInitialInstance(instances, active)).toBe('flow-a')
+    expect(pickInitialInstanceForSession(instances, active)).toBe('flow-a')
   })
 })
 

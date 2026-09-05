@@ -15,14 +15,23 @@ import type { TemplatesFace } from './useTemplates.js'
 import type { SelectionFace } from './useSelection.js'
 import type { UnsavedGuardFace } from './useUnsavedGuard.js'
 import type { ServiceControlFace } from './useServiceControl.js'
+import type { RemoteFace } from './useRemote.js'
 import type { ToastFace } from './useToast.js'
 import type { Dict } from '../i18n.js'
+import { EP } from '../lib/remote.js'
 
 export interface DocumentActionsFace {
   /** 保存当前画布（实例/模板/服务；成功记录已保存快照并 toast）。返回保存成功的文档（类型为三态并集，与原实现推断一致）。 */
   saveCanvas(): Promise<WorkflowDocument | WorkflowTemplate | ServiceState | null>
-  /** 创建实例（模板态：模板内容存为新实例并切到实例态；实例态等价保存）。 */
-  createInstanceFromCanvas(): Promise<WorkflowDocument | null>
+  /**
+   * 创建实例（模板态：模板内容存为新实例并切到实例态；实例态等价保存）。
+   * 工作台全局化改版：「开启新会话」为一次性临时选项——勾选时先新建主会话，
+   * 实例绑定该新会话；未勾选时在**当前主会话**创建，目标会话已有实例则弹
+   * 「覆盖旧工作流」二次确认（确认后复用旧实例 id 更新内容）。
+   * @param afterCreate 创建/覆盖成功后的回调（异步确认框路径同样触发）；
+   *   「运行」入口用它接续启动（因为确认框是异步的，返回值不可依赖）。
+   */
+  createInstanceFromCanvas(afterCreate?: (created: WorkflowDocument | ServiceState) => void): Promise<WorkflowDocument | null>
   /** 实例 → 模板（另存为全局共享工作流模板）。 */
   saveCurrentAsFlowTemplate(): Promise<void>
   openFlowById(id: string): void
@@ -48,6 +57,7 @@ export function useDocumentActions(
   templates: TemplatesFace,
   selection: SelectionFace,
   serviceControl: ServiceControlFace,
+  remote: RemoteFace,
   t: Dict,
 ): DocumentActionsFace {
   // ---------- 保存 / 打开 ----------
@@ -103,44 +113,130 @@ export function useDocumentActions(
   }, [dispatch, notify, state, toastError, workflows, flowTemplates, serviceControl, t.toastSaved])
 
   /**
-   * 创建实例（图2 交互改造核心）：把当前画布内容保存为「当前会话的实例」。
-   *  - 模板态：以模板内容创建新实例（模板不变；实例名 = 模板名，重名追加序号），
-   *    保存成功后切到实例态（画布绑定新实例，左栏新实例卡高亮）。
+   * 创建实例（图2 交互改造核心；工作台全局化改版重写）：
    *  - 实例态：等价于保存实例（名称动态为「保存实例/保存服务」）。
+   *  - 模板态（「创建实例」/「创建服务」按钮，或模板态「运行」前置）：
+   *      1. 目标会话 = 勾选「开启新会话」？新建主会话（createSession 端点，
+   *         一次性临时选项，不持久化）: 当前主会话（state.sessionId）；
+   *      2. 目标会话已有同模式实例（每会话单实例）→ 弹二次确认「新运行的工作流
+   *         将会覆盖旧的工作流」；确认后**复用旧实例 id 更新内容**（运行历史
+   *         按 flowId 连续可追溯）；
+   *      3. 保存成功 → 切到实例态（画布绑定新实例，左栏新实例卡高亮）→
+   *         afterCreate?.(saved)（「运行」入口接续启动）。
+   *  - 返回：即时创建路径返回保存的文档；弹确认框路径返回 null（后续统一经
+   *    afterCreate 回调接续，调用方不得依赖返回值判断成功）。
    */
-  const createInstanceFromCanvas = useCallback(async (): Promise<WorkflowDocument | null> => {
+  const createInstanceFromCanvas = useCallback(async (
+    afterCreate?: (created: WorkflowDocument | ServiceState) => void,
+  ): Promise<WorkflowDocument | null> => {
     // 实例态直接走保存（不变更 id/名称；保存结果可能是服务实例，忽略类型细分）
     if (state.currentKind === 'workflow' || state.currentKind === 'service') {
       const saved = await saveCanvas()
-      // 模板→实例仅用于模板态；实例态下返回保存结果（类型上仅工作流文档是运行目标）
       return (state.currentKind === 'workflow' ? saved as WorkflowDocument | null : null)
     }
     if (state.currentKind !== 'flowTemplate') return null
     const template = currentFlowTemplateOf(state)
     if (!template) return null
-    try {
-      const draft = workflows.instantiateFromTemplate(template)
-      // 名称去重：模板名 + 序号（与现有实例名称比较）
-      const existing = state.workflows.map((item) => item.name)
-      let name = draft.name
-      let index = 2
-      while (existing.includes(name)) {
-        name = `${draft.name} (${index})`
-        index += 1
+
+    // ---- 目标会话：勾选「开启新会话」→ 新建主会话（一次性动作） ----
+    const { newSession, workspacePath } = state.instanceOptions
+    let targetSessionId = state.sessionId
+    if (newSession) {
+      try {
+        const created = await remote.call(EP.EP_CREATE_SESSION, {
+          sessionId: state.sessionId,
+          ...(String(workspacePath ?? '').trim() ? { workspacePath: String(workspacePath).trim() } : {}),
+          label: `${t.sessionLabelWorkflowPrefix}${template.name ?? ''}`,
+        }) as { sessionId?: unknown }
+        targetSessionId = String(created?.sessionId ?? '')
+        if (!targetSessionId) throw new Error('新建会话失败：未返回会话 id')
+      } catch (error) {
+        toastError(error)
+        return null
       }
-      draft.name = name
-      const saved = await workflows.saveWorkflow(draft, state.canvas.nodes, state.canvas.edges)
-      if (saved) {
-        dispatch({ type: 'MARK_SAVED' })
-        workflows.openFlow(saved)
-        notify('success', t.toastCreatedInstance)
-      }
-      return saved
-    } catch (error) {
-      toastError(error)
+    }
+
+    // ---- 每会话单实例（按模式各一）：目标会话已有同模式实例 → 覆盖确认 ----
+    const existing = state.mode === 'mode1'
+      ? state.workflows.find((item) => item.sessionId === targetSessionId)
+      : state.services.find((item) => item.sessionId === targetSessionId)
+    // 模式二覆盖运行中的服务实例：拒绝（先停止再覆盖，避免定义与运行状态脱节）
+    if (existing && state.mode === 'mode2' && (existing as ServiceState).status === 'running') {
+      notify('error', t.toastServiceRunningCannotOverwrite)
       return null
     }
-  }, [dispatch, notify, state, toastError, workflows, flowTemplates, saveCanvas, t.toastCreatedInstance])
+
+    /** 实际创建/覆盖（确认框 onConfirm 与即时路径共用）。 */
+    const doCreate = async (): Promise<void> => {
+      try {
+        if (state.mode === 'mode1') {
+          const source = existing as WorkflowDocument | undefined
+          const draft: WorkflowDocument = source
+            ? {
+                // 覆盖：复用旧实例 id/sessionId/createdAt（revision 保存层 +1），
+                // 名称/内容 = 模板最新定义 ——「新运行的工作流覆盖旧的工作流」
+                id: source.id,
+                sessionId: source.sessionId,
+                mode: template.mode,
+                name: template.name ?? source.name,
+                description: template.description ?? '',
+                revision: Number(source.revision ?? 0),
+                nodes: JSON.parse(JSON.stringify(template.nodes ?? [])) as WorkflowDocument['nodes'],
+                lines: JSON.parse(JSON.stringify(template.lines ?? [])) as WorkflowDocument['lines'],
+                createdAt: source.createdAt,
+              }
+            : workflows.instantiateFromTemplate(template, targetSessionId)
+          const saved = await workflows.saveWorkflow(draft, state.canvas.nodes, state.canvas.edges)
+          if (!saved) return
+          dispatch({ type: 'MARK_SAVED' })
+          workflows.openFlow(saved)
+          notify('success', source ? t.toastInstanceOverwritten : t.toastCreatedInstance)
+          afterCreate?.(saved)
+        } else {
+          const source = existing as ServiceState | undefined
+          const draft: ServiceState = source
+            ? {
+                id: source.id,
+                sessionId: source.sessionId,
+                name: template.name ?? source.name,
+                description: template.description ?? '',
+                revision: Number(source.revision ?? 0),
+                nodes: JSON.parse(JSON.stringify(template.nodes ?? [])) as ServiceState['nodes'],
+                lines: JSON.parse(JSON.stringify(template.lines ?? [])) as ServiceState['lines'],
+                createdAt: source.createdAt,
+                updatedAt: new Date().toISOString(),
+                // 覆盖仅非运行态可达（上方已拒绝 running）；保留既有进程状态
+                status: source.status,
+              }
+            : serviceControl.instantiateFromTemplate(template, targetSessionId)
+          const saved = await serviceControl.saveService(draft, state.canvas.nodes, state.canvas.edges)
+          if (!saved) return
+          dispatch({ type: 'MARK_SAVED' })
+          notify('success', source ? t.toastInstanceOverwritten : t.toastCreatedInstance)
+          afterCreate?.(saved)
+        }
+      } catch (error) {
+        toastError(error)
+      }
+    }
+
+    if (existing) {
+      // 二次确认（图片批注④）：确认后覆盖（复用旧实例 id）并接续原动作
+      dispatch({
+        type: 'CONFIRM_SET',
+        confirm: {
+          kind: 'confirmText',
+          title: t.overwriteInstanceTitle,
+          message: t.overwriteInstanceMessage,
+          confirmLabel: t.overwriteInstanceConfirm,
+          onConfirm: () => { void doCreate() },
+        },
+      })
+      return null
+    }
+    await doCreate()
+    return null
+  }, [dispatch, notify, remote, saveCanvas, serviceControl, state, t, toastError, workflows])
 
   /** 实例 → 模板（另存为模板）：当前实例内容复制为全局共享的工作流模板。 */
   const saveCurrentAsFlowTemplate = useCallback(async (): Promise<void> => {

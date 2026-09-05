@@ -101,7 +101,10 @@ export interface PanelLayout {
 }
 
 export interface StudioState {
-  /** 绑定的会话 id（T-042：会话绑定，不提供下拉）。 */
+  /** 绑定的会话 id（T-042：会话绑定，不提供下拉）。
+   *  工作台全局化改版：这是「当前主会话」（会话树根），仅用于——① 实例列表
+   *  「当前」标签；② 进入工作台时画布默认选中；③ 未勾选新会话时创建实例的
+   *  目标会话。**不再**作为实例列表的过滤条件（列表为全部会话实例）。 */
   sessionId: string
   /** 左侧栏 Tab。 */
   libTab: LibTab
@@ -109,6 +112,15 @@ export interface StudioState {
   mode: 'mode1' | 'mode2'
   workflows: WorkflowDocument[]
   services: ServiceState[]
+  /** 全部会话的活跃 run 摘要（工作台全局化：实例列表状态徽标；running/paused 保留锁）。 */
+  activeRuns: Array<{ flowId: string; sessionId: string; status: string; runId: string }>
+  /**
+   * 「从模板创建实例」的一次性临时选项（模板态画布上方「开启新会话」复选框 +
+   * 工作区输入框；不持久化到模板/实例文档，创建实例时消费：
+   *   - newSession=true → 先新建主会话（createSession 端点），实例绑定该新会话；
+   *   - newSession=false → 当前主会话，目标会话已有实例时弹覆盖确认。
+   */
+  instanceOptions: { newSession: boolean; workspacePath: string }
   /** 工作流模板列表（全局共享；部分仅含当前 mode 的模板，模板拖入画布后经「创建实例」转实例）。 */
   flowTemplates: WorkflowTemplate[]
   templates: Record<TemplateKind, Array<RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate>>

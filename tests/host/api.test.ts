@@ -222,8 +222,8 @@ describe('端点白名单与分发', () => {
 describe('工作流端点', () => {
   it('create/list/get/put/delete 全链路；参数缺失 400、不存在 404', async () => {
     const h = await makeHarness()
-    await expect(h.api.handle('listWorkflows', {})).rejects.toMatchObject({ status: 400 })
-
+    // 工作台全局化：listWorkflows 无 sessionId = 列出全部会话实例（不再 400）
+    expect((await h.api.handle('listWorkflows', {})) as unknown[]).toHaveLength(0)
     const created = (await h.api.handle('createWorkflow', { sessionId: 'session-1', name: '新流程' })) as WorkflowDocument
     expect(created.id).toBeTruthy()
     expect(created.name).toBe('新流程')
@@ -245,6 +245,60 @@ describe('工作流端点', () => {
     expect(deleted).toEqual({ deleted: true })
     await expect(h.api.handle('deleteWorkflow', { sessionId: 'session-1', id: created.id })).rejects.toMatchObject({ status: 404 })
     await expect(h.api.handle('getWorkflow', { sessionId: 'session-1', id: 'nope' })).rejects.toMatchObject({ status: 404 })
+  })
+
+  it('listWorkflows 工作台全局化：无 sessionId 返回全部会话实例；带 sessionId 仍按会话过滤', async () => {
+    const h = await makeHarness()
+    await h.store.saveWorkflow(makeFlow(), 'session-1', { force: true })
+    await h.store.saveWorkflow({ ...makeFlow(), id: 'flow-other', name: '他会话流程' }, 'session-2', { force: true })
+    const all = (await h.api.handle('listWorkflows', {})) as WorkflowDocument[]
+    expect(all.map((f) => f.id).sort()).toEqual(['flow-1', 'flow-other'])
+    expect(all.map((f) => f.sessionId).sort()).toEqual(['session-1', 'session-2'])
+    const filtered = (await h.api.handle('listWorkflows', { sessionId: 'session-1' })) as WorkflowDocument[]
+    expect(filtered.map((f) => f.id)).toEqual(['flow-1'])
+  })
+
+  it('putWorkflow：实例文档不再写入 startNewSession/workspacePath（退役字段剥除）', async () => {
+    const h = await makeHarness()
+    await h.api.handle('putWorkflow', {
+      sessionId: 'session-1',
+      flow: { ...makeFlow(), startNewSession: true, workspacePath: 'D:\\work\\legacy' },
+    })
+    const saved = (await h.api.handle('getWorkflow', { sessionId: 'session-1', id: 'flow-1' })) as WorkflowDocument
+    expect(saved.startNewSession).toBeUndefined()
+    expect(saved.workspacePath).toBeUndefined()
+  })
+
+  it('createSession：「开启新会话」一次性动作——显式工作区校验直传 / 缺省继承创建者 cwd / 能力缺失 501', async () => {
+    const h = await makeHarness()
+    const calls: Array<{ label: string; agentPreset?: string; cwd?: string }> = []
+    h.host.sessionProvider = {
+      async createSession(options) {
+        calls.push(options)
+        return 'session-new-1'
+      },
+    }
+    // 显式工作区 → 校验存在为目录并直传（agentPreset=standard，标签可追溯）
+    const ws = await mkdtemp(join(tmpdir(), 'vw-sess-ws-'))
+    cleanups.push(() => rm(ws, { recursive: true, force: true }))
+    const created = (await h.api.handle('createSession', {
+      sessionId: 'session-1',
+      workspacePath: ws,
+      label: '工作流实例：测试模板',
+    })) as { sessionId?: unknown }
+    expect(created.sessionId).toBe('session-new-1')
+    expect(calls[0]).toMatchObject({ cwd: ws, agentPreset: 'standard', label: '工作流实例：测试模板' })
+    // 缺省工作区 → 继承创建者会话 cwd（sessionCwdOf 解析）
+    h.host.sessionCwdOf = async () => 'D:\\work\\owner'
+    await h.api.handle('createSession', { sessionId: 'session-1' })
+    expect(calls[1]?.cwd).toBe('D:\\work\\owner')
+    // 不存在的显式路径 → 400
+    await expect(
+      h.api.handle('createSession', { sessionId: 'session-1', workspacePath: 'D:\\no-such-dir-xyz\\abc' }),
+    ).rejects.toMatchObject({ status: 400 })
+    // 会话创建能力未装配 → 501
+    const h2 = await makeHarness()
+    await expect(h2.api.handle('createSession', { sessionId: 'session-1' })).rejects.toMatchObject({ status: 501 })
   })
 })
 
@@ -543,7 +597,7 @@ describe('运行端点', () => {
     await expect(h.api.handle('runStatus', { sessionId: 'session-1', runId: 'run-nope' })).rejects.toMatchObject({ status: 404 })
   })
 
-  it('activeRuns：会话当前活跃 run 列表（running/paused 保留锁；用于进入工作台自动选中实例）', async () => {
+  it('activeRuns：活跃 run 列表（running/paused 保留锁；工作台全局化：缺省返回全部会话）', async () => {
     const h = await makeHarness()
     await saveFlow(h)
     await h.api.handle('run', { sessionId: 'session-1', flowId: 'flow-1' })
@@ -552,8 +606,10 @@ describe('运行端点', () => {
     expect(runningRuns).toHaveLength(1)
     expect(runningRuns[0]).toMatchObject({ flowId: 'flow-1', status: 'running', runId: 'run-1' })
 
-    // 无 sessionId → 400
-    await expect(h.api.handle('activeRuns', {})).rejects.toMatchObject({ status: 400 })
+    // 工作台全局化：无 sessionId → 返回全部会话的活跃 run（工作台全局面板数据源）
+    const allRuns = (await h.api.handle('activeRuns', {})) as Array<{ flowId: string; sessionId: string }>
+    expect(allRuns).toHaveLength(1)
+    expect(allRuns[0]).toMatchObject({ flowId: 'flow-1', sessionId: 'session-1' })
 
     // 停止后：活跃列表为空
     await h.api.handle('runStop', { sessionId: 'session-1', runId: 'run-1' })

@@ -11,28 +11,29 @@ import type { RemoteFace } from './useRemote.js'
 import { EP } from '../lib/remote.js'
 
 export interface ServiceControlFace {
-  loadServices(sessionId: string): Promise<ServiceState[]>
-  /** 新建本地服务草稿（_draft 标记；首次保存时经 putService 真实入库）。 */
+  /** 加载服务实例列表（全部会话）；返回加载的条目。 */
+  loadServices(): Promise<ServiceState[]>
+  /** 新建本地服务草稿（_draft 标记；首次保存时经 putService 真实入库；目标会话 = 当前主会话）。 */
   createServiceDraft(name: string, sessionId: string): ServiceState
-  /** 模板 → 服务实例（图2 交互改造：模板拖入画布「创建服务」后转服务实例；深拷贝断引用）。 */
-  instantiateFromTemplate(template: WorkflowTemplate, sessionId: string): ServiceState
+  /**
+   * 模板 → 服务实例（图2 交互改造：模板拖入画布「创建服务」后转服务实例；深拷贝断引用）。
+   * 目标会话由调用方决定（当前主会话 / 新建主会话）；「开启新会话/工作区」为一次性
+   * 临时选项，不继承到实例文档（字段已退役）。
+   */
+  instantiateFromTemplate(template: WorkflowTemplate, targetSessionId: string): ServiceState
   /** 保存服务（草稿入库 / 正式带 revision 更新）。 */
   saveService(service: ServiceState, nodes: CanvasNode[], edges: CanvasEdge[]): Promise<ServiceState | null>
-  /** 启动服务：携带会话 id 供后端归属校验。 */
+  /** 启动服务：携带实例归属会话 id 供后端归属校验。 */
   startService(serviceId: string, sessionId: string): Promise<void>
-  /** 停止服务：携带会话 id 供后端归属校验。 */
+  /** 停止服务：携带实例归属会话 id 供后端归属校验。 */
   stopService(serviceId: string, sessionId: string): Promise<void>
 }
 
 /** 服务控制面（远端失败抛错，由调用方 toast）。 */
 export function useServiceControl(dispatch: Dispatch<StudioAction>, remote: RemoteFace): ServiceControlFace {
-  const loadServices = useCallback(async (sessionId: string): Promise<ServiceState[]> => {
-    // 会话未激活时跳过（后端 requires sessionId 400）
-    if (!sessionId) {
-      dispatch({ type: 'SERVICES_LOADED', items: [] })
-      return []
-    }
-    const items = await remote.call(EP.EP_LIST_SERVICES, { sessionId })
+  /** 加载全部会话的服务实例列表（工作台全局化：不按当前会话过滤）。 */
+  const loadServices = useCallback(async (): Promise<ServiceState[]> => {
+    const items = await remote.call(EP.EP_LIST_SERVICES, {}) as unknown
     const list = Array.isArray(items) ? (items as ServiceState[]) : []
     dispatch({ type: 'SERVICES_LOADED', items: list })
     return list
@@ -58,17 +59,14 @@ export function useServiceControl(dispatch: Dispatch<StudioAction>, remote: Remo
     return draft
   }, [dispatch])
 
-  const instantiateFromTemplate = useCallback((template: WorkflowTemplate, sessionId: string): ServiceState => {
+  const instantiateFromTemplate = useCallback((template: WorkflowTemplate, targetSessionId: string): ServiceState => {
     const now = new Date().toISOString()
     const draft = {
       id: `svc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-      sessionId,
+      sessionId: targetSessionId,
       name: template.name ?? '未命名服务',
       description: template.description ?? '',
       revision: 0,
-      // 启动时开启新会话/工作区随模板继承（服务保存后可再编辑）
-      ...(template.startNewSession === true ? { startNewSession: true as const } : {}),
-      ...(String(template.workspacePath ?? '').trim() ? { workspacePath: String(template.workspacePath).trim() } : {}),
       nodes: JSON.parse(JSON.stringify(template.nodes ?? [])) as ServiceState['nodes'],
       lines: JSON.parse(JSON.stringify(template.lines ?? [])) as ServiceState['lines'],
       createdAt: now,

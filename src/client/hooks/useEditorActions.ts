@@ -157,7 +157,7 @@ export function useEditorActions(
           title: t.deleteFlow,
           message: `${t.confirmDelete}（${flow.name}）`,
           onConfirm: () => {
-            void workflows.deleteWorkflow(flow.id).then(() => {
+            void workflows.deleteWorkflow(flow).then(() => {
               dispatch({ type: 'CLEAR_CANVAS' })
               notify('info', t.toastDeleted)
             }).catch((error) => {
@@ -187,7 +187,8 @@ export function useEditorActions(
           title: t.deleteFlow,
           message: `${t.confirmDelete}（${service.name}）`,
           onConfirm: () => {
-            void remote.call(EP.EP_DELETE_SERVICE, { sessionId: state.sessionId, id: service.id }).then(() => {
+            // 工作台全局化：删除归属校验用实例绑定的会话（可能不是当前主会话）
+            void remote.call(EP.EP_DELETE_SERVICE, { sessionId: service.sessionId, id: service.id }).then(() => {
               dispatch({ type: 'SERVICE_REMOVED', id: service.id })
               dispatch({ type: 'CLEAR_CANVAS' })
               notify('info', t.toastDeleted)

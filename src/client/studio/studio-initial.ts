@@ -21,6 +21,8 @@ export function createInitialState(sessionId: string): StudioState {
     mode: 'mode1',
     workflows: [],
     services: [],
+    activeRuns: [],
+    instanceOptions: { newSession: false, workspacePath: '' },
     flowTemplates: [],
     templates: { role: [], file: [], database: [], group: [] },
     combos: [],

@@ -62,7 +62,7 @@ function deferred<T>() {
 async function renderFace(remote: RemoteFace): Promise<WorkflowsFace> {
   let face: WorkflowsFace | null = null
   function Harness({ onReady }: { onReady: (f: WorkflowsFace) => void }) {
-    const f = useWorkflows(vi.fn(), remote, 's-1')
+    const f = useWorkflows(vi.fn(), remote)
     useEffect(() => { onReady(f) }, [f, onReady])
     return null
   }

@@ -50,6 +50,13 @@ export const EP_SERVICE_STATUS = 'serviceStatus'
  */
 export const EP_SERVICE_DEBUG = 'serviceDebug'
 
+/**
+ * 创建会话端点名（「开启新会话」一次性动作：从模板创建实例时先新建主会话，
+ * 实例绑定该新会话 id——官方 agents.create 不传 parentSession 即无父根会话）。
+ * 参数 { sessionId?, workspacePath?, label? }，返回 { sessionId }。
+ */
+export const EP_CREATE_SESSION = 'createSession'
+
 /** 模板列表端点名（角色/文件/数据库三类共用）。 */
 export const EP_LIST_TEMPLATES = 'listTemplates'
 /** 保存模板。 */

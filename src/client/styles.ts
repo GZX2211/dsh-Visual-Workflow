@@ -147,6 +147,8 @@ export const styles = `
 .wf-docitem__label{display:block;font-size:12px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wf-docitem__path{display:block;font:9px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--wf-ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wf-docitem__badge{justify-self:end;white-space:nowrap;font-size:10px;font-weight:700;color:var(--wf-ok);border:1px solid color-mix(in srgb,var(--wf-ok) 40%,var(--wf-border));border-radius:6px;padding:2px 7px;background:color-mix(in srgb,var(--wf-ok) 12%,transparent)}
+/* 工作台全局化：「当前」徽标（当前主会话对应的实例；品牌色以区分普通状态徽标） */
+.wf-docitem__badge.is-current{color:var(--wf-brand);border-color:color-mix(in srgb,var(--wf-brand) 45%,var(--wf-border));background:color-mix(in srgb,var(--wf-brand) 12%,transparent)}
 .wf-drag-preview{position:fixed;z-index:999;pointer-events:none;min-width:150px;max-width:230px;padding:9px 12px;border:1px solid var(--wf-brand);border-radius:10px;background:color-mix(in srgb,var(--wf-layer) 94%,var(--wf-brand) 6%);color:var(--wf-ink);font-size:12px;font-weight:650;box-shadow:0 14px 34px color-mix(in srgb,var(--wf-ink) 22%,transparent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wf-inspector{flex:none;width:auto;height:100%;max-height:100%;display:flex;flex-direction:column;background:var(--wf-layer);overflow:hidden;min-height:0}
 .wf-inspector__scroll{flex:1 1 0;height:0;min-height:0;overflow:auto;overscroll-behavior:contain;padding:15px;display:flex;flex-direction:column;gap:11px;scrollbar-width:thin}

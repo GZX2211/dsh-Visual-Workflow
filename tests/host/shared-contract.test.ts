@@ -214,6 +214,8 @@ describe('T-014 graph-model 纯类型形态', () => {
 const EXPECTED_ENDPOINTS: string[] = [
   // 工作流
   'listWorkflows', 'getWorkflow', 'putWorkflow', 'deleteWorkflow', 'createWorkflow',
+  // 会话（工作台全局化：「开启新会话」一次性动作——创建实例时新建主会话）
+  'createSession',
   // 服务
   'listServices', 'getService', 'putService', 'deleteService', 'serviceStart', 'serviceStop', 'serviceStatus', 'serviceDebug',
   // 模板
@@ -250,11 +252,11 @@ function readProtocolEndpoints(): string[] {
   return out
 }
 
-describe('T-014 protocol.ts 端点清单（§4.6 全部端点 + 定时任务 3 端点 + 工具开关 3 端点）', () => {
-  it('端点常量定义 51 个且无重复', () => {
+describe('T-014 protocol.ts 端点清单（§4.6 全部端点 + 定时任务 3 端点 + 工具开关 3 端点 + 会话 1 端点）', () => {
+  it('端点常量定义 52 个且无重复', () => {
     const eps = readProtocolEndpoints()
-    expect(eps).toHaveLength(51)
-    expect(new Set(eps).size).toBe(51) // 51 端点名全部唯一（无重复常量）
+    expect(eps).toHaveLength(52)
+    expect(new Set(eps).size).toBe(52) // 52 端点名全部唯一（无重复常量）
   })
 
   it('端点名逐字覆盖 §4.6 清单（正反向双向一致）', () => {

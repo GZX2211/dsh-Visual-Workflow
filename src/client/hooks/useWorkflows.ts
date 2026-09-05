@@ -2,6 +2,12 @@
 //
 // 工作流列表：加载 / 新建草稿 / 保存（草稿首存入库，正式带 revision 乐观锁）/
 // 删除 / 打开。数据模型对齐后端 WorkflowDocument（nodes/lines 全量内联）。
+//
+// 工作台全局化改版：
+//   - loadWorkflows 返回**全部会话**的实例（工作台全局面板数据源；不按会话过滤）；
+//   - instantiateFromTemplate 以「目标会话 id」为参数（创建实例时决定：当前主会话
+//     或新建主会话；「开启新会话」为一次性临时选项，实例文档不再继承该字段）；
+//   - saveWorkflow 以实例自身 sessionId 归属（运行/历史/状态都以实例绑定的会话为准）。
 
 import { useCallback, useRef } from 'react'
 import type { Dispatch } from 'react'
@@ -11,15 +17,18 @@ import type { RemoteFace } from './useRemote.js'
 import { EP } from '../lib/remote.js'
 
 export interface WorkflowsFace {
-  /** 加载工作流列表；返回加载的条目（供「进入工作台自动选中实例」复用）。 */
+  /** 加载工作流实例列表（全部会话）；返回加载的条目（供「进入工作台自动选中实例」复用）。 */
   loadWorkflows(): Promise<WorkflowDocument[]>
-  /** 新建本地草稿（_draft 标记；首次保存时真正入库）。 */
-  createWorkflowDraft(name: string): WorkflowDocument
+  /** 新建本地草稿（_draft 标记；首次保存时真正入库；目标会话 = 当前主会话）。 */
+  createWorkflowDraft(name: string, sessionId: string): WorkflowDocument
   /** 保存画布（草稿入库 / 正式带 revision 更新）。 */
   saveWorkflow(flow: WorkflowDocument, nodes: CanvasNode[], edges: CanvasEdge[]): Promise<WorkflowDocument | null>
-  /** 模板 → 实例：深拷贝模板内容创建实例草图（名称与现有实例去重；不落盘，由调用方 saveWorkflow）。 */
-  instantiateFromTemplate(template: WorkflowTemplate): WorkflowDocument
-  deleteWorkflow(id: string): Promise<void>
+  /**
+   * 模板 → 实例：深拷贝模板内容创建实例草图（绑定目标会话；不落盘，由调用方
+   * saveWorkflow）。「开启新会话/工作区」为一次性临时选项，不继承到实例文档。
+   */
+  instantiateFromTemplate(template: WorkflowTemplate, targetSessionId: string): WorkflowDocument
+  deleteWorkflow(flow: WorkflowDocument): Promise<void>
   openFlow(flow: WorkflowDocument): void
 }
 
@@ -53,21 +62,16 @@ export function serializeWorkflow(flow: WorkflowDocument, nodes: CanvasNode[], e
 export function useWorkflows(
   dispatch: Dispatch<StudioAction>,
   remote: RemoteFace,
-  sessionId: string,
 ): WorkflowsFace {
+  /** 加载全部会话的实例列表（工作台全局化：不按当前会话过滤）。 */
   const loadWorkflows = useCallback(async (): Promise<WorkflowDocument[]> => {
-    // 会话未激活时跳过（后端 requires sessionId 400）
-    if (!sessionId) {
-      dispatch({ type: 'WORKFLOWS_LOADED', items: [] })
-      return []
-    }
-    const items = await remote.call(EP.EP_LIST_WORKFLOWS, { sessionId })
+    const items = await remote.call(EP.EP_LIST_WORKFLOWS, {}) as unknown
     const list = Array.isArray(items) ? (items as WorkflowDocument[]) : []
     dispatch({ type: 'WORKFLOWS_LOADED', items: list })
     return list
-  }, [dispatch, remote, sessionId])
+  }, [dispatch, remote])
 
-  const createWorkflowDraft = useCallback((name: string): WorkflowDocument => {
+  const createWorkflowDraft = useCallback((name: string, sessionId: string): WorkflowDocument => {
     const now = new Date().toISOString()
     const draft = {
       id: `wf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
@@ -84,21 +88,22 @@ export function useWorkflows(
     } as Drafted<WorkflowDocument>
     dispatch({ type: 'WORKFLOW_ADDED', flow: draft })
     return draft
-  }, [dispatch, sessionId])
+  }, [dispatch])
 
-  /** 模板 → 实例：深拷贝模板（节点/连线全量内联，与模板完全断引用——§4.2.1 解耦语义）。 */
-  const instantiateFromTemplate = useCallback((template: WorkflowTemplate): WorkflowDocument => {
+  /**
+   * 模板 → 实例：深拷贝模板（节点/连线全量内联，与模板完全断引用——§4.2.1 解耦语义）。
+   * 目标会话由调用方决定（当前主会话 / 新建主会话）；不继承 startNewSession/workspacePath
+   * （一次性临时选项，字段已退役）。
+   */
+  const instantiateFromTemplate = useCallback((template: WorkflowTemplate, targetSessionId: string): WorkflowDocument => {
     const now = new Date().toISOString()
     const draft = {
       id: `wf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-      sessionId,
+      sessionId: targetSessionId,
       mode: template.mode,
       name: template.name ?? '未命名工作流',
       description: template.description ?? '',
       revision: 0,
-      // 启动时开启新会话/工作区随模板继承（实例保存后可再编辑）
-      ...(template.startNewSession === true ? { startNewSession: true as const } : {}),
-      ...(String(template.workspacePath ?? '').trim() ? { workspacePath: String(template.workspacePath).trim() } : {}),
       nodes: JSON.parse(JSON.stringify(template.nodes ?? [])) as WorkflowDocument['nodes'],
       lines: JSON.parse(JSON.stringify(template.lines ?? [])) as WorkflowDocument['lines'],
       createdAt: now,
@@ -106,7 +111,7 @@ export function useWorkflows(
     } as Drafted<WorkflowDocument>
     dispatch({ type: 'WORKFLOW_ADDED', flow: draft })
     return draft
-  }, [dispatch, sessionId])
+  }, [dispatch])
 
   /** 在途保存 Promise（快速双击/重复触发时共享同一请求，避免第二次携带旧 revision 触发 409）。 */
   const saveInflight = useRef<{ flowId: string; promise: Promise<WorkflowDocument | null> } | null>(null)
@@ -126,8 +131,9 @@ export function useWorkflows(
       // id 保持不变——草稿首存不再另 assign id，避免 WORKFLOW_UPDATED 无法命中
       // 列表项、当前画布继续引用旧草稿 id（旧实现每次保存都新建一个副本，
       // 用户感知「保存成功但实际没保存」）。
+      // 归属会话 = 实例自身 sessionId（工作台全局化：实例与运行/校验同会话）。
       const saved = await remote.call(EP.EP_PUT_WORKFLOW, {
-        sessionId,
+        sessionId: flow.sessionId,
         flow: serialized,
       }) as WorkflowDocument
       dispatch({ type: 'WORKFLOW_UPDATED', flow: saved })
@@ -141,12 +147,12 @@ export function useWorkflows(
       // 仅当仍是自己的在途条目时清空（期间切到别的工作流保存时不得覆盖其条目）
       if (saveInflight.current === entry) saveInflight.current = null
     }
-  }, [dispatch, remote, sessionId])
+  }, [dispatch, remote])
 
-  const deleteWorkflow = useCallback(async (id: string) => {
-    await remote.call(EP.EP_DELETE_WORKFLOW, { sessionId, id })
-    dispatch({ type: 'WORKFLOW_REMOVED', id })
-  }, [dispatch, remote, sessionId])
+  const deleteWorkflow = useCallback(async (flow: WorkflowDocument) => {
+    await remote.call(EP.EP_DELETE_WORKFLOW, { sessionId: flow.sessionId, id: flow.id })
+    dispatch({ type: 'WORKFLOW_REMOVED', id: flow.id })
+  }, [dispatch, remote])
 
   const openFlow = useCallback((flow: WorkflowDocument) => {
     dispatch({ type: 'OPEN_FLOW', flow })

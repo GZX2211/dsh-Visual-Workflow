@@ -19,7 +19,7 @@
 import type { RunSnapshot, ScheduledTask, ScheduledTaskRuntime, ScheduledTaskView } from '../shared/types.js'
 import type { WorkflowDocument, WorkflowTemplate } from '../shared/graph-model.js'
 import { isWithinWindow, nextTriggerAt } from './planner.js'
-import { instantiateFromTemplate } from './instantiate.js'
+import { instantiateFromTemplate, overwriteInstanceFromTemplate } from './instantiate.js'
 import { emptyPersistedRuntime, SchedulerTaskStore, type PersistedRuntime } from './task-store.js'
 
 /** 编排运行时的引擎视图（宿主装配；单测 fake）。 */
@@ -276,7 +276,7 @@ export class SchedulerEngine {
     await this.fire(task, rt, nextT)
   }
 
-  /** 触发执行：模板 → 实例（会话策略分派）→ startRun。 */
+  /** 触发执行：模板 → 实例（会话策略分派 + 每会话单实例覆盖）→ startRun。 */
   private async fire(task: ScheduledTask, rt: PersistedRuntime, triggerAt: number): Promise<void> {
     rt.lastConsumedTriggerAt = triggerAt
     try {
@@ -297,8 +297,14 @@ export class SchedulerEngine {
           })
       const template = await this.deps.flowStore.getFlowTemplate(task.workflowTemplateId)
       if (!template) throw new Error(`工作流模板不存在：${task.workflowTemplateId}`)
+      // 每会话单实例（工作台全局化改版）：目标会话已有实例时覆盖运行（复用既有
+      // 实例 id，名称/内容同步为模板最新定义）；否则全新实例化。
+      // - new-session 模式每次触发都是新会话 → 恒为全新实例；
+      // - current-session 模式触发到同一会话 → 覆盖既有实例（自动，不弹确认框）。
       const existing = await this.deps.flowStore.listWorkflows(sessionId)
-      const instance = instantiateFromTemplate(template, sessionId, existing.map((item) => item.name))
+      const instance = existing[0]
+        ? overwriteInstanceFromTemplate(template, existing[0])
+        : instantiateFromTemplate(template, sessionId, existing.map((item) => item.name))
       const saved = await this.deps.flowStore.saveWorkflow(instance, sessionId)
       const result = await this.deps.orchestrator.startRun({ sessionId, flowId: saved.id, mode: saved.mode })
       rt.currentRunId = result.runId

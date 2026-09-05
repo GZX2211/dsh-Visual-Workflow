@@ -21,6 +21,7 @@ import { useGraphHistory } from '../hooks/useGraphHistory.js'
 import { useUnsavedGuard } from '../hooks/useUnsavedGuard.js'
 import { useRunControl } from '../hooks/useRunControl.js'
 import { useRunPolling } from '../hooks/useRunPolling.js'
+import { useActiveRunsPolling } from '../hooks/useActiveRunsPolling.js'
 import { useFlowFileSync } from '../hooks/useFlowFileSync.js'
 import { useServiceControl } from '../hooks/useServiceControl.js'
 import { useModeSwitch } from '../hooks/useModeSwitch.js'
@@ -31,7 +32,7 @@ import { useEditorActions } from '../hooks/useEditorActions.js'
 import { useRunActions } from '../hooks/useRunActions.js'
 import { useStudioTransfer } from '../hooks/useStudioTransfer.js'
 import { useLibraryDrag } from '../hooks/useLibraryDrag.js'
-import { useStudioBoot } from '../hooks/useStudioBoot.js'
+import { useStudioBoot, pickInitialInstanceForSession } from '../hooks/useStudioBoot.js'
 import { useKeyShortcuts } from '../hooks/useKeyShortcuts.js'
 import {
   currentFlowOf, currentServiceOf, currentFlowTemplateOf, editorDataOf, isRunningOf,
@@ -63,7 +64,8 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
   const remote = remoteProp ?? useRemote()
   const { state, dispatch } = useStudioState(sessionId)
   const { toast, toastError } = useToast(dispatch)
-  const workflows = useWorkflows(dispatch, remote, state.sessionId)
+  // 工作台全局化：列表为全部会话实例（不按 sessionId 过滤；sessionId 仅当前主会话）
+  const workflows = useWorkflows(dispatch, remote)
   const flowTemplates = useFlowTemplates(dispatch, remote)
   const templates = useTemplates(dispatch, remote)
   const selection = useSelection(dispatch)
@@ -73,8 +75,11 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
   const serviceControl = useServiceControl(dispatch, remote)
   const modeSwitch = useModeSwitch(dispatch)
   const panels = usePanelLayout(state, dispatch)
-  // 运行状态轮询按实际执行会话归属（「启动时开启新会话」运行时与当前会话不同）
-  useRunPolling(state.run.sessionId ?? state.sessionId, state.run.runId, dispatch, remote)
+  // 运行状态轮询按实例绑定的会话（新逻辑 run 与实例同会话；兼容旧 run.sessionId）
+  const currentFlow = currentFlowOf(state)
+  useRunPolling(state.run.sessionId ?? currentFlow?.sessionId ?? state.sessionId, state.run.runId, dispatch, remote)
+  // 全量活跃 run 轮询（实例列表状态徽标：所有会话的运行状态实时可见）
+  useActiveRunsPolling(dispatch, remote)
 
   const canvasApiRef = useRef<CanvasApi | null>(null)
   const canvasShellRef = useRef<HTMLDivElement | null>(null)
@@ -82,7 +87,6 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
   const personaInputRef = useRef<HTMLInputElement | null>(null)
   const groupMdInputRef = useRef<HTMLInputElement | null>(null)
 
-  const currentFlow = currentFlowOf(state)
   const currentService = currentServiceOf(state)
   const currentFlowTemplate = currentFlowTemplateOf(state)
   const editorData = editorDataOf(state)
@@ -126,7 +130,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
   }, [state.combos, state.presets, t.modeNames])
 
   // ---------- 交互编排面（拆分至 hooks/ 的 controller hooks） ----------
-  const doc = useDocumentActions(state, dispatch, guard, notify, toastError, workflows, flowTemplates, templates, selection, serviceControl, t)
+  const doc = useDocumentActions(state, dispatch, guard, notify, toastError, workflows, flowTemplates, templates, selection, serviceControl, remote, t)
   const canvas = useCanvasActions(state, dispatch, notify, history, t)
   const editor = useEditorActions(state, dispatch, notify, toastError, t, workflows, flowTemplates, templates, selection, remote, doc.saveCanvas, canvas.removeSelected, canvas.removeLine, doc.selectWorkflow, doc.selectFlowTemplate)
   const run = useRunActions(state, dispatch, notify, toastError, t, remote, runControl, serviceControl, doc.saveCanvas, doc.createInstanceFromCanvas)
@@ -137,7 +141,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
   // ---------- 初始化加载 ----------
   useStudioBoot(
     state, dispatch, notify, toastError, t, remote, workflows, flowTemplates, templates, serviceControl,
-    pickInitialInstance,
+    pickInitialInstanceForSession,
   )
 
   // ---------- 模式切换（未保存守卫；需求 §4.1.1） ----------
@@ -149,10 +153,10 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
       if (mode === 'mode1') {
         void workflows.loadWorkflows()
       } else {
-        void serviceControl.loadServices(state.sessionId)
+        void serviceControl.loadServices()
       }
     })
-  }, [dispatch, guard, modeSwitch, serviceControl, state.mode, state.sessionId, workflows])
+  }, [dispatch, guard, modeSwitch, serviceControl, state.mode, workflows])
 
   const [modeMenuOpen, setModeMenuOpen] = useState(false)
 
@@ -253,27 +257,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
 }
 
 // ---------------------------------------------------------------------------
-// 纯函数辅助
+// 纯函数辅助：进入工作台自动选中实例的规则实现已迁至 useStudioBoot.ts
+// （pickInitialInstanceForSession——工作台全局化：当前主会话实例优先）。
 // ---------------------------------------------------------------------------
 
-/**
- * 进入工作台自动选中实例（用户新增需求）：从实例列表中选出默认打开的实例 id。
- * 规则（优先级）：
- *   1. 正在运行的实例——activeRuns 中 status='running' 的 flowId 对应实例；
- *   2. 已暂停的实例——activeRuns 中 status='paused' 的 flowId 对应实例；
- *   3. 实例列表第一个；
- * 校验：activeRuns 的 flowId 必须在实例列表中（否则忽略该条目，防止引用不存在实例）；
- * 实例列表为空时返回 null（保持空白画布，当前状态）。
- */
-export function pickInitialInstance(
-  instances: Array<{ id: string; name?: string }>,
-  activeRuns: Array<{ flowId: string; status: string }>,
-): string | null {
-  if (!instances || instances.length === 0) return null
-  const idSet = new Set(instances.map((item) => item.id))
-  const running = activeRuns.find((run) => run.status === 'running' && idSet.has(run.flowId))
-  if (running) return running.flowId
-  const paused = activeRuns.find((run) => run.status === 'paused' && idSet.has(run.flowId))
-  if (paused) return paused.flowId
-  return instances[0].id
-}

@@ -15,21 +15,16 @@ import { VisualWorkflowApiCatalog } from './api-catalog.js'
 export class VisualWorkflowApiRuns extends VisualWorkflowApiCatalog {
   // ---------- 运行（父代理编排） ----------
 
-  /** 启动运行：存在可恢复断点（暂停/中断）时自动续跑，否则全新启动；「启动时开启新会话」直接新会话启动。 */
-  async run(args: { sessionId?: unknown; flowId?: unknown; startNewSession?: unknown; workspacePath?: unknown }): Promise<unknown> {
+  /**
+   * 启动运行（工作台全局化改版）：运行唯一逻辑 = 运行当前实例——存在可恢复断点
+   * （暂停/中断）时自动续跑，否则全新启动；运行会话 = 实例绑定的会话
+   * （run.sessionId === instance.sessionId，不再支持运行期新建会话——「开启新会话」
+   * 只是创建实例时的一次性动作，见 createSession 端点）。
+   */
+  async run(args: { sessionId?: unknown; flowId?: unknown }): Promise<unknown> {
     const sessionId = String(args?.sessionId ?? '')
     const flowId = String(args?.flowId ?? '')
     if (!sessionId || !flowId) throw httpError(400, 'requires sessionId and flowId')
-    const startNewSession = args?.startNewSession === true
-    if (startNewSession) {
-      // 新会话模式：每次运行都用独立会话（无当前会话断点续跑语义）
-      return this.host.orchestrator.startRun({
-        sessionId,
-        flowId,
-        startNewSession: true,
-        ...(String(args?.workspacePath ?? '').trim() ? { workspacePath: String(args.workspacePath).trim() } : {}),
-      })
-    }
     const prev = await findResumableRun(this.host.store, { sessionId, flowId })
     if (prev) {
       return this.host.orchestrator.resumeRun({ sessionId, flowId, fromRunId: prev.id })
@@ -52,10 +47,15 @@ export class VisualWorkflowApiRuns extends VisualWorkflowApiCatalog {
     return disk
   }
 
-  /** 会话活跃 run 列表（workbench 进入时自动选中运行中实例用；running/paused 保留锁）。 */
+  /**
+   * 活跃 run 列表（工作台全局化改版）：sessionId 缺省时返回**全部会话**的活跃
+   * run（工作台全局面板实例列表状态徽标用；running/paused 保留锁）；传入时按
+   * 会话过滤（旧单会话面板兼容调用）。
+   */
   async activeRuns(args: { sessionId?: unknown }): Promise<unknown> {
-    const sessionId = String(args?.sessionId ?? '')
-    if (!sessionId) throw httpError(400, 'requires sessionId')
+    const sessionId = args?.sessionId === undefined || args.sessionId === null
+      ? undefined
+      : String(args.sessionId)
     return this.host.orchestrator.activeRunsForSession(sessionId)
   }
 

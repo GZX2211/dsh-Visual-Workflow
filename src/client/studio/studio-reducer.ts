@@ -59,6 +59,10 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       return { ...state, services: state.services.map((service) => (service.id === action.service.id ? action.service : service)) }
     case 'SERVICE_REMOVED':
       return { ...state, services: state.services.filter((service) => service.id !== action.id) }
+    case 'ACTIVE_RUNS_LOADED':
+      return { ...state, activeRuns: action.items }
+    case 'INSTANCE_OPTIONS_SET':
+      return { ...state, instanceOptions: { ...state.instanceOptions, ...action.options } }
     case 'TEMPLATES_LOADED':
       return { ...state, templates: { ...state.templates, [action.kind]: action.items } }
     case 'TEMPLATE_ADDED':
@@ -91,11 +95,16 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
     }
     case 'OPEN_FLOW_TEMPLATE': {
       // 模板打开 = 画布显示模板流程图（编辑态）；「创建实例」后转为实例态。
+      // 「开启新会话」临时选项：打开模板时重置（每次从模板创建实例默认不新开会话；
+      // 该选项仅临时 UI 状态，不持久化到模板文档）。
       const exists = state.flowTemplates.some((template) => template.id === action.template.id)
       const flowTemplates = exists
         ? state.flowTemplates.map((template) => (template.id === action.template.id ? action.template : template))
         : [action.template, ...state.flowTemplates]
-      return openDocument({ ...state, flowTemplates }, flowToCanvas(action.template), 'flowTemplate', action.template.id)
+      return {
+        ...openDocument({ ...state, flowTemplates }, flowToCanvas(action.template), 'flowTemplate', action.template.id),
+        instanceOptions: { newSession: false, workspacePath: '' },
+      }
     }
     case 'CLEAR_CANVAS':
       return {
@@ -170,7 +179,8 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         dirty: true,
       }
     case 'DOC_PATCH':
-      // 名/描述/新会话开关与工作区统一经 DOC_PATCH 落文档；undefined 不覆盖
+      // 名/描述经 DOC_PATCH 落文档；undefined 不覆盖（「开启新会话/工作区」已
+      // 改为临时创建选项 INSTANCE_OPTIONS_SET，不再落文档——字段已退役）。
       return state.currentKind === 'workflow'
         ? {
             ...state,
@@ -179,8 +189,6 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
                   ...flow,
                   ...(action.patch.name !== undefined ? { name: action.patch.name } : {}),
                   ...(action.patch.description !== undefined ? { description: action.patch.description } : {}),
-                  ...(action.patch.startNewSession !== undefined ? { startNewSession: action.patch.startNewSession } : {}),
-                  ...(action.patch.workspacePath !== undefined ? { workspacePath: action.patch.workspacePath } : {}),
                 }
               : flow)),
             dirty: true,
@@ -193,8 +201,6 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
                     ...template,
                     ...(action.patch.name !== undefined ? { name: action.patch.name } : {}),
                     ...(action.patch.description !== undefined ? { description: action.patch.description } : {}),
-                    ...(action.patch.startNewSession !== undefined ? { startNewSession: action.patch.startNewSession } : {}),
-                    ...(action.patch.workspacePath !== undefined ? { workspacePath: action.patch.workspacePath } : {}),
                   }
                 : template)),
               dirty: true,
@@ -207,8 +213,6 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
                       ...service,
                       ...(action.patch.name !== undefined ? { name: action.patch.name } : {}),
                       ...(action.patch.description !== undefined ? { description: action.patch.description } : {}),
-                      ...(action.patch.startNewSession !== undefined ? { startNewSession: action.patch.startNewSession } : {}),
-                      ...(action.patch.workspacePath !== undefined ? { workspacePath: action.patch.workspacePath } : {}),
                     }
                   : service)),
                 dirty: true,

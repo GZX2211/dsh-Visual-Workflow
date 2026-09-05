@@ -188,10 +188,15 @@ export class FlowStore {
     return join(this.root, 'combos.json')
   }
 
-  // ---- 工作流（模式一；按 sessionId 隔离） ----------------------------------
+  // ---- 工作流（模式一；工作台全局化后列表按需跨会话） ------------------------
 
-  /** 列出某会话的全部工作流（按 updatedAt 倒序）。 */
-  async listWorkflows(sessionId: string): Promise<WorkflowDocument[]> {
+  /**
+   * 列出工作流（按 updatedAt 倒序）。
+   * 工作台全局化改版：sessionId 缺省时列出**全部会话**的工作流实例（工作台
+   * 全局面板「所有实例」数据源）；传入 sessionId 时仍按会话过滤（定时任务
+   * 检测目标会话已有实例、旧单会话面板兼容调用）。
+   */
+  async listWorkflows(sessionId?: string): Promise<WorkflowDocument[]> {
     const dir = join(this.root, 'workflows')
     let names: string[] = []
     try {
@@ -203,7 +208,7 @@ export class FlowStore {
     for (const name of names) {
       if (!name.endsWith('.json')) continue
       const doc = await readListEntry<WorkflowDocument>(dir, name)
-      if (doc && doc.sessionId === sessionId) items.push(doc)
+      if (doc && (sessionId === undefined || doc.sessionId === sessionId)) items.push(doc)
     }
     return items.sort((a, b) => String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? '')))
   }
@@ -247,10 +252,14 @@ export class FlowStore {
     })
   }
 
-  // ---- 服务（模式二；按 sessionId 隔离） ------------------------------------
+  // ---- 服务（模式二；工作台全局化后列表按需跨会话） --------------------------
 
-  /** 列出某会话的全部服务（跳过 *.sessions.json 映射文件）。 */
-  async listServices(sessionId: string): Promise<ServiceState[]> {
+  /**
+   * 列出服务（跳过 *.sessions.json 映射文件；按 updatedAt 倒序）。
+   * 工作台全局化改版：sessionId 缺省时列出**全部会话**的服务实例；传入时按
+   * 会话过滤（旧单会话面板兼容调用）。
+   */
+  async listServices(sessionId?: string): Promise<ServiceState[]> {
     const dir = join(this.root, 'services')
     let names: string[] = []
     try {
@@ -262,7 +271,7 @@ export class FlowStore {
     for (const name of names) {
       if (!name.endsWith('.json') || name.endsWith('.sessions.json')) continue
       const doc = await readListEntry<ServiceState>(dir, name)
-      if (doc && doc.sessionId === sessionId) items.push(doc)
+      if (doc && (sessionId === undefined || doc.sessionId === sessionId)) items.push(doc)
     }
     return items.sort((a, b) => String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? '')))
   }

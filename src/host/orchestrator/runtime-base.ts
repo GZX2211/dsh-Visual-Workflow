@@ -171,17 +171,17 @@ export class RuntimeBase {
   }
 
   /**
-   * 某会话的全部活跃 run（running/paused 均保留运行锁；返回 flowId/status/runId 摘要）。
-   * 用途：工作台「进入时自动选中实例」——判断哪个实例正在运行（running 优先，
-   * 否则 paused），从而在实例列表中优先展示运行中的实例（图2 交互改造补充需求）。
+   * 活跃 run 摘要（running/paused 均保留运行锁；返回 flowId/status/runId/sessionId）。
+   * 工作台全局化改版：sessionId 缺省时返回**全部会话**的活跃 run（工作台全局面板
+   * 实例列表状态徽标用）；传入时按会话过滤（进入时自动选中、旧单会话面板兼容）。
    */
-  activeRunsForSession(sessionId: string): Array<{ flowId: string; status: RunStatus; runId: string }> {
-    const out: Array<{ flowId: string; status: RunStatus; runId: string }> = []
+  activeRunsForSession(sessionId?: string): Array<{ flowId: string; status: RunStatus; runId: string; sessionId: string }> {
+    const out: Array<{ flowId: string; status: RunStatus; runId: string; sessionId: string }> = []
     for (const entry of this.runs.values()) {
       const s = entry.snapshot
-      if (s.sessionId !== sessionId) continue
+      if (sessionId !== undefined && s.sessionId !== sessionId) continue
       if (s.status !== 'running' && s.status !== 'paused') continue
-      out.push({ flowId: s.flowId, status: s.status, runId: s.id })
+      out.push({ flowId: s.flowId, status: s.status, runId: s.id, sessionId: s.sessionId })
     }
     return out
   }

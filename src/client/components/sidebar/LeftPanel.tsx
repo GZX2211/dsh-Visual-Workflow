@@ -29,7 +29,13 @@ export interface LeftPanelProps {
   open: boolean
   width: number
   mode: 'mode1' | 'mode2'
-  workflows: Array<{ id: string; name: string; description?: string; nodes?: unknown[]; runStatus?: string | null }>
+  /**
+   * 实例列表（工作台全局化：全部会话实例；每项带 sessionId 供归属判定）。
+   * runStatus 为 null 表示无活跃 run（不显示徽标）。
+   */
+  workflows: Array<{ id: string; name: string; description?: string; nodes?: unknown[]; runStatus?: string | null; sessionId?: string }>
+  /** 当前主会话 id（会话树根）：实例列表中 sessionId 与之匹配的实例打「当前」标签。 */
+  currentSessionId: string
   /** 工作流模板列表（全局共享；按当前 mode 过滤后传入；图2 交互改造）。 */
   flowTemplates: WorkflowTemplate[]
   parentTemplate: RoleTemplate | null
@@ -83,7 +89,7 @@ function fileSubline(template: FileTemplate): string {
 
 export function LeftPanel(props: LeftPanelProps) {
   const {
-    copy: t, libTab, onSetTab, open, width, mode, workflows, flowTemplates, parentTemplate,
+    copy: t, libTab, onSetTab, open, width, mode, workflows, currentSessionId, flowTemplates, parentTemplate,
     roleTemplates, fileTemplates, databaseTemplates, groupTemplates, stageKinds, libSelection,
     modeName, onSelectWorkflow, onSelectFlowTemplate, onSelectLib, onPlaceTemplate, onPlaceTemplateIntoGroup, onPlaceStage,
     onPlaceGroup, onPlaceGroupFromTemplate, onPlaceParent, onCreateNew, onBeginDrag,
@@ -98,7 +104,7 @@ export function LeftPanel(props: LeftPanelProps) {
 
   const isActive = (kind: string, id: string): boolean => libSelection?.kind === kind && libSelection?.id === id
 
-  function itemCard(key: string, kind: string, id: string, icon: string, name: string, sub: string, payload: DragPayload, pinned = false, runStatus?: string | null) {
+  function itemCard(key: string, kind: string, id: string, icon: string, name: string, sub: string, payload: DragPayload, pinned = false, runStatus?: string | null, isCurrent = false) {
     const statusText = runStatus ? String((t.status as Record<string, string>)[runStatus] ?? '') : ''
     return (
       <button
@@ -110,6 +116,8 @@ export function LeftPanel(props: LeftPanelProps) {
         <span className="wf-docitem__icon">{icon}</span>
         <span>
           <span className="wf-docitem__label">{name}</span>
+          {/* 工作台全局化：当前主会话对应的实例打「当前」标签（用于区分跨会话实例） */}
+          {isCurrent ? <span className="wf-docitem__badge is-current">{t.currentSessionBadge}</span> : null}
           <span className="wf-docitem__path">{sub}</span>
         </span>
         {statusText ? <span className="wf-docitem__badge">{statusText}</span> : null}
@@ -121,7 +129,8 @@ export function LeftPanel(props: LeftPanelProps) {
 
   if (libTab === 'workflow') {
     // 图2 交互改造：左侧「工作流」Tab 拆两区——上方实例列表（无 + 号；运行中卡片
-    // 名称右侧显示运行状态），下方工作流模板列表（+ 号新建空白模板；全局共享）。
+    // 名称右侧显示运行状态；工作台全局化：全部会话实例 + 当前主会话实例「当前」标签），
+    // 下方工作流模板列表（+ 号新建空白模板；全局共享）。
     const instances = (workflows ?? []).map((item) => itemCard(
       item.id, 'workflow', item.id, '▦', String(item.name ?? ''),
       item.description ? truncate(item.description, 60) : `${item.nodes?.length ?? 0} ${t.nodes ?? ''}`,
@@ -132,6 +141,7 @@ export function LeftPanel(props: LeftPanelProps) {
       },
       false,
       item.runStatus,
+      item.sessionId === currentSessionId,
     ))
     sections.push({ key: 'instances', title: t.flowInstances, plus: false, cards: instances })
     sections.push({

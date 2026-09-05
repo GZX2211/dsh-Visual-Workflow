@@ -12,7 +12,7 @@ import { FlowStore } from '../../src/host/storage/flow-store.js'
 import { SchedulerTaskStore } from '../../src/host/scheduler/task-store.js'
 import { SchedulerEngine, type SchedulerOrchestrator } from '../../src/host/scheduler/engine.js'
 import { localToUtc } from '../../src/host/scheduler/planner.js'
-import type { WorkflowTemplate } from '../../src/host/shared/graph-model.js'
+import type { WorkflowDocument, WorkflowTemplate } from '../../src/host/shared/graph-model.js'
 import type { ScheduledTask } from '../../src/host/shared/types.js'
 
 const TZ = 'Asia/Shanghai'
@@ -186,6 +186,36 @@ describe('调度引擎', () => {
     await h.engine.sweep()
     expect(h.sessions.created).toHaveLength(0)
     expect(h.orche.startCalls[0].sessionId).toBe('session-owner')
+  })
+
+  it('触发：current-session 目标会话已有实例 → 覆盖（复用实例 id 更新内容）再运行（每会话单实例）', async () => {
+    const h = await makeHarness(makeTask({ sessionMode: 'current-session' }))
+    // 预置：owner 会话已绑定一个旧实例（旧名称/旧内容）
+    const old: WorkflowDocument = {
+      id: 'wf-existing',
+      sessionId: 'session-owner',
+      mode: 'mode1',
+      name: '旧实例',
+      description: '旧描述',
+      revision: 2,
+      nodes: [],
+      lines: [],
+      createdAt: '2026-08-20T00:00:00.000Z',
+    }
+    await h.flowStore.saveWorkflow(old, 'session-owner')
+    await h.engine.sweep()
+    // 未创建新会话（current-session）；运行的就是既有实例 id
+    expect(h.sessions.created).toHaveLength(0)
+    expect(h.orche.startCalls).toHaveLength(1)
+    expect(h.orche.startCalls[0].sessionId).toBe('session-owner')
+    expect(h.orche.startCalls[0].flowId).toBe('wf-existing')
+    // 覆盖语义：同 id 文档被更新为模板最新定义（名称/描述/内容），仅剩一个实例
+    const flows = await h.flowStore.listWorkflows('session-owner')
+    expect(flows).toHaveLength(1)
+    expect(flows[0]?.id).toBe('wf-existing')
+    expect(flows[0]?.name).toBe('定时模板')
+    // 预置实例首存 revision=1 → 覆盖保存 +1 = 2（revision 递增链保持）
+    expect(flows[0]?.revision).toBe(2)
   })
 
   it('触发：new-session 配置 workspacePath → 新会话 cwd 直传（不继承创建者 cwd）', async () => {

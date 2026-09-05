@@ -53,7 +53,8 @@ export function useStudioTransfer(
       const flow = currentFlowOf(state) ?? currentServiceOf(state)
       if (!flow) return
       try {
-        const result = await remote.call(EP.EP_EXPORT_WORKFLOW, { sessionId: state.sessionId, id: flow.id }) as { json?: string }
+        // 工作台全局化：导出归属校验用实例绑定的会话（可能不是当前主会话）
+        const result = await remote.call(EP.EP_EXPORT_WORKFLOW, { sessionId: flow.sessionId, id: flow.id }) as { json?: string }
         const name = String(flow.name ?? t.exportFileName).replace(/[\\/:*?"<>|]/g, '_')
         download(String(result?.json ?? ''), `${name}.json`)
         notify('success', t.toastExported)
@@ -74,7 +75,7 @@ export function useStudioTransfer(
       return
     }
     notify('error', t.exportEmpty)
-  }, [editorData, currentFlowOf, notify, remote, state.sessionId, t.exportEmpty, t.exportFileName, t.toastExported, toastError])
+  }, [editorData, currentFlowOf, notify, remote, t.exportEmpty, t.exportFileName, t.toastExported, toastError])
 
   const handleImportFile = useCallback(async (file: File | null) => {
     if (!file) return

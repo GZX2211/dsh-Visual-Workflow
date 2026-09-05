@@ -39,6 +39,10 @@ export interface ApiHost {
   store: FlowStore
   dataDir: string
   engine: EmbeddingEngine
+  /** 新会话创建缝（「开启新会话」一次性动作：从模板创建实例时先新建主会话；缺失时建会话端点 501）。 */
+  sessionProvider?: { createSession(options: { label: string; agentPreset?: string; cwd?: string }): Promise<string> }
+  /** 解析某会话记录的工作目录（新会话继承创建者 cwd 用；不可用时省略）。 */
+  sessionCwdOf?(sessionId: string): Promise<string | undefined>
   /** 模式二服务管理器（服务管理阶段装配；缺失时服务端点返回 501）。 */
   serviceManager?: {
     start(serviceId: string): Promise<unknown>

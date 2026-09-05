@@ -116,16 +116,6 @@ export interface OrchestratorDeps {
   newRunId?: () => string
   /** 消息 id 生成注入（缺省 randomUUID）。 */
   uuid?: () => string
-  /**
-   * 新会话创建缝（「启动时开启新会话」：模式一画布运行与定时任务共用官方
-   * agents.create 封装；缺省 = 不支持新会话，请求按当前会话运行）。
-   */
-  sessionProvider?: SessionProviderLike
-}
-
-/** 新会话创建缝（zero 官方类型依赖；与 scheduler/session-provider 同构）。 */
-export interface SessionProviderLike {
-  createSession(options: { label: string; agentPreset?: string; cwd?: string }): Promise<string>
 }
 
 export interface StartRunOptions {
@@ -133,21 +123,13 @@ export interface StartRunOptions {
   mode?: 'mode1' | 'mode2'
   /** 模式二：本次外部请求的用户问题（注入输入节点产出 + 编排指令动态段）。 */
   question?: string
-  /**
-   * 启动时开启新会话（默认 false）：true = 新建独立会话（agentPreset=standard，
-   * cwd=workspacePath）执行本条工作流——run 快照归属新会话，指令注入新会话根 Agent；
-   * 适合「每次运行隔离工作区、不受当前会话状态影响」的场景。
-   */
-  startNewSession?: boolean
-  /** 新会话工作区（绝对路径目录；startNewSession=true 时生效；保存端点已校验存在）。 */
-  workspacePath?: string
 }
 
 export interface StartRunResult {
   runId: string
   /** 流程事实源文件绝对路径（编排指令 facts.definitionPath）。 */
   defPath: string
-  /** 实际执行会话 id（startNewSession=true 时为新建会话；否则等于入参 sessionId）。 */
+  /** 实际执行会话 id（工作台全局化改版：恒等于入参 sessionId——运行只认实例绑定的会话）。 */
   sessionId: string
 }
 

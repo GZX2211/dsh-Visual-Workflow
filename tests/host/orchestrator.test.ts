@@ -201,7 +201,6 @@ interface Harness {
 /** 装配：临时目录真实 FlowStore + fake 依赖 + 可控时钟与 id 生成。 */
 async function makeHarness(
   config?: Partial<OrchestratorConfig>,
-  extra?: { sessionProvider?: { createSession(options: { label: string; agentPreset?: string; cwd?: string }): Promise<string> } },
 ): Promise<Harness> {
   const dir = await mkdtemp(join(tmpdir(), 'vw-orch-'))
   cleanups.push(() => rm(dir, { recursive: true, force: true }))
@@ -218,7 +217,6 @@ async function makeHarness(
     store,
     runner,
     agents,
-    ...(extra?.sessionProvider ? { sessionProvider: extra.sessionProvider } : {}),
     config: {
       outputFullLimit: 400,
       documentTextLimit: 200,
@@ -1511,57 +1509,19 @@ describe('父代理执行者模式', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 启动时开启新会话（startRun startNewSession）
+// 工作台全局化：运行只认实例绑定的会话（运行期不再新建会话）
 // ---------------------------------------------------------------------------
 
-describe('启动时开启新会话', () => {
-  it('startNewSession=true：经 sessionProvider 新建会话，根代理/快照归属新会话，返回 sessionId', async () => {
-    const sessions: Array<{ label: string; agentPreset?: string; cwd?: string }> = []
-    const h = await makeHarness(undefined, {
-      sessionProvider: {
-        async createSession(options) {
-          sessions.push(options)
-          h.agents.roots.set('session-new', new FakeRoot('session-new'))
-          return 'session-new'
-        },
-      },
-    })
-    const flow = makeFlow()
-    await h.store.saveWorkflow(flow, 'session-1', { force: true })
-    const result = await h.runtime.startRun({ sessionId: 'session-1', flowId: flow.id, startNewSession: true, workspacePath: 'D:\\work\\project' })
-    expect(sessions).toHaveLength(1)
-    expect(sessions[0]?.cwd).toBe('D:\\work\\project')
-    expect(sessions[0]?.agentPreset).toBe('standard')
-    expect(result.sessionId).toBe('session-new')
-    const snapshot = h.runtime.runSnapshot(result.runId)
-    expect(snapshot?.sessionId).toBe('session-new')
-    // 指令注入新会话根代理（原会话无消息）
-    expect(h.agents.roots.get('session-1')!.messages).toHaveLength(0)
-    expect(h.agents.roots.get('session-new')!.messages).toHaveLength(1)
-  })
-
-  it('workspacePath 空：新会话不带 cwd（继承宿主默认）', async () => {
-    const sessions: Array<{ cwd?: string }> = []
-    const h = await makeHarness(undefined, {
-      sessionProvider: {
-        async createSession(options) {
-          sessions.push(options)
-          h.agents.roots.set('session-new', new FakeRoot('session-new'))
-          return 'session-new'
-        },
-      },
-    })
-    const flow = makeFlow()
-    await h.store.saveWorkflow(flow, 'session-1', { force: true })
-    await h.runtime.startRun({ sessionId: 'session-1', flowId: flow.id, startNewSession: true })
-    expect(sessions[0]?.cwd).toBeUndefined()
-  })
-
-  it('sessionProvider 缺失：明确报错且不注入指令', async () => {
+describe('运行会话归属（工作台全局化）', () => {
+  it('startRun 在新逻辑下运行会话恒等于实例绑定的会话（无运行期新会话）', async () => {
     const h = await makeHarness()
     const flow = makeFlow()
     await h.store.saveWorkflow(flow, 'session-1', { force: true })
-    await expect(h.runtime.startRun({ sessionId: 'session-1', flowId: flow.id, startNewSession: true })).rejects.toThrow('「启动时开启新会话」不可用')
-    expect(h.agents.roots.get('session-1')!.messages).toHaveLength(0)
+    const result = await h.runtime.startRun({ sessionId: 'session-1', flowId: flow.id })
+    expect(result.sessionId).toBe('session-1')
+    const snapshot = h.runtime.runSnapshot(result.runId)
+    expect(snapshot?.sessionId).toBe('session-1')
+    // 指令注入实例绑定的会话根代理
+    expect(h.agents.roots.get('session-1')!.messages).toHaveLength(1)
   })
 })

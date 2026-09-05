@@ -5,6 +5,10 @@
 //
 // 图2 交互改造：画布上方「保存」按钮按当前对象态动态命名——模板态 = 「创建实例/创建服务」
 // （将画布内容保存为新实例，模板不变），实例态 = 「保存实例/保存服务」（保存到当前实例）。
+//
+// 工作台全局化改版：「开启新会话」（+ 工作区）复选框**仅在模板态显示**——
+// 它是「从模板创建实例」时的一次性临时选项（创建实例时新建主会话并绑定；
+// 不持久化到模板/实例文档）；实例态不显示（实例运行只认实例绑定的会话）。
 
 import type { Dict } from '../../i18n.js'
 
@@ -31,17 +35,19 @@ export interface ToolbarProps {
   onOpenHistory(): void
   canHistory: boolean
   serviceStatus: { port?: number; status?: string } | null
-  /** 启动时开启新会话配置（工作流/服务文档字段；模板态同样可编辑，创建实例时继承）。 */
-  runConfig: { startNewSession: boolean; workspacePath: string }
-  /** 新会话/工作区变更回调（写回当前文档）。 */
-  onRunConfigChange(patch: { startNewSession?: boolean; workspacePath?: string }): void
+  /** 「开启新会话」是否显示（仅模板态；实例态不显示——实例只认绑定会话运行）。 */
+  showNewSession: boolean
+  /** 「开启新会话」一次性临时选项（模板态编辑；不持久化到模板/实例文档）。 */
+  instanceOptions: { newSession: boolean; workspacePath: string }
+  /** 临时选项变更回调（写回 StudioState.instanceOptions）。 */
+  onInstanceOptionsChange(patch: { newSession?: boolean; workspacePath?: string }): void
 }
 
 export function Toolbar(props: ToolbarProps) {
   const {
     copy: t, mode, panelsCollapsed, onTogglePanels, saveLabel, onUndo, onRedo, onClear, canClear, onTidy, canTidy,
     onSave, canSave, running, onStop, onRun, onOpenHistory, canHistory, serviceStatus,
-    runConfig, onRunConfigChange,
+    showNewSession, instanceOptions, onInstanceOptionsChange,
   } = props
   const isMode2 = mode === 'mode2'
   // 运行状态指示（控制栏最右侧）：模式二含服务状态（停止/启动中/运行中·端口/崩溃）
@@ -79,25 +85,30 @@ export function Toolbar(props: ToolbarProps) {
         : <button type="button" className="wf-btn is-primary" onClick={onRun} disabled={!canSave}>{isMode2 ? t.startService : t.run}</button>}
       <button type="button" className="wf-btn is-ghost" onClick={onOpenHistory} disabled={!canHistory}>{t.history}</button>
       {statusText ? <span className={`wf-status${statusRunning ? ' is-running' : ''}`}>{statusText}</span> : null}
-      {/* 启动时开启新会话（运行历史右侧；模式一/模式二共用，保存于工作流/服务文档）：
-          开启后右侧出现「选择工作区」输入框（路径即新会话 cwd = 沙箱工作区根） */}
-      <label className="wf-toolbar__switch" title={t.newSessionHint}>
-        <input
-          type="checkbox"
-          checked={runConfig.startNewSession}
-          onChange={(event) => onRunConfigChange({ startNewSession: event.target.checked })}
-        />
-        <span>{t.newSession}</span>
-      </label>
-      {runConfig.startNewSession
+      {/* 开启新会话（仅模板态显示；「从模板创建实例」的一次性临时选项——勾选后
+          创建实例时新建主会话并绑定；不持久化到模板/实例文档。实例态不显示：
+          实例运行只认实例绑定的会话，无「新会话」概念） */}
+      {showNewSession
+        ? (
+            <label className="wf-toolbar__switch" title={t.newSessionHint}>
+              <input
+                type="checkbox"
+                checked={instanceOptions.newSession}
+                onChange={(event) => onInstanceOptionsChange({ newSession: event.target.checked })}
+              />
+              <span>{t.newSession}</span>
+            </label>
+          )
+        : null}
+      {showNewSession && instanceOptions.newSession
         ? (
             <input
               type="text"
               className="wf-toolbar__workspace"
-              value={runConfig.workspacePath}
+              value={instanceOptions.workspacePath}
               placeholder={t.workspacePlaceholder}
               title={t.workspaceHint}
-              onChange={(event) => onRunConfigChange({ workspacePath: event.target.value })}
+              onChange={(event) => onInstanceOptionsChange({ workspacePath: event.target.value })}
             />
           )
         : null}

@@ -7,7 +7,6 @@
 import { httpError } from './http.js'
 import { copyIntoManagedFile } from './download.js'
 import { stripClientMeta } from './api-base.js'
-import { resolveWorkspacePath } from '../workspace/verify.js'
 import { VisualWorkflowApiWorkflows } from './api-workflows.js'
 
 export class VisualWorkflowApiTemplates extends VisualWorkflowApiWorkflows {
@@ -70,16 +69,11 @@ export class VisualWorkflowApiTemplates extends VisualWorkflowApiWorkflows {
     if (!raw || !String(raw.id ?? '').trim()) throw httpError(400, 'requires a flow template id')
     const expected = Number(raw.revision)
     if (!Number.isFinite(expected)) throw httpError(400, 'requires a numeric revision')
-    // 新会话工作区校验（存在且为目录；模板保存同实例一致，实例化后运行时仍会再校验）
-    let workspacePath: string | undefined
-    try {
-      workspacePath = await resolveWorkspacePath(raw.workspacePath)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      throw httpError(400, message)
-    }
-    const normalized: Record<string, unknown> = { ...stripClientMeta(raw), startNewSession: raw.startNewSession === true }
-    if (workspacePath) normalized.workspacePath = workspacePath
+    // 退役字段剥除（同 putWorkflow）：「开启新会话」/工作区已改为创建实例时的一次性
+    // 临时选项，模板不存储该配置（旧模板残留字段保存即清除；也不再校验旧路径）。
+    const normalized = stripClientMeta(raw)
+    delete normalized.startNewSession
+    delete normalized.workspacePath
     try {
       return await this.host.store.saveFlowTemplate(normalized as never, { expectedRevision: expected })
     } catch (error) {

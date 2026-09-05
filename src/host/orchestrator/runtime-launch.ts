@@ -19,9 +19,9 @@ export class RuntimeLaunch extends RuntimeBase {
    * 启动一次「父代理编排」运行（模式一入口）。
    * 流程：校验 → 运行锁 → 建 run 状态 → 写流程事实源文件 → 构造编排指令 →
    * followup 一次性注入+唤醒父代理 → 开始即落盘（崩溃后历史可追溯）。
-   * 「启动时开启新会话」：startNewSession=true 时先经 sessionProvider 新建会话
-   * （cwd=workspacePath，agentPreset=standard），随后一切按该新会话运行
-   * （root Agent / 指令注入 / 快照归属均用新会话 id）。
+   * 工作台全局化改版：运行唯一逻辑 = 运行当前实例——run 会话即实例绑定的会话
+   * （run.sessionId === instance.sessionId）；「开启新会话」只是创建实例时的
+   * 一次性动作（createSession 端点），运行时不再新建会话。
    */
   async startRun(input: { sessionId: string; flowId: string } & StartRunOptions): Promise<StartRunResult> {
     const sessionId = String(input.sessionId ?? '')
@@ -50,18 +50,8 @@ export class RuntimeLaunch extends RuntimeBase {
       throw new WfError('Agent 能力不可用；父代理编排模式需要会话根 Agent 与可延续子代理', 'WF_AGENT_UNAVAILABLE')
     }
 
-    // 「启动时开启新会话」：新建独立会话（工作区 cwd = 沙箱 workspace-write 根）
-    let runSessionId = sessionId
-    if (input.startNewSession === true) {
-      if (!this.deps.sessionProvider) {
-        throw new WfError('「启动时开启新会话」不可用：会话创建能力未装配', 'WF_AGENT_UNAVAILABLE')
-      }
-      runSessionId = await this.deps.sessionProvider.createSession({
-        label: `工作流：${flow.name ?? flow.id}`,
-        agentPreset: 'standard',
-        ...(String(input.workspacePath ?? '').trim() ? { cwd: String(input.workspacePath).trim() } : {}),
-      })
-    }
+    // 运行基准会话 = 实例绑定的会话（新逻辑：run 与实例同会话，不再运行期新建）
+    const runSessionId = sessionId
 
     const root = this.deps.agents.getRootAgent(runSessionId)
     if (!root) throw new WfError(runSessionId === sessionId ? '当前会话 Agent 未激活；请先在对话区发送一条消息后重试' : '新会话 Agent 未激活，无法启动', 'WF_ROOT_INACTIVE')

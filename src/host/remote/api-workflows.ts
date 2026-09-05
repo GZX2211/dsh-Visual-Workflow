@@ -11,12 +11,48 @@ import { stripClientMeta } from './api-base.js'
 import { VisualWorkflowApiBase } from './api-base.js'
 
 export class VisualWorkflowApiWorkflows extends VisualWorkflowApiBase {
-  // ---------- 工作流（按会话分桶） ----------
+  // ---------- 工作流（工作台全局化：列表跨会话，读写按实例自身会话） ----------
 
+  /**
+   * 工作流列表（工作台全局化改版）：sessionId 缺省时返回**全部会话**的工作流
+   * 实例（工作台全局面板数据源）；传入时按会话过滤（定时任务检测目标会话
+   * 已有实例用）。
+   */
   async listWorkflows(args: { sessionId?: unknown }): Promise<unknown> {
-    const sessionId = String(args?.sessionId ?? '')
-    if (!sessionId) throw httpError(400, 'requires sessionId')
+    const sessionId = args?.sessionId === undefined || args.sessionId === null
+      ? undefined
+      : String(args.sessionId)
     return this.host.store.listWorkflows(sessionId)
+  }
+
+  /**
+   * 创建新主会话端点（「开启新会话」一次性动作：从模板创建实例时先新建主会话，
+   * 实例绑定该新会话 id）。
+   *   - workspacePath 传入时校验存在为目录（resolveWorkspacePath）并作为新会话 cwd；
+   *   - workspacePath 缺省时继承创建者会话（sessionId）的 cwd（与定时任务 new-session 一致）；
+   *   - cwd 解析不到时省略（官方会话默认工作区）。
+   */
+  async createSession(args: { sessionId?: unknown; workspacePath?: unknown; label?: unknown }): Promise<unknown> {
+    const provider = this.host.sessionProvider
+    if (!provider || typeof provider.createSession !== 'function') {
+      throw httpError(501, '会话创建能力未装配', 'WF_AGENT_UNAVAILABLE')
+    }
+    const creatorSessionId = String(args?.sessionId ?? '')
+    const label = String(args?.label ?? '工作流实例').trim() || '工作流实例'
+    // 新会话工作区：显式路径优先（校验存在为目录）；否则继承创建者会话 cwd（读不到省略）
+    const explicit = String(args?.workspacePath ?? '').trim()
+    let cwd: string | undefined
+    if (explicit) {
+      cwd = await this.checkedWorkspacePath(explicit)
+    } else if (creatorSessionId && this.host.sessionCwdOf) {
+      cwd = await this.host.sessionCwdOf(creatorSessionId).catch(() => undefined)
+    }
+    const sessionId = await provider.createSession({
+      label,
+      agentPreset: 'standard',
+      ...(cwd ? { cwd } : {}),
+    })
+    return { sessionId }
   }
 
   async getWorkflow(args: { sessionId?: unknown; id?: unknown }): Promise<unknown> {
@@ -53,16 +89,18 @@ export class VisualWorkflowApiWorkflows extends VisualWorkflowApiBase {
     if (!raw || !String(raw.id ?? '').trim()) throw httpError(400, 'requires a flow id')
     const expected = Number(raw.revision)
     if (!Number.isFinite(expected)) throw httpError(400, 'requires a numeric revision')
-    // 新会话工作区校验（存在且为目录；空值忽略）——保证「输入路径 → 新会话 cwd → 沙箱」联动
-    const workspacePath = await this.checkedWorkspacePath(raw.workspacePath)
-    const flow = { ...stripClientMeta(raw as Record<string, unknown>), sessionId, startNewSession: raw.startNewSession === true } as WorkflowDocument
-    if (workspacePath) flow.workspacePath = workspacePath
+    // 退役字段剥除：startNewSession/workspacePath 已改为「创建实例」的一次性临时选项，
+    // 不再持久化到实例文档（旧数据残留字段保存即清除；也不再校验旧路径是否存在）。
+    const flow = stripClientMeta(raw as Record<string, unknown>)
+    delete flow.startNewSession
+    delete flow.workspacePath
+    const normalized = { ...flow, sessionId } as WorkflowDocument
     try {
-      const saved = await this.host.store.saveWorkflow(flow, sessionId, { expectedRevision: expected })
+      const saved = await this.host.store.saveWorkflow(normalized, sessionId, { expectedRevision: expected })
       // 双向同步①「画布→编排」：保存成功后刷新活跃 run 的编排事实源
       // （orchestrations/<runId>.json），父代理（definitionPath 指向该文件）
       // 在运行中即可读到最新拓扑（新增节点/连线/修改即时生效）。
-      await this.host.orchestrator.refreshActiveDefinitions(flow.id, sessionId, saved)
+      await this.host.orchestrator.refreshActiveDefinitions(normalized.id, sessionId, saved)
       return saved
     } catch (error) {
       const code = (error as { code?: string })?.code ?? ''
@@ -82,9 +120,14 @@ export class VisualWorkflowApiWorkflows extends VisualWorkflowApiBase {
 
   // ---------- 服务（模式二；服务管理器装配前返回 501） ----------
 
+  /**
+   * 服务列表（工作台全局化改版）：sessionId 缺省时返回**全部会话**的服务实例
+   * （工作台全局面板数据源）；传入时按会话过滤（旧单会话面板兼容调用）。
+   */
   async listServices(args: { sessionId?: unknown }): Promise<unknown> {
-    const sessionId = String(args?.sessionId ?? '')
-    if (!sessionId) throw httpError(400, 'requires sessionId')
+    const sessionId = args?.sessionId === undefined || args.sessionId === null
+      ? undefined
+      : String(args.sessionId)
     return this.host.store.listServices(sessionId)
   }
 
@@ -104,12 +147,13 @@ export class VisualWorkflowApiWorkflows extends VisualWorkflowApiBase {
     if (!raw || !String(raw.id ?? '').trim()) throw httpError(400, 'requires a service id')
     const expected = Number(raw.revision)
     if (!Number.isFinite(expected)) throw httpError(400, 'requires a numeric revision')
-    // 新会话工作区校验（存在且为目录；空值忽略）
-    const workspacePath = await this.checkedWorkspacePath(raw.workspacePath)
     const serviceId = String(raw.id ?? '').trim()
     try {
-      const normalized = { ...stripClientMeta(raw), startNewSession: raw.startNewSession === true } as Record<string, unknown>
-      if (workspacePath) normalized.workspacePath = workspacePath
+      // 退役字段剥除（同 putWorkflow）：startNewSession/workspacePath 不再持久化，
+      // 旧服务实例重新保存后「服务级新会话」字段被清除（请求回退 userId 固定会话）。
+      const normalized = stripClientMeta(raw)
+      delete normalized.startNewSession
+      delete normalized.workspacePath
       const saved = await this.host.store.saveService(normalized as never, sessionId, { expectedRevision: expected })
       // 双向同步①「画布→编排」（模式二同理）：保存成功后刷新活跃 run 事实源。
       await this.host.orchestrator.refreshActiveDefinitions(serviceId, sessionId, {
@@ -120,8 +164,6 @@ export class VisualWorkflowApiWorkflows extends VisualWorkflowApiBase {
         description: saved.description,
         nodes: saved.nodes,
         lines: saved.lines,
-        startNewSession: saved.startNewSession,
-        workspacePath: saved.workspacePath,
         revision: saved.revision,
       } as WorkflowDocument)
       return saved

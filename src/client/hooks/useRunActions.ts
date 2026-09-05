@@ -1,7 +1,10 @@
 // src/client/hooks/useRunActions.ts
 //
 // 运行与服务控制面：模式一运行启停/运行历史/断点恢复，模式二服务启停。
-// 模板态运行时先「创建实例/创建服务」再启动（与保存语义一致）。
+// 工作台全局化改版（运行唯一逻辑）：
+//   - 模板态运行 = 先「创建实例」（含开启新会话/覆盖确认）再运行接续（afterCreate）；
+//   - 实例态运行 = 保存后运行该实例（会话 = 实例绑定的会话，不再新建会话）；
+//   - 运行/停止/历史/恢复均以实例绑定的会话（run.sessionId ?? flow.sessionId）归属。
 
 import { useCallback } from 'react'
 import type { Dispatch } from 'react'
@@ -38,35 +41,23 @@ export function useRunActions(
   createInstanceFromCanvas: DocumentActionsFace['createInstanceFromCanvas'],
 ): RunActionsFace {
   // ---------- 运行（模式一） ----------
-  /** 从流程文档提取运行选项（启动时开启新会话 + 工作区）。 */
-  const runOptionsOf = useCallback((flow: { startNewSession?: boolean; workspacePath?: string } | null): { startNewSession?: boolean; workspacePath?: string } => {
-    if (!flow) return {}
-    return {
-      ...(flow.startNewSession === true ? { startNewSession: true } : {}),
-      ...(String(flow.workspacePath ?? '').trim() ? { workspacePath: String(flow.workspacePath).trim() } : {}),
-    }
-  }, [])
-
   const startRun = useCallback(async () => {
     if (state.mode !== 'mode1') return
-    // 模板态：运行前自动「创建实例」再运行（用户裁决 q4：实例名 = 模板名 + 序号，
-    // 零打断；模板本身不变）。
+    // 模板态：运行前自动「创建实例」（含开启新会话/覆盖确认）再运行——
+    // 创建是异步的（可能弹确认框），后续启动统一经 afterCreate 回调接续。
     if (state.currentKind === 'flowTemplate') {
-      const created = await createInstanceFromCanvas()
-      if (!created) return
-      // 创建成功后画布已切到实例态，直接运行该实例（无需再次读取 state）
-      const hasStart = state.canvas.nodes.some((node) => node.kind === 'start')
-      const hasEnd = state.canvas.nodes.some((node) => node.kind === 'end')
-      if (!hasStart || !hasEnd) {
-        notify('error', t.needStartAndEnd)
-        return
-      }
-      try {
-        const runId = await runControl.startRun(state.sessionId, created.id, runOptionsOf(created))
-        if (runId) notify('success', t.toastRunning)
-      } catch (error) {
-        toastError(error)
-      }
+      void createInstanceFromCanvas((created) => {
+        const flow = created as import('../../host/shared/graph-model.js').WorkflowDocument
+        const hasStart = state.canvas.nodes.some((node) => node.kind === 'start')
+        const hasEnd = state.canvas.nodes.some((node) => node.kind === 'end')
+        if (!hasStart || !hasEnd) {
+          notify('error', t.needStartAndEnd)
+          return
+        }
+        void runControl.startRun(flow.sessionId, flow.id).then((runId) => {
+          if (runId) notify('success', t.toastRunning)
+        }).catch((error) => toastError(error))
+      })
       return
     }
     const flow = currentFlowOf(state)
@@ -80,18 +71,20 @@ export function useRunActions(
     const saved = await saveCanvas()
     if (!saved) return
     try {
-      const runId = await runControl.startRun(state.sessionId, saved.id, runOptionsOf(saved))
+      // 运行当前实例：会话 = 实例绑定的会话（不再支持运行期新建会话）
+      const runId = await runControl.startRun((saved as import('../../host/shared/graph-model.js').WorkflowDocument).sessionId, saved.id)
       if (runId) notify('success', t.toastRunning)
     } catch (error) {
       toastError(error)
     }
-  }, [notify, runControl, saveCanvas, createInstanceFromCanvas, state.canvas.nodes, state.mode, state.sessionId, runOptionsOf, t.needStartAndEnd, t.toastRunning, toastError])
+  }, [createInstanceFromCanvas, notify, runControl, saveCanvas, state, t.needStartAndEnd, t.toastRunning, toastError])
 
   const stopRun = useCallback(async () => {
     if (!state.run.runId) return
     try {
-      // 实际执行会话（新会话运行时与当前会话不同）：按 run.sessionId 归属
-      await runControl.stopRun(state.run.sessionId ?? state.sessionId, state.run.runId)
+      // 归属会话 = run 实际执行会话 ?? 实例绑定的会话（新逻辑二者恒一致）
+      const flow = currentFlowOf(state)
+      await runControl.stopRun(state.run.sessionId ?? flow?.sessionId ?? state.sessionId, state.run.runId)
       notify('info', t.toastStopped)
     } catch (error) {
       toastError(error)
@@ -104,8 +97,8 @@ export function useRunActions(
     const flow = currentFlowOf(state)
     if (!flow) return
     try {
-      // 会话隔离：历史查询必须携带会话（Bug 14）；新会话运行展示其实际执行会话的历史
-      const historySessionId = state.run.sessionId ?? state.sessionId
+      // 会话隔离：历史查询必须携带实例归属会话（Bug 14；新逻辑即执行会话）
+      const historySessionId = state.run.sessionId ?? flow.sessionId
       const items = await remote.call(EP.EP_RUN_HISTORY, { sessionId: historySessionId, flowId: flow.id }) as unknown[]
       dispatch({ type: 'RUN_HISTORY_LOADED', items: Array.isArray(items) ? items as [] : [] })
     } catch (error) {
@@ -117,8 +110,8 @@ export function useRunActions(
     const flow = currentFlowOf(state)
     if (!flow) return
     try {
-      // 断点续跑在原执行会话内进行（新会话运行的恢复同样用 run.sessionId）
-      const result = await remote.call(EP.EP_RUN_RESUME, { sessionId: state.run.sessionId ?? state.sessionId, flowId: flow.id, runId }) as { runId?: unknown }
+      // 断点续跑在实例绑定的会话内进行（新逻辑即原执行会话）
+      const result = await remote.call(EP.EP_RUN_RESUME, { sessionId: state.run.sessionId ?? flow.sessionId, flowId: flow.id, runId }) as { runId?: unknown }
       const newRunId = String(result?.runId ?? '')
       if (newRunId) dispatch({ type: 'RUN_STARTED', runId: newRunId, ...(state.run.sessionId ? { runSessionId: state.run.sessionId } : {}) })
       dispatch({ type: 'HISTORY_OPEN', open: false })
@@ -130,7 +123,8 @@ export function useRunActions(
 
   // ---------- 模式二服务 ----------
   const startService = useCallback(async () => {
-    // 模板态：运行前自动「创建服务实例」再启动（与模式一模板运行语义一致）
+    // 模板态：运行前自动「创建服务实例」（含开启新会话/覆盖确认）再启动——
+    // 与模式一模板运行语义一致；后续启动统一经 afterCreate 回调接续。
     if (state.currentKind === 'flowTemplate') {
       const template = currentFlowTemplateOf(state)
       if (!template) return
@@ -145,15 +139,12 @@ export function useRunActions(
         notify('error', t.needParentForService)
         return
       }
-      const draft = serviceControl.instantiateFromTemplate(template, state.sessionId)
-      const saved = await serviceControl.saveService(draft, state.canvas.nodes, state.canvas.edges)
-      if (!saved) return
-      try {
-        await serviceControl.startService(saved.id, saved.sessionId)
-        notify('success', t.toastServiceStarted)
-      } catch (error) {
-        toastError(error)
-      }
+      void createInstanceFromCanvas((created) => {
+        const service = created as import('../../host/shared/types.js').ServiceState
+        void serviceControl.startService(service.id, service.sessionId).then(() => {
+          notify('success', t.toastServiceStarted)
+        }).catch((error) => toastError(error))
+      })
       return
     }
     const service = currentServiceOf(state)
@@ -172,12 +163,13 @@ export function useRunActions(
     const saved = await saveCanvas()
     if (!saved) return
     try {
-      await serviceControl.startService(service.id, service.sessionId)
+      // 启动当前服务实例：会话 = 实例绑定的会话
+      await serviceControl.startService((saved as import('../../host/shared/types.js').ServiceState).id, (saved as import('../../host/shared/types.js').ServiceState).sessionId)
       notify('success', t.toastServiceStarted)
     } catch (error) {
       toastError(error)
     }
-  }, [notify, saveCanvas, serviceControl, state.canvas.nodes, state.mode, t.needParentForService, t.needStartAndEnd, t.toastServiceStarted, toastError])
+  }, [createInstanceFromCanvas, notify, saveCanvas, serviceControl, state, t.needParentForService, t.needStartAndEnd, t.toastServiceStarted, toastError])
 
   const stopService = useCallback(async () => {
     const service = currentServiceOf(state)

@@ -41,10 +41,11 @@ export function useFlowFileSync(
     const poll = async (): Promise<void> => {
       try {
         if (kind === 'workflow') {
-          const doc = await remote.call(EP.EP_GET_WORKFLOW, { sessionId: state.sessionId, id }) as WorkflowDocument | null
-          if (cancelled || !doc) return
           const current = state.workflows.find((item) => item.id === id)
           if (!current) return
+          // 工作台全局化：读取归属必须用实例绑定的会话（可能不是当前主会话）
+          const doc = await remote.call(EP.EP_GET_WORKFLOW, { sessionId: current.sessionId, id }) as WorkflowDocument | null
+          if (cancelled || !doc) return
           const remoteRevision = Number(doc.revision ?? 0)
           // 本地已应用该版本（本地保存后 WORKFLOW_UPDATED 已同步）→ 跳过
           if (appliedRef.current?.kind === 'workflow' && appliedRef.current.id === id
@@ -62,10 +63,10 @@ export function useFlowFileSync(
           appliedRef.current = { kind, id, revision: remoteRevision, updatedAt: doc.updatedAt ?? '' }
           dispatch({ type: 'OPEN_FLOW', flow: doc })
         } else {
-          const doc = await remote.call(EP.EP_GET_SERVICE, { sessionId: state.sessionId, id }) as ServiceState | null
-          if (cancelled || !doc) return
           const current = state.services.find((item) => item.id === id)
           if (!current) return
+          const doc = await remote.call(EP.EP_GET_SERVICE, { sessionId: current.sessionId, id }) as ServiceState | null
+          if (cancelled || !doc) return
           const remoteRevision = Number(doc.revision ?? 0)
           if (appliedRef.current?.kind === 'service' && appliedRef.current.id === id
             && appliedRef.current.revision === remoteRevision && appliedRef.current.updatedAt === doc.updatedAt) return
@@ -93,5 +94,6 @@ export function useFlowFileSync(
     }
     // state.dirty 等快照必须在每次轮询引用当前值——依赖数组仅 key 变化时重建定时器，
     // dirty 状态经 ref 保持最新。为正确性，deps 含 dirty：重建定时器成本可接受。
-  }, [dispatch, remote, state.sessionId, state.currentKind, state.currentId, state.dirty, onExternalChange])
+    // 注意：不再依赖 state.sessionId（实例归属由实例自身会话承载）。
+  }, [dispatch, remote, state.currentKind, state.currentId, state.dirty, onExternalChange])
 }

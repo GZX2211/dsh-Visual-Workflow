@@ -192,8 +192,10 @@ export class OpenAiApi {
     onDelta?: (delta: string) => void,
     options: RunChatOptions = {},
   ): Promise<ChatRunResult> {
-    // 「服务级新会话」：服务文档 startNewSession=true 时每请求新建独立会话（cwd=工作区），
-    // 请求间不连续（不复用断点）；关闭时保持 userId→sessionId 映射 + 断点续跑（现有语义）。
+    // 「服务级新会话」（旧数据兼容）：服务文档 startNewSession=true 时每请求新建
+    // 独立会话（cwd=工作区），请求间不连续（不复用断点）；关闭时保持
+    // userId→sessionId 映射 + 断点续跑。工作台全局化改版后新服务实例不再写入该
+    // 字段（保存端点剥除）——新服务恒为「userId 固定会话 + 断点续跑」语义。
     const serviceDoc = await this.deps.store.getServiceById(this.deps.serviceId).catch(() => null)
     const startNewSession = serviceDoc?.startNewSession === true
     const workspacePath = String(serviceDoc?.workspacePath ?? '').trim()
