@@ -51,11 +51,21 @@ export class CordisSessionProvider implements SessionProvider {
     // 供 header 记录，再在 setup 内 agentPresets.mount，使官方工具/prompt 段对 agent 可见）。
     // 只写 header 不 mount 会让新会话的根 Agent 仅继承全局层（宿主 + 插件 wf_* + MCP）工具，
     // 官方 standard 预设的工具（bash/pwsh/fs/jobs/skill/goal/subagent/workflow/web…）全部缺失。
+    //
+    // 关键约定：setup 必须「await 挂载但【不返回】mount 的结果」。官方 agent 工厂在
+    // setup 完成后会对返回值调用 `.commit()`（dsh-agent-loop setupAndPublish：
+    // `(await setup?.(agent.ctx))?.commit()`）。agentPresets.mount 返回的是被组装
+    // 的 preset 对象（无 `.commit` 方法），若把它作为 setup 返回值，触发时会在
+    // `.commit()` 处抛出 `(intermediate value).commit is not a function`，导致
+    // 定时任务「新会话」模式触发失败。与官方 composeAgent 保持一致：仅执行挂载副作用，
+    // 返回 void（`.commit()` 对空值安全短路；preset 子树随 agent fiber 自动卸载）。
     const presetId = options.agentPreset ?? 'standard'
     const agentPresets = this.ctx.get('agentPresets') as AgentPresetsLike | null | undefined
     if (agentPresets && typeof agentPresets.resolve === 'function' && typeof agentPresets.mount === 'function') {
       const resolvedPresetId = (await agentPresets.resolve(presetId)).id
-      const mountPreset = (agentCtx: unknown): Promise<unknown> => agentPresets.mount!(agentCtx, resolvedPresetId)
+      const mountPreset = async (agentCtx: unknown): Promise<void> => {
+        await agentPresets.mount!(agentCtx, resolvedPresetId)
+      }
       const sessionId = `sched-${randomUUID().replace(/-/g, '').slice(0, 16)}`
       await agents.create({
         sessionId,

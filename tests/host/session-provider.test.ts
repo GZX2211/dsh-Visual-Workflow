@@ -71,8 +71,14 @@ describe('CordisSessionProvider.createSession 预设装配', () => {
 
     // 触发 setup：把 preset 挂载到 agentCtx（官方工具/prompt 段对 agent 可见）
     const agentCtx = { marker: 'agent' }
-    await (createCall.setup as (ctx: unknown) => Promise<unknown>)(agentCtx)
+    const setupResult = await (createCall.setup as (ctx: unknown) => Promise<unknown>)(agentCtx)
     expect(presets.calls.mount).toEqual([{ agentCtx, id: 'standard' }])
+    // 回归（commit 非函数）：setup 必须「await 挂载但【不返回】mount 结果」。官方
+    // agent 工厂在 setup 完成后对返回值调 `.commit()`（dsh-agent-loop）；mount 返回
+    // 的是 preset 对象（无 commit），若把它当作 setup 返回值会抛
+    // `(intermediate value).commit is not a function`。此处必须解析为 void，令
+    // dsh 的 `(await setup?.(ctx))?.commit()` 安全短路。
+    expect(setupResult).toBeUndefined()
   })
 
   it('agentPreset 缺省：默认 standard', async () => {
