@@ -84,7 +84,7 @@ export function LeftPanel(props: LeftPanelProps) {
             className={`wf-lib-tab${libTab === def.key ? ' is-active' : ''}`}
             onClick={() => onSetTab(def.key)}
           >
-            <span className="wf-lib-tab__icon" aria-hidden="true">{def.icon}</span>
+            <span>{def.label}</span>
           </button>
         ))}
       </div>

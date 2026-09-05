@@ -349,11 +349,11 @@ export function StudioLayout(props: StudioLayoutProps) {
         />
       </main>
 
-      {/* 底栏：与左栏相互切换（图片批注新增）。上方为可拖动边界线（上下调整大小）；
-          卡片横向 flex-wrap 动态追加排；Tag 区显示工作流/角色/数据/其他四图标。 */}
+      {/* 底栏：与左栏相互切换（图片批注新增）。上方为可拖动边界线（横向，上下调整大小）；
+          卡片横向 flex-wrap 动态追加排；Tag 区为横向文字（工作流/角色/数据/其他）。 */}
       {bottomOpen
         ? (
-            <>
+            <div className="wf-bottom-area">
               <div
                 className="wf-splitter wf-splitter--horizontal"
                 role="separator"
@@ -366,7 +366,7 @@ export function StudioLayout(props: StudioLayoutProps) {
                 open={bottomOpen}
                 height={state.panels.bottomHeight}
               />
-            </>
+            </div>
           )
         : null}
 

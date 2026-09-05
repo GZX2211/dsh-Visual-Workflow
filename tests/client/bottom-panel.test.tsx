@@ -211,10 +211,12 @@ describe('底栏与折叠循环（DOM）', () => {
     expect(document.querySelector('.wf-bottombar')).toBeNull()
   })
 
-  it('底栏：Tag 区 4 图标 + 默认工作流分区（实例/工作流模板）+ 切换角色 Tag 随动', async () => {
+  it('底栏：Tag 区横向文字（工作流/角色/数据/其他）+ 默认工作流分区 + 切换随动 + 水平边界线可拖', async () => {
     await renderStudio()
     const btn = document.querySelector('.wf-toolbar__panels') as HTMLButtonElement
     await act(async () => { btn.click() }) // mode1 底展
+    // Tag 为横向文字（非图标）；aria-label 亦保留
+    expect(textOf('.wf-bottombar__tag')).toEqual(['工作流', '角色', '数据', '其他'])
     expect(Array.from(document.querySelectorAll('.wf-bottombar__tag')).map((item) => item.getAttribute('aria-label'))).toEqual(['工作流', '角色', '数据', '其他'])
     // 默认工作流 Tag：实例 / 工作流模板 两分区
     const workflowGroups = textOf('.wf-bottombar__group-title')
@@ -228,6 +230,21 @@ describe('底栏与折叠循环（DOM）', () => {
     expect(roleGroups).toContain('角色模板')
     // 底栏卡片只显示名称（无描述/图标）；研究员出现
     expect(textOf('.wf-hcard__name')).toContain('研究员')
+    // 底栏上边界线为横向（水平）调整高度：拖动后 bottomHeight 变化
+    const splitter = document.querySelector('.wf-splitter--horizontal') as HTMLElement
+    expect(splitter).toBeTruthy()
+    const barBefore = (document.querySelector('.wf-bottombar') as HTMLElement)?.style.height
+    await act(async () => {
+      splitter!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 0, clientY: 300, button: 0 }))
+    })
+    await act(async () => {
+      window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 0, clientY: 200 }))
+    })
+    await act(async () => {
+      window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 0, clientY: 200 }))
+    })
+    const barAfter = (document.querySelector('.wf-bottombar') as HTMLElement)?.style.height
+    expect(barAfter).not.toBe(barBefore)
   })
 })
 

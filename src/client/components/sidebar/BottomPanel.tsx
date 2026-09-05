@@ -56,7 +56,7 @@ export function BottomPanel(props: BottomPanelProps) {
 
   return (
     <aside className={`wf-bottombar${open ? '' : ' is-collapsed'}`} style={{ height: open ? height : undefined }}>
-      {/* Tag 区：工作流/角色/数据/其他 四图标（竖向；不显示文字） */}
+      {/* Tag 区：工作流/角色/数据/其他 横向文字（不显示图标）；切换时下方卡片随动 */}
       <div className="wf-bottombar__tags" role="tablist">
         {model.tabs.map((def) => (
           <button
@@ -68,7 +68,7 @@ export function BottomPanel(props: BottomPanelProps) {
             className={`wf-bottombar__tag${libTab === def.key ? ' is-active' : ''}`}
             onClick={() => onSetTab(def.key)}
           >
-            <span className="wf-bottombar__tag-icon" aria-hidden="true">{def.icon}</span>
+            {def.label}
           </button>
         ))}
       </div>
