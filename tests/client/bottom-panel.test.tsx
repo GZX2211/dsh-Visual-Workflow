@@ -110,17 +110,14 @@ async function dragHcardTo(cardText: string, clientX: number, clientY: number): 
 // ---------------------------------------------------------------------------
 
 describe('面板折叠/切换循环（纯逻辑）', () => {
-  it('nextPanelMode：0 → 1 → 2 → 3 → 4 → 5 → 0 循环', () => {
+  it('nextPanelMode：0 → 1 → 2 → 0 循环（左展→切换底栏→收起底栏→左展）', () => {
     expect(nextPanelMode(0)).toBe(1)
     expect(nextPanelMode(1)).toBe(2)
-    expect(nextPanelMode(2)).toBe(3)
-    expect(nextPanelMode(3)).toBe(4)
-    expect(nextPanelMode(4)).toBe(5)
-    expect(nextPanelMode(5)).toBe(0)
+    expect(nextPanelMode(2)).toBe(0)
   })
 
-  it('leftPanelOpenOf / bottomPanelOpenOf 按循环位置推导', () => {
-    // 0:左展 1:底展 2:底收 3:底展 4:左展 5:左收
+  it('leftPanelOpenOf / bottomPanelOpenOf 按循环位置推导（3 态）', () => {
+    // 0:左展开 1:切换底栏(底展开) 2:收起底栏(全隐)
     const mk = (mode: number): StudioState => ({ ...createInitialState('s-1'), panels: { ...createInitialState('s-1').panels, mode } })
     expect(leftPanelOpenOf(mk(0))).toBe(true)
     expect(bottomPanelOpenOf(mk(0))).toBe(false)
@@ -128,12 +125,6 @@ describe('面板折叠/切换循环（纯逻辑）', () => {
     expect(bottomPanelOpenOf(mk(1))).toBe(true)
     expect(leftPanelOpenOf(mk(2))).toBe(false)
     expect(bottomPanelOpenOf(mk(2))).toBe(false)
-    expect(leftPanelOpenOf(mk(3))).toBe(false)
-    expect(bottomPanelOpenOf(mk(3))).toBe(true)
-    expect(leftPanelOpenOf(mk(4))).toBe(true)
-    expect(bottomPanelOpenOf(mk(4))).toBe(false)
-    expect(leftPanelOpenOf(mk(5))).toBe(false)
-    expect(bottomPanelOpenOf(mk(5))).toBe(false)
   })
 })
 
@@ -178,7 +169,7 @@ describe('属性栏显隐判定（纯逻辑）', () => {
 // ---------------------------------------------------------------------------
 
 describe('底栏与折叠循环（DOM）', () => {
-  it('折叠/切换按钮：左展→切底→底收→底展→切左→左收→左展（6 态循环）', async () => {
+  it('折叠/切换按钮：左展→切换底栏→收起底栏→左展（3 态循环）', async () => {
     await renderStudio()
     const btn = document.querySelector('.wf-toolbar__panels') as HTMLButtonElement
     expect(btn).toBeTruthy()
@@ -186,22 +177,11 @@ describe('底栏与折叠循环（DOM）', () => {
     // 初始 = 左栏展开（mode 0）
     expect(docrailCollapsed()).toBe(false)
     expect(document.querySelector('.wf-bottombar')).toBeNull()
-    // click → mode1 底展
+    // click → mode1 切换底栏（底展，左隐）
     await act(async () => { btn.click() })
     expect(docrailCollapsed()).toBe(true)
     expect(document.querySelector('.wf-bottombar')).toBeTruthy()
-    // click → mode2 底收（全隐）
-    await act(async () => { btn.click() })
-    expect(docrailCollapsed()).toBe(true)
-    expect(document.querySelector('.wf-bottombar')).toBeNull()
-    // click → mode3 底展
-    await act(async () => { btn.click() })
-    expect(document.querySelector('.wf-bottombar')).toBeTruthy()
-    // click → mode4 左展
-    await act(async () => { btn.click() })
-    expect(docrailCollapsed()).toBe(false)
-    expect(document.querySelector('.wf-bottombar')).toBeNull()
-    // click → mode5 左收（全隐）
+    // click → mode2 收起底栏（全隐）
     await act(async () => { btn.click() })
     expect(docrailCollapsed()).toBe(true)
     expect(document.querySelector('.wf-bottombar')).toBeNull()
@@ -211,11 +191,15 @@ describe('底栏与折叠循环（DOM）', () => {
     expect(document.querySelector('.wf-bottombar')).toBeNull()
   })
 
-  it('底栏：Tag 区横向文字（工作流/角色/数据/其他）+ 默认工作流分区 + 切换随动 + 水平边界线可拖', async () => {
+  it('底栏：Tag 区【左侧竖排、文字横向】+ 默认工作流分区 + 切换随动 + 水平边界线可拖', async () => {
     await renderStudio()
     const btn = document.querySelector('.wf-toolbar__panels') as HTMLButtonElement
-    await act(async () => { btn.click() }) // mode1 底展
-    // Tag 为横向文字（非图标）；aria-label 亦保留
+    await act(async () => { btn.click() }) // mode1 切换底栏
+    // Tag 区位于底栏左侧（tags 是 bottombar 第一个子元素，列排布）
+    const tags = document.querySelector('.wf-bottombar__tags') as HTMLElement
+    expect(tags).toBeTruthy()
+    expect(tags.parentElement?.classList.contains('wf-bottombar')).toBe(true)
+    // Tag 文字为横向（非图标）；aria-label 亦保留
     expect(textOf('.wf-bottombar__tag')).toEqual(['工作流', '角色', '数据', '其他'])
     expect(Array.from(document.querySelectorAll('.wf-bottombar__tag')).map((item) => item.getAttribute('aria-label'))).toEqual(['工作流', '角色', '数据', '其他'])
     // 默认工作流 Tag：实例 / 工作流模板 两分区
@@ -230,7 +214,7 @@ describe('底栏与折叠循环（DOM）', () => {
     expect(roleGroups).toContain('角色模板')
     // 底栏卡片只显示名称（无描述/图标）；研究员出现
     expect(textOf('.wf-hcard__name')).toContain('研究员')
-    // 底栏上边界线为横向（水平）调整高度：拖动后 bottomHeight 变化
+    // 水平边界线（底栏顶部、横向）存在；拖动后 bottomHeight 变化
     const splitter = document.querySelector('.wf-splitter--horizontal') as HTMLElement
     expect(splitter).toBeTruthy()
     const barBefore = (document.querySelector('.wf-bottombar') as HTMLElement)?.style.height

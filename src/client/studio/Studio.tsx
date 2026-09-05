@@ -37,7 +37,7 @@ import { useKeyShortcuts } from '../hooks/useKeyShortcuts.js'
 import {
   currentFlowOf, currentServiceOf, currentFlowTemplateOf, editorDataOf, isRunningOf,
   leftPanelOpenOf, bottomPanelOpenOf, inspectorOpenOf, panelsFullyCollapsedOf, nextPanelMode,
-  PANEL_MODE_NONE_BOTTOM,
+  PANEL_MODE_NONE,
 } from './studio-state.js'
 import { StudioLayout } from './StudioLayout.js'
 import type { CanvasApi } from '../components/canvas/GraphCanvas.js'
@@ -173,7 +173,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
     // 1) 宿主切到分栏模式（持久化）
     onEnterSplit?.()
     // 2) 折叠工作台自身侧栏（左栏与底栏全部隐藏，仅留画布；右侧属性栏由选中推导，随之收起）
-    dispatch({ type: 'PANELS_SET', panels: { mode: PANEL_MODE_NONE_BOTTOM } })
+    dispatch({ type: 'PANELS_SET', panels: { mode: PANEL_MODE_NONE } })
     // 3) 触发真正运行
     void (state.mode === 'mode2' ? run.startService() : run.startRun())
   }, [dispatch, onEnterSplit, run, state.mode])
@@ -188,7 +188,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
   // 分栏模式下工作台初始折叠自身左右栏（沉浸式；用户可再切换展开）
   useEffect(() => {
     if (viewMode === 'split') {
-      dispatch({ type: 'PANELS_SET', panels: { mode: PANEL_MODE_NONE_BOTTOM } })
+      dispatch({ type: 'PANELS_SET', panels: { mode: PANEL_MODE_NONE } })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

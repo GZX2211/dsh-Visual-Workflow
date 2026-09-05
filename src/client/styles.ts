@@ -138,13 +138,13 @@ export const styles = `
 .wf-lib-tab.is-active{color:var(--wf-brand);background:color-mix(in srgb,var(--wf-brand) 10%,transparent);box-shadow:inset 0 -2px 0 var(--wf-brand)}
 /* ---- 底栏（新增；与左栏相互切换；卡片横向 flex-wrap 动态追加排） ---- */
 .wf-bottom-area{display:flex;flex-direction:column;min-height:0;overflow:hidden}
-.wf-bottombar{flex:none;display:flex;flex-direction:column;background:var(--wf-layer);border-top:1px solid var(--wf-border);min-height:0;overflow:hidden}
+.wf-bottombar{flex:none;display:flex;flex-direction:row;background:var(--wf-layer);border-top:1px solid var(--wf-border);min-height:0;overflow:hidden}
 .wf-bottombar.is-collapsed{visibility:hidden;pointer-events:none;height:0}
-/* Tag 区：横向文字（工作流/角色/数据/其他），不显示图标 */
-.wf-bottombar__tags{flex:none;display:flex;align-items:center;gap:4px;padding:6px 12px 0;border-bottom:1px solid var(--wf-border)}
-.wf-bottombar__tag{border:0;border-radius:9px 9px 0 0;background:transparent;color:var(--wf-ink-2);padding:7px 14px;font-size:11px;font-weight:650;cursor:pointer;white-space:nowrap}
+/* Tag 区：位于底栏【左侧】（竖向排布），但每个 Tag 文字是【横向】的（工作流/角色/数据/其他），不显示图标 */
+.wf-bottombar__tags{flex:none;width:88px;display:flex;flex-direction:column;align-items:stretch;gap:2px;padding:8px 6px;border-right:1px solid var(--wf-border)}
+.wf-bottombar__tag{border:1px solid transparent;border-radius:8px;background:transparent;color:var(--wf-ink-2);padding:7px 8px;font-size:11px;font-weight:650;cursor:pointer;white-space:nowrap;text-align:center}
 .wf-bottombar__tag:hover{color:var(--wf-ink);background:color-mix(in srgb,var(--wf-brand) 6%,transparent)}
-.wf-bottombar__tag.is-active{color:var(--wf-brand);background:color-mix(in srgb,var(--wf-brand) 10%,transparent);box-shadow:inset 0 -2px 0 var(--wf-brand)}
+.wf-bottombar__tag.is-active{color:var(--wf-brand);background:color-mix(in srgb,var(--wf-brand) 10%,transparent);border-color:color-mix(in srgb,var(--wf-brand) 45%,var(--wf-border))}
 .wf-bottombar__scroll{flex:1;min-width:0;min-height:0;overflow:auto;overscroll-behavior:contain;padding:8px 12px;display:flex;flex-direction:column;gap:8px;scrollbar-width:thin}
 .wf-bottombar__section{display:flex;flex-direction:column;gap:6px}
 .wf-bottombar__group{display:flex;align-items:center;gap:8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--wf-ink-2)}
@@ -155,10 +155,11 @@ export const styles = `
 .wf-hcard:hover{border-color:color-mix(in srgb,var(--wf-brand) 55%,var(--wf-border-strong))}
 .wf-hcard.is-active{border-color:color-mix(in srgb,var(--wf-brand) 45%,var(--wf-border));background:color-mix(in srgb,var(--wf-brand) 12%,var(--wf-layer));color:var(--wf-brand)}
 .wf-hcard__name{display:block;width:100%;overflow:hidden;text-overflow:ellipsis}
-/* 底栏上边界拖动线（上下调整大小；图片批注：边界线同样可拖动） */
-.wf-splitter--horizontal{position:relative;z-index:12;flex:none;min-height:8px;height:8px;cursor:row-resize;touch-action:none;background:var(--wf-layer-2);outline:0;border-top:1px solid var(--wf-border)}
-.wf-splitter--horizontal::before{content:"";position:absolute;inset:3px 0;background:var(--wf-border)}
-.wf-splitter--horizontal:hover::before,.wf-splitter--horizontal:focus-visible::before,.wf-splitter--horizontal.is-dragging::before{inset:2px 0;background:var(--wf-brand)}
+/* 底栏上边界拖动线（水平、位于底栏顶部，上下调整大小；图片批注：边界线同样可拖动）。
+   双类选择器覆盖 .wf-splitter 的竖向默认（width:9px/col-resize），确保为横向。 */
+.wf-splitter.wf-splitter--horizontal{position:relative;z-index:12;flex:none;min-width:0;width:auto;min-height:8px;height:8px;cursor:row-resize;touch-action:none;background:var(--wf-layer-2);outline:0;border-top:1px solid var(--wf-border)}
+.wf-splitter.wf-splitter--horizontal::before{content:"";position:absolute;inset:3px 0;background:var(--wf-border)}
+.wf-splitter.wf-splitter--horizontal:hover::before,.wf-splitter.wf-splitter--horizontal:focus-visible::before,.wf-splitter.wf-splitter--horizontal.is-dragging::before{inset:2px 0;background:var(--wf-brand)}
 .wf-docgroup{display:flex;align-items:center;justify-content:space-between;padding:5px 7px 2px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--wf-ink-2)}
 .wf-docgroup__add{width:20px;height:20px;min-width:20px;border:1px solid var(--wf-border-strong);border-radius:6px;background:transparent;color:var(--wf-ink-2);font-size:13px;line-height:0;padding:0;display:flex;align-items:center;justify-content:center;cursor:pointer}
 .wf-docgroup__add:hover{border-color:var(--wf-brand);color:var(--wf-brand)}

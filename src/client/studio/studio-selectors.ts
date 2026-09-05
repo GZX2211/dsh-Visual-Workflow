@@ -106,37 +106,34 @@ export function editorDataOf(state: StudioState): EditorData | null {
 }
 
 // ---------------------------------------------------------------------------
-// 折叠切换循环（6 态）与面板显隐推导
+// 折叠切换循环（3 态）与面板显隐推导
 // ---------------------------------------------------------------------------
 
-/** 折叠/切换循环长度（共 6 态）。 */
-export const PANEL_CYCLE_LEN = 6
-/** 循环位置枚举：0=左栏展开 1=底栏展开 2=底栏收起(全隐) 3=底栏展开 4=左栏展开 5=左栏收起(全隐)。 */
+/** 折叠/切换循环长度（共 3 态：左展开→切换底栏→收起底栏→左展开）。 */
+export const PANEL_CYCLE_LEN = 3
+/** 循环位置枚举：0=左栏展开 1=底栏展开 2=收起底栏/左栏(全隐)。 */
 export const PANEL_MODE_LEFT = 0
 export const PANEL_MODE_BOTTOM = 1
-export const PANEL_MODE_NONE_BOTTOM = 2
-export const PANEL_MODE_BOTTOM2 = 3
-export const PANEL_MODE_LEFT2 = 4
-export const PANEL_MODE_NONE_LEFT = 5
+export const PANEL_MODE_NONE = 2
 
-/** 折叠/切换下一步循环位置（左展→切底→底收→底展→切左→左收→左展）。 */
+/** 折叠/切换下一步循环位置（左展→切换底栏→收起底栏→左展）。 */
 export function nextPanelMode(mode: number): number {
   return (mode + 1) % PANEL_CYCLE_LEN
 }
 
-/** 左栏是否展开（循环位置 0 或 4）。 */
+/** 左栏是否展开（循环位置 0）。 */
 export function leftPanelOpenOf(state: StudioState): boolean {
-  return state.panels.mode === PANEL_MODE_LEFT || state.panels.mode === PANEL_MODE_LEFT2
+  return state.panels.mode === PANEL_MODE_LEFT
 }
 
-/** 底栏是否展开（循环位置 1 或 3）。 */
+/** 底栏是否展开（循环位置 1）。 */
 export function bottomPanelOpenOf(state: StudioState): boolean {
-  return state.panels.mode === PANEL_MODE_BOTTOM || state.panels.mode === PANEL_MODE_BOTTOM2
+  return state.panels.mode === PANEL_MODE_BOTTOM
 }
 
-/** 是否处于「两侧全隐」态（循环位置 2 或 5；仅画布）。 */
+/** 是否处于「全隐」态（循环位置 2：收起底栏/左栏，仅画布）。 */
 export function panelsFullyCollapsedOf(state: StudioState): boolean {
-  return state.panels.mode === PANEL_MODE_NONE_BOTTOM || state.panels.mode === PANEL_MODE_NONE_LEFT
+  return state.panels.mode === PANEL_MODE_NONE
 }
 
 /**
