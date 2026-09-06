@@ -106,6 +106,23 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
   const highlightedNodeIds = useMemo(() => runningNodeIds(state.run.snapshot), [state.run.snapshot])
   const runStatusByNode = useMemo(() => runStatusMap(state.run.snapshot), [state.run.snapshot])
 
+  // 运行状态对账（画布节点/运行按钮回显，防 run 状态被复位后失联）：
+  // useRunPolling 依赖 state.run.runId 拉取全量快照。若运行已开始但 state.run 未跟踪
+  // （分栏重挂载/折叠面板复位导致 RUN_STARTED 丢失、或运行由外部/定时任务触发），
+  // 由 activeRuns（全量活跃 run 摘要轮询）补发 RUN_STARTED，使 useRunPolling 重新拉取
+  // 快照，画布节点状态与「运行」按钮随之回显。仅处理运行中；暂停由断点续跑流程接管，
+  // 避免与 useRunPolling 的终态清空（RUN_CLEARED）形成循环。
+  useEffect(() => {
+    if (state.mode !== 'mode1') return
+    if (!currentFlow) return
+    const active = state.activeRuns.find(
+      (a) => a.flowId === currentFlow.id && a.sessionId === currentFlow.sessionId && a.status === 'running',
+    )
+    if (!active) return
+    if (state.run.runId === active.runId) return
+    dispatch({ type: 'RUN_STARTED', runId: active.runId, runSessionId: active.sessionId })
+  }, [currentFlow, dispatch, state.activeRuns, state.mode, state.run.runId])
+
   useEffect(() => {
     dispatch({ type: 'SET_SESSION', sessionId })
   }, [dispatch, sessionId])

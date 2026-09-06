@@ -67,8 +67,20 @@ export function nodeChildSignature(node: GraphNode, resolvedTools: string[], rol
   })
 }
 
-/** provider 首选序（旧项目语义：fork > spawn > codex > claude-code > dsh-sdk > acp > 首个可用）。 */
-const PROVIDER_PREFERENCE = ['fork', 'spawn', 'codex', 'claude-code', 'dsh-sdk', 'acp'] as const
+/**
+ * provider 首选序（spawn > fork > codex > claude-code > dsh-sdk > acp > 首个可用）。
+ *
+ * 为什么要 spawn 优先（用户裁决 + 官方取证）：
+ *   - 官方 `dsh-subagent-fork-in-process`：`inheritsParentContext = true`，其
+ *     `prepareContinuable()` 返回 `completedTurnPrefix(parent)` —— 把父代理（编排根
+ *     Agent）从会话开头到最近一次 `turn/end` 的整段已完成对话作为种子灌进子代理，
+ *     导致节点子代理拿到父代理的编排指令、提示词与完整上下文（越权）。
+ *   - 官方 `dsh-subagent-spawn-in-process`：`inheritsParentContext = false`，
+ *     `prepareContinuable()` 返回 `{}` —— 子代理是全新会话、own system prompt、
+ *     zero parent context。这正是「每个节点独立角色 / 独立上下文」工作流所需语义。
+ *   - 若 spawn 未注册（极少数部署只挂 fork）则回退 fork，保证运行仍可用。
+ */
+const PROVIDER_PREFERENCE = ['spawn', 'fork', 'codex', 'claude-code', 'dsh-sdk', 'acp'] as const
 
 /** 从可用 provider 清单中挑选（首选序优先，否则清单第一个；无可选返回 null）。 */
 export function pickProviderName(available: string[]): string | null {
@@ -519,7 +531,7 @@ export class NodeAgentRunner implements NodeRunner {
     if (existing && existing.signature === signature) return { childId: existing.childId, created: false }
 
     const provider = pickProviderName(subagents.list())
-    if (!provider) throw new Error('没有可用的子代理 provider（预期 fork 或 spawn）')
+    if (!provider) throw new Error('没有可用的子代理 provider（预期 spawn 或 fork）')
     // 白名单为空 → 不传 toolFilter（子代理继承父代理工具集边界由宿主组合决定）；
     // wf_run_node/wf_finish 永不进入 allow（§4.4.2 规则 7）
     const toolFilter = tools.length > 0 ? { allow: [...tools] } : undefined

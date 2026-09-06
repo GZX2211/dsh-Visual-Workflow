@@ -197,11 +197,20 @@ describe('childKey / nodeChildSignature / pickProviderName', () => {
     expect(nodeChildSignature(base, ['read'], '')).not.toBe(signature)
   })
 
-  it('pickProviderName：首选序 fork>spawn>codex>claude-code>dsh-sdk>acp；无首选回退首个；空清单 null', () => {
-    expect(pickProviderName(['acp', 'spawn', 'fork'])).toBe('fork')
+  it('pickProviderName：首选序 spawn>fork>codex>claude-code>dsh-sdk>acp；无首选回退首个；空清单 null', () => {
+    expect(pickProviderName(['acp', 'spawn', 'fork'])).toBe('spawn')
     expect(pickProviderName(['acp', 'codex'])).toBe('codex')
     expect(pickProviderName(['unknown-only'])).toBe('unknown-only')
     expect(pickProviderName([])).toBeNull()
+  })
+
+  it('spawn 优先越权隔离回归：节点子代理不继承父编排上下文；仅 spawn 缺失时回退 fork', () => {
+    // 官方：fork.inheritsParentContext=true（completedTurnPrefix 父会话种子）；spawn.inheritsParentContext=false（零父上下文）。
+    // 工作流节点必须走 spawn（own session / own system prompt / zero parent context），否则父代理对话/提示词整段泄露给子节点。
+    expect(pickProviderName(['fork', 'spawn'])).toBe('spawn')
+    expect(pickProviderName(['spawn'])).toBe('spawn')
+    // 仅 fork 可用（spawn 未注册）时仍可回退，保证运行可用而非崩溃
+    expect(pickProviderName(['fork', 'acp'])).toBe('fork')
   })
 })
 
@@ -394,7 +403,7 @@ describe('NodeAgentRunner 创建/复用/派发', () => {
     expect(result).toEqual({ childId: 'child-1', created: true })
     expect(h.subagents.started).toHaveLength(1)
     const spec = h.subagents.started[0]
-    expect(spec.provider).toBe('fork') // 首选序
+    expect(spec.provider).toBe('spawn') // 首选序（零父上下文，避免父编排/上下文泄露）
     expect(spec.label).toBe('节点n-a1')
     expect(spec.request.prompt).toEqual([{ type: 'text', text: '任务块' }]) // 首条消息=完整任务块
     expect(spec.request.persona).toBeUndefined() // 角色 Prompt 改为 system prompt 段，不再传官方 persona
