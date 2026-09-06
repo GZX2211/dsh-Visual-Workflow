@@ -109,10 +109,11 @@ export function LeftPanel(props: LeftPanelProps) {
                       onPointerDown={(event) => onBeginDrag(event, item.payload)}
                     >
                       <span className="wf-docitem__icon">{item.icon}</span>
-                      <span>
-                        <span className="wf-docitem__label">{item.name}</span>
-                        {/* 工作台全局化：当前主会话对应的实例打「当前」标签（用于区分跨会话实例） */}
-                        {item.isCurrent ? <span className="wf-docitem__badge is-current">{t.currentSessionBadge}</span> : null}
+                      <span className="wf-docitem__texts">
+                        <span className="wf-docitem__title-row">
+                          <span className="wf-docitem__label">{item.name}</span>
+                          {item.isCurrent ? <span className="wf-docitem__badge is-current">{t.currentSessionBadge}</span> : null}
+                        </span>
                         <span className="wf-docitem__path">{item.sub}</span>
                       </span>
                       {statusText ? <span className="wf-docitem__badge">{statusText}</span> : null}

@@ -11,9 +11,9 @@ import { defaultPanels, type PanelLayout, type StudioAction, type StudioState } 
 import { PANEL_CYCLE_LEN } from '../studio/studio-state.js'
 
 /** 面板默认/记忆几何。 */
-export const LEFT_PANEL_DEFAULT = 225
-export const RIGHT_PANEL_DEFAULT = 225
-export const BOTTOM_PANEL_DEFAULT = 180
+export const LEFT_PANEL_DEFAULT = 230
+export const RIGHT_PANEL_DEFAULT = 230
+export const BOTTOM_PANEL_DEFAULT = 170
 
 /** localStorage 键（与旧项目兼容的左右宽度沿用；新增 mode/bottom-height）。 */
 export const LAYOUT_KEYS = {

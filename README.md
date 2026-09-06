@@ -19,12 +19,16 @@
   <a href="#"><img alt="pnpm" src="https://img.shields.io/badge/pnpm-11-orange"></a>
   <a href="#"><img alt="vitest" src="https://img.shields.io/badge/test-vitest-cyan"></a>
   <a href="#"><img alt="license" src="https://img.shields.io/badge/license-MIT-lightgrey"></a>
-  <a href="https://github.com/GZX2211/dsh-Visual-Workflow/releases"><img alt="version" src="https://img.shields.io/github/v/release/GZX2211/dsh-Visual-Workflow?label=version&color=0891b2"></a>
+  <a href="https://github.com/GZX2211/dsh-Visual-Workflow/releases"><img alt="version" src="https://img.shields.io/github/v/release/GZX2211/dsh-Visual-Workflow?label=version&color=0891b2&include_prereleases"></a>
 </p>
 
 ---
 
 ## 核心亮点
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/界面优化.png" width="100%" />
+</p>
 
 ✦ **拖拽式编排**  
   - 零代码拖拽连线，纯 SVG 画布流畅交互、撤销重做一应俱全；无限画布、一键整理，复杂工作流触手可及。

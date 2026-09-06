@@ -143,7 +143,6 @@ dsh-visual-workflow/
 
 ## 其他约定
 
-- git 提交规则：提交信息使用中文，**流程**：任务执行完成 → 提交 git → 写日志 logs.md（无需再次提交）
 - 文档更新：修改 `shared/protocol.ts`（端点名）、`shared/types.ts`（数据结构）、`shared/graph-model.ts`（节点/连线模型）后，**必须同步更新 `docs/架构文档.md`** 对应章节，保持文档与代码零漂移
 - 修改核心引擎（orchestrator/agent/tools）后必须运行 `pnpm test`；修改前后端契约（shared/protocol.ts、shared/types.ts、shared/graph-model.ts）后必须运行 `pnpm typecheck` 并检查前端编译
 - 不允许阅读项目根目录下 prompt/ 文件夹内的任何文件（除我指定之外）
