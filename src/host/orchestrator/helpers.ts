@@ -9,22 +9,22 @@
 //   - messageOf：错误消息提取。
 // 全部为纯函数（不读时钟/随机源），不依赖全局状态。
 
-import type { OrchestrationDirectiveParams } from '../prompts/orchestration.js'
+import type { OrchestrationDirectiveParams, ParentPromptVariant } from '../prompts/orchestration.js'
+import { buildHybridPrompt, buildOrchestratorPrompt } from '../prompts/orchestration.js'
+import { buildParentExecutorPrompt, buildParentTaskSpec, type ExecutorContextFacts } from '../prompts/executor.js'
 import { buildNodeTaskBlock } from '../prompts/node-task.js'
 import { buildCollabBlock } from '../prompts/collab.js'
-import { ctxInEdges, dbInEdges, nodeById } from '../graph/model.js'
+import { ctxInEdges, dbInEdges, isGroupMember, nodeById, nodeHasFlowIn, nodeParticipatesInFlow } from '../graph/model.js'
 import { validateFlow } from '../graph/validate.js'
-import type { DatabaseNode, GraphNode, RoleNode, WorkflowDocument } from '../shared/graph-model.js'
+import type { DatabaseNode, GraphNode, GroupNode, RoleNode, WorkflowDocument } from '../shared/graph-model.js'
 import type { RunSnapshot } from '../shared/types.js'
 import { truncateText } from './snapshot.js'
 import type { RunNodeArgs } from './run-types.js'
 import { WfError } from './seams.js'
 
-/** 数据库访问工具的使用说明（面向模型英文；不随节点变化的三模式描述部分）。 */
+/** 数据库访问工具的使用说明（面向模型中文，精简；不随节点变化的三模式描述部分。工具名保留英文 W-03）。 */
 const DB_TOOL_HINT_MODES =
-  'Access them only through wf_db_query: ' +
-  'mode "search" (vector retrieval), mode "query" (read-only SELECT with LIMIT), mode "schema" (table structure). ' +
-  'Never read database files directly.'
+  '只可通过 wf_db_query 访问：mode "search"（向量检索）、mode "query"（只读 SELECT，带 LIMIT）、mode "schema"（表结构）；禁止直接读取数据库文件。'
 
 /**
  * 生成某节点的数据库工具说明。
@@ -40,7 +40,7 @@ export function dbToolHintOf(flow: WorkflowDocument, nodeId: string): string {
     .filter((n): n is DatabaseNode => n?.kind === 'database')
   if (sources.length === 0) return ''
   const ids = sources.map((n) => `${n.id} (${labelOf(n)})`).join('; ')
-  return `Connected database node(s) via db-in edge(s): ${ids}. ${DB_TOOL_HINT_MODES}`
+  return `已连接数据库节点：${ids}。${DB_TOOL_HINT_MODES}`
 }
 
 /** 错误消息提取（Error 或任意值）。 */
@@ -64,21 +64,23 @@ export function pauseNodeIdsOf(flow: WorkflowDocument): string[] {
 }
 
 /**
- * 编排指令 facts 的节点清单（仅可执行 agent 节点；父代理即编排者本人不列）。
+ * 编排指令 facts 的节点清单（仅可执行且参与流程的 agent 节点；父代理即编排者本人不列）。
+ * 「参与流程」判定：节点自身或其虚拟节点作为任一流程线（flow-out/flow-in）的源/目标；
+ * 未参与流程的 agent 节点 = 用户批注的「不执行任务的无关节点」，不进入清单。
  * 协作组是包裹层（无执行，只注入协作协议），proxy 镜像主节点 agent id 相同，
  * 阶段/文件/数据库均非可执行节点——一律不列入待编排节点（用户批注，图3）。
  * 协作组并行说明见 collabGroupList（单独成段，不并入节点清单）。
  */
 export function orchestrationNodeList(flow: WorkflowDocument): Array<{ id: string; label: string }> {
   return flow.nodes
-    .filter((n) => n.kind === 'agent')
+    .filter((n) => n.kind === 'agent' && nodeParticipatesInFlow(flow, n.id))
     .map((n) => ({ id: n.id, label: labelOf(n) }))
 }
 
-/** 编排指令 facts 的协作组说明（组内成员并行启动提示）。 */
+/** 编排指令 facts 的协作组说明（组内成员并行启动提示；仅列参与流程的协作组卡片）。 */
 export function collabGroupList(flow: WorkflowDocument): Array<{ groupId: string; label: string; memberIds: string[] }> {
   return flow.nodes
-    .filter((n) => n.kind === 'group')
+    .filter((n): n is GroupNode => n.kind === 'group' && nodeParticipatesInFlow(flow, n.id))
     .map((n) => ({ groupId: n.id, label: n.data.label || n.id, memberIds: n.data.memberIds ?? [] }))
 }
 
@@ -126,20 +128,19 @@ export function validateFlowForRun(flow: WorkflowDocument): WfError | null {
   return null
 }
 
-/** 节点任务块组装：persona 任务 + 输入输出结构 + 上下文注入 + 执行与交付约定。 */
-export function buildNodeBlocks(input: {
+/**
+ * 节点执行上下文组装（纯函数）：上游产出 / 文件路径索引 / 数据库工具说明。
+ * buildNodeBlocks（子代理任务块）与 prepareParentExecutor（父代理执行单元）共用，
+ * 保证同一节点的上下文注入完全一致。
+ */
+export function buildNodeContextFacts(input: {
   flow: WorkflowDocument
   node: RoleNode
   /** 运行快照：上游角色节点最终产出（ctx 连线显式注入）的读取源。 */
   snapshot: RunSnapshot
   documentTextLimit: number
-  pauseNodeIds: string[]
-  retryLimit: number
-  reactLimit: number | undefined
-  runContextText: string
-}): Array<{ type: 'text'; text: string }> {
+}): { upstreamContext: Array<{ source: string; content: string }>; filePaths: string[]; dbToolHint: string } {
   const { flow, node } = input
-  const data = node.data
   // 上游上下文（ctx-in 显式连线）：
   //   - file 节点：文本直通（截断）/ 受管文件路径索引；
   //   - agent/parent 角色节点（含虚拟节点引用）：注入运行快照中该节点的最终
@@ -200,7 +201,27 @@ export function buildNodeBlocks(input: {
       content: truncateText(output, input.documentTextLimit),
     })
   }
-  const dbHint = dbToolHintOf(flow, node.id)
+  return { upstreamContext, filePaths, dbToolHint: dbToolHintOf(flow, node.id) }
+}
+
+/** 节点任务块组装：角色任务上下文 + 输入输出结构 + 软约束 + 执行与交付约定。 */
+export function buildNodeBlocks(input: {
+  flow: WorkflowDocument
+  node: RoleNode
+  /** 运行快照：上游角色节点最终产出（ctx 连线显式注入）的读取源。 */
+  snapshot: RunSnapshot
+  documentTextLimit: number
+  pauseNodeIds: string[]
+  runContextText: string
+}): Array<{ type: 'text'; text: string }> {
+  const { flow, node } = input
+  const data = node.data
+  const { upstreamContext, filePaths, dbToolHint } = buildNodeContextFacts({
+    flow,
+    node,
+    snapshot: input.snapshot,
+    documentTextLimit: input.documentTextLimit,
+  })
 
   const text = buildNodeTaskBlock({
     facts: {
@@ -208,12 +229,10 @@ export function buildNodeBlocks(input: {
       nodeLabel: data.label || node.id,
       upstreamContext,
       filePaths,
-      dbToolHint: dbHint,
-      toolAllowlistNote: '', // 工具白名单解析后填充
+      dbToolHint,
+      isGroupMember: isGroupMember(flow, node.id),
     },
     dynamic: {
-      retryLimit: input.retryLimit,
-      ...(input.reactLimit !== undefined ? { reactLimit: input.reactLimit } : {}),
       pauseNodeIds: input.pauseNodeIds,
       runContextText: input.runContextText,
     },
@@ -224,12 +243,38 @@ export function buildNodeBlocks(input: {
   return [{ type: 'text', text: collabBlock ? `${text}\n\n${collabBlock}` : text }]
 }
 
-/** 父代理是否为执行者模式：父代理节点存在 flow-in 连线（被流程线连接 → 作为执行单元先执行自身任务）。 */
+/**
+ * 父代理提示词变体判定（三情况，纯函数）：
+ *   - orchestrator：纯编排——无父代理节点，或父代理（含其虚拟节点）未被流程线驱动
+ *     （无 flow-in 入边）；
+ *   - hybrid：编排 + 自执行——父代理被流程线驱动，且画布中**还存在其他参与流程的
+ *     可执行单元**（agent 角色或其虚拟节点、协作组卡片任一参与流程线）；
+ *   - executor：纯执行——父代理是唯一参与流程的可执行单元；画布上允许存在未参与
+ *     流程的无关 agent/协作组节点（不执行任务，不进入编排清单）。
+ */
+export function parentPromptVariantOf(flow: WorkflowDocument): ParentPromptVariant {
+  const parent = flow.nodes.find((n) => n.kind === 'parent')
+  // 父代理「被流程线连接」= 存在 flow-in 驱动（主节点或虚拟节点）；仅 flow-out 不构成激活
+  if (!parent || !nodeHasFlowIn(flow, parent.id)) return 'orchestrator'
+  const othersActive = flow.nodes.some((n) => {
+    if (n.id === parent.id) return false
+    if (n.kind === 'agent') return nodeParticipatesInFlow(flow, n.id)
+    if (n.kind === 'group') return nodeParticipatesInFlow(flow, n.id)
+    return false
+  })
+  return othersActive ? 'hybrid' : 'executor'
+}
+
+/**
+ * 父代理是否为执行者模式：父代理（或其虚拟节点）被流程线连接，作为执行单元
+ * 先执行自身任务再视情况继续调度。判定结果与 parentPromptVariantOf 一致：
+ * 返回 null = 纯编排（orchestrator），否则返回父代理节点身份。
+ */
 export function parentExecutorOf(flow: WorkflowDocument): { nodeId: string; nodeLabel: string } | null {
+  const variant = parentPromptVariantOf(flow)
+  if (variant === 'orchestrator') return null
   const parent = flow.nodes.find((n) => n.kind === 'parent')
   if (!parent) return null
-  const hasFlowIn = (flow.lines ?? []).some((line) => line.target === parent.id && line.targetHandle === 'flow-in')
-  if (!hasFlowIn) return null
   return { nodeId: parent.id, nodeLabel: labelOf(parent) }
 }
 
@@ -243,9 +288,9 @@ export function directiveParams(
     resume?: { resumeFromNodeId?: string; resumedFromRunId: string }
     /** 模式二用户问题（不稳定内容，仅末段）。 */
     question?: string
-    /** 执行者模式事实（父代理节点被流程线连接；静态）。 */
-    parentAsNode?: { nodeId: string; nodeLabel: string }
-    /** 父代理节点任务块（执行者模式；动态值仅末段）。 */
+    /** 情况2（hybrid）：父代理执行单元身份（父代理被流程线连接；静态）。 */
+    parentNode?: { nodeId: string; nodeLabel: string }
+    /** 情况2：父代理自执行单元任务块（buildParentTaskSpec 输出；动态值仅末段）。 */
     parentTaskBlock?: string
   },
 ): OrchestrationDirectiveParams {
@@ -256,7 +301,7 @@ export function directiveParams(
       definitionPath: defPath,
       nodes: orchestrationNodeList(flow),
       collabGroups: collabGroupList(flow),
-      parentAsNode: extra?.parentAsNode ?? null,
+      parentNode: extra?.parentNode ?? null,
     },
     dynamic: {
       pauseNodeIds: pauseNodeIdsOf(flow),
@@ -271,6 +316,61 @@ export function directiveParams(
         : {}),
     },
   }
+}
+
+/**
+ * 父代理运行提示词统一组装（startRun/resumeRun 共用；三情况整体替换组装）：
+ *   - orchestrator（情况1）：buildOrchestratorPrompt，纯编排；
+ *   - hybrid（情况2）：buildHybridPrompt，编排指令 + 末段【你的节点任务】执行单元任务块；
+ *   - executor（情况3）：buildParentExecutorPrompt，纯执行提示（无任何编排要素）；
+ *   - 续跑继承边界：hybrid/executor 但父代理执行单元已 ok（断点继承完成、无任务块）
+ *     时按 orchestrator 变体组装（剩余运行只有编排/收尾，不再含自执行任务内容），
+ *     避免提示词出现「先执行自身节点任务」但无任务可执行的自相矛盾。
+ * 纯函数：入参（flow/defPath/mode/executor/动态）不变则输出字节不变。
+ */
+export function buildParentRunPrompt(input: {
+  flow: WorkflowDocument
+  defPath: string
+  mode: 'mode1' | 'mode2'
+  /** 模式二用户问题（不稳定内容，仅末段）。 */
+  question?: string
+  /** 断点继续事实（resumeRun 用）。 */
+  resume?: { resumeFromNodeId?: string; resumedFromRunId: string }
+  /** 父代理执行单元（具体情况2/3）；纯编排或续跑继承完成时为 null。 */
+  executor: { nodeId: string; nodeLabel: string; task: ExecutorContextFacts; runContextText: string } | null
+}): string {
+  const { flow, defPath, mode, executor } = input
+  const variant = parentPromptVariantOf(flow)
+  const resume = input.resume
+
+  // 情况3：纯执行（父代理为唯一参与流程的执行单元，且有执行单元内容）
+  if (variant === 'executor' && executor) {
+    return buildParentExecutorPrompt({
+      workflowName: flow.name ?? flow.id,
+      facts: executor.task,
+      runContextText: executor.runContextText,
+    })
+  }
+
+  // 情况2：编排 + 自执行（有执行单元内容）
+  if (variant === 'hybrid' && executor) {
+    return buildHybridPrompt(
+      directiveParams(flow, defPath, mode, {
+        ...(resume ? { resume } : {}),
+        ...(input.question ? { question: input.question } : {}),
+        parentNode: { nodeId: executor.nodeId, nodeLabel: executor.nodeLabel },
+        parentTaskBlock: buildParentTaskSpec({ facts: executor.task, runContextText: executor.runContextText }),
+      }),
+    )
+  }
+
+  // 情况1：纯编排；或 hybrid/executor 在续跑中父代理执行单元已 ok（继承完成 → 纯编排语义）
+  return buildOrchestratorPrompt(
+    directiveParams(flow, defPath, mode, {
+      ...(resume ? { resume } : {}),
+      ...(input.question ? { question: input.question } : {}),
+    }),
+  )
 }
 
 /** 节点级回流重试上限解析：参数覆盖 > 节点配置 > 配置默认。 */

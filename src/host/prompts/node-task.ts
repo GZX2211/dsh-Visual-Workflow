@@ -1,20 +1,24 @@
-﻿// src/host/prompts/node-task.ts
+// src/host/prompts/node-task.ts
 //
-// 节点任务块构建器（T-005 基线之一）。
+// 节点任务块构建器（T-005 基线之一，提示词准确性改造后重写）。
 //
 // 上下文：本任务文本由 wf_run_node 启动节点子代理时注入，作为子代理执行单节点
 //       任务的「任务文本」。参考旧项目 VisualWorkflow/lib/orchestrator.js 的
 //       buildNodeBlocks（L821-871）骨架，但按 §13.1 重构。
 //
 // 稳定布局（§13.1）：
-//   ① 首段 = 该节点最重要的约束（仅用自身 System Prompt / 工具白名单边界 /
-//            失败语义：回流重试上限 + ReAct 软截停 / ）
+//   ① 首段 = 该节点真正需要强调的**软约束固化**（AI 有选择权、值得强调的行为规则）
+//             ——分词：report 工具一律软禁用（最终结论自动送达父代理、阶段汇报无意义）；
+//             协作组成员必须经 wf_ask_agent 通信（仅组内节点注入）；
 //   ② 中段 = 过程性信息（上游产出上下文（ctx 连线注入）/ 文件路径索引 / 数据库工具说明）
-//   ③ 末段 = 重申 + 动态态信息（本次执行的动态状态仅注入末尾）
+//   ③ 末段 = 软约束重申（W-02 双位）+ 动态态信息（本次执行的动态状态仅注入末尾）
 //
-// 为什么上游产出等长文本置于中段（§13.1.2 lost-in-the-middle）：长文本放入任务主体
-// 中部之后（本模板即中段），关键约束保持在首段与末段两端最受注意力关注的位置；关键
-// 结论由子代理在其最终消息中直接输出（不再要求 report 摘要），父代理据此汇总。
+// 代码层约束（引擎已强制、AI 无选择权）**不写入提示词**（用户裁决）：
+//   - 「仅使用你自己的 System Prompt」：子代理只有一条 System Prompt，无需强调；
+//   - 「只调用允许清单内的工具」：工具可见性由引擎管理，AI 只能调用可见工具；
+//   - 「重试/ReAct 迭代上限」：引擎护栏，数值对 AI 无执行意义；
+//   这些条目从首段与末段重申中删除，以节省上下文、消除无用约束对模型的干扰。
+//
 //
 // 构建器为纯函数：不读 Date.now/随机源，同一 params 两次构建字节相同；动态值仅注入末段。
 
@@ -29,11 +33,11 @@ export interface NodeTaskBlockParams {
   facts: {
     /**
      * 节点任务文本：节点自身的 System Prompt（persona），即子代理要完成的子任务。
-     * 可为空字符串（模板提供兜底占位）。
+     * 任务正文经 prompt-setup 作为系统提示词段注入，本任务块不再重复正文。
      */
     task: string
     /**
-     * 节点人类可读名称（用于「仅用自身 System Prompt」约束的指代与占位）。
+     * 节点人类可读名称（身份行与中段指代）。
      */
     nodeLabel: string
     /**
@@ -49,26 +53,16 @@ export interface NodeTaskBlockParams {
     filePaths: string[]
     /**
      * 数据库工具说明：存在 db-in 连线时说明 wf_db_query 三模式（search/query/schema，
-     * 只读）用法；无 db-in 连线时为空字符串（工具不入白名单，也不写说明）。
+     * 只读）用法；无 db-in 连线时为空字符串。
      */
     dbToolHint: string
     /**
-     * 工具白名单边界说明文本：该节点被注入的允许工具清单说明（resolveAgentTools 解析
-     * 结果），用于首段「工具白名单边界」约束。可为空字符串（无额外白名单说明时）。
+     * 协作组成员标记：该节点为协作组成员时注入「组内通信必须经 wf_ask_agent」软约束。
      */
-    toolAllowlistNote: string
+    isGroupMember: boolean
   }
   /** 末段动态态信息（不稳定内容，仅注入尾段）。全部可选，缺省即默认值。 */
   dynamic: {
-    /**
-     * 回流重试上限（本次执行生效值，默认 3）：单节点执行重复尝试上限，超限按护栏终止该节点。
-     */
-    retryLimit?: number
-    /**
-     * ReAct 迭代次数上限（本次生效值，可选）：单回合「思考-行动」循环软截停阈值，
-     * 达到后工具调用被拒、强制输出结论后正常结束（react-capped，非失败）。
-     */
-    reactLimit?: number
     /**
      * 暂停节点 id 清单：本节点若为其中一员（父代理对其调用 wf_run_node）将触发暂停门。
      * 缺省为无暂停语义（普通节点）。
@@ -82,21 +76,20 @@ export interface NodeTaskBlockParams {
 }
 
 /**
- * 节点任务块首段关键约束短语（供 W-02 双位测试与后续组装任务引用，面向模型英文）。
+ * 节点任务块首段软约束短语（W-02 双位测试断言与组装任务引用）。
+ * 面向模型中文（W-04）；只保留「软约束固化」类条目（AI 有选择权、值得强调的行为规则）。
  */
 export const NODE_HARD_CONSTRAINTS = {
-  /** 仅用自身 System Prompt（不继承父代理提示词）。 */
-  ownPromptOnly: '仅使用你自己的 System Prompt',
-  /** 工具白名单边界：仅调用允许清单内的工具。 */
-  allowlistOnly: '只调用你允许清单（allow-list）内的工具',
-  /** 失败语义：回流量试上限 / ReAct 软截停。 */
-  retryAndReact: '重试有上限；达到 ReAct 迭代上限会强制结束本轮',
+  /** report 工具一律软禁用：最终结论自动送达父代理，阶段汇报无意义。 */
+  noReportTool: '不得调用 report 工具提交结论或阶段汇报',
+  /** 协作组内通信必须经 wf_ask_agent（仅组内成员注入）。 */
+  collabAskOnly: '与组内成员的一切协作消息必须使用 wf_ask_agent（ask / reply）',
 } as const
 
 /**
  * 节点任务块构建器（纯函数）。
  *
- * 输出字符串同一 run 内字节稳定：首段约束 + 中段过程性信息固定；末段重申固定，
+ * 输出字符串同一 run 内字节稳定：首段软约束 + 中段过程性信息固定；末段重申固定，
  * 之后仅追加本次动态态信息。不读时钟、不随机。
  *
  * @param params - 模板入参（facts 静态事实 + dynamic 末段动态态信息）。
@@ -105,22 +98,21 @@ export const NODE_HARD_CONSTRAINTS = {
 export function buildNodeTaskBlock(params: NodeTaskBlockParams): string {
   const { facts, dynamic } = params
 
-  // —— 首段：该节点最重要的约束（注意力位置第一位）——
+  // —— 首段：软约束固化（注意力位置第一位；仅保留 AI 有选择权的行为规则）——
   const head = [
     HEAD_MARKER,
     '',
     `你正在执行节点「${facts.nodeLabel}」。`,
     '',
-    `1. ${NODE_HARD_CONSTRAINTS.ownPromptOnly}。`,
-    `2. ${NODE_HARD_CONSTRAINTS.allowlistOnly}${facts.toolAllowlistNote ? `（${facts.toolAllowlistNote}）` : ''}；wf_run_node / wf_finish 对你始终不可用。`,
-    `3. ${NODE_HARD_CONSTRAINTS.retryAndReact}；之后仍需输出你的最终结论并正常结束。`,
+    `1. ${NODE_HARD_CONSTRAINTS.noReportTool}`,
+    ...(facts.isGroupMember ? [`2. ${NODE_HARD_CONSTRAINTS.collabAskOnly}，不得用普通文本模拟对话或绕过工具直接发送消息。`] : []),
   ].join('\n')
 
   // —— 中段：过程性信息（上游产出 / 文件路径索引 / 数据库工具说明）——
   const midParts: string[] = [
     MID_MARKER,
     '',
-      `你的任务定义在你自己的 System Prompt 中，此处不重复。请依据该提示词执行工作流节点「${facts.nodeLabel}」。`,
+    `请执行工作流节点「${facts.nodeLabel}」`,
   ]
 
   if (facts.upstreamContext.length > 0) {
@@ -129,11 +121,11 @@ export function buildNodeTaskBlock(params: NodeTaskBlockParams): string {
       midParts.push(`- ${entry.source}：${entry.content}`)
     }
   } else {
-    midParts.push('', '上游产出：（无——本节点无 ctx 连线进入）')
+    midParts.push('', '上游产出：（无）')
   }
 
   if (facts.filePaths.length > 0) {
-    midParts.push('', '受管文件路径索引（请用你的读取工具自行读取这些文件）：')
+    midParts.push('', '文件路径索引（自行读取）：')
     for (const filePath of facts.filePaths) {
       midParts.push(`- ${filePath}`)
     }
@@ -145,13 +137,13 @@ export function buildNodeTaskBlock(params: NodeTaskBlockParams): string {
 
   const mid = midParts.join('\n')
 
-  // —— 末段：重申 + 动态态信息（动态值仅在此注入）——
+  // —— 末段：软约束重申（W-02 双位）+ 动态态信息（动态值仅在此注入）——
   const tail = [
     TAIL_MARKER,
     '',
     TAIL_RESTATE_MARKER,
-    `- ${NODE_HARD_CONSTRAINTS.ownPromptOnly}。`,
-    `- ${NODE_HARD_CONSTRAINTS.allowlistOnly}。`,
+    `- ${NODE_HARD_CONSTRAINTS.noReportTool}。`,
+    ...(facts.isGroupMember ? [`- ${NODE_HARD_CONSTRAINTS.collabAskOnly}。`] : []),
     '',
     renderDynamicState(dynamic),
   ].join('\n')
@@ -161,23 +153,16 @@ export function buildNodeTaskBlock(params: NodeTaskBlockParams): string {
 
 /**
  * 渲染末段动态态信息（内部纯函数）：仅依赖 dynamic 字段，输出不稳定内容。
+ * 重试上限 / ReAct 迭代上限为引擎层护栏，AI 无选择权，不再写入（用户裁决）。
  */
 function renderDynamicState(dynamic: NodeTaskBlockParams['dynamic']): string {
   const lines: string[] = ['当前执行状态：']
-
-  lines.push(`- 重试上限：${dynamic.retryLimit ?? 3}`)
-
-  if (dynamic.reactLimit !== undefined) {
-    lines.push(`- ReAct 迭代上限：${dynamic.reactLimit}（软上限；超过后拒绝工具调用，随后结束本节点）。`)
-  } else {
-    lines.push('- ReAct 迭代上限：（未设置）')
-  }
 
   const pauseIds = dynamic.pauseNodeIds && dynamic.pauseNodeIds.length > 0 ? dynamic.pauseNodeIds : null
   if (pauseIds) {
     lines.push(`- 暂停节点：[${pauseIds.join(', ')}]。若你属于其中之一，本节点作为纯流程门（暂停运行）。`)
   } else {
-    lines.push('- 本节点为普通任务节点（无暂停语义）。')
+    lines.push('- 本流程无暂停节点。')
   }
 
   lines.push(`- 运行上下文：${(dynamic.runContextText ?? '').trim() || '（无）'}`)

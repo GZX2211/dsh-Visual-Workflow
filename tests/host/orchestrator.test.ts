@@ -606,7 +606,7 @@ describe('wfRunNode 异步路径与护栏', () => {
     expect(h.runtime.childMetaFor('child-1')).toEqual({ sessionId: 'session-1', flowId: 'flow-1', nodeId: 'n-a1' })
   })
 
-  it('任务块注入：NODE 硬约束双位 + persona + 动态态（retryLimit）在末段', async () => {
+  it('任务块注入：NODE 软约束双位 + 过程性信息中段 + 动态态（运行上下文）仅末段', async () => {
     const h = await makeHarness()
     await start(h, makeFlow())
     await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
@@ -614,13 +614,19 @@ describe('wfRunNode 异步路径与护栏', () => {
 
     const midAt = text.indexOf(MID_MARKER)
     const tailAt = text.indexOf(TAIL_MARKER)
-    expect(text.slice(0, midAt)).toContain(NODE_HARD_CONSTRAINTS.ownPromptOnly)
-    expect(text.slice(tailAt)).toContain(NODE_HARD_CONSTRAINTS.ownPromptOnly)
-      // 自定义 System Prompt 已注入系统提示词，任务块不再重复（避免排队消息重复）
-      expect(text).not.toContain('任务：子任务A')
-      expect(text).toContain('此处不重复')
-      expect(text.slice(tailAt)).toContain('重试上限：3')
-    })
+    // W-02 双位：report 软禁用短语在首段与末段重申
+    expect(text.slice(0, midAt)).toContain(NODE_HARD_CONSTRAINTS.noReportTool)
+    expect(text.slice(tailAt)).toContain(NODE_HARD_CONSTRAINTS.noReportTool)
+    // 引擎层护栏（重试/ReAct 上限）不再写入任务块（用户裁决：AI 无选择权）
+    expect(text).not.toContain('重试上限')
+    expect(text).not.toContain('ReAct 迭代上限')
+    // 自定义 System Prompt 已注入系统提示词，任务块不再重复 persona（避免排队消息重复）
+    expect(text).not.toContain('任务：子任务A')
+    // 过程性信息（节点名称/上游产出）位于中段；动态态（运行上下文）仅注入末段
+    expect(text.slice(midAt, tailAt)).toContain('请执行工作流节点')
+    expect(text.slice(0, tailAt)).not.toContain('运行上下文：')
+    expect(text.slice(tailAt)).toContain('运行上下文：')
+  })
   it('文档 ctx-in：文本内容注入（超限截断）+ 受管文件路径索引', async () => {
     const h = await makeHarness()
     const flow = makeFlow()
@@ -724,16 +730,18 @@ describe('wfRunNode 异步路径与护栏', () => {
     expect(h.runtime.childMetaFor('child-1')!.nodeId).toBe('n-a2')
   })
 
-  it('节点级参数：retryLimit/iterationLimit/thinking 覆盖节点配置并透传', async () => {
+  it('节点级参数：retryLimit/iterationLimit/thinking 只作引擎层透传，不写入任务块', async () => {
     const h = await makeHarness()
     await start(h, makeFlow())
     await h.runtime.wfRunNode(caller, { nodeId: 'n-a1', retryLimit: 5, iterationLimit: 7, thinking: 'high' })
     const input = h.runner.calls[0]
     expect(input.iterationLimit).toBe(7)
     expect(input.thinking).toBe('high')
-    const tail = input.blocks[0].text.slice(input.blocks[0].text.indexOf(TAIL_MARKER))
-    expect(tail).toContain('重试上限：5')
-    expect(tail).toContain('ReAct 迭代上限：7')
+    // retryLimit 参与引擎护栏计数（重试上限）；iterationLimit 透传 runner 层。
+    // 引擎层护栏不再写入任务块（用户裁决：AI 无选择权，写入无用）。
+    const text = input.blocks[0].text
+    expect(text).not.toContain('重试上限')
+    expect(text).not.toContain('ReAct 迭代上限')
   })
 
   it('护栏：nodeId 缺失 WF_BAD_ARGS；节点不存在 WF_NODE_MISSING；非 agent 节点 WF_NODE_KIND', async () => {

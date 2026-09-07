@@ -8,10 +8,12 @@
 // RuntimeObserve ← RuntimeLifecycle ← OrchestratorRuntime（runtime.ts 收口）。
 
 import { resolveRolePrompt } from '../agent/runner.js'
+import { isGroupMember } from '../graph/model.js'
 import type { RoleNode, WorkflowDocument } from '../shared/graph-model.js'
 import type { RunSnapshot, RunStatus } from '../shared/types.js'
 import { cloneSnapshot, setNodeStatus } from './snapshot.js'
-import { buildNodeBlocks, effectiveReactLimitOf, effectiveRetryLimitOf, messageOf, parentExecutorOf, pauseNodeIdsOf } from './helpers.js'
+import type { ExecutorContextFacts } from '../prompts/executor.js'
+import { buildNodeContextFacts, messageOf, parentExecutorOf } from './helpers.js'
 import type { OrchestratorDeps, RunEntry } from './run-types.js'
 import {
   WfError,
@@ -88,39 +90,42 @@ export class RuntimeBase {
   }
 
   /**
-   * 父代理执行者模式准备（startRun/resumeRun 共用）：
-   *   - 父代理节点被流程线连接（存在 flow-in 连线）→ 登记 executorParentId，
-   *     快照中该节点标记 running（续跑已 ok 则跳过——继承不重跑）；
-   *   - 构建父代理节点任务块（复用 buildNodeBlocks：上游 ctx 产出/文件文本与路径索引/
-   *     db 提示/重试与 React 约定），供编排指令末段注入；
-   *   - 纯调度者模式返回 null（指令维持现状）。
+   * 父代理执行单元准备（startRun/resumeRun 共用；情况2 hybrid / 情况3 executor）：
+   *   - 父代理节点被流程线连接 → 登记 executorParentId，快照中该节点标记 running
+   *     （续跑已 ok 则跳过——继承不重跑）；
+   *   - 组装父代理执行单元上下文（复用 buildNodeContextFacts：上游 ctx 产出/文件
+   *     文本与路径索引/db 提示），返回结构化上下文供 hybrid 的【你的节点任务】与
+   *     executor（情况3）提示词构建使用；
+   *   - 情况1 纯调度者返回 null（指令不含执行单元内容）。
    */
-  protected async prepareParentExecutor(flow: WorkflowDocument, entry: RunEntry): Promise<{ nodeId: string; nodeLabel: string; taskBlock: string } | null> {
+  protected async prepareParentExecutor(
+    flow: WorkflowDocument,
+    entry: RunEntry,
+  ): Promise<{ nodeId: string; nodeLabel: string; task: ExecutorContextFacts; runContextText: string } | null> {
     const executor = parentExecutorOf(flow)
     if (!executor) return null
     const parentNode = flow.nodes.find((n) => n.id === executor.nodeId)
     if (!parentNode || parentNode.kind !== 'parent') return null
     const snapshot = entry.snapshot
     const existing = snapshot.nodes.find((n) => n.nodeId === executor.nodeId)
-    // 续跑继承：已 ok/react-capped 的父代理节点不再注入任务块（断点产出已随快照继承）
+    // 续跑继承：已 ok/react-capped 的父代理节点不再注入执行单元（断点产出已随快照继承）
     if (existing && (existing.status === 'ok' || existing.status === 'react-capped')) return null
     entry.executorParentId = executor.nodeId
     if (!existing || existing.status !== 'running') {
       setNodeStatus(snapshot, executor.nodeId, 'running', { now: this.now() })
     }
-    const retryLimit = effectiveRetryLimitOf(parentNode, {}, this.deps.config.retryLimitDefault)
-    const reactLimit = effectiveReactLimitOf(parentNode, {}, this.deps.config.reactIterationLimitDefault)
-    const blocks = buildNodeBlocks({
+    const context = buildNodeContextFacts({
       flow,
-      node: parentNode as RoleNode,
+      node: parentNode,
       snapshot,
       documentTextLimit: this.deps.config.documentTextLimit,
-      pauseNodeIds: pauseNodeIdsOf(flow),
-      retryLimit,
-      reactLimit,
-      runContextText: `runId=${snapshot.id}; attempt ${(existing?.attempts ?? 0) + 1}/1（父代理执行单元）`,
     })
-    return { nodeId: executor.nodeId, nodeLabel: executor.nodeLabel, taskBlock: blocks.map((b) => b.text).join('\n\n') }
+    return {
+      nodeId: executor.nodeId,
+      nodeLabel: executor.nodeLabel,
+      task: { ...context, nodeLabel: executor.nodeLabel, isGroupMember: isGroupMember(flow, executor.nodeId) },
+      runContextText: `runId=${snapshot.id}; attempt ${(existing?.attempts ?? 0) + 1}/1（父代理执行单元）`,
+    }
   }
 
   /** 父代理执行者收尾：开始调度（首次 wf_run_node / wf_finish）时把父代理节点标记 ok。 */

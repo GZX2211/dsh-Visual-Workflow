@@ -74,8 +74,6 @@ describe('dbToolHintOf 数据库连线提示', () => {
       snapshot: emptySnapshot,
       documentTextLimit: 20000,
       pauseNodeIds: [],
-      retryLimit: 3,
-      reactLimit: undefined,
       runContextText: '',
     })
     const text = blocks[0].text

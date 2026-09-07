@@ -1,146 +1,74 @@
-// src/client/studio/floating-window.tsx
+// src/client/studio/WorkbenchFrame.tsx
 //
-// 工作台浮窗入口：主界面右下角圆形 FAB + 独立窗口型页面。
-//
-// 窗口交互（修复"非线性快速滑动"的根因）：
-//   - **单一常驻事件源**：pointermove/pointerup/pointercancel 只在 mount 时挂载一次
-//     （effect + 卸载清理），pointerdown 仅登记会话 → 物理上不可能出现多组监听器
-//     同时累加位移（此前 onMove 叠加是放大的根源）；
-//   - **增量位移**：每次 move 只按 "当前事件坐标 - 上一事件坐标" 计算 dx/dy 并累加，
-//     同一事件被重复派发时 dx=0，数学上杜绝倍数放大；
-//   - **Pointer Capture**：pointerdown 捕获指针，拖出窗口/浏览器松开也能收到
-//     pointerup/pointercancel，会话必然结束；
-//   - **钳制**：x/y ≥ 0 且在视口内；尺寸最小 480×320、最大 ≤ 视口（防越界延展）；
-//   - 几何样式以固定引用对象传递（React 重渲染不覆盖直写值）→ 无闪烁；
-//   - 单一标题栏：浮窗不自绘标题栏，工作台标题顶栏兼任（children({ close, drag })）。
+// 工作台统一窗口框架（修复「切换窗口丢失全部状态」的根因）：
+//   - 旧实现（WorkbenchHost 双分支）在 float/split 两个分支各渲染一份 <Studio>，
+//     切换视图模式时 React 因根节点类型不同（FloatingWindow → div.wf-split-pane）
+//     卸载并重建整个 Studio 子树——画布内容、未保存修改、运行快照、轮询结果、
+//     选中实例、面板布局等全部内存状态随之丢失（已实证）。
+//   - 本组件把两种视图模式合并为**同一个组件实例**：float/split 只是外壳的
+//     className/几何样式与交互（浮窗拖拽缩放 / 分栏分隔线）不同；
+//     **内容容器（.wf-frame-content）恒为根元素的第 0 个子节点**，React 对同一
+//     位置的同一类型子树只更新 props、不卸载——Studio 跨模式切换保持挂载，
+//     一切状态与布局原样保留，「切换窗口」退化为纯视图切换、零副作用。
+//   - 运行联动（浮窗点「运行」→ 自动切分栏 + 收侧栏）由 Studio 层 handleRun
+//     组合（view.setViewMode('split') + PANELS_SET），与切换按钮互不干扰。
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
-import type { Dict } from '../i18n.js'
+import {
+  MIN_WINDOW_HEIGHT,
+  MIN_WINDOW_WIDTH,
+  clampBounds,
+  isInteractive,
+  keepBounds,
+  restoreBounds,
+  type DragEventLike,
+  type InteractionSession,
+  type ResizeDirection,
+  type WindowBounds,
+} from './floating-window.js'
+import { clampSplitWidth } from './useWorkbenchView.js'
 
-/** 窗口几何（像素；x/y 为窗口左上角）。 */
-export interface WindowBounds {
-  x: number
-  y: number
-  w: number
-  h: number
+/** 窗口框架给内容（Studio）的 api：close 关闭工作台；drag 标题栏拖动把手（仅浮窗生效）。 */
+export interface WorkbenchFrameApi {
+  close: () => void
+  drag: (event: DragEventLike) => void
 }
 
-/** 默认几何（视口右下偏上居中）。 */
-export const DEFAULT_WINDOW_BOUNDS: WindowBounds = { x: 120, y: 60, w: 960, h: 640 }
-/** 最小窗口尺寸。 */
-export const MIN_WINDOW_WIDTH = 480
-export const MIN_WINDOW_HEIGHT = 320
-/** 几何持久化键。 */
-export const WINDOW_BOUNDS_KEY = 'visual-workflow:window-bounds'
-
-/** 恢复记忆几何（损坏/越界回退默认；导出供 WorkbenchFrame 复用）。 */
-export function restoreBounds(): WindowBounds {
-  try {
-    const raw = localStorage.getItem(WINDOW_BOUNDS_KEY)
-    if (raw) {
-      const parsed = JSON.parse(raw) as Partial<WindowBounds>
-      const w = Number(parsed.w) || DEFAULT_WINDOW_BOUNDS.w
-      const h = Number(parsed.h) || DEFAULT_WINDOW_BOUNDS.h
-      const x = Number(parsed.x)
-      const y = Number(parsed.y)
-      const width = Math.max(MIN_WINDOW_WIDTH, Math.min(w, window.innerWidth - 40))
-      const height = Math.max(MIN_WINDOW_HEIGHT, Math.min(h, window.innerHeight - 40))
-      return {
-        x: Number.isFinite(x) ? Math.max(0, Math.min(x, window.innerWidth - width)) : DEFAULT_WINDOW_BOUNDS.x,
-        y: Number.isFinite(y) ? Math.max(0, Math.min(y, window.innerHeight - height)) : DEFAULT_WINDOW_BOUNDS.y,
-        w: width,
-        h: height,
-      }
-    }
-  } catch {
-    // 几何记忆损坏/不可用 → 默认
-  }
-  return { ...DEFAULT_WINDOW_BOUNDS }
-}
-
-function keepBounds(bounds: WindowBounds): void {
-  try {
-    localStorage.setItem(WINDOW_BOUNDS_KEY, JSON.stringify(bounds))
-  } catch {
-    // 忽略（隐私模式等）
-  }
-}
-export { keepBounds }
-
-/** 缩放方向（四边/四角）。 */
-export type ResizeDirection = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw'
-
-export interface FloatingWindowProps {
-  /** 文案词典。 */
-  t: Dict
-  /** 窗口是否打开（受控；由宿主 WorkbenchHost 决定）。 */
-  open: boolean
-  /** 关闭回调（受控；由宿主关闭工作台）。 */
+export interface WorkbenchFrameProps {
+  /** 视图模式：float=悬浮窗口（可拖/缩放）；split=分栏窗口（右侧固定 + 可拖分隔线）。 */
+  mode: 'float' | 'split'
+  /** 关闭回调（标题栏 ×；分栏模式不渲染关闭按钮，由 WorkbenchHost 决定传不传）。 */
   onClose: () => void
-  /** 窗口内容（工作台）；close 关闭窗口、drag 把拖动把手挂到内容标题栏。 */
-  children: (api: { close(): void; drag(event: DragEventLike): void }) => ReactNode
+  /** 当前分栏宽度（px；split 模式分隔线拖动回传）。 */
+  splitWidth: number
+  /** 分隔线拖动回传新宽度（宿主持久化 + 更新官方对话列内边距）。 */
+  onResize: (width: number) => void
+  /** 内容渲染（Studio）；api.close/api.drag 供标题栏使用。 */
+  children: (api: WorkbenchFrameApi) => ReactNode
 }
 
-/** beginDrag/beginResize 事件最小形状（React 合成 PointerEvent 满足）。 */
-export interface DragEventLike {
-  button?: number
-  clientX: number
-  clientY: number
-  pointerId?: number
-  preventDefault?(): void
-  target?: unknown
-  currentTarget?: unknown
-}
-
-/** 活动交互会话（常驻监听器驱动；会话寄存器 + 增量位移）。 */
-export interface InteractionSession {
-  kind: 'drag' | 'resize'
-  pointerId: number
-  lastX: number
-  lastY: number
-  bounds: WindowBounds
-  direction?: ResizeDirection
-}
-
-/** 标题栏/缩放把手内的可交互节点（按钮等）不触发拖动。 */
-export function isInteractive(target: EventTarget | null): boolean {
-  const element = target as HTMLElement | null
-  if (!element?.closest) return false
-  return Boolean(element.closest('button, input, select, textarea, a'))
-}
-
-/** 几何钳制：视口内定位；尺寸最小 480×320、最大 = 视口（防延展超出浏览器）。 */
-export function clampBounds(next: WindowBounds): WindowBounds {
-  const maxW = Math.max(MIN_WINDOW_WIDTH, window.innerWidth - 8)
-  const maxH = Math.max(MIN_WINDOW_HEIGHT, window.innerHeight - 8)
-  const w = Math.min(maxW, Math.max(MIN_WINDOW_WIDTH, next.w))
-  const h = Math.min(maxH, Math.max(MIN_WINDOW_HEIGHT, next.h))
-  const maxX = Math.max(0, window.innerWidth - w)
-  const maxY = Math.max(0, window.innerHeight - h)
-  return {
-    x: Math.max(0, Math.min(next.x, maxX)),
-    y: Math.max(0, Math.min(next.y, maxY)),
-    w,
-    h,
-  }
-}
+/** 八向缩放把手方向（仅浮窗模式渲染）。 */
+const RESIZE_DIRECTIONS: ResizeDirection[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
 
 /**
- * FAB + 浮窗宿主：FAB 固定右下角；打开后渲染可拖动/可缩放的窗口。
- * 几何状态本地管理（与工作台状态机解耦），持久化记忆。
+ * 工作台统一窗口框架：children（Studio）恒挂载于框架内，视图模式切换不重建。
+ * 浮窗几何（bounds）本地管理并持久化；切换分栏再切回时几何原样恢复。
  */
-export function FloatingWindow({ t, open, onClose, children }: FloatingWindowProps) {
+export function WorkbenchFrame({ mode, onClose, splitWidth, onResize, children }: WorkbenchFrameProps) {
+  const isFloat = mode === 'float'
   const [bounds, setBounds] = useState<WindowBounds>(() => restoreBounds())
-  const windowRef = useRef<HTMLElement | null>(null)
+  const shellRef = useRef<HTMLElement | null>(null)
   /** 几何 CSSProperties：固定引用（React 重渲染跳过该 style diff，不覆盖直写值）。 */
   const styleRef = useRef<CSSProperties>({})
-  /** 活动会话（唯一；常驻监听器读取）。 */
+  /** 活动会话（唯一；常驻监听器读取；仅浮窗拖拽/缩放使用）。 */
   const sessionRef = useRef<InteractionSession | null>(null)
   /** 会话期间的 body 样式快照（常驻监听器在会话结束时恢复）。 */
   const bodyRestoreRef = useRef<{ cursor: string; userSelect: string } | null>(null)
+  /** 最近一次浮窗几何（split 期间不展示但保留，切回 float 时按记忆还原）。 */
+  const boundsRef = useRef(bounds)
 
-  // 首渲染前置：以当前 bounds 初始化 styleRef（窗口首个帧即有几何；整体替换不修改）
+  // 首渲染前置：以当前 bounds 初始化 styleRef（首个帧即有几何；整体替换不修改）
   {
     styleRef.current = {
       left: `${bounds.x}px`,
@@ -156,7 +84,7 @@ export function FloatingWindow({ t, open, onClose, children }: FloatingWindowPro
    *  - styleRef 整体替换为新对象（绝不修改 React 已看过的对象——React dev 会冻结它）。
    */
   const applyGeometry = useCallback((next: WindowBounds): void => {
-    const el = windowRef.current
+    const el = shellRef.current
     if (el) {
       el.style.left = `${next.x}px`
       el.style.top = `${next.y}px`
@@ -174,13 +102,14 @@ export function FloatingWindow({ t, open, onClose, children }: FloatingWindowPro
   /** 提交几何（状态 + DOM + 持久化）。 */
   const commitBounds = useCallback((next: WindowBounds): void => {
     const clamped = clampBounds(next)
+    boundsRef.current = clamped
     applyGeometry(clamped)
     setBounds(clamped)
     keepBounds(clamped)
   }, [applyGeometry])
 
   // ---------------------------------------------------------------------------
-  // 常驻事件源：mount 时挂载一次；会话结束时自动清理（指针捕获保证 up 必达）
+  // 浮窗拖拽/缩放：常驻事件源（mount 时挂载一次；会话结束时自动清理）
   // ---------------------------------------------------------------------------
   useEffect(() => {
     const onPointerMove = (event: PointerEvent): void => {
@@ -217,8 +146,7 @@ export function FloatingWindow({ t, open, onClose, children }: FloatingWindowPro
     }
     const endSession = (event: PointerEvent): void => {
       const session = sessionRef.current
-      if (!session) return
-      if (event.pointerId !== session.pointerId) return
+      if (!session || event.pointerId !== session.pointerId) return
       sessionRef.current = null
       const restore = bodyRestoreRef.current
       if (restore) {
@@ -279,9 +207,9 @@ export function FloatingWindow({ t, open, onClose, children }: FloatingWindowPro
       pointerId,
       lastX: event.clientX,
       lastY: event.clientY,
-      bounds,
+      bounds: boundsRef.current,
     }
-  }, [bounds])
+  }, [])
 
   /** 八方向缩放开始（同上）。 */
   const beginResize = useCallback((direction: ResizeDirection, event: DragEventLike): void => {
@@ -302,42 +230,84 @@ export function FloatingWindow({ t, open, onClose, children }: FloatingWindowPro
       pointerId,
       lastX: event.clientX,
       lastY: event.clientY,
-      bounds,
+      bounds: boundsRef.current,
       direction,
     }
-  }, [bounds])
+  }, [])
 
-  // 打开时几何收敛到视口（窗口尺寸变化后防止越界）
+  /** 分栏分隔线拖动开始（split 模式；常驻 window 监听；结束恢复）。 */
+  const beginDividerDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== undefined && event.button !== 0) return
+    event.preventDefault?.()
+    const pointerId = Number(event.pointerId) || 0
+    const target = event.currentTarget as Element | null | undefined
+    try {
+      target?.setPointerCapture?.(pointerId)
+    } catch {
+      // 忽略（不支持/已捕获）
+    }
+    // 分栏宽度 = 视口右缘 - 当前 x（工作台 fixed 贴右侧，divider 在其左缘）
+    const right = window.innerWidth
+    const onMove = (moveEvent: PointerEvent): void => {
+      onResize(clampSplitWidth(right - moveEvent.clientX))
+    }
+    const onUp = (): void => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+      window.removeEventListener('blur', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+    window.addEventListener('blur', onUp)
+  }, [onResize])
+
+  // 挂载/切回浮窗时几何收敛到视口（窗口尺寸变化后防止越界；split 期间仅记忆不展示）
   useEffect(() => {
-    if (!open) return
+    if (!isFloat) return
     commitBounds(bounds)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+  }, [isFloat])
 
   return (
-    <>
-      {/* 浮窗（受控）：入口不再自绘 FAB（改由官方侧边栏入口触发，见 useWorkbenchView）；
-          内容自身标题栏 = 窗口标题栏（可拖动 + 关闭）；边缘八方向缩放 */}
-      {open ? (
-        <section
-          ref={windowRef}
-          className="wf-window"
-          style={styleRef.current}
-          data-wf-window=""
-        >
-          <div className="wf-window__body">
-            {children({ close: onClose, drag: beginDrag })}
-          </div>
-          {(['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'] as ResizeDirection[]).map((direction) => (
+    <section
+      ref={shellRef}
+      className={isFloat ? 'wf-window' : 'wf-split-pane'}
+      style={isFloat ? styleRef.current : undefined}
+      data-wf-frame={mode}
+    >
+      {/* 内容容器恒为根元素第 0 个子节点（位置/类型恒定）→ Studio 跨模式保持挂载，
+          视图切换只改外壳类名与后续兄弟节点，不触发子树重建。 */}
+      <div className="wf-frame-content">
+        {children({ close: onClose, drag: beginDrag })}
+      </div>
+      {/* 浮窗：八向缩放把手（渲染在内容之后，属于兄弟节点增删，不影响内容实例） */}
+      {isFloat
+        ? RESIZE_DIRECTIONS.map((direction) => (
             <div
               key={direction}
               className={`wf-window__resize is-${direction}`}
               data-direction={direction}
               onPointerDown={(event) => beginResize(direction, event)}
             />
-          ))}
-        </section>
-      ) : null}
-    </>
+          ))
+        : null}
+      {/* 分栏：左侧分隔线（absolute 定位覆盖在左缘；DOM 顺序在内容之后，React 稳定） */}
+      {isFloat ? null : (
+        <div
+          className="wf-split-divider"
+          role="separator"
+          aria-orientation="vertical"
+          title="拖动调节分栏宽度"
+          style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 9, zIndex: 12, cursor: 'col-resize', touchAction: 'none' }}
+          onPointerDown={beginDividerDrag}
+        />
+      )}
+    </section>
   )
 }

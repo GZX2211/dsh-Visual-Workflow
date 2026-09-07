@@ -140,8 +140,6 @@ export class RuntimeExecute extends RuntimeLaunch {
       snapshot: run.snapshot,
       documentTextLimit: this.deps.config.documentTextLimit,
       pauseNodeIds: pauseNodeIdsOf(flow),
-      retryLimit: effectiveRetryLimit,
-      reactLimit: effectiveReactLimit,
       runContextText: `runId=${run.snapshot.id}; attempt ${attempt}/${effectiveRetryLimit + 1}`,
     })
 

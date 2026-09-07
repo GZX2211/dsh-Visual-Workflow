@@ -3,33 +3,47 @@
 本目录是 `dsh-visual-workflow` 插件**所有提示词组装任务的唯一基线**。后续任何提示词组装必须引用本基线的构建器与
 共享常量，不得各自硬编码模板正文，以保证 W-01（前缀稳定）与 W-02（关键约束双位）跨任务一致。
 
-## 0. 语言约定（当前实际）
+## 0. 语言与约束政策（当前实际）
 
 - 三个构建器**注入给模型的指令正文用中文**（W-04）；工具名（`wf_run_node` / `wf_finish` / `wf_ask_agent` / `wf_db_query`）与**工具 schema 的 `description` 仍为英文**（W-03，见 §3）。
-- 惯用英文技术词（`System Prompt` / `allow-list` / `ReAct` / `flow-out` / `ctx`）保留原样；动态状态字段标签（「重试上限」「ReAct 迭代上限」「运行上下文」）一并中文化。
-- 节点任务块**不再包含 report 回传结论约束**（该约束已移除）；子代理结论在最终消息中输出，由父代理据此汇总。
+- 惯用英文技术词（`System Prompt` / `allow-list` / `ReAct` / `flow-out` / `ctx`）保留原样；动态状态字段标签一并中文化。
+- **代码层约束不写入提示词**（用户裁决）：只有 AI 有选择权、值得强调的**软约束固化**才进入「硬性约束」章节——
+  例如子代理的 report 工具一律软禁用（最终结论由系统自动送达父代理、阶段汇报无意义）、协作组成员必须经
+  `wf_ask_agent` 通信。引擎已强制（工具可见性、重试/ReAct 上限、唯一 System Prompt 等）的约束一律删除，
+  以节省上下文、消除无用约束对模型的干扰。
+- 节点任务块**不再包含 report 回传结论约束**：子代理结论在最终消息中输出，由父代理据此汇总。
 
 ## 1. 文件清单
 
 | 文件 | 作用 |
 |---|---|
-| `index.ts` | 统一出口：共享段落标记常量（`HEAD_MARKER` / `MID_MARKER` / `TAIL_MARKER` / `TAIL_RESTATE_MARKER`） + 三个构建器的 re-export |
-| `orchestration.ts` | 编排指令模板构建器 `buildOrchestrationDirective(params)`（注入父代理） |
-| `node-task.ts` | 节点任务块构建器 `buildNodeTaskBlock(params)`（注入节点子代理） |
+| `index.ts` | 统一出口：共享段落标记常量（`HEAD_MARKER` / `MID_MARKER` / `TAIL_MARKER` / `TAIL_RESTATE_MARKER`）+ 全部构建器与类型的 re-export |
+| `orchestration.ts` | 编排父代理提示词构建器：**情况1** `buildOrchestratorPrompt`（纯编排）、**情况2** `buildHybridPrompt`（编排+自执行）；`ORCH_HARD_CONSTRAINTS` 短语常量含「节点完成判定」一句话（report ≠ 完成，以结算通知为准） |
+| `executor.ts` | 父代理执行单元：**情况3** `buildParentExecutorPrompt`（纯执行完整提示词，无编排要素）+ 情况2 末段【你的节点任务】正文 `buildParentTaskSpec`（过程性信息 + 运行上下文） |
+| `node-task.ts` | 节点任务块构建器 `buildNodeTaskBlock(params)`（注入节点子代理）：软约束固化（report 软禁用、协作组 ask）+ 中段过程性信息 + 末段动态态 |
 | `collab.ts` | 协作成员清单块构建器 `buildCollabBlock({ members, custom })`（追加到组成员用户消息，始终列出成员 ID + 角色名） |
 | `README.md` | 本文件：§13.1 检查单落地表 + W-03 工具描述英文写作规范 |
 
-三个构建器均为**纯函数**：不读 `Date.now`/随机源，同一 `params` 两次构建字节相同。
+**三情况组装**：父代理提示词按画布形态**整体替换组装**（用户评审定稿）——判定纯函数
+`parentPromptVariantOf(flow)`（`orchestrator/helpers.ts`）返回 `orchestrator | hybrid | executor`，
+`buildParentRunPrompt`（同文件）按变体输出整份自洽提示词：情况1 只含编排措辞；情况2 以「执行者模式」
+取代「仅编排」并附【你的节点任务】；情况3 剔除全部编排/流程要素、仅保留任务执行与 `wf_finish` 收尾一句。
+三套变体共用 `ORCH_HARD_CONSTRAINTS` 等短语常量与段落标记，不逐条跨情况拼装（避免身份措辞残留矛盾）。
+
+所有构建器均为**纯函数**：不读 `Date.now`/随机源，同一 `params` 两次构建字节相同。
 
 ## 2. §13.1 检查单落地表
 
 | 规范点（§13.1） | 本基线实现位置 | 用法 |
 |---|---|---|
-| **前缀稳定（KV 缓存友好）** | 三个构建器的模板字符串首段（`HEAD_MARKER` 起）、中段（`MID_MARKER` 起）为固定文本，字节稳定；动态值仅注入末段（`TAIL_MARKER` 之后） | 同一 run 内只允许改 `params` 的末段动态字段；禁止在测试/调用处拼接不稳定内容到前中段 |
-| **注意力位置（关键约束双位）** | `HEAD_MARKER`（首段硬约束）+ `TAIL_MARKER`/`TAIL_RESTATE_MARKER`（末段重申） | 最重要约束（`ORCH_HARD_CONSTRAINTS` / `NODE_HARD_CONSTRAINTS` 短语）同时出现在输出首段与末段，测试断言这一点 |
-| **稳定段落化（同一 run 不再变化）** | 模板集中在本目录；动态态信息以变量注入尾部（`renderDynamicState` 内部纯函数） | 后续组装任务（T-021 等）复用构建器，不在运行时重排模板字符串 |
+| **前缀稳定（KV 缓存友好）** | 各构建器的首段（`HEAD_MARKER` 起）、中段（`MID_MARKER` 起）为固定文本，字节稳定；动态值仅注入末段（`TAIL_MARKER` 之后） | 同一 run 内只允许改 `params` 的末段动态字段；禁止在测试/调用处拼接不稳定内容到前中段 |
+| **注意力位置（关键约束双位）** | 每个变体的 `HEAD_MARKER`（首段软约束）+ `TAIL_MARKER`/`TAIL_RESTATE_MARKER`（末段重申） | 最重要约束 **（AI 有选择权、值得强调的软约束）** 同时出现在输出首段与末段，测试断言这一点 |
+| **稳定段落化（同一 run 不再变化）** | 模板集中在本目录；运行态动态信息以变量注入尾部（各构建器 `renderDynamicState` 内部纯函数） | 后续组装任务（T-021 等）复用构建器，不在运行时重排模板字符串 |
 | **协作 Prompt 追加位置** | `collab.ts` 的 `buildCollabBlock`（始终列出成员 ID + 角色名） | 追加到组内成员**首条用户消息（任务块）末尾**，不再注入系统提示词；无论用户文本是否为空都默认列出全部成员，再追加自定义说明 |
-| **工具 schema 稳定性** | 本基线不注册工具；但要求工具 description 走 W-03（见 §3），输出 render 键序稳定 | T-023/T-024/T-025 注册工具时遵守 §3 与 textRender 键序稳定约定 |
+| **三情况整体替换组装** | `parentPromptVariantOf`（`orchestrator/helpers.ts`）+ `buildParentRunPrompt` | startRun/resumeRun 注入前按画布形态判定变体，整份输出；情况间身份措辞互斥（测试断言互斥） |
+| **双重汇报软约束** | 编排系 `ORCH_HARD_CONSTRAINTS.nodeSettledSignal`；子代理 `NODE_HARD_CONSTRAINTS.noReportTool` | 父代理只以结算通知判定节点完成（report 仅中途汇报）；子代理一律不调用 report（阶段汇报无意义） |
+| **工具 schema 稳定性** | 本基线不注册工具；但要求工具 description 走 W-03（见 §3） | 输出 render 键序稳定 |
+| **部署级旁路（可选）** | 子代理节点「工具散文段开关」`injectToolSections=false` 会隐藏官方 `tool:report` 指引段（不改变工具调用能力） | 需要时由用户在节点面板关闭；插件层不主动启用 |
 
 ## 3. W-03 工具 description 英文写作规范
 

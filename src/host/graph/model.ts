@@ -232,6 +232,36 @@ export function flowInEdges(flow: Partial<WorkflowDocument>, nodeId: string): Li
   return (flow.lines ?? []).filter((l) => l.target === nodeId && l.targetHandle === 'flow-in')
 }
 
+/** 某连线是否为流程线（流程出 → 流程入；ctx/db 连线不参与编排调度，§4.3 连线类型规范）。 */
+export function isFlowLine(line: Line): boolean {
+  return line.sourceHandle === 'flow-out' || line.targetHandle === 'flow-in'
+}
+
+/**
+ * 节点是否参与流程拓扑（作为任一流程线的源或目标；ctx/db 连线不计）。
+ * 虚拟节点（proxy）的流程线归属其主角色节点：主节点自身或其任一虚拟节点参与
+ * 流程线即视为该角色参与流程（用户批注：无流程连接的 agent 为「不执行任务的
+ * 无关节点」——不进入编排清单，也不作为「可执行单元」的判定依据）。
+ */
+export function nodeParticipatesInFlow(flow: Partial<WorkflowDocument>, nodeId: string): boolean {
+  const lines = flow.lines ?? []
+  if (lines.some((l) => isFlowLine(l) && (l.source === nodeId || l.target === nodeId))) return true
+  return proxiesOf(flow, nodeId).some((p) => lines.some((l) => isFlowLine(l) && (l.source === p.id || l.target === p.id)))
+}
+
+/**
+ * 节点是否被流程线**驱动**（存在 flow-in 入边，或其任一虚拟节点存在 flow-in 入边）。
+ * 与「参与流程」的区别：仅有 flow-out 而无 flow-in 的节点不会被上游激活——
+ * 父代理「被流程线连接」的判定以驱动（flow-in）为准，与编排运行时
+ * （prepareParentExecutor/parentExecutorOf）语义保持一致。
+ */
+export function nodeHasFlowIn(flow: Partial<WorkflowDocument>, nodeId: string): boolean {
+  const lines = flow.lines ?? []
+  const hasIn = (id: string): boolean => lines.some((l) => l.target === id && l.targetHandle === 'flow-in')
+  if (hasIn(nodeId)) return true
+  return proxiesOf(flow, nodeId).some((p) => hasIn(p.id))
+}
+
 /** 某节点的 ctx-in 入边列表（上游上下文来源，§4.2.3.2 规则 5 显式连线）。 */
 export function ctxInEdges(flow: Partial<WorkflowDocument>, nodeId: string): Line[] {
   return (flow.lines ?? []).filter((l) => l.target === nodeId && l.targetHandle === 'ctx-in')

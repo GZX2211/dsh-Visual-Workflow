@@ -3,10 +3,14 @@
 // 工作台宿主（图1/图2 交互改造）：为官方 Web 页面提供插件工作台的统一宿主。
 //   - 常驻：侧边栏入口注入由 useWorkbenchView 完成（官方 sidebarDOM 注入）。
 //   - 打开后按视图模式渲染：
-//       float → FloatingWindow（独立悬浮窗口，覆盖于官方页面之上）；
-//       split → 工作台以 fixed 定位覆盖右侧（官方对话主列由 useWorkbenchView 设右内边距
-//              让出右半，不动官方 frame 网格）。工作台不再作为官方 frame 的子节点渲染，
-//              从根本上避免与官方 React 布局冲突。
+//       float → 悬浮窗口（WorkbenchFrame 浮窗形态：独立窗口覆盖于官方页面之上）；
+//       split → 分栏窗口（WorkbenchFrame 分栏形态：fixed 覆盖右侧，官方对话主列由
+//               useWorkbenchView 设右内边距让出右半，不动官方 frame 网格）。
+//   - **切换窗口零副作用（修复）**：float/split 由同一个 WorkbenchFrame 组件呈现，
+//     内容 <Studio> 恒挂载于框架内（React 位置/类型恒定）——切换视图模式只改外壳
+//     样式与交互，画布内容、未保存修改、运行快照、轮询结果、选中实例、面板布局
+//     等全部状态原样保留。此前双分支各自渲染 <Studio>，切换即卸载重建、状态全丢。
+//     切换按钮（toggleView）只切模式并持久化，不触发布局/保存/运行逻辑（用户验收）。
 //   - 会话绑定与订阅（工作台全局化改版）：工作台**不再按会话隔离**——实例/服务
 //     列表为全部会话的集合，宿主只解析「当前主会话」（会话树根）供——① 实例列表
 //     「当前」标签；② 进入时画布默认选中当前会话实例。会话切换跟随仅更新标签
@@ -17,8 +21,7 @@
 import { useEffect, useState } from 'react'
 import type { Dict } from '../i18n.js'
 import { Studio } from './Studio.js'
-import { FloatingWindow } from './floating-window.js'
-import { SplitWindow } from './SplitWindow.js'
+import { WorkbenchFrame } from './WorkbenchFrame.js'
 import { useWorkbenchView } from './useWorkbenchView.js'
 
 /** 宿主上下文（兼容官方 client 注入的 ctx 最小形状）。 */
@@ -89,24 +92,24 @@ export function WorkbenchHost({ ctx, t }: { ctx: WorkbenchHostContext; t: Dict }
   // 未打开：仅保留侧边栏入口（useWorkbenchView 注入），宿主不渲染任何内容。
   if (!view.open) return null
 
-  // 悬浮窗口（float）：覆盖于官方页面之上，标题栏兼任窗口标题栏（可拖动 + 关闭）。
-  if (view.viewMode === 'float') {
-    return (
-      <FloatingWindow t={t} open onClose={view.closeWorkbench}>
-        {({ close, drag }) => (
-          <Studio {...studioProps} onClose={close} onTitlebarDrag={drag} />
-        )}
-      </FloatingWindow>
-    )
-  }
-
-  // 分栏窗口（split）：工作台以 fixed 定位覆盖右侧；中间分隔线可拖（SplitWindow）。
-  // 官方对话主列右内边距由 useWorkbenchView effect 维护（不动官方 frame 网格）。
+  // 统一窗口框架（WorkbenchFrame）：float/split 为同一组件实例的两种形态，
+  // Studio 恒挂载于框架内容容器 —— 视图切换不卸载 Studio，状态全部保留。
+  // 浮窗形态：标题栏兼任窗口标题栏（可拖动 + 关闭）；分栏形态：无关闭按钮、
+  // 标题栏不可拖动（与旧 split 分支行为一致：不传 onClose/onTitlebarDrag）。
   return (
-    <div className="wf-split-pane">
-      <SplitWindow splitWidth={view.splitWidth} onResize={view.setSplitWidth}>
-        <Studio {...studioProps} />
-      </SplitWindow>
-    </div>
+    <WorkbenchFrame
+      mode={view.viewMode}
+      splitWidth={view.splitWidth}
+      onResize={view.setSplitWidth}
+      onClose={view.closeWorkbench}
+    >
+      {(frameApi) => (
+        <Studio
+          {...studioProps}
+          onClose={view.viewMode === 'float' ? frameApi.close : undefined}
+          onTitlebarDrag={view.viewMode === 'float' ? frameApi.drag : undefined}
+        />
+      )}
+    </WorkbenchFrame>
   )
 }

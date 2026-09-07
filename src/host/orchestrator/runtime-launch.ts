@@ -4,10 +4,9 @@
 // 全新启动）与 resumeRun（paused/interrupted 断点续跑）。方法体逐字移动。
 
 import { randomUUID } from 'node:crypto'
-import { buildOrchestrationDirective } from '../prompts/orchestration.js'
 import { buildResumedSnapshot, findResumableRun, type ResumeInput, type ResumeResult } from './resume.js'
 import { createRunSnapshot, setNodeStatus, statusText } from './snapshot.js'
-import { directiveParams, messageOf, missingStageLabels, validateFlowForRun } from './helpers.js'
+import { buildParentRunPrompt, messageOf, missingStageLabels, validateFlowForRun } from './helpers.js'
 import type { StartRunOptions, StartRunResult, RunEntry } from './run-types.js'
 import { WfError } from './seams.js'
 import { RuntimeBase } from './runtime-base.js'
@@ -104,13 +103,18 @@ export class RuntimeLaunch extends RuntimeBase {
 
     // 一次性注入 + 唤醒：官方 Message 契约要求 id 与 source 齐备（缺 source 父回合
     // 以 UNKNOWN 失败——旧项目根因复盘结论，必须保留）。
-    // 执行者模式：父代理节点被流程线连接 → 先执行自身节点任务（任务块注入指令尾段），
-    // 完成后从本人节点 flow-out 调用 wf_run_node 继续调度。
+    // 三情况组装（用户评审）：按画布形态判定父代理提示词变体，输出整份自洽提示词：
+    //   - 情况1 纯编排：无执行单元，编排指令（orchestrator 变体）；
+    //   - 情况2/3 父代理被流程线连接：prepareParentExecutor 先登记执行单元（快照
+    //     标记 running、产出执行单元上下文），再按 hybrid/executor 变体组装。
     const executor = await this.prepareParentExecutor(flow, entry)
-    const directive = buildOrchestrationDirective(directiveParams(flow, defPath, mode, {
+    const directive = buildParentRunPrompt({
+      flow,
+      defPath,
+      mode,
       ...(question ? { question } : {}),
-      ...(executor ? { parentAsNode: { nodeId: executor.nodeId, nodeLabel: executor.nodeLabel }, parentTaskBlock: executor.taskBlock } : {}),
-    }))
+      executor,
+    })
     try {
       this.deps.agents.followupRoot(root, {
         id: this.deps.uuid?.() ?? randomUUID(),
@@ -218,16 +222,17 @@ export class RuntimeLaunch extends RuntimeBase {
     // prev.resumeFromNodeId，interrupted 中断无暂停点时取首个未完成节点）——若直接用
     // prev.resumeFromNodeId，宿主重启中断的恢复会因 undefined 注入「（未指定）」，
     // 父代理无从定位起点、可能从头重调度已 ok 节点（违反 §4.7 规则 6 已执行节点不重跑）。
-    // 执行者模式：父代理节点未 ok（续跑继承外）时同样注入任务块继续执行自身任务。
-    // prepareParentExecutor 内部对已 ok/react-capped 的继承态直接返回 null（不重跑）；
-    // 未 ok 时标记 running + 产出任务块。
+    // 三情况组装与 startRun 一致；prepareParentExecutor 内部对已 ok/react-capped 的
+    // 继承态直接返回 null（不重跑）→ buildParentRunPrompt 按「父单元已完成」以
+    // orchestrator 变体组装（剩余运行只有编排/收尾，无自执行任务内容）。
     const executor = await this.prepareParentExecutor(flow, entry)
-    const directive = buildOrchestrationDirective(
-      directiveParams(flow, defPath, prev.mode, {
-        resume: { resumeFromNodeId: snapshot.resumeFromNodeId, resumedFromRunId: prev.id },
-        ...(executor ? { parentAsNode: { nodeId: executor.nodeId, nodeLabel: executor.nodeLabel }, parentTaskBlock: executor.taskBlock } : {}),
-      }),
-    )
+    const directive = buildParentRunPrompt({
+      flow,
+      defPath,
+      mode: prev.mode,
+      resume: { resumeFromNodeId: snapshot.resumeFromNodeId, resumedFromRunId: prev.id },
+      executor,
+    })
     try {
       this.deps.agents.followupRoot(root, {
         id: this.deps.uuid?.() ?? randomUUID(),

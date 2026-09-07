@@ -246,6 +246,11 @@ export const styles = `
 .wf-message{position:absolute;z-index:25;left:50%;bottom:18px;transform:translateX(-50%);max-width:70%;padding:8px 14px;border:1px solid var(--wf-border-strong);border-radius:10px;background:var(--wf-layer);color:var(--wf-ink-2);font-size:12px;box-shadow:0 10px 26px color-mix(in srgb,var(--wf-ink) 14%,transparent)}
 .wf-window{position:fixed;z-index:2147483000;display:flex;flex-direction:column;border:1px solid var(--wf-border-strong);border-radius:14px;background:var(--wf-bg);box-shadow:0 34px 90px color-mix(in srgb,var(--wf-ink) 34%,transparent);overflow:hidden;overflow-wrap:anywhere}
 .wf-window__body{flex:1;min-height:0;display:flex}
+/* 统一窗口框架内容容器（WorkbenchFrame）：恒为框架根的第 0 个子节点，float/split 共用；
+   取代 .wf-window__body / .wf-split-pane__content 的内容容器角色，保证 Studio 跨模式挂载 */
+.wf-frame-content{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}
+/* 分栏形态：分隔线 absolute 覆盖在左缘，内容容器左移 9px 让位（与旧 .wf-split-pane__inner 布局一致） */
+.wf-split-pane .wf-frame-content{padding-left:9px}
 .wf-window .wf-tabs{cursor:grab}
 .wf-window .wf-tabs button,.wf-window .wf-tabs input,.wf-window .wf-tabs select{cursor:pointer}
 .wf-window .wf-tabs .wf-titlebar__title{cursor:grab}
