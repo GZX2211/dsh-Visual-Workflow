@@ -129,6 +129,7 @@ export function buildOrchestratorPrompt(params: OrchestrationDirectiveParams): s
     `6. 条件连线：${ORCH_HARD_CONSTRAINTS.conditionSemantics}。`,
     `7. 失控处理：${ORCH_HARD_CONSTRAINTS.failureImmediate}。`,
     `8. 组内通信：${ORCH_HARD_CONSTRAINTS.askAgentTimeout}。`,
+    `9. 每次调度前必须重新读取事实源，以文件最新内容为准。`,
   ].join('\n')
 
   const mid = buildMidSection(facts)
@@ -171,6 +172,7 @@ export function buildHybridPrompt(params: OrchestrationDirectiveParams): string 
     `6. 条件连线：${ORCH_HARD_CONSTRAINTS.conditionSemantics}。`,
     `7. 失控处理：${ORCH_HARD_CONSTRAINTS.failureImmediate}。`,
     `8. 组内通信：${ORCH_HARD_CONSTRAINTS.askAgentTimeout}。`,
+    `9. 每次调度前必须重新读取事实源，以文件最新内容为准。`,
   ].join('\n')
 
   const mid = buildMidSection(facts)
@@ -179,7 +181,7 @@ export function buildHybridPrompt(params: OrchestrationDirectiveParams): string 
     TAIL_MARKER,
     '',
     TAIL_RESTATE_MARKER,
-    `- 每次调度前重新读取事实源，以文件最新内容为准。`,
+    `- 每次调度前必须重新读取事实源，以文件最新内容为准。`,
     `- ${ORCH_HARD_CONSTRAINTS.nodeSettledSignal}。`,
     `- ${ORCH_HARD_CONSTRAINTS.finishIdempotent}。`,
     `- ${ORCH_HARD_CONSTRAINTS.failureSemantics}；${ORCH_HARD_CONSTRAINTS.failureImmediate}（失控时）。`,
@@ -197,7 +199,6 @@ function buildMidSection(facts: OrchestrationDirectiveParams['facts']): string {
     MID_MARKER,
     '',
     `工作流事实源（只读文件）：${facts.definitionPath} —— 请先读取它，以获取完整节点列表与连线语义。`,
-    `⚠ 每次调度前重新读取事实源，以文件最新内容为准。`,
   ]
   const goal = String(facts.workflowGoal ?? '').trim()
   if (goal) midParts.push('', `工作流目标：${goal}`)

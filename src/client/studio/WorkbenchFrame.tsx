@@ -12,6 +12,12 @@
 //     一切状态与布局原样保留，「切换窗口」退化为纯视图切换、零副作用。
 //   - 运行联动（浮窗点「运行」→ 自动切分栏 + 收侧栏）由 Studio 层 handleRun
 //     组合（view.setViewMode('split') + PANELS_SET），与切换按钮互不干扰。
+//   - **关闭工作台（入口再次点击/标题栏 ×）同样不卸载（用户裁决 2026.09）**：
+//     新增 hidden 形态——外壳内联 display:none（.wf-window/.wf-split-pane 的
+//     display:flex 会覆盖 HTML hidden 属性，故必须用内联样式），内容（Studio）
+//     保持挂载，重进即恢复退出前的一切状态（画布/布局/未保存修改/运行回显/
+//     「开启新会话」选项等）。首次打开前的「零开销」由 WorkbenchHost 的
+//     everOpened 延迟挂载负责，本组件只表达「隐藏」这一形态。
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
@@ -46,16 +52,19 @@ export interface WorkbenchFrameProps {
   onResize: (width: number) => void
   /** 内容渲染（Studio）；api.close/api.drag 供标题栏使用。 */
   children: (api: WorkbenchFrameApi) => ReactNode
+  /** 工作台是否关闭（隐藏不卸载：外壳 display:none，内容保持挂载、状态原样保留）。 */
+  hidden?: boolean
 }
 
 /** 八向缩放把手方向（仅浮窗模式渲染）。 */
 const RESIZE_DIRECTIONS: ResizeDirection[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
 
 /**
- * 工作台统一窗口框架：children（Studio）恒挂载于框架内，视图模式切换不重建。
- * 浮窗几何（bounds）本地管理并持久化；切换分栏再切回时几何原样恢复。
+ * 工作台统一窗口框架：children（Studio）恒挂载于框架内，视图模式切换与
+ * 关闭（hidden）都不重建。浮窗几何（bounds）本地管理并持久化；切换分栏
+ * 再切回时几何原样恢复。
  */
-export function WorkbenchFrame({ mode, onClose, splitWidth, onResize, children }: WorkbenchFrameProps) {
+export function WorkbenchFrame({ mode, onClose, splitWidth, onResize, hidden = false, children }: WorkbenchFrameProps) {
   const isFloat = mode === 'float'
   const [bounds, setBounds] = useState<WindowBounds>(() => restoreBounds())
   const shellRef = useRef<HTMLElement | null>(null)
@@ -278,7 +287,18 @@ export function WorkbenchFrame({ mode, onClose, splitWidth, onResize, children }
     <section
       ref={shellRef}
       className={isFloat ? 'wf-window' : 'wf-split-pane'}
-      style={isFloat ? styleRef.current : undefined}
+      // 几何样式：浮窗用 styleRef（直写 DOM 几何的镜像）；关闭（hidden）时覆盖为
+      // display:none——⚠️ 不能用 HTML hidden 属性：.wf-window/.wf-split-pane 的
+      // CSS display:flex 会覆盖 UA 的 [hidden]{display:none}，必须内联样式。
+      style={
+        isFloat
+          ? hidden
+            ? { ...styleRef.current, display: 'none' as const }
+            : styleRef.current
+          : hidden
+            ? { display: 'none' as const }
+            : undefined
+      }
       data-wf-frame={mode}
     >
       {/* 内容容器恒为根元素第 0 个子节点（位置/类型恒定）→ Studio 跨模式保持挂载，

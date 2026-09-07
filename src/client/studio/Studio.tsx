@@ -42,6 +42,7 @@ import {
 import { StudioLayout } from './StudioLayout.js'
 import type { CanvasApi } from '../components/canvas/GraphCanvas.js'
 import { flowToCanvasLines, runStatusMap, runningNodeIds, stageTemplateKinds } from '../lib/graph-model.js'
+import { keepInstanceOptions } from './instance-options.js'
 
 export interface StudioProps {
   /** 文案词典。 */
@@ -126,6 +127,14 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
   useEffect(() => {
     dispatch({ type: 'SET_SESSION', sessionId })
   }, [dispatch, sessionId])
+
+  // 「开启新会话」/工作区路径缓存（用户裁决）：instanceOptions 任何变化（含
+  // 创建实例消费后的重置）即落盘 localStorage；初始恢复在 useStudioState 初始化
+  // 工厂完成。配合工作台保持挂载（关闭不卸载），重复进入不丢失，刷新亦恢复。
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    keepInstanceOptions(window.localStorage, state.instanceOptions)
+  }, [state.instanceOptions])
 
   // ---------- 轻提示 ----------
   const notify = useCallback((kind: 'info' | 'success' | 'error', text: string) => {

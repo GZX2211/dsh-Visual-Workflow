@@ -114,7 +114,7 @@ export function DateRangePicker({ value, onChange, weekdays, prevLabel, nextLabe
     return { left: { year: base.year, month: base.month }, right: addMonths(base.year, base.month, 1) }
   })
 
-  // 外部 value.start 变化（如切换任务）→ 视图跳到起点所属月，右月取次月
+  // 外部 value.start 变化（如切换任务）→ 视图跳到起点所属月，右月保持原有独立性（不再强制连续）
   const syncedRef = useRef<string | null>(value.start)
   useEffect(() => {
     if (value.start && value.start !== syncedRef.current) {
@@ -122,7 +122,14 @@ export function DateRangePicker({ value, onChange, weekdays, prevLabel, nextLabe
       const s = parseDate(value.start)
       if (s) {
         const left = { year: s.year, month: s.month }
-        setRange({ left, right: addMonths(s.year, s.month, 1) })
+        // 保留已有的 right，除非新 left 超过了原有的 right（则顺延为 left+1，防止倒挂）
+        setRange((prev) => {
+          const nextLeft = left
+          const nextRight = monthIndex(nextLeft) >= monthIndex(prev.right)
+            ? addMonths(nextLeft.year, nextLeft.month, 1)
+            : prev.right
+          return { left: nextLeft, right: nextRight }
+        })
       }
     }
   }, [value.start])
@@ -147,14 +154,20 @@ export function DateRangePicker({ value, onChange, weekdays, prevLabel, nextLabe
   const pick = (year: number, month: number, day: number): void => {
     const key = dayKey(year, month, day)
     if (startKey === null || endKey !== null) {
-      onChange({ start: fmt(year, month, day), end: null })
+      // 设置起点或重置起点：提前同步 ref，避免 useEffect 将日历强制跳转
+      const newStart = fmt(year, month, day)
+      syncedRef.current = newStart
+      onChange({ start: newStart, end: null })
       return
     }
     if (key < startKey) {
-      // 早于起点：重置起点
-      onChange({ start: fmt(year, month, day), end: null })
+      // 早于起点：重置起点，同样提前同步
+      const newStart = fmt(year, month, day)
+      syncedRef.current = newStart
+      onChange({ start: newStart, end: null })
       return
     }
+    // 设置终点：不改变起点，不需要提前同步
     onChange({ start: value.start, end: fmt(year, month, day) })
   }
 

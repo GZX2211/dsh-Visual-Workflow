@@ -148,3 +148,77 @@ describe('WorkbenchFrame：视图模式切换不卸载内容（BUG「切换窗�
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('WorkbenchFrame：关闭（hidden）不卸载内容（BUG「入口重进丢状态」回归）', () => {
+  it('hidden 往返：外壳 display:none↔恢复，内容组件恒挂载（mount 次数保持 1）', async () => {
+    const counter = { mounts: 0 }
+    const Probe = makeProbe(counter)
+    const renderWithHidden = (hidden: boolean) =>
+      act(async () => {
+        root!.render(
+          <WorkbenchFrame mode="float" onClose={() => {}} splitWidth={640} onResize={() => {}} hidden={hidden}>
+            {() => <Probe />}
+          </WorkbenchFrame>,
+        )
+      })
+
+    root = createRoot(container!)
+    await renderWithHidden(false)
+    expect(counter.mounts).toBe(1)
+    const shell = container!.querySelector('[data-wf-frame]') as HTMLElement
+    expect(shell).toBeTruthy()
+    expect(shell.style.display).not.toBe('none')
+
+    // 关闭：外壳 display:none（⚠️ 不能用 HTML hidden 属性——CSS display:flex 会覆盖）
+    await renderWithHidden(true)
+    expect(counter.mounts).toBe(1)
+    expect(shell.style.display).toBe('none')
+    expect(container!.querySelector('[data-probe]')).toBeTruthy()
+
+    // 重开：恢复显示且内容从未卸载重建
+    await renderWithHidden(false)
+    expect(counter.mounts).toBe(1)
+    expect(shell.style.display).not.toBe('none')
+  })
+
+  it('分栏形态同样支持 hidden（display:none）；内容保持挂载', async () => {
+    const counter = { mounts: 0 }
+    const Probe = makeProbe(counter)
+    root = createRoot(container!)
+    await act(async () => {
+      root!.render(
+        <WorkbenchFrame mode="split" onClose={() => {}} splitWidth={640} onResize={() => {}} hidden>
+          {() => <Probe />}
+        </WorkbenchFrame>,
+      )
+    })
+    const shell = container!.querySelector('[data-wf-frame="split"]') as HTMLElement
+    expect(shell).toBeTruthy()
+    expect(shell.style.display).toBe('none')
+    // 显示恢复后同一实例继续挂载
+    await act(async () => {
+      root!.render(
+        <WorkbenchFrame mode="split" onClose={() => {}} splitWidth={640} onResize={() => {}}>
+          {() => <Probe />}
+        </WorkbenchFrame>,
+      )
+    })
+    expect(counter.mounts).toBe(1)
+    expect(shell.style.display).not.toBe('none')
+    expect(container!.querySelector('.wf-split-divider')).toBeTruthy()
+  })
+
+  it('hidden 不传（undefined）时行为与旧版本一致（默认显示）', async () => {
+    root = createRoot(container!)
+    await act(async () => {
+      root!.render(
+        <WorkbenchFrame mode="float" onClose={() => {}} splitWidth={640} onResize={() => {}}>
+          {() => <div data-content="" />}
+        </WorkbenchFrame>,
+      )
+    })
+    const shell = container!.querySelector('[data-wf-frame]') as HTMLElement
+    expect(shell.style.display).not.toBe('none')
+    expect(container!.querySelector('[data-content]')).toBeTruthy()
+  })
+})

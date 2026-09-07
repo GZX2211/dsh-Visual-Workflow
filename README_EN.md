@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/流程编排模式.png" alt="UI Preview" width="100%" />
+  <img src="https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/流程编排.png" alt="UI Preview" width="100%" />
 </p>
 
 <h1 align="center">Visual Workflow</h1>
@@ -19,12 +19,16 @@
   <a href="#"><img alt="pnpm" src="https://img.shields.io/badge/pnpm-11-orange"></a>
   <a href="#"><img alt="vitest" src="https://img.shields.io/badge/test-vitest-cyan"></a>
   <a href="#"><img alt="license" src="https://img.shields.io/badge/license-MIT-lightgrey"></a>
-  <a href="https://github.com/GZX2211/dsh-Visual-Workflow/releases"><img alt="version" src="https://img.shields.io/github/v/release/GZX2211/dsh-Visual-Workflow?label=version&color=0891b2"></a>
+  <a href="https://github.com/GZX2211/dsh-Visual-Workflow/releases"><img alt="version" src="https://img.shields.io/github/v/release/GZX2211/dsh-Visual-Workflow?label=version&color=0891b2&include_prereleases"></a>
 </p>
 
 ---
 
 ## Key Highlights
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/界面优化.png" width="100%" />
+</p>
 
 ✦ **Drag-and-Drop Orchestration**  
   - Zero-code drag-and-drop with SVG canvas smooth interaction, full undo/redo support; infinite canvas, one-click auto-layout, making complex workflows easily accessible.
@@ -228,6 +232,7 @@ dsh plugin --profile web remove dsh-visual-workflow
 **Encounter `Host key verification failed`**
 
 In **PowerShell** or **CMD**, run:
+
 ```bash
 git config --global url."https://github.com/".insteadOf "git@github.com:"
 ```
@@ -367,7 +372,6 @@ dsh-visual-workflow/
 - Workflow prompt optimization (command execution accuracy, exception handling)
 - API service enhancements (runtime logs, error feedback)
 - Tool optimization (merge tools to reduce context)
-- Parent agent tool whitelist configuration (to reduce unnecessary context)
 
 ---
 

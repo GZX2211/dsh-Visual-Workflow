@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/流程编排模式.png" alt="界面预览" width="100%" />
+  <img src="https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/流程编排.png" alt="界面预览" width="100%" />
 </p>
 
 <h1 align="center">Visual Workflow</h1>
@@ -372,7 +372,6 @@ dsh-visual-workflow/
 - 工作流提示词优化（命令执行准确度、异常处理）
 - API 服务优化（运行日志、错误提示）
 - 工具优化（合并工具缩减上下文）
-- 父代理工具白名单配置（支持装卸，缩减无用上下文）
 
 ---
 

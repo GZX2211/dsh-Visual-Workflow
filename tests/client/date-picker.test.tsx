@@ -5,7 +5,8 @@
 // tests/client/date-picker.test.tsx
 //
 // 双月日历组件：双月渲染（左：锚定月，右：下月）、翻月、点选范围语义
-// （起点 → 终点 → 重置）、早于起点的点击重置起点、范围样式类。
+// （起点 → 终点 → 重置）、早于起点的点击重置起点、范围样式类，
+// 以及外部起点变化（切换任务）时右月保持独立同步、重置起点不跳转视图。
 
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { act } from 'react'
@@ -21,8 +22,13 @@ beforeEach(() => {
   document.body.append(container)
 })
 
-afterEach(() => {
-  root?.unmount()
+afterEach(async () => {
+  if (root) {
+    const instance = root
+    await act(async () => {
+      instance.unmount()
+    })
+  }
   root = null
   container?.remove()
   container = null
@@ -56,6 +62,23 @@ async function renderStateful(initial: DateRangeValue, log: DateRangeValue[]): P
     root = createRoot(container!)
     root.render(React.createElement(StatefulPicker, { initial, log }))
   })
+}
+
+/**
+ * 受控重渲染：同一 root 多次 render（不重建组件实例），
+ * 模拟父组件切换任务时直接改 value.start（不经 onChange 回写）。
+ */
+async function renderControlled(value: DateRangeValue): Promise<void> {
+  if (!root) {
+    await act(async () => {
+      root = createRoot(container!)
+    })
+  }
+  await act(async () => {
+    root!.render(React.createElement(DateRangePicker, { value, onChange: () => {} }))
+  })
+  // flush 被动 effect（外部 value.start 变化 → setRange），确保无 act 外更新
+  await act(async () => {})
 }
 
 describe('DateRangePicker', () => {
@@ -155,5 +178,56 @@ describe('DateRangePicker', () => {
       root?.unmount()
     })
     expect(container!.childElementCount).toBe(0)
+  })
+
+  it('外部 value.start 变化（切换任务）：左月跳到起点月，右月保持独立（不再强制 left+1）', async () => {
+    await renderControlled({ start: '2026-08-01', end: null })
+    expect(qall<HTMLElement>('.wf-cal-month__title').map((t) => t.textContent)).toEqual(['2026年8月', '2026年9月'])
+    // 把右月从 9 月连翻到 12 月（右面板 › 点 3 次），左月保持 8 月
+    const rightHead = qall<HTMLElement>('.wf-cal-month')[1]
+    const nextButtons = Array.from(rightHead.querySelectorAll<HTMLButtonElement>('.wf-cal-nav'))
+    for (let i = 0; i < 3; i += 1) {
+      await act(async () => { nextButtons[1]?.click() })
+    }
+    expect(qall<HTMLElement>('.wf-cal-month__title').map((t) => t.textContent)).toEqual(['2026年8月', '2026年12月'])
+    // 父组件切换任务：value.start 从 08-01 直接变为 10-05 → 左月 2026-10，右月保持 2026-12（独立性）
+    await renderControlled({ start: '2026-10-05', end: null })
+    expect(qall<HTMLElement>('.wf-cal-month__title').map((t) => t.textContent)).toEqual(['2026年10月', '2026年12月'])
+  })
+
+  it('外部 value.start 越过右月：右月顺延为新左月+1（防倒挂）', async () => {
+    await renderControlled({ start: '2026-08-01', end: null })
+    const rightHead = qall<HTMLElement>('.wf-cal-month')[1]
+    const nextButtons = Array.from(rightHead.querySelectorAll<HTMLButtonElement>('.wf-cal-nav'))
+    for (let i = 0; i < 3; i += 1) {
+      await act(async () => { nextButtons[1]?.click() })
+    }
+    expect(qall<HTMLElement>('.wf-cal-month__title')[1].textContent).toBe('2026年12月')
+    // 新起点 2027-02 已越过右月 2026-12 → 右月不能倒挂，顺延为 2027-03
+    await renderControlled({ start: '2027-02-01', end: null })
+    expect(qall<HTMLElement>('.wf-cal-month__title').map((t) => t.textContent)).toEqual(['2027年2月', '2027年3月'])
+  })
+
+  it('点选重置起点不跳转视图（提前同步 ref；不再强制跳到新起点月）', async () => {
+    const selected: DateRangeValue[] = []
+    await renderStateful({ start: '2026-08-01', end: null }, selected)
+    // 设终点：右面板 10 号
+    await act(async () => {
+      const rightPanel = qall<HTMLElement>('.wf-cal-month')[1]
+      Array.from(rightPanel.querySelectorAll<HTMLButtonElement>('.wf-cal-cell'))
+        .find((item) => item.textContent?.startsWith('10'))
+        ?.click()
+    })
+    expect(selected.at(-1)).toEqual({ start: '2026-08-01', end: '2026-09-10' })
+    // 再点 20 号 → 重置起点为 2026-09-20；视图应保持 8 月/9 月（不因 value.start 变化而跳转）
+    await act(async () => {
+      const rightPanel = qall<HTMLElement>('.wf-cal-month')[1]
+      Array.from(rightPanel.querySelectorAll<HTMLButtonElement>('.wf-cal-cell'))
+        .find((item) => item.textContent?.startsWith('20'))
+        ?.click()
+    })
+    expect(selected.at(-1)).toEqual({ start: '2026-09-20', end: null })
+    await act(async () => {}) // flush 剩余被动 effect
+    expect(qall<HTMLElement>('.wf-cal-month__title').map((t) => t.textContent)).toEqual(['2026年8月', '2026年9月'])
   })
 })
