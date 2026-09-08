@@ -3,16 +3,17 @@
 // 节点子代理执行引擎（T-022）：ensureNodeChild / 配置签名复用 / 工具白名单解析 /
 // startNodeTask / interruptChild / 软截停消费。
 //
-// 官方 seam 取证（§8 索引 #1/#6/#7，零官方运行时依赖 W-05）：
+// 官方 seam 取证（§8 索引 #1/#6/#7，零官方运行时依赖 W-05；DSH 0.1.2-rc.1 复核）：
 //   - ctx.subagents.startContinuable({ provider, label, request: { prompt, parent,
 //     persona?, toolFilter?, agentOptions? }, signal }) → { childId, messageId }；
 //     request.prompt 是首条 user 消息，创建即开始推理——首次创建必须把完整任务块
 //     作为 prompt 注入，否则子代理以「无任务」状态空转（旧项目关键时序结论）；
-//   - ctx.subagents.followup(parent, childId, content, { source, signal })——复用
-//     派发；source 记录消息来源（{ kind: 'coordinator', form: 'relay',
-//     senderSessionId } 沿用旧项目语义）；
+//   - 复用派发：0.1.2 SubagentRuntime 移除 rc.2 的 followup，改相邻 Agent 通道
+//     sendMessage(sender, childId, content, { signal }) / queuePrompt(...)（A4-01）；
 //   - ctx.subagents.interrupt(childId, { kind: 'user', parentSessionId })——尽力中断；
-//   - ctx.subagents.registerContinuableSetup((childCtx) => disposer)——贡献注入点。
+//   - 每子代理作用域贡献：0.1.2 移除 registerContinuableSetup，改为 startContinuable
+//     返回后按 agents.get(childId).ctx（发布后的 scoped ctx）安装四类贡献
+//     （可见性/软截停/模型选择/角色提示词）——与官方 installModelSelection(agentCtx, …) 范式一致。
 //
 // 白名单规则（架构文档 §4.2 L219，与旧项目行为差异已标注）：
 //   - combo：combo.tools ∩ 可见工具集（父代理工具集）+ 所选 MCP 服务器前缀工具；
@@ -87,6 +88,17 @@ export function pickProviderName(available: string[]): string | null {
   return PROVIDER_PREFERENCE.find((name) => available.includes(name)) ?? available[0] ?? null
 }
 
+/**
+ * 探测可用延续子代理 provider：0.1.2 SubagentRuntime 移除 rc.2 的 list()，改为按名
+ * getProvider(name)（未注册返回 undefined）探测候选顺序；旧宿主回退 list() 清单。
+ */
+export function detectSubagentProvider(service: SubagentsServiceLike): string | null {
+  if (typeof service.getProvider === 'function') {
+    return PROVIDER_PREFERENCE.find((name) => service.getProvider!(name) !== undefined) ?? null
+  }
+  return pickProviderName(service.list?.() ?? [])
+}
+
 /** 任务块为空的兜底 prompt（正常路径由 T-021 组装任务块；防御性兜底）。 */
 function fallbackPrompt(node: RoleNode): string {
   return [
@@ -126,9 +138,11 @@ export interface AgentsServiceLike {
   roots?(): unknown[]
 }
 
-/** 子代理服务最小结构（官方 SubagentRuntime 使用面）。 */
+/** 子代理服务最小结构（0.1.2 SubagentRuntime 使用面；零官方类型依赖，运行时守卫）。 */
 export interface SubagentsServiceLike {
-  list(): string[]
+  /** 延续子代理 provider 名列表（rc.2 旧面；0.1.2 移除 list()，改用 getProvider 按名探测）。 */
+  list?(): string[]
+  /** 延续子代理创建：首条 prompt 即任务块（rc.1 保留；request 兼容 persona/toolFilter/agentOptions）。 */
   startContinuable(spec: {
     provider: string
     label: string
@@ -141,9 +155,16 @@ export interface SubagentsServiceLike {
     }
     signal: AbortSignal
   }): Promise<{ childId: string; messageId?: unknown }>
-  followup(parent: unknown, childId: string, content: unknown[], options: { source: unknown; signal?: AbortSignal }): Promise<unknown>
-  interrupt(childId: string, authority: { kind: 'user'; parentSessionId: string }): Promise<void>
-  registerContinuableSetup(contribution: (childCtx: unknown) => () => void): () => void
+  /** 0.1.2 相邻 Agent 投递（替代 rc.2 followup）：live 父 Agent → direct child 派发下一回合。 */
+  sendMessage?(sender: unknown, targetId: string, content: Array<{ type: 'text'; text: string }>, options: { signal?: AbortSignal }): Promise<unknown>
+  /** 0.1.2 host 协议投递（distinct child turn，durable host source）；无 sendMessage 时回退。 */
+  queuePrompt?(parent: unknown, childId: string, content: Array<{ type: 'text'; text: string }>, source?: unknown, signal?: AbortSignal): Promise<unknown>
+  /** 尽力中断当前回合（0.1.2 同步签名 interrupt(target, authority)；保留会话）。 */
+  interrupt?(childId: string, authority: { kind: 'user'; parentSessionId: string }): unknown
+  /** 0.1.2 provider 按名探测（探测 provider 是否注册；未注册返回 undefined）。 */
+  getProvider?(name: string): unknown
+  /** rc.2 旧复用投递（双版本兼容；0.1.2 宿主无此方法）。 */
+  followup?(parent: unknown, childId: string, content: unknown[], options: { source: unknown; signal?: AbortSignal }): Promise<unknown>
 }
 
 /** 工具服务最小结构（schemas 视图；restrict 双保险）。 */
@@ -428,6 +449,13 @@ export interface NodeAgentRunnerDeps {
   promptSetup: ChildPromptSetup
   /** 全局关闭工具集快照（tool-switches 模块；同步读取；缺省空集 = 不做过滤）。 */
   toolSwitches?: () => ReadonlySet<string>
+  /**
+   * 每子代理作用域装配（0.1.2 替代 rc.2 的 registerContinuableSetup；由 host 注入）。
+   * 在 startContinuable 返回后按 agents.get(childId).ctx（发布后的 scoped ctx）调用，
+   * 返回该次装配的撤销函数（runner 管理生命周期）。与官方 installModelSelection(agentCtx)
+   * 的「拿到 child 的 ctx 后安装」范式一致。
+   */
+  childSetup?: (childCtx: unknown) => () => void
   logger?: OrchestratorLogger
 }
 
@@ -443,6 +471,8 @@ export class NodeAgentRunner implements NodeRunner {
   private readonly nodeChildren = new Map<string, { childId: string; signature: string }>()
   /** 已创建 childId 集合（dispose 清理护栏登记用）。 */
   private readonly childIds = new Set<string>()
+  /** 已安装 child 作用域装配的撤销表（childId → disposer；dispose/重建子代理时撤销）。 */
+  private readonly childSetupDisposers = new Map<string, () => void>()
   /** 软截停消费适配（NodeRunner 契约）。 */
   readonly consumeReactCapped: NonNullable<NodeRunner['consumeReactCapped']>
 
@@ -468,11 +498,8 @@ export class NodeAgentRunner implements NodeRunner {
     const subagents = this.requireSubagents()
     const parent = this.requireParent(input.sessionId)
     if (!created) {
-      // 复用子代理：followup 派发本轮任务（官方 FIFO 下一回合）
-      await subagents.followup(parent, childId, input.blocks, {
-        source: { kind: 'coordinator', form: 'relay', senderSessionId: input.sessionId },
-        ...(input.signal ? { signal: input.signal } : {}),
-      })
+      // 复用子代理：相邻投递派发本轮任务（0.1.2 sendMessage 优先，回退 queuePrompt/旧 followup）
+      await this.deliverReuse(subagents, parent, childId, input.blocks, input.sessionId, input.signal)
     }
     this.attachModelSelection(childId, input)
       await this.attachPromptState(childId, input)
@@ -483,19 +510,98 @@ export class NodeAgentRunner implements NodeRunner {
   async interruptChild(childId: string, sessionId: string): Promise<void> {
     const subagents = this.requireSubagents()
     try {
-      await subagents.interrupt(childId, { kind: 'user', parentSessionId: sessionId })
+      // 0.1.2 interrupt 为同步签名 interrupt(target, authority)；rc.2 同形。await 兼容 Promise 形态。
+      const outcome = subagents.interrupt?.(childId, { kind: 'user', parentSessionId: sessionId })
+      if (outcome !== undefined && typeof (outcome as Promise<unknown>).then === 'function') {
+        await (outcome as Promise<unknown>)
+      }
     } catch {
       // 已停止/不存在视为成功（旧项目语义）
     }
   }
 
-  /** 清理子代理表与护栏登记（宿主 dispose 调用；不中断子代理——由运行时统一中止）。 */
+  /** 清理子代理表/作用域装配与护栏登记（宿主 dispose 调用；不中断子代理——由运行时统一中止）。 */
   dispose(): void {
     for (const childId of this.childIds) {
       this.deps.react.drop(childId)
     }
     this.childIds.clear()
     this.nodeChildren.clear()
+    for (const dispose of this.childSetupDisposers.values()) {
+      try {
+        dispose()
+      } catch {
+        // 撤销尽力而为
+      }
+    }
+    this.childSetupDisposers.clear()
+  }
+
+  /** 撤销某 child 已安装的作用域装配（幂等；重建/清理路径）。 */
+  private dropChildSetup(childId: string): void {
+    const dispose = this.childSetupDisposers.get(childId)
+    if (!dispose) return
+    this.childSetupDisposers.delete(childId)
+    try {
+      dispose()
+    } catch {
+      // 撤销尽力而为
+    }
+  }
+
+  /** 在 startContinuable 返回后为 child 安装每子代理作用域装配（0.1.2 替代 registerContinuableSetup）。 */
+  private installChildSetup(childId: string): void {
+    if (!this.deps.childSetup) return
+    const agents = this.deps.agents()
+    if (!agents) return
+    let childCtx: unknown
+    try {
+      const agent = agents.get(childId) as { ctx?: unknown } | null | undefined
+      if (agent !== null && typeof agent === 'object') childCtx = agent.ctx
+    } catch {
+      childCtx = undefined
+    }
+    if (!childCtx || typeof childCtx !== 'object') {
+      this.deps.logger?.warn(`[visual-workflow] 子代理 ${childId} 作用域装配失败：未取到 child ctx（护栏/提示词注入降级）`)
+      return
+    }
+    try {
+      const dispose = this.deps.childSetup(childCtx)
+      if (typeof dispose === 'function') this.childSetupDisposers.set(childId, dispose)
+    } catch (error) {
+      this.deps.logger?.warn(`[visual-workflow] child setup attach failed: ${String(error)}`)
+    }
+  }
+
+  /**
+   * 复用子代理的下一回合派发：0.1.2 SubagentRuntime 移除 rc.2 的 followup，改为相邻 Agent
+   * 通道。优先 sendMessage（免自定义 source：sender 即 live 父代理，来源由服务派生）；
+   * 无则回退 queuePrompt / 旧 followup（双版本兼容）。
+   */
+  private async deliverReuse(
+    subagents: SubagentsServiceLike,
+    parent: unknown,
+    childId: string,
+    content: Array<{ type: 'text'; text: string }>,
+    senderSessionId: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (typeof subagents.sendMessage === 'function') {
+      await subagents.sendMessage(parent, childId, content, { ...(signal ? { signal } : {}) })
+      return
+    }
+    if (typeof subagents.queuePrompt === 'function') {
+      await subagents.queuePrompt(parent, childId, content, undefined, signal)
+      return
+    }
+    if (typeof subagents.followup === 'function') {
+      await subagents.followup(parent, childId, content, {
+        source: { kind: 'coordinator', form: 'relay', senderSessionId },
+        ...(signal ? { signal } : {}),
+      })
+      return
+    }
+    throw new Error('subagents 服务不支持复用派发（缺少 sendMessage/queuePrompt/followup）')
   }
 
   // ---- 子代理创建/复用 ---------------------------------------------------------
@@ -530,7 +636,7 @@ export class NodeAgentRunner implements NodeRunner {
     const existing = this.nodeChildren.get(key)
     if (existing && existing.signature === signature) return { childId: existing.childId, created: false }
 
-    const provider = pickProviderName(subagents.list())
+    const provider = detectSubagentProvider(subagents)
     if (!provider) throw new Error('没有可用的子代理 provider（预期 spawn 或 fork）')
     // 白名单为空 → 不传 toolFilter（子代理继承父代理工具集边界由宿主组合决定）；
     // wf_run_node/wf_finish 永不进入 allow（§4.4.2 规则 7）
@@ -557,8 +663,17 @@ export class NodeAgentRunner implements NodeRunner {
       },
       signal: input.signal,
     }))
+    const previous = this.nodeChildren.get(key)
+    if (previous && previous.childId !== started.childId) {
+      // 配置签名变化重建子代理：撤销旧 child 的作用域装配（旧子代理仍存活，但已不再由本运行驱动）
+      this.dropChildSetup(previous.childId)
+    }
     this.nodeChildren.set(key, { childId: started.childId, signature })
     this.childIds.add(started.childId)
+    // 0.1.2 移除 registerContinuableSetup：在 startContinuable 返回后立即按
+    // agents.get(childId).ctx 安装每子代理作用域贡献（可见性/软截停/模型选择/角色提示词）。
+    // resolve 发生在 inbox 接受 prompt 之后、子代理首轮推理（宏任务）之前，同步安装基本覆盖首轮。
+    this.installChildSetup(started.childId)
     // 创建即开始推理（官方 startContinuable 语义）：软截停上限必须在 startContinuable
     // 返回后的同步块内立即登记（startNodeTask 会再次刷新，幂等）。保证事件循环中任何
     // pre-step 事件（宏任务）晚于登记发生；极端情况下官方在 resolve 前同步触发 pre-step

@@ -63,8 +63,12 @@ export function rootSessionIdOf(
   const seen = new Set<string>()
   while (cursor && !seen.has(cursor)) {
     seen.add(cursor)
-    const entry = snapshot.byId[cursor] as { parentSessionId?: unknown } | undefined
-    const parent = typeof entry?.parentSessionId === 'string' ? entry.parentSessionId : ''
+    // 父链字段在 DSH 0.1.2 由 parentSessionId 更名为 parentId（SessionSummary；
+    // 0.1.2-rc.1 类型取证：parentId + origin:'subagent'）。双读兼容运行版本：
+    // 优先 parentId、回退旧名，保证子代理后代仍能上溯到根（实例/服务按会话树根隔离）。
+    const entry = snapshot.byId[cursor] as { parentId?: unknown; parentSessionId?: unknown } | undefined
+    const rawParent = entry?.parentId ?? entry?.parentSessionId
+    const parent = typeof rawParent === 'string' ? rawParent : ''
     if (!parent || !snapshot.byId[parent]) return cursor
     cursor = parent
   }

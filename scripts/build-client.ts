@@ -10,9 +10,9 @@
 //   3. `clean: false` —— 不清空 lib/（host 产物并存）；entryFileNames 锁定 lib/client.js。
 //   4. sourcemap: true —— 插件代码在 Vite module graph 之外被拉取，其 bundle 必须自带
 //      TS/TSX 映射。
-//   5. purity gate —— 除平台模块表基线（react/react-dom/cordis/ui-slots/ui-primitives、
-//      @deepseek-ai/dsh-client-runtime/client）外的任何 @deepseek-ai/* 值 import 都是构建错误，
-//      跨插件协作必须走 cordis service（type-only import 会被擦除，不触达此门）。
+//   5. purity gate —— 除平台模块表基线（react/react-dom/cordis/ui-slots/ui-primitives）外的
+//      任何 @deepseek-ai/* 值 import 都是构建错误，跨插件协作必须走 cordis service
+//      （type-only import 会被擦除，不触达此门）。
 //
 // 运行方式：由 scripts/build.mjs 以 `node node_modules/tsdown/dist/run.mjs --config ...`
 // 以 stdio 'inherit' 直接执行（规避 Windows 沙箱 pipe EPERM）。配置以 node 原生 TS
@@ -30,7 +30,7 @@ const BUNDLE_ID = 'dsh-visual-workflow'
 /**
  * 平台模块表基线（显式固化，避免 workspace 依赖 @repo packages/client/web/src/platform.ts）：
  * shell 共享给冻结模块表的 specifier，以及 shell 启动前 parser 预取的动态行。
- * 与官方 PLATFORM_MODULES / PRELOADED_CLIENT_EXTERNALS 逐字一致。
+ * 与官方 PLATFORM_MODULES 逐字一致（DSH 0.1.2 已移除 dsh-client-runtime，无预载条目）。
  */
 const PLATFORM_MODULES: readonly string[] = [
   'react',
@@ -40,10 +40,6 @@ const PLATFORM_MODULES: readonly string[] = [
   '@deepseek-ai/cordis',
   '@deepseek-ai/dsh-client-ui-slots',
   '@deepseek-ai/dsh-client-ui-primitives',
-]
-
-const PRELOADED_CLIENT_EXTERNALS: readonly string[] = [
-  '@deepseek-ai/dsh-client-runtime/client',
 ]
 
 // 项目根目录（package.json 所在目录）。
@@ -94,7 +90,9 @@ function matchesPattern(patterns: readonly RegExp[], specifier: string): boolean
  * entry：src/client/entry.ts（tsdown 自行编译 TS）；outDir：lib（与 host 产物并存）。
  */
 function clientConfig(): UserConfig {
-  const externals = new Set([...PLATFORM_MODULES, ...PRELOADED_CLIENT_EXTERNALS])
+  // dsh-client-runtime 在 DSH 0.1.2 已从官方包树移除（DSH-0.1.2-A1-25）：
+  // 客户端模块表不再包含它的预载 externals；插件 client 亦不得 import 它。
+  const externals = new Set([...PLATFORM_MODULES])
   const isRequested = (specifier: string): boolean => externals.has(specifier)
 
   return {

@@ -31,6 +31,38 @@ export class OpenAiError extends Error {
   }
 }
 
+// 会话事件流读取（DSH 0.1.2 适配，A4-03/A4-04）：0.1.2 移除 session.events，改
+// seq/eventAt() 按需读取（branded number 运行时仍是普通非负整数）；此处零官方类型
+// 依赖守卫，兼容 0.1.1 的 events 数组。
+
+/** 会话事件流当前长度：0.1.2 用 session.seq；旧版本回退 events.length。 */
+function sessionEventLengthOf(session: unknown): number {
+  if (!session || typeof session !== 'object') return 0
+  const s = session as { seq?: unknown; events?: unknown[] }
+  const viaEvents = Array.isArray(s.events) ? s.events.length : 0
+  const seq = Number(s.seq)
+  if (Number.isFinite(seq) && seq >= 0) {
+    // seq 权威；但「seq 与 events 并存且 seq 为 0、events 非空」的过渡/fake 态下
+    // 以 events 为准（防御性：0.1.2 真会话无 events 字段，不受此分支影响）。
+    return seq > 0 || viaEvents === 0 ? seq : viaEvents
+  }
+  return viaEvents
+}
+
+/** 读取第 index 个会话事件：优先 eventAt(index)（0.1.2）；越界/缺失返回 undefined。 */
+function sessionEventAt(session: unknown, index: number): unknown {
+  if (!session || typeof session !== 'object') return undefined
+  const s = session as { eventAt?: (i: number) => unknown; events?: unknown[] }
+  if (typeof s.eventAt === 'function') {
+    try {
+      return s.eventAt(index)
+    } catch {
+      return undefined // 越界/校验失败：按无事件处理
+    }
+  }
+  return Array.isArray(s.events) ? s.events[index] : undefined
+}
+
 /** 请求体上限（16MB，聊天文本足够）。 */
 const BODY_LIMIT = 16 * 1024 * 1024
 
@@ -254,9 +286,9 @@ export class OpenAiApi {
         )
       }
       await this.deps.sweep()
-      const events = agentLike.session?.events ?? []
-      for (let index = baseSeq; index < events.length; index += 1) {
-        const event = events[index] as { type?: unknown; data?: { message?: { content?: unknown } } } | null
+      const eventLength = sessionEventLengthOf(agentLike.session)
+      for (let index = baseSeq; index < eventLength; index += 1) {
+        const event = sessionEventAt(agentLike.session, index) as { type?: unknown; data?: { message?: { content?: unknown } } } | null
         if (!event) continue
         if (event.type === 'assistant/message' && event.data?.message?.content !== undefined) {
           const joined = extractText(event.data.message.content)
@@ -269,7 +301,7 @@ export class OpenAiApi {
           turnEnded = true
         }
       }
-      baseSeq = events.length
+      baseSeq = eventLength
 
       const snapshot = this.deps.orchestrator.runSnapshot(runId)
       const status = snapshot?.status

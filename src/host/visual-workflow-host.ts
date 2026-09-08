@@ -106,6 +106,36 @@ export class VisualWorkflowHost extends Service {
       react: this.reactGuard.bridge,
       modelSelection: this.modelSelection,
       promptSetup: this.childPrompt,
+      // 0.1.2 适配：rc.2 的 registerContinuableSetup 已从官方移除，改为 runner 在
+      // startContinuable 返回后按 agents.get(childId).ctx 调用本装配，把四类每子代理
+      // 作用域贡献（wf_* 可见性双保险 / ReAct 软截停 / 模型选择 / 角色提示词段）
+      // 装到已发布的 child scoped ctx 上（与官方 installModelSelection(agentCtx) 范式一致）。
+      childSetup: (childCtx) => {
+        const contributions: Array<(context: unknown) => () => void> = [
+          childVisibilityContribution(),
+          this.reactGuard.contribution,
+          this.modelSelection.contribution,
+          this.childPrompt.contribution,
+        ]
+        const disposers: Array<() => void> = []
+        for (const contribution of contributions) {
+          try {
+            const dispose = contribution(childCtx)
+            if (typeof dispose === 'function') disposers.push(dispose)
+          } catch {
+            // 单个贡献因 childCtx 形状不符失败：跳过（其余照装），功能局部降级
+          }
+        }
+        return () => {
+          for (const dispose of disposers) {
+            try {
+              dispose()
+            } catch {
+              // 撤销尽力而为
+            }
+          }
+        }
+      },
       logger: cordisLogger(ctx),
     })
     this.orchestrator = new OrchestratorRuntime({
@@ -179,7 +209,19 @@ export class VisualWorkflowHost extends Service {
     if (!subagents) {
       throw new Error('subagents 服务不可用，无法冷恢复目标子代理')
     }
-    return subagents.followup(parent, childId, content, options)
+    const blocks = (Array.isArray(content) ? content : []) as Array<{ type: 'text'; text: string }>
+    // 0.1.2 适配：SubagentRuntime 移除 rc.2 的 followup，改为相邻 Agent 通道。
+    // sendMessage（live 父 → direct child）/ queuePrompt（host distinct turn）/ 旧 followup 依可用性投递。
+    if (typeof subagents.sendMessage === 'function') {
+      return subagents.sendMessage(parent, childId, blocks, options.signal ? { signal: options.signal } : {})
+    }
+    if (typeof subagents.queuePrompt === 'function') {
+      return subagents.queuePrompt(parent, childId, blocks, options.source, options.signal)
+    }
+    if (typeof subagents.followup === 'function') {
+      return subagents.followup(parent, childId, blocks, options)
+    }
+    throw new Error('subagents 服务不支持协作投递（缺少 sendMessage/queuePrompt/followup）')
   }
 
   /** 数据根目录（数据工具索引落盘位置）。 */
@@ -235,29 +277,13 @@ export class VisualWorkflowHost extends Service {
     this.ctx.on('subagent/end', (payload) => this.onSubagentEnd(payload))
     this.ctx.on('agent/error', (payload) => this.onAgentError(payload))
 
-    // 子代理护栏贡献：每个未发布子代理创建时注入——wf_* 可见性双保险 +
-    // ReAct 软截停 + 思考强度模型选择。返回的 disposers 归 ctx.effect
-    // （服务卸载时撤销贡献）。
-    const subagents = subagentsServiceLike(this.ctx)
-    if (subagents) {
-      this.ctx.effect(() => {
-        const disposers: Array<() => void> = []
-        disposers.push(subagents.registerContinuableSetup(childVisibilityContribution()))
-        disposers.push(subagents.registerContinuableSetup(this.reactGuard.contribution))
-        disposers.push(subagents.registerContinuableSetup(this.modelSelection.contribution))
-          disposers.push(subagents.registerContinuableSetup(this.childPrompt.contribution))
-        return () => {
-          for (const dispose of disposers) {
-            try {
-              dispose()
-            } catch {
-              // 撤销尽力而为
-            }
-          }
-        }
-      }, 'visualWorkflowHost.childSetup')
-    } else {
-      this.ctx.logger.warn('[visual-workflow] subagents 服务不可用：子代理护栏与思考强度注入未启用')
+    // 0.1.2 适配：rc.2 的 registerContinuableSetup 已从官方移除。每子代理作用域装配
+    // （wf_* 可见性双保险 + ReAct 软截停 + 思考强度模型选择 + 角色提示词段）改为由
+    // runner 在 startContinuable 返回后按 agents.get(childId).ctx 调用构造期注入的
+    // childSetup 安装（见构造函数；生命周期随 NodeAgentRunner.dispose）。此处仅检测
+    // subagents 服务可用性并提示——不再在此注册任何贡献。
+    if (!subagentsServiceLike(this.ctx)) {
+      this.ctx.logger.warn('[visual-workflow] subagents 服务不可用：子代理执行/护栏将受限（运行时按需报错或降级）')
     }
 
     // wf_* 工具注册：全局层注册 wf_run_node/wf_finish/wf_ask；子代理侧可见性由

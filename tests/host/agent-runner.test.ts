@@ -17,6 +17,7 @@ import {
   NodeAgentRunner,
   childKey,
   childVisibilityContribution,
+  detectSubagentProvider,
   nodeChildSignature,
   pickProviderName,
   resolveAgentTools,
@@ -546,5 +547,173 @@ describe('childVisibilityContribution（wf_run_node/wf_run_node_wait/wf_finish �
     expect(contribution({ get: () => undefined })()).toBeUndefined()
     const throwingTools = { restrict: () => { throw new Error('unknown tool') } }
     expect(() => contribution({ get: () => throwingTools })()).not.toThrow()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// DSH 0.1.2 子代理 seam（rc.1 SubagentRuntime 使用面）
+// ---------------------------------------------------------------------------
+// 取证（0.1.2-rc.1 类型）：rc.2 的 list()/followup/registerContinuableSetup 移除；
+// 改 getProvider 按名探测、sendMessage/queuePrompt 相邻投递、interrupt(target, authority)。
+// 每子代理作用域装配由 runner 在 startContinuable 返回后按 agents.get(childId).ctx 安装。
+
+/** rc.1 面子代理服务 fake（无 list/followup/registerContinuableSetup）。 */
+class Rc1FakeSubagents implements SubagentsServiceLike {
+  providers: Record<string, unknown> = { spawn: {}, fork: {}, acp: {} }
+  started: Array<Parameters<SubagentsServiceLike['startContinuable']>[0]> = []
+  sent: Array<{ sender: unknown; targetId: string; content: unknown[]; signal?: AbortSignal }> = []
+  queued: Array<{ parent: unknown; childId: string; content: unknown[]; source: unknown; signal?: AbortSignal }> = []
+  interrupts: Array<{ childId: string; authority: { kind: 'user'; parentSessionId: string } }> = []
+  /** startContinuable 成功后回调（模拟官方 provider 发布 child agent → agents.get(childId) 可达）。 */
+  onStart?: (childId: string) => void
+  private seq = 0
+
+  getProvider(name: string): unknown {
+    return this.providers[name]
+  }
+  async startContinuable(spec: Parameters<SubagentsServiceLike['startContinuable']>[0]): Promise<{ childId: string }> {
+    this.started.push(spec)
+    this.seq += 1
+    const childId = `rc1-${this.seq}`
+    this.onStart?.(childId)
+    return { childId }
+  }
+  async sendMessage(sender: unknown, targetId: string, content: Array<{ type: 'text'; text: string }>, options: { signal?: AbortSignal }): Promise<unknown> {
+    this.sent.push({ sender, targetId, content, signal: options.signal })
+    return `mid-${targetId}`
+  }
+  async queuePrompt(parent: unknown, childId: string, content: Array<{ type: 'text'; text: string }>, source?: unknown, signal?: AbortSignal): Promise<unknown> {
+    this.queued.push({ parent, childId, content, source, signal })
+    return `mid-${childId}`
+  }
+  interrupt(childId: string, authority: { kind: 'user'; parentSessionId: string }): void {
+    this.interrupts.push({ childId, authority })
+  }
+}
+
+/** rc.1 面「仅 queuePrompt、无 sendMessage」的子代理 fake（投递回退分支用）。 */
+class Rc1QueueOnlySubagents implements SubagentsServiceLike {
+  providers: Record<string, unknown> = { spawn: {} }
+  started: Array<Parameters<SubagentsServiceLike['startContinuable']>[0]> = []
+  queued: Array<{ parent: unknown; childId: string; content: unknown[]; source: unknown; signal?: AbortSignal }> = []
+  interrupts: Array<{ childId: string; authority: { kind: 'user'; parentSessionId: string } }> = []
+  onStart?: (childId: string) => void
+  private seq = 0
+
+  getProvider(name: string): unknown {
+    return this.providers[name]
+  }
+  async startContinuable(spec: Parameters<SubagentsServiceLike['startContinuable']>[0]): Promise<{ childId: string }> {
+    this.started.push(spec)
+    this.seq += 1
+    const childId = `rc1-${this.seq}`
+    this.onStart?.(childId)
+    return { childId }
+  }
+  async queuePrompt(parent: unknown, childId: string, content: Array<{ type: 'text'; text: string }>, source?: unknown, signal?: AbortSignal): Promise<unknown> {
+    this.queued.push({ parent, childId, content, source, signal })
+    return `mid-${childId}`
+  }
+  interrupt(childId: string, authority: { kind: 'user'; parentSessionId: string }): void {
+    this.interrupts.push({ childId, authority })
+  }
+}
+
+describe('DSH 0.1.2 子代理 seam（getProvider 探测 / childSetup 安装 / sendMessage 复用派发 / interrupt）', () => {
+  it('detectSubagentProvider：getProvider 按名探测命中首选；缺失回退 list()', () => {
+    const rc1 = new Rc1FakeSubagents()
+    expect(detectSubagentProvider(rc1)).toBe('spawn') // spawn 注册 → 首选
+    delete rc1.providers.spawn
+    expect(detectSubagentProvider(rc1)).toBe('fork')
+    rc1.providers = {}
+    expect(detectSubagentProvider(rc1)).toBeNull()
+    // 旧面 fake（仅 list）回退 list() 清单
+    const legacy = new FakeSubagents()
+    legacy.providers = ['acp', 'fork']
+    expect(detectSubagentProvider(legacy)).toBe('fork')
+  })
+
+  it('创建：startContinuable(provider=spawn) + childSetup 在 child 发布后按 agent.ctx 安装；dispose 撤销', async () => {
+    const h = await makeHarness()
+    await h.store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read'], mcpServers: [] })
+    // 换成 rc.1 面 subagents：startContinuable 即发布 child agent（带 ctx）
+    const rc1 = new Rc1FakeSubagents()
+    rc1.onStart = (childId) => { h.agents.children.set(childId, { id: childId, ctx: { tag: `ctx-${childId}` } }) }
+    const childSetup = vi.fn<(ctx: unknown) => () => void>((_ctx) => vi.fn(() => {}))
+    const runner = new NodeAgentRunner({
+      store: h.store,
+      agents: () => h.agents,
+      subagents: () => rc1,
+      toolsView: h.toolsView,
+      react: h.react as unknown as ReactGuardBridge,
+      modelSelection: h.modelSelection as unknown as ModelSelectionSetup,
+      promptSetup: h.promptSetup as unknown as ChildPromptSetup,
+      childSetup,
+    })
+    const result = await runner.startNodeTask(taskInput())
+    expect(result).toEqual({ childId: 'rc1-1', created: true })
+    expect(rc1.started).toHaveLength(1)
+    expect(rc1.started[0].provider).toBe('spawn') // getProvider 探测，而非 list()
+    // childSetup 以发布后的 child.ctx 安装一次
+    expect(childSetup).toHaveBeenCalledTimes(1)
+    expect((childSetup.mock.calls[0] as unknown[])[0]).toEqual({ tag: 'ctx-rc1-1' })
+    const disposer = childSetup.mock.results[0].value as unknown as ReturnType<typeof vi.fn>
+    runner.dispose()
+    expect(disposer).toHaveBeenCalledTimes(1)
+  })
+
+  it('复用派发走 sendMessage（live 父 Agent → direct child），不再调 followup', async () => {
+    const h = await makeHarness()
+    await h.store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read'], mcpServers: [] })
+    const rc1 = new Rc1FakeSubagents()
+    rc1.onStart = (childId) => { h.agents.children.set(childId, { id: childId, ctx: { tag: `ctx-${childId}` } }) }
+    const runner = new NodeAgentRunner({
+      store: h.store,
+      agents: () => h.agents,
+      subagents: () => rc1,
+      toolsView: h.toolsView,
+      react: h.react as unknown as ReactGuardBridge,
+      modelSelection: h.modelSelection as unknown as ModelSelectionSetup,
+      promptSetup: h.promptSetup as unknown as ChildPromptSetup,
+    })
+    const signal = new AbortController().signal
+    await runner.startNodeTask(taskInput({ signal }))
+    const result = await runner.startNodeTask(taskInput({ signal, blocks: blocks('第二轮') }))
+    expect(result).toEqual({ childId: 'rc1-1', created: false })
+    expect(rc1.sent).toHaveLength(1)
+    expect(rc1.sent[0].targetId).toBe('rc1-1')
+    expect(rc1.sent[0].sender).toEqual({ id: 'session-1' }) // sender = live 父 Agent
+    expect(rc1.sent[0].content).toEqual([{ type: 'text', text: '第二轮' }])
+    expect(rc1.sent[0].signal).toBe(signal)
+    expect((rc1 as unknown as { followups?: unknown }).followups).toBeUndefined()
+    runner.dispose()
+  })
+
+  it('复用派发无 sendMessage 时回退 queuePrompt；interrupt 走 rc.1 签名', async () => {
+    const h = await makeHarness()
+    await h.store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read'], mcpServers: [] })
+    // 模拟宿主仅提供 queuePrompt（无 sendMessage）：deliverReuse 回退 queuePrompt
+    const queueOnly = new Rc1QueueOnlySubagents()
+    queueOnly.onStart = (childId) => h.agents.children.set(childId, { id: childId, ctx: {} })
+    const runner = new NodeAgentRunner({
+      store: h.store,
+      agents: () => h.agents,
+      subagents: () => queueOnly,
+      toolsView: h.toolsView,
+      react: h.react as unknown as ReactGuardBridge,
+      modelSelection: h.modelSelection as unknown as ModelSelectionSetup,
+      promptSetup: h.promptSetup as unknown as ChildPromptSetup,
+    })
+    await runner.startNodeTask(taskInput())
+    const reused = await runner.startNodeTask(taskInput({ blocks: blocks('第三轮') }))
+    expect(reused).toEqual({ childId: 'rc1-1', created: false })
+    expect(queueOnly.queued).toHaveLength(1)
+    expect(queueOnly.queued[0].childId).toBe('rc1-1')
+    expect(queueOnly.queued[0].content).toEqual([{ type: 'text', text: '第三轮' }])
+
+    // interrupt：rc.1 服务方法 interrupt(target, { kind:'user', parentSessionId })
+    await runner.interruptChild('rc1-1', 'session-1')
+    expect(queueOnly.interrupts).toEqual([{ childId: 'rc1-1', authority: { kind: 'user', parentSessionId: 'session-1' } }])
+    runner.dispose()
   })
 })

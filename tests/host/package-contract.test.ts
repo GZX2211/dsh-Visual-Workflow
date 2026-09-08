@@ -101,8 +101,10 @@ describe('T-001 包契约（dsh 元数据）', () => {
     expect(pkg.dsh?.client?.platform).toBe('web')
   })
 
-  it('dsh.client.inject 含 @deepseek-ai/dsh-client-runtime', () => {
-    expect(pkg.dsh?.client?.inject).toContain('@deepseek-ai/dsh-client-runtime')
+  it('dsh.client.inject 不含 @deepseek-ai/dsh-client-runtime（DSH 0.1.2 已移除该包，A1-25）', () => {
+    // 0.1.1-rc.2 时代把 client runtime 包列入 inject；0.1.2 拆解后它是运行时幽灵依赖，
+    // 保留会让装配行 pending / 不入 boot graph——client 现只经 ctx.get 守卫取会话/语言服务。
+    expect(pkg.dsh?.client?.inject).not.toContain('@deepseek-ai/dsh-client-runtime')
   })
 })
 

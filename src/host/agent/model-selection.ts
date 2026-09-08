@@ -10,8 +10,9 @@
 //     （system-prompt/assemble 注入 provider/model 变量；agent/request 改写
 //     LlmCallConfig 的 provider/model/reasoningEffort），selection.current 可变，
 //     由调用入口持有；
-//   - 注入点 = ctx.subagents.registerContinuableSetup((childCtx) => disposer)
-//     （activation-setup-registry L26 契约）：每个未发布子代理创建时安装。
+//   - 注入点（0.1.2 适配）：rc.2 的 ctx.subagents.registerContinuableSetup 已从官方移除；
+//     改为 runner 在 startContinuable 返回后按 agents.get(childId).ctx 调用本 contribution
+//     （与官方 installModelSelection(agentCtx, …)「拿 child 的 ctx 安装」的范式一致）。
 //
 // 本移植（零官方运行时依赖，W-05）：结构逐条对齐官方 installModelSelection，
 // payload/next 全部 unknown 收窄；selection 以 WeakMap 按 childCtx 对象身份登记，
