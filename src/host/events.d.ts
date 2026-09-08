@@ -42,6 +42,15 @@ declare module '@deepseek-ai/cordis' {
       step?: unknown
       error?: unknown
     }): void
+    /** 代理会话启动事件（子代理创建窗口内同步触发；用于提前安装每子代理作用域贡献）。 */
+    'agent/session-start'(payload: {
+      agent?: { id?: unknown; ctx?: unknown }
+      source?: unknown
+    }): void
+    /** 代理销毁事件（用于回收已安装的子代理作用域装配）。 */
+    'agent/disposed'(payload: {
+      agent?: { id?: unknown }
+    }): void
     /**
      * 步骤提议瀑布（软截停护栏计步/消息替换；官方 runtime-types L231，§8 #5）。
      * 监听器可返回 { kind: 'enter', messages } 替换本步消息或经 next() 透传。

@@ -22,7 +22,7 @@ import {
 } from './agent/runner.js'
 import { createReactGuard } from './agent/guards.js'
 import { createModelSelectionSetup } from './agent/model-selection.js'
-import { createChildPromptSetup } from './agent/prompt-setup.js'
+import { createChildPromptSetup, type ChildPromptState } from './agent/prompt-setup.js'
 import { CordisAgentHost, agentsServiceLike, subagentsServiceLike } from './agent/agents-host.js'
 import { systemLanguageOf, type SettingsServiceLike } from './system-language.js'
 import { registerWfTools } from './tools/wf-tools.js'
@@ -71,6 +71,19 @@ export class VisualWorkflowHost extends Service {
   private readonly modelSelection = createModelSelectionSetup()
   /** 子代理系统提示词与协作 Prompt 注入装配。 */
   private readonly childPrompt = createChildPromptSetup()
+  /**
+   * 每子代理作用域装配撤销表（agentId → disposer）：由 `agent/session-start` 处理器在
+   * 子代理创建窗口内安装四类贡献（角色提示词/工具可见性/模型选择/软截停），
+   * `agent/disposed` 或宿主 dispose 时撤销。持 key 的是 agent id（而非 childId）。
+   */
+  private readonly childScopeDisposers = new Map<string, () => void>()
+  /**
+   * 每个视觉工作流子代理的提示词状态（agentId → ChildPromptState）。在首次 `agent/session-start`
+   * 时写入；此后即使子代理被重发布/恢复（`agent/session-start` 再次触发、但不在 withPending
+   * 作用域内）也能据此状态重新安装四类贡献——避免「第二轮被官方提示词顶替、贡献被卸载」的
+   * 二次重置 BUG。`agent/disposed` 或宿主 dispose 时清理。
+   */
+  private readonly childPromptStates = new Map<string, ChildPromptState>()
   /** 本地嵌入引擎（外部端点 > 本地资产 > BM25 降级；惰性加载）。 */
   private readonly embedding: EmbeddingService
   /** 已清理标记（dispose 后为 true；重复 dispose 幂等）。 */
@@ -107,36 +120,6 @@ export class VisualWorkflowHost extends Service {
       react: this.reactGuard.bridge,
       modelSelection: this.modelSelection,
       promptSetup: this.childPrompt,
-      // 0.1.2 适配：rc.2 的 registerContinuableSetup 已从官方移除，改为 runner 在
-      // startContinuable 返回后按 agents.get(childId).ctx 调用本装配，把四类每子代理
-      // 作用域贡献（wf_* 可见性双保险 / ReAct 软截停 / 模型选择 / 角色提示词段）
-      // 装到已发布的 child scoped ctx 上（与官方 installModelSelection(agentCtx) 范式一致）。
-      childSetup: (childCtx) => {
-        const contributions: Array<(context: unknown) => () => void> = [
-          childVisibilityContribution(),
-          this.reactGuard.contribution,
-          this.modelSelection.contribution,
-          this.childPrompt.contribution,
-        ]
-        const disposers: Array<() => void> = []
-        for (const contribution of contributions) {
-          try {
-            const dispose = contribution(childCtx)
-            if (typeof dispose === 'function') disposers.push(dispose)
-          } catch {
-            // 单个贡献因 childCtx 形状不符失败：跳过（其余照装），功能局部降级
-          }
-        }
-        return () => {
-          for (const dispose of disposers) {
-            try {
-              dispose()
-            } catch {
-              // 撤销尽力而为
-            }
-          }
-        }
-      },
       logger: cordisLogger(ctx),
     })
     this.orchestrator = new OrchestratorRuntime({
@@ -194,6 +177,95 @@ export class VisualWorkflowHost extends Service {
   /** 按会话取根 Agent（wf_* 工具层提问/校验用；转发至 agents 适配）。 */
   getRootAgent(sessionId: string): RootAgentLike | null {
     return this.agents.getRootAgent(sessionId)
+  }
+
+  // ---- 每子代理作用域装配（agent/session-start 创建窗口内提前安装） ----------------
+
+  /**
+   * 在子代理创建窗口内安装四类每子代理作用域贡献，返回合并 disposer（host 管理生命周期）。
+   * 与官方 installModelSelection(agentCtx) 的「拿到 child 的 ctx 后安装」范式一致：
+   *   - wf_* 可见性双保险（wf_run_node/wf_finish deny）；
+   *   - ReAct 软截停护栏；
+   *   - 模型选择（provider/model/reasoning）；
+   *   - 角色提示词段 + 开关过滤。
+   * 因在 `agent/session-start`（agents.create 发布、首轮组装之前同步触发）执行，
+   * 四类贡献在首轮即可见——修复「系统提示词/工具第二轮才更新」的同源时序 BUG。
+   * 单个贡献失败则跳过（其余照装），返回的 disposer 为已成功安装贡献的合并撤销。
+   */
+  private installChildScope(childCtx: unknown): () => void {
+    const contributions: Array<(context: unknown) => () => void> = [
+      childVisibilityContribution(),
+      this.reactGuard.contribution,
+      this.modelSelection.contribution,
+      this.childPrompt.contribution,
+    ]
+    const disposers: Array<() => void> = []
+    for (const contribution of contributions) {
+      try {
+        const dispose = contribution(childCtx)
+        if (typeof dispose === 'function') disposers.push(dispose)
+      } catch {
+        // 单个贡献因 childCtx 形状不符失败：跳过（其余照装），功能局部降级
+      }
+    }
+    return () => {
+      for (const dispose of disposers) {
+        try {
+          dispose()
+        } catch {
+          // 撤销尽力而为
+        }
+      }
+    }
+  }
+
+  /** 撤销某 child 已安装的作用域装配（幂等；agent/disposed / 重建路径用）。 */
+  private dropChildScope(agentId: string): void {
+    const dispose = this.childScopeDisposers.get(agentId)
+    if (!dispose) return
+    this.childScopeDisposers.delete(agentId)
+    try {
+      dispose()
+    } catch {
+      // 撤销尽力而为
+    }
+  }
+
+  /**
+   * 监听官方 `agent/session-start`：子代理创建/重发布窗口（startContinuable 内部、first assembly
+   * 之前）同步触发。
+   *   - 首建：此时 `withPending` 状态仍在作用域内 → `peekPending()` 取到本次创建的 ChildPromptState；
+   *   - 重发布/恢复：`agent/session-start` 再次触发但不在 withPending 作用域内 → 从
+   *     `childPromptStates`（首建时持久化）取回状态。
+   * 据此在其 ctx 上提前（重新）安装四类贡献，使首轮 + 后续每轮系统提示词与工具集都保持就位，
+   * 不会「第二轮被官方提示词顶替、贡献被卸载」（二次重置 BUG）。
+   */
+  private onAgentSessionStart(payload: { agent?: { id?: unknown; ctx?: unknown } }): void {
+    const agent = payload?.agent
+    if (!agent || typeof agent !== 'object') return
+    const childCtx = agent.ctx
+    if (!childCtx) return
+    const agentId = String(agent.id ?? '')
+    if (!agentId) return
+    // 状态优先级：仍在 withPending（首建）→ 用本次 pending；否则用首建持久化的对应该子代理状态（重发布/恢复）
+    const state = this.childPrompt.peekPending() ?? this.childPromptStates.get(agentId)
+    if (!state) return // 非视觉工作流子代理（既不处于首建 pending，也不是已知视觉工作流子代理）
+    this.dropChildScope(agentId) // 同 id 二次发布先撤销旧装配，防重复
+    // 用 withPending 包裹，使 contribution 读到该 state（首建嵌套于 runner 的 pending，取最内层值）
+    void this.childPrompt.withPending(state, async () => {
+      const dispose = this.installChildScope(childCtx)
+      if (typeof dispose === 'function') this.childScopeDisposers.set(agentId, dispose)
+      return dispose
+    })
+    this.childPromptStates.set(agentId, state)
+  }
+
+  /** 子代理被销毁时回收其作用域装配与提示词状态（重建配置签名变化 / 正常运行结束）。 */
+  private onAgentDisposed(payload: { agent?: { id?: unknown } }): void {
+    const agentId = String(payload?.agent?.id ?? '')
+    if (!agentId) return
+    this.dropChildScope(agentId)
+    this.childPromptStates.delete(agentId)
   }
 
   /** 按会话 id 取子代理 agent（wf_ask_agent 投递缝用；转发至 agents 适配）。 */
@@ -259,6 +331,13 @@ export class VisualWorkflowHost extends Service {
     await this.toolSwitches.load()
     this.ctx.effect(() => registerToolSwitchFilter(this.ctx, this.toolSwitches), 'visualWorkflowHost.toolSwitches')
 
+    // 角色提示词首轮注入全局瀑布（unscoped，与工具开关瀑布同构）：子代理首轮组装在
+    // startContinuable 内部、withPending 状态仍活跃时发生（详见 prompt-setup.ts），
+    // 全局瀑布据此注入角色 Prompt 段并应用开关过滤，使子代理【第一轮】即用角色 Prompt
+    // 替换官方身份/人设段——修复「初始提示词未被用户自设替换、第二轮才替换」的 BUG。
+    // 后续回合由 per-agent 贡献（contribution/bindParent）持久生效，本瀑布只介入首轮。
+    this.ctx.effect(() => this.childPrompt.registerGlobalAssemblyHook(this.ctx), 'visualWorkflowHost.promptGlobalHook')
+
     // 陈旧记录对账与模式二服务自动恢复（上次运行中 status=running 的服务重启）。
     // 服务进程装配（skipReconcile）整块跳过：磁盘运行记录与服务状态属主进程，
     // 服务进程不接管——否则服务进程启动后会扫描到「自己」（主进程 fork 前已把
@@ -276,15 +355,20 @@ export class VisualWorkflowHost extends Service {
     // 事件观察：
     //   - subagent/end：节点子代理结束回写（ok/fail/react-capped + output + wait 唤醒）
     //   - agent/error：父代理回合错误快速终止（看护 latestTurnEnd 为兜底权威检测）
+    //   - agent/session-start：子代理创建窗口内提前安装四类每子代理作用域贡献
+    //     （角色提示词/工具可见性/模型选择/软截停），使首轮系统提示词与工具集就位
+    //   - agent/disposed：撤销对应子代理的作用域装配（重建/正常销毁回收）
     // ctx.on 随本 fiber 自动反注册，无需手动 removeListener。
     this.ctx.on('subagent/end', (payload) => this.onSubagentEnd(payload))
     this.ctx.on('agent/error', (payload) => this.onAgentError(payload))
+    this.ctx.on('agent/session-start', (payload) => this.onAgentSessionStart(payload))
+    this.ctx.on('agent/disposed', (payload) => this.onAgentDisposed(payload))
 
-    // 0.1.2 适配：rc.2 的 registerContinuableSetup 已从官方移除。每子代理作用域装配
-    // （wf_* 可见性双保险 + ReAct 软截停 + 思考强度模型选择 + 角色提示词段）改为由
-    // runner 在 startContinuable 返回后按 agents.get(childId).ctx 调用构造期注入的
-    // childSetup 安装（见构造函数；生命周期随 NodeAgentRunner.dispose）。此处仅检测
-    // subagents 服务可用性并提示——不再在此注册任何贡献。
+    // 0.1.2 适配：rc.2 的 registerContinuableSetup 已从官方移除。每子代理作用域装配改为
+    // 由 host 监听 `agent/session-start`（子代理创建窗口内同步触发）提前安装四类贡献
+    // （见 onAgentSessionStart / installChildScope），不再由 runner 在 startContinuable
+    // 返回后安装——否则首轮系统提示词/工具尚未就位、第二轮才更新。此处仅检测 subagents
+    // 服务可用性并提示。
     if (!subagentsServiceLike(this.ctx)) {
       this.ctx.logger.warn('[visual-workflow] subagents 服务不可用：子代理执行/护栏将受限（运行时按需报错或降级）')
     }
@@ -377,6 +461,16 @@ export class VisualWorkflowHost extends Service {
     this.scheduler.dispose()
     this.orchestrator.dispose()
     this.runner.dispose()
+    // 回收所有已安装的子代理作用域装配（角色提示词/工具可见性/模型选择/软截停）
+    for (const dispose of this.childScopeDisposers.values()) {
+      try {
+        dispose()
+      } catch {
+        // 撤销尽力而为
+      }
+    }
+    this.childScopeDisposers.clear()
+    this.childPromptStates.clear()
     this.embedding.dispose()
     this.serviceManager.dispose()
     this.ctx.logger.info('[visual-workflow] host disposed')

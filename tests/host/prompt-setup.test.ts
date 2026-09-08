@@ -174,3 +174,78 @@ describe('T-021 提示词注入装配 bindParent（父代理根 Agent）', () =>
     expect(out.tools!.map((tool) => tool.name)).toEqual(['read'])
   })
 })
+
+// ---------------------------------------------------------------------------
+// T-021b 全局首轮瀑布（registerGlobalAssemblyHook）：
+// 子代理首轮系统提示词组装发生在 startContinuable 内部、withPending 状态仍活跃时。
+// 全局 unscoped 瀑布就近读取 pending 状态，注入角色 Prompt 段并替换官方身份/人设段，
+// 从而「第一轮」即用用户自设角色 Prompt，而非第二轮才替换（BUG 根因修复复核）。
+// ---------------------------------------------------------------------------
+
+describe('T-021b 子代理首轮角色 Prompt 注入（全局 unscoped 瀑布）', () => {
+  it('在 withPending 作用域内（首轮组装）注入角色 Prompt 段并替换官方身份/人设段', async () => {
+    const setup = createChildPromptSetup()
+    const ctx = makeCtx()
+    setup.registerGlobalAssemblyHook(ctx)
+    let out: Awaited<ReturnType<typeof runAssemble>> | undefined
+    await setup.withPending(
+      { systemPrompt: '子代理角色', injectSystemPrompt: true, injectToolSections: true },
+      async () => {
+        // 模拟 startContinuable 内部、pending 仍活跃时的首轮组装
+        out = await runAssemble(ctx, [
+          { name: 'harness:identity', text: 'You are an AI agent powered by DeepSeek Harness.' },
+          { name: 'deployment:persona', text: '' },
+          { name: 'tool:read', text: 'read tool' },
+          { name: 'tools:sdk', text: 'sdk proto' },
+        ])
+      },
+    )
+    const names = out!.sections!.map((section) => section.name)
+    expect(names).toContain(VISUAL_WORKFLOW_PROMPT_SECTION)
+    expect(out!.sections!.find((s) => s.name === VISUAL_WORKFLOW_PROMPT_SECTION)!.text).toBe('子代理角色')
+    expect(names).not.toContain('harness:identity') // 角色 Prompt 替换官方身份段
+    expect(names).not.toContain('deployment:persona') // 角色 Prompt 替换官方人设段
+    expect(names).toContain('tool:read') // 工具散文段保留
+    expect(names).toContain('tools:sdk') // Code Mode 协议段保留
+    expect(out!.contexts).toHaveLength(1)
+    expect(out!.tools!.map((tool) => tool.name)).toEqual(['read'])
+  })
+
+  it('pending 为空（后续回合/非视觉工作流代理）：全局瀑布原样返回，不篡改官方组装', async () => {
+    const setup = createChildPromptSetup()
+    const ctx = makeCtx()
+    setup.registerGlobalAssemblyHook(ctx)
+    // 在 withPending 之外触发（模拟后续回合），pending.getStore() 为空 → 不干预
+    const out = await runAssemble(ctx, [
+      { name: 'harness:identity', text: 'You are an AI agent powered by DeepSeek Harness.' },
+      { name: 'tool:read', text: 'read tool' },
+    ])
+    expect(out.sections!.map((section) => section.name)).toEqual(['harness:identity', 'tool:read'])
+    expect(out.contexts).toHaveLength(1)
+    expect(out.tools!.map((tool) => tool.name)).toEqual(['read'])
+  })
+
+  it('首轮组装时角色 Prompt 为空：不注入角色段（两开关全开时保持官方组装不变）', async () => {
+    const setup = createChildPromptSetup()
+    const ctx = makeCtx()
+    setup.registerGlobalAssemblyHook(ctx)
+    let out: Awaited<ReturnType<typeof runAssemble>> | undefined
+    await setup.withPending({ systemPrompt: '', injectSystemPrompt: true, injectToolSections: true }, async () => {
+      out = await runAssemble(ctx, [
+        { name: 'harness:identity', text: 'You are an AI agent powered by DeepSeek Harness.' },
+        { name: 'tool:read', text: 'read tool' },
+      ])
+    })
+    // 角色 Prompt 为空 → 无需替换身份段，官方组装保持原样
+    expect(out!.sections!.map((section) => section.name)).toEqual(['harness:identity', 'tool:read'])
+  })
+
+  it('hasPending：withPending 作用域内为 true，之外为 false（agent/session-start 判定视觉工作流子代理依据）', async () => {
+    const setup = createChildPromptSetup()
+    expect(setup.hasPending()).toBe(false)
+    await setup.withPending({ systemPrompt: 'x', injectSystemPrompt: true, injectToolSections: true }, async () => {
+      expect(setup.hasPending()).toBe(true)
+    })
+    expect(setup.hasPending()).toBe(false)
+  })
+})

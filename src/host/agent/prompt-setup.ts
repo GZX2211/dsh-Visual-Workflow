@@ -63,6 +63,30 @@ export interface ChildPromptSetup {
    * 跨会话不影响。非侵入：仅挂载，不修改官方源码。
    */
   bindParent(ctx: unknown, state: ChildPromptState, sessionId: string): void
+  /**
+   * 注册全局 unscoped `system-prompt/assemble` 瀑布（host 层；与工具开关瀑布同构）：
+   * 当 `withPending` 的 AsyncLocalStorage 状态仍在作用域内（即子代理首轮组装发生在
+   * `startContinuable` 内部时），据此注入角色 Prompt 段并应用开关过滤——修复「子代理
+   * 首轮系统提示词未替换成用户自设角色 Prompt」的 BUG。
+   *
+   * 为什么需要全局瀑布：子代理首轮组装（`agents.create` 后 `followup` 触发）在
+   * `startContinuable` 返回**之前**同步发生（官方 dsh-agent-loop 的 preStep → assemble），
+   * 而 per-agent 贡献经 `childSetup` 在 `startContinuable` 返回**之后**才安装，晚于首轮，
+   * 导致首轮组装时角色 Prompt 段尚未注册。全局瀑布在 host 初始化时即注册（早于任何
+   * 子代理创建），且首轮组装执行在 `withPending` 作用域内，故就近读到 pending 状态注入。
+   * 后续回合（pending 已退出）由 per-agent 贡献/bindParent 持久生效，本瀑布不再介入
+   * （`pending.getStore()` 为空即原样返回），避免双重注入。
+   */
+  registerGlobalAssemblyHook(ctx: PromptChildContextLike): () => void
+  /**
+   * 当前是否处于 `withPending`（视觉工作流子代理创建）作用域内。
+   * host 层 `agent/session-start` 处理器据此判断「正在创建的是视觉工作流子代理」，
+   * 从而在其创建窗口内提前安装四类每子代理作用域贡献（角色提示词段 / 工具可见性 deny /
+   * 模型选择 / 软截停），使首轮系统提示词与工具集均在第一回合就位（修复「工具第二轮才更新」）。
+   */
+  hasPending(): boolean
+  /** 读取当前 withPending 作用域内的状态（若在作用域内）；`agent/session-start` 首建时据此取状态。 */
+  peekPending(): ChildPromptState | undefined
 }
 
 /** 可变状态引用（section 文本以函数读取，attach/bindParent 后即时生效）。 */
@@ -125,6 +149,37 @@ function shouldKeepSection(name: string, ref: PromptStateRef): boolean {
 }
 
 /**
+ * 把角色 Prompt 状态应用到一次系统提示词组装结果（纯函数、确定性）：
+ *   - 两开关全开且未设置角色 Prompt 时原样返回（保持官方缓存/稳定性优化）；
+ *   - 否则注入 `visual-workflow:prompt` 段（sectionRegistered 为 false 时在瀑布内补插），
+ *     再按 shouldKeepSection 过滤出保留段；contexts 随 injectSystemPrompt 开关。
+ * 供 per-agent 贡献/父代理 bindParent 与全局首轮瀑布共用，逻辑一致。
+ */
+function applyPromptStateToAssembly(
+  assembly: PromptAssemblyLike | null,
+  ref: PromptStateRef,
+  sectionRegistered: boolean,
+): PromptAssemblyLike | null {
+  if (!assembly) return assembly
+  const roleText = String(ref.systemPrompt ?? '').trim()
+  const roleSet = roleText.length > 0
+  // 快速路径：两开关全开且未设置角色 Prompt（无需替换官方身份段）时，不改动官方组装。
+  const needsFilter = !(ref.injectSystemPrompt && ref.injectToolSections) || roleSet
+  if (!needsFilter) return assembly
+  let baseSections = Array.isArray(assembly.sections) ? [...assembly.sections] : []
+  if (!sectionRegistered && roleSet) {
+    // 避免重复注入：若组装结果已含角色 Prompt 段（例如 per-agent 的 sys.section 已注册、
+    // 或本次瀑布已在前次监听中补插过），不再重复追加。
+    const alreadyPresent = baseSections.some((section) => String(section.name) === VISUAL_WORKFLOW_PROMPT_SECTION)
+    if (!alreadyPresent) {
+      baseSections = [{ name: VISUAL_WORKFLOW_PROMPT_SECTION, text: roleText }, ...baseSections]
+    }
+  }
+  const sections = baseSections.filter((section) => shouldKeepSection(String(section.name), ref))
+  return { ...assembly, sections, contexts: ref.injectSystemPrompt ? (assembly.contexts ?? []) : [] }
+}
+
+/**
  * 在同一 ctx 上装配「角色 Prompt 段 + 开关过滤瀑布」，返回合并 disposer。
  * 供子代理 contribution 与父代理 bindParent 共用（逻辑一致）。
  */
@@ -150,24 +205,12 @@ function registerPromptOnCtx(childCtx: PromptChildContextLike, ref: PromptStateR
   }
 
   // 开关过滤瀑布：两开关全开且未设置角色 Prompt 时返回官方原有装配（不改动，保持官方
-  // 缓存/稳定性优化）；否则按 shouldKeepSection 保留角色段 + Code 协议段 + 按开关的
+  // 缓存/稳定性优化）；否则按 applyPromptStateToAssembly 保留角色段 + Code 协议段 + 按开关的
   // 工具段/官方段。角色 Prompt 设置时会替换官方身份/人设段（用户裁决）。
   // 工具调用能力仅由 tools[] Schema 决定，本瀑布从不改动 assembly.tools。
   const disposeAssembly = childCtx.on('system-prompt/assemble', async (rawAssembly, _rawContext, next) => {
     const assembly = (await next()) as PromptAssemblyLike | null
-    const roleText = String(ref.systemPrompt ?? '').trim()
-    const roleSet = roleText.length > 0
-    // 快速路径：两开关全开且未设置角色 Prompt（无需替换官方身份段）时，不改动官方组装。
-    // 仅当设置了角色 Prompt 或任一开关关闭时才做过滤（保持缓存/稳定性优化）。
-    const needsFilter = !(ref.injectSystemPrompt && ref.injectToolSections) || roleSet
-    if (!needsFilter) return assembly
-    let baseSections = Array.isArray(assembly?.sections) ? [...assembly.sections] : []
-    if (!sectionRegistered && roleSet) {
-      baseSections = [{ name: VISUAL_WORKFLOW_PROMPT_SECTION, text: roleText }, ...baseSections]
-    }
-    const sections = baseSections.filter((section) => shouldKeepSection(String(section.name), ref))
-    // 上下文（运行时快照）属官方系统信息，随 injectSystemPrompt 开关；与工具段无关
-    return { ...assembly, sections, contexts: ref.injectSystemPrompt ? (assembly?.contexts ?? []) : [] }
+    return applyPromptStateToAssembly(assembly, ref, sectionRegistered)
   }) as () => void
   disposers.push(disposeAssembly)
 
@@ -214,6 +257,10 @@ export function createChildPromptSetup(): ChildPromptSetup {
   const withPending = <T>(state: ChildPromptState, operation: () => Promise<T>): Promise<T> =>
     pending.run(state, operation)
 
+  const hasPending = (): boolean => pending.getStore() !== undefined
+
+  const peekPending = (): ChildPromptState | undefined => pending.getStore()
+
   const attach = (childCtx: unknown, state: ChildPromptState): void => {
     if (!childCtx || typeof childCtx !== 'object') return
     const ref = states.get(childCtx as object)
@@ -240,5 +287,26 @@ export function createChildPromptSetup(): ChildPromptSetup {
     ref.injectToolSections = state.injectToolSections !== false
   }
 
-  return { contribution, withPending, attach, bindParent }
+  /**
+   * 全局 unscoped 瀑布（host 层，与工具开关瀑布同构）。宿主在初始化时注册到自身
+   * unscoped ctx，对所有 agent 的组装生效。子代理首轮组装发生在 `withPending` 作用域内
+   * （startContinuable 尚未返回），此时 pending.getStore() 非空——据此注入角色 Prompt 段
+   * 并应用开关过滤，使首轮即用角色 Prompt 替换官方身份/人设段。后续回合 pending 已退出，
+   * 本瀑布原样返回（由 per-agent 贡献/bindParent 持久生效），避免双重注入。
+   */
+  const registerGlobalAssemblyHook = (ctx: PromptChildContextLike): (() => void) => {
+    if (typeof ctx?.on !== 'function') return () => {}
+    return ctx.on('system-prompt/assemble', async (rawAssembly, _rawContext, next) => {
+      const assembly = (await next()) as PromptAssemblyLike | null
+      const pendingState = pending.getStore()
+      if (!pendingState) return assembly // 非视觉工作流子代理首轮/后续回合：交给 per-agent 贡献/bindParent
+      return applyPromptStateToAssembly(assembly, {
+        systemPrompt: String(pendingState.systemPrompt ?? ''),
+        injectSystemPrompt: pendingState.injectSystemPrompt !== false,
+        injectToolSections: pendingState.injectToolSections !== false,
+      }, false)
+    }) as () => void
+  }
+
+  return { contribution, withPending, attach, bindParent, registerGlobalAssemblyHook, hasPending, peekPending }
 }

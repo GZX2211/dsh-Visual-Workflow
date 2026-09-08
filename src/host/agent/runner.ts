@@ -449,13 +449,6 @@ export interface NodeAgentRunnerDeps {
   promptSetup: ChildPromptSetup
   /** 全局关闭工具集快照（tool-switches 模块；同步读取；缺省空集 = 不做过滤）。 */
   toolSwitches?: () => ReadonlySet<string>
-  /**
-   * 每子代理作用域装配（0.1.2 替代 rc.2 的 registerContinuableSetup；由 host 注入）。
-   * 在 startContinuable 返回后按 agents.get(childId).ctx（发布后的 scoped ctx）调用，
-   * 返回该次装配的撤销函数（runner 管理生命周期）。与官方 installModelSelection(agentCtx)
-   * 的「拿到 child 的 ctx 后安装」范式一致。
-   */
-  childSetup?: (childCtx: unknown) => () => void
   logger?: OrchestratorLogger
 }
 
@@ -471,8 +464,6 @@ export class NodeAgentRunner implements NodeRunner {
   private readonly nodeChildren = new Map<string, { childId: string; signature: string }>()
   /** 已创建 childId 集合（dispose 清理护栏登记用）。 */
   private readonly childIds = new Set<string>()
-  /** 已安装 child 作用域装配的撤销表（childId → disposer；dispose/重建子代理时撤销）。 */
-  private readonly childSetupDisposers = new Map<string, () => void>()
   /** 软截停消费适配（NodeRunner 契约）。 */
   readonly consumeReactCapped: NonNullable<NodeRunner['consumeReactCapped']>
 
@@ -520,57 +511,16 @@ export class NodeAgentRunner implements NodeRunner {
     }
   }
 
-  /** 清理子代理表/作用域装配与护栏登记（宿主 dispose 调用；不中断子代理——由运行时统一中止）。 */
+  /** 清理子代理表与护栏登记（宿主 dispose 调用；不中断子代理——由运行时统一中止）。
+   *  每子代理作用域装配（角色提示词/工具可见性/模型选择/软截停）由 host 层
+   *  `agent/session-start` 处理器在创建窗口内安装，其撤销函数归 host 的
+   *  `childScopeDisposers` 管理（见 visual-workflow-host.ts），runner 不再持有。 */
   dispose(): void {
     for (const childId of this.childIds) {
       this.deps.react.drop(childId)
     }
     this.childIds.clear()
     this.nodeChildren.clear()
-    for (const dispose of this.childSetupDisposers.values()) {
-      try {
-        dispose()
-      } catch {
-        // 撤销尽力而为
-      }
-    }
-    this.childSetupDisposers.clear()
-  }
-
-  /** 撤销某 child 已安装的作用域装配（幂等；重建/清理路径）。 */
-  private dropChildSetup(childId: string): void {
-    const dispose = this.childSetupDisposers.get(childId)
-    if (!dispose) return
-    this.childSetupDisposers.delete(childId)
-    try {
-      dispose()
-    } catch {
-      // 撤销尽力而为
-    }
-  }
-
-  /** 在 startContinuable 返回后为 child 安装每子代理作用域装配（0.1.2 替代 registerContinuableSetup）。 */
-  private installChildSetup(childId: string): void {
-    if (!this.deps.childSetup) return
-    const agents = this.deps.agents()
-    if (!agents) return
-    let childCtx: unknown
-    try {
-      const agent = agents.get(childId) as { ctx?: unknown } | null | undefined
-      if (agent !== null && typeof agent === 'object') childCtx = agent.ctx
-    } catch {
-      childCtx = undefined
-    }
-    if (!childCtx || typeof childCtx !== 'object') {
-      this.deps.logger?.warn(`[visual-workflow] 子代理 ${childId} 作用域装配失败：未取到 child ctx（护栏/提示词注入降级）`)
-      return
-    }
-    try {
-      const dispose = this.deps.childSetup(childCtx)
-      if (typeof dispose === 'function') this.childSetupDisposers.set(childId, dispose)
-    } catch (error) {
-      this.deps.logger?.warn(`[visual-workflow] child setup attach failed: ${String(error)}`)
-    }
   }
 
   /**
@@ -650,14 +600,11 @@ export class NodeAgentRunner implements NodeRunner {
       injectSystemPrompt,
       injectToolSections,
     }
-    // 【关键时序】withPending 必须同时覆盖 installChildSetup：0.1.2 移除
-    // registerContinuableSetup 后，contribution 在 startContinuable 返回后由
-    // installChildSetup 调用（见下方），此时若已脱离 withPending 的 AsyncLocalStorage
-    // 作用域，contribution 读不到 pending 状态 → 角色 Prompt 段注册为空文本 →
-    // 子代理首轮组装时该空段被官方 renderPrompt 过滤，系统提示词只剩官方段
-    // （「初始提示词没有被用户自设替换」BUG 根因）。把 installChildSetup 放进
-    // withPending 回调（await 后同步执行，AsyncLocalStorage 跨 await 恢复），
-    // contribution 即可读到正确 pending 状态，首轮即注入角色 Prompt。
+    // 【关键时序】每子代理作用域装配（角色提示词/工具可见性/模型选择/软截停）由 host 层
+    // `agent/session-start` 处理器在子代理创建窗口内安装（该事件在 agents.create 发布、
+    // 首轮 followup 组装之前同步触发；此时 withPending 的 AsyncLocalStorage 状态仍在作用域内，
+    // 各 contribution 能读到本次创建的 promptState/manifest）。因此 startContinuable 只需要
+    // 创建子代理并提交首条任务，不再在返回后重复安装——避免二次「工具已更新」。
     const started = await this.deps.promptSetup.withPending(promptState, async () => {
       const result = await subagents.startContinuable({
         provider,
@@ -672,15 +619,13 @@ export class NodeAgentRunner implements NodeRunner {
         },
         signal: input.signal,
       })
-      // 在 withPending 作用域内安装每子代理作用域贡献：contribution 经 AsyncLocalStorage
-      // 读到本次创建的 promptState（角色 Prompt/两开关），首轮组装即就绪。
-      this.installChildSetup(result.childId)
       return result
     })
     const previous = this.nodeChildren.get(key)
     if (previous && previous.childId !== started.childId) {
-      // 配置签名变化重建子代理：撤销旧 child 的作用域装配（旧子代理仍存活，但已不再由本运行驱动）
-      this.dropChildSetup(previous.childId)
+      // 配置签名变化重建子代理：旧 child 的作用域装配归 host 的 childScopeDisposers 管理，
+      // 由 host 监听 agent/disposed 回收，不再由 runner 撤销。
+      this.deps.logger?.debug(`[visual-workflow] 子代理重建：${previous.childId} -> ${started.childId}`)
     }
     this.nodeChildren.set(key, { childId: started.childId, signature })
     this.childIds.add(started.childId)

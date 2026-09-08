@@ -14,6 +14,7 @@ import { existsSync } from 'node:fs'
 import { VisualWorkflowHost, VisualWorkflowHostServiceName, type Config } from '../../src/host/index.js'
 import { FlowStore } from '../../src/host/storage/flow-store.js'
 import { ServiceManager } from '../../src/host/service/manager.js'
+import { VISUAL_WORKFLOW_PROMPT_SECTION } from '../../src/host/agent/prompt-setup.js'
 
 /** 构造含临时 dataDir 的完整配置（其余键取 schema 默认）。 */
 function makeConfig(dir: string): Config {
@@ -126,5 +127,109 @@ describe('VisualWorkflowHost 装配', () => {
     } finally {
       spy.mockRestore()
     }
+  })
+
+  it('agent/session-start：在 withPending 创建窗口内为视觉工作流子代理提前装配四类贡献', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vw-host-'))
+    cleanups.push(() => rm(dir, { recursive: true, force: true }))
+    const root = new Context()
+    await root.plugin(VisualWorkflowHost, makeConfig(dir))
+    const host = root.get(VisualWorkflowHostServiceName) as VisualWorkflowHost
+
+    // 子代理 ctx fake：支持四类贡献所需的 on / systemPrompt.section / tools.get(restrict)
+    const sections: Array<{ name: string; order: number }> = []
+    const handlers = new Map<string, unknown[]>()
+    const denies: Array<{ deny?: string[] }> = []
+    const childCtx = {
+      on(name: string, listener: unknown): () => void {
+        handlers.set(name, [...(handlers.get(name) ?? []), listener])
+        return () => {}
+      },
+      systemPrompt: {
+        section(input: { name: string; order: number }): () => void {
+          sections.push(input)
+          return () => {}
+        },
+      },
+      get(name: string): unknown {
+        return name === 'tools'
+          ? { restrict: (filter: { deny?: string[] }) => { denies.push(filter); return () => {} } }
+          : undefined
+      },
+    }
+
+    // 模拟 startContinuable 内（withPending 作用域）出现的 agent/session-start
+    await (host as unknown as { childPrompt: { withPending(s: unknown, o: () => Promise<void>): Promise<void> } })
+      .childPrompt.withPending(
+        { systemPrompt: '子代理角色', injectSystemPrompt: true, injectToolSections: true },
+        async () => {
+          ;(host as unknown as { onAgentSessionStart(p: unknown): void }).onAgentSessionStart({
+            agent: { id: 'child-x', ctx: childCtx },
+          })
+        },
+      )
+
+    // ① 角色 Prompt 段已注册（per-agent sys.section）
+    expect(sections.map((s) => s.name)).toContain(VISUAL_WORKFLOW_PROMPT_SECTION)
+    // ② 系统提示词组装过滤瀑布已挂
+    expect(handlers.get('system-prompt/assemble')?.length ?? 0).toBeGreaterThan(0)
+    // ③ 工具可见性双保险：wf_run_node / wf_finish deny 已在创建窗口内生效
+    expect(denies.some((d) => Array.isArray(d.deny) && d.deny!.includes('wf_run_node'))).toBe(true)
+    expect(denies.some((d) => Array.isArray(d.deny) && d.deny!.includes('wf_finish'))).toBe(true)
+
+    await root.fiber.dispose()
+  })
+
+  it('agent/session-start 再次触发（重发布/恢复，不在 withPending 内）：用首建持久化状态重装，不回退官方提示词', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vw-host-'))
+    cleanups.push(() => rm(dir, { recursive: true, force: true }))
+    const root = new Context()
+    await root.plugin(VisualWorkflowHost, makeConfig(dir))
+    const host = root.get(VisualWorkflowHostServiceName) as VisualWorkflowHost
+
+    const makeCtx = () => {
+      const sections: Array<{ name: string; order: number }> = []
+      const handlers = new Map<string, unknown[]>()
+      const denies: Array<{ deny?: string[] }> = []
+      const childCtx = {
+        on(name: string, listener: unknown): () => void {
+          handlers.set(name, [...(handlers.get(name) ?? []), listener])
+          return () => {}
+        },
+        systemPrompt: { section(input: { name: string; order: number }): () => void { sections.push(input); return () => {} } },
+        get(name: string): unknown {
+          return name === 'tools'
+            ? { restrict: (filter: { deny?: string[] }) => { denies.push(filter); return () => {} } }
+            : undefined
+        },
+      }
+      return { childCtx, sections, handlers, denies }
+    }
+
+    const hostAs = host as unknown as {
+      childPrompt: { withPending(s: unknown, o: () => Promise<void>): Promise<void>; hasPending(): boolean }
+      onAgentSessionStart(p: unknown): void
+    }
+
+    // 首建：withPending 作用域内，install + 持久化状态
+    const first = makeCtx()
+    await hostAs.childPrompt.withPending(
+      { systemPrompt: '子代理角色', injectSystemPrompt: true, injectToolSections: true },
+      async () => { hostAs.onAgentSessionStart({ agent: { id: 'child-x', ctx: first.childCtx } }) },
+    )
+    expect(first.sections.map((s) => s.name)).toContain(VISUAL_WORKFLOW_PROMPT_SECTION)
+
+    // 重发布/恢复：不再处于 withPending（子代理被卸载后重新发布 → session-start 再次触发）
+    // 关键：必须用首建持久化状态重装四类贡献，否则回退官方提示词（二次重置 BUG 回归）
+    const second = makeCtx()
+    expect(hostAs.childPrompt.hasPending()).toBe(false)
+    hostAs.onAgentSessionStart({ agent: { id: 'child-x', ctx: second.childCtx } })
+
+    expect(second.sections.map((s) => s.name)).toContain(VISUAL_WORKFLOW_PROMPT_SECTION)
+    expect(second.handlers.get('system-prompt/assemble')?.length ?? 0).toBeGreaterThan(0)
+    expect(second.denies.some((d) => Array.isArray(d.deny) && d.deny!.includes('wf_run_node'))).toBe(true)
+    expect(second.denies.some((d) => Array.isArray(d.deny) && d.deny!.includes('wf_finish'))).toBe(true)
+
+    await root.fiber.dispose()
   })
 })

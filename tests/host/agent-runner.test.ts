@@ -633,13 +633,15 @@ describe('DSH 0.1.2 子代理 seam（getProvider 探测 / childSetup 安装 / se
     expect(detectSubagentProvider(legacy)).toBe('fork')
   })
 
-  it('创建：startContinuable(provider=spawn) + childSetup 在 child 发布后按 agent.ctx 安装；dispose 撤销', async () => {
+  it('创建：startContinuable(provider=spawn)（getProvider 探测）返回 created=true；装配由 host 的 agent/session-start 负责', async () => {
     const h = await makeHarness()
     await h.store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read'], mcpServers: [] })
     // 换成 rc.1 面 subagents：startContinuable 即发布 child agent（带 ctx）
     const rc1 = new Rc1FakeSubagents()
     rc1.onStart = (childId) => { h.agents.children.set(childId, { id: childId, ctx: { tag: `ctx-${childId}` } }) }
-    const childSetup = vi.fn<(ctx: unknown) => () => void>((_ctx) => vi.fn(() => {}))
+    // 0.1.2 起每子代理作用域装配（角色提示词/工具可见性/模型选择/软截停）不再由 runner 在
+    // startContinuable 返回后安装，而是由 host 层监听 agent/session-start 在创建窗口内安装
+    // （见 visual-workflow-host.ts），避免首轮系统提示词/工具第二轮才更新。runner 只负责创建。
     const runner = new NodeAgentRunner({
       store: h.store,
       agents: () => h.agents,
@@ -648,18 +650,12 @@ describe('DSH 0.1.2 子代理 seam（getProvider 探测 / childSetup 安装 / se
       react: h.react as unknown as ReactGuardBridge,
       modelSelection: h.modelSelection as unknown as ModelSelectionSetup,
       promptSetup: h.promptSetup as unknown as ChildPromptSetup,
-      childSetup,
     })
     const result = await runner.startNodeTask(taskInput())
     expect(result).toEqual({ childId: 'rc1-1', created: true })
     expect(rc1.started).toHaveLength(1)
     expect(rc1.started[0].provider).toBe('spawn') // getProvider 探测，而非 list()
-    // childSetup 以发布后的 child.ctx 安装一次
-    expect(childSetup).toHaveBeenCalledTimes(1)
-    expect((childSetup.mock.calls[0] as unknown[])[0]).toEqual({ tag: 'ctx-rc1-1' })
-    const disposer = childSetup.mock.results[0].value as unknown as ReturnType<typeof vi.fn>
     runner.dispose()
-    expect(disposer).toHaveBeenCalledTimes(1)
   })
 
   it('复用派发走 sendMessage（live 父 Agent → direct child），不再调 followup', async () => {
