@@ -93,13 +93,11 @@ describe('侧边栏入口按钮构建', () => {
     expect(btn.querySelectorAll('svg path').length).toBe(1)
   })
 
-  it('传入官方「设置」按钮时复制其 className（样式与设置按钮一致）', () => {
+  it('样式自持：不再复制官方 className，入口仅 wf-sidebar-entry（样式由 button.wf-sidebar-entry 复刻官方 trigger，避免外圈边框/发光）', () => {
     const official = document.createElement('button')
     official.className = 'VOzbGW_trigger ds-x'
     const btn = buildSidebarEntryButton('工作流', official)
-    expect(btn.className).toContain('wf-sidebar-entry')
-    expect(btn.className).toContain('VOzbGW_trigger')
-    expect(btn.className).toContain('ds-x')
+    expect(btn.className).toBe('wf-sidebar-entry')
   })
 
   it('未传官方按钮时仅保留 wf-sidebar-entry 标记', () => {
@@ -129,6 +127,46 @@ describe('分栏 DOM 注入（不修改官方 frame 网格）', () => {
     exitSplit()
     expect(cc.style.paddingRight).toBe('')
     expect(document.documentElement.style.getPropertyValue('--wf-split-w')).toBe('')
+  })
+})
+
+describe('入口文案跟随语言', () => {
+  /** 构造官方侧边栏「设置」按钮锚点结构（footArea > settingsArea > button）。 */
+  function seedSettingsArea(): void {
+    const foot = document.createElement('div')
+    foot.className = 'footArea'
+    const area = document.createElement('div')
+    area.className = 'settingsArea'
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'trigger'
+    btn.innerText = '设置'
+    area.append(btn)
+    foot.append(area)
+    document.body.append(foot)
+  }
+
+  /** 用 label 驱动 useWorkbenchView（模拟语言切换传入不同入口文案）。 */
+  function LabelProbe({ label }: { label: string }) {
+    useWorkbenchView(label)
+    return null
+  }
+
+  it('label 变化时更新已注入按钮的文本与 aria（入口文案不因语言切换残留中文）', async () => {
+    seedSettingsArea()
+    const host = document.createElement('div')
+    document.body.append(host)
+    const root = createRoot(host)
+    cleanups.push(() => { root.unmount() })
+    await act(async () => { root.render(<LabelProbe label="工作流" />) })
+    const entry = document.querySelector('.wf-sidebar-entry') as HTMLButtonElement
+    expect(entry).toBeTruthy()
+    expect(entry.querySelector('.wf-sidebar-entry__label')?.textContent).toBe('工作流')
+    expect(entry.getAttribute('aria-label')).toBe('工作流')
+    // 语言切到 en → label 变化 → effect 就地更新按钮文案
+    await act(async () => { root.render(<LabelProbe label="Workflows" />) })
+    expect(entry.querySelector('.wf-sidebar-entry__label')?.textContent).toBe('Workflows')
+    expect(entry.getAttribute('aria-label')).toBe('Workflows')
   })
 })
 

@@ -149,7 +149,7 @@ describe('orchestrationNodeList / collabGroupList 只列参与流程的执行单
 describe('buildParentRunPrompt 三情况整装（身份措辞互斥）', () => {
   it('情况1（无父代理）→ 纯编排指令：含「仅编排」、不含执行者模式与【你的节点任务】', () => {
     const f = flow([roleNode('a1', 'agent', '子代理A')], [flowLine('s-a1', 'start', 'a1'), flowLine('a1-end', 'a1', 'end')])
-    const directive = buildParentRunPrompt({ flow: f, defPath: 'orchestrations/run-1.json', mode: 'mode1', executor: null })
+    const directive = buildParentRunPrompt({ flow: f, defPath: 'orchestrations/run-1.json', mode: 'mode1', executor: null, systemLanguage: '中文' })
     expect(directive).toContain('仅编排：你只负责调度子代理，不亲自执行节点任务')
     expect(directive).not.toContain('执行者模式：')
     expect(directive).not.toContain('【你的节点任务】')
@@ -160,7 +160,7 @@ describe('buildParentRunPrompt 三情况整装（身份措辞互斥）', () => {
       [roleNode('p1', 'parent', '父执行'), roleNode('a1', 'agent', '子代理A')],
       [flowLine('s-p1', 'start', 'p1'), flowLine('p1-a1', 'p1', 'a1'), flowLine('a1-end', 'a1', 'end')],
     )
-    const directive = buildParentRunPrompt({ flow: f, defPath: 'orchestrations/run-1.json', mode: 'mode1', executor: executorOf('p1', '父执行') })
+    const directive = buildParentRunPrompt({ flow: f, defPath: 'orchestrations/run-1.json', mode: 'mode1', executor: executorOf('p1', '父执行'), systemLanguage: '中文' })
     expect(directive).toContain('你是工作流「测试流程」的编排父代理，同时以执行节点「父执行」')
     expect(directive).toContain('【你的节点任务】')
     expect(directive).not.toContain('仅编排：你只负责调度子代理')
@@ -168,7 +168,7 @@ describe('buildParentRunPrompt 三情况整装（身份措辞互斥）', () => {
 
   it('情况3（executor）→ 纯执行提示：无编排要素且含 wf_finish 收尾', () => {
     const f = flow([roleNode('p1', 'parent', '父执行')], [flowLine('s-p1', 'start', 'p1'), flowLine('p1-end', 'p1', 'end')])
-    const directive = buildParentRunPrompt({ flow: f, defPath: 'orchestrations/run-1.json', mode: 'mode1', executor: executorOf('p1', '父执行') })
+    const directive = buildParentRunPrompt({ flow: f, defPath: 'orchestrations/run-1.json', mode: 'mode1', executor: executorOf('p1', '父执行'), systemLanguage: '中文' })
     for (const forbidden of ['仅编排', 'wf_run_node', '待编排节点', '工作流事实源', '协作组', '调用协议']) {
       expect(directive).not.toContain(forbidden)
     }
@@ -186,6 +186,7 @@ describe('buildParentRunPrompt 三情况整装（身份措辞互斥）', () => {
       mode: 'mode1',
       executor: null,
       resume: { resumeFromNodeId: 'a1', resumedFromRunId: 'run-0' },
+      systemLanguage: '中文',
     })
     expect(directive).toContain('仅编排：你只负责调度子代理，不亲自执行节点任务')
     expect(directive).not.toContain('【你的节点任务】')

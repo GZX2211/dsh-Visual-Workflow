@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { buildResumedSnapshot, findResumableRun, type ResumeInput, type ResumeResult } from './resume.js'
 import { createRunSnapshot, setNodeStatus, statusText } from './snapshot.js'
 import { buildParentRunPrompt, messageOf, missingStageLabels, validateFlowForRun } from './helpers.js'
+import { DEFAULT_SYSTEM_LANGUAGE } from '../system-language.js'
 import type { StartRunOptions, StartRunResult, RunEntry } from './run-types.js'
 import { WfError } from './seams.js'
 import { RuntimeBase } from './runtime-base.js'
@@ -114,6 +115,7 @@ export class RuntimeLaunch extends RuntimeBase {
       mode,
       ...(question ? { question } : {}),
       executor,
+      systemLanguage: this.deps.systemLanguage?.() ?? DEFAULT_SYSTEM_LANGUAGE,
     })
     try {
       this.deps.agents.followupRoot(root, {
@@ -232,6 +234,7 @@ export class RuntimeLaunch extends RuntimeBase {
       mode: prev.mode,
       resume: { resumeFromNodeId: snapshot.resumeFromNodeId, resumedFromRunId: prev.id },
       executor,
+      systemLanguage: this.deps.systemLanguage?.() ?? DEFAULT_SYSTEM_LANGUAGE,
     })
     try {
       this.deps.agents.followupRoot(root, {

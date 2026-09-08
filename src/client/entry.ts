@@ -75,8 +75,17 @@ export function rootSessionIdOf(
   return cursor
 }
 
-// 无硬依赖：样式/DOM 全部自持；locale/sessions 经 ctx.get 守卫（测试/降级友好）。
-export const inject: string[] = []
+// 插件所需服务（cordis fiber inject）。
+//  - locale：声明后 fiber 会**等待**官方 locale 服务（dsh-client-locale）激活后才运行
+//    apply，从而保证 apply 内 ctx.get('locale') 返回活跃的 LocaleRuntime，能 register
+//    词典并 subscribe(render) 收到语言切换通知。此前 inject 为空，插件可能先于 locale
+//    激活：ctx.get('locale') 为 undefined → detectLanguage 回退 navigator.language
+//    （zh-CN）→ 词典恒为中文，且 subscribe 因 localeService 为 null 未订阅 —— 语言
+//    切换既不读 active 也不触发重渲染（界面停留中文的根因）。
+//  - sessions 在 WorkbenchHost 内经 ctx.get?.('sessions') 防御式读取（可能延迟出现），
+//    不声明在 inject（避免 locale 之外的隐性依赖把插件整体 park 住）。
+// 样式/DOM 全部自持；测试/降级友好。
+export const inject: string[] = ['locale']
 
 /** 测试导出（client-smoke 渲染路径验证）。 */
 export const VisualWorkflowView = null
@@ -107,19 +116,27 @@ export function apply(ctx: {
   }
 
   // 工作台宿主：body 常驻容器（由 WorkbenchHost 按视图模式渲染浮窗/分栏；
-  // 入口改为官方侧边栏注入，见 useWorkbenchView；会话绑定由 WorkbenchHost 自理）
+  // 入口改为官方侧边栏注入，见 useWorkbenchView；会话绑定由 WorkbenchHost 自理）。
   let root: Root | null = null
   let container: HTMLDivElement | null = null
   ctx.effect?.(() => {
     container = document.createElement('div')
     container.id = 'visual-workflow-workbench-host'
     document.body.append(container)
-    const t = text(detectLanguage(ctx.get?.('locale')))
-    root ??= createRoot(container!)
-    root.render(
-      React.createElement(WorkbenchHost, { ctx, t: t as Dict }),
-    )
+    // 语言切换响应式：官方 locale 服务（dsh-client-locale LocaleRuntime）暴露
+    // subscribe(fn)，语言变化时回调。重算 t 并重渲染，使插件界面跟随配置语言。
+    const localeService = ctx.get?.('locale') as {
+      subscribe?(fn: () => void): () => void
+    } | null | undefined
+    const render = (): void => {
+      const t = text(detectLanguage(ctx.get?.('locale')))
+      root ??= createRoot(container!)
+      root.render(React.createElement(WorkbenchHost, { ctx, t: t as Dict }))
+    }
+    render()
+    const unsubscribe = typeof localeService?.subscribe === 'function' ? localeService.subscribe(render) : undefined
     return () => {
+      unsubscribe?.()
       root?.unmount()
       root = null
       container?.remove()

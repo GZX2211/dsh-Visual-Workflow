@@ -8,17 +8,24 @@
 //
 // 稳定布局（§13.1）：
 //   ① 首段 = 该节点真正需要强调的**软约束固化**（AI 有选择权、值得强调的行为规则）
-//             ——分词：report 工具一律软禁用（最终结论自动送达父代理、阶段汇报无意义）；
-//             协作组成员必须经 wf_ask_agent 通信（仅组内节点注入）；
-//   ② 中段 = 过程性信息（上游产出上下文（ctx 连线注入）/ 文件路径索引 / 数据库工具说明）
-//   ③ 末段 = 软约束重申（W-02 双位）+ 动态态信息（本次执行的动态状态仅注入末尾）
+//             ——协作组成员必须经 wf_ask_agent 通信（仅组内节点注入）；
+//   ② 中段 = 过程性信息（系统语言规则 + 上游产出上下文（ctx 连线注入）/ 文件路径
+//             索引 / 数据库工具说明）
+//   ③ 末段 = 软约束重申（W-02 双位）+ 动态态信息（父 agent id，仅注入末尾）
+//
+// 提示词准确性改造（用户批注 + AI 行为事后剖析）：
+//   - **删除 report 工具软禁用条目**：report 不在子代理工具白名单内（AI 无法调用），
+//     提示「不得调用 report」属 AI 无法查证/无选择权的内容，写入只会干扰模型；
+//   - **删除「当前执行状态」段**（暂停节点 / 运行上下文 / send_message 指令）：暂停门
+//     由引擎在 wf_run_node 检测（子代理无需知道）；运行上下文对子代理无可验证语义；
+//     send_message 为官方相邻投递注入的冗余条目，本段不再重复；
+//   - **新增系统语言规则**：所有回复/注释/思考必须使用配置语言（从 DSH 设置读取）；
+//   - **新增父 agent id**：仅告诉父代理会话 id，不再含 send_message 相关条目。
 //
 // 代码层约束（引擎已强制、AI 无选择权）**不写入提示词**（用户裁决）：
 //   - 「仅使用你自己的 System Prompt」：子代理只有一条 System Prompt，无需强调；
 //   - 「只调用允许清单内的工具」：工具可见性由引擎管理，AI 只能调用可见工具；
 //   - 「重试/ReAct 迭代上限」：引擎护栏，数值对 AI 无执行意义；
-//   这些条目从首段与末段重申中删除，以节省上下文、消除无用约束对模型的干扰。
-//
 //
 // 构建器为纯函数：不读 Date.now/随机源，同一 params 两次构建字节相同；动态值仅注入末段。
 
@@ -60,31 +67,41 @@ export interface NodeTaskBlockParams {
      * 协作组成员标记：该节点为协作组成员时注入「组内通信必须经 wf_ask_agent」软约束。
      */
     isGroupMember: boolean
+    /**
+     * 系统语言名（如 '中文' / 'English'；从 DSH 用户设置读取）。
+     * 注入「所有对话回复、注释、思考过程必须使用该语言」规则。
+     */
+    systemLanguage: string
   }
   /** 末段动态态信息（不稳定内容，仅注入尾段）。全部可选，缺省即默认值。 */
   dynamic: {
     /**
-     * 暂停节点 id 清单：本节点若为其中一员（父代理对其调用 wf_run_node）将触发暂停门。
-     * 缺省为无暂停语义（普通节点）。
+     * 父代理会话 id（根 Agent 的会话 id；子代理的父 agent id）。
+     * 仅告诉 id，不含 send_message 相关指令。
      */
-    pauseNodeIds?: string[]
-    /**
-     * 本次执行的额外运行上下文说明文本（如恢复自断点、attempt 次数等）。缺省为空。
-     */
-    runContextText?: string
+    parentAgentId?: string
   }
 }
 
 /**
  * 节点任务块首段软约束短语（W-02 双位测试断言与组装任务引用）。
  * 面向模型中文（W-04）；只保留「软约束固化」类条目（AI 有选择权、值得强调的行为规则）。
+ *
+ * 准确性改造：report 工具软禁用条目已删除——report 不在子代理工具白名单内（AI 无法调用），
+ * 「不得调用 report」属 AI 无选择权/无法查证的内容（用户批注），写入只会干扰模型。
  */
 export const NODE_HARD_CONSTRAINTS = {
-  /** report 工具一律软禁用：最终结论自动送达父代理，阶段汇报无意义。 */
-  noReportTool: '不得调用 report 工具提交结论或阶段汇报',
   /** 协作组内通信必须经 wf_ask_agent（仅组内成员注入）。 */
   collabAskOnly: '与组内成员的一切协作消息必须使用 wf_ask_agent（ask / reply）',
 } as const
+
+/**
+ * 系统语言规则短语（面向模型中文；各提示词构建器共用）。
+ * 从 DSH 用户设置读取语言名，注入「所有对话回复、注释、思考过程必须使用该语言」。
+ */
+export function systemLanguageRule(language: string): string {
+  return `所有对话回复、注释、思考过程必须使用${language}`
+}
 
 /**
  * 节点任务块构建器（纯函数）。
@@ -104,16 +121,20 @@ export function buildNodeTaskBlock(params: NodeTaskBlockParams): string {
     '',
     `你正在执行节点「${facts.nodeLabel}」。`,
     '',
-    `1. ${NODE_HARD_CONSTRAINTS.noReportTool}`,
-    ...(facts.isGroupMember ? [`2. ${NODE_HARD_CONSTRAINTS.collabAskOnly}，不得用普通文本模拟对话或绕过工具直接发送消息。`] : []),
+    ...(facts.isGroupMember ? [`1. ${NODE_HARD_CONSTRAINTS.collabAskOnly}，不得用普通文本模拟对话或绕过工具直接发送消息。`] : []),
   ].join('\n')
 
-  // —— 中段：过程性信息（上游产出 / 文件路径索引 / 数据库工具说明）——
+  // —— 中段：系统语言规则 + 过程性信息（上游产出 / 文件路径索引 / 数据库工具说明）——
   const midParts: string[] = [
     MID_MARKER,
     '',
     `请执行工作流节点「${facts.nodeLabel}」`,
   ]
+
+  // 系统语言规则（从 DSH 设置读取；确保回复/注释/思考使用配置语言）
+  if (facts.systemLanguage.trim()) {
+    midParts.push('', `1. ${systemLanguageRule(facts.systemLanguage)}。`)
+  }
 
   if (facts.upstreamContext.length > 0) {
     midParts.push('', '上游产出（经 ctx 连线注入）：')
@@ -137,34 +158,28 @@ export function buildNodeTaskBlock(params: NodeTaskBlockParams): string {
 
   const mid = midParts.join('\n')
 
-  // —— 末段：软约束重申（W-02 双位）+ 动态态信息（动态值仅在此注入）——
-  const tail = [
-    TAIL_MARKER,
-    '',
-    TAIL_RESTATE_MARKER,
-    `- ${NODE_HARD_CONSTRAINTS.noReportTool}。`,
-    ...(facts.isGroupMember ? [`- ${NODE_HARD_CONSTRAINTS.collabAskOnly}。`] : []),
-    '',
-    renderDynamicState(dynamic),
-  ].join('\n')
+  // —— 末段：软约束重申（W-02 双位）+ 动态态信息（父 agent id 仅在此注入）——
+  const tailLines: string[] = [TAIL_MARKER, '']
+  const restate: string[] = []
+  if (facts.isGroupMember) restate.push(`- ${NODE_HARD_CONSTRAINTS.collabAskOnly}。`)
+  if (restate.length > 0) tailLines.push(TAIL_RESTATE_MARKER, ...restate)
+  const dynamicState = renderDynamicState(dynamic)
+  if (dynamicState) tailLines.push('', dynamicState)
+  const tail = tailLines.join('\n')
 
   return `${head}\n\n${mid}\n\n${tail}\n`
 }
 
 /**
  * 渲染末段动态态信息（内部纯函数）：仅依赖 dynamic 字段，输出不稳定内容。
- * 重试上限 / ReAct 迭代上限为引擎层护栏，AI 无选择权，不再写入（用户裁决）。
+ * 只注入父 agent id（仅告诉 id，不含 send_message 相关条目）。
+ * 暂停节点 / 运行上下文不再写入（用户批注：引擎层处理，AI 无可验证语义）。
  */
 function renderDynamicState(dynamic: NodeTaskBlockParams['dynamic']): string {
-  const lines: string[] = ['当前执行状态：']
-
-  const pauseIds = dynamic.pauseNodeIds && dynamic.pauseNodeIds.length > 0 ? dynamic.pauseNodeIds : null
-  if (pauseIds) {
-    lines.push(`- 暂停节点：[${pauseIds.join(', ')}]。若你属于其中之一，本节点作为纯流程门（暂停运行）。`)
-  } else {
-    lines.push('- 本流程无暂停节点。')
+  const lines: string[] = []
+  const parentAgentId = String(dynamic.parentAgentId ?? '').trim()
+  if (parentAgentId) {
+    lines.push(`你的父 agent id 为：${parentAgentId}`)
   }
-
-  lines.push(`- 运行上下文：${(dynamic.runContextText ?? '').trim() || '（无）'}`)
   return lines.join('\n')
 }

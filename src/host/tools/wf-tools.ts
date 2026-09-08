@@ -1,4 +1,4 @@
-﻿// src/host/tools/wf-tools.ts
+// src/host/tools/wf-tools.ts
 //
 // wf_run_node / wf_run_node_wait / wf_finish / wf_ask 四个父代理编排工具注册。
 //
@@ -135,7 +135,7 @@ export function registerWfTools(
         'A pause-node id pauses the run and persists a checkpoint instead (returns paused). ' +
         'Child agents are rejected; fails with WF_* codes on invalid arguments, missing nodes, mode mismatch, or stopped runs.',
       parameters: {
-        nodeId: { type: 'string', required: true, description: 'Node id from the flow definition file (nodes[].id) to start; proxy nodes resolve to their source node.' },
+        nodeId: { type: 'string', required: true, description: 'Node id from the flow definition file (nodes[].id) to start. A proxy node is a real flow step: pass the proxy id and the runtime resolves it to its source node for execution — never skip a proxy or pass its source node id instead.' },
         thinking: { type: 'string', description: 'Optional reasoning-effort override for this node run; value domain follows the official adapter.' },
         iterationLimit: { type: 'number', description: 'Optional ReAct iteration-limit override (soft cap: the child stops calling tools and concludes).' },
         retryLimit: { type: 'number', description: 'Optional per-node retry-limit override (hard guard, over the node default).' },
@@ -164,7 +164,7 @@ export function registerWfTools(
         'Returns ok/fail with the child final output when the node child completes, or paused for a pause-node id. ' +
         'Child agents are rejected; fails with WF_* codes on invalid arguments, missing nodes, mode mismatch, or stopped runs.',
       parameters: {
-        nodeId: { type: 'string', required: true, description: 'Node id from the flow definition file (nodes[].id) to start; proxy nodes resolve to their source node.' },
+        nodeId: { type: 'string', required: true, description: 'Node id from the flow definition file (nodes[].id) to start. A proxy node is a real flow step: pass the proxy id and the runtime resolves it to its source node for execution — never skip a proxy or pass its source node id instead.' },
         thinking: { type: 'string', description: 'Optional reasoning-effort override for this node run; value domain follows the official adapter.' },
         iterationLimit: { type: 'number', description: 'Optional ReAct iteration-limit override (soft cap: the child stops calling tools and concludes).' },
         retryLimit: { type: 'number', description: 'Optional per-node retry-limit override (hard guard, over the node default).' },

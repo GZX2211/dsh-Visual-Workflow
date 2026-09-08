@@ -122,14 +122,15 @@ export function officialCol(segment: 'sidebarCol' | 'centerCol' | 'detailsCol'):
 }
 
 /** 构建侧边栏入口按钮元素（图标 + 「工作流」）。
- *  样式与官方「设置」按钮一致：复制其 className（CSS-module hash 类，运行时读取保证准确）。
- *  @param officialBtn 官方「设置」按钮，用于复制样式类名；缺省仅保留 wf-sidebar-entry 标记。 */
+ *  样式与官方「设置」按钮一致：不复用其 className（CSS-module hash 类随构建/版本变化，
+ *  且复制到的 hashed 类在部分状态下会引入浏览器默认外圈边框/发光层）。改为由 styles.ts 的
+ *  button.wf-sidebar-entry 直接提取官方 trigger 样式逐字复刻，视觉与「设置」按钮完全一致，
+ *  且不受 hash/主题状态影响。
+ *  @param officialBtn 官方「设置」按钮，预留（当前不再读取其 className）；缺省仅 wf-sidebar-entry。 */
 export function buildSidebarEntryButton(label: string, officialBtn?: HTMLElement | null): HTMLButtonElement {
   const button = document.createElement('button')
   button.type = 'button'
-  button.className = officialBtn && officialBtn.className && officialBtn.className.trim()
-    ? ('wf-sidebar-entry ' + officialBtn.className.trim())
-    : 'wf-sidebar-entry'
+  button.className = 'wf-sidebar-entry'
   button.dataset.wfEntry = 'workflow'
   button.setAttribute('aria-label', label)
   // 文字放入子元素：官方侧边栏折叠时用 CSS 裁切/隐藏文字，裸文本节点无法被隐藏
@@ -195,8 +196,10 @@ function isBrowser(): boolean {
   return typeof document !== 'undefined' && typeof window !== 'undefined'
 }
 
-/** 工作台视图模式状态机。 */
-export function useWorkbenchView(): WorkbenchViewFace {
+/** 工作台视图模式状态机。
+ *  @param entryLabel 侧边栏入口按钮文案（随语言切换更新；由 WorkbenchHost 传入 t 词典
+ *  对应键，如 t.workflows）。默认 '工作流'（保持既有行为）。 */
+export function useWorkbenchView(entryLabel: string = '工作流'): WorkbenchViewFace {
   const [open, setOpen] = useState(false)
   const [viewMode, setViewModeState] = useState<WorkbenchViewMode>(() =>
     isBrowser() ? readViewMode(window.localStorage) : 'float',
@@ -205,6 +208,13 @@ export function useWorkbenchView(): WorkbenchViewFace {
     isBrowser() ? readSplitWidth(window.localStorage) : SPLIT_WIDTH_DEFAULT,
   )
   const openRef = useRef<() => void>(() => undefined)
+  // 侧边栏入口按钮（DOM 注入，非 React 渲染）与其文案的引用：
+  //   - entryLabelRef：place() 创建按钮时读取**当前**入口文案（创建时机可能晚于语言切换，
+  //     若直接捕获参数会读到陈旧值）；
+  //   - entryRef：供 [entryLabel] effect 就地更新已创建按钮的文本/aria，
+  //     而无需重建按钮或重挂 MutationObserver。
+  const entryRef = useRef<HTMLButtonElement | null>(null)
+  const entryLabelRef = useRef(entryLabel)
 
   const setViewMode = useCallback((mode: WorkbenchViewMode) => {
     setViewModeState(mode)
@@ -273,11 +283,13 @@ export function useWorkbenchView(): WorkbenchViewFace {
       const footArea = settingsArea?.parentElement
       if (!settingsArea || !footArea) return
       if (!entry) {
-        entry = buildSidebarEntryButton('工作流', anchor)
+        entry = buildSidebarEntryButton(entryLabelRef.current, anchor)
         entry.onclick = () => openRef.current()
+        entryRef.current = entry
       }
-      // 仅在值变化时修改（防自循环）
-      const nextCls = 'wf-sidebar-entry ' + anchor.className.trim()
+      // 仅在值变化时修改（防自循环）。基础类固定为 wf-sidebar-entry（样式由 button.wf-sidebar-entry
+      // 自持，不再拼接官方 anchor 的 className——避免其 hash 类带入外圈边框/发光）。
+      const nextCls = 'wf-sidebar-entry'
       if (entry.className !== nextCls) entry.className = nextCls
       // 折叠态只显示图标（官方侧边栏折叠时 root 带 collapsed 类）
       const collapsed = !!document.querySelector('[class*="sidebarCol"] [class*="collapsed"]')
@@ -304,6 +316,18 @@ export function useWorkbenchView(): WorkbenchViewFace {
       entry = null
     }
   }, [])
+
+  // 语言切换响应式：入口文案变化时同步 ref 并就地更新已注入按钮的文本与 aria-label。
+  // 按钮是 DOM 注入（非 React），必须在此手动同步；新建（entryRef 为空）的时机由
+  // place() 用 entryLabelRef.current 实取当前值兜底。
+  useEffect(() => {
+    entryLabelRef.current = entryLabel
+    const btn = entryRef.current
+    if (!btn) return
+    const labelEl = btn.querySelector<HTMLElement>('.wf-sidebar-entry__label')
+    if (labelEl && labelEl.textContent !== entryLabel) labelEl.textContent = entryLabel
+    if (btn.getAttribute('aria-label') !== entryLabel) btn.setAttribute('aria-label', entryLabel)
+  }, [entryLabel])
 
   // 分栏 DOM 注入：open && split → 给官方 centerCol 设右内边距；否则还原。
   useEffect(() => {

@@ -650,19 +650,33 @@ export class NodeAgentRunner implements NodeRunner {
       injectSystemPrompt,
       injectToolSections,
     }
-    const started = await this.deps.promptSetup.withPending(promptState, () => subagents.startContinuable({
-      provider,
-      label: node.data.label || `visual-workflow:${input.flowId}:${node.id}`,
-      request: {
-        // 首条消息 = 完整任务块（任务 + 上下文），杜绝创建即空转；角色 Prompt 由
-        // prompt-setup 注册为系统提示词独立段，不再经官方 request.persona 占用官方人设
-        prompt: input.blocks.length > 0 ? input.blocks : [{ type: 'text', text: fallbackPrompt(node) }],
-        parent,
-        ...(toolFilter ? { toolFilter } : {}),
-        ...(Object.keys(agentOptions).length > 0 ? { agentOptions } : {}),
-      },
-      signal: input.signal,
-    }))
+    // 【关键时序】withPending 必须同时覆盖 installChildSetup：0.1.2 移除
+    // registerContinuableSetup 后，contribution 在 startContinuable 返回后由
+    // installChildSetup 调用（见下方），此时若已脱离 withPending 的 AsyncLocalStorage
+    // 作用域，contribution 读不到 pending 状态 → 角色 Prompt 段注册为空文本 →
+    // 子代理首轮组装时该空段被官方 renderPrompt 过滤，系统提示词只剩官方段
+    // （「初始提示词没有被用户自设替换」BUG 根因）。把 installChildSetup 放进
+    // withPending 回调（await 后同步执行，AsyncLocalStorage 跨 await 恢复），
+    // contribution 即可读到正确 pending 状态，首轮即注入角色 Prompt。
+    const started = await this.deps.promptSetup.withPending(promptState, async () => {
+      const result = await subagents.startContinuable({
+        provider,
+        label: node.data.label || `visual-workflow:${input.flowId}:${node.id}`,
+        request: {
+          // 首条消息 = 完整任务块（任务 + 上下文），杜绝创建即空转；角色 Prompt 由
+          // prompt-setup 注册为系统提示词独立段，不再经官方 request.persona 占用官方人设
+          prompt: input.blocks.length > 0 ? input.blocks : [{ type: 'text', text: fallbackPrompt(node) }],
+          parent,
+          ...(toolFilter ? { toolFilter } : {}),
+          ...(Object.keys(agentOptions).length > 0 ? { agentOptions } : {}),
+        },
+        signal: input.signal,
+      })
+      // 在 withPending 作用域内安装每子代理作用域贡献：contribution 经 AsyncLocalStorage
+      // 读到本次创建的 promptState（角色 Prompt/两开关），首轮组装即就绪。
+      this.installChildSetup(result.childId)
+      return result
+    })
     const previous = this.nodeChildren.get(key)
     if (previous && previous.childId !== started.childId) {
       // 配置签名变化重建子代理：撤销旧 child 的作用域装配（旧子代理仍存活，但已不再由本运行驱动）
@@ -670,10 +684,6 @@ export class NodeAgentRunner implements NodeRunner {
     }
     this.nodeChildren.set(key, { childId: started.childId, signature })
     this.childIds.add(started.childId)
-    // 0.1.2 移除 registerContinuableSetup：在 startContinuable 返回后立即按
-    // agents.get(childId).ctx 安装每子代理作用域贡献（可见性/软截停/模型选择/角色提示词）。
-    // resolve 发生在 inbox 接受 prompt 之后、子代理首轮推理（宏任务）之前，同步安装基本覆盖首轮。
-    this.installChildSetup(started.childId)
     // 创建即开始推理（官方 startContinuable 语义）：软截停上限必须在 startContinuable
     // 返回后的同步块内立即登记（startNodeTask 会再次刷新，幂等）。保证事件循环中任何
     // pre-step 事件（宏任务）晚于登记发生；极端情况下官方在 resolve 前同步触发 pre-step

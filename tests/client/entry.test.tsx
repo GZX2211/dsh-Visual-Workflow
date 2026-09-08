@@ -12,7 +12,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act } from 'react'
 import { apply, rootSessionIdOf } from '../../src/client/entry.js'
-import { zh } from '../../src/client/i18n.js'
+import { zh, en } from '../../src/client/i18n.js'
 
 const cleanups: Array<() => void> = []
 
@@ -75,6 +75,27 @@ function seedSettingButton(): HTMLButtonElement {
   return btn
 }
 
+/** 模拟官方 locale 服务（dsh-client-locale LocaleRuntime 最小形状）：可切换 active 并通知订阅者。 */
+function makeFakeLocale(initial: string) {
+  const listeners = new Set<() => void>()
+  const snap = { active: initial, locales: [] as Array<unknown>, revision: 0 }
+  const locale = {
+    register: vi.fn(),
+    getSnapshot: () => snap,
+    getLocale: () => snap,
+    subscribe: (fn: () => void) => {
+      listeners.add(fn)
+      return () => listeners.delete(fn)
+    },
+    switch: (next: string) => {
+      snap.active = next
+      snap.revision += 1
+      for (const fn of listeners) fn()
+    },
+  }
+  return locale
+}
+
 describe('apply 装配', () => {
   it('样式注入：style[data-plugin=visual-workflow] 进入 head，含浮窗/分栏/入口样式', async () => {
     const { ctx, disposers } = makeCtx()
@@ -109,6 +130,25 @@ describe('apply 装配', () => {
     const { ctx, disposers } = makeCtx({ locale: { register } })
     await act(async () => { apply(ctx as never) })
     expect(register).toHaveBeenCalledWith('visualWorkflow', expect.objectContaining({ zh: expect.any(Object), en: expect.any(Object) }))
+    while (disposers.length > 0) disposers.pop()!()
+  })
+
+  it('语言切换：订阅 locale，active 变化后工作台与入口文案随语言重渲染', async () => {
+    seedSettingButton()
+    const locale = makeFakeLocale('zh')
+    const { ctx, disposers } = makeCtx({ currentSession: 'session-9', locale })
+    await act(async () => { apply(ctx as never) })
+    // 打开工作台
+    const entry = document.querySelector('.wf-sidebar-entry') as HTMLButtonElement
+    expect(entry).toBeTruthy()
+    await act(async () => { entry.click() })
+    // 初始 zh：标题 + 入口文案
+    expect(document.querySelector('.wf-titlebar__title')?.textContent).toBe(zh.studio)
+    expect(entry.querySelector('.wf-sidebar-entry__label')?.textContent).toBe(zh.workflows)
+    // 切到 en → subscribe(render) 触发重渲染
+    await act(async () => { locale.switch('en') })
+    expect(document.querySelector('.wf-titlebar__title')?.textContent).toBe(en.studio)
+    expect(entry.querySelector('.wf-sidebar-entry__label')?.textContent).toBe(en.workflows)
     while (disposers.length > 0) disposers.pop()!()
   })
 

@@ -39,6 +39,7 @@ const orchFacts = {
     { id: 'node-b', label: '总结节点' },
   ],
   collabGroups: [{ groupId: 'group-1', label: '协作组一', memberIds: ['node-a', 'node-b'] }],
+  systemLanguage: '中文',
 }
 
 const nodeFacts = {
@@ -48,6 +49,7 @@ const nodeFacts = {
   filePaths: ['data/files/example.pdf'],
   dbToolHint: '已连接数据库节点：d1（产品库）。只可通过 wf_db_query 访问。',
   isGroupMember: false,
+  systemLanguage: '中文',
 }
 
 describe('T-005 编排父代理提示词（情况1 纯编排）', () => {
@@ -96,7 +98,7 @@ describe('T-005 编排父代理提示词（情况2 编排+自执行）', () => {
   it('身份互斥：含执行者角色常量、不含纯编排措辞常量（情况2 与 情况1 区分）', () => {
     const out = buildHybridPrompt({
       facts: hybridFacts,
-      dynamic: { parentTaskBlock: buildParentTaskSpec({ facts: nodeFacts, runContextText: 'runId=run-1' }) },
+      dynamic: { parentTaskBlock: buildParentTaskSpec({ facts: nodeFacts, runContextText: 'runId=run-1', systemLanguage: '中文' }) },
     })
     expect(out).toContain(ORCH_HARD_CONSTRAINTS.executorRole)
     expect(out).not.toContain(ORCH_HARD_CONSTRAINTS.dispatchOnly)
@@ -105,7 +107,7 @@ describe('T-005 编排父代理提示词（情况2 编排+自执行）', () => {
   it('同一 params 两次构建字节相同；首段与末段各自包含导出的约束常量', () => {
     const params = {
       facts: hybridFacts,
-      dynamic: { parentTaskBlock: buildParentTaskSpec({ facts: nodeFacts }) },
+      dynamic: { parentTaskBlock: buildParentTaskSpec({ facts: nodeFacts, systemLanguage: '中文' }) },
     }
     const out = buildHybridPrompt(params)
     expect(buildHybridPrompt(params)).toBe(out)
@@ -121,6 +123,7 @@ describe('T-005 父代理执行单元（情况3 纯执行 / 情况2 任务块正
     workflowName: '示例工作流',
     facts: nodeFacts,
     runContextText: 'runId=run-1; attempt 1/1（父代理执行单元）',
+    systemLanguage: '中文',
   }
 
   it('情况3：纯执行身份——不含「纯编排」措辞常量，输出非空', () => {
@@ -130,7 +133,7 @@ describe('T-005 父代理执行单元（情况3 纯执行 / 情况2 任务块正
   })
 
   it('情况2 任务块正文：不含块级标记标题，透传运行上下文与上游文件路径', () => {
-    const spec = buildParentTaskSpec({ facts: nodeFacts, runContextText: 'runId=run-1; attempt 1/1' })
+    const spec = buildParentTaskSpec({ facts: nodeFacts, runContextText: 'runId=run-1; attempt 1/1', systemLanguage: '中文' })
     // 结构：任务块正文不经 HEAD/TAIL 标记包裹
     expect(spec).not.toContain(HEAD_MARKER)
     expect(spec).not.toContain(TAIL_MARKER)
@@ -141,18 +144,31 @@ describe('T-005 父代理执行单元（情况3 纯执行 / 情况2 任务块正
 
   it('同一 params 两次构建字节相同', () => {
     expect(buildParentExecutorPrompt(executorParams)).toBe(buildParentExecutorPrompt(executorParams))
-    const specParams = { facts: nodeFacts }
+    const specParams = { facts: nodeFacts, systemLanguage: '中文' }
     expect(buildParentTaskSpec(specParams)).toBe(buildParentTaskSpec(specParams))
   })
 })
 
-describe('T-005 节点任务块模板（软约束双位 + 过程性信息中段）', () => {
-  it('协作软约束常量双位出现（首段 + 末段；经导出常量引用，W-02）', () => {
+describe('T-005 节点任务块模板（软约束双位 + 过程性信息中段 + 系统语言/父agent id）', () => {
+  it('report 工具软禁用条目已删除（不在子代理工具白名单内，属无选择权内容）', () => {
+    const out = buildNodeTaskBlock({ facts: nodeFacts, dynamic: { parentAgentId: 'sess-1' } })
+    expect(out).not.toContain('report')
+  })
+
+  it('系统语言规则出现在中段（流程上下文内）', () => {
     const out = buildNodeTaskBlock({ facts: nodeFacts, dynamic: {} })
-    const head = out.slice(0, out.indexOf(TAIL_MARKER))
+    const headEnd = out.indexOf(MID_MARKER)
+    const tailStart = out.indexOf(TAIL_MARKER)
+    const mid = out.slice(headEnd, tailStart)
+    expect(mid).toContain('必须使用中文')
+    expect(out.slice(0, headEnd)).not.toContain('必须使用中文')
+  })
+
+  it('父 agent id 注入末段动态态（仅告诉 id，不含 send_message 指令）', () => {
+    const out = buildNodeTaskBlock({ facts: nodeFacts, dynamic: { parentAgentId: 'sess-1' } })
     const tail = out.slice(out.indexOf(TAIL_MARKER))
-    expect(head).toContain(NODE_HARD_CONSTRAINTS.noReportTool)
-    expect(tail).toContain(NODE_HARD_CONSTRAINTS.noReportTool)
+    expect(tail).toContain('你的父 agent id 为：sess-1')
+    expect(tail).not.toContain('send_message')
   })
 
   it('协作组成员才注入 wf_ask_agent 软约束；非组成员不注入（经导出常量引用）', () => {
@@ -174,10 +190,10 @@ describe('T-005 节点任务块模板（软约束双位 + 过程性信息中段�
   })
 
   it('同一 params 两次构建字节相同；仅改动态 param 时前缀不变', () => {
-    const params = { facts: nodeFacts, dynamic: { runContextText: 'runId=run-1' } }
+    const params = { facts: nodeFacts, dynamic: { parentAgentId: 'sess-1' } }
     expect(buildNodeTaskBlock(params)).toBe(buildNodeTaskBlock(params))
-    const a = buildNodeTaskBlock({ facts: nodeFacts, dynamic: { runContextText: 'runId=run-1' } })
-    const b = buildNodeTaskBlock({ facts: nodeFacts, dynamic: { runContextText: 'runId=run-2' } })
+    const a = buildNodeTaskBlock({ facts: nodeFacts, dynamic: { parentAgentId: 'sess-1' } })
+    const b = buildNodeTaskBlock({ facts: nodeFacts, dynamic: { parentAgentId: 'sess-2' } })
     expect(a.slice(0, a.indexOf(TAIL_MARKER))).toBe(b.slice(0, b.indexOf(TAIL_MARKER)))
     expect(a).not.toBe(b)
   })

@@ -787,12 +787,29 @@ export function detectLanguage(locale: unknown, navigatorLanguage?: string): str
   try {
     if (typeof locale === 'string') return locale
     if (locale && typeof locale === 'object') {
-      const record = locale as { language?: unknown; current?: unknown; get?: (key: string) => unknown }
+      const record = locale as {
+        language?: unknown
+        current?: unknown
+        get?: (key: string) => unknown
+        // DSH 官方 locale 服务（dsh-client-locale LocaleRuntime）形状：
+        // getSnapshot() / getLocale() 均返回 { active, locales, revision }。
+        getSnapshot?: () => { active?: unknown }
+        getLocale?: () => { active?: unknown }
+      }
       if (typeof record.language === 'string') return record.language
       if (typeof record.current === 'string') return record.current
       if (typeof record.get === 'function') {
         const value = record.get('language')
         if (typeof value === 'string') return value
+      }
+      // 官方 locale 服务：读 active 语言 id（'zh' / 'en'）
+      if (typeof record.getSnapshot === 'function') {
+        const snapshot = record.getSnapshot()
+        if (snapshot && typeof snapshot.active === 'string') return snapshot.active
+      }
+      if (typeof record.getLocale === 'function') {
+        const snapshot = record.getLocale()
+        if (snapshot && typeof snapshot.active === 'string') return snapshot.active
       }
     }
   } catch {

@@ -24,6 +24,7 @@ import { createReactGuard } from './agent/guards.js'
 import { createModelSelectionSetup } from './agent/model-selection.js'
 import { createChildPromptSetup } from './agent/prompt-setup.js'
 import { CordisAgentHost, agentsServiceLike, subagentsServiceLike } from './agent/agents-host.js'
+import { systemLanguageOf, type SettingsServiceLike } from './system-language.js'
 import { registerWfTools } from './tools/wf-tools.js'
 import { registerWfAskAgent } from './tools/wf-ask-agent.js'
 import { registerDataTools } from './tools/data-tools.js'
@@ -153,6 +154,8 @@ export class VisualWorkflowHost extends Service {
         wfAskAgentTimeoutMs: config.wfAskAgentTimeoutMs,
       },
       dbIndexer: { dataDir: config.dataDir, engine: this.embedding },
+      // 系统语言名：从 DSH 用户设置（locale.preference）读取，供提示词注入语言规则
+      systemLanguage: () => systemLanguageOf(ctx.get('settings') as SettingsServiceLike | null),
       logger: cordisLogger(ctx),
     })
     // 新会话创建缝：装配到宿主（API createSession 端点使用；运行器不再消费——

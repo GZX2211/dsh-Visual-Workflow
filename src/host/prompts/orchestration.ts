@@ -31,6 +31,7 @@
 // 构建器均为纯函数：不读 Date.now/随机源，同一 params 两次构建字节相同。
 
 import { HEAD_MARKER, MID_MARKER, TAIL_MARKER, TAIL_RESTATE_MARKER } from './markers.js'
+import { systemLanguageRule } from './node-task.js'
 
 /** 父代理提示词变体（三情况组装分发）：orchestrator=纯编排 / hybrid=编排+自执行 / executor=纯执行。 */
 export type ParentPromptVariant = 'orchestrator' | 'hybrid' | 'executor'
@@ -53,6 +54,8 @@ export interface OrchestrationDirectiveParams {
     collabGroups: Array<{ groupId: string; label: string; memberIds: string[] }>
     /** 情况2（hybrid）：父代理自身执行单元身份（被流程线连接）；情况1 缺省 null。 */
     parentNode?: { nodeId: string; nodeLabel: string } | null
+    /** 系统语言名（如 '中文' / 'English'；从 DSH 用户设置读取）。注入语言规则。 */
+    systemLanguage: string
   }
   /**
    * 末段动态状态（不稳定内容，仅注入尾段，保证前中段前缀稳定）。
@@ -115,6 +118,9 @@ export const ORCH_HARD_CONSTRAINTS = {
 export function buildOrchestratorPrompt(params: OrchestrationDirectiveParams): string {
   const { facts, dynamic } = params
   const nodeList = facts.nodes.map((n) => `- ${n.id} (${n.label})`).join('\n')
+  const langRule = String(facts.systemLanguage ?? '').trim()
+    ? `${systemLanguageRule(facts.systemLanguage)}。`
+    : ''
 
   const head = [
     HEAD_MARKER,
@@ -130,6 +136,7 @@ export function buildOrchestratorPrompt(params: OrchestrationDirectiveParams): s
     `7. 失控处理：${ORCH_HARD_CONSTRAINTS.failureImmediate}。`,
     `8. 组内通信：${ORCH_HARD_CONSTRAINTS.askAgentTimeout}。`,
     `9. 每次调度前必须重新读取事实源，以文件最新内容为准。`,
+    ...(langRule ? [`10. ${langRule}`] : []),
   ].join('\n')
 
   const mid = buildMidSection(facts)
@@ -142,6 +149,7 @@ export function buildOrchestratorPrompt(params: OrchestrationDirectiveParams): s
     `- ${ORCH_HARD_CONSTRAINTS.nodeSettledSignal}。`,
     `- ${ORCH_HARD_CONSTRAINTS.finishIdempotent}。`,
     `- ${ORCH_HARD_CONSTRAINTS.failureSemantics}；${ORCH_HARD_CONSTRAINTS.failureImmediate}（失控时）。`,
+    ...(langRule ? [`- ${langRule}`] : []),
     '',
     renderDynamicState(dynamic),
   ].join('\n')
@@ -158,6 +166,9 @@ export function buildHybridPrompt(params: OrchestrationDirectiveParams): string 
   const { facts, dynamic } = params
   const parent = facts.parentNode
   const nodeList = facts.nodes.map((n) => `- ${n.id} (${n.label})`).join('\n')
+  const langRule = String(facts.systemLanguage ?? '').trim()
+    ? `${systemLanguageRule(facts.systemLanguage)}。`
+    : ''
 
   const head = [
     HEAD_MARKER,
@@ -173,6 +184,7 @@ export function buildHybridPrompt(params: OrchestrationDirectiveParams): string 
     `7. 失控处理：${ORCH_HARD_CONSTRAINTS.failureImmediate}。`,
     `8. 组内通信：${ORCH_HARD_CONSTRAINTS.askAgentTimeout}。`,
     `9. 每次调度前必须重新读取事实源，以文件最新内容为准。`,
+    ...(langRule ? [`10. ${langRule}`] : []),
   ].join('\n')
 
   const mid = buildMidSection(facts)
@@ -185,6 +197,7 @@ export function buildHybridPrompt(params: OrchestrationDirectiveParams): string 
     `- ${ORCH_HARD_CONSTRAINTS.nodeSettledSignal}。`,
     `- ${ORCH_HARD_CONSTRAINTS.finishIdempotent}。`,
     `- ${ORCH_HARD_CONSTRAINTS.failureSemantics}；${ORCH_HARD_CONSTRAINTS.failureImmediate}（失控时）。`,
+    ...(langRule ? [`- ${langRule}`] : []),
     '',
     renderDynamicState(dynamic),
   ].join('\n')

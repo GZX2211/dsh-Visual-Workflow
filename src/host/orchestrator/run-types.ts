@@ -108,6 +108,8 @@ export interface OrchestratorDeps {
    * 吸收构建耗时、避免子代理首次检索才构建。
    */
   dbIndexer?: { dataDir: string; engine: EmbeddingEngine }
+  /** 系统语言名读取（宿主注入：从 DSH 用户设置读取；缺省回退默认语言）。 */
+  systemLanguage?: () => string
   /** 日志（缺省 console）。 */
   logger?: OrchestratorLogger
   /** 时钟注入（单测可控；缺省 Date.now）。 */

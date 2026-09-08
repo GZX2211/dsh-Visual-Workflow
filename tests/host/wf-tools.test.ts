@@ -316,6 +316,16 @@ describe('工具注册与 schema 编译', () => {
       expect(answers.required).toBeUndefined() // required 只出现在对象属性上，数组本身不参与
     })
 
+    it('两个 run 工具 nodeId 描述明确「代理节点必须被调度、不得跳过或改用源节点」（避免二义性）', async () => {
+      const h = await makeHarness()
+      for (const name of [WF_RUN_NODE, WF_RUN_NODE_WAIT]) {
+        const def = h.tools.definitions.get(name)!
+        const nodeIdDesc = ((def.parameters.properties ?? {}).nodeId as JsonSchemaNode).description as string
+        expect(nodeIdDesc).toContain('never skip a proxy')
+        expect(nodeIdDesc).not.toContain('proxy nodes resolve to their source node')
+      }
+    })
+
   it('wf_ask 的 questions 参数：数组必填、minItems=1、选项对象 open', async () => {
     const h = await makeHarness()
     const def = h.tools.definitions.get(WF_ASK)!

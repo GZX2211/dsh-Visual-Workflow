@@ -211,8 +211,8 @@ export function buildNodeBlocks(input: {
   /** 运行快照：上游角色节点最终产出（ctx 连线显式注入）的读取源。 */
   snapshot: RunSnapshot
   documentTextLimit: number
-  pauseNodeIds: string[]
-  runContextText: string
+  /** 系统语言名（从 DSH 用户设置读取；注入「回复/注释/思考必须使用该语言」规则）。 */
+  systemLanguage: string
 }): Array<{ type: 'text'; text: string }> {
   const { flow, node } = input
   const data = node.data
@@ -231,10 +231,11 @@ export function buildNodeBlocks(input: {
       filePaths,
       dbToolHint,
       isGroupMember: isGroupMember(flow, node.id),
+      systemLanguage: input.systemLanguage,
     },
     dynamic: {
-      pauseNodeIds: input.pauseNodeIds,
-      runContextText: input.runContextText,
+      // 父 agent id = 根会话 id（子代理的父代理即编排根 Agent；仅告诉 id，不含 send_message 指令）
+      parentAgentId: input.snapshot.sessionId,
     },
   })
   // 协作组成员：把成员清单块（含成员 ID + 角色名 + 自定义说明）追加到首条用户消息。
@@ -292,6 +293,8 @@ export function directiveParams(
     parentNode?: { nodeId: string; nodeLabel: string }
     /** 情况2：父代理自执行单元任务块（buildParentTaskSpec 输出；动态值仅末段）。 */
     parentTaskBlock?: string
+    /** 系统语言名（从 DSH 用户设置读取；注入语言规则）。 */
+    systemLanguage?: string
   },
 ): OrchestrationDirectiveParams {
   return {
@@ -302,6 +305,7 @@ export function directiveParams(
       nodes: orchestrationNodeList(flow),
       collabGroups: collabGroupList(flow),
       parentNode: extra?.parentNode ?? null,
+      systemLanguage: extra?.systemLanguage ?? '',
     },
     dynamic: {
       pauseNodeIds: pauseNodeIdsOf(flow),
@@ -338,8 +342,10 @@ export function buildParentRunPrompt(input: {
   resume?: { resumeFromNodeId?: string; resumedFromRunId: string }
   /** 父代理执行单元（具体情况2/3）；纯编排或续跑继承完成时为 null。 */
   executor: { nodeId: string; nodeLabel: string; task: ExecutorContextFacts; runContextText: string } | null
+  /** 系统语言名（从 DSH 用户设置读取；注入语言规则）。 */
+  systemLanguage: string
 }): string {
-  const { flow, defPath, mode, executor } = input
+  const { flow, defPath, mode, executor, systemLanguage } = input
   const variant = parentPromptVariantOf(flow)
   const resume = input.resume
 
@@ -349,6 +355,7 @@ export function buildParentRunPrompt(input: {
       workflowName: flow.name ?? flow.id,
       facts: executor.task,
       runContextText: executor.runContextText,
+      systemLanguage,
     })
   }
 
@@ -359,7 +366,8 @@ export function buildParentRunPrompt(input: {
         ...(resume ? { resume } : {}),
         ...(input.question ? { question: input.question } : {}),
         parentNode: { nodeId: executor.nodeId, nodeLabel: executor.nodeLabel },
-        parentTaskBlock: buildParentTaskSpec({ facts: executor.task, runContextText: executor.runContextText }),
+        parentTaskBlock: buildParentTaskSpec({ facts: executor.task, runContextText: executor.runContextText, systemLanguage }),
+        systemLanguage,
       }),
     )
   }
@@ -369,6 +377,7 @@ export function buildParentRunPrompt(input: {
     directiveParams(flow, defPath, mode, {
       ...(resume ? { resume } : {}),
       ...(input.question ? { question: input.question } : {}),
+      systemLanguage,
     }),
   )
 }

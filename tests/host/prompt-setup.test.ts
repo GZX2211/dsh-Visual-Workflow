@@ -57,10 +57,35 @@ describe('T-021 提示词注入装配 bindParent（父代理根 Agent）', () =>
     expect(ctx.__sections[0].text()).toBe('B')
   })
 
-  it('开关 ON（默认）：官方段保持不变（不做任何改写）', async () => {
+  it('角色 Prompt 设置时替换官方身份/人设段（harness:identity / deployment:persona 移除，其余保留）', async () => {
     const setup = createChildPromptSetup()
     const ctx = makeCtx()
     setup.bindParent(ctx, { systemPrompt: '父代理角色', injectSystemPrompt: true, injectToolSections: true }, 's')
+    const out = await runAssemble(ctx, [
+      { name: 'harness:identity', text: 'You are an AI agent powered by DeepSeek Harness.' },
+      { name: 'deployment:persona', text: '' },
+      { name: VISUAL_WORKFLOW_PROMPT_SECTION, text: '父代理角色' },
+      { name: 'tool:read', text: 'read tool' },
+      { name: 'workspace:instructions', text: 'AGENTS.md' },
+    ])
+    const names = out.sections!.map((section) => section.name)
+    // 角色 Prompt 替换官方身份/人设段（用户裁决）；角色段保留
+    expect(names).toContain(VISUAL_WORKFLOW_PROMPT_SECTION)
+    expect(names).not.toContain('harness:identity')
+    expect(names).not.toContain('deployment:persona')
+    // 其余官方段（工作区说明）与工具段保留
+    expect(names).toContain('workspace:instructions')
+    expect(names).toContain('tool:read')
+    // ON 时保留原上下文
+    expect(out.contexts).toHaveLength(1)
+    // ON 时 tools[] 保持原样（读取工具 schema 与散文段无关）
+    expect(out.tools!.map((tool) => tool.name)).toEqual(['read'])
+  })
+
+  it('未设置角色 Prompt 时官方段保持不变（不做任何改写，缓存/稳定性优化）', async () => {
+    const setup = createChildPromptSetup()
+    const ctx = makeCtx()
+    setup.bindParent(ctx, { systemPrompt: '', injectSystemPrompt: true, injectToolSections: true }, 's')
     const out = await runAssemble(ctx, [
       { name: 'harness:identity', text: 'You are an AI agent powered by DeepSeek Harness.' },
       { name: 'deployment:persona', text: '' },
@@ -103,7 +128,8 @@ describe('T-021 提示词注入装配 bindParent（父代理根 Agent）', () =>
   it('工具散文段开关 OFF：移除 tool:* 段，保留官方段、Code Mode 协议段与工具 schema', async () => {
     const setup = createChildPromptSetup()
     const ctx = makeCtx()
-    setup.bindParent(ctx, { systemPrompt: '父代理角色', injectSystemPrompt: true, injectToolSections: false }, 's')
+    // 空角色 Prompt（不触发官方身份段替换），专测工具散文段开关
+    setup.bindParent(ctx, { systemPrompt: '', injectSystemPrompt: true, injectToolSections: false }, 's')
     const out = await runAssemble(ctx, [
       { name: 'harness:identity', text: 'You are an AI agent powered by DeepSeek Harness.' },
       { name: 'deployment:persona', text: 'persona' },

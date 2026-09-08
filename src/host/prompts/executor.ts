@@ -17,7 +17,7 @@
 // 构建器均为纯函数：不读 Date.now/随机源，同一 params 两次构建字节相同。
 
 import { HEAD_MARKER, MID_MARKER, TAIL_MARKER, TAIL_RESTATE_MARKER } from './markers.js'
-import { NODE_HARD_CONSTRAINTS } from './node-task.js'
+import { NODE_HARD_CONSTRAINTS, systemLanguageRule } from './node-task.js'
 
 /** 执行单元共用的过程性信息（上游产出 / 文件路径索引 / 数据库工具说明）。 */
 export interface ExecutorContextFacts {
@@ -40,6 +40,8 @@ export interface ParentTaskSpecParams {
   facts: ExecutorContextFacts
   /** 本次执行单元的运行上下文说明（runId、attempt 等；可为空）。 */
   runContextText?: string
+  /** 系统语言名（如 '中文' / 'English'；从 DSH 用户设置读取）。 */
+  systemLanguage: string
 }
 
 /**
@@ -51,6 +53,8 @@ export interface ParentExecutorPromptParams {
   facts: ExecutorContextFacts
   /** 本次执行的运行上下文说明（runId、attempt 等；仅注入末段动态态）。 */
   runContextText: string
+  /** 系统语言名（如 '中文' / 'English'；从 DSH 用户设置读取）。 */
+  systemLanguage: string
 }
 
 /** 执行收尾协议短语（情况3 首段 + 末段重申双位；W-02）。 */
@@ -84,11 +88,14 @@ function renderContextSection(facts: ExecutorContextFacts): string {
  * 不含「# 硬性约束」等块级标题（避免与编排指令嵌套冲突），只列过程性信息与运行上下文。
  */
 export function buildParentTaskSpec(params: ParentTaskSpecParams): string {
-  const { facts, runContextText } = params
+  const { facts, runContextText, systemLanguage } = params
   const lines: string[] = [
     `严格按照规范执行节点「${facts.nodeLabel}」。`,
-    renderContextSection(facts),
   ]
+  if (String(systemLanguage ?? '').trim()) {
+    lines.push(`1. ${systemLanguageRule(systemLanguage)}。`)
+  }
+  lines.push(renderContextSection(facts))
   const runText = String(runContextText ?? '').trim()
   if (runText) lines.push('', `运行上下文：${runText}`)
   return lines.join('\n')
@@ -100,7 +107,10 @@ export function buildParentTaskSpec(params: ParentTaskSpecParams): string {
  * 不含任何编排/流程调度措辞（事实源、待编排节点、协作组并行、调用协议等一律剔除）。
  */
 export function buildParentExecutorPrompt(params: ParentExecutorPromptParams): string {
-  const { workflowName, facts, runContextText } = params
+  const { workflowName, facts, runContextText, systemLanguage } = params
+  const langRule = String(systemLanguage ?? '').trim()
+    ? `${systemLanguageRule(systemLanguage)}。`
+    : ''
 
   const head = [
     HEAD_MARKER,
@@ -110,6 +120,7 @@ export function buildParentExecutorPrompt(params: ParentExecutorPromptParams): s
     `1. ${EXECUTOR_FINISH_RULE}。`,
     `2. 严格按照规范执行本节点`,
     ...(facts.isGroupMember ? [`3. ${NODE_HARD_CONSTRAINTS.collabAskOnly}，不得用普通文本模拟对话或绕过工具直接发送消息。`] : []),
+    ...(langRule ? [`${facts.isGroupMember ? 4 : 3}. ${langRule}`] : []),
   ].join('\n')
 
   const mid = [
@@ -124,6 +135,7 @@ export function buildParentExecutorPrompt(params: ParentExecutorPromptParams): s
     TAIL_RESTATE_MARKER,
     `- ${EXECUTOR_FINISH_RULE}。`,
     ...(facts.isGroupMember ? [`- ${NODE_HARD_CONSTRAINTS.collabAskOnly}。`] : []),
+    ...(langRule ? [`- ${langRule}`] : []),
     '',
     '当前执行状态：',
     `- 运行上下文：${String(runContextText ?? '').trim() || '（无）'}`,

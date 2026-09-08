@@ -6,7 +6,8 @@
 import { WF_RUN_NODE_WAIT } from '../shared/protocol.js'
 import { nodeById } from '../graph/model.js'
 import { ensureDatabaseIndexes } from '../tools/data-tools.js'
-import { buildNodeBlocks, collabPromptOf, effectiveReactLimitOf, effectiveRetryLimitOf, effectiveThinkingOf, labelOf, pauseNodeIdsOf } from './helpers.js'
+import { DEFAULT_SYSTEM_LANGUAGE } from '../system-language.js'
+import { buildNodeBlocks, collabPromptOf, effectiveReactLimitOf, effectiveRetryLimitOf, effectiveThinkingOf, labelOf } from './helpers.js'
 import { createWaiter, type FinishArgs, type FinishResult, type RunEntry, type RunNodeArgs, type RunNodeResult, type Waiter } from './run-types.js'
 import { setNodeStatus, statusText, terminalizeNodes } from './snapshot.js'
 import { GLOBAL_RUN_CALL_LIMIT, WfError, type CallerInfo } from './seams.js'
@@ -139,8 +140,7 @@ export class RuntimeExecute extends RuntimeLaunch {
       node,
       snapshot: run.snapshot,
       documentTextLimit: this.deps.config.documentTextLimit,
-      pauseNodeIds: pauseNodeIdsOf(flow),
-      runContextText: `runId=${run.snapshot.id}; attempt ${attempt}/${effectiveRetryLimit + 1}`,
+      systemLanguage: this.deps.systemLanguage?.() ?? DEFAULT_SYSTEM_LANGUAGE,
     })
 
     // wait:true 阻塞等待器必须先于启动注册（subagent/end 可能在启动返回前到达）

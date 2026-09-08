@@ -343,11 +343,20 @@ export const styles = `
 .wf-service-dot.is-stopped{background:var(--wf-ink-2)}
 .wf-service-dot.is-crashed{background:var(--wf-err)}
 /* ---- 图1/图2 交互改造：侧边栏入口 / 标题栏窗口切换 / 分栏窗口 ---- */
-/* 侧边栏入口样式复用官方「设置」按钮的 className（见 useWorkbenchView.buildSidebarEntryButton），
-   故此处不覆写 .wf-sidebar-entry 的布局/背景，避免覆盖官方 trigger 样式。 */
-.wf-sidebar-entry__label{white-space:nowrap}
-.wf-sidebar-entry--rail{justify-content:center}
+/* 侧边栏入口：直接提取官方「设置」按钮样式（dsh-client-ui-settings-general 的 .VOzbGW_trigger）
+   配置到 button.wf-sidebar-entry 上，使其与「设置」按钮视觉完全一致。*.wf-sidebar-entry 前缀
+   提高、.wf-sidebar-entry 选择器特异性（0,1,1）确保覆盖任何复制来的官方 hashed 类；显式
+   appearance:none / border:none / box-shadow:none 重置浏览器默认 button 外观（外圈边框/发光）。
+   不依赖复制官方 className 呈现视觉，避免其在不同状态下引入外圈/发光。 */
+button.wf-sidebar-entry{box-sizing:border-box;cursor:pointer;width:100%;min-width:0;height:42px;color:var(--dsw-alias-label-primary);background:0 0;border:none;border-radius:12px;box-shadow:none;align-items:center;gap:8px;margin:0;padding:0 10px 0 8px;font-family:inherit;font-size:14px;line-height:22px;display:flex;overflow:hidden;-webkit-appearance:none;appearance:none}
+button.wf-sidebar-entry:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.wf-sidebar-entry__label{white-space:nowrap;overflow:hidden}
+button.wf-sidebar-entry--rail{corner-shape:round;border-radius:50%;width:36px;height:36px;justify-content:center;gap:0;margin:0;padding:0}
 .wf-sidebar-entry--rail .wf-sidebar-entry__label{display:none}
+/* 清除聚焦/点击后的发光焦点环（含默认浏览器/主题 focus 圈），保持与设置按钮一致 */
+button.wf-sidebar-entry:focus,
+button.wf-sidebar-entry:focus-visible,
+button.wf-sidebar-entry:active{outline:none;box-shadow:none;-webkit-tap-highlight-color:transparent}
 .wf-titlebar__view{display:inline-flex;align-items:center;justify-content:center;padding:6px;margin-left:2px}
 .wf-split-pane{position:fixed;top:0;right:0;bottom:0;width:var(--wf-split-w,640px);z-index:2147482010;display:flex;flex-direction:column;background:var(--wf-bg);border-left:1px solid var(--wf-border);min-height:0;overflow:hidden}
 .wf-split-pane__inner{display:flex;width:100%;height:100%;min-width:0;min-height:0}

@@ -606,7 +606,7 @@ describe('wfRunNode 异步路径与护栏', () => {
     expect(h.runtime.childMetaFor('child-1')).toEqual({ sessionId: 'session-1', flowId: 'flow-1', nodeId: 'n-a1' })
   })
 
-  it('任务块注入：NODE 软约束双位 + 过程性信息中段 + 动态态（运行上下文）仅末段', async () => {
+  it('任务块注入：系统语言规则中段 + 过程性信息中段 + 动态态（父 agent id）仅末段', async () => {
     const h = await makeHarness()
     await start(h, makeFlow())
     await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
@@ -614,18 +614,19 @@ describe('wfRunNode 异步路径与护栏', () => {
 
     const midAt = text.indexOf(MID_MARKER)
     const tailAt = text.indexOf(TAIL_MARKER)
-    // W-02 双位：report 软禁用短语在首段与末段重申
-    expect(text.slice(0, midAt)).toContain(NODE_HARD_CONSTRAINTS.noReportTool)
-    expect(text.slice(tailAt)).toContain(NODE_HARD_CONSTRAINTS.noReportTool)
+    // report 软禁用条目已删除（不在子代理工具白名单内，属无选择权内容）
+    expect(text).not.toContain('report')
     // 引擎层护栏（重试/ReAct 上限）不再写入任务块（用户裁决：AI 无选择权）
     expect(text).not.toContain('重试上限')
     expect(text).not.toContain('ReAct 迭代上限')
     // 自定义 System Prompt 已注入系统提示词，任务块不再重复 persona（避免排队消息重复）
     expect(text).not.toContain('任务：子任务A')
-    // 过程性信息（节点名称/上游产出）位于中段；动态态（运行上下文）仅注入末段
+    // 系统语言规则位于中段（流程上下文内）
+    expect(text.slice(midAt, tailAt)).toContain('必须使用')
+    // 过程性信息（节点名称/上游产出）位于中段；动态态（父 agent id）仅注入末段
     expect(text.slice(midAt, tailAt)).toContain('请执行工作流节点')
-    expect(text.slice(0, tailAt)).not.toContain('运行上下文：')
-    expect(text.slice(tailAt)).toContain('运行上下文：')
+    expect(text.slice(0, tailAt)).not.toContain('你的父 agent id 为：')
+    expect(text.slice(tailAt)).toContain('你的父 agent id 为：')
   })
   it('文档 ctx-in：文本内容注入（超限截断）+ 受管文件路径索引', async () => {
     const h = await makeHarness()

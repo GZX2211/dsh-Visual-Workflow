@@ -8,10 +8,10 @@
 - 三个构建器**注入给模型的指令正文用中文**（W-04）；工具名（`wf_run_node` / `wf_finish` / `wf_ask_agent` / `wf_db_query`）与**工具 schema 的 `description` 仍为英文**（W-03，见 §3）。
 - 惯用英文技术词（`System Prompt` / `allow-list` / `ReAct` / `flow-out` / `ctx`）保留原样；动态状态字段标签一并中文化。
 - **代码层约束不写入提示词**（用户裁决）：只有 AI 有选择权、值得强调的**软约束固化**才进入「硬性约束」章节——
-  例如子代理的 report 工具一律软禁用（最终结论由系统自动送达父代理、阶段汇报无意义）、协作组成员必须经
-  `wf_ask_agent` 通信。引擎已强制（工具可见性、重试/ReAct 上限、唯一 System Prompt 等）的约束一律删除，
+  例如协作组成员必须经 `wf_ask_agent` 通信。引擎已强制（工具可见性、重试/ReAct 上限、唯一 System Prompt 等）的约束一律删除，
   以节省上下文、消除无用约束对模型的干扰。
-- 节点任务块**不再包含 report 回传结论约束**：子代理结论在最终消息中输出，由父代理据此汇总。
+- 节点任务块**不再包含 report 回传结论约束**：report 不在子代理工具白名单内（AI 无法调用），提示「不得调用 report」属 AI 无选择权/无法查证的内容（用户批注），写入只会干扰模型。
+- **系统语言规则**：所有构建器注入「所有对话回复、注释、思考过程必须使用 <系统语言>」——系统语言名从 DSH 用户设置（`locale.preference`）读取（`src/host/system-language.ts`），插件界面与提示词均跟随官方配置语言。
 
 ## 1. 文件清单
 
@@ -41,7 +41,7 @@
 | **稳定段落化（同一 run 不再变化）** | 模板集中在本目录；运行态动态信息以变量注入尾部（各构建器 `renderDynamicState` 内部纯函数） | 后续组装任务（T-021 等）复用构建器，不在运行时重排模板字符串 |
 | **协作 Prompt 追加位置** | `collab.ts` 的 `buildCollabBlock`（始终列出成员 ID + 角色名） | 追加到组内成员**首条用户消息（任务块）末尾**，不再注入系统提示词；无论用户文本是否为空都默认列出全部成员，再追加自定义说明 |
 | **三情况整体替换组装** | `parentPromptVariantOf`（`orchestrator/helpers.ts`）+ `buildParentRunPrompt` | startRun/resumeRun 注入前按画布形态判定变体，整份输出；情况间身份措辞互斥（测试断言互斥） |
-| **双重汇报软约束** | 编排系 `ORCH_HARD_CONSTRAINTS.nodeSettledSignal`；子代理 `NODE_HARD_CONSTRAINTS.noReportTool` | 父代理只以结算通知判定节点完成（report 仅中途汇报）；子代理一律不调用 report（阶段汇报无意义） |
+| **双重汇报软约束** | 编排系 `ORCH_HARD_CONSTRAINTS.nodeSettledSignal` | 父代理只以结算通知判定节点完成（report 仅中途汇报）；子代理 report 不在工具白名单内（AI 无选择权），任务块不再提示（用户批注） |
 | **工具 schema 稳定性** | 本基线不注册工具；但要求工具 description 走 W-03（见 §3） | 输出 render 键序稳定 |
 | **部署级旁路（可选）** | 子代理节点「工具散文段开关」`injectToolSections=false` 会隐藏官方 `tool:report` 指引段（不改变工具调用能力） | 需要时由用户在节点面板关闭；插件层不主动启用 |
 

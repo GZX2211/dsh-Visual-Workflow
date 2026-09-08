@@ -73,8 +73,7 @@ describe('dbToolHintOf 数据库连线提示', () => {
       node: role('a1', 'agent', '查询代理'),
       snapshot: emptySnapshot,
       documentTextLimit: 20000,
-      pauseNodeIds: [],
-      runContextText: '',
+      systemLanguage: '中文',
     })
     const text = blocks[0].text
     expect(text).toContain('数据库工具说明：')

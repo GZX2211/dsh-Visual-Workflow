@@ -70,7 +70,7 @@ export function rootSessionIdOf(
 
 /** 工作台宿主组件。 */
 export function WorkbenchHost({ ctx, t }: { ctx: WorkbenchHostContext; t: Dict }) {
-  const view = useWorkbenchView()
+  const view = useWorkbenchView(t.workflows)
   const [sessionId, setSessionId] = useState(() => rootSessionIdOf(currentSessionOf(ctx), ctx.get?.('sessions') as never))
   /** 是否打开过工作台（首次打开后才挂载框架：未打开页面零工作台开销；
    *  打开过后常驻挂载，此后关闭仅 hidden 隐藏不卸载——状态全保留）。 */

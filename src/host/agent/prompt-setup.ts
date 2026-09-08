@@ -89,6 +89,13 @@ interface PromptChildContextLike {
 /** Code Mode 协议段：无论系统提示词/工具段开关如何，都始终保留（移除会破坏 Code Mode 调用协议）。 */
 const CODE_PROTOCOL_SECTIONS = ['tools:sdk', 'tools:code-only'] as const
 
+/**
+ * 官方身份/人设段：节点设置了自定义 System Prompt（角色 Prompt）时，用角色 Prompt
+ * 整体替换这两个段（用户裁决「角色 Prompt 替换官方提示词」）。其余官方段
+ * （环境上下文/工作区说明等）仍按 injectSystemPrompt 开关决定是否保留。
+ */
+const OFFICIAL_IDENTITY_SECTIONS = ['harness:identity', 'deployment:persona'] as const
+
 /** 是否为 Code Mode 协议段（tools:sdk / tools:code-only；复数命名且以 `tools:` 开头）。 */
 function isCodeProtocolSection(name: string): boolean {
   return CODE_PROTOCOL_SECTIONS.includes(name as (typeof CODE_PROTOCOL_SECTIONS)[number])
@@ -99,11 +106,21 @@ function isToolProseSection(name: string): boolean {
   return name.startsWith('tool:')
 }
 
-/** 是否保留某个段：角色段与 Code 协议段恒保留；tool:* 段按 injectToolSections；其余官方段按 injectSystemPrompt。 */
+/** 是否为官方身份/人设段（角色 Prompt 设置时被整体替换）。 */
+function isOfficialIdentitySection(name: string): boolean {
+  return OFFICIAL_IDENTITY_SECTIONS.includes(name as (typeof OFFICIAL_IDENTITY_SECTIONS)[number])
+}
+
+/**
+ * 是否保留某个段：角色段与 Code 协议段恒保留；tool:* 段按 injectToolSections；
+ * 角色 Prompt 设置时官方身份/人设段被替换（不保留）；其余官方段按 injectSystemPrompt。
+ */
 function shouldKeepSection(name: string, ref: PromptStateRef): boolean {
   if (name === VISUAL_WORKFLOW_PROMPT_SECTION) return true // 角色 Prompt 段始终保留
   if (isCodeProtocolSection(name)) return true // Code Mode 协议段始终保留
   if (isToolProseSection(name)) return ref.injectToolSections // 工具散文段按工具开关
+  // 角色 Prompt 设置时替换官方身份/人设段（不再注入官方 identity/persona）
+  if (isOfficialIdentitySection(name) && String(ref.systemPrompt ?? '').trim()) return false
   return ref.injectSystemPrompt // 其余官方段（人设/身份/系统）按系统提示词开关
 }
 
@@ -132,23 +149,20 @@ function registerPromptOnCtx(childCtx: PromptChildContextLike, ref: PromptStateR
     }
   }
 
-  // 开关过滤瀑布：两个开关都开启时返回官方原有装配（不改动，保持官方缓存/稳定性优化）；
-  // 任一关闭时按 shouldKeepSection 保留角色段 + Code 协议段 + 按开关的工具段/官方段。
+  // 开关过滤瀑布：两开关全开且未设置角色 Prompt 时返回官方原有装配（不改动，保持官方
+  // 缓存/稳定性优化）；否则按 shouldKeepSection 保留角色段 + Code 协议段 + 按开关的
+  // 工具段/官方段。角色 Prompt 设置时会替换官方身份/人设段（用户裁决）。
   // 工具调用能力仅由 tools[] Schema 决定，本瀑布从不改动 assembly.tools。
   const disposeAssembly = childCtx.on('system-prompt/assemble', async (rawAssembly, _rawContext, next) => {
     const assembly = (await next()) as PromptAssemblyLike | null
-    const roleText = String(ref.systemPrompt ?? '')
-    if (ref.injectSystemPrompt && ref.injectToolSections) {
-      // 默认路径：官方已优化，不做改动（仅当 section API 不可用时兜底前置角色段）
-      if (!sectionRegistered && roleText.trim()) {
-        const sections = Array.isArray(assembly?.sections) ? [...assembly.sections] : []
-        return { ...assembly, sections: [{ name: VISUAL_WORKFLOW_PROMPT_SECTION, text: roleText }, ...sections] }
-      }
-      return assembly
-    }
-    // 任一开关关闭：section API 不可用时兜底先行注入角色段，再按 shouldKeepSection 过滤。
+    const roleText = String(ref.systemPrompt ?? '').trim()
+    const roleSet = roleText.length > 0
+    // 快速路径：两开关全开且未设置角色 Prompt（无需替换官方身份段）时，不改动官方组装。
+    // 仅当设置了角色 Prompt 或任一开关关闭时才做过滤（保持缓存/稳定性优化）。
+    const needsFilter = !(ref.injectSystemPrompt && ref.injectToolSections) || roleSet
+    if (!needsFilter) return assembly
     let baseSections = Array.isArray(assembly?.sections) ? [...assembly.sections] : []
-    if (!sectionRegistered && roleText.trim()) {
+    if (!sectionRegistered && roleSet) {
       baseSections = [{ name: VISUAL_WORKFLOW_PROMPT_SECTION, text: roleText }, ...baseSections]
     }
     const sections = baseSections.filter((section) => shouldKeepSection(String(section.name), ref))
