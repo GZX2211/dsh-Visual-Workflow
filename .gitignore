@@ -4,9 +4,10 @@
 node_modules/
 .pnpm-store/
 
-# 构建产物（当前阶段 lib 为构建产物，忽略；SKILL.md §7.1 备选分发策略若需
-# 「可提交 lib」时再单独调整）。根级锚定：src/client/lib/ 是源码目录，不得忽略。
-/lib/
+# 构建产物（lib 已提交作为分发包：源码改动后需重新 pnpm build 并同步提交 lib，与源码保持一致）。
+# 根级锚定：src/client/lib/ 是源码目录，不得忽略。
+# lib/ 现为可提交分发包，不再忽略；仅调试源码映射（*.map）不入库，运行时无需。
+lib/**/*.map
 
 # TypeScript 增量产物
 *.tsbuildinfo

@@ -1,0 +1,80 @@
+/**
+ * 节点任务块的入参（中文注释每个字段）。
+ * `facts` 为同一 run 内字节稳定的静态事实；`dynamic` 为仅注入末段的动态态信息。
+ */
+export interface NodeTaskBlockParams {
+    /** 静态事实：节点身份 / 任务 / 上下文注入（同一 run 内稳定）。 */
+    facts: {
+        /**
+         * 节点任务文本：节点自身的 System Prompt（persona），即子代理要完成的子任务。
+         * 任务正文经 prompt-setup 作为系统提示词段注入，本任务块不再重复正文。
+         */
+        task: string;
+        /**
+         * 节点人类可读名称（身份行与中段指代）。
+         */
+        nodeLabel: string;
+        /**
+         * 上游产出上下文（ctx 连线注入）：上游节点最终产出摘要/产物文本，作为下游节点的
+         * 上下文注入。数组元素为「来源 → 内容」键值；可为空（无 ctx 连线即不注入）。
+         * 长文本（文档/上游产物）统一置于中段（lost-in-the-middle 处置）。
+         */
+        upstreamContext: Array<{
+            source: string;
+            content: string;
+        }>;
+        /**
+         * 文件路径索引：非文本文件节点连线注入的受管文件路径（data/files/），子代理经
+         * 官方读取工具自行读取（不直通模型上下文）。可为空。
+         */
+        filePaths: string[];
+        /**
+         * 数据库工具说明：存在 db-in 连线时说明 wf_db_query 三模式（search/query/schema，
+         * 只读）用法；无 db-in 连线时为空字符串。
+         */
+        dbToolHint: string;
+        /**
+         * 协作组成员标记：该节点为协作组成员时注入「组内通信必须经 wf_ask_agent」软约束。
+         */
+        isGroupMember: boolean;
+        /**
+         * 系统语言名（如 '中文' / 'English'；从 DSH 用户设置读取）。
+         * 注入「所有对话回复、注释、思考过程必须使用该语言」规则。
+         */
+        systemLanguage: string;
+    };
+    /** 末段动态态信息（不稳定内容，仅注入尾段）。全部可选，缺省即默认值。 */
+    dynamic: {
+        /**
+         * 父代理会话 id（根 Agent 的会话 id；子代理的父 agent id）。
+         * 仅告诉 id，不含 send_message 相关指令。
+         */
+        parentAgentId?: string;
+    };
+}
+/**
+ * 节点任务块首段软约束短语（W-02 双位测试断言与组装任务引用）。
+ * 面向模型中文（W-04）；只保留「软约束固化」类条目（AI 有选择权、值得强调的行为规则）。
+ *
+ * 准确性改造：report 工具软禁用条目已删除——report 不在子代理工具白名单内（AI 无法调用），
+ * 「不得调用 report」属 AI 无选择权/无法查证的内容（用户批注），写入只会干扰模型。
+ */
+export declare const NODE_HARD_CONSTRAINTS: {
+    /** 协作组内通信必须经 wf_ask_agent（仅组内成员注入）。 */
+    readonly collabAskOnly: "与组内成员的一切协作消息必须使用 wf_ask_agent（ask / reply）";
+};
+/**
+ * 系统语言规则短语（面向模型中文；各提示词构建器共用）。
+ * 从 DSH 用户设置读取语言名，注入「所有对话回复、注释、思考过程必须使用该语言」。
+ */
+export declare function systemLanguageRule(language: string): string;
+/**
+ * 节点任务块构建器（纯函数）。
+ *
+ * 输出字符串同一 run 内字节稳定：首段软约束 + 中段过程性信息固定；末段重申固定，
+ * 之后仅追加本次动态态信息。不读时钟、不随机。
+ *
+ * @param params - 模板入参（facts 静态事实 + dynamic 末段动态态信息）。
+ * @returns 注入子代理的任务文本（面向模型，中文）。
+ */
+export declare function buildNodeTaskBlock(params: NodeTaskBlockParams): string;
