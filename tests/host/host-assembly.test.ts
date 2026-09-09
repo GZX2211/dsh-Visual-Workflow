@@ -232,4 +232,62 @@ describe('VisualWorkflowHost 装配', () => {
 
     await root.fiber.dispose()
   })
+
+  it('agent/disposed 不清除持久化状态：创建→销毁→冷恢复重发布，仍能重装贡献（第二轮回退官方提示词回归）', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vw-host-'))
+    cleanups.push(() => rm(dir, { recursive: true, force: true }))
+    const root = new Context()
+    await root.plugin(VisualWorkflowHost, makeConfig(dir))
+    const host = root.get(VisualWorkflowHostServiceName) as VisualWorkflowHost
+
+    const makeCtx = () => {
+      const sections: Array<{ name: string; order: number }> = []
+      const handlers = new Map<string, unknown[]>()
+      const denies: Array<{ deny?: string[] }> = []
+      const childCtx = {
+        on(name: string, listener: unknown): () => void {
+          handlers.set(name, [...(handlers.get(name) ?? []), listener])
+          return () => {}
+        },
+        systemPrompt: { section(input: { name: string; order: number }): () => void { sections.push(input); return () => {} } },
+        get(name: string): unknown {
+          return name === 'tools'
+            ? { restrict: (filter: { deny?: string[] }) => { denies.push(filter); return () => {} } }
+            : undefined
+        },
+      }
+      return { childCtx, sections, handlers, denies }
+    }
+
+    const hostAs = host as unknown as {
+      childPrompt: { withPending(s: unknown, o: () => Promise<void>): Promise<void> }
+      onAgentSessionStart(p: unknown): void
+      onAgentDisposed(p: unknown): void
+    }
+
+    // ① 首建：withPending 作用域内 install + 持久化状态
+    const first = makeCtx()
+    await hostAs.childPrompt.withPending(
+      { systemPrompt: '子代理角色', injectSystemPrompt: true, injectToolSections: true },
+      async () => { hostAs.onAgentSessionStart({ agent: { id: 'child-x', ctx: first.childCtx } }) },
+    )
+    expect(first.sections.map((s) => s.name)).toContain(VISUAL_WORKFLOW_PROMPT_SECTION)
+
+    // ② 子代理回合结束被官方 watchSettlement 销毁 → agent/disposed 触发。
+    // 旧实现在此 delete 持久化状态，导致后续冷恢复无法重装（回归根因）。
+    hostAs.onAgentDisposed({ agent: { id: 'child-x' } })
+
+    // ③ 第二轮父代理派发 → coldResume 冷恢复（重新发布）→ 再次 agent/session-start
+    //    （不在 withPending 内）。必须用首建持久化状态重装四类贡献，否则回退官方提示词。
+    const second = makeCtx()
+    hostAs.onAgentSessionStart({ agent: { id: 'child-x', ctx: second.childCtx } })
+
+    // 角色提示词段 / 组装瀑布 / 工具可见性 deny 均已重装（不因 dispose 丢失）
+    expect(second.sections.map((s) => s.name)).toContain(VISUAL_WORKFLOW_PROMPT_SECTION)
+    expect(second.handlers.get('system-prompt/assemble')?.length ?? 0).toBeGreaterThan(0)
+    expect(second.denies.some((d) => Array.isArray(d.deny) && d.deny!.includes('wf_run_node'))).toBe(true)
+    expect(second.denies.some((d) => Array.isArray(d.deny) && d.deny!.includes('wf_finish'))).toBe(true)
+
+    await root.fiber.dispose()
+  })
 })

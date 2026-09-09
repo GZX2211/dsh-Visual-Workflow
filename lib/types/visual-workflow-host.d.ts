@@ -54,7 +54,12 @@ export declare class VisualWorkflowHost extends Service {
      * 每个视觉工作流子代理的提示词状态（agentId → ChildPromptState）。在首次 `agent/session-start`
      * 时写入；此后即使子代理被重发布/恢复（`agent/session-start` 再次触发、但不在 withPending
      * 作用域内）也能据此状态重新安装四类贡献——避免「第二轮被官方提示词顶替、贡献被卸载」的
-     * 二次重置 BUG。`agent/disposed` 或宿主 dispose 时清理。
+     * 二次重置 BUG。
+     * 【关键生命周期】`agent/disposed` **不再**删除此状态：可延续子代理（startContinuable）在
+     * 回合间会因官方 watchSettlement（空闲+settled）被销毁并触发 `agent/disposed`，第二轮父代理
+     * 再派发时经 coldResume 冷恢复（重新发布 → 再次 `agent/session-start`）。若在 dispose 时删除
+     * 状态，重发布将找不到该子代理的 ChildPromptState → 四类贡献不再重装 → 第二轮回退官方提示词。
+     * 条目为极小字符串、会话内数量有限，仅随宿主 dispose 统一清理即可。
      */
     private readonly childPromptStates;
     /** 本地嵌入引擎（外部端点 > 本地资产 > BM25 降级；惰性加载）。 */
@@ -94,7 +99,15 @@ export declare class VisualWorkflowHost extends Service {
      * 不会「第二轮被官方提示词顶替、贡献被卸载」（二次重置 BUG）。
      */
     private onAgentSessionStart;
-    /** 子代理被销毁时回收其作用域装配与提示词状态（重建配置签名变化 / 正常运行结束）。 */
+    /**
+     * 子代理被销毁时回收其作用域装配（重建配置签名变化 / 正常运行结束）。
+     * 【关键】**不删除** `childPromptStates`：可延续子代理在回合间会因官方 watchSettlement
+     * （空闲+settled）被销毁并触发 `agent/disposed`，第二轮父代理再派发时经 coldResume 冷恢复
+     * （重新发布 → 再次 `agent/session-start`）。若此处删除持久化状态，重发布时将无法找到该
+     * 子代理的 ChildPromptState，四类贡献（角色提示词段/工具可见性/模型选择/软截停）不会重装
+     * → 第二轮回退官方提示词（「系统提示词和工具已更新」二次重置 BUG）。状态仅随宿主 dispose
+     * 统一清理。
+     */
     private onAgentDisposed;
     /** 按会话 id 取子代理 agent（wf_ask_agent 投递缝用；转发至 agents 适配）。 */
     getChildAgent(childId: string): RootAgentLike | null;
