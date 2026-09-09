@@ -63,23 +63,17 @@ export declare const ORCH_HARD_CONSTRAINTS: {
      * 节点完成判定（双重汇报防治，一句话）：子代理主动 report ≠ 完成；
      * 只有 DSH 自动送达的结算通知才是节点完成的权威信号。
      */
-    readonly nodeSettledSignal: "节点完成判定：只有收到结算通知（Background subagent … finished …）才算该节点完成";
-    /** 调用协议：模式一 wf_run_node 异步启动。 */
-    readonly runNodeAsync: "模式一用 wf_run_node：异步启动节点子代理并立即返回";
-    /** 调用协议：模式二 wf_run_node_wait 阻塞等待。 */
-    readonly runNodeBlocking: "模式二用 wf_run_node_wait：阻塞启动节点子代理直至节点完成";
+    readonly nodeSettledSignal: "节点判定：只有收到结算通知（Background subagent … finished …）才算该节点完成";
     /** 收尾协议：wf_finish 幂等收尾、释放锁。 */
-    readonly finishIdempotent: "以 wf_finish 收尾（只调用一次，幂等，并释放运行锁）";
+    readonly finishIdempotent: "收尾时调用 wf_finish （只调用一次，幂等，释放运行锁）";
     /** 失败语义：节点失败需显式处置，不静默跳过。 */
     readonly failureSemantics: "绝不静默跳过失败节点";
     /** 条件连线语义：条件分支由父代理按上游实际产出语义判断。 */
     readonly conditionSemantics: "条件分支由你依据上游节点的实际产出进行语义判断";
-    /** 失控处理：失控立即 wf_finish(failed)。 */
-    readonly failureImmediate: "检测到失控时立即调用 wf_finish({ status: 'failed' })";
     /** 协作通信超时处置：征询用户后 resolve 三动作。 */
-    readonly askAgentTimeout: "收到 wf_ask_agent 的 ask 超时通知时，先用 ask_user_question 征询用户，再用 wf_ask_agent resolve（continue / resend / abort）定案";
+    readonly askAgentTimeout: "若收到 wf_ask_agent 超时通知，先征询用户，再用该工具定案(continue / resend / abort)";
     /** 情况2 执行者模式核心短语：你本人也是执行节点，先执行自身任务再调度。 */
-    readonly executorRole: "执行者模式：你本人也是执行节点，启动后必须先执行自身节点任务，完成后从本人节点的 flow-out 调用 wf_run_node 继续调度";
+    readonly executorRole: "执行+编排：你既是执行节点，也要负责调度子代理；你只执行指向自身的节点任务";
 };
 /**
  * 情况1（纯编排）父代理提示词构建器（纯函数）。
@@ -88,7 +82,7 @@ export declare const ORCH_HARD_CONSTRAINTS: {
 export declare function buildOrchestratorPrompt(params: OrchestrationDirectiveParams): string;
 /**
  * 情况2（编排 + 自执行）父代理提示词构建器（纯函数）。
- * 首段以执行者模式取代「仅编排」；末段重申含执行者模式与完成判定信号，
+ * 首段以执行者模式取代「仅编排」；末段重申含收尾与失败语义，
  * dynamic.parentTaskBlock 为父代理自执行单元任务块（buildParentTaskSpec 输出）。
  */
 export declare function buildHybridPrompt(params: OrchestrationDirectiveParams): string;

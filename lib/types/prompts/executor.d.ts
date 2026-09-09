@@ -37,7 +37,7 @@ export interface ParentExecutorPromptParams {
     systemLanguage: string;
 }
 /** 执行收尾协议短语（情况3 首段 + 末段重申双位；W-02）。 */
-export declare const EXECUTOR_FINISH_RULE = "\u5B8C\u6210\u8282\u70B9\u4EFB\u52A1\u5E76\u8F93\u51FA\u6700\u7EC8\u7ED3\u8BBA\u540E\uFF0C\u8C03\u7528 wf_finish \u7ED3\u675F\u672C\u6B21\u8FD0\u884C\uFF08\u53EA\u8C03\u7528\u4E00\u6B21\uFF0C\u5E42\u7B49\uFF09";
+export declare const EXECUTOR_FINISH_RULE = "\u5B8C\u6210\u8282\u70B9\u4EFB\u52A1\u540E\uFF0C\u8C03\u7528 wf_finish \u7ED3\u675F\u672C\u6B21\u8FD0\u884C\uFF08\u53EA\u8C03\u7528\u4E00\u6B21\uFF0C\u5E42\u7B49\uFF09";
 /**
  * 情况2 父代理自执行单元任务块（编排指令末段小节正文；纯函数）。
  * 不含「# 硬性约束」等块级标题（避免与编排指令嵌套冲突），只列过程性信息与运行上下文。

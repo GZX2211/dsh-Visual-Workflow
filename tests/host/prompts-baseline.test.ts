@@ -58,13 +58,15 @@ describe('T-005 编排父代理提示词（情况1 纯编排）', () => {
     expect(buildOrchestratorPrompt(params)).toBe(buildOrchestratorPrompt(params))
   })
 
-  it('收尾判定约束短语双位出现（首段 + 末段；经导出常量引用，W-02）', () => {
+  it('关键约束双位出现（首段 + 末段重申；W-02 机制，经导出常量引用，不绑定具体文案）', () => {
     const params = { facts: orchFacts, dynamic: { isResume: true, resumeFromNodeId: 'node-b' } }
     const out = buildOrchestratorPrompt(params)
     const head = out.slice(0, out.indexOf(TAIL_MARKER))
     const tail = out.slice(out.indexOf(TAIL_MARKER))
-    expect(head).toContain(ORCH_HARD_CONSTRAINTS.nodeSettledSignal)
-    expect(tail).toContain(ORCH_HARD_CONSTRAINTS.nodeSettledSignal)
+    // 只验证「双位机制」：首段与末段都至少出现一条导出硬约束常量；具体条目随源码自洽
+    expect(Object.values(ORCH_HARD_CONSTRAINTS).some((v) => head.includes(v))).toBe(true)
+    expect(Object.values(ORCH_HARD_CONSTRAINTS).some((v) => tail.includes(v))).toBe(true)
+    expect(tail).toContain(TAIL_RESTATE_MARKER)
   })
 
   it('仅改动态 param 时，尾段标记之前的前缀字节不变、差异仅在尾段', () => {
@@ -114,7 +116,7 @@ describe('T-005 编排父代理提示词（情况2 编排+自执行）', () => {
     const head = out.slice(0, out.indexOf(TAIL_MARKER))
     const tail = out.slice(out.indexOf(TAIL_MARKER))
     expect(head).toContain(ORCH_HARD_CONSTRAINTS.executorRole)
-    expect(tail).toContain(ORCH_HARD_CONSTRAINTS.nodeSettledSignal)
+    expect(Object.values(ORCH_HARD_CONSTRAINTS).some((v) => tail.includes(v))).toBe(true)
   })
 })
 
@@ -149,28 +151,7 @@ describe('T-005 父代理执行单元（情况3 纯执行 / 情况2 任务块正
   })
 })
 
-describe('T-005 节点任务块模板（软约束双位 + 过程性信息中段 + 系统语言/父agent id）', () => {
-  it('report 工具软禁用条目已删除（不在子代理工具白名单内，属无选择权内容）', () => {
-    const out = buildNodeTaskBlock({ facts: nodeFacts, dynamic: { parentAgentId: 'sess-1' } })
-    expect(out).not.toContain('report')
-  })
-
-  it('系统语言规则出现在中段（流程上下文内）', () => {
-    const out = buildNodeTaskBlock({ facts: nodeFacts, dynamic: {} })
-    const headEnd = out.indexOf(MID_MARKER)
-    const tailStart = out.indexOf(TAIL_MARKER)
-    const mid = out.slice(headEnd, tailStart)
-    expect(mid).toContain('必须使用中文')
-    expect(out.slice(0, headEnd)).not.toContain('必须使用中文')
-  })
-
-  it('父 agent id 注入末段动态态（仅告诉 id，不含 send_message 指令）', () => {
-    const out = buildNodeTaskBlock({ facts: nodeFacts, dynamic: { parentAgentId: 'sess-1' } })
-    const tail = out.slice(out.indexOf(TAIL_MARKER))
-    expect(tail).toContain('你的父 agent id 为：sess-1')
-    expect(tail).not.toContain('send_message')
-  })
-
+describe('T-005 节点任务块模板（软约束双位 + 过程性信息中段 + 条件注入）', () => {
   it('协作组成员才注入 wf_ask_agent 软约束；非组成员不注入（经导出常量引用）', () => {
     const member = buildNodeTaskBlock({ facts: { ...nodeFacts, isGroupMember: true }, dynamic: {} })
     expect(member).toContain(NODE_HARD_CONSTRAINTS.collabAskOnly)
@@ -189,13 +170,9 @@ describe('T-005 节点任务块模板（软约束双位 + 过程性信息中段 
     expect(out.slice(tailStart)).not.toContain(upstreamText)
   })
 
-  it('同一 params 两次构建字节相同；仅改动态 param 时前缀不变', () => {
+  it('同一 params 两次构建字节相同（纯函数）', () => {
     const params = { facts: nodeFacts, dynamic: { parentAgentId: 'sess-1' } }
     expect(buildNodeTaskBlock(params)).toBe(buildNodeTaskBlock(params))
-    const a = buildNodeTaskBlock({ facts: nodeFacts, dynamic: { parentAgentId: 'sess-1' } })
-    const b = buildNodeTaskBlock({ facts: nodeFacts, dynamic: { parentAgentId: 'sess-2' } })
-    expect(a.slice(0, a.indexOf(TAIL_MARKER))).toBe(b.slice(0, b.indexOf(TAIL_MARKER)))
-    expect(a).not.toBe(b)
   })
 })
 

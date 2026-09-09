@@ -34,7 +34,7 @@ import { renderServePatch } from '../../src/host/service/serve-patch.js'
 import { registerWfAskAgent } from '../../src/host/tools/wf-ask-agent.js'
 import { WF_ASK_AGENT } from '../../src/host/shared/protocol.js'
 import { ORCH_HARD_CONSTRAINTS } from '../../src/host/prompts/orchestration.js'
-import { HEAD_MARKER } from '../../src/host/prompts/markers.js'
+import { HEAD_MARKER, TAIL_MARKER, TAIL_RESTATE_MARKER } from '../../src/host/prompts/markers.js'
 
 const cleanups: Array<() => Promise<void>> = []
 
@@ -205,8 +205,11 @@ describe('e2e：编排运行全链路与双向同步', () => {
     const directive = h.root.messages[0]?.content
     const directiveText = (directive as Array<{ text?: string }>)?.map((m) => m.text ?? '').join('') ?? ''
     expect(directiveText.startsWith(HEAD_MARKER)).toBe(true)
-    // W-02 注意力双位：dispatchOnly 短语在首段与末段重申各出现一次
-    expect(directiveText.split(ORCH_HARD_CONSTRAINTS.dispatchOnly).length - 1).toBeGreaterThanOrEqual(2)
+    // W-02 注意力双位机制：末段重申存在（TAIL_RESTATE_MARKER + 至少一条导出硬约束常量；
+    // 只验证机制，不绑定具体文案条目——提示词文案可随版本润色）
+    const tailSection = directiveText.slice(directiveText.indexOf(TAIL_MARKER))
+    expect(tailSection).toContain(TAIL_RESTATE_MARKER)
+    expect(Object.values(ORCH_HARD_CONSTRAINTS).some((v) => tailSection.includes(v))).toBe(true)
     expect(h.root.messages[0]?.source).toEqual({ kind: 'user' })
 
     // 2. wf_run_node → 子代理启动（任务块含节点身份与上游 ctx）

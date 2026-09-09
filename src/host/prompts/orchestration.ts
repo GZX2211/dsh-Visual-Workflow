@@ -13,20 +13,10 @@
 //       子代理、判断条件连线、并在失控或正常走完时 wf_finish 收尾。
 //
 // 稳定布局（前缀稳定 + 关键约束双位 + 动态值仅注入末尾）：
-//   ① 首段 = 硬约束（身份/调度协议/完成判定信号/收尾/失败语义/条件连线/失控/组内通信）
-//   ② 中段 = 过程性信息（事实源路径 / 节点清单 / 协作组并行说明，协作组按需输出）
+//   ① 首段 = 硬约束（身份/调度协议/完成判定信号/收尾/失败语义/条件连线/组内通信）
+//   ② 中段 = 过程性信息（事实源路径 / 工作流目标 / 协作组并行说明，协作组按需输出）
 //   ③ 末段 = 关键约束重申 + 本次动态状态（断点继续 / 暂停 / 运行参数 / 情况2的
 //            父代理自执行单元任务块等动态值仅在此注入）
-//
-// 提示词准确性改造要点（用户评审落定）：
-//   - 情况1 删「执行者模式」条目；情况2 以「执行者模式」取代「仅编排」——两种身份
-//     互斥，整份替换组装，杜绝嵌套冲突；
-//   - 删除引擎级护栏条目（wf_run_node 全局调用上限、空闲超时）：AI 无选择权，写入无用；
-//   - 新增「节点完成判定」一句话（双重汇报防治）：report ≠ 完成，以 DSH 自动送达的
-//     结算通知为准，收到前不得推进下游或收尾运行；
-//   - 协作组段仅在画布存在协作组时组装；待编排节点只列「参与流程」的 agent 节点
-//     （未参与流程的无关节点不进入清单）；
-//   - 事实源警示句精简；动态值（断点/暂停/运行参数/父代理自执行单元任务）仅注入末段。
 //
 // 构建器均为纯函数：不读 Date.now/随机源，同一 params 两次构建字节相同。
 
@@ -91,24 +81,17 @@ export const ORCH_HARD_CONSTRAINTS = {
    * 只有 DSH 自动送达的结算通知才是节点完成的权威信号。
    */
   nodeSettledSignal:
-    '节点完成判定：只有收到结算通知（Background subagent … finished …）才算该节点完成',
-  /** 调用协议：模式一 wf_run_node 异步启动。 */
-  runNodeAsync: '模式一用 wf_run_node：异步启动节点子代理并立即返回',
-  /** 调用协议：模式二 wf_run_node_wait 阻塞等待。 */
-  runNodeBlocking: '模式二用 wf_run_node_wait：阻塞启动节点子代理直至节点完成',
+    '节点判定：只有收到结算通知（Background subagent … finished …）才算该节点完成',
   /** 收尾协议：wf_finish 幂等收尾、释放锁。 */
-  finishIdempotent: '以 wf_finish 收尾（只调用一次，幂等，并释放运行锁）',
+  finishIdempotent: '收尾时调用 wf_finish （只调用一次，幂等，释放运行锁）',
   /** 失败语义：节点失败需显式处置，不静默跳过。 */
   failureSemantics: '绝不静默跳过失败节点',
   /** 条件连线语义：条件分支由父代理按上游实际产出语义判断。 */
   conditionSemantics: '条件分支由你依据上游节点的实际产出进行语义判断',
-  /** 失控处理：失控立即 wf_finish(failed)。 */
-  failureImmediate: "检测到失控时立即调用 wf_finish({ status: 'failed' })",
   /** 协作通信超时处置：征询用户后 resolve 三动作。 */
-  askAgentTimeout:
-    '收到 wf_ask_agent 的 ask 超时通知时，先用 ask_user_question 征询用户，再用 wf_ask_agent resolve（continue / resend / abort）定案',
+  askAgentTimeout: '若收到 wf_ask_agent 超时通知，先征询用户，再用该工具定案(continue / resend / abort)',
   /** 情况2 执行者模式核心短语：你本人也是执行节点，先执行自身任务再调度。 */
-  executorRole: '执行者模式：你本人也是执行节点，启动后必须先执行自身节点任务，完成后从本人节点的 flow-out 调用 wf_run_node 继续调度',
+  executorRole: '执行+编排：你既是执行节点，也要负责调度子代理；你只执行指向自身的节点任务',
 } as const
 
 /**
@@ -117,7 +100,6 @@ export const ORCH_HARD_CONSTRAINTS = {
  */
 export function buildOrchestratorPrompt(params: OrchestrationDirectiveParams): string {
   const { facts, dynamic } = params
-  const nodeList = facts.nodes.map((n) => `- ${n.id} (${n.label})`).join('\n')
   const langRule = String(facts.systemLanguage ?? '').trim()
     ? `${systemLanguageRule(facts.systemLanguage)}。`
     : ''
@@ -128,15 +110,12 @@ export function buildOrchestratorPrompt(params: OrchestrationDirectiveParams): s
     `你是工作流「${facts.workflowName}」的编排父代理。`,
     '',
     `1. ${ORCH_HARD_CONSTRAINTS.dispatchOnly}。`,
-    `2. ${ORCH_HARD_CONSTRAINTS.nodeSettledSignal}；收到前不得判定节点完成、推进下游或收尾运行。`,
-    `3. 调用协议：${ORCH_HARD_CONSTRAINTS.runNodeAsync}；${ORCH_HARD_CONSTRAINTS.runNodeBlocking}。`,
-    `4. 收尾协议：${ORCH_HARD_CONSTRAINTS.finishIdempotent}。`,
-    `5. 失败语义：${ORCH_HARD_CONSTRAINTS.failureSemantics}；在节点限额内重试、询问用户，或显式终止本次运行。`,
-    `6. 条件连线：${ORCH_HARD_CONSTRAINTS.conditionSemantics}。`,
-    `7. 失控处理：${ORCH_HARD_CONSTRAINTS.failureImmediate}。`,
-    `8. 组内通信：${ORCH_HARD_CONSTRAINTS.askAgentTimeout}。`,
-    `9. 每次调度前必须重新读取事实源，以文件最新内容为准。`,
-    ...(langRule ? [`10. ${langRule}`] : []),
+    `2. ${ORCH_HARD_CONSTRAINTS.nodeSettledSignal}；收到前不得推进下游或收尾。`,
+    `3. ${ORCH_HARD_CONSTRAINTS.finishIdempotent}。`,
+    `4. ${ORCH_HARD_CONSTRAINTS.failureSemantics}；可重试一次，若仍失败则询问用户；若编排失控或确认无法继续，即终止运行。`,
+    `5. ${ORCH_HARD_CONSTRAINTS.conditionSemantics}。`,
+    `6. ${ORCH_HARD_CONSTRAINTS.askAgentTimeout}。`,
+    ...(langRule ? [`7. ${langRule}`] : []),
   ].join('\n')
 
   const mid = buildMidSection(facts)
@@ -145,10 +124,8 @@ export function buildOrchestratorPrompt(params: OrchestrationDirectiveParams): s
     TAIL_MARKER,
     '',
     TAIL_RESTATE_MARKER,
-    `- ${ORCH_HARD_CONSTRAINTS.dispatchOnly}。`,
-    `- ${ORCH_HARD_CONSTRAINTS.nodeSettledSignal}。`,
     `- ${ORCH_HARD_CONSTRAINTS.finishIdempotent}。`,
-    `- ${ORCH_HARD_CONSTRAINTS.failureSemantics}；${ORCH_HARD_CONSTRAINTS.failureImmediate}（失控时）。`,
+    `- ${ORCH_HARD_CONSTRAINTS.failureSemantics}。`,
     ...(langRule ? [`- ${langRule}`] : []),
     '',
     renderDynamicState(dynamic),
@@ -159,13 +136,12 @@ export function buildOrchestratorPrompt(params: OrchestrationDirectiveParams): s
 
 /**
  * 情况2（编排 + 自执行）父代理提示词构建器（纯函数）。
- * 首段以执行者模式取代「仅编排」；末段重申含执行者模式与完成判定信号，
+ * 首段以执行者模式取代「仅编排」；末段重申含收尾与失败语义，
  * dynamic.parentTaskBlock 为父代理自执行单元任务块（buildParentTaskSpec 输出）。
  */
 export function buildHybridPrompt(params: OrchestrationDirectiveParams): string {
   const { facts, dynamic } = params
   const parent = facts.parentNode
-  const nodeList = facts.nodes.map((n) => `- ${n.id} (${n.label})`).join('\n')
   const langRule = String(facts.systemLanguage ?? '').trim()
     ? `${systemLanguageRule(facts.systemLanguage)}。`
     : ''
@@ -173,18 +149,15 @@ export function buildHybridPrompt(params: OrchestrationDirectiveParams): string 
   const head = [
     HEAD_MARKER,
     '',
-    `你是工作流「${facts.workflowName}」的编排父代理${parent ? `，同时以执行节点「${parent.nodeLabel}」（id=${parent.nodeId}）的身份先执行自身任务` : ''}。`,
+    `你是工作流「${facts.workflowName}」的编排父代理${parent ? `，同时以节点「${parent.nodeLabel}」（id=${parent.nodeId}）的身份执行自身任务` : ''}。`,
     '',
     `1. ${ORCH_HARD_CONSTRAINTS.executorRole}。`,
-    `2. ${ORCH_HARD_CONSTRAINTS.nodeSettledSignal}；收到前不得判定节点完成、推进下游或收尾运行。`,
-    `3. 调用协议：${ORCH_HARD_CONSTRAINTS.runNodeAsync}；${ORCH_HARD_CONSTRAINTS.runNodeBlocking}。`,
-    `4. 收尾协议：${ORCH_HARD_CONSTRAINTS.finishIdempotent}。`,
-    `5. 失败语义：${ORCH_HARD_CONSTRAINTS.failureSemantics}；在节点限额内重试、询问用户，或显式终止本次运行。`,
-    `6. 条件连线：${ORCH_HARD_CONSTRAINTS.conditionSemantics}。`,
-    `7. 失控处理：${ORCH_HARD_CONSTRAINTS.failureImmediate}。`,
-    `8. 组内通信：${ORCH_HARD_CONSTRAINTS.askAgentTimeout}。`,
-    `9. 每次调度前必须重新读取事实源，以文件最新内容为准。`,
-    ...(langRule ? [`10. ${langRule}`] : []),
+    `2. ${ORCH_HARD_CONSTRAINTS.nodeSettledSignal}；收到前不得推进下游或收尾。`,
+    `3. ${ORCH_HARD_CONSTRAINTS.finishIdempotent}。`,
+    `4. ${ORCH_HARD_CONSTRAINTS.failureSemantics}；可重试一次，若仍失败则询问用户；若编排失控或确认无法继续，即终止运行。`,
+    `5. ${ORCH_HARD_CONSTRAINTS.conditionSemantics}。`,
+    `6. ${ORCH_HARD_CONSTRAINTS.askAgentTimeout}。`,
+    ...(langRule ? [`7. ${langRule}`] : []),
   ].join('\n')
 
   const mid = buildMidSection(facts)
@@ -193,10 +166,8 @@ export function buildHybridPrompt(params: OrchestrationDirectiveParams): string 
     TAIL_MARKER,
     '',
     TAIL_RESTATE_MARKER,
-    `- 每次调度前必须重新读取事实源，以文件最新内容为准。`,
-    `- ${ORCH_HARD_CONSTRAINTS.nodeSettledSignal}。`,
     `- ${ORCH_HARD_CONSTRAINTS.finishIdempotent}。`,
-    `- ${ORCH_HARD_CONSTRAINTS.failureSemantics}；${ORCH_HARD_CONSTRAINTS.failureImmediate}（失控时）。`,
+    `- ${ORCH_HARD_CONSTRAINTS.failureSemantics}。`,
     ...(langRule ? [`- ${langRule}`] : []),
     '',
     renderDynamicState(dynamic),
@@ -205,17 +176,15 @@ export function buildHybridPrompt(params: OrchestrationDirectiveParams): string 
   return `${head}\n\n${mid}\n\n${tail}\n`
 }
 
-/** 中段过程性信息（情况1/2 共用）：事实源 + 目标 + 待编排节点 + 协作组（按需）。 */
+/** 中段过程性信息（情况1/2 共用）：事实源 + 目标 + 协作组（按需）。 */
 function buildMidSection(facts: OrchestrationDirectiveParams['facts']): string {
-  const nodeList = facts.nodes.map((n) => `- ${n.id} (${n.label})`).join('\n')
   const midParts: string[] = [
     MID_MARKER,
     '',
-    `工作流事实源（只读文件）：${facts.definitionPath} —— 请先读取它，以获取完整节点列表与连线语义。`,
+    `工作流事实源：${facts.definitionPath} —— 请先读取它，获取节点列表与连线语义。`,
   ]
   const goal = String(facts.workflowGoal ?? '').trim()
   if (goal) midParts.push('', `工作流目标：${goal}`)
-  if (nodeList) midParts.push('', '待编排节点（启动时快照，不作为调度依据）：', nodeList)
   // 协作组段仅在画布存在协作组时组装（用户批注：无协作组节点时此项不组装）。
   if (facts.collabGroups.length > 0) {
     const collabText = facts.collabGroups
@@ -242,7 +211,7 @@ function renderDynamicState(dynamic: OrchestrationDirectiveParams['dynamic']): s
 
   if (pauseIds) {
     lines.push(
-      `- 暂停节点：[${pauseIds.join(', ')}]。以其中任一 nodeId 调用 wf_run_node 会暂停运行并持久化检查点；之后从其 flow-out 恢复继续。`,
+      `- 暂停节点：[${pauseIds.join(', ')}]。暂停运行并持久化检查点；之后从其 flow-out 恢复继续。`,
     )
   } else {
     lines.push('- 本工作流无暂停节点。')
@@ -255,7 +224,7 @@ function renderDynamicState(dynamic: OrchestrationDirectiveParams['dynamic']): s
   // 情况2：父代理自执行单元任务块注入末段（动态值仅末段；本 run 内字节稳定）
   if (dynamic.parentTaskBlock) {
     lines.push('')
-    lines.push('【你的节点任务】（执行者模式：以下任务由你亲自执行，不得下发）：')
+    lines.push('【你的节点任务】（以下任务由你亲自执行，不得下发）：')
     lines.push(dynamic.parentTaskBlock)
   }
   return lines.join('\n')

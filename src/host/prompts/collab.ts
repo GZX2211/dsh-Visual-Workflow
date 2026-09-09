@@ -7,10 +7,6 @@
 //       用户写了什么（即使空白）都默认追加组内所有成员的 ID + 角色名称清单**，
 //       用于告知成员「你在和谁协作、能向谁发送协作消息（wf_ask_agent）」。
 //
-// 为什么以消息块而非系统提示词段注入（§13.1.4 变更）：协作是**成员间的动态关系**，
-// 放入系统提示词会与其他插件段落混排；改放入用户消息首块可稳定告知每个成员的协作对象，
-// 且与「系统提示词开关」解耦（关闭官方系统提示词时协作信息仍在）。
-//
 // 纯函数：输入 members/custom 不变则输出字节不变。
 
 /**
@@ -46,7 +42,7 @@ export function buildCollabBlock(params: CollabBlockParams): string {
       lines.push(`- ${label || id}（id：${id}）`)
     }
   }
-  lines.push('你可以向以上任一成员发送 wf_ask_agent 消息：ask 的 targetChildId 直接使用上列成员的 id（即节点 id）；目标即使当前空闲/未运行也会被唤醒。超时由父代理仲裁。')
+  lines.push('与其他成员通信时，请使用 wf_ask_agent 工具，并将 targetChildId 填为对方成员 id。')
 
   const custom = String(params?.custom ?? '').trim()
   if (custom) {

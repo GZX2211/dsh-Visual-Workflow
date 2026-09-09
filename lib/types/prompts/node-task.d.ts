@@ -1,6 +1,7 @@
 /**
  * 节点任务块的入参（中文注释每个字段）。
- * `facts` 为同一 run 内字节稳定的静态事实；`dynamic` 为仅注入末段的动态态信息。
+ * `facts` 为同一 run 内字节稳定的静态事实；`dynamic` 字段保留（向前兼容调用方），
+ * 构建器当前不注入任何动态态信息。
  */
 export interface NodeTaskBlockParams {
     /** 静态事实：节点身份 / 任务 / 上下文注入（同一 run 内稳定）。 */
@@ -43,11 +44,10 @@ export interface NodeTaskBlockParams {
          */
         systemLanguage: string;
     };
-    /** 末段动态态信息（不稳定内容，仅注入尾段）。全部可选，缺省即默认值。 */
+    /** 动态态信息（当前未注入任务块；字段保留以兼容既有调用方）。全部可选，缺省即默认值。 */
     dynamic: {
         /**
          * 父代理会话 id（根 Agent 的会话 id；子代理的父 agent id）。
-         * 仅告诉 id，不含 send_message 相关指令。
          */
         parentAgentId?: string;
     };
@@ -55,9 +55,6 @@ export interface NodeTaskBlockParams {
 /**
  * 节点任务块首段软约束短语（W-02 双位测试断言与组装任务引用）。
  * 面向模型中文（W-04）；只保留「软约束固化」类条目（AI 有选择权、值得强调的行为规则）。
- *
- * 准确性改造：report 工具软禁用条目已删除——report 不在子代理工具白名单内（AI 无法调用），
- * 「不得调用 report」属 AI 无选择权/无法查证的内容（用户批注），写入只会干扰模型。
  */
 export declare const NODE_HARD_CONSTRAINTS: {
     /** 协作组内通信必须经 wf_ask_agent（仅组内成员注入）。 */
