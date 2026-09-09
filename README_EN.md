@@ -211,18 +211,31 @@ Agents autonomously schedule using the following tools (guardrails and persisten
 
 ## Installation (Windows)
 
+1. **Locate in File Explorer**: In `%USERPROFILE%\.dsh\profiles\web\pnpm-workspace.yaml`, add the following:
+
+```yaml
+allowBuilds:
+  onnxruntime-node: true
+  protobufjs: true
+  sharp: true
+```
+
+2. **Run the plugin installation command**:
+
 ```bash
 dsh plugin --profile web add "github:GZX2211/dsh-Visual-Workflow#main"
 ```
 
-Restart `dsh web`; the "Workflow" button above the bottom-left settings is the entry point (click to open the workspace).
+3. **Verify mount** (optional):
 
-Verify mount:
 ```bash
 dsh --profile web --dump-config | findstr "visual-workflow"
 ```
 
-Uninstall:
+4. **Restart** `dsh web`; the "Workflow" button above the settings in the lower-left corner is the entry (click to expand the workspace).
+
+5. **Uninstall**:
+
 ```bash
 dsh plugin --profile web remove dsh-visual-workflow
 ```

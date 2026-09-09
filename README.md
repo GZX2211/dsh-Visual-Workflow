@@ -211,18 +211,31 @@
 
 ## 安装（Windows）
 
+1. **文件管理器定位**：`%USERPROFILE%\.dsh\profiles\web\pnpm-workspace.yaml`,在其中添加：
+
+```yaml
+allowBuilds:
+  onnxruntime-node: true
+  protobufjs: true
+  sharp: true
+```
+
+2. **运行插件安装命令**:
+
 ```bash
 dsh plugin --profile web add "github:GZX2211/dsh-Visual-Workflow#main"
 ```
 
-重启 `dsh web`，左下角设置上方“工作流”按钮即入口（点击展开工作台）。
+3. **验证挂载**：（可选）
 
-验证挂载：
 ```bash
 dsh --profile web --dump-config | findstr "visual-workflow"
 ```
 
-卸载：
+4. **重启** `dsh web`，左下角设置上方“工作流”按钮即入口（点击展开工作台）。
+
+5. **卸载**：
+
 ```bash
 dsh plugin --profile web remove dsh-visual-workflow
 ```
