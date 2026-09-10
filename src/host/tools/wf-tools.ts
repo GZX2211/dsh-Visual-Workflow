@@ -222,7 +222,10 @@ export function registerWfTools(
       questions: {
         type: 'array',
         required: true,
-        minItems: 1,
+        // 不写 minItems：官方 tools 的 JSON Schema 受支持子集
+        // （type/oneOf/properties/required/additionalProperties/items/enum/const + 注解）
+        // 不含 minItems/maxItems。「至少一条问题」由 execute 运行时校验（归一化后长度为 0 即
+        // 抛 WF_BAD_ARGS），语义不变且不依赖非子集关键字。
         description: 'Questions to ask (at least one); presented as an official question card and answered in one batch.',
         items: {
           type: 'object',

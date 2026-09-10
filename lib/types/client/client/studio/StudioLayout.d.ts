@@ -22,10 +22,6 @@ export interface StudioLayoutProps {
     state: StudioState;
     sessionId: string;
     remote: RemoteFace;
-    /** 窗口关闭回调（标题栏 ×；浮窗宿主注入；对话视图挂载无关闭）。 */
-    onClose?: () => void;
-    /** 窗口拖动把手回调（浮窗注入；工作台标题顶栏兼任窗口标题栏拖动）。 */
-    onTitlebarDrag?: (event: React.PointerEvent) => void;
     currentFlow: WorkflowDocument | null;
     currentService: ServiceState | null;
     currentFlowTemplate: WorkflowTemplate | null;
@@ -66,12 +62,7 @@ export interface StudioLayoutProps {
     modeMenuOpen: boolean;
     setModeMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
     switchMode: (mode: 'mode1' | 'mode2') => void;
-    requestClose: () => void;
-    /** 视图模式（浮窗/分栏）。 */
-    viewMode?: 'float' | 'split';
-    /** 标题栏窗口切换按钮回调（float↔split）。 */
-    onToggleView?: () => void;
-    /** 运行联动：切分栏 + 折叠自身左右栏 + 触发运行。 */
+    /** 运行联动：宿主让出空间（官方右侧 Sidebar 全屏时缩回）+ 折叠自身左右栏 + 触发运行。 */
     handleRun: () => void;
     /** 两侧侧栏是否都已折叠（顶部一键折叠/展开按钮用）。 */
     panelsCollapsed: boolean;

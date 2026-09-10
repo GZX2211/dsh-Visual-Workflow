@@ -3,16 +3,17 @@
 // 节点子代理执行引擎（T-022）：ensureNodeChild / 配置签名复用 / 工具白名单解析 /
 // startNodeTask / interruptChild / 软截停消费。
 //
-// 官方 seam 取证（§8 索引 #1/#6/#7，零官方运行时依赖 W-05；DSH 0.1.2-rc.1 复核）：
+// 官方 seam 取证（§8 索引 #1/#6/#7，零官方运行时依赖 W-05；DSH 0.1.5-rc.1 复核）：
 //   - ctx.subagents.startContinuable({ provider, label, request: { prompt, parent,
 //     persona?, toolFilter?, agentOptions? }, signal }) → { childId, messageId }；
 //     request.prompt 是首条 user 消息，创建即开始推理——首次创建必须把完整任务块
 //     作为 prompt 注入，否则子代理以「无任务」状态空转（旧项目关键时序结论）；
-//   - 复用派发：0.1.2 SubagentRuntime 移除 rc.2 的 followup，改相邻 Agent 通道
+//   - 复用派发：官方 SubagentRuntime 自 0.1.2 起已无 rc.2 的 followup，改相邻 Agent 通道
 //     sendMessage(sender, childId, content, { signal }) / queuePrompt(...)（A4-01）；
+//     0.1.5-rc.1 复核：followup 仍不存在，sendMessage 为唯一推荐通道；
 //   - ctx.subagents.interrupt(childId, { kind: 'user', parentSessionId })——尽力中断；
-//   - 每子代理作用域贡献：0.1.2 移除 registerContinuableSetup，改为 startContinuable
-//     返回后按 agents.get(childId).ctx（发布后的 scoped ctx）安装四类贡献
+//   - 每子代理作用域贡献：官方无 registerContinuableSetup，改为经 agent/session-start
+//     事件在创建窗口内按 agent.ctx（发布后的 scoped ctx）安装四类贡献
 //     （可见性/软截停/模型选择/角色提示词）——与官方 installModelSelection(agentCtx, …) 范式一致。
 //
 // 白名单规则（架构文档 §4.2 L219，与旧项目行为差异已标注）：
@@ -138,11 +139,11 @@ export interface AgentsServiceLike {
   roots?(): unknown[]
 }
 
-/** 子代理服务最小结构（0.1.2 SubagentRuntime 使用面；零官方类型依赖，运行时守卫）。 */
+/** 子代理服务最小结构（0.1.5-rc.1 SubagentRuntime 使用面；零官方类型依赖，运行时守卫）。 */
 export interface SubagentsServiceLike {
-  /** 延续子代理 provider 名列表（rc.2 旧面；0.1.2 移除 list()，改用 getProvider 按名探测）。 */
+  /** 延续子代理 provider 名列表（旧面；新宿主改用 getProvider 按名探测）。 */
   list?(): string[]
-  /** 延续子代理创建：首条 prompt 即任务块（rc.1 保留；request 兼容 persona/toolFilter/agentOptions）。 */
+  /** 延续子代理创建：首条 prompt 即任务块（request 兼容 persona/toolFilter/agentOptions；signal 为必填）。 */
   startContinuable(spec: {
     provider: string
     label: string
@@ -155,16 +156,18 @@ export interface SubagentsServiceLike {
     }
     signal: AbortSignal
   }): Promise<{ childId: string; messageId?: unknown }>
-  /** 0.1.2 相邻 Agent 投递（替代 rc.2 followup）：live 父 Agent → direct child 派发下一回合。 */
+  /** 相邻 Agent 投递（live 父 Agent → direct child 派发下一回合）；**0.1.5 唯一推荐通道**。 */
   sendMessage?(sender: unknown, targetId: string, content: Array<{ type: 'text'; text: string }>, options: { signal?: AbortSignal }): Promise<unknown>
-  /** 0.1.2 host 协议投递（distinct child turn，durable host source）；无 sendMessage 时回退。 */
+  /**
+   * host 协议投递（distinct child turn，durable host source）；无 sendMessage 时的**旧版兼容**兜底。
+   * 0.1.5-rc.1 该方法的 source 与 signal 均为必填（官方 continuation.d.ts 的 queuePrompt 签名），
+   * 故本插件只在 sendMessage 缺失时才走它。
+   */
   queuePrompt?(parent: unknown, childId: string, content: Array<{ type: 'text'; text: string }>, source?: unknown, signal?: AbortSignal): Promise<unknown>
-  /** 尽力中断当前回合（0.1.2 同步签名 interrupt(target, authority)；保留会话）。 */
+  /** 尽力中断当前回合（同步签名 interrupt(target, authority)；保留会话）。 */
   interrupt?(childId: string, authority: { kind: 'user'; parentSessionId: string }): unknown
-  /** 0.1.2 provider 按名探测（探测 provider 是否注册；未注册返回 undefined）。 */
+  /** provider 按名探测（探测 provider 是否注册；未注册返回 undefined）。 */
   getProvider?(name: string): unknown
-  /** rc.2 旧复用投递（双版本兼容；0.1.2 宿主无此方法）。 */
-  followup?(parent: unknown, childId: string, content: unknown[], options: { source: unknown; signal?: AbortSignal }): Promise<unknown>
 }
 
 /** 工具服务最小结构（schemas 视图；restrict 双保险）。 */
@@ -457,7 +460,7 @@ export interface NodeAgentRunnerDeps {
  * （ctx.subagents.startContinuable，带持久 Session）。
  *   - 复用键 sessionId:flowId:nodeId；配置签名变化时重建（旧子代理保留历史）；
  *   - 首条创建即把完整任务块作为 prompt 注入（杜绝创建即空转）；
- *   - 复用经 followup 派发本轮任务，立即返回（不阻塞父代理）。
+ *   - 复用经相邻 Agent 通道派发本轮任务，立即返回（不阻塞父代理）。
  */
 export class NodeAgentRunner implements NodeRunner {
   /** 子代理表：复用键 → { childId, signature }。 */
@@ -476,21 +479,21 @@ export class NodeAgentRunner implements NodeRunner {
   /**
    * 异步启动一个节点任务（消息驱动，立即返回）：
    *   - 首次创建：任务块已在首条 prompt 注入，子代理立即开始执行；
-   *   - 复用：经 followup 派发本轮任务；
+   *   - 复用：经相邻 Agent 通道派发本轮任务；
    *   - 完成事件由编排器监听 subagent/end 更新快照，本方法不等待执行结果。
    */
   async startNodeTask(input: NodeStartInput): Promise<{ childId: string; created: boolean }> {
     const { childId, created } = await this.ensureNodeChild(input)
     // 每轮派发前刷新护栏上限与模型选择（节点级参数可按次覆盖；官方 selection 可变态）。
     // 【时序】setLimit 必须位于任何 await 之前：子代理本轮第一步推理的 pre-step 事件
-    // 一旦触发就读 limits 表——若先 followup 再登记，新回合（可能换了 limit）的第一步
+    // 一旦触发就读 limits 表——若先派发再登记，新回合（可能换了 limit）的第一步
     // 会读到旧上限/未登记值，软截停延迟生效（guards.ts 对 unknown childId 直接放行）。
     this.deps.react.setLimit(childId, input.iterationLimit)
     const subagents = this.requireSubagents()
     const parent = this.requireParent(input.sessionId)
     if (!created) {
-      // 复用子代理：相邻投递派发本轮任务（0.1.2 sendMessage 优先，回退 queuePrompt/旧 followup）
-      await this.deliverReuse(subagents, parent, childId, input.blocks, input.sessionId, input.signal)
+      // 复用子代理：相邻投递派发本轮任务（0.1.5-rc.1：sendMessage 优先，queuePrompt 兜底）
+      await this.deliverReuse(subagents, parent, childId, input.blocks, input.signal)
     }
     this.attachModelSelection(childId, input)
       await this.attachPromptState(childId, input)
@@ -524,16 +527,21 @@ export class NodeAgentRunner implements NodeRunner {
   }
 
   /**
-   * 复用子代理的下一回合派发：0.1.2 SubagentRuntime 移除 rc.2 的 followup，改为相邻 Agent
-   * 通道。优先 sendMessage（免自定义 source：sender 即 live 父代理，来源由服务派生）；
-   * 无则回退 queuePrompt / 旧 followup（双版本兼容）。
+   * 复用子代理的下一回合派发：0.1.2 起 SubagentRuntime 已移除 rc.2 的 followup，改为相邻
+   * Agent 通道。优先 sendMessage（免自定义 source：sender 即 live 父代理，来源由服务派生）；
+   * 次选 queuePrompt（host distinct turn，**旧版兼容路径**：0.1.5-rc.1 该方法的
+   * source/signal 已是必填，调用方需显式给全，故仅作兜底）。
+   *
+   * 【0.1.5-rc.1 取证】官方 SubagentRuntime **没有** followup 方法
+   * （dsh-subagent/lib/types/index.d.ts：startContinuable/sendMessage/interrupt/
+   * drainContinuableDescendants/drainContinuableChildren/listChildren/listDescendants/
+   * prompt/interruptByParent/registerProvider/getProvider/list/start），故不再设 followup 回退。
    */
   private async deliverReuse(
     subagents: SubagentsServiceLike,
     parent: unknown,
     childId: string,
     content: Array<{ type: 'text'; text: string }>,
-    senderSessionId: string,
     signal?: AbortSignal,
   ): Promise<void> {
     if (typeof subagents.sendMessage === 'function') {
@@ -544,14 +552,7 @@ export class NodeAgentRunner implements NodeRunner {
       await subagents.queuePrompt(parent, childId, content, undefined, signal)
       return
     }
-    if (typeof subagents.followup === 'function') {
-      await subagents.followup(parent, childId, content, {
-        source: { kind: 'coordinator', form: 'relay', senderSessionId },
-        ...(signal ? { signal } : {}),
-      })
-      return
-    }
-    throw new Error('subagents 服务不支持复用派发（缺少 sendMessage/queuePrompt/followup）')
+    throw new Error('subagents 服务不支持复用派发（缺少 sendMessage/queuePrompt）')
   }
 
   // ---- 子代理创建/复用 ---------------------------------------------------------
@@ -681,7 +682,8 @@ export class NodeAgentRunner implements NodeRunner {
    * 把节点级角色 Prompt、官方系统提示词开关与工具散文段开关写入该 child 的 prompt setup。
    * 角色 Prompt 由 prompt-setup 注册为系统提示词独立段；injectSystemPrompt=false 时
    * 开关过滤瀑布会清空官方段；injectToolSections=false 时移除 tool:* 散文段。
-   * Code Mode 协议段（tools:sdk/tools:code-only）与工具 Schema 始终保留，不受两开关影响。
+   * Code Mode 协议段（tools:sdk / tools:ptc-only，0.1.5-rc.1 更名前为 tools:code-only）
+   * 与工具 Schema 始终保留，不受两开关影响。
    * 角色文本经 resolveRolePrompt 解析（.md 路径设置时读取文件当前内容），与创建期一致。
    */
   private async attachPromptState(childId: string, input: NodeStartInput): Promise<void> {

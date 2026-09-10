@@ -3,13 +3,9 @@ export declare const zh: {
     badge: string;
     note: string;
     windowTitle: string;
-    windowClose: string;
-    toggleWindow: string;
-    viewFloat: string;
-    viewSplit: string;
-    fabOpen: string;
     currentSession: string;
     currentSessionUnavailable: string;
+    workbenchInUse: string;
     mode1: string;
     mode2: string;
     modeLabel1: string;

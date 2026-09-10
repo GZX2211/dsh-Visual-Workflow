@@ -37,6 +37,9 @@ function sampleAssembly(): PromptAssemblyLike {
       { name: 'tool:read', text: 'read 使用指引' },
       { name: 'tool:wf_run_node', text: '调度指引' },
       { name: 'tools:sdk', text: 'SDK 协议' },
+      // 0.1.5-rc.1 官方新名（原 tools:code-only）
+      { name: 'tools:ptc-only', text: 'PTC 规则' },
+      // 旧名保留：≤0.1.2 宿主
       { name: 'tools:code-only', text: 'Code Mode 规则' },
     ],
     contexts: [{ name: 'ctx', text: 'x' }],
@@ -103,16 +106,25 @@ describe('filterToolsInAssembly', () => {
     expect(filterToolsInAssembly(assembly, new Set())).toBe(assembly)
   })
 
-  it('剔除被关闭工具的 Schema 与 tool:<name> 散文段；协议段恒保留', () => {
+  it('剔除被关闭工具的 Schema 与 tool:<name> 散文段；协议段（新名 + 旧名）恒保留', () => {
     const out = filterToolsInAssembly(sampleAssembly(), new Set(['read', 'wf_run_node']))
     expect(out.tools?.map((t) => t.name)).toEqual(['mcp__codegraph__codegraph_explore'])
     expect(out.sections?.map((s) => s.name)).toEqual([
       'harness:identity',
       'tools:sdk',
+      'tools:ptc-only',
       'tools:code-only',
     ])
     // 上下文与变量不触碰
     expect(out.contexts).toHaveLength(1)
+  })
+
+  it('与「工具散文段开关」的分界：全局关闭会同时剥夺调用能力（tools[] 剔除）', () => {
+    // 这是与节点 injectToolSections（只过滤 sections、绝不动 tools[]）的本质区别。
+    const assembly = sampleAssembly()
+    const out = filterToolsInAssembly(assembly, new Set(['read']))
+    expect(out.tools?.map((t) => t.name)).toEqual(['wf_run_node', 'mcp__codegraph__codegraph_explore'])
+    expect(out.sections?.map((s) => s.name)).not.toContain('tool:read')
   })
 
   it('MCP 服务器关闭：schema 全量剔除但散文段（无 tool:mcp__* 段）不误伤', () => {

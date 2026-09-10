@@ -1,4 +1,4 @@
-import type { StorageLike } from './useWorkbenchView.js';
+import type { StorageLike } from '../lib/storage.js';
 /** instanceOptions 持久化键。 */
 export declare const INSTANCE_OPTIONS_KEY = "visual-workflow:instance-options";
 /** 实例选项（对齐 StudioState.instanceOptions；创建实例时一次性消费）。 */

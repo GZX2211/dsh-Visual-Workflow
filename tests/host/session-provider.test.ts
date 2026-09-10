@@ -5,9 +5,14 @@
 //     header 记录 resolved id —— 否则新会话根 Agent 只继承全局层（宿主+插件+MCP）工具，
 //     官方 standard 预设工具全部缺失（「启动时开启新会话」只显示注册工具/MCP 工具的根因）。
 //   - 缺失 agentPresets 服务时：降级为不挂载（会话按全局层运行），且不写 agentPreset header。
+//
+// sessionCwdResolver（新会话继承创建者 cwd）：
+//   - 【0.1.5-rc.1 适配】host 侧 ctx.sessions 是 SessionStore：list() 是**方法**，
+//     没有 list.getSnapshot()/get()/byId —— 旧读法恒返回 undefined，会让 cwd 继承静默失效。
+//     正确读法：sessions.get(id)?.header?.cwd。旧快照读法保留为兜底。
 
 import { describe, expect, it, vi } from 'vitest'
-import { CordisSessionProvider } from '../../src/host/scheduler/session-provider.js'
+import { CordisSessionProvider, sessionCwdResolver } from '../../src/host/scheduler/session-provider.js'
 
 /** 记录 agents.create 参数的 fake（含 setup 捕获）。 */
 interface CreateCall {
@@ -108,5 +113,50 @@ describe('CordisSessionProvider.createSession 预设装配', () => {
     await expect(
       provider.createSession({ label: 'x', agentPreset: 'standard' }),
     ).rejects.toThrow(/agents 服务不支持创建会话/)
+  })
+})
+
+describe('sessionCwdResolver 会话工作目录解析（0.1.5-rc.1 适配）', () => {
+  it('0.1.5 读法：SessionStore.get(id).header.cwd 命中', async () => {
+    const resolver = sessionCwdResolver(fakeCtx({
+      sessions: {
+        // 0.1.5-rc.1：list 是方法（返回 Session[]），不再有 getSnapshot
+        list: () => [],
+        get: (id: string) => (id === 's-1' ? { header: { cwd: 'D:\\proj' } } : undefined),
+      },
+    }))
+    await expect(resolver('s-1')).resolves.toBe('D:\\proj')
+  })
+
+  it('0.1.5 读法返回非字符串 / 空白 cwd：视为不可用（undefined）', async () => {
+    const numeric = sessionCwdResolver(fakeCtx({ sessions: { get: () => ({ header: { cwd: 42 } }) } }))
+    await expect(numeric('s-1')).resolves.toBeUndefined()
+    const blank = sessionCwdResolver(fakeCtx({ sessions: { get: () => ({ header: { cwd: '   ' } }) } }))
+    await expect(blank('s-1')).resolves.toBeUndefined()
+  })
+
+  it('0.1.5 读法无该会话：undefined', async () => {
+    const resolver = sessionCwdResolver(fakeCtx({ sessions: { get: () => undefined } }))
+    await expect(resolver('missing')).resolves.toBeUndefined()
+  })
+
+  it('旧宿主兜底：无 get 时回退快照读法（byId[id].meta.cwd / header.meta.cwd）', async () => {
+    const resolver = sessionCwdResolver(fakeCtx({
+      sessions: { list: { getSnapshot: () => ({ byId: { 's-1': { meta: { cwd: 'D:\\legacy' } }, 's-2': { header: { meta: { cwd: 'D:\\legacy2' } } } } }) } },
+    }))
+    await expect(resolver('s-1')).resolves.toBe('D:\\legacy')
+    await expect(resolver('s-2')).resolves.toBe('D:\\legacy2')
+    await expect(resolver('s-3')).resolves.toBeUndefined()
+  })
+
+  it('sessions 服务缺失：undefined（不抛错）', async () => {
+    await expect(sessionCwdResolver(fakeCtx({}))('s-1')).resolves.toBeUndefined()
+  })
+
+  it('get 抛错：降级为 undefined（不阻断新会话创建）', async () => {
+    const resolver = sessionCwdResolver(fakeCtx({
+      sessions: { get: () => { throw new Error('boom') } },
+    }))
+    await expect(resolver('s-1')).resolves.toBeUndefined()
   })
 })

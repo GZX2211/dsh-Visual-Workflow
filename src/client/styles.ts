@@ -244,28 +244,16 @@ export const styles = `
 .wf-toast.is-info .wf-toast__dot{background:var(--wf-brand)}
 @keyframes wf-toast-in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
 .wf-message{position:absolute;z-index:25;left:50%;bottom:18px;transform:translateX(-50%);max-width:70%;padding:8px 14px;border:1px solid var(--wf-border-strong);border-radius:10px;background:var(--wf-layer);color:var(--wf-ink-2);font-size:12px;box-shadow:0 10px 26px color-mix(in srgb,var(--wf-ink) 14%,transparent)}
-.wf-window{position:fixed;z-index:2147483000;display:flex;flex-direction:column;border:1px solid var(--wf-border-strong);border-radius:14px;background:var(--wf-bg);box-shadow:0 34px 90px color-mix(in srgb,var(--wf-ink) 34%,transparent);overflow:hidden;overflow-wrap:anywhere}
-.wf-window__body{flex:1;min-height:0;display:flex}
-/* 统一窗口框架内容容器（WorkbenchFrame）：恒为框架根的第 0 个子节点，float/split 共用；
-   取代 .wf-window__body / .wf-split-pane__content 的内容容器角色，保证 Studio 跨模式挂载 */
-.wf-frame-content{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}
-/* 分栏形态：分隔线 absolute 覆盖在左缘，内容容器左移 9px 让位（与旧 .wf-split-pane__inner 布局一致） */
-.wf-split-pane .wf-frame-content{padding-left:9px}
-.wf-window .wf-tabs{cursor:grab}
-.wf-window .wf-tabs button,.wf-window .wf-tabs input,.wf-window .wf-tabs select{cursor:pointer}
-.wf-window .wf-tabs .wf-titlebar__title{cursor:grab}
-.wf-window__resize{position:absolute;z-index:5}
-.wf-window__resize.is-n{top:-4px;left:12px;right:12px;height:8px;cursor:n-resize}
-.wf-window__resize.is-s{bottom:-4px;left:12px;right:12px;height:8px;cursor:s-resize}
-.wf-window__resize.is-e{right:-4px;top:12px;bottom:12px;width:8px;cursor:e-resize}
-.wf-window__resize.is-w{left:-4px;top:12px;bottom:12px;width:8px;cursor:w-resize}
-.wf-window__resize.is-ne{top:-5px;right:-5px;width:14px;height:14px;cursor:ne-resize}
-.wf-window__resize.is-nw{top:-5px;left:-5px;width:14px;height:14px;cursor:nw-resize}
-.wf-window__resize.is-se{bottom:-5px;right:-5px;width:14px;height:14px;cursor:se-resize}
-.wf-window__resize.is-sw{bottom:-5px;left:-5px;width:14px;height:14px;cursor:sw-resize}
-.wf-fab{position:fixed;right:22px;bottom:22px;z-index:2147482999;width:56px;height:56px;border:2px solid rgba(255,255,255,0.28);border-radius:50%;background:var(--wf-brand,#4f7cff);color:#ffffff;display:grid;place-items:center;cursor:pointer;box-shadow:0 10px 26px rgba(0,0,0,0.45),0 2px 8px rgba(0,0,0,0.35),0 0 0 4px rgba(79,124,255,0.18);transition:transform .16s ease,box-shadow .16s ease}
-.wf-fab:hover{transform:translateY(-2px) scale(1.05);box-shadow:0 14px 32px rgba(0,0,0,0.5),0 4px 10px rgba(0,0,0,0.4),0 0 0 6px rgba(79,124,255,0.24)}
-.wf-fab:focus-visible{outline:3px solid #ffffff;outline-offset:2px}
+/* ── 工作台 × 官方右侧 Sidebar 标签页（0.1.5-rc.1 迁移） ─────────────────────
+   工作台内容由插件自持的常驻容器承载（Studio 永不卸载），标签页激活时该容器被搬进下面这个
+   挂载点；未持有容器时（多标签页 body 并存）显示占位提示，避免出现空白面板。
+   官方右侧 Sidebar 的浮动层 z-index 最高 40，工作台内部弹层须大于它。 */
+.wf-tab-mount{position:relative;flex:1;min-width:0;min-height:0;height:100%;display:flex;flex-direction:column;overflow:hidden;background:var(--wf-bg);color:var(--wf-ink)}
+.wf-tab-mount__placeholder{display:none;flex:1;min-height:0;align-items:center;justify-content:center;padding:0 24px;color:var(--wf-ink-2);font-size:12px;text-align:center}
+.wf-tab-mount[data-wf-mount="empty"] .wf-tab-mount__placeholder{display:flex}
+/* 无标签页持有容器时，常驻容器停放在隐藏 holder 内（display:none 不销毁子树，Studio 保持挂载） */
+#visual-workflow-workbench-holder{display:none}
+#visual-workflow-workbench-host{width:100%;height:100%;min-width:0;min-height:0;display:flex;flex-direction:column}
 .wf-combo-backdrop{position:absolute;z-index:35;inset:0;display:grid;place-items:center;padding:16px;background:color-mix(in srgb,var(--wf-bg) 72%,transparent);backdrop-filter:blur(4px)}
 .wf-combo{width:min(1080px,94%);height:min(92%,760px);max-height:92%;display:flex;flex-direction:column;border:1px solid var(--wf-border-strong);border-radius:14px;background:var(--wf-layer);box-shadow:0 20px 60px color-mix(in srgb,var(--wf-ink) 18%,transparent);overflow:hidden}
 .wf-combo__search{flex:none;padding:8px 12px 0}
@@ -342,12 +330,16 @@ export const styles = `
 .wf-service-dot.is-running{background:var(--wf-ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--wf-ok) 18%,transparent)}
 .wf-service-dot.is-stopped{background:var(--wf-ink-2)}
 .wf-service-dot.is-crashed{background:var(--wf-err)}
-/* ---- 图1/图2 交互改造：侧边栏入口 / 标题栏窗口切换 / 分栏窗口 ---- */
-/* 侧边栏入口：直接提取官方「设置」按钮样式（dsh-client-ui-settings-general 的 .VOzbGW_trigger）
-   配置到 button.wf-sidebar-entry 上，使其与「设置」按钮视觉完全一致。*.wf-sidebar-entry 前缀
-   提高、.wf-sidebar-entry 选择器特异性（0,1,1）确保覆盖任何复制来的官方 hashed 类；显式
-   appearance:none / border:none / box-shadow:none 重置浏览器默认 button 外观（外圈边框/发光）。
-   不依赖复制官方 className 呈现视觉，避免其在不同状态下引入外圈/发光。 */
+/* ---- 官方侧边栏入口按钮（sidebar.footer.action 插槽） ----
+   迁移（0.1.5-rc.1）：入口按钮不再由 MutationObserver 注入到官方「设置」按钮上方，而是注册进
+   官方 sidebar.footer.action 插槽。官方 DOM 结构（dsh-client-ui-sidebar 取证）：
+     div.footArea（纵向 column）
+       ├ div.footerActions（flex 横向行，width:100%） ← 本按钮在此
+       └ div.settingsArea
+   折叠态官方给 footerActions 加 justify-content:center（width:auto），故此处保持 width:100%，
+   折叠类 wf-sidebar-entry--rail 改为固定方形图标即可与官方「设置」按钮同级视觉。
+   样式取自官方「设置」按钮（dsh-client-ui-settings-general 的 trigger）：*.wf-sidebar-entry 前缀
+   提高特异性（0,1,1），并显式 appearance:none / border:none / box-shadow:none 重置浏览器默认外观。 */
 button.wf-sidebar-entry{box-sizing:border-box;cursor:pointer;width:100%;min-width:0;height:42px;color:var(--dsw-alias-label-primary);background:0 0;border:none;border-radius:12px;box-shadow:none;align-items:center;gap:8px;margin:0;padding:0 10px 0 8px;font-family:inherit;font-size:14px;line-height:22px;display:flex;overflow:hidden;-webkit-appearance:none;appearance:none}
 button.wf-sidebar-entry:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .wf-sidebar-entry__label{white-space:nowrap;overflow:hidden}
@@ -357,15 +349,8 @@ button.wf-sidebar-entry--rail{corner-shape:round;border-radius:50%;width:36px;he
 button.wf-sidebar-entry:focus,
 button.wf-sidebar-entry:focus-visible,
 button.wf-sidebar-entry:active{outline:none;box-shadow:none;-webkit-tap-highlight-color:transparent}
-.wf-titlebar__view{display:inline-flex;align-items:center;justify-content:center;padding:6px;margin-left:2px}
-.wf-split-pane{position:fixed;top:0;right:0;bottom:0;width:var(--wf-split-w,640px);z-index:2147482010;display:flex;flex-direction:column;background:var(--wf-bg);border-left:1px solid var(--wf-border);min-height:0;overflow:hidden}
-.wf-split-pane__inner{display:flex;width:100%;height:100%;min-width:0;min-height:0}
-.wf-split-divider{position:relative;z-index:12;flex:none;width:9px;cursor:col-resize;touch-action:none}
-.wf-split-divider::before{content:"";position:absolute;inset:0 3px;background:var(--wf-border)}
-.wf-split-divider:hover::before,.wf-split-divider.is-dragging::before{inset:0 2px;background:var(--wf-ink-2)}
-.wf-split-pane__content{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}
-/* 分栏不修改官方 frame 网格（官方 frame 含 overlayLayer/handle 等子项，覆盖其 grid 会错位）。
-   分栏时仅由 useWorkbenchView 给官方 centerCol 设右内边距（让出右半），工作台以 fixed 覆盖右侧。 */
+/* 官方右侧 Sidebar 自行管理列几何（grid track / 全屏 / 折叠滑动 / 分栏），插件不再触碰官方
+   frame 网格与对话主列内边距（0.1.5-rc.1 迁移：浮窗与分栏视图模式已整体删除）。 */
 @media(max-width:1180px){.wf-status{display:none}.wf-titlebar__note{display:none}}
 @media(max-width:760px){.wf-toolbar{padding:7px}.wf-tabs{padding:0 10px}.wf-titlebar__badge{display:none}.wf-lib-tab{font-size:10px}.wf-confirm__actions .wf-btn{flex:1}}
 /* ---- 定时任务（新功能本阶段；样式对齐组合管理 wf-combo 体系） ---- */

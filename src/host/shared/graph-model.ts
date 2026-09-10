@@ -67,10 +67,16 @@ export interface RoleNode extends BaseNode {
     /** System Prompt 来源文件名（从 .md 加载时记录，左侧栏卡片展示用，需求文档 §4.2.3.1）。 */
     systemPromptSource?: string
     /**
-     * 官方系统提示词注入开关（默认 true）。
-     * true（开）= 官方 harness:identity / 人设 / 系统 / 上下文段正常注入；
-     * false（关）= 仅保留角色 Prompt 段（visual-workflow:prompt）与 tool:* 段 + 工具 schema，
-     *              清空官方系统提示词段（不再对官方段做任何插入/替换）。
+     * 官方系统提示词注入开关（默认 true；界面上是「人设段」开关）。
+     * true（开）= 官方 harness:identity / 人设（deployment:persona-prefix 与
+     *              deployment:persona-suffix）/ 系统 / 上下文段正常注入；
+     * false（关）= 仅保留角色 Prompt 段（visual-workflow:prompt）+ tool:* 散文段
+     *              + Code Mode 协议段 + 工具 schema，清空其余全部官方系统提示词段
+     *              与 runtime context 快照（不再对官方段做任何插入/替换）。
+     * 说明（0.1.5-rc.1 取证）：原 deployment:persona 已拆为前缀（order 0）与
+     * 后缀（order 10200）；后缀文本为环境事实「Your working directory is {{cwd}}.」。
+     * 设置角色 Prompt 时只替换 identity 与前缀，后缀仍保留（工作目录事实），
+     * 但本开关 OFF 时后缀同样被清空。
      * 父/子代理节点均有此字段。
      */
     injectSystemPrompt?: boolean
@@ -78,8 +84,11 @@ export interface RoleNode extends BaseNode {
      * 工具提示词（tool:* 散文段）注入开关（默认 true）。
      * true（开）= 各工具包注册的使用指引段正常注入（tool:read / tool:write / tool:pwsh…）；
      * false（关）= 移除所有 tool:* 散文段，但**始终保留** Code Mode 协议段
-     *              （tools:sdk / tools:code-only）与 tools[] 工具 Schema（模型仍能看到工具清单）。
-     * 注意：与 injectSystemPrompt 独立；关闭它不改变工具能否被调用（调用能力由 Schema 决定）。
+     *              （tools:sdk / tools:ptc-only）与 tools[] 工具 Schema（模型仍能看到工具清单）。
+     * 注意：与 injectSystemPrompt 独立；关闭它不改变工具能否被调用（调用能力由 Schema 决定，
+     * 本开关只重写 assembly.sections，assembly.tools[] 原样透传）。
+     * 对比：正菜单的「全局工具开关」会同时剔除 tools[] 条目与该工具的 tool:<name> 段，
+     * 那才会真正剥夺调用能力。
      * 父/子代理节点均有此字段。
      */
     injectToolSections?: boolean

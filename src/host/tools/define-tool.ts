@@ -52,11 +52,23 @@ export interface ObjectSpec {
   description?: string
 }
 
-/** 数组 spec：items 为元素 spec。 */
+/**
+ * 数组 spec：items 为元素 spec。
+ *
+ * ⚠️ 0.1.5-rc.1 取证：官方 tools 的受支持 JSON Schema 子集为
+ * `type/oneOf/properties/required/additionalProperties/items/enum/const` + 注解
+ * （description/title/default/examples）——**不含 minItems/maxItems**。
+ * 二者编译进 `parameters` 不会被 `ctx.tools.register` 校验（register 只校验
+ * `output.schema`），但会随工具 Schema 一并送给模型，属非子集关键字。
+ * 若它们出现在 `output.schema` 中，官方 `assertSupportedJsonSchema` 会直接抛
+ * JsonSchemaError 导致工具注册失败。约束请下沉到 execute 内运行时校验。
+ */
 export interface ArraySpec {
   type: 'array'
   items: PropertySpec
+  /** 非官方子集关键字（见上）；仅用于 parameters 描述，勿用于 output.schema。 */
   minItems?: number
+  /** 非官方子集关键字（见上）；仅用于 parameters 描述，勿用于 output.schema。 */
   maxItems?: number
   description?: string
 }
@@ -151,6 +163,8 @@ export function compileValue(spec: ValueSchemaSpec): JsonSchemaNode {
     if (type === 'array') {
       const arraySpec = spec as ArraySpec
       const node: JsonSchemaNode = { type: 'array', items: compileProperty(arraySpec.items) }
+      // minItems/maxItems 非官方子集关键字：只在显式声明时透传（parameters 不校验；
+      // output.schema 若携带会被 ctx.tools.register 的 assertSupportedJsonSchema 拒绝）。
       if (arraySpec.minItems !== undefined) node.minItems = arraySpec.minItems
       if (arraySpec.maxItems !== undefined) node.maxItems = arraySpec.maxItems
       return withDesc(node)

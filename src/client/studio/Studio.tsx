@@ -51,19 +51,15 @@ export interface StudioProps {
   sessionId: string
   /** 远端调用面（测试注入；缺省 useRemote）。 */
   remote?: RemoteFace
-  /** 窗口关闭回调（标题栏 ×；浮窗宿主注入；对话视图挂载无关闭）。 */
-  onClose?: () => void
-  /** 窗口拖动把手回调（浮窗注入；工作台标题顶栏兼任窗口标题栏拖动）。 */
-  onTitlebarDrag?: (event: React.PointerEvent) => void
-  /** 视图模式（浮窗/分栏）；分栏时工作台初始折叠自身左右栏。 */
-  viewMode?: 'float' | 'split'
-  /** 标题栏窗口切换按钮回调（float↔split，宿主持久化）。 */
-  onToggleView?: () => void
-  /** 运行联动：进入分栏模式（宿主持久化；配合运行触发）。 */
-  onEnterSplit?: () => void
+  /**
+   * 运行联动（沉浸式）：点击「运行」时由宿主执行「让出空间」动作。
+   * 0.1.5-rc.1 迁移后语义 = 若官方右侧 Sidebar 处于全屏则缩回普通态（非全屏保持原状）；
+   * 之前是「切到插件自己的分栏视图模式」，该模式已随浮窗/分栏整体删除。
+   */
+  onRunImmersive?: () => void
 }
 
-export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDrag, viewMode, onToggleView, onEnterSplit }: StudioProps) {
+export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: StudioProps) {
   const remote = remoteProp ?? useRemote()
   const { state, dispatch } = useStudioState(sessionId)
   const { toast, toastError } = useToast(dispatch)
@@ -188,21 +184,15 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
 
   const [modeMenuOpen, setModeMenuOpen] = useState(false)
 
-  // ---------- 关闭守卫（§4.5.9：关闭工作台前未保存修改需确认） ----------
-  const requestClose = useCallback(() => {
-    if (!onClose) return
-    guard.guard(() => onClose())
-  }, [guard, onClose])
-
-  // ---------- 运行联动（图2：点击「运行」→ 自动切分栏 + 折叠工作台自身左右栏） ----------
+  // ---------- 运行联动（点击「运行」→ 宿主让出空间 + 折叠工作台自身左右栏） ----------
   const handleRun = useCallback(() => {
-    // 1) 宿主切到分栏模式（持久化）
-    onEnterSplit?.()
+    // 1) 宿主让出空间（官方右侧 Sidebar 全屏时缩回普通态；非全屏保持原状）
+    onRunImmersive?.()
     // 2) 折叠工作台自身侧栏（左栏与底栏全部隐藏，仅留画布；右侧属性栏由选中推导，随之收起）
     dispatch({ type: 'PANELS_SET', panels: { mode: PANEL_MODE_NONE } })
     // 3) 触发真正运行
     void (state.mode === 'mode2' ? run.startService() : run.startRun())
-  }, [dispatch, onEnterSplit, run, state.mode])
+  }, [dispatch, onRunImmersive, run, state.mode])
 
   // 批注：顶部折叠/切换按钮不再控制右侧栏，只控制左栏/底栏的展开、折叠、切换。
   // 六态循环：左展→切底→底收→底展→切左→左收→左展（默认左栏展开）。
@@ -210,14 +200,6 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
   const togglePanels = useCallback(() => {
     dispatch({ type: 'PANELS_SET', panels: { mode: nextPanelMode(state.panels.mode) } })
   }, [dispatch, state.panels.mode])
-
-  // 分栏模式下工作台初始折叠自身左右栏（沉浸式；用户可再切换展开）
-  useEffect(() => {
-    if (viewMode === 'split') {
-      dispatch({ type: 'PANELS_SET', panels: { mode: PANEL_MODE_NONE } })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   // ---------- 派生 ----------
   const stageKinds = useMemo(() => stageTemplateKinds(state.mode), [state.mode])
@@ -237,8 +219,6 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
       state={state}
       sessionId={state.sessionId}
       remote={remote}
-      onClose={onClose}
-      onTitlebarDrag={onTitlebarDrag}
       currentFlow={currentFlow}
       currentService={currentService}
       currentFlowTemplate={currentFlowTemplate}
@@ -278,9 +258,6 @@ export function Studio({ t, sessionId, remote: remoteProp, onClose, onTitlebarDr
       modeMenuOpen={modeMenuOpen}
       setModeMenuOpen={setModeMenuOpen}
       switchMode={switchMode}
-      requestClose={requestClose}
-      viewMode={viewMode}
-      onToggleView={onToggleView}
       handleRun={handleRun}
       panelsCollapsed={panelsCollapsed}
       onTogglePanels={togglePanels}

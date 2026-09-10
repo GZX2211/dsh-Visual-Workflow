@@ -326,12 +326,16 @@ describe('工具注册与 schema 编译', () => {
       }
     })
 
-  it('wf_ask 的 questions 参数：数组必填、minItems=1、选项对象 open', async () => {
+  it('wf_ask 的 questions 参数：数组必填、选项对象 open，且不使用官方子集外的 minItems', async () => {
     const h = await makeHarness()
     const def = h.tools.definitions.get(WF_ASK)!
     const questions = (def.parameters.properties ?? {}).questions as JsonSchemaNode
     expect(questions.type).toBe('array')
-    expect(questions.minItems).toBe(1)
+    // 【0.1.5-rc.1】官方 tools 的受支持 JSON Schema 子集为
+    // type/oneOf/properties/required/additionalProperties/items/enum/const + 注解，
+    // 不含 minItems/maxItems（register 只校验 output.schema，故此处不报错，但属非子集关键字）。
+    // 「至少一条问题」的约束由 execute 运行时校验承担（见「空 questions → WF_BAD_ARGS」用例）。
+    expect(questions.minItems).toBeUndefined()
     const item = questions.items as JsonSchemaNode
     expect(item.additionalProperties).toBe(true)
     expect(item.required).toEqual(['id', 'question'])
@@ -505,7 +509,7 @@ describe('wf_ask 工具执行', () => {
     await expect(def.execute({ questions: [{ id: 'q1', question: '继续？' }] }, execOf(childAgent))).rejects.toMatchObject({ code: 'WF_NO_ACTIVE_RUN' })
   })
 
-  it('空 questions → WF_BAD_ARGS', async () => {
+  it('空 questions → WF_BAD_ARGS（schema 不含 minItems，约束由运行时承担）', async () => {
     const h = await makeHarness()
     await start(h)
     const def = h.tools.definitions.get(WF_ASK)!

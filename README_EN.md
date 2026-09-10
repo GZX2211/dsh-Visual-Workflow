@@ -95,7 +95,7 @@
 | **Node** | A card on the canvas, including parent agent, sub-agent, file, database, stage (start/end/pause), collaboration group, and virtual node. |
 | **Edge** | Conveys flow direction (flow edge), context content (context edge), or database identifier (database edge); flow edges can carry condition labels (pass/fail/content) determined semantically by the parent agent. |
 | **Parent Agent** | The core scheduler of the orchestration; in Mode 1, responsible for supervision and scheduling (not executing specific tasks); in Mode 2, serves as the final responder; can be instructed by the user to adjust the orchestration flow. |
-| **Sub-agent** | Task executor; independently configures persona, model, tools, etc., created and scheduled by the parent agent as needed. |
+| **Sub-agent** | Task executor; independently configures a role prompt (system prompt), model, tools, etc., created and scheduled by the parent agent as needed. |
 | **Orchestration** | The main agent autonomously drives the process using tools such as `wf_run_node`, `wf_ask`, `wf_finish`, controlling node states. |
 | **Mode** | The plugin provides two operation modes: Flow Orchestration Mode (Mode 1) and API Service Mode (Mode 2), switched via the top bar; each stores data in separate directories. |
 | **Checkpoint Resume** | After a workflow is paused or the host is unexpectedly interrupted, the states of executed nodes are persisted; upon resumption, no re-execution occurs—the process continues from the checkpoint. |
@@ -143,7 +143,7 @@ Card layout (**3 inputs on the left, 2 outputs on the right**):
 | **ReAct iteration cap** | Soft cut-off: upon reaching the cap, forced finalization (no new tool calls, output existing conclusions); default 50 |
 | **Retry cap** | Node-level attempt count guardrail; default 3 |
 | **Input/Output data schema** | Text/JSON description (assists model understanding) |
-| **System prompt toggles** | Controls official system prompt injection (enabled by default); two toggles separately control official persona and tool text injection |
+| **System prompt toggles** | Controls official system prompt injection (enabled by default); the two toggles separately control the official persona/identity/system/context sections ("persona sections") and the `tool:*` usage-guidance sections ("tool prose sections"). **Turning tool prose off does not remove tool-calling ability** (it only drops the English usage guidance); to actually disable a tool, use the global tool switches in "Combos". |
 
 **Virtual Node**: Click "Duplicate" to generate a virtual node (dashed border + "↻ Reference" badge), which shares configuration and execution instance with the master node; deleting the master node cascades cleanup.
 
@@ -211,6 +211,12 @@ Agents autonomously schedule using the following tools (guardrails and persisten
 
 ## Installation (Windows)
 
+> **Version compatibility**: this plugin targets **DeepSeek Harness `0.1.5-rc.1`** (official prompt section names, subagent delivery API, session cwd reading, and client slots are all adapted against that release). Install or upgrade the host first (stop every dsh process in an external terminal before upgrading):
+>
+> ```bash
+> npm install -g @deepseek-ai/dsh@0.1.5-rc.1
+> ```
+
 1. **Locate in File Explorer**: In `%USERPROFILE%\.dsh\profiles\web\pnpm-workspace.yaml`, add the following:
 
 ```yaml
@@ -232,7 +238,7 @@ dsh plugin --profile web add "github:GZX2211/dsh-Visual-Workflow#main"
 dsh --profile web --dump-config | findstr "visual-workflow"
 ```
 
-4. **Restart** `dsh web`; the "Workflow" button above the settings in the lower-left corner is the entry (click to expand the workspace).
+4. **Restart** `dsh web`. To open the studio: click the **"Workflow" entry at the bottom of the official left sidebar** (next to "Settings") → the official **right Sidebar** opens the "Workflow" tab, which is the full studio (clicking again merely focuses that tab; studio state stays resident and is never reloaded).
 
 5. **Uninstall**:
 
@@ -258,13 +264,16 @@ Navigate to `%USERPROFILE%\.dsh\profiles\web\pnpm-workspace.yaml` in File Explor
 
 ## Quick Start
 
-1. **Create a workflow template** – In the left panel "Workflows" → click `＋` below the template area to create a blank template
-2. **Create a role template** – In the left panel "Roles" → `＋` → configure prompt / model / tool combo → save
-3. **Drag onto the canvas** – Drag roles/files/databases/stages/collaboration groups from the left panel to generate nodes
-4. **Connect edges** – Drag from the right output ports to the left input ports (`flow` controls order, `ctx` passes context, `db` injects data tools)
-5. **Create instance and run** – Click "Create Instance" above the canvas (or directly click "Run", which auto-creates an instance); Mode 1 starts the flow; Mode 2 click "Run" to start the API service
-6. **Real-time editing** – Modify the canvas during execution and save; subsequent scheduling takes effect immediately; node status highlighting is reflected back; supports undo/redo
-7. **Checkpoint resume** – After a pause node or window closure, re-running continues from the checkpoint; the history panel shows all run records and allows recovery of interrupted flows
+1. **Open the studio** – Click the **"Workflow" entry at the bottom of the official left sidebar** → the official **right Sidebar** opens the "Workflow" tab (the studio *is* that tab; closing the tab only hides it, and reopening restores the exact prior state)
+2. **Create a workflow template** – In the left panel "Workflows" → click `＋` below the template area to create a blank template
+3. **Create a role template** – In the left panel "Roles" → `＋` → configure prompt / model / tool combo → save
+4. **Drag onto the canvas** – Drag roles/files/databases/stages/collaboration groups from the left panel to generate nodes
+5. **Connect edges** – Drag from the right output ports to the left input ports (`flow` controls order, `ctx` passes context, `db` injects data tools)
+6. **Create instance and run** – Click "Create Instance" above the canvas (or directly click "Run", which auto-creates an instance); Mode 1 starts the flow; Mode 2 click "Run" to start the API service
+7. **Real-time editing** – Modify the canvas during execution and save; subsequent scheduling takes effect immediately; node status highlighting is reflected back; supports undo/redo
+8. **Checkpoint resume** – After a pause node or window closure, re-running continues from the checkpoint; the history panel shows all run records and allows recovery of interrupted flows
+
+> **Studio entry**: the "Workflow" button at the bottom of the official left sidebar → the "Workflow" tab in the official right Sidebar (clicking is idempotent focus, it never toggles the sidebar closed); when you hit Run, a fullscreen right Sidebar is automatically shrunk back to normal so the canvas gets the room.
 
 > **Mode switching**: The top bar "Mode" dropdown lets you choose the running mode – Mode 1 for long-running scheduled orchestration, Mode 2 for persistent API services.
 > **Combo management**: The top bar "Combos" button lets you create custom tool combinations (official tools/self-built tools + MCP servers), selectable in role templates.
@@ -331,6 +340,8 @@ pnpm install
 dsh plugin --profile web add "link:$PWD"
 ```
 
+> Target host version for development/verification: **`@deepseek-ai/dsh@0.1.5-rc.1`** (`npm install -g @deepseek-ai/dsh@0.1.5-rc.1`; stop every dsh process before upgrading).
+
 Common commands:
 ```bash
 pnpm build         # Build Host (tsc) + Client (tsdown)
@@ -361,10 +372,11 @@ dsh-visual-workflow/
 │   │   ├── scheduler/            # Scheduled task engine
 │   │   └── prompts/              # Orchestration/node task prompt templates
 │   └── client/                   # WebUI source
+│       ├── sidebar/              # Official slot registration (right Sidebar tab / sidebar entry / resident container)
 │       ├── studio/               # Main state machine (useReducer)
 │       ├── components/           # Canvas/panels/combos/history/scheduled tasks, etc.
 │       ├── hooks/                # Single-responsibility hooks
-│       └── lib/                  # Pure logic (remote/graph-model/bundle)
+│       └── lib/                  # Pure logic (remote/graph-model/bundle/storage)
 ├── tests/                        # Unit + integration tests
 ├── scripts/                      # Build and watch scripts
 ├── assets/models/                # Local embedding model assets

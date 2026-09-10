@@ -41,10 +41,6 @@ export interface StudioLayoutProps {
   state: StudioState
   sessionId: string
   remote: RemoteFace
-  /** 窗口关闭回调（标题栏 ×；浮窗宿主注入；对话视图挂载无关闭）。 */
-  onClose?: () => void
-  /** 窗口拖动把手回调（浮窗注入；工作台标题顶栏兼任窗口标题栏拖动）。 */
-  onTitlebarDrag?: (event: React.PointerEvent) => void
   // ---- 派生数据 ----
   currentFlow: WorkflowDocument | null
   currentService: ServiceState | null
@@ -87,16 +83,11 @@ export interface StudioLayoutProps {
   beginLibraryDrag: LibraryDragFace['beginLibraryDrag']
   dragPreview: LibraryDragFace['dragPreview']
   dropGroupId: LibraryDragFace['dropGroupId']
-  // ---- 模式菜单 / 模式与关闭 ----
+  // ---- 模式菜单 ----
   modeMenuOpen: boolean
   setModeMenuOpen: React.Dispatch<React.SetStateAction<boolean>>
   switchMode: (mode: 'mode1' | 'mode2') => void
-  requestClose: () => void
-  /** 视图模式（浮窗/分栏）。 */
-  viewMode?: 'float' | 'split'
-  /** 标题栏窗口切换按钮回调（float↔split）。 */
-  onToggleView?: () => void
-  /** 运行联动：切分栏 + 折叠自身左右栏 + 触发运行。 */
+  /** 运行联动：宿主让出空间（官方右侧 Sidebar 全屏时缩回）+ 折叠自身左右栏 + 触发运行。 */
   handleRun: () => void
   /** 两侧侧栏是否都已折叠（顶部一键折叠/展开按钮用）。 */
   panelsCollapsed: boolean
@@ -107,15 +98,15 @@ export interface StudioLayoutProps {
 /** 工作台渲染层（纯 JSX 组合；回调/数据全部来自 props）。 */
 export function StudioLayout(props: StudioLayoutProps) {
   const {
-    t, state, sessionId, remote, onClose, onTitlebarDrag,
+    t, state, sessionId, remote,
     currentFlow, currentService, currentFlowTemplate, editorData, edgeList, stageKinds, parentTemplate, roleTemplates, groupTemplates,
     toolbarRunning, runStatusByNode, highlightedNodeIds, modeName,
     canvasApiRef, canvasShellRef, libraryImportRef, personaInputRef, groupMdInputRef,
     dispatch, doc, canvas, editor, run, transfer, selection, history, guard, panels, toast,
     beginLibraryDrag, dragPreview, dropGroupId,
-    modeMenuOpen, setModeMenuOpen, switchMode, requestClose, canvasCaption,
+    modeMenuOpen, setModeMenuOpen, switchMode, canvasCaption,
     leftOpen, bottomOpen, inspectorOpen,
-    onToggleView, handleRun, panelsCollapsed, onTogglePanels,
+    handleRun, panelsCollapsed, onTogglePanels,
   } = props
 
   // 左栏（LeftPanel）与底栏（BottomPanel）共用同一份库内容 props（内容/选中/拖拽逻辑一致，
@@ -165,8 +156,9 @@ export function StudioLayout(props: StudioLayoutProps) {
 
   return (
     <div className="wf-root" data-wf-immersive="true">
-      {/* 标题顶栏 = 窗口标题栏（工作流设计器一行；可拖动；组合按钮右侧为关闭按钮） */}
-      <nav className="wf-tabs" data-wf-titlebar="" onPointerDown={onTitlebarDrag}>
+      {/* 标题顶栏（工作流设计器一行；不再是窗口标题栏——工作台已迁到官方右侧 Sidebar 标签页，
+          chip 由官方渲染，故此处不再有拖动手柄、窗口切换按钮与关闭按钮） */}
+      <nav className="wf-tabs" data-wf-titlebar="">
         <span className="wf-titlebar__title">{t.studio}</span>
         <span className="wf-titlebar__badge">{t.badge}</span>
         <span className="wf-titlebar__note">{t.note}</span>
@@ -211,17 +203,6 @@ export function StudioLayout(props: StudioLayoutProps) {
         {/* 定时任务：模式下拉右侧、「组合」左侧（新功能本阶段入口） */}
         <button type="button" className="wf-btn" title={t.scheduler} onClick={() => dispatch({ type: 'SCHEDULER_OPEN', open: true })}>{t.scheduler}</button>
         <button type="button" className="wf-btn" title={t.combos} onClick={() => dispatch({ type: 'COMBO_OPEN', open: true })}>{t.combos}</button>
-        {/* 图2：窗口切换按钮注册到「组合」右侧、「关闭」左侧；float↔split */}
-        {onToggleView
-          ? <button type="button" className="wf-btn wf-iconbtn wf-titlebar__view" title={t.toggleWindow} aria-label={t.toggleWindow} onClick={onToggleView}>
-              <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" style={{ color: 'currentColor' }}>
-                <path fill="none" stroke="currentColor" strokeWidth="2" d="M9 4v16M4 4h16v16H4z" />
-              </svg>
-            </button>
-          : null}
-        {onClose
-          ? <button type="button" className="wf-btn wf-iconbtn wf-titlebar__close" title={t.windowClose} aria-label={t.windowClose} onClick={requestClose}>✕</button>
-          : null}
       </nav>
 
       <main className="wf-main" data-wf-main="">

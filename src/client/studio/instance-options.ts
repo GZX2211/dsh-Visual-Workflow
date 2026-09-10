@@ -7,9 +7,11 @@
 //   - 但它属于用户界面记忆——「开启新会话」复选框与工作区路径必须做到重复
 //     进入工作台不丢失。工作台保持挂载已覆盖打开/关闭循环；此处再把值落盘
 //     localStorage，即使宿主重建/页面刷新也能恢复（双保险）。
-//   - 纯函数 + StorageLike 注入（与 useWorkbenchView 同一极简存储抽象，便于单测）。
+//   - 纯函数 + StorageLike 注入（极简存储抽象，便于单测）。
+//     说明：StorageLike 原定义在 studio/useWorkbenchView.ts 内；该模块随浮窗/分栏视图模式
+//     一并删除，类型已迁至 client/lib/storage.ts。
 
-import type { StorageLike } from './useWorkbenchView.js'
+import type { StorageLike } from '../lib/storage.js'
 
 /** instanceOptions 持久化键。 */
 export const INSTANCE_OPTIONS_KEY = 'visual-workflow:instance-options'

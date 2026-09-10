@@ -1,7 +1,7 @@
 // tests/host/agent-runner.test.ts
 //
 // 节点子代理执行引擎单测（T-022）：复用键/配置签名/白名单解析（可选注入）/
-// ensureNodeChild（创建/签名重建）/startNodeTask（followup 派发）/interruptChild/
+// ensureNodeChild（创建/签名重建）/startNodeTask（相邻 Agent 通道派发）/interruptChild/
 // 软截停消费/可见性双保险。
 //
 // DoD（任务清单 T-022）：签名重建、白名单∩父代理工具集、wf_ask/wf_ask_agent 仅
@@ -67,12 +67,13 @@ function blocks(text = '任务块'): Array<{ type: 'text'; text: string }> {
 class FakeSubagents implements SubagentsServiceLike {
   providers: string[] = ['spawn', 'fork', 'acp']
   started: Array<Parameters<SubagentsServiceLike['startContinuable']>[0]> = []
-  followups: Array<{ parent: unknown; childId: string; content: unknown[]; source: unknown; signal?: AbortSignal }> = []
+  /** 复用派发记录（0.1.5-rc.1：sendMessage 为唯一推荐通道）。 */
+  dispatches: Array<{ sender: unknown; targetId: string; content: unknown[]; signal?: AbortSignal }> = []
   interrupts: Array<{ childId: string; authority: { kind: 'user'; parentSessionId: string } }> = []
   setups: Array<(childCtx: unknown) => () => void> = []
   failStart: unknown = null
-  /** 时序断言钩子（followup 触发时回调，用于验证 setLimit 先于派发）。 */
-  onFollowup?: () => void
+  /** 时序断言钩子（派发触发时回调，用于验证 setLimit 先于派发）。 */
+  onDispatch?: () => void
   private seq = 0
   list(): string[] {
     return [...this.providers]
@@ -87,9 +88,10 @@ class FakeSubagents implements SubagentsServiceLike {
     this.seq += 1
     return { childId: `child-${this.seq}` }
   }
-  async followup(parent: unknown, childId: string, content: unknown[], options: { source: unknown; signal?: AbortSignal }): Promise<void> {
-    this.onFollowup?.()
-    this.followups.push({ parent, childId, content, source: options.source, signal: options.signal })
+  /** 相邻 Agent 投递（live 父 Agent → direct child）；0.1.5-rc.1 已无 followup 通道。 */
+  async sendMessage(sender: unknown, targetId: string, content: unknown[], options: { signal?: AbortSignal }): Promise<void> {
+    this.onDispatch?.()
+    this.dispatches.push({ sender, targetId, content, signal: options.signal })
   }
   async interrupt(childId: string, authority: { kind: 'user'; parentSessionId: string }): Promise<void> {
     this.interrupts.push({ childId, authority })
@@ -455,7 +457,7 @@ describe('NodeAgentRunner 创建/复用/派发', () => {
     await expect(h3.runner.ensureNodeChild(taskInput())).rejects.toThrow(/没有可用的子代理 provider/)
   })
 
-  it('startNodeTask 复用派发：followup 调用（coordinator/relay source + signal 透传），立即返回', async () => {
+  it('startNodeTask 复用派发：走 sendMessage（相邻 Agent 通道，signal 透传），立即返回', async () => {
     const h = await makeHarness()
     await h.store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read'], mcpServers: [] })
     const signal = new AbortController().signal
@@ -463,16 +465,15 @@ describe('NodeAgentRunner 创建/复用/派发', () => {
     const result = await h.runner.startNodeTask(taskInput({ signal, blocks: blocks('第二轮') }))
 
     expect(result).toEqual({ childId: 'child-1', created: false })
-    expect(h.subagents.followups).toHaveLength(1)
-    const followup = h.subagents.followups[0]
-    expect(followup.childId).toBe('child-1')
-    expect(followup.parent).toEqual({ id: 'session-1' })
-    expect(followup.content).toEqual([{ type: 'text', text: '第二轮' }])
-    expect(followup.source).toEqual({ kind: 'coordinator', form: 'relay', senderSessionId: 'session-1' })
-    expect(followup.signal).toBe(signal)
+    expect(h.subagents.dispatches).toHaveLength(1)
+    const dispatch = h.subagents.dispatches[0]
+    expect(dispatch.targetId).toBe('child-1')
+    expect(dispatch.sender).toEqual({ id: 'session-1' })
+    expect(dispatch.content).toEqual([{ type: 'text', text: '第二轮' }])
+    expect(dispatch.signal).toBe(signal)
   })
 
-  it('复用路径：setLimit 先于 followup 派发（软截停上限按次覆盖立即生效）', async () => {
+  it('复用路径：setLimit 先于派发（软截停上限按次覆盖立即生效）', async () => {
     const h = await makeHarness()
     await h.store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read'], mcpServers: [] })
     await h.runner.startNodeTask(taskInput()) // 首次创建
@@ -480,12 +481,12 @@ describe('NodeAgentRunner 创建/复用/派发', () => {
     const order: string[] = []
     const setLimitSpy = vi.fn((_childId: string, limit: number | undefined) => order.push(`setLimit:${limit}`))
     h.react.setLimit = setLimitSpy
-    h.subagents.onFollowup = () => order.push('followup')
-    // 第二轮复用并按次覆盖 limit：修复前 setLimit 在 followup（await）之后执行，
+    h.subagents.onDispatch = () => order.push('dispatch')
+    // 第二轮复用并按次覆盖 limit：修复前 setLimit 在派发（await）之后执行，
     // 新回合第一步 pre-step 会读到旧上限；修复后必须先在派发前登记
     await h.runner.startNodeTask(taskInput({ iterationLimit: 3, blocks: blocks('第二轮') }))
     expect(h.react.setLimit).toHaveBeenCalledWith('child-1', 3)
-    expect(order).toEqual(['setLimit:3', 'followup'])
+    expect(order).toEqual(['setLimit:3', 'dispatch'])
   })
 
   it('创建后挂接模型选择（经 child agent ctx）+ 复用派发后刷新护栏上限', async () => {

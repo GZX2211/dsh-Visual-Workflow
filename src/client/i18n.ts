@@ -3,18 +3,17 @@
 // 中英双语文案（照搬旧项目 i18n.js，按新需求模型扩展：模式/服务/断点/协作组/虚拟节点/浮窗）。
 
 export const zh = {
-  // 标题顶栏 / 浮窗
+  // 标题顶栏
   studio: '工作流设计器',
   badge: '可视化编排',
   note: '拖拽卡片 · 连线编排 · 一键运行',
   windowTitle: '工作流设计器',
-  windowClose: '关闭',
-  toggleWindow: '切换窗口',
-  viewFloat: '悬浮窗口',
-  viewSplit: '分栏窗口',
-  fabOpen: '打开工作流工作台',
   currentSession: '当前会话',
   currentSessionUnavailable: '当前会话不可用：请先在对话区发送一条消息激活会话，再打开工作台',
+  // 工作台 × 官方右侧 Sidebar 标签页（0.1.5-rc.1 迁移）：
+  // 多标签页 body 并存（分栏 / 多会话）时，常驻容器只能归最新的那个 body，
+  // 其余 body 显示本提示，避免出现无解释的空白面板。
+  workbenchInUse: '工作台已在另一个标签页中打开',
   mode1: '流程编排',
   mode2: 'API服务',
   modeLabel1: '模式一',
@@ -407,13 +406,9 @@ export const en: Dict = {
   badge: 'Visual Orchestration',
   note: 'Drag cards · Wire connections · Run',
   windowTitle: 'Workflow Designer',
-  windowClose: 'Close',
-  toggleWindow: 'Toggle window',
-  viewFloat: 'Floating window',
-  viewSplit: 'Split window',
-  fabOpen: 'Open workflow studio',
   currentSession: 'Current session',
   currentSessionUnavailable: 'Session unavailable: send a message in the chat first, then reopen the studio',
+  workbenchInUse: 'The studio is already open in another tab',
   mode1: 'Orchestration Mode',
   mode2: 'Service Mode',
   modeLabel1: 'Mode 1',

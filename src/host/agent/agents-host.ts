@@ -174,11 +174,11 @@ export function subagentsServiceLike(ctx: Context): SubagentsServiceLike | null 
   if (
     service !== null && typeof service === 'object'
     && typeof (service as { startContinuable?: unknown }).startContinuable === 'function'
-    // 0.1.2 SubagentRuntime：相邻投递三选一——sendMessage / queuePrompt（rc.1 新增），
-    // 旧宿主仍走 followup（rc.2 面）。registerContinuableSetup 在 rc.1 已移除，不再判定。
+    // 相邻投递二选一：sendMessage（0.1.5-rc.1 唯一推荐通道）/ queuePrompt（旧版兼容兜底）。
+    // 【0.1.5-rc.1 取证】官方 SubagentRuntime 已无 followup 方法（rc.2 面），故不再作为
+    // 可用性判据；registerContinuableSetup 亦早已移除，不再判定。
     && (typeof (service as { sendMessage?: unknown }).sendMessage === 'function'
-        || typeof (service as { queuePrompt?: unknown }).queuePrompt === 'function'
-        || typeof (service as { followup?: unknown }).followup === 'function')
+        || typeof (service as { queuePrompt?: unknown }).queuePrompt === 'function')
     && typeof (service as { interrupt?: unknown }).interrupt === 'function'
   ) {
     return service as SubagentsServiceLike

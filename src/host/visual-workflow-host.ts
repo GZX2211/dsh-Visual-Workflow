@@ -297,18 +297,16 @@ export class VisualWorkflowHost extends Service {
       throw new Error('subagents 服务不可用，无法冷恢复目标子代理')
     }
     const blocks = (Array.isArray(content) ? content : []) as Array<{ type: 'text'; text: string }>
-    // 0.1.2 适配：SubagentRuntime 移除 rc.2 的 followup，改为相邻 Agent 通道。
-    // sendMessage（live 父 → direct child）/ queuePrompt（host distinct turn）/ 旧 followup 依可用性投递。
+    // 0.1.5-rc.1 适配：SubagentRuntime 的 followup（rc.2 面）早已移除，官方现无该方法。
+    // sendMessage（live 父 → direct child）为首选；queuePrompt（host distinct turn，
+    // 0.1.5 其 source/signal 为必填，属旧版兼容兜底）仅在 sendMessage 缺失时使用。
     if (typeof subagents.sendMessage === 'function') {
       return subagents.sendMessage(parent, childId, blocks, options.signal ? { signal: options.signal } : {})
     }
     if (typeof subagents.queuePrompt === 'function') {
       return subagents.queuePrompt(parent, childId, blocks, options.source, options.signal)
     }
-    if (typeof subagents.followup === 'function') {
-      return subagents.followup(parent, childId, blocks, options)
-    }
-    throw new Error('subagents 服务不支持协作投递（缺少 sendMessage/queuePrompt/followup）')
+    throw new Error('subagents 服务不支持协作投递（缺少 sendMessage/queuePrompt）')
   }
 
   /** 数据根目录（数据工具索引落盘位置）。 */

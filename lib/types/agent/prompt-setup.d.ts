@@ -1,4 +1,4 @@
-/** 角色 Prompt 注册为的系统提示词段名（order 1，位于官方 harness:identity 之后、工具段之前）。 */
+/** 角色 Prompt 注册为的系统提示词段名（order 1，位于官方 harness:identity / persona 前缀之后、工具段之前）。 */
 export declare const VISUAL_WORKFLOW_PROMPT_SECTION = "visual-workflow:prompt";
 /** 子代理提示词注入状态（runner 在节点启动后写入；bindParent 也使用）。 */
 export interface ChildPromptState {

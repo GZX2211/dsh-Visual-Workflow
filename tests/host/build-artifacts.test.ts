@@ -57,4 +57,25 @@ describe('T-003 构建链路（client bundle + host/client 并存）', () => {
     // 保证 ./client 的类型入口非空壳。
     expect(dts).toContain("export * from './client/entry'")
   })
+
+  it('lib/client.js 含 v0.1.5-rc.1 迁移后的官方插槽注册面（标签页 / 入口 / 全屏缩回）', () => {
+    const code = readArtifact('lib/client.js')
+    // 两阶段注册：类型注册表 + keyed 插槽 body + 官方侧边栏底部动作插槽
+    expect(code).toContain('sidebarRightTabs')
+    expect(code).toContain('sidebar.right.pane.tab')
+    expect(code).toContain('sidebar.footer.action')
+    // 标签页挂载点与官方全屏缩回助手（自动化属性选择器）
+    expect(code).toContain('wf-tab-mount')
+    expect(code).toContain('data-sidebar-right-mode')
+  })
+
+  it('lib/client.js 不再含浮窗/分栏视图模式与 conversation.view 注册（迁移回归）', () => {
+    const code = readArtifact('lib/client.js')
+    // 浮窗/分栏外壳与视图模式切换按钮已随迁移整体删除
+    expect(code).not.toContain('wf-window')
+    expect(code).not.toContain('wf-split-pane')
+    expect(code).not.toContain('wf-frame-content')
+    // 用户验收批注：不得在 conversation.view 注册插件入口
+    expect(code).not.toContain('conversation.view')
+  })
 })
