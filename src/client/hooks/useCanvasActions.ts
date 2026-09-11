@@ -3,17 +3,37 @@
 // 画布编辑操作面：节点放置（模板深拷贝/父代理/阶段/协作组/入组）、连线
 // 校验与增删、删除级联、整理布局、清空画布、虚拟节点复制与协作组成员
 // 移除。变更统一走 dispatch；涉及图标量变化前先 history.remember()。
+//
+// 本次改造（用户裁决）：
+//   - 画布节点删除不再二次确认（直接删除）；
+//   - 清空画布不再二次确认（运行中由工具栏禁用按钮拦截）；
+//   - 运行中实例画布锁定（run-locks）：已完成/执行中流程不可删除、不可改线；
+//   - 纯 XY 拖动 / 协作组卡片缩放 = 几何改动 → 防抖自动保存（不弹确认、静默落盘）。
 
-import { useCallback } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import type { Dispatch } from 'react'
 import type { StudioAction, StudioState, CanvasNode, CanvasEdge } from '../studio/studio-state.js'
+import { currentFlowOf, currentFlowTemplateOf, currentServiceOf } from '../studio/studio-state.js'
 import type { GraphHistoryFace } from './useGraphHistory.js'
 import type { ToastFace } from './useToast.js'
+import type { SaveCanvasOptions } from './useDocumentActions.js'
+import type { RunLockSet } from '../lib/run-locks.js'
 import type { Dict } from '../i18n.js'
 import {
   connectionProblem, connectionProblemMessage, consolidateGroups, dropNodeFlowLines, flowToCanvasLines,
   layoutNodes, joinNodeToGroup, stageTemplateKinds, templateToNodeData, type CanvasLine,
 } from '../lib/graph-model.js'
+
+/** 几何拖动（节点拖动 / 组卡片缩放）自动保存的防抖窗口（毫秒）。 */
+export const GEOMETRY_AUTOSAVE_DEBOUNCE_MS = 400
+
+/** 画布编辑面的外部依赖注入（锁定判定 + 自动保存）。 */
+export interface CanvasActionsOptions {
+  /** 运行中实例画布锁定判定集（模式一 running；未启用时全部解锁）。 */
+  locks: RunLockSet
+  /** 画布保存入口（纯几何改动的防抖自动保存用；auto:true = 静默落库）。 */
+  saveCanvas(options?: SaveCanvasOptions): Promise<unknown>
+}
 
 export interface CanvasActionsFace {
   rememberGraph(): void
@@ -41,14 +61,47 @@ export interface CanvasActionsFace {
   swapNodePorts(id: string): void
 }
 
-/** 画布编辑面（remember 需在变更 dispatch 前调用；远端无 IO）。 */
+/** 画布编辑面（remember 需在变更 dispatch 前调用；远端 IO 仅几何自动保存一处）。 */
 export function useCanvasActions(
   state: StudioState,
   dispatch: Dispatch<StudioAction>,
   notify: ToastFace['toast'],
   history: GraphHistoryFace,
   t: Dict,
+  options: CanvasActionsOptions,
 ): CanvasActionsFace {
+  const { locks, saveCanvas } = options
+  /** 几何自动保存防抖计时器（跨渲染保持；卸载时清理，避免迟到保存）。 */
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  /** 当前画布对象是否可自动保存（无对象/本地草稿态跳过——草稿须手动保存/创建实例）。 */
+  const canAutoSave = useCallback((): boolean => {
+    if (!state.currentId) return false
+    const doc = state.currentKind === 'flowTemplate'
+      ? currentFlowTemplateOf(state)
+      : state.currentKind === 'workflow'
+        ? currentFlowOf(state)
+        : state.currentKind === 'service'
+          ? currentServiceOf(state)
+          : null
+    if (!doc) return false
+    return (doc as { _draft?: boolean })._draft !== true
+  }, [state])
+
+  /** 纯几何改动（拖动/缩放）→ 防抖自动保存（静默落库；草稿态不自动落库）。 */
+  const scheduleGeometryAutoSave = useCallback((): void => {
+    if (!canAutoSave()) return
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
+    autoSaveTimer.current = setTimeout(() => {
+      autoSaveTimer.current = null
+      void saveCanvas({ auto: true })
+    }, GEOMETRY_AUTOSAVE_DEBOUNCE_MS)
+  }, [canAutoSave, saveCanvas])
+
+  useEffect(() => () => {
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
+  }, [])
+
   // ---------- 画布操作 ----------
   const rememberGraph = useCallback(() => {
     history.remember()
@@ -56,13 +109,20 @@ export function useCanvasActions(
 
   const moveNode = useCallback((id: string, position: { x: number; y: number }) => {
     dispatch({ type: 'NODE_MOVED', id, position })
-  }, [dispatch])
+    scheduleGeometryAutoSave()
+  }, [dispatch, scheduleGeometryAutoSave])
 
   const onNodeDragStart = useCallback(() => {
     history.remember()
   }, [history])
 
   const onConnect = useCallback((connection: { source: string; target: string; sourceHandle: string; targetHandle: string }) => {
+    // 运行中锁定：已完成节点不得再接出线，已完成/执行中节点不得再接左入口线
+    // （反馈沿用既有「无效连线」toast，用户裁决）
+    if (!locks.canConnect(connection.source, connection.target)) {
+      notify('error', t.invalidConnection)
+      return
+    }
     const problem = connectionProblem(
       state.canvas.nodes as unknown as import('../../host/shared/graph-model.js').GraphNode[],
       state.canvas.edges as unknown as CanvasLine[],
@@ -81,7 +141,7 @@ export function useCanvasActions(
       targetHandle: connection.targetHandle as CanvasEdge['targetHandle'],
     }
     dispatch({ type: 'EDGE_ADDED', edge })
-  }, [dispatch, history, notify, state.canvas.nodes, state.canvas.edges, t])
+  }, [dispatch, history, locks, notify, state.canvas.nodes, state.canvas.edges, t])
 
   const onConnectionRejected = useCallback(() => {
     notify('error', t.invalidConnection)
@@ -93,55 +153,22 @@ export function useCanvasActions(
     // 重复实现的 flowLayout，避免两份布局算法漂移）。
     const next = layoutNodes(state.canvas.nodes, flowToCanvasLines(state.canvas.edges))
     dispatch({ type: 'GRAPH_REPLACED', nodes: next, edges: state.canvas.edges, dirty: true })
+    // 整理布局 = 批量坐标改动（纯几何）：同样防抖自动保存（不构成编排变更）
+    scheduleGeometryAutoSave()
     notify('success', t.toastTidy)
-  }, [dispatch, history, notify, state.canvas.edges, state.canvas.nodes, t.toastTidy])
+  }, [dispatch, history, notify, scheduleGeometryAutoSave, state.canvas.edges, state.canvas.nodes, t.toastTidy])
 
+  /** 清空画布：无二次确认（用户裁决）；运行中由工具栏禁用入口，此处不重复拦截。 */
   const clearGraph = useCallback(() => {
-    dispatch({
-      type: 'CONFIRM_SET',
-      confirm: {
-        kind: 'confirmText',
-        title: t.clearCanvas,
-        message: t.clearCanvasHint,
-        confirmLabel: t.clear,
-        onConfirm: () => {
-          history.remember()
-          dispatch({ type: 'GRAPH_REPLACED', nodes: [], edges: [], dirty: true })
-          dispatch({ type: 'CLEAR_SELECTION' })
-          notify('info', t.toastCleared)
-        },
-      },
-    })
-  }, [dispatch, history, notify, t.clear, t.clearCanvas, t.clearCanvasHint, t.toastCleared])
-
-  const removeSelected = useCallback(() => {
-    if (!state.selection.nodeId) return
-    const id = state.selection.nodeId
-    const node = state.canvas.nodes.find((item) => item.id === id)
-    if (!node) return
-    // 虚拟节点级联提示（§4.2.3.2 规则 5）：删除主节点时通知其虚拟引用数量
-    const proxies = node.kind === 'parent' || node.kind === 'agent'
-      ? state.canvas.nodes.filter((item) => item.kind === 'proxy' && (item as { proxySourceId?: unknown }).proxySourceId === node.id)
-      : []
-    if (proxies.length > 0) {
-      dispatch({
-        type: 'CONFIRM_SET',
-        confirm: {
-          kind: 'confirmText',
-          title: t.deleteNode,
-          message: t.proxyCascadeHint.replace('{count}', String(proxies.length)),
-          onConfirm: () => { removeNodeNow(id) },
-        },
-      })
-      return
-    }
-    dispatch({
-      type: 'CONFIRM_SET',
-      confirm: { kind: 'confirmText', title: t.deleteNode, message: t.confirmDelete, onConfirm: () => { removeNodeNow(id) } },
-    })
-  }, [dispatch, state.canvas.nodes, state.selection.nodeId, t.confirmDelete, t.deleteNode, t.proxyCascadeHint])
+    history.remember()
+    dispatch({ type: 'GRAPH_REPLACED', nodes: [], edges: [], dirty: true })
+    dispatch({ type: 'CLEAR_SELECTION' })
+    notify('info', t.toastCleared)
+  }, [dispatch, history, notify, t.toastCleared])
 
   const removeNodeNow = useCallback((id: string) => {
+    // 运行中锁定（防御性二次拦截：调用点可能不止 removeSelected）
+    if (locks.isNodeLocked(id)) return
     history.remember()
     // 组内成员离开协作组：清除成员关系（§4.2.5.2）
     const node = state.canvas.nodes.find((item) => item.id === id)
@@ -168,14 +195,27 @@ export function useCanvasActions(
     }
     dispatch({ type: 'CLEAR_SELECTION' })
     notify('info', t.toastDeleted)
-  }, [dispatch, history, notify, state.canvas.edges, state.canvas.nodes, t.toastDeleted])
+  }, [dispatch, history, locks, notify, state.canvas.edges, state.canvas.nodes, t.toastDeleted])
+
+  /** 删除选中节点：无二次确认（用户裁决）；运行中锁定项静默忽略。 */
+  const removeSelected = useCallback(() => {
+    if (!state.selection.nodeId) return
+    const id = state.selection.nodeId
+    const node = state.canvas.nodes.find((item) => item.id === id)
+    if (!node) return
+    // 运行中锁定：已完成/执行中的节点不可删除（静默忽略；无 toast，用户裁决）
+    if (locks.isNodeLocked(id)) return
+    removeNodeNow(id)
+  }, [locks, removeNodeNow, state.canvas.nodes, state.selection.nodeId])
 
   const removeLine = useCallback((id: string) => {
+    // 运行中锁定：已完成流程的连线与执行中节点左入口连线不可删除（静默忽略）
+    if (locks.isEdgeLocked(id)) return
     history.remember()
     dispatch({ type: 'EDGE_REMOVED', id })
     dispatch({ type: 'CLEAR_SELECTION' })
     notify('info', t.toastDeleted)
-  }, [dispatch, history, notify, t.toastDeleted])
+  }, [dispatch, history, locks, notify, t.toastDeleted])
 
   // ---------- 画布节点放置（模板深拷贝，§4.2.1） ----------
   const placeTemplateNode = useCallback((kind: 'role' | 'file' | 'database', templateId: string, position: { x: number; y: number }) => {
@@ -305,10 +345,15 @@ export function useCanvasActions(
 
   const onGroupResize = useCallback((id: string, size: { w: number; h: number }) => {
     dispatch({ type: 'NODE_DATA_PATCH', id, patch: { size } })
-  }, [dispatch])
+    // 卡片缩放属纯几何改动：防抖自动保存（不弹运行中确认、不构成编排变更）
+    scheduleGeometryAutoSave()
+  }, [dispatch, scheduleGeometryAutoSave])
 
   /** 角色节点拖入协作组（§4.2.5.2 规则 1）：成员标记 groupId + 组 memberIds 登记（原子追加，防止不一致）。 */
   const addNodeToGroup = useCallback((nodeId: string, groupId: string) => {
+    // 运行中锁定：已完成/执行中节点入组会断开其原有流程连线（dropNodeFlowLines），
+    // 等于改写已跑完/执行中的流程 → 直接忽略
+    if (locks.isNodeLocked(nodeId)) return
     const group = state.canvas.nodes.find((item) => item.id === groupId)
     if (!group || group.kind !== 'group') return
     const node = state.canvas.nodes.find((item) => item.id === nodeId)
@@ -323,7 +368,7 @@ export function useCanvasActions(
     // 入组时自动断开该节点原有的流程连线（组内成员仅上下文/数据库线，§4.2.5.2 规则 4）
     dispatch({ type: 'GRAPH_REPLACED', nodes: joinNodeToGroup(state.canvas.nodes, nodeId, groupId), edges: dropNodeFlowLines(state.canvas.edges, nodeId), dirty: true })
     notify('success', t.toastGroupMemberAdded)
-  }, [dispatch, history, notify, state.canvas.edges, state.canvas.nodes, t.groupMemberLimitHint, t.toastGroupMemberAdded])
+  }, [dispatch, history, locks, notify, state.canvas.edges, state.canvas.nodes, t.groupMemberLimitHint, t.toastGroupMemberAdded])
 
   // ---------- 虚拟节点（复制） ----------
   const copyToProxy = useCallback(() => {
@@ -351,6 +396,8 @@ export function useCanvasActions(
   // 再从去重后的成员列表里移除该成员（一次只删一个，即使历史数据里该 id 重复出现），
   // 同时只清空目标成员的 groupId —— 杜绝「删 1 个却移出多个 / 无论点哪个都移出 2 个」。
   const removeGroupMember = useCallback((memberId: string) => {
+    // 运行中锁定：已完成/执行中成员退出协作组会改变已跑完/执行中的协作结构 → 忽略
+    if (locks.isNodeLocked(memberId)) return
     const base = consolidateGroups(state.canvas.nodes)
     const member = base.find((item) => item.id === memberId)
     const groupId = member && (member.kind === 'parent' || member.kind === 'agent')
@@ -368,7 +415,7 @@ export function useCanvasActions(
       return n
     })
     dispatch({ type: 'GRAPH_REPLACED', nodes, edges: state.canvas.edges, dirty: true })
-  }, [dispatch, history, state.canvas.edges, state.canvas.nodes])
+  }, [dispatch, history, locks, state.canvas.edges, state.canvas.nodes])
 
   // ---------- 交换节点左右连接点（用户批注：美化布线防交叉；状态随节点持久化） ----------
   const swapNodePorts = useCallback((id: string) => {

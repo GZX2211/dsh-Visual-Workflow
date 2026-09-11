@@ -18,6 +18,7 @@ import {
   OrchestratorRuntime,
   type AgentHost,
   type CallerInfo,
+  type CoordinatorMessage,
   type NodeRunner,
   type NodeStartInput,
   type OrchestratorConfig,
@@ -37,6 +38,7 @@ import {
 import { WATCHDOG_INTERVAL_MS, reconcileStaleRuns, scheduleIdleWatchdog, sweepWatchdogOnce } from '../../src/host/orchestrator/watchdog.js'
 import { HEAD_MARKER, MID_MARKER, TAIL_MARKER, TAIL_RESTATE_MARKER } from '../../src/host/prompts/markers.js'
 import { ORCH_HARD_CONSTRAINTS } from '../../src/host/prompts/orchestration.js'
+import { ORCH_CHANGE_MARKER } from '../../src/host/prompts/orchestration-change.js'
 import { NODE_HARD_CONSTRAINTS } from '../../src/host/prompts/node-task.js'
 import { parentExecutorOf } from '../../src/host/orchestrator/helpers.js'
 import { stageLabel } from '../../src/host/graph/model.js'
@@ -120,9 +122,14 @@ class FakeRoot implements RootAgentLike {
   id: string
   status = 'idle'
   messages: RootInjectedMessage[] = []
+  /** steer 插队注入的消息（编排变更通知/协作超时通知等；父代理忙碌时走该通道）。 */
+  steered: CoordinatorMessage[] = []
   session: { events: unknown[] } = { events: [] }
   constructor(id: string) {
     this.id = id
+  }
+  steer(message: CoordinatorMessage): void {
+    this.steered.push(message)
   }
 }
 
@@ -1385,6 +1392,123 @@ describe('refreshActiveDefinitions：画布保存 → 运行事实源实时刷�
     await h.runtime.refreshActiveDefinitions('flow-1', 'session-1', updated)
     // 已完成 run 的事实源不应被改写（历史追溯语料保持原样）
     expect((await h.store.readOrchestration(result.runId))?.nodes).toHaveLength(6)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 运行中画布保存 → 「编排变更」注入（用户裁决的新机制，取代提示词软约束）
+// ---------------------------------------------------------------------------
+
+describe('运行中画布保存 → 编排变更注入（新机制）', () => {
+  /** 取下该会话的父代理 fake（断言注入通道用）。 */
+  function rootOf(h: Harness): FakeRoot {
+    const root = h.agents.roots.get('session-1')
+    if (!root) throw new Error('缺少父代理 fake')
+    return root as FakeRoot
+  }
+
+  it('编排语义变更 + 父代理忙碌：steer 插队注入【编排变更】与事实源路径', async () => {
+    const h = await makeHarness()
+    const flow = makeFlow()
+    const { result } = await start(h, flow)
+    const root = rootOf(h)
+    root.status = 'running'
+    // 画布新增节点 + 新增连线（编排语义变更）
+    const updated: WorkflowDocument = {
+      ...flow,
+      revision: 2,
+      nodes: [...flow.nodes, agent('n-a3', '子任务C')],
+      lines: [...flow.lines, { id: 'l5', source: 'n-a2', target: 'n-a3', sourceHandle: 'flow-out', targetHandle: 'flow-in' }],
+    }
+    await h.store.saveWorkflow(updated, 'session-1', { force: true })
+    await h.runtime.refreshActiveDefinitions('flow-1', 'session-1', updated)
+
+    expect(root.steered).toHaveLength(1)
+    const text = root.steered[0]?.content[0]?.text ?? ''
+    expect(text).toContain(ORCH_CHANGE_MARKER)
+    expect(text).toContain(h.store.orchestrationFilePath(result.runId))
+    // 未走 followup（父代理忙碌时不新起回合；messages 仅启动注入那一条）
+    expect(root.messages).toHaveLength(1)
+    // 事实源已刷新为最新拓扑
+    expect((await h.store.readOrchestration(result.runId))?.nodes.map((n) => n.id)).toContain('n-a3')
+  })
+
+  it('纯几何改动（节点坐标）：不注入，但事实源仍刷新', async () => {
+    const h = await makeHarness()
+    const flow = makeFlow()
+    const { result } = await start(h, flow)
+    const root = rootOf(h)
+    root.status = 'running'
+    const moved: WorkflowDocument = {
+      ...flow,
+      revision: 2,
+      nodes: flow.nodes.map((node) => ({ ...node, position: { x: 321, y: 654 } })),
+    }
+    await h.runtime.refreshActiveDefinitions('flow-1', 'session-1', moved)
+
+    expect(root.steered).toHaveLength(0)
+    expect(root.messages).toHaveLength(1)
+    expect((await h.store.readOrchestration(result.runId))?.nodes[0]?.position).toEqual({ x: 321, y: 654 })
+  })
+
+  it('节点配置变化（systemPrompt）：注入', async () => {
+    const h = await makeHarness()
+    const flow = makeFlow()
+    const { result } = await start(h, flow)
+    const root = rootOf(h)
+    root.status = 'running'
+    const patched: WorkflowDocument = {
+      ...flow,
+      revision: 2,
+      nodes: flow.nodes.map((node) => (node.id === 'n-a1'
+        ? ({ ...node, data: { ...(node as { data: Record<string, unknown> }).data, systemPrompt: '任务：改后的A' } } as GraphNode)
+        : node)),
+    }
+    await h.runtime.refreshActiveDefinitions('flow-1', 'session-1', patched)
+    expect(root.steered).toHaveLength(1)
+    expect(result.runId).toBeTruthy()
+  })
+
+  it('父代理空闲：followupRoot 兜底注入（不丢通知）', async () => {
+    const h = await makeHarness()
+    const flow = makeFlow()
+    await start(h, flow)
+    const root = rootOf(h)
+    root.status = 'idle'
+    const updated = { ...flow, revision: 2, nodes: [...flow.nodes, agent('n-a3', '子任务C')] }
+    await h.runtime.refreshActiveDefinitions('flow-1', 'session-1', updated)
+
+    expect(root.steered).toHaveLength(0)
+    expect(root.messages).toHaveLength(2)
+    expect(root.messages[1]?.content[0]?.text ?? '').toContain(ORCH_CHANGE_MARKER)
+  })
+
+  it('paused run：只刷新事实源，不注入（不打断暂停态）', async () => {
+    const h = await makeHarness()
+    const flow = makeFlow()
+    const { result } = await start(h, flow)
+    const root = rootOf(h)
+    const entry = h.runtime.entryFor(result.runId)
+    if (!entry) throw new Error('缺少 run entry')
+    entry.snapshot.status = 'paused'
+    const updated = { ...flow, revision: 2, nodes: [...flow.nodes, agent('n-a3', '子任务C')] }
+    await h.runtime.refreshActiveDefinitions('flow-1', 'session-1', updated)
+
+    expect(root.steered).toHaveLength(0)
+    expect(root.messages).toHaveLength(1)
+    expect((await h.store.readOrchestration(result.runId))?.nodes.map((n) => n.id)).toContain('n-a3')
+  })
+
+  it('连续两次相同保存：第二次无变更 → 不重复注入', async () => {
+    const h = await makeHarness()
+    const flow = makeFlow()
+    await start(h, flow)
+    const root = rootOf(h)
+    root.status = 'running'
+    const updated = { ...flow, revision: 2, nodes: [...flow.nodes, agent('n-a3', '子任务C')] }
+    await h.runtime.refreshActiveDefinitions('flow-1', 'session-1', updated)
+    await h.runtime.refreshActiveDefinitions('flow-1', 'session-1', updated)
+    expect(root.steered).toHaveLength(1)
   })
 })
 

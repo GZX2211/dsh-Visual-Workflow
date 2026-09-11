@@ -8,7 +8,7 @@ import { useCallback } from 'react'
 import type { Dispatch } from 'react'
 import type { WorkflowDocument, WorkflowTemplate } from '../../host/shared/graph-model.js'
 import type { ServiceState } from '../../host/shared/types.js'
-import { currentFlowOf, currentFlowTemplateOf, currentServiceOf, type LibTab, type StudioAction, type StudioState } from '../studio/studio-state.js'
+import { currentFlowOf, currentFlowTemplateOf, currentServiceOf, instanceRunningOf, type LibTab, type StudioAction, type StudioState } from '../studio/studio-state.js'
 import type { WorkflowsFace } from './useWorkflows.js'
 import type { FlowTemplatesFace } from './useFlowTemplates.js'
 import type { TemplatesFace } from './useTemplates.js'
@@ -20,9 +20,19 @@ import type { ToastFace } from './useToast.js'
 import type { Dict } from '../i18n.js'
 import { EP } from '../lib/remote.js'
 
+/** 画布保存选项。 */
+export interface SaveCanvasOptions {
+  /**
+   * 纯几何改动的自动保存（节点拖动 / 协作组卡片缩放的防抖保存）：
+   * 跳过「运行中保存」二次确认、跳过成功 toast（避免拖动即弹窗/刷屏）。
+   * 它不是「编排变更」通道：若画布内容没变，宿主侧 diff 也不会向父代理注入。
+   */
+  auto?: boolean
+}
+
 export interface DocumentActionsFace {
   /** 保存当前画布（实例/模板/服务；成功记录已保存快照并 toast）。返回保存成功的文档（类型为三态并集，与原实现推断一致）。 */
-  saveCanvas(): Promise<WorkflowDocument | WorkflowTemplate | ServiceState | null>
+  saveCanvas(options?: SaveCanvasOptions): Promise<WorkflowDocument | WorkflowTemplate | ServiceState | null>
   /**
    * 创建实例（模板态：模板内容存为新实例并切到实例态；实例态等价保存）。
    * 工作台全局化改版：「开启新会话」为一次性临时选项——勾选时先新建主会话，
@@ -61,22 +71,45 @@ export function useDocumentActions(
   t: Dict,
 ): DocumentActionsFace {
   // ---------- 保存 / 打开 ----------
-  const saveCanvas = useCallback(async () => {
+  const saveCanvas = useCallback(async (options?: SaveCanvasOptions) => {
+    const auto = options?.auto === true
     if (state.currentKind === 'workflow') {
       const flow = currentFlowOf(state)
       if (!flow) return null
-      try {
-        const saved = await workflows.saveWorkflow(flow, state.canvas.nodes, state.canvas.edges)
-        if (saved) {
-          // MARK_SAVED：同时记录「已保存图快照」，供撤销/重做精确判定 dirty（Bug 17）
-          dispatch({ type: 'MARK_SAVED' })
-          notify('success', t.toastSaved)
+      /** 真正落库（二次确认确认后与即时路径共用）。 */
+      const doSave = async (): Promise<WorkflowDocument | null> => {
+        try {
+          const saved = await workflows.saveWorkflow(flow, state.canvas.nodes, state.canvas.edges)
+          if (saved) {
+            // MARK_SAVED：同时记录「已保存图快照」，供撤销/重做精确判定 dirty（Bug 17）
+            dispatch({ type: 'MARK_SAVED' })
+            // 自动保存（纯几何拖动）静默成功，避免拖动即 toast；失败仍提示
+            if (!auto) notify('success', t.toastSaved)
+          }
+          return saved
+        } catch (error) {
+          toastError(error)
+          return null
         }
-        return saved
-      } catch (error) {
-        toastError(error)
+      }
+      // 运行中保存实例：二次确认（用户裁决 b）——保存会把最新画布同步给父代理
+      // 并由宿主注入【编排变更】，父代理据此调整后续编排流程，故必须先确认。
+      // 自动保存（纯几何拖动）不弹确认；无未保存改动（dirty=false，例如纯拖动已
+      // 自动落库）也直接忽略确认与注入——坐标变动不构成编排变更。
+      if (!auto && state.dirty && instanceRunningOf(state)) {
+        dispatch({
+          type: 'CONFIRM_SET',
+          confirm: {
+            kind: 'confirmText',
+            title: t.saveRunningTitle,
+            message: t.saveRunningMessage,
+            confirmLabel: t.saveRunningConfirm,
+            onConfirm: () => { void doSave() },
+          },
+        })
         return null
       }
+      return await doSave()
     }
     if (state.currentKind === 'flowTemplate') {
       // 模板态：属性栏「保存」= 保存模板全部内容（覆盖模板库，改模板不改实例）
@@ -86,7 +119,7 @@ export function useDocumentActions(
         const saved = await flowTemplates.saveFlowTemplate(template, state.canvas.nodes, state.canvas.edges)
         if (saved) {
           dispatch({ type: 'MARK_SAVED' })
-          notify('success', t.toastSaved)
+          if (!auto) notify('success', t.toastSaved)
         }
         return saved
       } catch (error) {
@@ -101,7 +134,7 @@ export function useDocumentActions(
         const saved = await serviceControl.saveService(service, state.canvas.nodes, state.canvas.edges)
         if (saved) {
           dispatch({ type: 'MARK_SAVED' })
-          notify('success', t.toastSaved)
+          if (!auto) notify('success', t.toastSaved)
         }
         return saved
       } catch (error) {
@@ -110,7 +143,7 @@ export function useDocumentActions(
       }
     }
     return null
-  }, [dispatch, notify, state, toastError, workflows, flowTemplates, serviceControl, t.toastSaved])
+  }, [dispatch, notify, state, toastError, workflows, flowTemplates, serviceControl, t.saveRunningConfirm, t.saveRunningMessage, t.saveRunningTitle, t.toastSaved])
 
   /**
    * 创建实例（图2 交互改造核心；工作台全局化改版重写）：

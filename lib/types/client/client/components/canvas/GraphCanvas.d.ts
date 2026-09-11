@@ -30,6 +30,12 @@ export interface GraphCanvasProps {
         outputSummary: string;
     }>;
     highlightedNodeIds: string[];
+    /**
+     * 运行中锁定项（已完成流程不可变更；模式一 running 时由 run-locks 计算）：
+     * 节点显示锁角标、被锁连线渲染为灰化虚线，点击不选中（属性栏不展开）。
+     */
+    lockedNodeIds?: ReadonlySet<string>;
+    lockedEdgeIds?: ReadonlySet<string>;
     onInit(api: CanvasApi): void;
     onNodeDragStart(): void;
     onNodeMove(id: string, position: {

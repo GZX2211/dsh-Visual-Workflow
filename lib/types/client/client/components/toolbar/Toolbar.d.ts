@@ -12,6 +12,8 @@ export interface ToolbarProps {
     onRedo(): void;
     onClear(): void;
     canClear: boolean;
+    /** 「清空」按钮悬停说明（运行中禁用时提示先停止运行）。 */
+    clearTitle: string;
     onTidy(): void;
     canTidy: boolean;
     onSave(): void;

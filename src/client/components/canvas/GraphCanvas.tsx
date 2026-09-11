@@ -30,6 +30,12 @@ export interface GraphCanvasProps {
   selectedEdge: string | null
   runStatusByNode: Record<string, { status: string; attempts: number; outputSummary: string }>
   highlightedNodeIds: string[]
+  /**
+   * 运行中锁定项（已完成流程不可变更；模式一 running 时由 run-locks 计算）：
+   * 节点显示锁角标、被锁连线渲染为灰化虚线，点击不选中（属性栏不展开）。
+   */
+  lockedNodeIds?: ReadonlySet<string>
+  lockedEdgeIds?: ReadonlySet<string>
   onInit(api: CanvasApi): void
   onNodeDragStart(): void
   onNodeMove(id: string, position: { x: number; y: number }): void
@@ -60,6 +66,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
     nodes, edges, copy, mode, selectedNode, selectedEdge, runStatusByNode, highlightedNodeIds,
     onInit, onNodeDragStart, onNodeMove, onNodeDropToGroup, onNodeSelect, onEdgeSelect, onPaneClick,
     onConnect, onConnectionRejected, onGroupResize, onSwapPorts, dropTargetGroupId, fitLabel, zoomInLabel, zoomOutLabel, emptyHint, workflowCaption,
+    lockedNodeIds, lockedEdgeIds,
   } = props
   const rootRef = useRef<HTMLDivElement | null>(null)
   const viewportRef = useRef<Viewport>({ x: 32, y: 32, zoom: 0.8 })
@@ -72,6 +79,13 @@ export function GraphCanvas(props: GraphCanvasProps) {
   const byId = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes])
   const highlightedSet = useMemo(() => new Set(highlightedNodeIds), [highlightedNodeIds])
   const runStatusOf = (id: string): { status: string; attempts: number; outputSummary: string } | null => runStatusByNode[id] ?? null
+  /** 锁定判定（未传入视为全解锁）：节点锁角标、连线灰化虚线、点击不选中。 */
+  const isLockedNode = (id: string): boolean => lockedNodeIds?.has(id) === true
+  const isLockedEdge = (id: string): boolean => lockedEdgeIds?.has(id) === true
+  /** 节点锁悬停文案（已完成/执行中语义不同，取自词典）。 */
+  const nodeLockHint = (id: string): string => (runStatusOf(id)?.status === 'running'
+    ? String(copy.lockedRunningNodeHint ?? '')
+    : String(copy.lockedCompletedNodeHint ?? ''))
 
   const updateViewport = useCallback((value: Viewport | ((current: Viewport) => Viewport)): void => {
     setViewport((current) => {
@@ -344,6 +358,8 @@ export function GraphCanvas(props: GraphCanvasProps) {
     if (!geometry) return null
     const isSelected = edge.id === selectedEdge
     const isRunning = runStatusOf(edge.source)?.status === 'running'
+    // 运行中锁定连线：属于已完成流程或执行中节点的左入口 → 灰化虚线、点击不选中（属性栏不展开）
+    const isLocked = isLockedEdge(edge.id)
     const lineType = conditionLabel(edge.condition) ? edgeConditionClass(edge) : edgeChannelClass(edge)
     const label = conditionLabel(edge.condition)
     // 流程通道有向（箭头）；上下文/数据库线无方向要求
@@ -352,14 +368,20 @@ export function GraphCanvas(props: GraphCanvasProps) {
     const markerEnd = directed ? `url(#wf-arrow-${channel === '' ? 'flow' : channel})` : undefined
     const labelWidth = label ? Math.min(150, Math.max(34, label.length * 7 + 16)) : 0
     return (
-      <g key={edge.id}>
+      <g key={edge.id} className={isLocked ? 'is-locked' : undefined}>
+        {/* 被锁连线不可选中/编辑（用户裁决：锁定的内容不展开属性面板，故无需 toast） */}
+        {isLocked ? <title>{String(copy.lockedEdgeHint ?? '')}</title> : null}
         <path
           className={`wf-graph__edge-hit${isSelected ? ' is-selected' : ''}`}
           d={geometry.path}
-          onPointerDown={(event) => { event.stopPropagation(); onEdgeSelect?.(edge.id) }}
+          onPointerDown={(event) => {
+            event.stopPropagation()
+            if (isLocked) return
+            onEdgeSelect?.(edge.id)
+          }}
         />
         <path
-          className={`wf-graph__edge${isSelected ? ' is-selected' : ''}${lineType ? ` ${lineType}` : ''}${isRunning ? ' is-running' : ''}`}
+          className={`wf-graph__edge${isSelected ? ' is-selected' : ''}${lineType ? ` ${lineType}` : ''}${isRunning ? ' is-running' : ''}${isLocked ? ' is-locked' : ''}`}
           d={geometry.path}
           markerEnd={markerEnd}
         />
@@ -405,11 +427,16 @@ export function GraphCanvas(props: GraphCanvasProps) {
   }
   // 组内成员仅在组卡片内显示迷你卡（不在画布重复渲染大卡，需求 §4.2.5.2 规则 9）
   const standalone = renderedNodes.filter((node) => node.kind !== 'group' && !memberIdsOf.has(node.id))
-  const groupMembers = new Map<string, { id: string; label: string; status: string | null }[]>()
+  const groupMembers = new Map<string, { id: string; label: string; status: string | null; locked: boolean }[]>()
   for (const group of groupNodes) {
     const members = [...new Set((group.data.memberIds as string[] | undefined) ?? [])].map((memberId) => {
       const member = byId.get(memberId)
-      return { id: memberId, label: String((member?.data as { label?: unknown } | undefined)?.label ?? memberId), status: runStatusOf(memberId)?.status ?? null }
+      return {
+        id: memberId,
+        label: String((member?.data as { label?: unknown } | undefined)?.label ?? memberId),
+        status: runStatusOf(memberId)?.status ?? null,
+        locked: isLockedNode(memberId),
+      }
     })
     groupMembers.set(group.id, members)
   }
@@ -450,6 +477,8 @@ export function GraphCanvas(props: GraphCanvasProps) {
               members={groupMembers.get(node.id) ?? []}
               selected={node.id === selectedNode}
               dropTarget={dropTargetGroupId === node.id || dragHoverGroupId === node.id}
+              locked={isLockedNode(node.id)}
+              lockHint={nodeLockHint(node.id)}
               onPointerDown={beginNodeDrag}
               onHandlePointerDown={beginConnection}
               onMemberSelect={onNodeSelect}
@@ -469,6 +498,8 @@ export function GraphCanvas(props: GraphCanvasProps) {
               // parent 为编排执行单元（父代理节点），快照同样记录其状态，必须一并回显
               // （否则仅 parent 节点的工作流在画布上永远看不到节点运行状态）。
               runStatus={node.kind === 'agent' || node.kind === 'parent' ? runStatusOf(node.id) : null}
+              locked={isLockedNode(node.id)}
+              lockHint={nodeLockHint(node.id)}
               onPointerDown={beginNodeDrag}
               onHandlePointerDown={beginConnection}
               onToggleSwap={onSwapPorts}

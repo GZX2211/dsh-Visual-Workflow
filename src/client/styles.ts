@@ -64,7 +64,10 @@ export const styles = `
 .wf-arrow-head.is-fail{fill:var(--wf-fail)}
 .wf-arrow-head.is-content{fill:var(--wf-content)}
 .wf-graph__edge.is-running{stroke-dasharray:8 5}
+/* 运行中锁定连线（已完成流程 / 执行中节点左入口）：灰化虚线 + 不可点击（点击不选中、属性栏不展开） */
+.wf-graph__edge.is-locked{stroke:var(--wf-ink-2);stroke-dasharray:3 4;opacity:.55;filter:none}
 .wf-graph__edge-hit{fill:none!important;stroke:transparent;stroke-width:18;vector-effect:non-scaling-stroke;pointer-events:stroke;cursor:pointer}
+g.is-locked .wf-graph__edge-hit{cursor:not-allowed}
 .wf-graph__connection{fill:none!important;stroke:var(--wf-brand);stroke-width:2;stroke-dasharray:7 5;vector-effect:non-scaling-stroke;pointer-events:none}
 .wf-graph__label-bg{fill:var(--wf-layer);stroke:var(--wf-border);stroke-width:1;vector-effect:non-scaling-stroke}
 .wf-graph__label{fill:var(--wf-ink);font-size:10px;font-weight:750;text-anchor:middle;dominant-baseline:middle;pointer-events:none}
@@ -92,6 +95,10 @@ export const styles = `
 .wf-node__kind{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--wf-ink-2);margin-bottom:2px;display:flex;align-items:center;gap:6px}
 .wf-node__label{font-weight:650;font-size:13px;word-break:break-word;display:flex;align-items:center;gap:6px}
 .wf-node__proxy-badge{flex:none;font-size:9px;font-weight:750;color:var(--wf-warn);border:1px solid var(--wf-warn);border-radius:999px;padding:0 5px;line-height:15px}
+/* 运行中锁定角标（已完成/执行中节点；仅提示不可修改，节点仍可拖动移动） */
+.wf-node__lock-badge{flex:none;font-size:9px;line-height:14px;opacity:.75;cursor:help}
+.wf-node.is-locked{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--wf-ink-2) 35%,transparent)}
+.wf-node.is-locked .wf-node__label{opacity:.92}
 .wf-node__prompt{margin-top:5px;font-size:11px;color:var(--wf-ink-2);white-space:pre-wrap;max-height:34px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 /* 卡片右上角「交换左右连接点」按钮（用户批注：美化布线防交叉；交换后连线端点随之换向） */
 .wf-node__swap{position:absolute;z-index:5;top:7px;right:8px;width:22px;height:22px;min-width:22px;padding:0;border:1px solid var(--wf-border-strong);border-radius:7px;background:var(--wf-layer-2);color:var(--wf-ink-2);font-size:13px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:border-color .14s ease,color .14s ease}

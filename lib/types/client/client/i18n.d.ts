@@ -40,7 +40,7 @@ export declare const zh: {
     redo: string;
     clear: string;
     clearCanvas: string;
-    clearCanvasHint: string;
+    clearRunningHint: string;
     tidy: string;
     togglePanels: string;
     save: string;
@@ -209,9 +209,11 @@ export declare const zh: {
         database: string;
         group: string;
     };
-    deleteTemplateTitle: string;
-    deleteTemplateMessage: string;
     confirmDelete: string;
+    /** 运行中保存实例的二次确认（需求：保存后会更改父代理后续编排流程）。 */
+    saveRunningTitle: string;
+    saveRunningMessage: string;
+    saveRunningConfirm: string;
     unsavedTitle: string;
     unsavedMessage: string;
     unsavedSave: string;
@@ -243,8 +245,10 @@ export declare const zh: {
     toastResuming: string;
     parentDuplicatedHint: string;
     stageDuplicatedHint: string;
-    deleteNode: string;
-    proxyCascadeHint: string;
+    /** 运行中画布锁定（已完成流程不可变更）的悬停/角标提示文案。 */
+    lockedCompletedNodeHint: string;
+    lockedRunningNodeHint: string;
+    lockedEdgeHint: string;
     invalidConnection: string;
     selfLoop: string;
     duplicateConnection: string;

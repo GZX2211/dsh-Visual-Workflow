@@ -25,6 +25,8 @@ export interface ToolbarProps {
   onRedo(): void
   onClear(): void
   canClear: boolean
+  /** 「清空」按钮悬停说明（运行中禁用时提示先停止运行）。 */
+  clearTitle: string
   onTidy(): void
   canTidy: boolean
   onSave(): void
@@ -45,7 +47,7 @@ export interface ToolbarProps {
 
 export function Toolbar(props: ToolbarProps) {
   const {
-    copy: t, mode, panelsCollapsed, onTogglePanels, saveLabel, onUndo, onRedo, onClear, canClear, onTidy, canTidy,
+    copy: t, mode, panelsCollapsed, onTogglePanels, saveLabel, onUndo, onRedo, onClear, canClear, clearTitle, onTidy, canTidy,
     onSave, canSave, running, onStop, onRun, onOpenHistory, canHistory, serviceStatus,
     showNewSession, instanceOptions, onInstanceOptionsChange,
   } = props
@@ -77,7 +79,7 @@ export function Toolbar(props: ToolbarProps) {
       </button>
       <button type="button" className="wf-btn wf-iconbtn is-ghost" title={`${t.undo} · Ctrl/Cmd+Z`} aria-label={t.undo} onClick={onUndo}>↶</button>
       <button type="button" className="wf-btn wf-iconbtn is-ghost" title={`${t.redo} · Ctrl/Cmd+Shift+Z`} aria-label={t.redo} onClick={onRedo}>↷</button>
-      <button type="button" className="wf-btn is-ghost" title={t.clearCanvas} onClick={onClear} disabled={!canClear}>{t.clear}</button>
+      <button type="button" className="wf-btn is-ghost" title={clearTitle} onClick={onClear} disabled={!canClear}>{t.clear}</button>
       <button type="button" className="wf-btn is-ghost" title={t.tidy} onClick={onTidy} disabled={!canTidy}>{t.tidy}</button>
       <button type="button" className="wf-btn" onClick={onSave} disabled={!canSave}>{saveLabel}</button>
       {running

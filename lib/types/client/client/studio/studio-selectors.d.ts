@@ -9,6 +9,14 @@ export declare function currentFlowTemplateOf(state: StudioState): WorkflowTempl
 export declare function currentServiceOf(state: StudioState): ServiceState | null;
 /** 当前运行状态（running 判定）。 */
 export declare function isRunningOf(state: StudioState): boolean;
+/**
+ * 当前**实例**是否处于「运行中」（模式一；运行中实例的保存二次确认与画布锁定共用）。
+ * 判定来源双保险：① 当前跟踪的 run 快照（flowId 必须等于当前实例，避免跟踪到别的实例）；
+ * ② 全量活跃 run 摘要轮询（跨会话/外部触发也能判定）。
+ * 模式二按用户裁决保持现状（服务常驻运行，无「运行中画布」语义），恒为 false。
+ * 暂停（paused）不算运行中：暂停时保存既不弹确认、也不锁画布。
+ */
+export declare function instanceRunningOf(state: StudioState): boolean;
 /** 编辑器数据（右侧面板渲染源）。 */
 export declare function editorDataOf(state: StudioState): EditorData | null;
 /** 折叠/切换循环长度（共 3 态：左展开→切换底栏→收起底栏→左展开）。 */

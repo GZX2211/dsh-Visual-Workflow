@@ -15,6 +15,7 @@ import type { RemoteFace } from './useRemote.js'
 import type { ToastFace } from './useToast.js'
 import type { DocumentActionsFace } from './useDocumentActions.js'
 import type { CanvasActionsFace } from './useCanvasActions.js'
+import type { RunLockSet } from '../lib/run-locks.js'
 import type { Dict } from '../i18n.js'
 import { EP } from '../lib/remote.js'
 
@@ -23,6 +24,12 @@ export interface EditorActionsFace {
   patchEditor(patch: Record<string, unknown>): void
   saveEditor(): Promise<void>
   deleteEditor(): Promise<void>
+}
+
+/** 编辑器面外部依赖（运行中画布锁定判定）。 */
+export interface EditorActionsOptions {
+  /** 运行中锁定集：被锁连线的字段编辑直接忽略（防「运行前已选中」的旁路改写）。 */
+  locks: RunLockSet
 }
 
 /** 编辑器面（保存/删除失败 toast；节点/连线删除复用画布面）。 */
@@ -42,7 +49,9 @@ export function useEditorActions(
   removeLine: CanvasActionsFace['removeLine'],
   selectWorkflow: DocumentActionsFace['selectWorkflow'],
   selectFlowTemplate: DocumentActionsFace['selectFlowTemplate'],
+  options: EditorActionsOptions,
 ): EditorActionsFace {
+  const { locks } = options
   // ---------- 左侧库选中 ----------
   // 打开工作流/服务/模板（selectWorkflow/selectFlowTemplate 由文档面注入，未保存守卫在后端）
   const selectLibraryCard = useCallback((kind: LibSelKind, id: string) => {
@@ -104,9 +113,12 @@ export function useEditorActions(
       return
     }
     if (editor.source === 'edge') {
+      // 运行中锁定：被锁连线（已完成流程 / 执行中节点左入口）的字段编辑直接忽略
+      // ——正常路径下点击被锁连线不会选中，此处防「运行开始前已选中」的旁路改写。
+      if (locks.isEdgeLocked(editor.id)) return
       dispatch({ type: 'EDGE_PATCH', id: editor.id, patch })
     }
-  }, [dispatch, state.canvas.nodes, state.editor, state.templates])
+  }, [dispatch, locks, state.canvas.nodes, state.editor, state.templates])
 
   // ---------- 保存 / 删除编辑器对象 ----------
   const saveEditor = useCallback(async () => {
@@ -206,6 +218,8 @@ export function useEditorActions(
     if (editor.source === 'flowTemplate') {
       const template = state.flowTemplates.find((item) => item.id === editor.id)
       if (!template) return
+      // 草稿（未入库）本地直接移除；已入库模板删除**不再二次确认**（用户裁决 2026-02）：
+      // 直接走后端删除（成功由 deleteFlowTemplate 内部摘除列表项）并清空画布
       if ((template as { _draft?: boolean })._draft === true) {
         dispatch({ type: 'FLOW_TEMPLATE_REMOVED', id: template.id })
         dispatch({ type: 'CLEAR_CANVAS' })
@@ -213,51 +227,29 @@ export function useEditorActions(
         notify('info', t.toastDeleted)
         return
       }
-      dispatch({
-        type: 'CONFIRM_SET',
-        confirm: {
-          kind: 'confirmText',
-          title: t.deleteFlow,
-          message: `${t.confirmDelete}（${template.name}）`,
-          onConfirm: () => {
-            void flowTemplates.deleteFlowTemplate(template.id).then(() => {
-              dispatch({ type: 'CLEAR_CANVAS' })
-              notify('info', t.toastDeleted)
-            }).catch((error) => {
-              toastError(error)
-              dispatch({ type: 'CONFIRM_SET', confirm: null })
-            })
-          },
-        },
+      void flowTemplates.deleteFlowTemplate(template.id).then(() => {
+        dispatch({ type: 'CLEAR_CANVAS' })
+        notify('info', t.toastDeleted)
+      }).catch((error) => {
+        // 删除失败不改动本地列表（与后端保持一致），仅提示
+        toastError(error)
       })
       return
     }
     if (editor.source === 'template') {
       const template = state.templates[editor.kind].find((item) => item.id === editor.id)
       if (!template) return
-      // 本地草稿（未入库）直接移除；已入库模板走确认框 + 后端删除
+      // 草稿（未入库）本地直接移除；已入库模板删除**不再二次确认**（用户裁决 2026-02）
       if ((template as { _draft?: boolean })._draft === true) {
         dispatch({ type: 'TEMPLATE_REMOVED', kind: editor.kind, id: editor.id })
         dispatch({ type: 'CLEAR_SELECTION' })
         notify('info', t.toastDeleted)
         return
       }
-      dispatch({
-        type: 'CONFIRM_SET',
-        confirm: {
-          kind: 'confirmText',
-          title: t.deleteTemplateTitle,
-          message: t.deleteTemplateMessage.replace('{name}', String((template as { name?: unknown }).name ?? '')),
-          onConfirm: () => {
-            void templates.deleteTemplate(editor.kind, editor.id).then(() => {
-              dispatch({ type: 'CLEAR_SELECTION' })
-              notify('info', t.toastDeleted)
-            }).catch((error) => {
-              toastError(error)
-              dispatch({ type: 'CONFIRM_SET', confirm: null })
-            })
-          },
-        },
+      void templates.deleteTemplate(editor.kind, editor.id).then(() => {
+        notify('info', t.toastDeleted)
+      }).catch((error) => {
+        toastError(error)
       })
       return
     }
@@ -268,7 +260,7 @@ export function useEditorActions(
     if (editor.source === 'edge') {
       removeLine(editor.id)
     }
-  }, [dispatch, notify, removeLine, removeSelected, state.editor, state.sessionId, state.templates, state.flowTemplates, t.confirmDelete, t.deleteFlow, t.deleteTemplateMessage, t.deleteTemplateTitle, t.toastDeleted, templates, flowTemplates, toastError, workflows])
+  }, [dispatch, notify, removeLine, removeSelected, state.editor, state.sessionId, state.templates, state.flowTemplates, t.confirmDelete, t.deleteFlow, t.toastDeleted, templates, flowTemplates, toastError, workflows])
 
   return { selectLibraryCard, patchEditor, saveEditor, deleteEditor }
 }

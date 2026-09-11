@@ -11,17 +11,20 @@ import { nodeSizeOf } from './geometry.js'
 interface GroupCardProps {
   node: CanvasNode
   copy: Dict
-  members: Array<{ id: string; label: string; status: string | null }>
+  members: Array<{ id: string; label: string; status: string | null; locked?: boolean }>
   selected: boolean
   /** 拖拽悬停目标（左栏角色卡拖入时高亮并提示「放开以入组」）。 */
   dropTarget: boolean
+  /** 组卡片自身运行中锁定（已完成/执行中）：锁角标 + 悬停提示。 */
+  locked?: boolean
+  lockHint?: string
   onPointerDown(event: React.PointerEvent, id: string): void
   onHandlePointerDown(event: React.PointerEvent, id: string, handle: string): void
   onMemberSelect(id: string): void
   onResizeStart(event: React.PointerEvent, id: string, direction: string): void
 }
 
-export function GroupCard({ node, copy, members, selected, dropTarget, onPointerDown, onHandlePointerDown, onMemberSelect, onResizeStart }: GroupCardProps) {
+export function GroupCard({ node, copy, members, selected, dropTarget, locked, lockHint, onPointerDown, onHandlePointerDown, onMemberSelect, onResizeStart }: GroupCardProps) {
   const size = nodeSizeOf(node)
   // 去重计数（历史数据可能残留重复 memberIds，避免计数虚高）
   const memberIds = [...new Set((node.data.memberIds as string[] | undefined) ?? [])]
@@ -33,10 +36,11 @@ export function GroupCard({ node, copy, members, selected, dropTarget, onPointer
       style={{ left: node.position.x, top: node.position.y, width: size.w, height: size.h }}
       onPointerDown={(event) => onPointerDown(event, node.id)}
     >
-      <div className={`wf-node wf-node--group${selected ? ' is-selected' : ''}${dropTarget ? ' is-drop-target' : ''}`}>
+      <div className={`wf-node wf-node--group${selected ? ' is-selected' : ''}${dropTarget ? ' is-drop-target' : ''}${locked ? ' is-locked' : ''}`} title={locked ? lockHint : undefined}>
         <div className="wf-node__kind">
           <span>{String(copy.nodeKinds?.group ?? '协作组')}</span>
           <span className="wf-hint">{`${memberIds.length} ${String(copy.groupMembers ?? '个成员')}`}</span>
+          {locked ? <span className="wf-node__lock-badge" title={lockHint}>🔒</span> : null}
         </div>
         {dropTarget ? <div className="wf-group__drop-hint">{String(copy.groupDropHint ?? '放开以入组')}</div> : null}
         <div className="wf-node__label">{String(node.data.label ?? copy.nodeKinds?.group ?? '协作组')}</div>
@@ -53,6 +57,7 @@ export function GroupCard({ node, copy, members, selected, dropTarget, onPointer
                   onClick={(event) => { event.stopPropagation(); onMemberSelect(member.id) }}
                 >
                   <span className="wf-group__member-name">{member.label || member.id}</span>
+                  {member.locked ? <span className="wf-node__lock-badge" title={lockHint}>🔒</span> : null}
                   {member.status ? (
                     <span className="wf-group__member-status">
                       <span className={`wf-status-dot is-${member.status}`} />

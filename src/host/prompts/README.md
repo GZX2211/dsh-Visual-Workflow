@@ -22,6 +22,7 @@
 | `executor.ts` | 父代理执行单元：**情况3** `buildParentExecutorPrompt`（纯执行完整提示词，无编排要素）+ 情况2 末段【你的节点任务】正文 `buildParentTaskSpec`（过程性信息 + 运行上下文） |
 | `node-task.ts` | 节点任务块构建器 `buildNodeTaskBlock(params)`（注入节点子代理）：软约束固化（report 软禁用、协作组 ask）+ 中段过程性信息 + 末段动态态 |
 | `collab.ts` | 协作成员清单块构建器 `buildCollabBlock({ members, custom })`（追加到组成员用户消息，始终列出成员 ID + 角色名） |
+| `orchestration-change.ts` | 运行期「编排变更」通知构建器 `buildOrchestrationChangeText({ workflowName, definitionPath, systemLanguage })`：运行中画布保存且**编排语义变更**（见 `orchestrator/flow-diff.ts`）时由宿主注入父代理——标注 `ORCH_CHANGE_MARKER`（【编排变更】）、声明「不是用户新指令」、给出事实源路径并要求重读；取代旧「父代理每次调度前重读源文件」软约束。纯函数（同样不读时钟/随机源） |
 | `README.md` | 本文件：§13.1 检查单落地表 + W-03 工具描述英文写作规范 |
 
 **三情况组装**：父代理提示词按画布形态**整体替换组装**（用户评审定稿）——判定纯函数

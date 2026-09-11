@@ -11,9 +11,18 @@ import type { ServiceControlFace } from './useServiceControl.js';
 import type { RemoteFace } from './useRemote.js';
 import type { ToastFace } from './useToast.js';
 import type { Dict } from '../i18n.js';
+/** 画布保存选项。 */
+export interface SaveCanvasOptions {
+    /**
+     * 纯几何改动的自动保存（节点拖动 / 协作组卡片缩放的防抖保存）：
+     * 跳过「运行中保存」二次确认、跳过成功 toast（避免拖动即弹窗/刷屏）。
+     * 它不是「编排变更」通道：若画布内容没变，宿主侧 diff 也不会向父代理注入。
+     */
+    auto?: boolean;
+}
 export interface DocumentActionsFace {
     /** 保存当前画布（实例/模板/服务；成功记录已保存快照并 toast）。返回保存成功的文档（类型为三态并集，与原实现推断一致）。 */
-    saveCanvas(): Promise<WorkflowDocument | WorkflowTemplate | ServiceState | null>;
+    saveCanvas(options?: SaveCanvasOptions): Promise<WorkflowDocument | WorkflowTemplate | ServiceState | null>;
     /**
      * 创建实例（模板态：模板内容存为新实例并切到实例态；实例态等价保存）。
      * 工作台全局化改版：「开启新会话」为一次性临时选项——勾选时先新建主会话，

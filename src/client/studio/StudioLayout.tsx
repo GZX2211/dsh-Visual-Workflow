@@ -54,6 +54,11 @@ export interface StudioLayoutProps {
   toolbarRunning: boolean
   runStatusByNode: ReturnType<typeof runStatusMap>
   highlightedNodeIds: ReturnType<typeof runningNodeIds>
+  /** 运行中锁定项（已完成/执行中流程）：节点锁角标、连线灰化虚线、连线点击不选中。 */
+  lockedNodeIds: ReadonlySet<string>
+  lockedEdgeIds: ReadonlySet<string>
+  /** 当前实例是否运行中（模式一）：决定「清空」是否禁用等运行态交互。 */
+  instanceRunning: boolean
   modeName: (presetId: string | null | undefined) => string
   /** 画布左上角工作流名称角标（实例/模板 + 名称）。 */
   canvasCaption: string
@@ -101,6 +106,7 @@ export function StudioLayout(props: StudioLayoutProps) {
     t, state, sessionId, remote,
     currentFlow, currentService, currentFlowTemplate, editorData, edgeList, stageKinds, parentTemplate, roleTemplates, groupTemplates,
     toolbarRunning, runStatusByNode, highlightedNodeIds, modeName,
+    lockedNodeIds, lockedEdgeIds, instanceRunning,
     canvasApiRef, canvasShellRef, libraryImportRef, personaInputRef, groupMdInputRef,
     dispatch, doc, canvas, editor, run, transfer, selection, history, guard, panels, toast,
     beginLibraryDrag, dragPreview, dropGroupId,
@@ -239,7 +245,9 @@ export function StudioLayout(props: StudioLayoutProps) {
             onUndo={history.undo}
             onRedo={history.redo}
             onClear={canvas.clearGraph}
-            canClear={state.canvas.nodes.length > 0}
+            // 运行中实例禁止清空（用户裁决：工具栏按钮直接禁用；无弹窗/无 toast）
+            canClear={state.canvas.nodes.length > 0 && !instanceRunning}
+            clearTitle={instanceRunning ? t.clearRunningHint : t.clearCanvas}
             onTidy={canvas.tidyGraph}
             canTidy={state.canvas.nodes.length > 0}
             onSave={() => { void (state.currentKind === 'flowTemplate' ? doc.createInstanceFromCanvas() : doc.saveCanvas()) }}
@@ -273,12 +281,16 @@ export function StudioLayout(props: StudioLayoutProps) {
             selectedEdge={state.selection.edgeId}
             runStatusByNode={runStatusByNode}
             highlightedNodeIds={highlightedNodeIds}
+            lockedNodeIds={lockedNodeIds}
+            lockedEdgeIds={lockedEdgeIds}
             onInit={(api) => { canvasApiRef.current = api }}
             onNodeDragStart={canvas.onNodeDragStart}
             onNodeMove={canvas.moveNode}
             onNodeDropToGroup={canvas.addNodeToGroup}
             onNodeSelect={(id) => selection.selectNode(id)}
-            onEdgeSelect={(id) => selection.selectEdge(id)}
+            // 被锁连线（已完成流程 / 执行中节点左入口）点击不选中：属性栏因此不展开，
+            // 从根上杜绝编辑（用户裁决：锁定内容不展开属性面板，也就无需 toast 报错）
+            onEdgeSelect={(id) => { if (!lockedEdgeIds.has(id)) selection.selectEdge(id) }}
             onPaneClick={() => selection.clearSelection()}
             onConnect={canvas.onConnect}
             onConnectionRejected={canvas.onConnectionRejected}
@@ -325,7 +337,9 @@ export function StudioLayout(props: StudioLayoutProps) {
           onLoadMd={() => { void transfer.loadPersonaMd() }}
           onLoadGroupMd={() => { void transfer.loadGroupMd() }}
           onTestDb={() => { void transfer.testDbConnection() }}
-          saveDisabled={toolbarRunning}
+          // 属性栏「保存」：模式一运行中改为「保存 + 二次确认（会改写父代理后续编排）」，
+          // 故不再随运行禁用；模式二（服务常驻）维持原行为（运行中禁用）。
+          saveDisabled={state.mode === 'mode2' && toolbarRunning}
           importBusy={false}
         />
       </main>

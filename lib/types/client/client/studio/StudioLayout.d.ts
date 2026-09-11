@@ -34,6 +34,11 @@ export interface StudioLayoutProps {
     toolbarRunning: boolean;
     runStatusByNode: ReturnType<typeof runStatusMap>;
     highlightedNodeIds: ReturnType<typeof runningNodeIds>;
+    /** 运行中锁定项（已完成/执行中流程）：节点锁角标、连线灰化虚线、连线点击不选中。 */
+    lockedNodeIds: ReadonlySet<string>;
+    lockedEdgeIds: ReadonlySet<string>;
+    /** 当前实例是否运行中（模式一）：决定「清空」是否禁用等运行态交互。 */
+    instanceRunning: boolean;
     modeName: (presetId: string | null | undefined) => string;
     /** 画布左上角工作流名称角标（实例/模板 + 名称）。 */
     canvasCaption: string;

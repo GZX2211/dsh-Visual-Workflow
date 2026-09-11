@@ -31,6 +31,23 @@ export function isRunningOf(state: StudioState): boolean {
   return state.run.snapshot?.status === 'running' || (state.run.runId !== null && state.run.snapshot === null)
 }
 
+/**
+ * 当前**实例**是否处于「运行中」（模式一；运行中实例的保存二次确认与画布锁定共用）。
+ * 判定来源双保险：① 当前跟踪的 run 快照（flowId 必须等于当前实例，避免跟踪到别的实例）；
+ * ② 全量活跃 run 摘要轮询（跨会话/外部触发也能判定）。
+ * 模式二按用户裁决保持现状（服务常驻运行，无「运行中画布」语义），恒为 false。
+ * 暂停（paused）不算运行中：暂停时保存既不弹确认、也不锁画布。
+ */
+export function instanceRunningOf(state: StudioState): boolean {
+  if (state.mode !== 'mode1') return false
+  if (state.currentKind !== 'workflow') return false
+  const flow = currentFlowOf(state)
+  if (!flow) return false
+  const tracked = state.run.snapshot
+  if (tracked && tracked.status === 'running' && tracked.flowId === flow.id) return true
+  return state.activeRuns.some((item) => item.flowId === flow.id && item.sessionId === flow.sessionId && item.status === 'running')
+}
+
 /** 编辑器数据（右侧面板渲染源）。 */
 export function editorDataOf(state: StudioState): EditorData | null {
   const editor = state.editor

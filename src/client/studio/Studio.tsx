@@ -35,13 +35,14 @@ import { useLibraryDrag } from '../hooks/useLibraryDrag.js'
 import { useStudioBoot, pickInitialInstanceForSession } from '../hooks/useStudioBoot.js'
 import { useKeyShortcuts } from '../hooks/useKeyShortcuts.js'
 import {
-  currentFlowOf, currentServiceOf, currentFlowTemplateOf, editorDataOf, isRunningOf,
+  currentFlowOf, currentServiceOf, currentFlowTemplateOf, editorDataOf, instanceRunningOf, isRunningOf,
   leftPanelOpenOf, bottomPanelOpenOf, inspectorOpenOf, panelsFullyCollapsedOf, nextPanelMode,
   PANEL_MODE_NONE,
 } from './studio-state.js'
 import { StudioLayout } from './StudioLayout.js'
 import type { CanvasApi } from '../components/canvas/GraphCanvas.js'
 import { flowToCanvasLines, runStatusMap, runningNodeIds, stageTemplateKinds } from '../lib/graph-model.js'
+import { computeRunLocks } from '../lib/run-locks.js'
 import { keepInstanceOptions } from './instance-options.js'
 
 export interface StudioProps {
@@ -102,6 +103,18 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
   // id 列表（GraphCanvas 渲染 is-highlighted；防回环：只写视图，不进保存/撤销历史）。
   const highlightedNodeIds = useMemo(() => runningNodeIds(state.run.snapshot), [state.run.snapshot])
   const runStatusByNode = useMemo(() => runStatusMap(state.run.snapshot), [state.run.snapshot])
+  // 运行中画布锁定（用户裁决 c）：模式一实例 running 时，已跑完的流程不可变更
+  // （节点/连线不可删改，仅可拖动）；未跑完的（执行中节点右出及其后全部）可自由编辑。
+  const instanceRunning = instanceRunningOf(state)
+  const statusByNode = useMemo<Record<string, string>>(() => {
+    const out: Record<string, string> = {}
+    for (const [id, value] of Object.entries(runStatusByNode)) out[id] = value.status
+    return out
+  }, [runStatusByNode])
+  const runLocks = useMemo(
+    () => computeRunLocks({ enabled: instanceRunning, nodes: state.canvas.nodes, edges: state.canvas.edges, statusByNode }),
+    [instanceRunning, state.canvas.nodes, state.canvas.edges, statusByNode],
+  )
 
   // 运行状态对账（画布节点/运行按钮回显，防 run 状态被复位后失联）：
   // useRunPolling 依赖 state.run.runId 拉取全量快照。若运行已开始但 state.run 未跟踪
@@ -155,8 +168,8 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
 
   // ---------- 交互编排面（拆分至 hooks/ 的 controller hooks） ----------
   const doc = useDocumentActions(state, dispatch, guard, notify, toastError, workflows, flowTemplates, templates, selection, serviceControl, remote, t)
-  const canvas = useCanvasActions(state, dispatch, notify, history, t)
-  const editor = useEditorActions(state, dispatch, notify, toastError, t, workflows, flowTemplates, templates, selection, remote, doc.saveCanvas, canvas.removeSelected, canvas.removeLine, doc.selectWorkflow, doc.selectFlowTemplate)
+  const canvas = useCanvasActions(state, dispatch, notify, history, t, { locks: runLocks, saveCanvas: doc.saveCanvas })
+  const editor = useEditorActions(state, dispatch, notify, toastError, t, workflows, flowTemplates, templates, selection, remote, doc.saveCanvas, canvas.removeSelected, canvas.removeLine, doc.selectWorkflow, doc.selectFlowTemplate, { locks: runLocks })
   const run = useRunActions(state, dispatch, notify, toastError, t, remote, runControl, serviceControl, doc.saveCanvas, doc.createInstanceFromCanvas)
   const transfer = useStudioTransfer(state, dispatch, notify, toastError, t, remote, templates, flowTemplates, workflows, editor.patchEditor, editorData, personaInputRef, groupMdInputRef)
   const { beginLibraryDrag, dragPreview, dropGroupId } = useLibraryDrag(canvasShellRef, canvasApiRef)
@@ -231,6 +244,9 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
       toolbarRunning={toolbarRunning}
       runStatusByNode={runStatusByNode}
       highlightedNodeIds={highlightedNodeIds}
+      lockedNodeIds={runLocks.lockedNodeIds}
+      lockedEdgeIds={runLocks.lockedEdgeIds}
+      instanceRunning={instanceRunning}
       modeName={modeName}
       canvasCaption={canvasCaption}
       leftOpen={leftOpen}

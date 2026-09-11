@@ -29,6 +29,10 @@ interface FlowNodeProps {
   highlighted: boolean
   dragging: boolean
   runStatus: { status: string; attempts: number } | null
+  /** 运行中锁定（已完成/执行中）：显示锁角标 + 悬停提示；不影响拖动移动。 */
+  locked?: boolean
+  /** 锁定时显示的悬停说明（已完成/执行中文案不同）。 */
+  lockHint?: string
   onPointerDown(event: React.PointerEvent, id: string): void
   onHandlePointerDown(event: React.PointerEvent, id: string, handle: string): void
   /** 交换左右连接点（节点属性 swapPorts 取反）。 */
@@ -95,7 +99,7 @@ function metaLinesOf(node: CanvasNode, copy: Dict & { modeName(id: string | null
   return out.filter((line) => String(line ?? '').trim())
 }
 
-export function FlowNode({ node, copy, mode, selected, highlighted, dragging, runStatus, onPointerDown, onHandlePointerDown, onToggleSwap }: FlowNodeProps) {
+export function FlowNode({ node, copy, mode, selected, highlighted, dragging, runStatus, locked, lockHint, onPointerDown, onHandlePointerDown, onToggleSwap }: FlowNodeProps) {
   const kind = node.kind
   const isProxy = kind === 'proxy'
   // 阶段节点（启动/结束/暂停）：单/双流程连接点，交换无意义且会产生死数据（审查 BUG-1），
@@ -117,6 +121,7 @@ export function FlowNode({ node, copy, mode, selected, highlighted, dragging, ru
     selected ? 'is-selected' : '',
     highlighted ? 'is-highlighted' : '',
     isProxy ? 'is-proxy' : '',
+    locked ? 'is-locked' : '',
   ].filter(Boolean).join(' ')
 
   // 单侧接点渲染：side 决定左右位置，dir 决定入口/出口颜色（批注：区分入口与出口）
@@ -144,7 +149,7 @@ export function FlowNode({ node, copy, mode, selected, highlighted, dragging, ru
       style={{ left: node.position.x, top: node.position.y, width: size.w, height: size.h }}
       onPointerDown={(event) => onPointerDown(event, node.id)}
     >
-      <div className={cls}>
+      <div className={cls} title={locked ? lockHint : undefined}>
         {!isStage ? (
           <button
             type="button"
@@ -159,6 +164,8 @@ export function FlowNode({ node, copy, mode, selected, highlighted, dragging, ru
           <span>{String(copy.nodeKinds?.[displayKind] ?? displayKind)}</span>
           {statusText ? <span className={`wf-status-dot is-${status}`} /> : null}
           {statusText ? <span className="wf-hint">{statusText}</span> : null}
+          {/* 运行中锁定角标（已完成/执行中流程不可修改、不可删除；仍可拖动移动） */}
+          {locked ? <span className="wf-node__lock-badge" title={lockHint}>🔒</span> : null}
         </div>
         <div className="wf-node__label">
           {isProxy ? <span className="wf-node__proxy-badge">↻ 引用</span> : null}

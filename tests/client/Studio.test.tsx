@@ -213,7 +213,7 @@ function nodeCount(): number {
 }
 
 describe('Studio 交互', () => {
-  it('清空画布：二次确认（按钮文案=清空）→ 清空后可撤销恢复', async () => {
+  it('清空画布：无二次确认（用户裁决）→ 直接清空，且可撤销恢复', async () => {
     await renderStudio()
     await createDraft()
     await act(async () => {
@@ -222,18 +222,11 @@ describe('Studio 交互', () => {
     await dragRoleToCanvas()
     expect(nodeCount()).toBe(1)
 
-    // 清空 → 确认框（确认按钮文案为"清空"而非默认"删除"）
+    // 清空 → 不再弹确认框，直接清空
     await act(async () => {
       document.querySelector<HTMLButtonElement>('[title*="清空"]')?.click()
     })
-    const confirmDialog = document.querySelector('.wf-confirm')
-    expect(confirmDialog).toBeTruthy()
-    expect(confirmDialog?.textContent).toContain(zh.clearCanvasHint)
-    const confirmButtons = Array.from(confirmDialog!.querySelectorAll('button')).map((item) => item.textContent)
-    expect(confirmButtons).toContain(zh.clear)
-    await act(async () => {
-      Array.from(confirmDialog!.querySelectorAll('button')).find((item) => item.textContent === zh.clear)?.click()
-    })
+    expect(document.querySelector('.wf-confirm')).toBeNull()
     expect(nodeCount()).toBe(0)
     expect(document.querySelector('.wf-canvas-empty')).toBeTruthy()
 
