@@ -1,7 +1,7 @@
 // src/client/hooks/useKeyShortcuts.ts
 //
 // 键盘快捷键：Escape 关闭确认框/清空选中；Ctrl/Cmd+Z 撤销（Shift 重做）；
-// Delete/Backspace 删除选中连线/节点（输入控件聚焦时跳过）。
+// Delete 删除选中连线/节点（输入控件聚焦时跳过）。
 
 import { useEffect } from 'react'
 import type { Dispatch } from 'react'
@@ -33,7 +33,7 @@ export function useKeyShortcuts(
         event.preventDefault()
         if (event.shiftKey) history.redo()
         else history.undo()
-      } else if (event.key === 'Delete' || event.key === 'Backspace') {
+      } else if (event.key === 'Delete') {
         if (state.selection.edgeId) {
           event.preventDefault()
           removeLine(state.selection.edgeId)

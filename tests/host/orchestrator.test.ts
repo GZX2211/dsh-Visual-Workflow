@@ -816,15 +816,26 @@ describe('暂停门（§4.4.2 规则 3 / §4.7 规则 4）', () => {
     expect(h.runtime.pausedRun('session-1', 'flow-1')?.snapshot.id).toBe('run-1')
   })
 
-  it('暂停后：其他节点调度 WF_PAUSED；同会话再运行 WF_PAUSED（带 runId）；跨会话 WF_LOCKED', async () => {
+  it('暂停后：同会话调度自动续跑（新 run 接管锁）；startRun 仍 WF_PAUSED；跨会话 WF_LOCKED', async () => {
     const h = await makeHarness()
     await start(h, makeFlow())
     await h.runtime.wfRunNode(caller, { nodeId: 'n-pause' })
 
-    await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-a2' })).rejects.toMatchObject({ code: 'WF_PAUSED' })
+    // 运行锁降权（用户裁决）：父代理在暂停后直接调度不再 WF_PAUSED，而是自动续跑接管
+    const resumed = await h.runtime.wfRunNode(caller, { nodeId: 'n-a2' })
+    expect(resumed).toMatchObject({ nodeId: 'n-a2', status: 'started' })
+    expect(h.runtime.flowLockInfo('flow-1')).toMatchObject({ status: 'running', runId: 'run-2' })
+    expect((await h.store.getRun('run-2'))?.resumedFromRunId).toBe('run-1')
+    // 续跑指令注入父代理（断点起点 = 暂停节点，已 ok 节点不重跑）
+    const directive = h.agents.roots.get('session-1')!.messages.at(-1)!.content[0].text
+    expect(directive).toContain('正在恢复先前运行')
+    expect(directive).toContain('n-pause')
+
+    // 显式 startRun（工作台「运行」按钮语义）仍按原锁语义拒绝暂停态，避免绕过续跑语义
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-pause' })
     await expect(h.runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })).rejects.toMatchObject({
       code: 'WF_PAUSED',
-      pausedRunId: 'run-1',
+      pausedRunId: 'run-2',
     })
     await expect(h.runtime.startRun({ sessionId: 'session-2', flowId: 'flow-1' })).rejects.toMatchObject({ code: 'WF_LOCKED' })
   })
@@ -836,13 +847,17 @@ describe('暂停门（§4.4.2 规则 3 / §4.7 规则 4）', () => {
     expect(result.status).toBe('paused')
   })
 
-  it('暂停状态下 wfFinish：幂等返回 paused，锁保留、状态不变', async () => {
+  it('暂停状态下 wfFinish：自动续跑接管后收尾为新 run（旧断点记录保持 paused）', async () => {
     const h = await makeHarness()
     await start(h, makeFlow())
     await h.runtime.wfRunNode(caller, { nodeId: 'n-pause' })
+    // 运行锁降权（用户裁决）：收尾也走自动续跑，不再幂等返回 paused——父代理在续跑
+    // 指令下重新确认流程已走完后收尾，运行锁随之释放
     const finish = await h.runtime.wfFinish(caller, { status: 'completed' })
-    expect(finish).toMatchObject({ ok: true, status: 'paused', idempotent: true })
-    expect(h.runtime.flowLockInfo('flow-1')?.status).toBe('paused')
+    expect(finish).toMatchObject({ ok: true, status: 'completed', runId: 'run-2' })
+    expect(h.runtime.flowLockInfo('flow-1')).toBeNull()
+    // 旧断点记录不被改写（历史可追溯）
+    expect((await h.store.getRun('run-1'))?.status).toBe('paused')
   })
 })
 
@@ -1150,7 +1165,7 @@ describe('watchdog 看护与陈旧记录对账', () => {
     expect(entry.snapshot.status).toBe('stopped')
   })
 
-  it('父代理回合 error → failed；aborted → stopped', async () => {
+  it('父代理回合 error → failed；aborted（对话区停止）→ 保持 running 不终止', async () => {
     const h = await makeHarness()
     const { entry } = await start(h, makeFlow())
     h.agents.turnEnd = { kind: 'error', error: new Error('编排错误') }
@@ -1159,11 +1174,15 @@ describe('watchdog 看护与陈旧记录对账', () => {
     expect(entry.snapshot.summary).toContain('编排错误')
     expect(h.runtime.flowLockInfo('flow-1')).toBeNull()
 
+    // 用户裁决：对话区官方「停止」只打断父代理回合（官方 cancel 不级联掐死子代理），
+    // 语义是「打断+修正」而非「停止工作流」→ 运行保持 running，锁保留，画布继续回显
     const h2 = await makeHarness()
     const { entry: entry2 } = await start(h2, makeFlow())
     h2.agents.turnEnd = { kind: 'aborted' }
     await sweepWatchdogOnce(h2.runtime)
-    expect(entry2.snapshot.status).toBe('stopped')
+    expect(entry2.snapshot.status).toBe('running')
+    expect(h2.runtime.flowLockInfo('flow-1')).toMatchObject({ status: 'running' })
+    expect(h2.warnings.some((message) => message.includes('保持运行'))).toBe(true)
   })
 
   it('scheduleIdleWatchdog：定时触发扫描，disposer 可停止', async () => {
@@ -1213,6 +1232,109 @@ describe('watchdog 看护与陈旧记录对账', () => {
     expect(r2?.resumeFromNodeId).toBe('n-pause')
 
     expect((await h.store.getRun('stale-3'))?.status).toBe('completed')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 运行上下文自动接续（ensureActiveRun；运行锁降权改造）
+// ---------------------------------------------------------------------------
+
+describe('运行上下文自动接续（运行锁降权）', () => {
+  it('磁盘 stopped 断点：wfRunNode 自动续跑接管（无需工作台点运行）', async () => {
+    const h = await makeHarness()
+    const { entry } = await start(h, makeFlow())
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    // 让 n-a1 产出 ok（模拟子代理已完成），再停止运行
+    await h.runtime.handleSubagentEnd({ id: 'child-1', stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: 'A 完成' }] })
+    expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-a1')!.status).toBe('ok')
+    await h.runtime.stopRun('run-1')
+    expect(h.runtime.flowLockInfo('flow-1')).toBeNull()
+    const result = await h.runtime.wfRunNode(caller, { nodeId: 'n-a2' })
+    expect(result).toMatchObject({ nodeId: 'n-a2', status: 'started' })
+    expect(h.runtime.flowLockInfo('flow-1')).toMatchObject({ status: 'running', runId: 'run-2' })
+    // 续跑继承：已 ok 节点不重跑（状态与产出随断点继承），其余回退 pending
+    const snapshot = h.runtime.runSnapshot('run-2')!
+    expect(snapshot.resumedFromRunId).toBe('run-1')
+    expect(snapshot.nodes.find((n) => n.nodeId === 'n-a1')!.status).toBe('ok')
+    expect(snapshot.nodes.find((n) => n.nodeId === 'n-a1')!.resumed).toBe(true)
+  })
+
+  it('磁盘 interrupted 断点（宿主重启）：wfRunNode 自动续跑，续跑起点为首个未完成节点', async () => {
+    const h = await makeHarness()
+    const flow = makeFlow()
+    await h.store.saveWorkflow(flow, 'session-1', { force: true })
+    // 直接构造一条宿主重启遗留的 interrupted 记录（reconcileStaleRuns 只处理 running/paused）
+    const stale = createRunSnapshot({ runId: 'run-stale', flow, sessionId: 'session-1', mode: 'mode1', now: 1000 })
+    setNodeStatus(stale, 'n-a1', 'ok', { now: 1000, output: 'A 完成' })
+    stale.status = 'interrupted'
+    stale.endedAt = new Date(2000).toISOString()
+    await h.store.saveRun(stale)
+
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-pause' })
+    const snapshot = h.runtime.runSnapshot('run-1')!
+    expect(snapshot.resumedFromRunId).toBe('run-stale')
+    // 已 ok 节点（n-a1）不重跑；起点推断为首个未完成节点（n-pause）
+    expect(snapshot.resumeFromNodeId).toBe('n-pause')
+    expect(snapshot.nodes.find((n) => n.nodeId === 'n-a1')!.resumed).toBe(true)
+    expect(snapshot.nodes.find((n) => n.nodeId === 'n-a1')!.output).toBe('A 完成')
+  })
+
+  it('最近断点优先：多条可恢复记录时取 startedAt 最新的一条', async () => {
+    const h = await makeHarness()
+    const flow = makeFlow()
+    await h.store.saveWorkflow(flow, 'session-1', { force: true })
+    const older = createRunSnapshot({ runId: 'run-old', flow, sessionId: 'session-1', mode: 'mode1', now: 1000 })
+    older.status = 'stopped'
+    await h.store.saveRun(older)
+    const newer = createRunSnapshot({ runId: 'run-new', flow, sessionId: 'session-1', mode: 'mode1', now: 9000 })
+    newer.status = 'stopped'
+    await h.store.saveRun(newer)
+
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    expect((await h.store.getRun('run-1'))?.resumedFromRunId).toBe('run-new')
+  })
+
+  it('并发调度只续跑一次：同 flowId 的并发调用共享同一续跑（不抛 WF_LOCKED）', async () => {
+    const h = await makeHarness()
+    await start(h, makeFlow())
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-pause' })
+    const [a, b] = await Promise.all([
+      h.runtime.wfRunNode(caller, { nodeId: 'n-a2' }),
+      h.runtime.wfRunNode(caller, { nodeId: 'n-a1' }),
+    ])
+    expect(a).toMatchObject({ nodeId: 'n-a2', status: 'started' })
+    expect(b).toMatchObject({ nodeId: 'n-a1', status: 'started' })
+    // 只生成一条新 run（run-2），没有第二次续跑
+    expect(h.runtime.flowLockInfo('flow-1')).toMatchObject({ runId: 'run-2' })
+    expect(await h.store.getRun('run-3')).toBeNull()
+  })
+
+  it('终态（completed/failed）不自动续跑：无断点即 WF_NO_ACTIVE_RUN', async () => {
+    const h = await makeHarness()
+    await start(h, makeFlow())
+    await h.runtime.wfFinish(caller, { status: 'completed' })
+    await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })).rejects.toMatchObject({ code: 'WF_NO_ACTIVE_RUN' })
+  })
+
+  it('续跑失败（工作流已不完整）时向上抛精确错误，不静默', async () => {
+    const h = await makeHarness()
+    await start(h, makeFlow())
+    await h.runtime.stopRun('run-1')
+    // 画布被改坏：删掉结束节点 → 续跑校验失败
+    const broken = { ...makeFlow(), nodes: makeFlow().nodes.filter((n) => n.kind !== 'end') }
+    await h.store.saveWorkflow(broken, 'session-1', { force: true })
+    await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })).rejects.toMatchObject({ code: 'WF_FLOW_INCOMPLETE' })
+  })
+
+  it('wf_finish：无激活运行但有断点时自动续跑后收尾（磁盘旧记录保持原状）', async () => {
+    const h = await makeHarness()
+    await start(h, makeFlow())
+    await h.runtime.stopRun('run-1')
+    const finish = await h.runtime.wfFinish(caller, { status: 'completed', summary: '确认完成' })
+    expect(finish).toMatchObject({ ok: true, status: 'completed', runId: 'run-2' })
+    expect(h.runtime.flowLockInfo('flow-1')).toBeNull()
+    expect((await h.store.getRun('run-1'))?.status).toBe('stopped')
+    expect((await h.store.getRun('run-2'))?.status).toBe('completed')
   })
 })
 

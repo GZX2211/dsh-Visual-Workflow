@@ -474,12 +474,27 @@ const childExec = (childId: string): ToolExecLike => ({
 })
 
 describe('wf_db_query 工具执行', () => {
-  it('无运行 → WF_NO_ACTIVE_RUN；参数缺失 → WF_BAD_ARGS', async () => {
+  it('无运行态：主代理仍可查询（运行态解耦）；参数缺失/非法 → WF_BAD_ARGS', async () => {
     const h = await makeHarness()
+    await h.store.saveWorkflow(makeFlow(h.dbFile), 'session-1', { force: true })
     const def = h.tools.definitions.get(WF_DB_QUERY)!
-    await expect(def.execute({ dataId: 'd1', mode: 'schema' }, rootExec())).rejects.toMatchObject({ code: 'WF_NO_ACTIVE_RUN' })
+    // 运行锁降权（用户裁决）：主代理在画布连好数据库后不必先点运行即可查询
+    const result = await def.execute({ dataId: 'd1', mode: 'schema' }, rootExec())
+    expect(result).toMatchObject({ dataId: 'd1', mode: 'schema' })
+    const tables = (result as { tables: Array<{ name: string }> }).tables.map((t) => t.name).sort()
+    expect(tables).toEqual(['notes', 'products'])
     await expect(def.execute({ mode: 'schema' }, rootExec())).rejects.toMatchObject({ code: 'WF_BAD_ARGS' })
     await expect(def.execute({ dataId: 'd1', mode: 'bad' }, rootExec())).rejects.toMatchObject({ code: 'WF_BAD_ARGS' })
+  })
+
+  it('无运行态：本会话无实例 → WF_NO_INSTANCE；子代理无运行态仍被拒绝', async () => {
+    const h = await makeHarness()
+    const def = h.tools.definitions.get(WF_DB_QUERY)!
+    // 从未保存过实例：无运行上下文也无实例可依
+    await expect(def.execute({ dataId: 'd1', mode: 'schema' }, rootExec())).rejects.toMatchObject({ code: 'WF_NO_INSTANCE' })
+    // 子代理：节点身份依赖 run（childIndex），无运行 → WF_NO_ACTIVE_RUN
+    await h.store.saveWorkflow(makeFlow(h.dbFile), 'session-1', { force: true })
+    await expect(def.execute({ dataId: 'd1', mode: 'schema' }, childExec('child-1'))).rejects.toMatchObject({ code: 'WF_NO_ACTIVE_RUN' })
   })
 
   it('数据节点不存在 → WF_DB_BAD_DATA', async () => {

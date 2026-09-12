@@ -1,6 +1,13 @@
 import type { FlowStore } from '../storage/flow-store.js';
 import type { WorkflowDocument } from '../shared/graph-model.js';
 import type { RunSnapshot } from '../shared/types.js';
+/**
+ * 可恢复的 run 状态集合：
+ *   paused=暂停门/窗口挂起断点；interrupted=宿主重启中断；stopped=用户停止（可续跑修正）。
+ * 导出供运行时「自动续跑」判定复用（runtime-base.ensureActiveRun 的磁盘兜底扫描），
+ * 避免两处各自维护一份可恢复状态清单而产生漂移。
+ */
+export declare const RESUMABLE_STATUSES: readonly ["paused", "interrupted", "stopped"];
 /** 断点续跑入参（runResume 端点与 run 端点自动续跑共用）。 */
 export interface ResumeInput {
     sessionId: string;

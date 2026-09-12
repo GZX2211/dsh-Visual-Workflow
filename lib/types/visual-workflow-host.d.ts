@@ -133,7 +133,14 @@ export declare class VisualWorkflowHost extends Service {
         stopReason?: unknown;
         lastAssistantMessage?: unknown;
     }): void;
-    /** agent/error 观察：匹配父代理会话 → 快速标记失败并释放运行锁（看护兜底）。 */
+    /**
+     * agent/error 观察：**只记录，不终止运行**（用户裁决）。
+     * 为什么撤销旧的「快速失败通道」：官方 ISession.cancel（对话区停止按钮）会让父代理
+     * 当前回合以 error/aborted 收尾，而 payload.error 对「用户取消」与「真实故障」并无
+     * 稳定可判的形状；旧的快速通道因而把「打断修正」误判成「编排已死」并释放运行锁。
+     * 现在运行终止只由两处承担：工作台停止按钮（stopRun）与空闲看护；真实编排错误仍由
+     * watchdog 的 latestTurnEnd（kind==='error'）权威判定为 failed（15s 内收敛）。
+     */
     onAgentError(payload: {
         agent?: {
             id?: unknown;

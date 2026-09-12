@@ -10,8 +10,9 @@
 //
 // 安全边界（架构安全章节）：
 //   - SQL 只读白名单：仅单条 SELECT、强制 LIMIT、拒绝写/DDL/多语句/文件导出；
-//   - 归属校验：调用者必须是运行中工作流的父代理或节点子代理，且该节点经
-//     db-in 连线接入目标数据节点（无连线拒绝——与「无连线不注入」可见性一致）；
+//   - 归属校验（运行态解耦改造）：主代理在运行中按运行上下文、不在运行中按**实例绑定
+//     会话**定位实例（一个会话一个实例）；节点子代理仍必须是运行中工作流的节点，且该
+//     节点经 db-in 连线接入目标数据节点（无连线拒绝——与「无连线不注入」可见性一致）；
 //   - 本地 SQLite 以只读模式打开（node:sqlite readOnly），物理防写。
 //
 // 服务器驱动加载策略：mysql2/pg 为可选依赖，运行时惰性 import——未安装时给出
@@ -23,7 +24,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type { DatabaseNode, GraphNode, RoleNode, WorkflowDocument } from '../shared/graph-model.js'
 import { dbInEdges, nodeById } from '../graph/model.js'
-import type { CallerInfo, OrchestratorRuntime } from '../orchestrator/runtime.js'
+import type { CallerInfo, OrchestratorRuntime, RunEntry } from '../orchestrator/runtime.js'
 import { WfError } from '../orchestrator/runtime.js'
 import type { FlowStore } from '../storage/flow-store.js'
 import type { EmbeddingEngine } from '../embedding/engine.js'
@@ -500,6 +501,35 @@ function resolveActiveRun(
   return { run, callerNodeId: '' }
 }
 
+/**
+ * 数据查询上下文解析（运行态解耦改造，用户裁决）：
+ *   - 有激活运行时：沿用 run 携带的 flowId/sessionId/mode 读取当前实例（行为不变）；
+ *   - 无激活运行时（主代理直接在对话里问数据库）：按**实例绑定的会话**定位工作流实例
+ *     （一个会话一个实例，取最新；`listWorkflows` 即按 updatedAt 倒序），不需要运行、
+ *     不影响任何运行状态。子代理仍要求运行态（其节点身份与 db-in 校验都以 run 为前提）。
+ */
+async function resolveDataQueryContext(
+  host: DataToolsHost,
+  caller: CallerInfo,
+  exec: ToolExecLike,
+): Promise<{ flow: WorkflowDocument; callerNodeId: string; run: RunEntry | null }> {
+  if (!caller.isChild) {
+    const run = caller.sessionId ? host.orchestrator.activeRunForSession(caller.sessionId) : null
+    if (run) {
+      const flow = await host.orchestrator.currentResolvedFlow(run)
+      return { flow, callerNodeId: callerNodeIdOf(flow, caller, ''), run }
+    }
+    if (!caller.sessionId) throw new WfError('无法识别调用者会话', 'WF_BAD_CALLER')
+    const instances = await host.store.listWorkflows(caller.sessionId)
+    const flow = instances[0] ?? null
+    if (!flow) throw new WfError('当前会话没有工作流实例：请先在工作台创建实例并连接数据库节点', 'WF_NO_INSTANCE')
+    return { flow, callerNodeId: callerNodeIdOf(flow, caller, ''), run: null }
+  }
+  const { run, callerNodeId } = resolveActiveRun(host.orchestrator, caller, exec)
+  const flow = await host.orchestrator.currentResolvedFlow(run)
+  return { flow, callerNodeId, run }
+}
+
 /** 定位调用者节点 id（root 调用时解析父代理节点；无父代理节点返回空）。 */
 function callerNodeIdOf(flow: WorkflowDocument, caller: CallerInfo, childNodeId: string): string {
   if (caller.isChild) return childNodeId
@@ -517,11 +547,12 @@ export function registerDataTools(ctx: { get(name: string): unknown }, host: Dat
   const definition = defineTool({
     name: WF_DB_QUERY,
     description:
-      'Query a database node of the active Visual Workflow run. Use only while an orchestration is running and your node is connected to the database via a db-in edge: pass the database node id and pick a mode — ' +
+      'Query a database node of the current Visual Workflow instance. Pass the database node id and pick a mode — ' +
       '"search" (vector retrieval over any database, local or server, via a locally built index; falls back to BM25 when the embedding model is unavailable), ' +
       '"query" (read-only SELECT with a mandatory LIMIT; local or server databases; long cell values are truncated and marked to protect the context), or "schema" (read-only table list). ' +
+      'Available without a running orchestration for the session main agent (the canvas instance only needs that database node connected); node children additionally require the node to be connected via a db-in edge. ' +
       'Prefer "search" for semantic questions and avoid "SELECT *" when a table has large vector columns. ' +
-      'Rejected with WF_DB_* codes for nodes without a db-in edge to the data node, blocked SQL, missing index, or after the run stops.',
+      'Rejected with WF_DB_* codes for nodes without a db-in edge, blocked SQL, missing index, or an unknown database node id.',
     parameters: {
       dataId: { type: 'string', required: true, description: 'Database node id from the flow definition file (nodes[].id).' },
       mode: { type: 'string', required: true, enum: ['search', 'query', 'schema'] as const, description: 'search: vector retrieval; query: read-only SELECT; schema: table list.' },
@@ -578,17 +609,21 @@ export function registerDataTools(ctx: { get(name: string): unknown }, host: Dat
         throw new WfError(`wf_db_query mode 必须是 search/query/schema（收到 ${mode}）`, 'WF_BAD_ARGS')
       }
 
-      // 归属校验：调用者必须属于当前运行中的工作流
-      const { run, callerNodeId: childNodeId } = resolveActiveRun(host.orchestrator, caller, exec)
-      const flow = await host.orchestrator.currentResolvedFlow(run)
-      const callerNodeId = callerNodeIdOf(flow, caller, childNodeId)
+      // 归属校验（运行态解耦）：主代理在运行中走运行上下文，不在运行中走实例定位；
+      // 子代理仍严格要求归属当前运行（节点身份 + db-in 双校验）。
+      const { flow, callerNodeId, run } = await resolveDataQueryContext(host, caller, exec)
       const dataNode = flow.nodes.find((node): node is DatabaseNode => node.id === dataId && node.kind === 'database')
       if (!dataNode) throw new WfError(`数据节点不存在或已从画布移除：${dataId}`, 'WF_DB_BAD_DATA')
-      // 连线校验：调用者节点必须经 db-in 接入该数据节点（无连线拒绝）
-      if (!callerNodeId || !dbInEdges(flow, callerNodeId).some((line) => line.source === dataId)) {
+      // 连线校验：调用者节点必须经 db-in 接入该数据节点。
+      // 主代理无父代理节点（callerNodeId 为空）时跳过连线校验——主代理不在流程线上，
+      // 「在画布中连接该数据库节点」即为其授权依据（用户裁决）；子代理恒有 callerNodeId，
+      // 仍严格按 db-in 连线拒绝（无连线不注入工具、不可访问，与可见性一致）。
+      const mustBeConnected = caller.isChild || callerNodeId !== ''
+      if (mustBeConnected && !dbInEdges(flow, callerNodeId).some((line) => line.source === dataId)) {
         throw new WfError('当前节点未通过数据库连线接入该数据节点，无法访问', 'WF_DB_NO_LINE')
       }
-      host.orchestrator.touchRun(run)
+      // 运行中才需刷新空闲基准（无运行时无 run 可触碰）
+      if (run) host.orchestrator.touchRun(run)
 
       if (mode === 'search') {
         const queryText = String(args?.query ?? '').trim()
