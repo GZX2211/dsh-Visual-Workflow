@@ -261,6 +261,70 @@ describe('wf_graph_patch · A 组图结构变更', () => {
     }), 'WF_GRAPH_INVALID')
   })
 
+  // 回归（2026.09）：create_node 曾把 raw.data 原样落盘，父代理最自然的写法
+  // { kind:'agent', data:{ label, systemPrompt } } 会产出 presetId=undefined 的空壳节点，
+  // 运行期 resolveAgentTools 判定为零工具集（连 read/write 都调不到）。
+  it('create_node：角色节点 data 缺省字段被补全（presetId 归一为 null、retryLimit/inject* 补默认）', async () => {
+    const { applyGraphOps } = await import('../../src/host/tools/wf-graph-patch-apply.js')
+    const applied = applyGraphOps({
+      doc: makeFlow('wf-1', { nodes: [stageNode('s', 'start')], lines: [] }),
+      ops: [{ op: 'create_node', node: { id: 'a9', kind: 'agent', data: { label: '新角色', systemPrompt: '你是分析员' } } }],
+    })
+    const node = (applied.doc.nodes as GraphNode[]).find((item) => item.id === 'a9') as {
+      data?: Record<string, unknown>
+    }
+    expect(node.data).toMatchObject({
+      label: '新角色',
+      systemPrompt: '你是分析员',
+      presetId: null,
+      provider: '',
+      model: '',
+      retryLimit: 3,
+      reactLimit: null,
+      inputSchema: '',
+      outputSchema: '',
+      injectSystemPrompt: true,
+      injectToolSections: true,
+      groupId: null,
+    })
+  })
+
+  it('create_node：角色节点完全缺 data 也不崩（按空对象补全）', async () => {
+    const { applyGraphOps } = await import('../../src/host/tools/wf-graph-patch-apply.js')
+    const applied = applyGraphOps({
+      doc: makeFlow('wf-1', { nodes: [stageNode('s', 'start')], lines: [] }),
+      ops: [{ op: 'create_node', node: { id: 'a9', kind: 'parent' } }],
+    })
+    const node = (applied.doc.nodes as GraphNode[]).find((item) => item.id === 'a9') as {
+      data?: Record<string, unknown>
+    }
+    expect(node.data).toMatchObject({ label: '', systemPrompt: '', presetId: null, retryLimit: 3 })
+  })
+
+  it('update_node_data：角色节点合并后仍过一次补全（被抹掉的 presetId/provider 补回默认）', async () => {
+    const { applyGraphOps } = await import('../../src/host/tools/wf-graph-patch-apply.js')
+    const applied = applyGraphOps({
+      doc: makeFlow('wf-1'),
+      ops: [{ op: 'update_node_data', nodeId: 'a1', data: { systemPrompt: '新任务' } }],
+    })
+    const node = (applied.doc.nodes as GraphNode[]).find((item) => item.id === 'a1') as {
+      data?: Record<string, unknown>
+    }
+    expect(node.data).toMatchObject({ systemPrompt: '新任务', presetId: null, retryLimit: 3 })
+  })
+
+  it('create_node：presetId 显式给出时原样保留（只归一空值为 null）', async () => {
+    const { applyGraphOps } = await import('../../src/host/tools/wf-graph-patch-apply.js')
+    const applied = applyGraphOps({
+      doc: makeFlow('wf-1', { nodes: [stageNode('s', 'start')], lines: [] }),
+      ops: [{ op: 'create_node', node: { id: 'a9', kind: 'agent', data: { label: 'x', presetId: 'combo-1' } } }],
+    })
+    const node = (applied.doc.nodes as GraphNode[]).find((item) => item.id === 'a9') as {
+      data?: Record<string, unknown>
+    }
+    expect(node.data?.presetId).toBe('combo-1')
+  })
+
   it('remove_node：级联删除虚拟节点与其连线，并从协作组成员清单移除', async () => {
     const { host, storeState } = makeHost()
     // 基线：s → a1 → g1 → e；a2/a3 为组内成员（无流程线，但组成员由组卡片承载）

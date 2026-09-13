@@ -24,8 +24,8 @@
 | `collab.ts` | 协作成员清单块构建器 `buildCollabBlock({ members, custom })`（追加到组成员用户消息，始终列出成员 ID + 角色名） |
 | `orchestration-change.ts` | 运行期「编排变更」通知构建器 `buildOrchestrationChangeText({ workflowName, definitionPath, systemLanguage })`：运行中画布保存且**编排语义变更**（见 `orchestrator/flow-diff.ts`）时由宿主注入父代理——标注 `ORCH_CHANGE_MARKER`（【编排变更】）、声明「不是用户新指令」、给出事实源路径并要求重读；取代旧「父代理每次调度前重读源文件」软约束。纯函数（同样不读时钟/随机源） |
 | `org-budget.ts` | 「本次组织预算」末段文本构建器 `buildOrgBudgetText(budget)`（自主编排方案 §6.4）：给**剩余量**而非上限；属动态值 → 只在 `TAIL_MARKER` 之后注入。P0 提供构建器，P2 由规划变体接入（`dynamic.orgBudgetText`） |
-| `org-sop.ts` | 规划 SOP 的**稳定文本段**：`ORG_SOP_L1_GRAPH_SEMANTICS`（L1 图语义：9 种节点 + 三类连线 + 检查器硬规则）与 `ORG_SOP_L2_PATTERN_LIBRARY`（L2 模式库：六种常见编排模式）。纯常量、字节稳定 → 置于中段，是 KV 缓存友好的长前缀；L3（用户 SOP）只留注入点（D-19） |
-| `org-plan.ts` | **规划期**父代理提示词变体 `buildOrgPlanPrompt(params)`：HEAD 硬约束（不自动投产 / 新建或更新语法 / 先勘察 / 一次一组 / 不产出坐标 / 检查器修好再说 / 工具默认关闭）→ MID（目标行 + L1 + L2 稳定段）→ TAIL（重申 + 用户意图 + L3 用户 SOP 注入点 + 组织预算文本）。目标三态 `create / template / instance` 决定身份与语法指引（`ORG_PLAN_HARD_CONSTRAINTS` 双位常量）；由 `/arrange` 命令注入（`src/host/commands/arrange.ts`） |
+| `org-sop.ts` | 规划 SOP 的**稳定文本段**：`ORG_SOP_L1_GRAPH_SEMANTICS`（L1 图语义：9 种节点 + 三类连线 + 协作组与虚拟节点选择判据 + 条件线/数据节点硬规则）与 `ORG_SOP_DESIGN_METHOD`（设计方法：交付物 → 落盘路径与消费方 → 并行判定 + 节点配置要求）。纯常量、字节稳定 → 置于中段，是 KV 缓存友好的长前缀；原 L2 模式库按用户裁决 A1 删除（通用编排结构模型可自行推断，写了只占预算）；L3（用户 SOP）只留注入点（D-19） |
+| `org-plan.ts` | **规划期**父代理提示词变体 `buildOrgPlanPrompt(params)`：HEAD 硬约束（不自动投产 / 新建或更新语法 / 先勘察组织资产与工作区事实 / 两工具可被用户关闭）→ MID（目标行 + L1 + 设计方法）→ TAIL（重申 + **提交前自检四步** + 用户意图 + L3 用户 SOP 注入点 + 组织预算文本）。目标三态 `create / template / instance` 决定身份与语法指引（`ORG_PLAN_HARD_CONSTRAINTS` 双位常量）；由 `/arrange` 命令注入（`src/host/commands/arrange.ts`） |
 | `README.md` | 本文件：§13.1 检查单落地表 + W-03 工具描述英文写作规范 |
 
 **三情况组装**：父代理提示词按画布形态**整体替换组装**（用户评审定稿）——判定纯函数

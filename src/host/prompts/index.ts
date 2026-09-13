@@ -42,8 +42,14 @@ export {
   type ParentTaskSpecParams,
 } from './executor.js'
 
-// 节点任务块构建器（子代理任务文本）。
-export { buildNodeTaskBlock, NODE_HARD_CONSTRAINTS, type NodeTaskBlockParams } from './node-task.js'
+// 节点任务块构建器（子代理任务文本）：含交接契约（outputContract）与输入结构（inputContract）。
+export {
+  buildNodeTaskBlock,
+  NODE_HARD_CONSTRAINTS,
+  DEFAULT_OUTPUT_CONTRACT,
+  outputContractRule,
+  type NodeTaskBlockParams,
+} from './node-task.js'
 
 // 协作 Prompt 构建器（追加到组成员首条用户消息）。
 export { buildCollabBlock, type CollabBlockParams } from './collab.js'
@@ -52,10 +58,10 @@ export { buildCollabBlock, type CollabBlockParams } from './collab.js'
 // P0 提供纯函数与单测，注入点由 P2 的 SOP 组装接入。
 export { buildOrgBudgetText } from './org-budget.js'
 
-// 规划 SOP 三层文本（L1 图语义 / L2 模式库；L3 为用户注入点，见 org-plan.ts）。
-export { ORG_SOP_L1_GRAPH_SEMANTICS, ORG_SOP_L2_PATTERN_LIBRARY } from './org-sop.js'
+// 规划 SOP 文本（L1 图语义 / 设计方法；L2 模式库按用户裁决 A1 删除）。
+export { ORG_SOP_L1_GRAPH_SEMANTICS, ORG_SOP_DESIGN_METHOD } from './org-sop.js'
 
-// 规划期父代理提示词变体（自主编排方案 §10 P2）：首段硬约束 → 中段 L1+L2 → 末段动态
+// 规划期父代理提示词变体（自主编排方案 §10 P2）：首段硬约束 → 中段 L1+设计方法 → 末段动态
 // （用户意图 / L3 用户 SOP 注入点 / 组织预算文本）。
 export {
   buildOrgPlanPrompt,

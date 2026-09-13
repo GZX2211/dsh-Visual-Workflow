@@ -22,7 +22,7 @@ import {
   MID_MARKER,
   TAIL_MARKER,
   ORG_SOP_L1_GRAPH_SEMANTICS,
-  ORG_SOP_L2_PATTERN_LIBRARY,
+  ORG_SOP_DESIGN_METHOD,
 } from '../../src/host/prompts/index.js'
 
 // ---------------------------------------------------------------------------
@@ -130,7 +130,7 @@ describe('/arrange handler：只采集 + 注入，绝不改图', () => {
     expect(messages[0].content[0].type).toBe('text')
   })
 
-  it('注入文本＝规划变体（HEAD/MID/TAIL 标记 + 三层 SOP 的 L1/L2 稳定段）', () => {
+  it('注入文本＝规划变体（HEAD/MID/TAIL 标记 + L1 图语义与设计方法稳定段）', () => {
     const { ctx, registered } = makeCtx()
     registerArrangeCommand(ctx)
     const { agent, messages } = makeAgent()
@@ -140,7 +140,7 @@ describe('/arrange handler：只采集 + 注入，绝不改图', () => {
     expect(text).toContain(MID_MARKER)
     expect(text).toContain(TAIL_MARKER)
     expect(text).toContain(ORG_SOP_L1_GRAPH_SEMANTICS)
-    expect(text).toContain(ORG_SOP_L2_PATTERN_LIBRARY)
+    expect(text).toContain(ORG_SOP_DESIGN_METHOD)
     expect(text).toContain('做一个内容生产流水线')
   })
 

@@ -19,6 +19,29 @@ export declare function cloneDoc(doc: WorkflowDocument): WorkflowDocument;
  */
 export declare function ensureGroupConsistency(nodes: GraphNode[], groupId: string, memberIds: string[]): GraphNode[];
 /**
+ * 角色节点 data 补全（图结构补丁的**唯一规范化入口**）。
+ *
+ * 为什么必须有（2026.09 实机取证）：ops 是自由对象，`create_node` 只把 raw 原样落盘，
+ * 父代理最自然的写法 `{ kind:'agent', data:{ label, systemPrompt } }` 会产出
+ * `presetId: undefined` 的节点——而运行期 `resolveAgentTools` 对空 presetId 的判定是
+ * **零工具集**（连 read/write 都调不到），`provider/model` 为空也会退化成宿主默认。
+ * 检查器与 validateFlow 都不校验节点 data 形状，于是这类「空壳节点」会一路落盘到运行期
+ * 才暴露。补齐默认值与画布新建角色（graph/model.ts 的 newRoleNode）完全一致，
+ * 保证「父代理建出来的节点」与「用户拖出来的节点」形状无差异。
+ *
+ * 语义：`null` 与 `undefined` 一律视为未提供（补默认）；显式 `''` / 数字 / 布尔原样保留。
+ */
+export declare function normalizeRoleNodeData(raw: unknown): Record<string, unknown>;
+/**
+ * 角色节点（agent / parent）的 data 字段契约文本（**单一事实源**；工具描述引用）。
+ *
+ * 为什么必须写进工具描述：ops 是自由对象，模型只能从描述推断节点 shape。
+ * 2026.09 实机结论——不写契约时模型只会给 `{ label, systemPrompt }`，
+ * 而 `presetId` 为空意味着该节点运行期**零工具**（resolveAgentTools 语义），
+ * 且没有自动补全（补全只补形状，不会替模型组合）。
+ */
+export declare const ROLE_NODE_DATA_CONTRACT: string;
+/**
  * 应用 A 组图结构操作（按序，纯函数）。
  * 失败一律抛 WfError（稳定 code），调用方据此返回带修复建议的补丁错误。
  */

@@ -33,7 +33,7 @@ import { effectiveOrgMeta, metaOfDocument, normalizeOrgMeta } from '../graph/org
 import { orgUsageOf } from '../graph/org-meta-usage.js'
 import { metaLimitIssues } from '../graph/org-meta-limits.js'
 import { validateFlow } from '../graph/validate.js'
-import { applyGraphOps, applyMarkOp, OP_FIELD_SHAPES } from './wf-graph-patch-apply.js'
+import { applyGraphOps, applyMarkOp, OP_FIELD_SHAPES, ROLE_NODE_DATA_CONTRACT } from './wf-graph-patch-apply.js'
 import {
   GROUP_HINTS,
   groupsOf,
@@ -531,6 +531,15 @@ const GRAPH_OP_CONTRACT = [
 ].join('; ')
 
 /**
+ * meta 组 / mark 组的 op 字段契约（与 graph 组同一「单一事实源」策略）。
+ * 为什么也要写：这两个 op 此前从未在描述里出现字段名，模型只能猜 `meta` 的嵌套方式。
+ */
+const META_MARK_OP_CONTRACT = [
+  "{ op:'set_meta', meta: Partial<OrgMeta> } — org budget knobs, e.g. { op:'set_meta', meta:{ nodeMax:12 } }",
+  "{ op:'mark_node', nodeId:string, status:'ok'|'fail' } — completes the CURRENT milestone gate only",
+].join('; ')
+
+/**
  * 注册 wf_graph_patch（全局层；ctx.tools.register）。
  * 返回 disposer：注销失败尽力而为。
  */
@@ -548,6 +557,8 @@ export function registerWfGraphPatch(
       'Apply one patch to a workflow template or the running instance. This tool has three op groups: graph structure, meta parameters, and run-state marking. A patch must use ops from ONE group at a time. ' +
       'Planning a NEW template: pass scope=template plus create={name, description?, mode?} with graph ops that build a complete valid graph (start + executable units + end). The response returns newTemplate=true and targetId = the new template id; never pass expectRevision there. ' +
       `graph group ops — EXACT field shapes, copy verbatim: ${GRAPH_OP_CONTRACT}. ` +
+      `meta/mark group ops: ${META_MARK_OP_CONTRACT}. ` +
+      ROLE_NODE_DATA_CONTRACT + '. ' +
       'Connections are validated by the graph checker and persisted atomically. Missing/misspelled op fields are rejected as WF_BAD_ARGS (fix the parameter shape); real graph problems come back as WF_GRAPH_INVALID (fix the graph, suggestions included). ' +
       'The flow graph must stay an acyclic DAG even for review rework: model "review failed" as a forward conditional branch (condition={type:"fail"}) into a repair node that rejoins the main line downstream — a back-edge to an upstream node is rejected with flowCycle. ' +
       'meta group: set_meta — updates the org budget itself (re-checked against the current graph). ' +

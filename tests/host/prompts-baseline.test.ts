@@ -21,6 +21,7 @@ import {
   TAIL_RESTATE_MARKER,
   ORCH_HARD_CONSTRAINTS,
   NODE_HARD_CONSTRAINTS,
+  DEFAULT_OUTPUT_CONTRACT,
   buildCollabBlock,
   buildHybridPrompt,
   buildNodeTaskBlock,
@@ -49,6 +50,9 @@ const nodeFacts = {
   filePaths: ['data/files/example.pdf'],
   dbToolHint: '已连接数据库节点：d1（产品库）。只可通过 wf_db_query 访问。',
   isGroupMember: false,
+  inputContract: '',
+  outputContract: '',
+  outputContractDefaulted: false,
   systemLanguage: '中文',
 }
 
@@ -181,6 +185,47 @@ describe('T-005 节点任务块模板（软约束双位 + 过程性信息中段 
   it('同一 params 两次构建字节相同（纯函数）', () => {
     const params = { facts: nodeFacts, dynamic: { parentAgentId: 'sess-1' } }
     expect(buildNodeTaskBlock(params)).toBe(buildNodeTaskBlock(params))
+  })
+
+  it('输入结构注入中段；缺省时不组装该段', () => {
+    const withInput = buildNodeTaskBlock({
+      facts: { ...nodeFacts, inputContract: '上游交付的调研纪要（markdown）' },
+      dynamic: {},
+    })
+    const midStart = withInput.indexOf(MID_MARKER)
+    const tailStart = withInput.indexOf(TAIL_MARKER)
+    expect(withInput.slice(midStart, tailStart)).toContain('上游交付的调研纪要（markdown）')
+    expect(withInput.slice(0, midStart)).not.toContain('上游交付的调研纪要（markdown）')
+    expect(buildNodeTaskBlock({ facts: nodeFacts, dynamic: {} })).not.toContain('输入结构')
+  })
+
+  it('交接契约注入末段（注意力末位），且经导出常量引用默认结构', () => {
+    const out = buildNodeTaskBlock({
+      facts: { ...nodeFacts, outputContract: DEFAULT_OUTPUT_CONTRACT, outputContractDefaulted: true },
+      dynamic: {},
+    })
+    const tail = out.slice(out.indexOf(TAIL_MARKER))
+    expect(tail).toContain(TAIL_RESTATE_MARKER)
+    expect(tail).toContain('下游节点直接读取')
+    expect(tail).toContain(DEFAULT_OUTPUT_CONTRACT)
+    // 前缀（首段+中段）不出现契约正文——契约属末段提醒，不污染稳定前缀
+    expect(out.slice(0, out.indexOf(TAIL_MARKER))).not.toContain(DEFAULT_OUTPUT_CONTRACT)
+  })
+
+  it('自定义交接契约逐字使用（仍带「下游直接读取」声明）', () => {
+    const custom = '{结论, 数据表路径, 置信度}'
+    const out = buildNodeTaskBlock({
+      facts: { ...nodeFacts, outputContract: custom, outputContractDefaulted: false },
+      dynamic: {},
+    })
+    const tail = out.slice(out.indexOf(TAIL_MARKER))
+    expect(tail).toContain(custom)
+    expect(tail).toContain('下游节点直接读取')
+  })
+
+  it('未提供交接契约时不组装该段（终端节点不受无关约束）', () => {
+    const out = buildNodeTaskBlock({ facts: nodeFacts, dynamic: {} })
+    expect(out).not.toContain('下游节点直接读取')
   })
 })
 

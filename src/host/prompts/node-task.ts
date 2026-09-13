@@ -54,6 +54,22 @@ export interface NodeTaskBlockParams {
      */
     isGroupMember: boolean
     /**
+     * 输入结构说明（节点配置 data.inputSchema）：告诉该子代理「应当收到什么输入」，
+     * 避免它重复索要上游已提供的信息。为空则不组装该段。
+     */
+    inputContract: string
+    /**
+     * 交接契约（节点配置 data.outputSchema，或系统的默认结构）：该子代理的最终回复
+     * 会被下游 ctx 连线节点**直接读取**，故须按此结构组织。为空则不组装该段。
+     * 注意这是**柔性文本契约**（用户裁决 A3：不做结构校验），只影响提示词，不参与校验。
+     */
+    outputContract: string
+    /**
+     * 交接契约是否来自系统默认结构（节点未配置 outputSchema，且该节点存在 ctx-out 出线）。
+     * true 时声明中提到「本结构由系统默认给出」，便于模型区分用户定制与默认。
+     */
+    outputContractDefaulted: boolean
+    /**
      * 系统语言名（如 '中文' / 'English'；从 DSH 用户设置读取）。
      * 注入「所有对话回复、注释、思考过程必须使用该语言」规则。
      */
@@ -76,6 +92,24 @@ export const NODE_HARD_CONSTRAINTS = {
   /** 协作组内通信必须经 wf_ask_agent（仅组内成员注入）。 */
   collabAskOnly: '与组内成员的一切协作消息必须使用 wf_ask_agent（ask / reply）',
 } as const
+
+/**
+ * 默认交接契约的字段清单（系统兜底用；用户裁决：有 ctx-out 出线且未配置 outputSchema 时注入）。
+ * 为什么是这四项：下游节点经 ctx 连线读到的就是本节点的**最终回复文本**，
+ * 它需要能据此判断「结论是什么、产物在哪、有哪些已定决策、还剩什么没定」——
+ * 大产物本身一律落盘（写在路径里），不靠回复正文传递。
+ */
+export const DEFAULT_OUTPUT_CONTRACT =
+  '结论 / 产出文件路径 / 关键决策 / 未决问题'
+
+/**
+ * 交接契约声明句（首段与末段复用同一措辞源；术语一致性由本常量保证）。
+ * @param defaulted true = 这段结构是系统默认给出的（节点未配置），可用但可自行细化
+ */
+export function outputContractRule(defaulted: boolean): string {
+  const base = `你的最终回复会被下游节点直接读取，必须包含：${DEFAULT_OUTPUT_CONTRACT}`
+  return defaulted ? `${base}（这套结构是本节点的默认交接格式）` : base
+}
 
 /**
  * 系统语言规则短语（面向模型中文；各提示词构建器共用）。
@@ -139,16 +173,28 @@ export function buildNodeTaskBlock(params: NodeTaskBlockParams): string {
     }
   }
 
+  if (facts.inputContract.trim()) {
+    midParts.push('', '输入结构（你应当收到的输入）：', facts.inputContract.trim())
+  }
+
   if (facts.dbToolHint.trim()) {
     midParts.push('', `数据库工具说明：${facts.dbToolHint.trim()}`)
   }
 
   const mid = midParts.join('\n')
 
-  // —— 末段：软约束重申（W-02 双位）——
+  // —— 末段：软约束重申（W-02 双位） + 交接契约（注意力末位 = 最终回复格式的最后一次提醒）——
   const tailLines: string[] = [TAIL_MARKER, '']
   const restate: string[] = []
   if (facts.isGroupMember) restate.push(`- ${NODE_HARD_CONSTRAINTS.collabAskOnly}。`)
+  const outputContract = facts.outputContract.trim()
+  if (outputContract) {
+    // 节点自配置时逐字使用其结构；未配置（系统兜底）时同时给出标准字段清单，
+    // 避免下游契约退化成「随便说说」。
+    restate.push(facts.outputContractDefaulted
+      ? `- ${outputContractRule(true)}：${outputContract}。`
+      : `- 你的最终回复会被下游节点直接读取，必须包含：${outputContract}。`)
+  }
   if (restate.length > 0) tailLines.push(TAIL_RESTATE_MARKER, ...restate)
   const tail = tailLines.join('\n')
 

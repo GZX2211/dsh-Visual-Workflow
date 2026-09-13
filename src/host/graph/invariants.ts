@@ -31,7 +31,9 @@ import {
   ruleDbTarget,
   ruleGroupMembers,
   ruleMilestoneProxy,
+  ruleNodeDataFlowContract,
   ruleProxySource,
+  ruleRoleNodeConfigured,
 } from './invariants-rules-nodes.js'
 import { ruleDuplicateRoleLabel, ruleMetaLimits, ruleNamingConvention } from './invariants-meta-rules.js'
 import { GRAPH_INVARIANT_CODES, type CheckGraphInput, type GraphIssue } from './invariants-types.js'
@@ -85,6 +87,9 @@ export function checkGraphInvariants(input: CheckGraphInput): GraphIssue[] {
     ...ruleDataNodeComplete(input),
     ...ruleCtxSource(input),
     ...ruleDbTarget(input),
+    // 数据流契约与角色配置（规划期可见性提醒；warning 级不阻断）
+    ...ruleNodeDataFlowContract(input),
+    ...ruleRoleNodeConfigured(input),
     ...ruleMilestoneProxy(input, dag),
     // 元参数与命名维度
     ...ruleDuplicateRoleLabel(input),

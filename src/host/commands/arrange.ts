@@ -87,8 +87,7 @@ export const ARRANGE_NO_AGENT = '当前会话不可用于编排规划（接收 A
 
 /** 命令成功后的 UI 直出文案（不进入模型上下文）。 */
 export const ARRANGE_ACCEPTED_TEXT =
-  '已注入编排规划指令（/arrange）：父代理会先调用 wf_org_catalog 勘察现有资产，再用 wf_graph_patch' +
-  "（scope=template + create）产出新模板。规划完成不会自动运行，投产需你确认后再点「运行」。"
+  '已注入编排规划指令（/arrange）：规划完成不会自动运行，投产需你确认后在工作台点「运行」。'
 
 /**
  * 注册 `/arrange` 命令（全局层；命令面缺失时静默跳过）。
@@ -105,7 +104,7 @@ export function registerArrangeCommand(
   }
   const dispose = commands.register({
     name: ARRANGE_COMMAND_NAME,
-    description: 'plan and create a workflow template from a natural-language intent',
+    description: '根据自然语言意图规划并创建工作流',
     input: { hint: '[规划意图]' },
     handler: (invocation) => {
       const agent = invocation?.agent

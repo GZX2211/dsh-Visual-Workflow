@@ -117,6 +117,57 @@ function normalizeProxyData(raw: Record<string, unknown>): Record<string, unknow
 }
 
 /**
+ * 角色节点 data 补全（图结构补丁的**唯一规范化入口**）。
+ *
+ * 为什么必须有（2026.09 实机取证）：ops 是自由对象，`create_node` 只把 raw 原样落盘，
+ * 父代理最自然的写法 `{ kind:'agent', data:{ label, systemPrompt } }` 会产出
+ * `presetId: undefined` 的节点——而运行期 `resolveAgentTools` 对空 presetId 的判定是
+ * **零工具集**（连 read/write 都调不到），`provider/model` 为空也会退化成宿主默认。
+ * 检查器与 validateFlow 都不校验节点 data 形状，于是这类「空壳节点」会一路落盘到运行期
+ * 才暴露。补齐默认值与画布新建角色（graph/model.ts 的 newRoleNode）完全一致，
+ * 保证「父代理建出来的节点」与「用户拖出来的节点」形状无差异。
+ *
+ * 语义：`null` 与 `undefined` 一律视为未提供（补默认）；显式 `''` / 数字 / 布尔原样保留。
+ */
+export function normalizeRoleNodeData(raw: unknown): Record<string, unknown> {
+  const data = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>
+  const presetId = data.presetId
+  return {
+    ...data,
+    label: data.label === undefined || data.label === null ? '' : String(data.label),
+    systemPrompt: data.systemPrompt === undefined || data.systemPrompt === null ? '' : String(data.systemPrompt),
+    provider: data.provider === undefined || data.provider === null ? '' : String(data.provider),
+    model: data.model === undefined || data.model === null ? '' : String(data.model),
+    // presetId 空 → 运行期零工具集（见函数头）；此处只做类型收口，不替模型猜一个组合
+    presetId: presetId === undefined || presetId === null || String(presetId).trim() === '' ? null : String(presetId),
+    retryLimit: typeof data.retryLimit === 'number' ? data.retryLimit : 3,
+    reactLimit: data.reactLimit ?? null,
+    inputSchema: data.inputSchema === undefined || data.inputSchema === null ? '' : String(data.inputSchema),
+    outputSchema: data.outputSchema === undefined || data.outputSchema === null ? '' : String(data.outputSchema),
+    injectSystemPrompt: data.injectSystemPrompt !== false,
+    injectToolSections: data.injectToolSections !== false,
+    groupId: data.groupId ?? null,
+  }
+}
+
+/**
+ * 角色节点（agent / parent）的 data 字段契约文本（**单一事实源**；工具描述引用）。
+ *
+ * 为什么必须写进工具描述：ops 是自由对象，模型只能从描述推断节点 shape。
+ * 2026.09 实机结论——不写契约时模型只会给 `{ label, systemPrompt }`，
+ * 而 `presetId` 为空意味着该节点运行期**零工具**（resolveAgentTools 语义），
+ * 且没有自动补全（补全只补形状，不会替模型组合）。
+ */
+export const ROLE_NODE_DATA_CONTRACT =
+  "role nodes (kind='agent'|'parent') data fields: "
+  + "label (required), systemPrompt (required: the whole role/task spec for that subagent), "
+  + "presetId (required: use a combo id from catalog combos, or an official preset id from catalog presets — "
+  + 'an empty presetId gives that node ZERO tools at runtime), '
+  + 'provider + model (pick from catalog models; empty falls back to host default), '
+  + 'reasoning?, retryLimit?, reactLimit?, inputSchema? (what this node should receive), '
+  + 'outputSchema? (the structure of its final reply, which downstream ctx-linked nodes read verbatim)'
+
+/**
  * 应用 A 组图结构操作（按序，纯函数）。
  * 失败一律抛 WfError（稳定 code），调用方据此返回带修复建议的补丁错误。
  */
@@ -169,6 +220,9 @@ export function applyGraphOps(input: {
         if (node.kind === 'start' || node.kind === 'end' || node.kind === 'pause') {
           // 阶段节点属性锁定：label 由系统硬编码（忽略补丁传入值）
           ;(node as { data: { label: string } }).data = { label: stageLabelOf(node.kind, mode) }
+        } else if (node.kind === 'parent' || node.kind === 'agent') {
+          // 角色节点 data 补全（缺 data 也不崩：按空对象补默认值）
+          ;(node as { data: Record<string, unknown> }).data = normalizeRoleNodeData(raw.data)
         }
         if (node.kind === 'proxy') {
           const sourceId = String((raw as { proxySourceId?: unknown }).proxySourceId ?? '')
@@ -257,7 +311,8 @@ export function applyGraphOps(input: {
           const next = { ...(target.data ?? {}), ...patch }
           // 成员关系只能经 set_group_members 维护；此处保守地忽略成员字段（防组内清单与节点不一致）
           delete next.memberIds
-          target.data = next
+          // 角色节点：合并后再过一次规范化（补全被手改/导入数据抹掉的必填字段）
+          target.data = (node.kind === 'parent' || node.kind === 'agent') ? normalizeRoleNodeData(next) : next
         }
         updatedNodeIds.push(nodeId)
         break

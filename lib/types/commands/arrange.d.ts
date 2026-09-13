@@ -66,7 +66,7 @@ export declare function buildArrangePrompt(input: {
 /** 命令失败文案：接收 Agent 未激活。 */
 export declare const ARRANGE_NO_AGENT = "\u5F53\u524D\u4F1A\u8BDD\u4E0D\u53EF\u7528\u4E8E\u7F16\u6392\u89C4\u5212\uFF08\u63A5\u6536 Agent \u672A\u6FC0\u6D3B\uFF09\u3002";
 /** 命令成功后的 UI 直出文案（不进入模型上下文）。 */
-export declare const ARRANGE_ACCEPTED_TEXT: string;
+export declare const ARRANGE_ACCEPTED_TEXT = "\u5DF2\u6CE8\u5165\u7F16\u6392\u89C4\u5212\u6307\u4EE4\uFF08/arrange\uFF09\uFF1A\u89C4\u5212\u5B8C\u6210\u4E0D\u4F1A\u81EA\u52A8\u8FD0\u884C\uFF0C\u6295\u4EA7\u9700\u4F60\u786E\u8BA4\u540E\u5728\u5DE5\u4F5C\u53F0\u70B9\u300C\u8FD0\u884C\u300D\u3002";
 /**
  * 注册 `/arrange` 命令（全局层；命令面缺失时静默跳过）。
  * @returns disposer：注销命令注册（命令面缺失时为 no-op）。

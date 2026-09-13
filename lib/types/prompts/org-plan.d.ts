@@ -9,22 +9,20 @@ export type OrgPlanTargetKind = 'create' | 'template' | 'instance';
  * 规划变体关键约束短语（首段与末段双位；测试经本常量引用断言，不绑定具体文案）。
  */
 export declare const ORG_PLAN_HARD_CONSTRAINTS: {
-    /** D-11：规划不自动投产。 */
+    /** D-11：规划不自动投产（工具无此护栏，只能写进提示词，故必须保留）。 */
     readonly templateOnly: "只规划模板：本阶段不创建实例、不启动运行，是否投产由用户决定";
-    /** 主用例：新建模板（create 通路；修正 §4.2 的自相矛盾）。 */
+    /** 主用例：新建模板（create 通路）。 */
     readonly createTemplate: "新建模板：提交 scope='template' 且带 create={name, description?, mode?} 的补丁，工具返回的 targetId 即新模板 id";
     /** 次用例：改既有目标（必须带 targetId 与 expectRevision）。 */
     readonly updateTarget: "改既有目标：scope='template' 改模板、scope='instance' 改实例，且必须带 targetId 与 expectRevision";
-    /** 先勘察后动手：wf_org_catalog 是规划的第一动作。 */
-    readonly surveyFirst: "先勘察后动手：先调用 wf_org_catalog 摸清现有角色模板、组合、工具、预设与模板库，再提交补丁";
-    /** §4.2 语义三分区：一次补丁只用同一 op 组。 */
-    readonly patchOnly: "改图只经 wf_graph_patch，且一次补丁只能使用同一 op 组（图结构 / 元参数 / 运行状态标记）";
-    /** D-16：父代理不产出坐标。 */
-    readonly noPosition: "不产出坐标：节点坐标由客户端分层布局自动计算，补丁里不要写 position";
-    /** §4.2：检查器 error 级阻断落盘。 */
-    readonly checkerFixes: "图检查器 error 级会阻断落盘，必须按返回的修复建议修正后重新提交";
-    /** P1 决策（2026.09 修订）：两工具由组合管理统一开关、默认开启；不可用时提示用户开启。 */
-    readonly toolsMayBeClosed: "wf_org_catalog 与 wf_graph_patch 默认开启、由用户在组合管理中统一开关；工具不可用时提示用户到组合管理开启后重试";
+    /** 先勘察后动手：wf_org_catalog 是第一动作，且必须勘察工作区事实。 */
+    readonly surveyFirst: "先勘察后动手：先调用 wf_org_catalog 摸清现有角色模板、组合、预设、模板库与组织预算，再勘察工作区事实（已有文件、技术栈、目录约定），最后才提交补丁";
+    /**
+     * 工具可被用户关闭（P1 决策：两工具由组合管理统一开关、默认开启）。
+     * 为什么必须保留：工具被关闭时模型收到的是 UNKNOWN_TOOL，没有这句它就不知道
+     * 「去组合管理开启后重试」，表现为父代理干脆不用工具。
+     */
+    readonly toolsMayBeClosed: "wf_org_catalog 与 wf_graph_patch 默认开启；任一工具不可用时，提示用户到组合管理开启后重试，不要改用其他方式改图";
 };
 /** 规划提示词入参：`facts` 为规划任务内字节稳定的静态事实，`dynamic` 仅注入末段。 */
 export interface OrgPlanPromptParams {
@@ -41,7 +39,11 @@ export interface OrgPlanPromptParams {
     dynamic: {
         /** 用户本次规划意图（不稳定内容，仅末段注入）。 */
         userIntent: string;
-        /** L3 用户 SOP 注入点（D-19 本轮只留位；空/缺省 = 不组装该段）。 */
+        /**
+         * L3 用户 SOP 注入点（D-19）。
+         * TODO(可视化可调项)：目前无任何调用方传入（`/arrange` 只传 userIntent），
+         * 待「组织规划提示词可调项」UI 落地后由 arrange 命令注入。
+         */
         userSop?: string;
         /** 「本次组织预算」文本（buildOrgBudgetText 输出；仅末段注入）。 */
         orgBudgetText?: string;
@@ -50,6 +52,6 @@ export interface OrgPlanPromptParams {
 /**
  * 构建规划期父代理提示词（纯函数）。
  * @param params facts（目标种类/身份/语言）+ dynamic（用户意图/L3 SOP/预算文本）
- * @returns 完整提示词文本：HEAD 硬约束 → MID（L1 + L2）→ TAIL（重申 + 动态状态）
+ * @returns 完整提示词文本：HEAD 硬约束 → MID（L1 + 设计方法）→ TAIL（重申 + 自检 + 动态状态）
  */
 export declare function buildOrgPlanPrompt(params: OrgPlanPromptParams): string;

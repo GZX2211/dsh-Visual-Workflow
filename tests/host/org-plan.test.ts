@@ -16,7 +16,7 @@ import {
   TAIL_RESTATE_MARKER,
   ORG_PLAN_HARD_CONSTRAINTS,
   ORG_SOP_L1_GRAPH_SEMANTICS,
-  ORG_SOP_L2_PATTERN_LIBRARY,
+  ORG_SOP_DESIGN_METHOD,
   buildOrgBudgetText,
   buildOrgPlanPrompt,
 } from '../../src/host/prompts/index.js'
@@ -109,18 +109,18 @@ describe('P2 规划提示词（buildOrgPlanPrompt）', () => {
     expect(splitTail(out).tail).not.toContain('用户意图：\n')
   })
 
-  it('L1 图语义与 L2 模式库位于中段（MID 之后、TAIL 之前），且不在首段/末段重复', () => {
+  it('L1 图语义与设计方法位于中段（MID 之后、TAIL 之前），且不在首段/末段重复', () => {
     const out = buildOrgPlanPrompt({ facts, dynamic: { userIntent: 'x' } })
     const mid = out.indexOf(MID_MARKER)
     const tail = out.indexOf(TAIL_MARKER)
     const middle = out.slice(mid, tail)
     expect(middle).toContain(ORG_SOP_L1_GRAPH_SEMANTICS)
-    expect(middle).toContain(ORG_SOP_L2_PATTERN_LIBRARY)
+    expect(middle).toContain(ORG_SOP_DESIGN_METHOD)
     expect(out.slice(0, mid)).not.toContain(ORG_SOP_L1_GRAPH_SEMANTICS)
-    expect(out.slice(0, mid)).not.toContain(ORG_SOP_L2_PATTERN_LIBRARY)
+    expect(out.slice(0, mid)).not.toContain(ORG_SOP_DESIGN_METHOD)
     expect(out.slice(tail)).not.toContain(ORG_SOP_L1_GRAPH_SEMANTICS)
-    expect(out.slice(tail)).not.toContain(ORG_SOP_L2_PATTERN_LIBRARY)
-    expect(middle.indexOf(ORG_SOP_L1_GRAPH_SEMANTICS)).toBeLessThan(middle.indexOf(ORG_SOP_L2_PATTERN_LIBRARY))
+    expect(out.slice(tail)).not.toContain(ORG_SOP_DESIGN_METHOD)
+    expect(middle.indexOf(ORG_SOP_L1_GRAPH_SEMANTICS)).toBeLessThan(middle.indexOf(ORG_SOP_DESIGN_METHOD))
   })
 
   it('L3 用户 SOP 注入点默认不组装；给出时标题与正文仅出现在末段', () => {

@@ -20,44 +20,52 @@ import type { OrgMeta } from '../../src/host/shared/types.js'
 // 构造帮手（每个用例只触发目标 code，避免级联噪声干扰断言）
 // ---------------------------------------------------------------------------
 
-/** 可执行节点（agent/parent）。 */
-function agent(id: string, label = id): GraphNode {
+/**
+ * 可执行节点（agent/parent）。
+ *
+ * 注意（2026.09）：默认值构造成「已配置好」的角色节点（有 systemPrompt 与 presetId 组合），
+ * 使各规则用例只触发目标 code，不被 roleNodeNoPreset / roleNodeNoPrompt 两条软规则污染。
+ * 需要验证这两条规则的用例显式传 `{ presetId: null }` / `{ systemPrompt: '' }`。
+ */
+function agent(id: string, label = id, data: Record<string, unknown> = {}): GraphNode {
   return {
     id,
     kind: 'agent',
     position: { x: 0, y: 0 },
     data: {
       label,
-      systemPrompt: '',
+      systemPrompt: '你是执行该任务的子代理。',
       provider: '',
       model: '',
-      presetId: null,
+      presetId: 'combo-test',
       retryLimit: 3,
       reactLimit: null,
       inputSchema: '',
       outputSchema: '',
       groupId: null,
+      ...data,
     },
   }
 }
 
 /** 父代理节点（与 agent 同形状，仅 kind 不同——显式构造，便于类型收窄）。 */
-function parent(id: string, label = id): GraphNode {
+function parent(id: string, label = id, data: Record<string, unknown> = {}): GraphNode {
   return {
     id,
     kind: 'parent',
     position: { x: 0, y: 0 },
     data: {
       label,
-      systemPrompt: '',
+      systemPrompt: '你是编排父代理。',
       provider: '',
       model: '',
-      presetId: null,
+      presetId: 'combo-test',
       retryLimit: 3,
       reactLimit: null,
       inputSchema: '',
       outputSchema: '',
       groupId: null,
+      ...data,
     },
   }
 }
@@ -136,11 +144,15 @@ function codes(issues: GraphIssue[]): string[] {
   return issues.map((issue) => issue.code)
 }
 
-/** 健康基线图：start → a1 → end（无任何问题）。 */
+/**
+ * 健康基线图：start → a1 →（ctx）→ a2 → end（无 error 也无 warning）。
+ * 两层节点 + 一条 ctx 线：既满足流程/阶段硬规则，也满足数据流契约软规则
+ * （a2 有上游输入通道），故可用于「零问题」断言。
+ */
 function healthyFlow(): WorkflowDocument {
   return flow(
-    [stage('s', 'start'), agent('a1', '分析'), stage('e', 'end')],
-    [line('l1', 's', 'a1'), line('l2', 'a1', 'e')],
+    [stage('s', 'start'), agent('a1', '分析'), agent('a2', '成稿'), stage('e', 'end')],
+    [line('l1', 's', 'a1'), line('l2', 'a1', 'a2'), line('l3', 'a2', 'e'), line('l4', 'a1', 'a2', 'ctx')],
   )
 }
 
@@ -149,7 +161,7 @@ function healthyFlow(): WorkflowDocument {
 // ---------------------------------------------------------------------------
 
 describe('检查器基线', () => {
-  it('健康基线图：空 issues（无 error 也无 warning）', () => {
+  it('健康基线图：无 error 也无 warning（含数据流契约与角色配置软规则）', () => {
     const issues = check({ flow: healthyFlow() })
     expect(issues).toEqual([])
     expect(hasBlockingIssues(issues)).toBe(false)
@@ -495,9 +507,10 @@ describe('规则矩阵（每个 code 一例）', () => {
     expect(issues.find((i) => i.code === 'namingConvention')?.level).toBe('warning')
 
     // 全部满足前缀 → 无任何问题（空数组，锁定「不误报」）
+    // 注意：两条软规则（nodeNoUpstream / roleNode*）也要满足，故给 a2 连一条 ctx 输入线
     const satisfied = flow(
       [stage('s', 'start'), agent('a1', '阶段一'), agent('a2', '阶段二'), stage('e', 'end')],
-      [line('l1', 's', 'a1'), line('l2', 'a1', 'a2'), line('l3', 'a2', 'e')],
+      [line('l1', 's', 'a1'), line('l2', 'a1', 'a2'), line('l3', 'a2', 'e'), line('c1', 'a1', 'a2', 'ctx')],
     )
     expect(check({ flow: satisfied, meta: { namingConvention: '阶段' } })).toEqual([])
 
@@ -507,10 +520,92 @@ describe('规则矩阵（每个 code 一例）', () => {
     // 正则写法（首尾斜杠）：以数字开头的名称通过，其余提示
     const numbered = flow(
       [stage('s', 'start'), agent('a1', '1-阶段一'), agent('a2', '2-阶段二'), stage('e', 'end')],
-      [line('l1', 's', 'a1'), line('l2', 'a1', 'a2'), line('l3', 'a2', 'e')],
+      [line('l1', 's', 'a1'), line('l2', 'a1', 'a2'), line('l3', 'a2', 'e'), line('c1', 'a1', 'a2', 'ctx')],
     )
     expect(codes(check({ flow: numbered, meta: { namingConvention: '/^\\d/' } }))).not.toContain('namingConvention')
     expect(codes(check({ flow: satisfied, meta: { namingConvention: '/^\\d/' } }))).toContain('namingConvention')
+  })
+
+  it('nodeNoUpstream：多前置且无输入通道 → warning；单前置线性流水线不报（不误伤首节点）', () => {
+    // 线性流水线（每个节点只有一个可执行前置）→ 两条数据流规则都不报
+    const linear = flow(
+      [stage('s', 'start'), agent('a1'), agent('a2'), stage('e', 'end')],
+      [line('l1', 's', 'a1'), line('l2', 'a1', 'a2'), line('l3', 'a2', 'e')],
+    )
+    expect(codes(check({ flow: linear }))).not.toContain('nodeNoUpstream')
+    expect(codes(check({ flow: linear }))).not.toContain('nodeNoConsumer')
+
+    // 扇出后汇聚：汇聚节点有 a1/a2 两个可执行前置却无任何输入通道 → 提示
+    const converge = flow(
+      [stage('s', 'start'), agent('a1'), agent('a2'), agent('j'), stage('e', 'end')],
+      [
+        line('l1', 's', 'a1'), line('l2', 's', 'a2'),
+        line('l3', 'a1', 'j'), line('l4', 'a2', 'j'), line('l5', 'j', 'e'),
+      ],
+    )
+    const issues = check({ flow: converge })
+    expect(issues.filter((i) => i.code === 'nodeNoUpstream').flatMap((i) => i.nodeIds ?? [])).toEqual(['j'])
+    expect(issues.filter((i) => i.code === 'nodeNoUpstream').every((i) => i.level === 'warning')).toBe(true)
+
+    // 给汇聚节点补一条 ctx 入线后不再报
+    const withCtx = flow(
+      [stage('s', 'start'), agent('a1'), agent('a2'), agent('j'), stage('e', 'end')],
+      [
+        line('l1', 's', 'a1'), line('l2', 's', 'a2'),
+        line('l3', 'a1', 'j'), line('l4', 'a2', 'j'), line('l5', 'j', 'e'),
+        line('c1', 'a1', 'j', 'ctx'),
+      ],
+    )
+    expect(codes(check({ flow: withCtx }))).not.toContain('nodeNoUpstream')
+  })
+
+  it('nodeNoConsumer：声明了输出结构但下游都没接入 ctx → warning；未声明则不报', () => {
+    const base = [
+      stage('s', 'start') as GraphNode,
+      agent('a1', '分析', { outputSchema: '结论 / 产出文件路径' }),
+      agent('a2', '成稿'),
+      stage('e', 'end') as GraphNode,
+    ]
+    const lines = [line('l1', 's', 'a1'), line('l2', 'a1', 'a2'), line('l3', 'a2', 'e')]
+    const issues = check({ flow: flow(base, lines) })
+    expect(issues.filter((i) => i.code === 'nodeNoConsumer').flatMap((i) => i.nodeIds ?? [])).toEqual(['a1', 'a2'])
+    // 未声明 outputSchema 的同类图不报（本规则只在「契约与图形不一致」时发声）
+    const undeclared = flow(
+      [stage('s', 'start'), agent('a1', '分析'), agent('a2', '成稿'), stage('e', 'end')],
+      [line('l1', 's', 'a1'), line('l2', 'a1', 'a2'), line('l3', 'a2', 'e')],
+    )
+    expect(codes(check({ flow: undeclared }))).not.toContain('nodeNoConsumer')
+    // 接上 ctx 线后一致，不再报
+    expect(codes(check({ flow: flow(base, [...lines, line('c1', 'a1', 'a2', 'ctx')]) }))).not.toContain('nodeNoConsumer')
+  })
+
+  it('nodeNoUpstream：file / db 入线也算输入通道（不误报）', () => {
+    const withFile = flow(
+      [
+        stage('s', 'start'),
+        fileNode('f1'),
+        agent('a1'),
+        agent('a2'),
+        stage('e', 'end'),
+      ],
+      [
+        line('l1', 's', 'a1'), line('l2', 's', 'a2'),
+        line('l3', 'a1', 'a2'), line('l4', 'a2', 'e'),
+        line('c1', 'f1', 'a2', 'ctx'),
+      ],
+    )
+    expect(codes(check({ flow: withFile }))).not.toContain('nodeNoUpstream')
+  })
+
+  it('roleNodeNoPreset / roleNodeNoPrompt：角色节点缺工具组合或缺 System Prompt → warning', () => {
+    const doc = flow(
+      [stage('s', 'start'), agent('a1', '分析', { presetId: null }), agent('a2', '成稿', { systemPrompt: '  ' }), stage('e', 'end')],
+      [line('l1', 's', 'a1'), line('l2', 'a1', 'a2'), line('l3', 'a2', 'e'), line('c1', 'a1', 'a2', 'ctx')],
+    )
+    const issues = check({ flow: doc })
+    expect(issues.find((i) => i.code === 'roleNodeNoPreset')?.nodeIds).toEqual(['a1'])
+    expect(issues.find((i) => i.code === 'roleNodeNoPrompt')?.nodeIds).toEqual(['a2'])
+    expect(issues.filter((i) => i.level === 'error')).toEqual([])
   })
 })
 

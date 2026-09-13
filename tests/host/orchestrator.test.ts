@@ -927,6 +927,26 @@ describe('wait 阻塞（§4.4.2 规则 1，模式二调度）', () => {
     expect(node.outputSummary).toBe(big) // 1000 < 6000 不截断
   })
 
+  // 回归：outputFullLimit 曾因回写路径先用 OUTPUT_SUMMARY_LIMIT(6000) 截断而形同虚设，
+  // 导致完整产出（断点回填与下游 ctx 注入的读取源）实际卡在 6000 字。
+  it('节点产出超过摘要上限时：完整输出按 outputFullLimit 保留、摘要才按 6000 字截断', async () => {
+    const h = await makeHarness()
+    await start(h, makeFlow())
+    const big = 'z'.repeat(OUTPUT_SUMMARY_LIMIT + 500)
+    const pending = h.runtime.wfRunNode(caller, { nodeId: 'n-a1', wait: true })
+    await waitStarted(h)
+    await h.runtime.handleSubagentEnd({ id: 'child-1', stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: big }] })
+    await pending
+
+    const persisted = await h.store.getRun('run-1')
+    const node = persisted!.nodes.find((n) => n.nodeId === 'n-a1')!
+    // 完整输出取全量后再按 outputFullLimit(400) 截断 → 400 + 标记（不是被 6000 先砍过）
+    expect(node.output).toHaveLength(406)
+    expect(node.output.startsWith('z'.repeat(400))).toBe(true)
+    // 摘要按 OUTPUT_SUMMARY_LIMIT 截断
+    expect(node.outputSummary).toHaveLength(OUTPUT_SUMMARY_LIMIT + 6)
+  })
+
   it('wait:true 子代理失败：stopReason=error → fail', async () => {
     const h = await makeHarness()
     await start(h, makeFlow())

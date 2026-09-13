@@ -71,7 +71,6 @@ function makeHost(overrides: Partial<OrgCatalogHost> = {}) {
       },
     },
     toolSwitches: { currentDisabled: () => new Set(['wf_graph_patch']) },
-    listTools: async () => [{ name: 'read' }, { name: 'run_code' }, { name: 'wf_run_node' }, { name: 'wf_graph_patch' }],
     listPresets: async () => [{ id: 'standard', name: '标准' }],
     listModels: async () => [{ provider: 'deepseek', model: 'deepseek-chat' }],
     activeRunOf: () => null,
@@ -97,13 +96,78 @@ describe('wf_org_catalog（只读勘察）', () => {
     expect(limits.nodeRemaining).toBeNull()
   })
 
-  it('工具开关现状：available 剔除保留名与子代理隐藏工具，disabled 原样给出', async () => {
+  it('工具开关：只报被关闭的工具，不返回可用工具总清单（父代理无法点名工具）', async () => {
     const { host } = makeHost()
     const catalog = await buildOrgCatalog(host, 'session-1', {})
-    const tools = catalog.tools as { available: string[]; disabled: string[] }
-    // run_code（官方保留传输名）剔除；wf_run_node 属子代理隐藏集，父代理目录里不列（仍可调用）
-    expect(tools.available).toEqual(['read'])
+    const tools = catalog.tools as { disabled: string[]; available?: string[] }
     expect(tools.disabled).toEqual(['wf_graph_patch'])
+    expect(tools.available).toBeUndefined()
+  })
+
+  it('模型目录：给出 provider/model 配对（节点 provider/model 的取值来源）', async () => {
+    const { host } = makeHost()
+    const catalog = await buildOrgCatalog(host, 'session-1', {})
+    expect(catalog.models).toEqual([{ provider: 'deepseek', model: 'deepseek-chat' }])
+  })
+
+  it('分级输出：overview 默认紧凑（短摘要 + detailHint），detail=full 才给角色摘要全文', async () => {
+    const { host } = makeHost()
+    const overview = await buildOrgCatalog(host, 'session-1', {})
+    expect(overview.detail).toBe('overview')
+    expect(typeof overview.detailHint).toBe('string')
+    const compact = (overview.roles as Array<{ summary: string; tools?: unknown }>)[0]
+    expect(compact.summary.length).toBeLessThanOrEqual(CATALOG_LIMITS.summaryCompact + 8)
+    expect(compact.tools).toBeUndefined()
+
+    const full = await buildOrgCatalog(host, 'session-1', { detail: 'full' })
+    expect(full.detail).toBe('full')
+    expect(full.detailHint).toBeUndefined()
+    const detailed = (full.roles as Array<{ summary: string; tools?: unknown }>)[0]
+    // 角色模板在 fake 里是长提示词：full 级别应比 overview 保留更多正文
+    expect(detailed.summary.length).toBeGreaterThan(compact.summary.length)
+    expect('tools' in detailed).toBe(true)
+  })
+
+  it('组合清单两种级别都带工具（组合 id 是节点 presetId 的取值来源）', async () => {
+    const { host } = makeHost()
+    for (const detail of ['overview', 'full'] as const) {
+      const catalog = await buildOrgCatalog(host, 'session-1', { detail })
+      const combo = (catalog.combos as Array<{ id: string; tools: string[] }>)[0]
+      expect(combo.id).toBe('combo-1')
+      expect(combo.tools).toEqual(['wf_ask_agent'])
+    }
+  })
+
+  it('体积天花板：目录条目超量时压缩明细列表并置 truncated', async () => {
+    const base = makeHost()
+    const many = Array.from({ length: 300 }, (_item, index) => ({
+      id: `role-${index}`,
+      name: `角色${index}`,
+      kind: 'agent',
+      provider: 'deepseek',
+      model: 'deepseek-chat',
+      systemPrompt: '角色提示词'.repeat(60),
+    }))
+    const manyTemplates = Array.from({ length: 300 }, (_item, index) => ({
+      id: `tpl-${index}`,
+      mode: 'mode1' as const,
+      name: `模板${index}`,
+      description: '',
+      revision: 1,
+      nodes: [],
+      lines: [],
+    }))
+    const host: OrgCatalogHost = {
+      ...base.host,
+      store: {
+        ...base.host.store,
+        async listTemplates() { return many },
+        async listFlowTemplates(): Promise<WorkflowTemplate[]> { return manyTemplates },
+      },
+    }
+    const catalog = await buildOrgCatalog(host, 'session-1', { detail: 'full' })
+    expect(JSON.stringify(catalog).length).toBeLessThanOrEqual(CATALOG_LIMITS.payload)
+    expect(catalog.truncated).toBe(true)
   })
 
   it('预算化：摘要截断到上限内；detailRoleId 才返回提示词正文（且截断）', async () => {
@@ -114,8 +178,9 @@ describe('wf_org_catalog（只读勘察）', () => {
     expect('rolePrompt' in plain).toBe(false)
 
     const detailed = await buildOrgCatalog(host, 'session-1', { detailRoleId: 'role-1' })
-    const prompt = detailed.rolePrompt as { id: string; systemPrompt: string }
+    const prompt = detailed.rolePrompt as { id: string; name: string; systemPrompt: string }
     expect(prompt.id).toBe('role-1')
+    expect(prompt.name).toBe('分析员')
     expect(prompt.systemPrompt).toContain('你是分析员')
     expect('sys'.length).toBe(3)
   })

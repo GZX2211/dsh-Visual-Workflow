@@ -30,6 +30,10 @@ export interface OrgMeta {
   membersMax?: number
   /** 并行分支数上限（硬护栏：无环分层后单层内可执行单元数）。 */
   parallelBranchMax?: number
+  // TODO(可视化可调项)：本节的 planFreedom / promptSource / roleGranularity / roleReuse /
+  // interveneTrigger / askPerNodeMax / crossGroupPolicy 目前**只归一化与持久化，尚未接入行为**
+  // （用户裁决 2026.09：与「组织规划提示词可调项」一起做成可视化 UI 旋钮后再接入）。
+  // 接入落点：提示词 → prompts/org-budget.ts；可机械判定的 → graph/org-meta-limits.ts。
   /** 规划自由度：只能选现成角色模板 / 允许派生新角色（软约束，提示词注入）。 */
   planFreedom?: 'templates-only' | 'allow-new-role'
   // ---- 二、角色招纳 --------------------------------------------------------

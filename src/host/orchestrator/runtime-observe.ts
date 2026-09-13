@@ -6,7 +6,7 @@
 
 import type { WorkflowDocument } from '../shared/graph-model.js'
 import { memberGroupId } from '../graph/model.js'
-import { OUTPUT_SUMMARY_LIMIT, lastAssistantText, setNodeStatus } from './snapshot.js'
+import { lastAssistantText, setNodeStatus } from './snapshot.js'
 import { SUBAGENT_END_RETRY_DELAY_MS, SUBAGENT_END_RETRY_MAX } from './seams.js'
 import type { RunEntry, SubagentEndInfo } from './run-types.js'
 import { RuntimeComm } from './runtime-comm.js'
@@ -43,7 +43,13 @@ export class RuntimeObserve extends RuntimeComm {
       // max-tokens = 模型输出被硬截断（内容不完整），不能视为成功（Bug 19）；
       // 仅 completed 才算节点成功；ReAct 软截停由 consumeReactCapped 另判 react-capped。
       const completed = stopReason === 'completed'
-      const outputText = lastAssistantText(info?.lastAssistantMessage, OUTPUT_SUMMARY_LIMIT)
+      // 完整产出先取全量（limit=0 不截断），再由 setNodeStatus 按两套口径各自截断：
+      //   - nodes[].output        ← config.outputFullLimit（默认 100KB；断点回填与下游 ctx 注入的读取源）
+      //   - nodes[].outputSummary ← OUTPUT_SUMMARY_LIMIT（6000 字；仅供界面展示）
+      // 历史 BUG（2026.09 修复）：此处曾用 OUTPUT_SUMMARY_LIMIT 先截断再交给 setNodeStatus，
+      // 导致 outputFullLimit 形同虚设（完整产出实际卡在 6000 字），下游节点与断点续跑
+      // 都只能拿到被砍掉的产出。
+      const outputText = lastAssistantText(info?.lastAssistantMessage, 0)
       // 软截停（护栏）：触达 ReAct 上限仍正常产出——标记 react-capped（非失败）
       const reactCapped = this.deps.runner.consumeReactCapped?.(childId) === true
       // P0-1：协作组成员回合结束 ≠ 终态完成——它在协作组内仍可被 wf_ask_agent 唤醒，
