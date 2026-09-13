@@ -42,6 +42,19 @@ declare module '@deepseek-ai/cordis' {
       step?: unknown
       error?: unknown
     }): void
+    /**
+     * 代理状态事件（运行活性基准刷新，自主编排方案 §5.1）：
+     * 官方 packages/core/agent/src/runtime-types.ts L247-250
+     *   payload: { agent: Agent; status: 'running' | 'idle' }（status 词表见 L240-246）。
+     * 语义：父代理（会话根 Agent）从 idle 转 running 即「它在干活」——规划/思考/读写
+     * 文件期间同样触发，据此刷新编排运行的空闲基准 lastActiveAt，避免长规划被空闲
+     * 看护（runIdleTimeoutMs）误判为 idle 并自动 stopped。
+     * status 声明为 unknown：官方词表漂移时由宿主做运行时守卫（只认 'running'）。
+     */
+    'agent/status'(payload: {
+      agent?: { id?: unknown }
+      status?: unknown
+    }): void
     /** 代理会话启动事件（子代理创建窗口内同步触发；用于提前安装每子代理作用域贡献）。 */
     'agent/session-start'(payload: {
       agent?: { id?: unknown; ctx?: unknown }

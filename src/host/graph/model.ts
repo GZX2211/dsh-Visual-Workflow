@@ -297,6 +297,49 @@ export function proxiesOf(flow: Partial<WorkflowDocument>, nodeId: string): Grap
   return (flow.nodes ?? []).filter((n) => n.kind === 'proxy' && n.proxySourceId === nodeId)
 }
 
+/**
+ * 虚拟节点角色（P3；自主编排方案 §5.2 扩展1）：缺省 `executor`（沿用既有自动完成行为），
+ * 显式 `role: 'milestone'` 表示里程碑闸门——该轮父代理执行单元**不自动 ok**，
+ * 只能由 `wf_graph_patch(mark_node)` 显式标记（D-07）。
+ */
+export function proxyRoleOf(node: GraphNode | null | undefined): 'executor' | 'milestone' {
+  const role = (node as { data?: { role?: unknown } } | null | undefined)?.data?.role
+  return role === 'milestone' ? 'milestone' : 'executor'
+}
+
+/** 某主节点的**闸门**虚拟节点（role='milestone'）。 */
+export function milestoneProxiesOf(flow: Partial<WorkflowDocument>, nodeId: string): GraphNode[] {
+  return proxiesOf(flow, nodeId).filter((node) => proxyRoleOf(node) === 'milestone')
+}
+
+/**
+ * 当前生效的闸门：被流程线驱动（有 flow-in）的 milestone 虚拟节点。
+ * 纯函数；多个闸门时按画布节点顺序取第一个——调用方只用它判定「本轮是不是闸门」，
+ * 不承担「第几个闸门」的运行时编排（那是父代理自己的调度决策）。
+ */
+export function activeMilestoneGateOf(
+  flow: Partial<WorkflowDocument>,
+  nodeId: string,
+): { proxyId: string; label?: string } | null {
+  const gate = milestoneProxiesOf(flow, nodeId).find((node) => nodeHasFlowIn(flow, node.id))
+  if (!gate) return null
+  const label = (gate as { data?: { label?: unknown } }).data?.label
+  return { proxyId: gate.id, ...(typeof label === 'string' && label.trim() ? { label: label.trim() } : {}) }
+}
+
+/**
+ * 把「主节点 id 或其任意虚拟节点 id」归一化为主节点 id（找不到返回 null）。
+ * 为什么需要：闸门标记天然有两种自然写法（画布上的闸门虚拟节点 id / 父代理节点 id），
+ * 二者在快照里是同一条记录（虚拟节点与主节点共享执行实例），必须在入口收敛为一种。
+ */
+export function mainNodeIdOf(flow: Partial<WorkflowDocument>, nodeId: string): string | null {
+  const node = nodeById(flow, nodeId)
+  if (!node) return null
+  if (node.kind !== 'proxy') return node.id
+  const source = nodeById(flow, node.proxySourceId)
+  return source ? source.id : null
+}
+
 /** 某协作组的成员节点 id 列表。 */
 export function groupMemberIds(flow: Partial<WorkflowDocument>, groupId: string): string[] {
   const g = nodeById(flow, groupId)

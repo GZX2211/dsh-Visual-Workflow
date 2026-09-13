@@ -110,6 +110,29 @@ export declare function nodeById(flow: Partial<WorkflowDocument>, nodeId: string
 export declare function lineById(flow: Partial<WorkflowDocument>, lineId: string): Line | undefined;
 /** 某主节点的全部虚拟节点（§4.2.3.2 规则 4：复制按钮生成）。 */
 export declare function proxiesOf(flow: Partial<WorkflowDocument>, nodeId: string): GraphNode[];
+/**
+ * 虚拟节点角色（P3；自主编排方案 §5.2 扩展1）：缺省 `executor`（沿用既有自动完成行为），
+ * 显式 `role: 'milestone'` 表示里程碑闸门——该轮父代理执行单元**不自动 ok**，
+ * 只能由 `wf_graph_patch(mark_node)` 显式标记（D-07）。
+ */
+export declare function proxyRoleOf(node: GraphNode | null | undefined): 'executor' | 'milestone';
+/** 某主节点的**闸门**虚拟节点（role='milestone'）。 */
+export declare function milestoneProxiesOf(flow: Partial<WorkflowDocument>, nodeId: string): GraphNode[];
+/**
+ * 当前生效的闸门：被流程线驱动（有 flow-in）的 milestone 虚拟节点。
+ * 纯函数；多个闸门时按画布节点顺序取第一个——调用方只用它判定「本轮是不是闸门」，
+ * 不承担「第几个闸门」的运行时编排（那是父代理自己的调度决策）。
+ */
+export declare function activeMilestoneGateOf(flow: Partial<WorkflowDocument>, nodeId: string): {
+    proxyId: string;
+    label?: string;
+} | null;
+/**
+ * 把「主节点 id 或其任意虚拟节点 id」归一化为主节点 id（找不到返回 null）。
+ * 为什么需要：闸门标记天然有两种自然写法（画布上的闸门虚拟节点 id / 父代理节点 id），
+ * 二者在快照里是同一条记录（虚拟节点与主节点共享执行实例），必须在入口收敛为一种。
+ */
+export declare function mainNodeIdOf(flow: Partial<WorkflowDocument>, nodeId: string): string | null;
 /** 某协作组的成员节点 id 列表。 */
 export declare function groupMemberIds(flow: Partial<WorkflowDocument>, groupId: string): string[];
 /** 某角色节点所属协作组 id（不在组内返回 null）。 */

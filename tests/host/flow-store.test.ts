@@ -444,3 +444,33 @@ describe('工作流模板 CRUD（图2 交互改造：flow-templates/ 全局共�
     expect((await store.getWorkflow('s1', 'f-tpl'))?.name).toBe('模板')
   })
 })
+
+// ---------------------------------------------------------------------------
+// P4 代理补丁标注的服务端字段语义（lastPatch）
+// ---------------------------------------------------------------------------
+
+describe('FlowStore · P4 lastPatch（用户保存清除，补丁路径保留）', () => {
+  const patch = { origin: 'agent' as const, at: '2026-09-01T00:00:00.000Z', nodeIds: ['a'] }
+
+  it('用户保存（缺省）：清除 lastPatch（服务端字段不随客户端快照回写）', async () => {
+    const flow = { ...makeFlow('wf-mark', 's-1'), lastPatch: patch } as WorkflowDocument
+    await store.saveWorkflow(flow, 's-1', { force: true })
+    const saved = await store.getWorkflow('s-1', 'wf-mark')
+    expect((saved as { lastPatch?: unknown } | null)?.lastPatch).toBeUndefined()
+  })
+
+  it('keepServerFields=true（补丁工具路径）：保留 lastPatch', async () => {
+    const flow = { ...makeFlow('wf-mark2', 's-1'), lastPatch: patch } as WorkflowDocument
+    await store.saveWorkflow(flow, 's-1', { force: true, keepServerFields: true })
+    const saved = await store.getWorkflow('s-1', 'wf-mark2')
+    expect((saved as { lastPatch?: unknown } | null)?.lastPatch).toEqual(patch)
+  })
+
+  it('模板同样：缺省清除、keepServerFields 保留', async () => {
+    const base = { id: 'tpl-mark', mode: 'mode1' as const, name: 'T', description: '', nodes: [], lines: [], lastPatch: patch }
+    await store.saveFlowTemplate({ ...base, id: 'tpl-mark-a' }, { force: true })
+    await store.saveFlowTemplate({ ...base, id: 'tpl-mark-b' }, { force: true, keepServerFields: true })
+    expect((await store.getFlowTemplate('tpl-mark-a') as { lastPatch?: unknown } | null)?.lastPatch).toBeUndefined()
+    expect((await store.getFlowTemplate('tpl-mark-b') as { lastPatch?: unknown } | null)?.lastPatch).toEqual(patch)
+  })
+})

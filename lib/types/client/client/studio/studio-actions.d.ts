@@ -25,6 +25,11 @@ export type StudioAction = {
 } | {
     type: 'FLOW_TEMPLATES_LOADED';
     items: WorkflowTemplate[];
+}
+/** 轮询同步（P2）：保留本地未落盘草稿，其余以服务端列表为准。 */
+ | {
+    type: 'FLOW_TEMPLATES_SYNCED';
+    items: WorkflowTemplate[];
 } | {
     type: 'FLOW_TEMPLATE_ADDED';
     template: WorkflowTemplate;

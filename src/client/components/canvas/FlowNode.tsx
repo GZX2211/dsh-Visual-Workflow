@@ -33,6 +33,8 @@ interface FlowNodeProps {
   locked?: boolean
   /** 锁定时显示的悬停说明（已完成/执行中文案不同）。 */
   lockHint?: string
+  /** P4：该节点是最近一次**父代理补丁**（origin='agent'）改动的节点 → 显示「AI 调整」角标。 */
+  agentPatched?: boolean
   onPointerDown(event: React.PointerEvent, id: string): void
   onHandlePointerDown(event: React.PointerEvent, id: string, handle: string): void
   /** 交换左右连接点（节点属性 swapPorts 取反）。 */
@@ -99,9 +101,13 @@ function metaLinesOf(node: CanvasNode, copy: Dict & { modeName(id: string | null
   return out.filter((line) => String(line ?? '').trim())
 }
 
-export function FlowNode({ node, copy, mode, selected, highlighted, dragging, runStatus, locked, lockHint, onPointerDown, onHandlePointerDown, onToggleSwap }: FlowNodeProps) {
+export function FlowNode({ node, copy, mode, selected, highlighted, dragging, runStatus, locked, lockHint, agentPatched, onPointerDown, onHandlePointerDown, onToggleSwap }: FlowNodeProps) {
   const kind = node.kind
   const isProxy = kind === 'proxy'
+  // P4 闸门可视化：proxy.data.role='milestone' 时用里程碑样式 + 角标（label 已在名称行渲染）
+  const isGate = isProxy && (node.data as { role?: unknown }).role === 'milestone'
+  // 名称回退：label 为空（含空白）时显示节点种类名（避免虚拟节点显示为空白卡片）
+  const nodeLabel = String(node.data.label ?? '').trim() || String(copy.nodeKinds?.[isProxy ? 'agent' : kind] ?? '')
   // 阶段节点（启动/结束/暂停）：单/双流程连接点，交换无意义且会产生死数据（审查 BUG-1），
   // 与协作组一致不渲染交换按钮。
   const isStage = kind === 'start' || kind === 'end' || kind === 'pause'
@@ -121,6 +127,7 @@ export function FlowNode({ node, copy, mode, selected, highlighted, dragging, ru
     selected ? 'is-selected' : '',
     highlighted ? 'is-highlighted' : '',
     isProxy ? 'is-proxy' : '',
+    isGate ? 'is-gate' : '',
     locked ? 'is-locked' : '',
   ].filter(Boolean).join(' ')
 
@@ -166,10 +173,16 @@ export function FlowNode({ node, copy, mode, selected, highlighted, dragging, ru
           {statusText ? <span className="wf-hint">{statusText}</span> : null}
           {/* 运行中锁定角标（已完成/执行中流程不可修改、不可删除；仍可拖动移动） */}
           {locked ? <span className="wf-node__lock-badge" title={lockHint}>🔒</span> : null}
+          {/* P4：最近一次父代理补丁改动的节点（帮助用户理解画布为何变了） */}
+          {agentPatched ? <span className="wf-node__agent-badge" title={String(copy.agentPatchedBadge ?? '')}>{String(copy.agentPatchedBadge ?? '')}</span> : null}
         </div>
         <div className="wf-node__label">
-          {isProxy ? <span className="wf-node__proxy-badge">↻ 引用</span> : null}
-          {String(node.data.label ?? copy.nodeKinds?.[displayKind] ?? '')}
+          {isProxy
+            ? (isGate
+                ? <span className="wf-node__proxy-badge is-gate">{String(copy.proxyGateBadge ?? '🚩')}</span>
+                : <span className="wf-node__proxy-badge">↻ 引用</span>)
+            : null}
+          {nodeLabel}
         </div>
         {metaLines.length > 0 ? <div className="wf-node__prompt">{metaText}</div> : null}
         {handles.left.map((handle) => handleEl(handle, 'left'))}

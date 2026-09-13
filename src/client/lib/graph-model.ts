@@ -8,6 +8,9 @@
 
 import type { GraphNode, Line, NodeKind, WorkflowDocument } from '../../host/shared/graph-model.js'
 import type { RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate, RunSnapshot } from '../../host/shared/types.js'
+import { tidyNodes } from './layout-fit.js'
+import type { LayoutBoxNode } from './layout-fit.js'
+import { groupCardSizeOf } from '../components/canvas/geometry.js'
 
 // ---------------------------------------------------------------------------
 // 连接点表（与 Host graph/model.ts 保持一致的客户端镜像）
@@ -180,8 +183,8 @@ export function flowToCanvasLines(lines: Line[] | null | undefined): CanvasLine[
 }
 
 /**
- * 序列化写回：画布节点 → 存储节点（剔除视图字段；虚拟节点只保留 proxySourceId；
- * 阶段节点只保留 label 硬编码；组节点保留 memberIds/size）。
+ * 序列化写回：画布节点 → 存储节点（剔除视图字段；虚拟节点保留 proxySourceId 与
+ * data 的 label/role（P3 闸门识别）；阶段节点只保留 label 硬编码；组节点保留 memberIds/size）。
  */
 export function serializeFlow(currentFlow: WorkflowDocument, nodes: CanvasNode[], lines: CanvasLine[]): WorkflowDocument {
   return {
@@ -190,7 +193,19 @@ export function serializeFlow(currentFlow: WorkflowDocument, nodes: CanvasNode[]
       const kind = nodeKindOf(node)
       const nodeAny = node as { proxySourceId?: string; data?: Record<string, unknown> }
       if (kind === 'proxy') {
-        return { id: node.id, kind, position: node.position, proxySourceId: nodeAny.proxySourceId } as GraphNode
+        // P3：虚拟节点的 data（label / role）是「闸门识别」的事实源，必须随保存写回；
+        // 只保留这两个已知字段，避免把画布视图字段（如 selected）落到文档里。
+        const proxyData = nodeAny.data ?? {}
+        const data: Record<string, unknown> = {}
+        if (proxyData.label !== undefined) data.label = String(proxyData.label)
+        if (proxyData.role === 'milestone' || proxyData.role === 'executor') data.role = proxyData.role
+        return {
+          id: node.id,
+          kind,
+          position: node.position,
+          proxySourceId: nodeAny.proxySourceId,
+          ...(Object.keys(data).length > 0 ? { data } : {}),
+        } as GraphNode
       }
       if (kind === 'start' || kind === 'end' || kind === 'pause') {
         return { id: node.id, kind, position: node.position, data: { label: String(nodeAny.data?.label ?? '') } } as GraphNode
@@ -299,59 +314,35 @@ export function graphSnapshot(nodes: CanvasNode[], lines: CanvasLine[]): { nodes
   return JSON.parse(JSON.stringify({ nodes, lines }))
 }
 
-/** 布局输入的最小结构（仅依赖 id 与 position，兼容各类节点投影）。 */
+/**
+ * 布局输入的最小结构（仅依赖 id 与 position，兼容各类节点投影）。
+ * data 可选：同时兼容「Host 图模型节点（proxy 无 data）」与「studio 画布投影（data 必填）」。
+ */
 export interface LayoutNodeLike {
   id: string
   position: { x: number; y: number }
+  kind?: string
+  data?: Record<string, unknown>
 }
 
-/** 层次布局：按 flow 边拓扑排序分列排布（照搬旧项目 layoutNodes；泛型保留节点形状）。 */
+/**
+ * 层次布局（「整理布局」与自动布局的共用入口）：委托给新的分层布局实现（自主编排方案 §7）。
+ *
+ * 为什么重写（§7.1 旧实现的 7 项缺陷）：proxy 入边计入 indegree 导致主节点被推到引用节点
+ * 之后、不看卡片实际尺寸必然重叠、组内成员不参与布局、无层内排序、孤立节点塞进流程最右列、
+ * 无长边处理、无环路处理。
+ *
+ * 新实现落点：
+ *   - 算法：src/client/lib/layout.ts（分层 + 层内重心排序 + 按实际尺寸生成坐标）；
+ *   - 统一入口：src/client/lib/layout-fit.ts 的 tidyNodes（尺寸解析 + 坐标写回四步收敛）；
+ *   - 尺寸口径：src/client/components/canvas/geometry.ts 的 groupCardSizeOf。
+ * 本函数保持原有签名与「返回含新 position 的新数组」语义：既有调用方与测试零改动。
+ */
 export function layoutNodes<T extends LayoutNodeLike>(nodes: T[], lines: CanvasLine[]): T[] {
-  return layoutGraph(nodes, lines, (line) => line.sourceHandle === 'flow-out')
-}
-
-/** 布局原语：可传边缘筛选函数。 */
-export function layoutGraph<T extends LayoutNodeLike>(
-  nodes: T[],
-  lines: CanvasLine[],
-  channelFilter: (line: Line) => boolean,
-): T[] {
-  const edges = (lines ?? []).filter((line) => channelFilter(line))
-  const byId = new Map(nodes.map((node) => [node.id, node]))
-  const indegree = new Map(nodes.map((node) => [node.id, 0]))
-  const outgoing = new Map(nodes.map((node) => [node.id, [] as string[]]))
-  for (const edge of edges) {
-    if (!byId.has(edge.source) || !byId.has(edge.target)) continue
-    indegree.set(edge.target, (indegree.get(edge.target) ?? 0) + 1)
-    outgoing.get(edge.source)?.push(edge.target)
-  }
-  const queue = nodes.filter((node) => indegree.get(node.id) === 0).map((node) => node.id)
-  const level = new Map(queue.map((id) => [id, 0]))
-  const order: string[] = []
-  while (queue.length) {
-    const id = queue.shift() as string
-    order.push(id)
-    for (const next of outgoing.get(id) ?? []) {
-      level.set(next, Math.max(level.get(next) ?? 0, (level.get(id) ?? 0) + 1))
-      indegree.set(next, (indegree.get(next) ?? 0) - 1)
-      if (indegree.get(next) === 0) queue.push(next)
-    }
-  }
-  nodes.forEach((node) => {
-    if (!level.has(node.id)) {
-      const maxLevel = order.length > 0 ? Math.max(...level.values()) : -1
-      level.set(node.id, maxLevel + 1)
-    }
-  })
-  const rows = new Map<number, number>()
-  const stepX = 270
-  const stepY = 180
-  return nodes.map((node) => {
-    const column = level.get(node.id) ?? 0
-    const row = rows.get(column) ?? 0
-    rows.set(column, row + 1)
-    return { ...node, position: { x: 70 + column * stepX, y: 80 + row * stepY } }
-  })
+  type SizeInput = Parameters<typeof groupCardSizeOf>[0]
+  return tidyNodes(nodes as unknown as LayoutBoxNode[], lines as CanvasLine[], {
+    sizeOf: (node) => groupCardSizeOf(node as unknown as SizeInput),
+  }).nodes as unknown as T[]
 }
 
 /** 运行快照 → 节点状态映射（画布回显用）。 */

@@ -118,6 +118,8 @@ export declare function directiveParams(flow: WorkflowDocument, defPath: string,
     parentTaskBlock?: string;
     /** 系统语言名（从 DSH 用户设置读取；注入语言规则）。 */
     systemLanguage?: string;
+    /** 「本次组织预算」末段文本（冻结快照 → 剩余量口径；P2 注入）。 */
+    orgBudgetText?: string;
 }): OrchestrationDirectiveParams;
 /**
  * 父代理运行提示词统一组装（startRun/resumeRun 共用；三情况整体替换组装）：
@@ -149,6 +151,8 @@ export declare function buildParentRunPrompt(input: {
     } | null;
     /** 系统语言名（从 DSH 用户设置读取；注入语言规则）。 */
     systemLanguage: string;
+    /** 「本次组织预算」末段文本（冻结快照 → 剩余量口径；P2 起由 startRun/resumeRun 注入）。 */
+    orgBudgetText?: string;
 }): string;
 /** 节点级回流重试上限解析：参数覆盖 > 节点配置 > 配置默认。 */
 export declare function effectiveRetryLimitOf(node: RoleNode, args: RunNodeArgs, fallback: number): number;

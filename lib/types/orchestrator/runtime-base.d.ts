@@ -50,6 +50,12 @@ export declare abstract class RuntimeBase {
     /** 记录告警（watchdog 扫描失败/持久化告警路径）。 */
     warn(message: string): void;
     /**
+     * 持久化运行快照（公开包装；自主编排的 mark_node 路径在改写节点状态后调用）。
+     * 为什么需要公开入口：`persistWarn` 是 protected（内部状态机专用），而工具层只应
+     * 「改状态 → 落盘」两步，不应为落盘再复制一遍错误容忍逻辑。
+     */
+    persistRunSnapshot(entry: RunEntry): Promise<void>;
+    /**
      * 父代理执行单元准备（startRun/resumeRun 共用；情况2 hybrid / 情况3 executor）：
      *   - 父代理节点被流程线连接 → 登记 executorParentId，快照中该节点标记 running
      *     （续跑已 ok 则跳过——继承不重跑）；
@@ -64,8 +70,18 @@ export declare abstract class RuntimeBase {
         task: ExecutorContextFacts;
         runContextText: string;
     } | null>;
-    /** 父代理执行者收尾：开始调度（首次 wf_run_node / wf_finish）时把父代理节点标记 ok。 */
+    /**
+     * 父代理执行者收尾：开始调度（首次 wf_run_node / wf_finish）时把父代理节点标记 ok。
+     * P3：**闸门轮（executorIsMilestone）不生效**——闸门的完成只能由
+     * `wf_graph_patch(mark_node)` 写入（D-07），否则自动标记会把闸门静默放过。
+     */
     protected markParentExecutorDone(entry: RunEntry): void;
+    /**
+     * 本会话在编运行已完成的门闸数（D-21：不含首次编排）。
+     * 口径唯一来源是快照的 `milestoneUsed`（可审计 + 续跑继承），无活跃 run 时为 0。
+     * 供 wf_graph_patch 的闸门预算判定与 wf_org_catalog 的预算展示复用。
+     */
+    milestoneUsedForSession(sessionId: string): number;
     /** 空闲看护门限（watchdog.ts 引用）。 */
     get idleTimeoutMs(): number;
     /** 子代理是否仍在运行（watchdog.ts 引用；经 AgentHost）。 */
@@ -136,6 +152,16 @@ export declare abstract class RuntimeBase {
      * 并自动停止。
      */
     touchRun(entry: RunEntry): void;
+    /**
+     * 按会话刷新运行的空闲基准（自主编排方案 §5.1，host 经 `agent/status` 事件调用）。
+     * 为什么需要：父代理只在调用 wf_* 工具时刷新 lastActiveAt（runtime-execute.ts），
+     * 规划/思考/读写文件期间父代理虽在干活却不刷新 → 长规划（> runIdleTimeoutMs，
+     * 默认 30 分钟）会被空闲看护误判为空闲并自动 stopped。官方 `agent/status` 在父代理
+     * 转为 running 时触发，据此把「父代理在干活」翻译成「运行不空闲」。
+     * 只作用于本会话 status==='running' 的 run：paused 由看护自然跳过（watchdog 只扫
+     * running），终态 run 已释放内存条目，均无需刷新。返回是否命中（便于断言/日志）。
+     */
+    touchRunForSession(sessionId: string): boolean;
     /** 重读当前（运行的）工作流最新快照：每节点执行前读一次，运行中调整即时生效（双向同步①）。 */
     currentResolvedFlow(entry: RunEntry): Promise<WorkflowDocument>;
     /**

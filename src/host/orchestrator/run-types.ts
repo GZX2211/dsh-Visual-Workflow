@@ -41,6 +41,14 @@ export interface RunEntry {
    * 启动时登记；父代理开始调度（首次 wf_run_node/wf_finish）时把该节点标记 ok。
    */
   executorParentId?: string
+  /**
+   * 执行者模式：本轮父代理执行单元是否为**里程碑闸门**（proxy.data.role='milestone'）。
+   * true 时 `markParentExecutorDone` 不生效——闸门只能由 wf_graph_patch(mark_node) 显式
+   * 标记完成（D-07）。内存态：startRun/resumeRun 时按当前画布重新推导。
+   */
+  executorIsMilestone?: boolean
+  /** 当前闸门虚拟节点 id（executorIsMilestone 时给出；mark_node 接受它或父代理节点 id）。 */
+  milestoneProxyId?: string
 }
 
 /** wait:true 的阻塞等待器（subagent/end 唤醒 resolve；终止/取消 reject）。 */

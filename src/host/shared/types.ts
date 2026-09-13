@@ -13,6 +13,39 @@
 //   - 每个字段以中文 JSDoc 说明业务语义，并引用需求条款号（PRD §4.x.y）。
 
 import type { GraphNode, Line, WorkflowTemplate } from './graph-model.js'
+import type { OrgMeta as OrgMetaMirror } from './graph-model.js'
+// 本文件内部字段类型使用（RunSnapshot.meta / ServiceState.meta）；对外经下方 re-export 暴露。
+import type { OrgMeta } from './org-meta.js'
+
+// ---------------------------------------------------------------------------
+// 元参数结构一致性断言（编译期强制，零运行时代价）
+// ---------------------------------------------------------------------------
+// graph-model.ts 因 shared 层「完全零 import」纯度门而保留 OrgMeta 结构镜像；本区块用
+// **键集合断言**把镜像与本体（./org-meta.ts）锁在一起：任一侧新增/删除字段而另一侧未同步，
+// 少键（本体比镜像多）或类型不符都会让 `pnpm typecheck` 直接失败，杜绝静默漂移。
+// 为什么不用「双向可赋值」断言：映射类型把可选字段的 undefined 也视作可赋值方向，
+// 漏一个可选字段时断言仍会通过（已实测），键集合断言才是可靠的哨兵。
+const ORG_META_KEYS: Record<keyof OrgMeta, true> = {
+  nodeMin: true, nodeMax: true, groupMax: true, membersMin: true, membersMax: true,
+  parallelBranchMax: true, planFreedom: true, promptSource: true, roleGranularity: true,
+  roleReuse: true, milestoneMax: true, interveneTrigger: true, patchOpsMax: true,
+  askPerNodeMax: true, crossGroupPolicy: true, failurePolicy: true, forbiddenShapes: true,
+  namingConvention: true, eval: true, restructure: true,
+}
+// 镜像没有多余字段（镜像侧多出的键会被 Record<keyof OrgMeta, true> 判为多余属性）
+// 键集合精确相等（任一方向不同即解析为 false → 赋值报错）：
+//   - 镜像少字段：org-meta 侧联合多出该键 → false；
+//   - 镜像多字段：graph-model 侧联合多出该键 → false。
+type KeysMatch<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
+type OrgMetaKeys = keyof OrgMeta
+type OrgMetaMirrorKeys = keyof OrgMetaMirror
+const ORG_META_MIRROR_IN_SYNC: KeysMatch<OrgMetaKeys, OrgMetaMirrorKeys> = true
+void ORG_META_MIRROR_IN_SYNC
+
+// 说明：OrgMeta / OrgBudget 的**类型本体**在 ./org-meta.ts（零 import 纯类型文件）；
+// graph-model.ts 直接 import type 它挂在 WorkflowTemplate/WorkflowDocument.meta 上，
+// 本文件以 type-only re-export 保持既有契约路径（`from './types.js'`）。
+// 三者皆为纯类型、编译期完全擦除，不产生运行时依赖环（shared 层纯度门不破）。
 
 // ---------------------------------------------------------------------------
 // run 快照（runs/<runId>.json，架构文档 §6.1）
@@ -65,6 +98,19 @@ export interface RunSnapshot {
   resumedFromRunId?: string
   /** 断点续跑：从哪个节点恢复（暂停节点 id，需求文档 §4.7 规则 3）。 */
   resumeFromNodeId?: string
+  /**
+   * 元参数冻结副本（D-13）：startRun 时把「有效元参数（模板 ← 实例覆盖）」的副本
+   * 写入快照，供审计与后续评估/重组还原当时预算；续跑继承旧快照的冻结值（不重读）。
+   * 未配置元参数时不写（保持既有快照形状，旧数据兼容）。
+   */
+  meta?: OrgMeta
+  /**
+   * 本 run 已完成的父代理闸门次数（D-21：**不含首次编排**）。
+   * 落位说明（P3）：放在快照而不是内存 RunEntry —— 预算必须可审计、且续跑要继承
+   * （`buildResumedSnapshot` 深拷贝旧快照即自动带上）；仅由 `wf_graph_patch(mark_node)`
+   * 标记 ok 时递增，父代理的自动完成路径永远不会写它。
+   */
+  milestoneUsed?: number
   /** 节点执行记录列表（仅可执行 agent 节点；协作组/阶段/文件/数据库不做执行记录）。 */
   nodes: Array<{
     /** 节点 id。 */
@@ -98,6 +144,17 @@ export interface RunSnapshot {
     }>
   }>
 }
+
+// ---------------------------------------------------------------------------
+// 元参数（OrgMeta / OrgBudget：约束父代理自主编排的不确定因素，自主编排方案 §6.4）
+// ---------------------------------------------------------------------------
+// 类型本体定义在 ./org-meta.ts（shared 层纯度门要求：本文件只允许 type-only 引用，
+// 且 graph-model.ts 必须完全零 import——独立纯类型文件让两侧都能干净引用）；
+// 这里以 type-only re-export 保持既有对外契约路径（`from './types.js'` 继续可用）。
+// 设计依据：docs/自主编排-实施方案.md §6.4 + 决策台账 D-04/D-05/D-13/D-21/D-24。
+export type { OrgBudget, OrgMeta } from './org-meta.js'
+
+/**
 
 // ---------------------------------------------------------------------------
 // 服务（services/<serviceId>.json，架构文档 §6.2）
@@ -145,6 +202,11 @@ export interface ServiceState {
   port?: number
   /** API Key 哈希（鉴权配置，需求文档 §4.1.3 REST API 鉴权行）。 */
   apiKeyHash?: string
+  /**
+   * 元参数（可选，与 WorkflowDocument.meta 同语义）：模式二服务实例的元参数层。
+   * 服务文档即模式二的工作流实例文档，运行期按「有效元参数」组装并冻结进 run 快照。
+   */
+  meta?: OrgMeta
   /** 最近启动时间（ISO 字符串，可选）。 */
   lastStartedAt?: string
   /** 最近停止时间（ISO 字符串，可选）。 */

@@ -11,6 +11,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  DEFAULT_DISABLED_TOOLS,
   filterToolsInAssembly,
   registerToolSwitchFilter,
   ToolSwitchStore,
@@ -56,6 +57,7 @@ describe('ToolSwitchStore', () => {
     const { store } = await makeStore()
     await expect(store.setDisabled('', true)).rejects.toThrow('工具名不能为空')
     await store.setDisabled('read', true)
+    // 磁盘读取语义 = 用户关闭项（默认关闭种子只进内存权威快照，不写进磁盘清单）
     expect(await store.readDisabled()).toEqual(['read'])
   })
 
@@ -65,22 +67,22 @@ describe('ToolSwitchStore', () => {
     await store.setDisabled('read', true)
     await store.setDisabled('read', true)
     await store.setDisabled('wf_run_node', true)
-    expect([...store.currentDisabled()].sort()).toEqual(['read', 'wf_run_node'])
+    expect([...store.currentDisabled()].sort()).toEqual(['read', 'wf_run_node', ...DEFAULT_DISABLED_TOOLS].sort())
     await store.setDisabled('read', false)
-    expect([...store.currentDisabled()].sort()).toEqual(['wf_run_node'])
-    expect(await store.readDisabled()).toEqual(['wf_run_node'])
+    expect([...store.currentDisabled()].sort()).toEqual(['wf_run_node', ...DEFAULT_DISABLED_TOOLS].sort())
+    expect((await store.readDisabled()).sort()).toEqual(['wf_run_node'])
   })
 
   it('setDisabledMany：批量关/开 + 幂等 + 空名忽略 + 内存快照即时更新', async () => {
     const { store } = await makeStore()
     await store.load()
     await store.setDisabledMany(['read', 'grep', '  ', ''], true)
-    expect([...store.currentDisabled()].sort()).toEqual(['grep', 'read'])
+    expect([...store.currentDisabled()].sort()).toEqual(['grep', 'read', ...DEFAULT_DISABLED_TOOLS].sort())
     // 已存在单工具关闭后，批量开启应从清单移出
     await store.setDisabled('wf_run_node', true)
     await store.setDisabledMany(['read', 'wf_run_node'], false)
-    expect([...store.currentDisabled()].sort()).toEqual(['grep'])
-    expect(await store.readDisabled()).toEqual(['grep'])
+    expect([...store.currentDisabled()].sort()).toEqual(['grep', ...DEFAULT_DISABLED_TOOLS].sort())
+    expect((await store.readDisabled()).sort()).toEqual(['grep'])
   })
 
   it('setDisabledMany：空数组为 no-op（不写盘、不报错）', async () => {
@@ -90,13 +92,26 @@ describe('ToolSwitchStore', () => {
     expect(await store.readDisabled()).toEqual(['read'])
   })
 
-  it('损坏 JSON 容忍：按空清单处置，后续保存重写', async () => {
+  it('损坏 JSON 容忍：按空清单处置，后续保存重写（默认关闭种子仍在）', async () => {
     const { dir, store } = await makeStore()
     await writeFile(join(dir, 'tool-switches.json'), '{broken', 'utf8')
     await store.load()
-    expect(store.currentDisabled().size).toBe(0)
+    // 默认关闭种子（自主编排两工具）在任何情况下都生效，损坏文件只影响用户关闭项
+    expect([...store.currentDisabled()].sort()).toEqual([...DEFAULT_DISABLED_TOOLS].sort())
     await store.setDisabled('read', true)
     expect(await store.readDisabled()).toEqual(['read'])
+  })
+
+  it('默认关闭种子：自主编排工具（wf_org_catalog / wf_graph_patch）未开启前不可见', async () => {
+    const { store } = await makeStore()
+    await store.load()
+    for (const name of DEFAULT_DISABLED_TOOLS) {
+      expect(store.currentDisabled().has(name)).toBe(true)
+    }
+    // 用户显式开启后从清单移除（其余种子不受影响）
+    await store.setDisabled('wf_graph_patch', false)
+    expect(store.currentDisabled().has('wf_graph_patch')).toBe(false)
+    expect(store.currentDisabled().has('wf_org_catalog')).toBe(true)
   })
 })
 

@@ -150,6 +150,10 @@ export const WF_ASK = 'wf_ask'
 export const WF_ASK_AGENT = 'wf_ask_agent'
 /** 单工具三模式数据访问工具名（search/query/schema，有 db-in 连线时注入）。 */
 export const WF_DB_QUERY = 'wf_db_query'
+/** 父代理自主编排的只读勘察工具名（角色模板/组合/工具开关/preset/数据源/模板库 + 元参数预算）。 */
+export const WF_ORG_CATALOG = 'wf_org_catalog'
+/** 父代理自主编排的写图工具名（三分区：图结构 / 元参数 / 运行状态标记）。 */
+export const WF_GRAPH_PATCH = 'wf_graph_patch'
 
 // ---------------------------------------------------------------------------
 // 工具可见性元数据（架构文档 §4.5 工具可见性表 + 需求文档 §4.4.2 规则 7）
@@ -166,8 +170,25 @@ export const PARENT_AGENT_VISIBLE_TOOLS = [
   WF_ASK_AGENT, // resolve 裁决能力内聚于父代理（架构文档 §4.5）
 ] as const
 
-/** 子代理永久隐藏工具集（经 tools.restrict 显式隐藏，双保险）：wf_run_node / wf_run_node_wait、wf_finish。 */
-export const CHILD_AGENT_HIDDEN_TOOLS = [WF_RUN_NODE, WF_RUN_NODE_WAIT, WF_FINISH] as const
+/**
+ * 子代理永久隐藏工具集（经 tools.restrict 显式隐藏，双保险）：
+ * wf_run_node / wf_run_node_wait / wf_finish（仅父代理可调度）+ wf_org_catalog /
+ * wf_graph_patch（自主编排方案 §4：勘察与改图都是「父代理的组织权限」，子代理不得改图）。
+ */
+export const CHILD_AGENT_HIDDEN_TOOLS = [
+  WF_RUN_NODE,
+  WF_RUN_NODE_WAIT,
+  WF_FINISH,
+  WF_ORG_CATALOG,
+  WF_GRAPH_PATCH,
+] as const
+
+/**
+ * 自主编排工具集（默认**关闭**，走全局工具开关，由用户按需开启）：
+ * 与 wf_run_node/wf_finish 等常开工具不同，勘察/改图属「组织权限」，默认不给父代理，
+ * 避免未经用户同意就自动扩张组织；开启后 host 端仍按调用者身份二次校验。
+ */
+export const ORG_AUTHORING_TOOLS = [WF_ORG_CATALOG, WF_GRAPH_PATCH] as const
 
 /**
  * 官方保留的 Code Mode presentation transport 名（run_code）：
@@ -192,10 +213,12 @@ export const OPTIONAL_INJECT_TOOLS = [WF_ASK, WF_ASK_AGENT, WF_DB_QUERY] as cons
 export const TOOL_VISIBILITY = {
   /** 父代理可见集（wf_run_node / wf_run_node_wait / wf_finish / wf_ask_agent(resolve) + 有 db-in 时的 wf_db_query）。 */
   parentVisible: PARENT_AGENT_VISIBLE_TOOLS,
-  /** 子代理永久隐藏集（wf_run_node / wf_run_node_wait / wf_finish）。 */
+  /** 子代理永久隐藏集（wf_run_node / wf_run_node_wait / wf_finish + 自主编排两工具）。 */
   childHidden: CHILD_AGENT_HIDDEN_TOOLS,
   /** 可选注入集（wf_ask / wf_ask_agent / wf_db_query）。 */
   optionalInject: OPTIONAL_INJECT_TOOLS,
+  /** 自主编排工具集（wf_org_catalog / wf_graph_patch；默认关闭，经全局工具开关开启）。 */
+  orgAuthoring: ORG_AUTHORING_TOOLS,
 } as const
 
 // ---------------------------------------------------------------------------

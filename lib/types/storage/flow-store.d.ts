@@ -10,6 +10,12 @@ export interface SaveOptions {
     expectedRevision?: number | null;
     /** 强制覆盖（跳过冲突检查）。 */
     force?: boolean;
+    /**
+     * 保留服务端字段（`lastPatch`，P4 代理补丁标注）。
+     * 缺省 false = 用户保存路径：清除代理标注（用户已看过/改过画布）。
+     * 只有 `wf_graph_patch` 的代理补丁路径传 true（否则刚写的标注会被自己剥掉）。
+     */
+    keepServerFields?: boolean;
 }
 /** revision 冲突错误：另一会话已保存更新的版本（架构文档 §4.1 原子性与锁一致）。 */
 export declare class FlowRevisionConflictError extends Error {
@@ -62,6 +68,11 @@ export declare class FlowStore {
     listServicesAll(): Promise<ServiceState[]>;
     /** 服务文档 → 模式二工作流视图（编排运行入口的 flow 形态）。 */
     getServiceAsFlow(serviceId: string): Promise<WorkflowDocument | null>;
+    /**
+     * 按「工作流视图」写回服务实例（补丁工具用）：只覆盖图结构与元参数，
+     * 保留服务自身的运行字段（status/port/apiKeyHash/时间戳），避免调用方拼错形状。
+     */
+    saveServiceAsFlow(doc: WorkflowDocument, sessionId: string, options?: SaveOptions): Promise<WorkflowDocument>;
     /** 保存服务（revision 递增 + 冲突保护；status/port 等运行字段由服务管理器独立更新）。 */
     saveService(service: ServiceState, sessionId: string, options?: SaveOptions): Promise<ServiceState>;
     /** 删除服务（级联删除其 sessions 映射文件）。 */

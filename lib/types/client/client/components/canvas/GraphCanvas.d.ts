@@ -36,6 +36,8 @@ export interface GraphCanvasProps {
      */
     lockedNodeIds?: ReadonlySet<string>;
     lockedEdgeIds?: ReadonlySet<string>;
+    /** P4：最近一次父代理补丁（origin='agent'）改动的节点 id → 显示「AI 调整」角标。 */
+    agentPatchedNodeIds?: string[];
     onInit(api: CanvasApi): void;
     onNodeDragStart(): void;
     onNodeMove(id: string, position: {

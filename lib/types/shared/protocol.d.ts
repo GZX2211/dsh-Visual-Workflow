@@ -117,10 +117,24 @@ export declare const WF_ASK = "wf_ask";
 export declare const WF_ASK_AGENT = "wf_ask_agent";
 /** 单工具三模式数据访问工具名（search/query/schema，有 db-in 连线时注入）。 */
 export declare const WF_DB_QUERY = "wf_db_query";
+/** 父代理自主编排的只读勘察工具名（角色模板/组合/工具开关/preset/数据源/模板库 + 元参数预算）。 */
+export declare const WF_ORG_CATALOG = "wf_org_catalog";
+/** 父代理自主编排的写图工具名（三分区：图结构 / 元参数 / 运行状态标记）。 */
+export declare const WF_GRAPH_PATCH = "wf_graph_patch";
 /** 父代理（主会话 Agent）可见工具集：wf_run_node / wf_run_node_wait、wf_finish、wf_ask_agent。 */
 export declare const PARENT_AGENT_VISIBLE_TOOLS: readonly ["wf_run_node", "wf_run_node_wait", "wf_finish", "wf_ask_agent"];
-/** 子代理永久隐藏工具集（经 tools.restrict 显式隐藏，双保险）：wf_run_node / wf_run_node_wait、wf_finish。 */
-export declare const CHILD_AGENT_HIDDEN_TOOLS: readonly ["wf_run_node", "wf_run_node_wait", "wf_finish"];
+/**
+ * 子代理永久隐藏工具集（经 tools.restrict 显式隐藏，双保险）：
+ * wf_run_node / wf_run_node_wait / wf_finish（仅父代理可调度）+ wf_org_catalog /
+ * wf_graph_patch（自主编排方案 §4：勘察与改图都是「父代理的组织权限」，子代理不得改图）。
+ */
+export declare const CHILD_AGENT_HIDDEN_TOOLS: readonly ["wf_run_node", "wf_run_node_wait", "wf_finish", "wf_org_catalog", "wf_graph_patch"];
+/**
+ * 自主编排工具集（默认**关闭**，走全局工具开关，由用户按需开启）：
+ * 与 wf_run_node/wf_finish 等常开工具不同，勘察/改图属「组织权限」，默认不给父代理，
+ * 避免未经用户同意就自动扩张组织；开启后 host 端仍按调用者身份二次校验。
+ */
+export declare const ORG_AUTHORING_TOOLS: readonly ["wf_org_catalog", "wf_graph_patch"];
 /**
  * 官方保留的 Code Mode presentation transport 名（run_code）：
  *  - 官方 core/tools 在非 native 模式为每个 scope 自动注入（子代理本就自带，无需勾选）；
@@ -142,10 +156,12 @@ export declare const OPTIONAL_INJECT_TOOLS: readonly ["wf_ask", "wf_ask_agent", 
 export declare const TOOL_VISIBILITY: {
     /** 父代理可见集（wf_run_node / wf_run_node_wait / wf_finish / wf_ask_agent(resolve) + 有 db-in 时的 wf_db_query）。 */
     readonly parentVisible: readonly ["wf_run_node", "wf_run_node_wait", "wf_finish", "wf_ask_agent"];
-    /** 子代理永久隐藏集（wf_run_node / wf_run_node_wait / wf_finish）。 */
-    readonly childHidden: readonly ["wf_run_node", "wf_run_node_wait", "wf_finish"];
+    /** 子代理永久隐藏集（wf_run_node / wf_run_node_wait / wf_finish + 自主编排两工具）。 */
+    readonly childHidden: readonly ["wf_run_node", "wf_run_node_wait", "wf_finish", "wf_org_catalog", "wf_graph_patch"];
     /** 可选注入集（wf_ask / wf_ask_agent / wf_db_query）。 */
     readonly optionalInject: readonly ["wf_ask", "wf_ask_agent", "wf_db_query"];
+    /** 自主编排工具集（wf_org_catalog / wf_graph_patch；默认关闭，经全局工具开关开启）。 */
+    readonly orgAuthoring: readonly ["wf_org_catalog", "wf_graph_patch"];
 };
 /**
  * 运行状态枚举（RUN_STATUSES）：与 types.ts 的 RunStatus / 架构文档 §6.1

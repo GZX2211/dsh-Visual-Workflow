@@ -6,6 +6,8 @@
 // 编辑器引用（Bug 8）。所有变更经 dispatch(action) 流入。
 
 import type { StudioState, CanvasNode, CanvasEdge, EditorRef, LibSelKind } from './studio-types.js'
+import type { WorkflowTemplate } from '../../host/shared/graph-model.js'
+import type { Drafted } from './studio-state.js'
 import type { StudioAction } from './studio-actions.js'
 import { flowToCanvas, serviceToCanvas } from './studio-projection.js'
 import { graphSnapshotOf, graphSnapshotsEqual } from './studio-snapshot.js'
@@ -47,6 +49,12 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       return { ...state, workflows: state.workflows.filter((flow) => flow.id !== action.id) }
     case 'FLOW_TEMPLATES_LOADED':
       return { ...state, flowTemplates: action.items }
+    case 'FLOW_TEMPLATES_SYNCED': {
+      // 轮询同步：本地未落盘的模板草稿必须存活（服务端列表里没有它们），
+      // 否则「新建模板 → 未保存」期间被轮询覆盖会凭空消失。
+      const drafts = state.flowTemplates.filter((item) => (item as Drafted<WorkflowTemplate>)._draft === true)
+      return { ...state, flowTemplates: [...drafts, ...action.items] }
+    }
     case 'FLOW_TEMPLATE_ADDED':
       return { ...state, flowTemplates: [action.template, ...state.flowTemplates] }
     case 'FLOW_TEMPLATE_UPDATED':

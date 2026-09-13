@@ -216,6 +216,8 @@ export function useDocumentActions(
                 revision: Number(source.revision ?? 0),
                 nodes: JSON.parse(JSON.stringify(template.nodes ?? [])) as WorkflowDocument['nodes'],
                 lines: JSON.parse(JSON.stringify(template.lines ?? [])) as WorkflowDocument['lines'],
+                // 元参数（模板层）：覆盖创建时随内容一并复制（否则模板预算在实例化后丢失）
+                ...(template.meta ? { meta: template.meta } : {}),
                 createdAt: source.createdAt,
               }
             : workflows.instantiateFromTemplate(template, targetSessionId)
@@ -236,6 +238,8 @@ export function useDocumentActions(
                 revision: Number(source.revision ?? 0),
                 nodes: JSON.parse(JSON.stringify(template.nodes ?? [])) as ServiceState['nodes'],
                 lines: JSON.parse(JSON.stringify(template.lines ?? [])) as ServiceState['lines'],
+                // 元参数（模板层）：覆盖创建时随内容一并复制（与模式一同口径）
+                ...(template.meta ? { meta: template.meta } : {}),
                 createdAt: source.createdAt,
                 updatedAt: new Date().toISOString(),
                 // 覆盖仅非运行态可达（上方已拒绝 running）；保留既有进程状态

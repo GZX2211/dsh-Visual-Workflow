@@ -64,6 +64,12 @@ export interface OrchestrationDirectiveParams {
     runParamsText?: string
     /** 模式二本次外部请求的用户问题（不稳定内容，仅末段注入；模式一无）。 */
     question?: string
+    /**
+     * 「本次组织预算」末段文本（自主编排方案 §6.4；buildOrgBudgetText 输出）。
+     * 取值口径 = 快照冻结元参数（D-13 第三层）+ 当前图规模 → **剩余量**；
+     * 属动态值，只在末段注入（P2 正式接入，见 runtime-launch 的 startRun/resumeRun）。
+     */
+    orgBudgetText?: string
     /** 情况2：父代理自执行单元任务块（buildParentTaskSpec 输出；本 run 内字节稳定）。 */
     parentTaskBlock?: string
   }
@@ -220,6 +226,11 @@ function renderDynamicState(dynamic: OrchestrationDirectiveParams['dynamic']): s
   lines.push(`- 运行参数：${(dynamic.runParamsText ?? '').trim() || '（无）'}`)
   if (dynamic.question) {
     lines.push(`- 用户问题（服务模式）：${dynamic.question}`)
+  }
+  // 组织预算（P2）：给剩余量口径，父代理据此判断还能扩张多少（禁改图预算属硬护栏）
+  if (dynamic.orgBudgetText) {
+    lines.push('')
+    lines.push(dynamic.orgBudgetText)
   }
   // 情况2：父代理自执行单元任务块注入末段（动态值仅末段；本 run 内字节稳定）
   if (dynamic.parentTaskBlock) {

@@ -7,6 +7,14 @@ export declare function currentFlowOf(state: StudioState): WorkflowDocument | nu
 export declare function currentFlowTemplateOf(state: StudioState): WorkflowTemplate | null;
 /** 当前服务文档。 */
 export declare function currentServiceOf(state: StudioState): ServiceState | null;
+/**
+ * P4：当前文档里「父代理最近一次补丁」（origin='agent'）改动的节点 id。
+ * 用途：画布给这些节点加「AI 调整」角标，让用户理解画布为何变了。
+ * 语义边界：用户一旦在画布上保存，宿主侧的 stripClientMeta 会清除 lastPatch
+ * （客户端快照里本来就没有该字段），所以角标只反映「尚未被用户确认的代理改动」。
+ * 纯函数；非法/缺失一律返回空数组（旧数据零影响）。
+ */
+export declare function agentPatchedNodeIdsOf(state: StudioState): string[];
 /** 当前运行状态（running 判定）。 */
 export declare function isRunningOf(state: StudioState): boolean;
 /**

@@ -52,6 +52,12 @@ export interface SaveOptions {
   expectedRevision?: number | null
   /** 强制覆盖（跳过冲突检查）。 */
   force?: boolean
+  /**
+   * 保留服务端字段（`lastPatch`，P4 代理补丁标注）。
+   * 缺省 false = 用户保存路径：清除代理标注（用户已看过/改过画布）。
+   * 只有 `wf_graph_patch` 的代理补丁路径传 true（否则刚写的标注会被自己剥掉）。
+   */
+  keepServerFields?: boolean
 }
 
 /** revision 冲突错误：另一会话已保存更新的版本（架构文档 §4.1 原子性与锁一致）。 */
@@ -82,6 +88,14 @@ function safeFilePart(value: string): string {
 const CLIENT_META_KEYS = ['_draft', '_clientMeta'] as const
 
 /**
+ * 保存时**必须清除**的服务端字段（P4）：`lastPatch` 只描述「父代理最近一次补丁」。
+ * 任何经用户保存路径（putWorkflow/putService/putFlowTemplate）写回的文档都携带的是
+ * 客户端快照，因此用户一保存即视为「用户已看过/改过画布」——清除标注是正确语义，
+ * 也顺带避免客户端伪造该字段。
+ */
+const SERVER_ONLY_KEYS = ['lastPatch'] as const
+
+/**
  * 列表场景逐文件读取：单个文件损坏（CorruptJsonError）时跳过该文件返回 null，
  * 不阻塞整个列表——一个损坏的 JSON 不应让同目录其他正常文件全部不可见（Bug 21）。
  * 其余读取失败（EACCES 等）仍上浮（保留可诊断性，防止把权限问题伪装成空列表）。
@@ -95,12 +109,18 @@ async function readListEntry<T>(dir: string, name: string): Promise<T | null> {
   }
 }
 
-/** 剥除前端快照标记（浅拷贝，不修改入参）。 */
-function stripClientMeta<T>(value: T): T {
+/** 剥除前端快照标记（浅拷贝，不修改入参）；keepServerFields=true 时保留 lastPatch。 */
+function stripClientMeta<T>(value: T, keepServerFields = false): T {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return value
   const next = { ...(value as Record<string, unknown>) }
   for (const key of CLIENT_META_KEYS) delete next[key]
+  if (!keepServerFields) for (const key of SERVER_ONLY_KEYS) delete next[key]
   return next as T
+}
+
+/** 保存选项 → 是否保留服务端字段（缺省 false：用户保存即清除代理标注）。 */
+function keepServerFieldsOf(options: SaveOptions | undefined): boolean {
+  return options?.keepServerFields === true
 }
 
 /** 提取当前 revision（非法/缺失按 0 处理，旧项目 flowRevision 语义）。 */
@@ -230,7 +250,7 @@ export class FlowStore {
       const revision = nextFlowRevision(flow, current, options)
       const now = new Date().toISOString()
       const saved: WorkflowDocument = {
-        ...stripClientMeta(flow),
+        ...stripClientMeta(flow, keepServerFieldsOf(options)),
         revision,
         sessionId,
         createdAt: flow.createdAt ?? current?.createdAt ?? now,
@@ -321,9 +341,31 @@ export class FlowStore {
       startNewSession: service.startNewSession,
       workspacePath: service.workspacePath,
       revision: service.revision,
+      // 元参数（实例层，可选）：模式二运行时同样按「有效元参数」组装指令与冻结快照，
+      // 漏转发会让服务实例的 meta 在运行期被静默丢弃（P0-3 数据链路）。
+      ...(service.meta ? { meta: service.meta } : {}),
       createdAt: service.createdAt,
       updatedAt: service.updatedAt,
     }
+  }
+
+  /**
+   * 按「工作流视图」写回服务实例（补丁工具用）：只覆盖图结构与元参数，
+   * 保留服务自身的运行字段（status/port/apiKeyHash/时间戳），避免调用方拼错形状。
+   */
+  async saveServiceAsFlow(doc: WorkflowDocument, sessionId: string, options: SaveOptions = {}): Promise<WorkflowDocument> {
+    const current = await this.getServiceById(doc.id)
+    if (!current) throw new Error(`服务不存在：${doc.id}`)
+    if (current.sessionId !== sessionId) throw new Error(`服务不属于该会话：${doc.id}`)
+    const saved = await this.saveService({
+      ...current,
+      name: doc.name ?? current.name,
+      description: doc.description ?? current.description,
+      nodes: doc.nodes,
+      lines: doc.lines,
+      ...(doc.meta ? { meta: doc.meta } : {}),
+    } as ServiceState, sessionId, options)
+    return (await this.getServiceAsFlow(saved.id)) as WorkflowDocument
   }
 
   /** 保存服务（revision 递增 + 冲突保护；status/port 等运行字段由服务管理器独立更新）。 */
@@ -336,7 +378,7 @@ export class FlowStore {
       const revision = nextFlowRevision(service, current, options)
       const now = new Date().toISOString()
       const saved: ServiceState = {
-        ...stripClientMeta(service),
+        ...stripClientMeta(service, keepServerFieldsOf(options)),
         revision,
         sessionId,
         createdAt: service.createdAt ?? current?.createdAt ?? now,
@@ -456,7 +498,7 @@ export class FlowStore {
       const revision = nextFlowRevision(template, current, options)
       const now = new Date().toISOString()
       const saved: WorkflowTemplate = {
-        ...stripClientMeta(template),
+        ...stripClientMeta(template, keepServerFieldsOf(options)),
         revision,
         createdAt: template.createdAt ?? current?.createdAt ?? now,
         updatedAt: now,

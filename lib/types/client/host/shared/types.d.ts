@@ -1,4 +1,5 @@
 import type { GraphNode, Line, WorkflowTemplate } from './graph-model.js';
+import type { OrgMeta } from './org-meta.js';
 /** run 运行状态：运行/暂停/完成/失败/停止/中断（架构文档 §4.3 状态机 + §6.1）。 */
 export type RunStatus = 'running' | 'paused' | 'completed' | 'failed' | 'stopped' | 'interrupted';
 /** 单节点运行状态（架构文档 §6.1 nodes[].status）。 */
@@ -31,6 +32,19 @@ export interface RunSnapshot {
     resumedFromRunId?: string;
     /** 断点续跑：从哪个节点恢复（暂停节点 id，需求文档 §4.7 规则 3）。 */
     resumeFromNodeId?: string;
+    /**
+     * 元参数冻结副本（D-13）：startRun 时把「有效元参数（模板 ← 实例覆盖）」的副本
+     * 写入快照，供审计与后续评估/重组还原当时预算；续跑继承旧快照的冻结值（不重读）。
+     * 未配置元参数时不写（保持既有快照形状，旧数据兼容）。
+     */
+    meta?: OrgMeta;
+    /**
+     * 本 run 已完成的父代理闸门次数（D-21：**不含首次编排**）。
+     * 落位说明（P3）：放在快照而不是内存 RunEntry —— 预算必须可审计、且续跑要继承
+     * （`buildResumedSnapshot` 深拷贝旧快照即自动带上）；仅由 `wf_graph_patch(mark_node)`
+     * 标记 ok 时递增，父代理的自动完成路径永远不会写它。
+     */
+    milestoneUsed?: number;
     /** 节点执行记录列表（仅可执行 agent 节点；协作组/阶段/文件/数据库不做执行记录）。 */
     nodes: Array<{
         /** 节点 id。 */
@@ -64,6 +78,13 @@ export interface RunSnapshot {
         }>;
     }>;
 }
+export type { OrgBudget, OrgMeta } from './org-meta.js';
+/**
+
+// ---------------------------------------------------------------------------
+// 服务（services/<serviceId>.json，架构文档 §6.2）
+// ---------------------------------------------------------------------------
+
 /** 服务进程状态：停止/运行中/崩溃（架构文档 §6.2；需求文档 §4.1.3）。 */
 export type ServiceStatus = 'stopped' | 'running' | 'crashed';
 /**
@@ -105,6 +126,11 @@ export interface ServiceState {
     port?: number;
     /** API Key 哈希（鉴权配置，需求文档 §4.1.3 REST API 鉴权行）。 */
     apiKeyHash?: string;
+    /**
+     * 元参数（可选，与 WorkflowDocument.meta 同语义）：模式二服务实例的元参数层。
+     * 服务文档即模式二的工作流实例文档，运行期按「有效元参数」组装并冻结进 run 快照。
+     */
+    meta?: OrgMeta;
     /** 最近启动时间（ISO 字符串，可选）。 */
     lastStartedAt?: string;
     /** 最近停止时间（ISO 字符串，可选）。 */

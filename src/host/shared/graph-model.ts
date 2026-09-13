@@ -10,6 +10,11 @@
 //     src/host/graph/ 负责，本文件只约束「形状」）。
 //   - 每个字段均以中文 JSDoc 说明业务语义，并引用需求条款号（PRD §4.x.y）。
 
+// 为何镜像而不是 import type：shared 层纯度门要求本文件**完全零 import**（连 type import 也无），
+// 而 OrgMeta 的类型本体在 ./org-meta.ts。下方 MIRROR 保留字段结构并与本体逐字段一致——
+// 由文件末尾的「结构一致性类型断言」在编译期强制（改本体不改镜像 → typecheck 失败），
+// 因此不存在静默漂移风险，且本文件仍保持零 import。
+
 // ---------------------------------------------------------------------------
 // 节点判别联合（架构文档 §4.2 代码块 + 需求文档 §4.2）
 // ---------------------------------------------------------------------------
@@ -205,7 +210,53 @@ export interface ProxyNode extends BaseNode {
   kind: 'proxy'
   /** 引用主节点的 id（虚拟节点不存储独立配置，仅此一个引用字段）。 */
   proxySourceId: string
+  /**
+   * 可选视图/识别数据（P3 新增，自主编排方案 §5.2 扩展1；**全部可选，向后兼容**）。
+   * 为什么需要它：同一个父代理可以被多个虚拟节点引用，运行时必须能区分
+   * 「普通执行入口」与「里程碑闸门」——闸门那一轮**不自动完成**，只能由
+   * `wf_graph_patch(mark_node)` 显式标记（D-07）。
+   */
+  data?: {
+    /** 画布显示名（如「里程碑①：方案评审」）。 */
+    label?: string
+    /** 角色：缺省 = executor（沿用既有自动完成行为）；milestone = 闸门（不自动 ok）。 */
+    role?: 'executor' | 'milestone'
+  }
 }
+
+/**
+ * 元参数结构镜像（本体见 ./org-meta.ts 的 OrgMeta，文档注释以本体为准）。
+ * 字段顺序与本体一致；结构一致性由文件末尾类型断言在编译期强制。
+ */
+export interface OrgMeta {
+  nodeMin?: number
+  nodeMax?: number
+  groupMax?: number
+  membersMin?: number
+  membersMax?: number
+  parallelBranchMax?: number
+  planFreedom?: 'templates-only' | 'allow-new-role'
+  promptSource?: 'user-template' | 'agent-generated'
+  roleGranularity?: 'broad' | 'narrow'
+  roleReuse?: 'forbid' | 'allow'
+  milestoneMax?: number
+  interveneTrigger?: Array<'user' | 'threshold' | 'milestone'>
+  patchOpsMax?: number
+  askPerNodeMax?: number
+  crossGroupPolicy?: 'via-parent' | 'forbid'
+  failurePolicy?: { retry: 1; thenEscalate: true; askUserOnUnresolved: true }
+  forbiddenShapes?: string[]
+  namingConvention?: string | null
+  eval?: Record<string, unknown>
+  restructure?: Record<string, unknown>
+}
+
+/**
+ * 可执行单元节点种类（元参数规模统计口径，自主编排方案 §6.4）：
+ * 子代理（agent）、父代理（parent）与协作组卡片（group，组内成员并行执行为一单元）。
+ * 三端（host 检查器 / 客户端预算展示 / P1 写图工具）共用同一口径，避免统计漂移。
+ */
+export const EXECUTABLE_UNIT_KINDS: readonly NodeKind[] = ['agent', 'parent', 'group']
 
 /** 节点判别联合：按 kind 判别具体数据形状（架构文档 §4.2）。 */
 export type GraphNode =
@@ -292,6 +343,13 @@ export interface WorkflowTemplate {
   workspacePath?: string
   /** 修订版本号（可选，与实例保存对齐）。 */
   revision?: number
+  /**
+   * 元参数（可选）：父代理自主编排的可调节参数（自主编排方案 §6.4 / D-13 三层之「模板层」）。
+   * 全部可选、缺省即不约束；旧模板不含该字段，读到时按缺省处理（向后兼容）。
+   */
+  meta?: OrgMeta
+  /** 最近一次父代理补丁记录（P4 画布「AI 调整」角标；用户保存经 stripClientMeta 清除）。 */
+  lastPatch?: LastAgentPatch
   /** 创建时间（ISO 字符串）。 */
   createdAt?: string
   /** 最近更新时间（ISO 字符串）。 */
@@ -299,12 +357,25 @@ export interface WorkflowTemplate {
 }
 
 /**
- * 工作流文档（WorkflowDocument）：完整编排流程定义，关联画布所有节点与连线
+ * 最近一次**父代理补丁**记录（P4 画布角标）：只记录 origin='agent' 的写图补丁——
+ * 用户手动保存会经 `stripClientMeta` 清除本字段（用户改过的画布不再标注「AI 调整」）。
+ */
+export interface LastAgentPatch {
+  /** 固定为 agent：该字段只描述代理改动；用户改动即清除。 */
+  origin: 'agent'
+  /** 补丁落盘时间（ISO 字符串）。 */
+  at: string
+  /** 本次补丁触碰的节点 id（新增/修改/删除的节点；画布据此显示角标）。 */
+  nodeIds: string[]
+}
+
+/** 工作流文档（WorkflowDocument）：完整编排流程定义，关联画布所有节点与连线
  * （需求文档 §4.2.2 工作流实例定义）。
  * 「节点 JSON 即事实源」：nodes/lines 为全量内联快照，不含 templateId 引用
  * （需求文档 §4.2.1 数据模型核心规则）。
  */
 export interface WorkflowDocument {
+  // 说明：meta 字段类型为本文件的元参数结构镜像（本体见 ./org-meta.ts 的 OrgMeta）
   /** 工作流稳定标识（flowId，会话内唯一；按 sessionId + flowId 维度隔离，需求文档 §4.2.2 规则 3）。 */
   id: string
   /** 归属会话 id（会话隔离存储，需求文档 §4.2.2 规则 3）。 */
@@ -330,6 +401,13 @@ export interface WorkflowDocument {
   workspacePath?: string
   /** 修订版本号（可选，配合增量/缓存优化用，非必需）。 */
   revision?: number
+  /**
+   * 元参数（可选）：父代理自主编排的可调节参数（自主编排方案 §6.4 / D-13 三层之「实例层」）。
+   * 有效值 = 实例覆盖模板；startRun 时把有效值冻结进 run 快照（snapshot.meta）。
+   */
+  meta?: OrgMeta
+  /** 最近一次父代理补丁记录（P4 画布「AI 调整」角标；用户保存经 stripClientMeta 清除）。 */
+  lastPatch?: LastAgentPatch
   /** 创建时间（ISO 字符串）。 */
   createdAt?: string
   /** 最近更新时间（ISO 字符串）。 */

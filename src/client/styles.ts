@@ -97,6 +97,11 @@ g.is-locked .wf-graph__edge-hit{cursor:not-allowed}
 .wf-node__proxy-badge{flex:none;font-size:9px;font-weight:750;color:var(--wf-warn);border:1px solid var(--wf-warn);border-radius:999px;padding:0 5px;line-height:15px}
 /* 运行中锁定角标（已完成/执行中节点；仅提示不可修改，节点仍可拖动移动） */
 .wf-node__lock-badge{flex:none;font-size:9px;line-height:14px;opacity:.75;cursor:help}
+/* P4 闸门可视化：里程碑闸门用实线强调边框（普通虚拟节点是虚线） */
+.wf-node.is-gate{border-style:solid;border-color:var(--wf-brand);box-shadow:0 0 0 1px var(--wf-brand) inset}
+.wf-node__proxy-badge.is-gate{color:var(--wf-brand);border-color:var(--wf-brand)}
+/* P4：父代理补丁改动的节点角标 */
+.wf-node__agent-badge{flex:none;font-size:9px;font-weight:750;color:var(--wf-brand);border:1px solid var(--wf-brand);border-radius:999px;padding:0 5px;line-height:15px;opacity:.9}
 .wf-node.is-locked{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--wf-ink-2) 35%,transparent)}
 .wf-node.is-locked .wf-node__label{opacity:.92}
 .wf-node__prompt{margin-top:5px;font-size:11px;color:var(--wf-ink-2);white-space:pre-wrap;max-height:34px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}

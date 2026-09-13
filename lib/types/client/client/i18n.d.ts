@@ -74,6 +74,7 @@ export declare const zh: {
     flowFileChanged: string;
     refresh: string;
     emptyHint: string;
+    canvasOverlapHint: string;
     fitView: string;
     zoomIn: string;
     zoomOut: string;
@@ -185,7 +186,14 @@ export declare const zh: {
     swapPorts: string;
     proxyMainLabel: string;
     proxyReadonlyHint: string;
-    parentTemplateHint: string;
+    proxyLabel: string;
+    proxyLabelHint: string;
+    proxyRole: string;
+    proxyRoleExecutor: string;
+    proxyRoleMilestone: string;
+    proxyRoleMilestoneHint: string;
+    proxyGateBadge: string;
+    agentPatchedBadge: string;
     line: string;
     lineType: string;
     lineTypeFlow: string;

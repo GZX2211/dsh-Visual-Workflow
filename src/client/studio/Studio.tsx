@@ -22,6 +22,7 @@ import { useUnsavedGuard } from '../hooks/useUnsavedGuard.js'
 import { useRunControl } from '../hooks/useRunControl.js'
 import { useRunPolling } from '../hooks/useRunPolling.js'
 import { useActiveRunsPolling } from '../hooks/useActiveRunsPolling.js'
+import { useFlowTemplatesPolling } from '../hooks/useFlowTemplatesPolling.js'
 import { useFlowFileSync } from '../hooks/useFlowFileSync.js'
 import { useServiceControl } from '../hooks/useServiceControl.js'
 import { useModeSwitch } from '../hooks/useModeSwitch.js'
@@ -80,6 +81,8 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
   useRunPolling(state.run.sessionId ?? currentFlow?.sessionId ?? state.sessionId, state.run.runId, dispatch, remote)
   // 全量活跃 run 轮询（实例列表状态徽标：所有会话的运行状态实时可见）
   useActiveRunsPolling(dispatch, remote)
+  // 工作流模板列表轮询（P2）：父代理经 wf_graph_patch 在宿主侧产出的模板要能被看见
+  useFlowTemplatesPolling(dispatch, remote)
 
   const canvasApiRef = useRef<CanvasApi | null>(null)
   const canvasShellRef = useRef<HTMLDivElement | null>(null)

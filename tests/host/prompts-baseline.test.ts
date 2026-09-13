@@ -84,6 +84,14 @@ describe('T-005 编排父代理提示词（情况1 纯编排）', () => {
     expect(withGroup).not.toBe(without)
   })
 
+  it('组织预算文本仅在末段注入（P2 接入；改预算不改前缀字节）', () => {
+    const base = buildOrchestratorPrompt({ facts: orchFacts, dynamic: {} })
+    const withBudget = buildOrchestratorPrompt({ facts: orchFacts, dynamic: { orgBudgetText: '本次组织预算：\n- 可执行节点 3/5（剩余 2）' } })
+    expect(base).not.toContain('本次组织预算：')
+    expect(withBudget.slice(0, withBudget.indexOf(TAIL_MARKER))).toBe(base.slice(0, base.indexOf(TAIL_MARKER)))
+    expect(withBudget.slice(withBudget.indexOf(TAIL_MARKER))).toContain('本次组织预算：')
+  })
+
   it('模板不含 Date.now / Math.random；构建器为纯函数（无副作用源）', () => {
     const out = buildOrchestratorPrompt({ facts: orchFacts, dynamic: { isResume: true } })
     expect(out).not.toContain('Date.now')

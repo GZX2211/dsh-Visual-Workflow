@@ -22,6 +22,8 @@ export type StudioAction =
   | { type: 'WORKFLOW_UPDATED'; flow: WorkflowDocument }
   | { type: 'WORKFLOW_REMOVED'; id: string }
   | { type: 'FLOW_TEMPLATES_LOADED'; items: WorkflowTemplate[] }
+  /** 轮询同步（P2）：保留本地未落盘草稿，其余以服务端列表为准。 */
+  | { type: 'FLOW_TEMPLATES_SYNCED'; items: WorkflowTemplate[] }
   | { type: 'FLOW_TEMPLATE_ADDED'; template: WorkflowTemplate }
   | { type: 'FLOW_TEMPLATE_UPDATED'; template: WorkflowTemplate }
   | { type: 'FLOW_TEMPLATE_REMOVED'; id: string }

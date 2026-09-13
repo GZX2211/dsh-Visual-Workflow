@@ -452,8 +452,19 @@ export function GroupForm({ data, copy, members, onPatch, onLoadMd, onRemoveMemb
   )
 }
 
-/** 虚拟节点只读（仅显示主节点名称，不可修改，§4.2.3.2 规则 3）。 */
-export function ProxyForm({ data, copy, mainLabel }: { data: Record<string, unknown>; copy: Dict; mainLabel: string }) {
+/**
+ * 虚拟节点表单（P4 闸门可视化）：引用主节点只读（§4.2.3.2 规则 3），另可编辑
+ *   - 显示名（画布上替代角色名，如「里程碑①：方案评审」）；
+ *   - 角色：普通执行入口（缺省，沿用自动完成）或里程碑闸门（不自动完成，
+ *     只能由父代理 `wf_graph_patch(mark_node)` 显式标记，D-07/D-21）。
+ */
+export function ProxyForm({ data, copy, onPatch, mainLabel }: {
+  data: Record<string, unknown>
+  copy: Dict
+  onPatch(patch: Record<string, unknown>): void
+  mainLabel: string
+}) {
+  const isMilestone = data.role === 'milestone'
   return (
     <div>
       <h3>{copy.nodeKinds.proxy}</h3>
@@ -461,6 +472,28 @@ export function ProxyForm({ data, copy, mainLabel }: { data: Record<string, unkn
         <span className="wf-pathbox__label">{copy.proxyMainLabel}</span>
         <span className="wf-pathbox__value">{mainLabel || String(data.proxySourceId ?? '—')}</span>
       </div>
+      <Field label={String(copy.proxyLabel ?? '')}>
+        <input
+          type="text"
+          value={String(data.label ?? '')}
+          placeholder={String(copy.proxyLabelHint ?? '')}
+          onChange={(event) => onPatch({ label: event.target.value })}
+        />
+      </Field>
+      <Field label={String(copy.proxyRole ?? '')}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={isMilestone}
+              onChange={(event) => onPatch({ role: event.target.checked ? 'milestone' : null })}
+              style={{ width: 'auto', flex: '0 0 auto', padding: 0, margin: 0, minWidth: 0, accentColor: 'var(--wf-brand)' }}
+            />
+            <span>{isMilestone ? copy.proxyRoleMilestone : copy.proxyRoleExecutor}</span>
+          </label>
+          <span className="wf-hint">{copy.proxyRoleMilestoneHint}</span>
+        </div>
+      </Field>
       <span className="wf-hint">{copy.proxyReadonlyHint}</span>
     </div>
   )

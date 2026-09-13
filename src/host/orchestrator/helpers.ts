@@ -295,6 +295,8 @@ export function directiveParams(
     parentTaskBlock?: string
     /** 系统语言名（从 DSH 用户设置读取；注入语言规则）。 */
     systemLanguage?: string
+    /** 「本次组织预算」末段文本（冻结快照 → 剩余量口径；P2 注入）。 */
+    orgBudgetText?: string
   },
 ): OrchestrationDirectiveParams {
   return {
@@ -314,6 +316,7 @@ export function directiveParams(
           ? 'mode2 (service): use wf_run_node_wait to start each node and block until it finishes; never use wf_run_node.'
             : 'mode1 (orchestration): use wf_run_node to start each node asynchronously; never use wf_run_node_wait.',
       ...(extra?.question ? { question: extra.question } : {}),
+      ...(extra?.orgBudgetText ? { orgBudgetText: extra.orgBudgetText } : {}),
       ...(extra?.parentTaskBlock ? { parentTaskBlock: extra.parentTaskBlock } : {}),
       ...(extra?.resume
         ? { isResume: true, resumeFromNodeId: extra.resume.resumeFromNodeId, resumedFromRunId: extra.resume.resumedFromRunId }
@@ -344,6 +347,8 @@ export function buildParentRunPrompt(input: {
   executor: { nodeId: string; nodeLabel: string; task: ExecutorContextFacts; runContextText: string } | null
   /** 系统语言名（从 DSH 用户设置读取；注入语言规则）。 */
   systemLanguage: string
+  /** 「本次组织预算」末段文本（冻结快照 → 剩余量口径；P2 起由 startRun/resumeRun 注入）。 */
+  orgBudgetText?: string
 }): string {
   const { flow, defPath, mode, executor, systemLanguage } = input
   const variant = parentPromptVariantOf(flow)
@@ -365,6 +370,7 @@ export function buildParentRunPrompt(input: {
       directiveParams(flow, defPath, mode, {
         ...(resume ? { resume } : {}),
         ...(input.question ? { question: input.question } : {}),
+        ...(input.orgBudgetText ? { orgBudgetText: input.orgBudgetText } : {}),
         parentNode: { nodeId: executor.nodeId, nodeLabel: executor.nodeLabel },
         parentTaskBlock: buildParentTaskSpec({ facts: executor.task, runContextText: executor.runContextText, systemLanguage }),
         systemLanguage,
@@ -377,6 +383,7 @@ export function buildParentRunPrompt(input: {
     directiveParams(flow, defPath, mode, {
       ...(resume ? { resume } : {}),
       ...(input.question ? { question: input.question } : {}),
+      ...(input.orgBudgetText ? { orgBudgetText: input.orgBudgetText } : {}),
       systemLanguage,
     }),
   )

@@ -48,6 +48,12 @@ export interface OrchestrationDirectiveParams {
         runParamsText?: string;
         /** 模式二本次外部请求的用户问题（不稳定内容，仅末段注入；模式一无）。 */
         question?: string;
+        /**
+         * 「本次组织预算」末段文本（自主编排方案 §6.4；buildOrgBudgetText 输出）。
+         * 取值口径 = 快照冻结元参数（D-13 第三层）+ 当前图规模 → **剩余量**；
+         * 属动态值，只在末段注入（P2 正式接入，见 runtime-launch 的 startRun/resumeRun）。
+         */
+        orgBudgetText?: string;
         /** 情况2：父代理自执行单元任务块（buildParentTaskSpec 输出；本 run 内字节稳定）。 */
         parentTaskBlock?: string;
     };

@@ -181,7 +181,10 @@ export function buildLibraryModel(input: LibraryModelInput): LibraryModel {
               label: String(parentTemplate.name ?? t.parentAgent),
               onClick: () => onSelectLib('parentTemplate', parentTemplate.id),
               onDrop: (position) => onPlaceParent(parentTemplate.id, position ?? { x: 120, y: 80 }),
-            }, true,
+            },
+            // pinned 必须为 false：父代理模板卡不是「钉住」的对象——旧代码把第 9 个位置
+            // 参数传了 true，导致 LeftPanel 常驻渲染 is-pinned 高亮（P4 修复）。
+            false,
           ),
         ],
       })

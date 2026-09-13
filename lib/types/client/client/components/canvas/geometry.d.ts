@@ -24,6 +24,15 @@ export declare function nodeSizeOf(node: CanvasNode): {
     w: number;
     h: number;
 };
+/**
+ * 协作组卡片最小尺寸（容纳成员列表所需高度；宽度保持用户拉伸值）。
+ * 布局与自动布局判定共用同一口径，避免「布局算出的高度」与「渲染高度」漂移。
+ * 纯函数：只读 data.memberIds / data.size，不读时钟/随机源。
+ */
+export declare function groupCardSizeOf(node: CanvasNode): {
+    w: number;
+    h: number;
+};
 /** 接点垂直位置（百分比）：db 最上、ctx 上、flow 下。 */
 export declare function handleY(handle: string): number;
 export declare function clamp(value: number, minimum: number, maximum: number): number;

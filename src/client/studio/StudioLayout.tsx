@@ -8,6 +8,7 @@
 import type { Dispatch } from 'react'
 import type { Dict } from '../i18n.js'
 import type { StudioAction, StudioState, EditorData } from './studio-state.js'
+import { agentPatchedNodeIdsOf } from './studio-selectors.js'
 import type { DocumentActionsFace } from '../hooks/useDocumentActions.js'
 import type { CanvasActionsFace } from '../hooks/useCanvasActions.js'
 import type { EditorActionsFace } from '../hooks/useEditorActions.js'
@@ -35,6 +36,7 @@ import { RunHistory } from '../components/run-history/RunHistory.js'
 import { ServiceConsole } from '../components/service-console/ServiceConsole.js'
 import { ComboManager } from '../components/combo-manager/ComboManager.js'
 import { SchedulerManager } from '../components/scheduler/SchedulerManager.js'
+import { useAutoLayout } from '../hooks/useAutoLayout.js'
 
 export interface StudioLayoutProps {
   t: Dict
@@ -114,6 +116,15 @@ export function StudioLayout(props: StudioLayoutProps) {
     leftOpen, bottomOpen, inspectorOpen,
     handleRun, panelsCollapsed, onTogglePanels,
   } = props
+
+  // 自动布局（自主编排方案 §7.3 / D-15 方案 B）：打开/接收文档时若节点缺坐标（哨兵 {0,0}）
+  // → 自动重排一次并静默落盘；已布局过的文档只检测重叠并提示，绝不覆盖用户手动调整。
+  useAutoLayout(state, dispatch, {
+    saveCanvas: doc.saveCanvas,
+    notify: toast,
+    tips: { overlap: t.canvasOverlapHint },
+    onApplied: () => canvasApiRef.current?.fitView(),
+  })
 
   // 左栏（LeftPanel）与底栏（BottomPanel）共用同一份库内容 props（内容/选中/拖拽逻辑一致，
   // 本次仅显示布局不同）。仅 open/width 或 open/height 两处按各自布局传入。
@@ -283,6 +294,7 @@ export function StudioLayout(props: StudioLayoutProps) {
             highlightedNodeIds={highlightedNodeIds}
             lockedNodeIds={lockedNodeIds}
             lockedEdgeIds={lockedEdgeIds}
+            agentPatchedNodeIds={agentPatchedNodeIdsOf(state)}
             onInit={(api) => { canvasApiRef.current = api }}
             onNodeDragStart={canvas.onNodeDragStart}
             onNodeMove={canvas.moveNode}

@@ -370,6 +370,9 @@ dsh-visual-workflow/
 │   │   ├── service/              # 模式二服务管理器（fork/端口池/恢复）
 │   │   ├── embedding/            # 本地向量嵌入与索引
 │   │   ├── scheduler/            # 定时任务引擎
+│   │   ├── graph/                # 图模型校检
+│   │   ├── commands/             # / 命令注册
+│   │   ├── workspace/            # 工作区路径校验
 │   │   └── prompts/              # 编排/节点任务提示词模板
 │   └── client/                   # WebUI 源码
 │       ├── sidebar/              # 官方插槽注册（右侧 Sidebar 标签页 / 侧边栏入口 / 常驻容器）

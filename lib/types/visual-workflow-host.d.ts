@@ -124,6 +124,12 @@ export declare class VisualWorkflowHost extends Service {
     get engine(): EmbeddingService;
     /** 启动装配（Service.init 语义：初始化失败让 fiber 失败，不吞错）。 */
     [Service.init](): Promise<void>;
+    /**
+     * 自主编排工具的宿主能力适配（P1）：把宿主 service 的 store / 运行时 / 生态枚举
+     * 收敛成两个工具所需的最小缝。为什么要一层适配而不是把 service 直接传出：
+     * 工具只应看到自己需要的能力（单测可替换 fake），避免工具层反向依赖宿主内部结构。
+     */
+    private ecosystemAdapters;
     /** subagent/end 观察：回写 run 节点状态（ok/fail + output）并唤醒 wait 阻塞。 */
     onSubagentEnd(payload: {
         runId?: unknown;
@@ -148,6 +154,20 @@ export declare class VisualWorkflowHost extends Service {
         turn?: unknown;
         step?: unknown;
         error?: unknown;
+    }): void;
+    /**
+     * agent/status 观察：父代理转为 running（在干活）→ 刷新其在编运行的空闲基准。
+     * payload 全字段运行时守卫（官方词表/形状漂移时静默忽略，绝不抛错）：
+     *   - status 只认 'running'（'idle' 表示父代理空闲，不能算作活跃）；
+     *   - 会话 id 取 agent.id（父代理会话 id 即根会话 id）。
+     * 非本会话在编运行（子代理状态事件、其他会话）不影响：touchRunForSession 按
+     * 会话 + status==='running' 精确匹配。
+     */
+    onAgentStatus(payload: {
+        agent?: {
+            id?: unknown;
+        };
+        status?: unknown;
     }): void;
     /**
      * 清理运行时资源（幂等）。

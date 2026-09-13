@@ -2,8 +2,20 @@
 export interface ToolSwitchDoc {
     /** 被关闭（父代理不可见）的工具名清单。 */
     disabled: string[];
+    /**
+     * 显式启用清单（默认关闭工具被用户打开后记账）：
+     * 没有它，「恢复默认」会把自主编排工具重新关掉——与用户刚做的开启操作相反。
+     */
+    enabled?: string[];
 }
-/** 空文档（所有工具启用；disabled 为空数组）。 */
+/**
+ * 默认关闭的工具（种子集合）：自主编排的勘察/写图工具（wf_org_catalog / wf_graph_patch）
+ * 属「组织权限」，用户未显式开启前不进任何会话的代理上下文（自主编排方案 §4.2）。
+ * 为什么在存储层做种子而不是注册层：开关语义是「关闭即从上下文剔除」，
+ * 种子里出现即等价于用户手动关闭；用户在组合管理里打开即从清单移出。
+ */
+export declare const DEFAULT_DISABLED_TOOLS: readonly string[];
+/** 空文档（磁盘主体恒为「用户关闭项」；默认关闭种子只在内存权威快照里生效）。 */
 export declare function emptyToolSwitchDoc(): ToolSwitchDoc;
 /** 工具开关存储：持久化 + 内存快照（瀑布过滤同步读取）。 */
 export declare class ToolSwitchStore {
@@ -15,12 +27,14 @@ export declare class ToolSwitchStore {
     private path;
     /** 读取磁盘文档（损坏 JSON 按空文档容忍；保存会重写完整文件）。 */
     private readDoc;
-    /** 装载内存快照（Service.init 时调用；幂等）。 */
+    /** 装载内存快照（Service.init 时调用；幂等）：含默认关闭种子。 */
     load(): Promise<void>;
     /** 当前被关闭的工具名集合（瀑布过滤与白名单解析共用；同步读取）。 */
     currentDisabled(): ReadonlySet<string>;
     /** 读取关闭清单（磁盘权威；端点/测试用）。 */
     readDisabled(): Promise<string[]>;
+    /** 完整关闭清单（用户关闭项 ∪ 默认关闭种子 − 显式启用项；顺序稳定：用户项在前）。 */
+    private readDisabledWithDefaults;
     /**
      * 设置某个工具的开关状态（幂等）：
      *   - name 必须非空且非官方保留传输名 run_code（该名永远不可关闭）；

@@ -36,6 +36,8 @@ export interface GraphCanvasProps {
    */
   lockedNodeIds?: ReadonlySet<string>
   lockedEdgeIds?: ReadonlySet<string>
+  /** P4：最近一次父代理补丁（origin='agent'）改动的节点 id → 显示「AI 调整」角标。 */
+  agentPatchedNodeIds?: string[]
   onInit(api: CanvasApi): void
   onNodeDragStart(): void
   onNodeMove(id: string, position: { x: number; y: number }): void
@@ -66,7 +68,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
     nodes, edges, copy, mode, selectedNode, selectedEdge, runStatusByNode, highlightedNodeIds,
     onInit, onNodeDragStart, onNodeMove, onNodeDropToGroup, onNodeSelect, onEdgeSelect, onPaneClick,
     onConnect, onConnectionRejected, onGroupResize, onSwapPorts, dropTargetGroupId, fitLabel, zoomInLabel, zoomOutLabel, emptyHint, workflowCaption,
-    lockedNodeIds, lockedEdgeIds,
+    lockedNodeIds, lockedEdgeIds, agentPatchedNodeIds,
   } = props
   const rootRef = useRef<HTMLDivElement | null>(null)
   const viewportRef = useRef<Viewport>({ x: 32, y: 32, zoom: 0.8 })
@@ -81,6 +83,8 @@ export function GraphCanvas(props: GraphCanvasProps) {
   const runStatusOf = (id: string): { status: string; attempts: number; outputSummary: string } | null => runStatusByNode[id] ?? null
   /** 锁定判定（未传入视为全解锁）：节点锁角标、连线灰化虚线、点击不选中。 */
   const isLockedNode = (id: string): boolean => lockedNodeIds?.has(id) === true
+  // P4：父代理补丁改动标记（数组 → Set，渲染期 O(1) 判定）
+  const agentPatchedSet = new Set(agentPatchedNodeIds ?? [])
   const isLockedEdge = (id: string): boolean => lockedEdgeIds?.has(id) === true
   /** 节点锁悬停文案（已完成/执行中语义不同，取自词典）。 */
   const nodeLockHint = (id: string): string => (runStatusOf(id)?.status === 'running'
@@ -500,6 +504,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
               runStatus={node.kind === 'agent' || node.kind === 'parent' ? runStatusOf(node.id) : null}
               locked={isLockedNode(node.id)}
               lockHint={nodeLockHint(node.id)}
+              agentPatched={agentPatchedSet.has(node.id)}
               onPointerDown={beginNodeDrag}
               onHandlePointerDown={beginConnection}
               onToggleSwap={onSwapPorts}

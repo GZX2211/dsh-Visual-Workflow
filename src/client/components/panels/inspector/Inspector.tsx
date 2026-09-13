@@ -55,23 +55,22 @@ export function Inspector(props: InspectorProps) {
         content = <WorkflowForm data={data} copy={t} isService={editorData.kind === 'service'} flowMeta={flowMeta} onPatch={onPatch} />
         break
       case 'role':
-        // 父代理规则：左侧模板点击无属性（不可编辑）；画布父代理节点可编辑
-        // （名称/System Prompt/服务商/模型/思考强度/模式（仅 preset）/高级选项，§4.2.3.1）
-        content = editorData.isParent && editorData.template
-          ? <div className="wf-empty">{String(t.parentTemplateHint ?? '')}</div>
-          : (
-              <RoleForm
-                data={data}
-                copy={t}
-                presets={presets}
-                models={models}
-                combos={combos}
-                onPatch={onPatch}
-                onLoadMd={onLoadMd}
-                isParent={editorData.isParent === true}
-                allowCombos={editorData.isParent !== true}
-              />
-            )
+        // 父代理属性（D-20）：**模板层全面可编辑**（含 presetId/工具组合），不再显示
+        // 「父代理模板无独立属性」空态；画布上的父代理节点同样可编辑，但运行期 preset
+        // 仍按引擎口径固定 —— 故只有「模板来源」的编辑才放开组合(preset)下拉。
+        content = (
+          <RoleForm
+            data={data}
+            copy={t}
+            presets={presets}
+            models={models}
+            combos={combos}
+            onPatch={onPatch}
+            onLoadMd={onLoadMd}
+            isParent={editorData.isParent === true}
+            allowCombos={editorData.isParent !== true || editorData.template === true}
+          />
+        )
         break
       case 'file':
         content = <FileForm data={data} copy={t} onPatch={onPatch} onFileSelect={onFileSelect} />
@@ -86,7 +85,7 @@ export function Inspector(props: InspectorProps) {
         content = <StageForm data={data} copy={t} nodeLabel={String(data.label ?? '')} />
         break
       case 'proxy':
-        content = <ProxyForm data={data} copy={t} mainLabel={editorData.mainLabel ?? ''} />
+        content = <ProxyForm data={data} copy={t} onPatch={onPatch} mainLabel={editorData.mainLabel ?? ''} />
         break
       case 'edge':
         content = <LinePanel data={data} copy={t} onPatch={onPatch} />

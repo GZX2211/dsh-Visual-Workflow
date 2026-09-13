@@ -34,6 +34,19 @@ export function nodeSizeOf(node: CanvasNode): { w: number; h: number } {
   return { w: GRAPH_NODE_WIDTH, h: GRAPH_NODE_HEIGHT }
 }
 
+/**
+ * 协作组卡片最小尺寸（容纳成员列表所需高度；宽度保持用户拉伸值）。
+ * 布局与自动布局判定共用同一口径，避免「布局算出的高度」与「渲染高度」漂移。
+ * 纯函数：只读 data.memberIds / data.size，不读时钟/随机源。
+ */
+export function groupCardSizeOf(node: CanvasNode): { w: number; h: number } {
+  const size = nodeSizeOf(node)
+  if (node.kind !== 'group') return size
+  const members = [...new Set((node.data?.memberIds as string[] | undefined) ?? [])]
+  const minHeight = GROUP_MEMBER_LIST_TOP + members.length * GROUP_MEMBER_ROW_H + 10
+  return { w: size.w, h: Math.max(size.h, minHeight) }
+}
+
 /** 接点垂直位置（百分比）：db 最上、ctx 上、flow 下。 */
 export function handleY(handle: string): number {
   if (handle === 'db-in' || handle === 'db-out') return 0.22

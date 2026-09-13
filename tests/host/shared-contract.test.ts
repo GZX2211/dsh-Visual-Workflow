@@ -431,7 +431,8 @@ describe('T-014 types.ts 结构形态', () => {
 // 零 import 纯度门：三文件文本不含 `import` 语句与 `from '`
 // ---------------------------------------------------------------------------
 describe('T-014 零运行时 import 纯度门', () => {
-  const files = ['graph-model.ts', 'types.ts', 'protocol.ts']
+  // org-meta.ts：元参数纯类型本体（零 import）——与 graph-model/protocol 同级门禁
+  const files = ['graph-model.ts', 'types.ts', 'protocol.ts', 'org-meta.ts']
 
   it.each(files)('%s 不含任何 `import` 语句', (name) => {
     const src = readShared(name)
@@ -443,8 +444,10 @@ describe('T-014 零运行时 import 纯度门', () => {
     expect(runtimeImports, `${name} 存在运行时 import`).toEqual([])
   })
 
-  it('graph-model.ts 与 protocol.ts 完全零 import（连 type import 也无）', () => {
-    for (const name of ['graph-model.ts', 'protocol.ts']) {
+  it('graph-model.ts、protocol.ts 与 org-meta.ts 完全零 import（连 type import 也无）', () => {
+    // graph-model.ts 的 OrgMeta 是结构镜像（零 import），与本体的一致性由 types.ts 的
+    // 编译期类型断言锁定（见 OrgMetaMirrorInSync），不依赖文本脆弱断言。
+    for (const name of ['graph-model.ts', 'protocol.ts', 'org-meta.ts']) {
       const src = readShared(name)
       expect(/^\s*import\b/m.test(src), `${name} 含 import`).toBe(false)
     }
@@ -459,13 +462,26 @@ describe('T-014 零运行时 import 纯度门', () => {
     }
   })
 
-  it('三文件不含 `from "` / `from \'`（无模块说明符——除 types.ts 的 type-only 引用）', () => {
-    for (const name of ['graph-model.ts', 'protocol.ts']) {
-      const src = readShared(name)
-      expect(src.includes('from '), `${name} 含 from 说明符`).toBe(false)
+  it('四文件无模块说明符（除 types.ts 的 type-only 引用）', () => {
+    // 只统计**语句行**（import/export … from '…'）：注释里出现「from './xxx.js'」这类
+    // 说明文字不算模块说明符（否则注释措辞会误伤纯度门）。import type 亦属 import 语句，
+    // 故零 import 的文件（graph-model/protocol/org-meta）自然为 0 条。
+    const specifierLines = (src: string): string[] => src
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => /^(import|export)\b/.test(line) && /\bfrom\s+['"]/.test(line))
+    for (const name of ['graph-model.ts', 'protocol.ts', 'org-meta.ts']) {
+      expect(specifierLines(readShared(name)), name + ' 含模块说明符').toEqual([])
     }
-    // types.ts 允许 `import type { ... } from './graph-model.js'` 单一纯类型引用。
-    const typesSrc = readShared('types.ts')
-    expect((typesSrc.match(/from '/g) ?? []).length).toBeLessThanOrEqual(1)
+    // types.ts 允许四处 type-only 引用（皆纯类型、编译期擦除）：
+    //   import type … from './graph-model.js'（GraphNode/Line/WorkflowTemplate）
+    //   import type … from './org-meta.js'（OrgMeta，字段标注用）
+    //   export type … from './org-meta.js'（OrgMeta/OrgBudget，对外契约 re-export）
+    const lines = specifierLines(readShared('types.ts'))
+    expect(lines.length).toBeLessThanOrEqual(4)
+    for (const line of lines) {
+      const isTypeOnly = line.startsWith('import type ') || line.startsWith('export type ')
+      expect(isTypeOnly, 'types.ts 非 type 引用：' + line).toBe(true)
+    }
   })
 })

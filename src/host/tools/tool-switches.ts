@@ -31,14 +31,28 @@
 
 import { join } from 'node:path'
 import { atomicWriteJson, CorruptJsonError, readJson, withJsonLock } from '../storage/atomic.js'
+import { ORG_AUTHORING_TOOLS } from '../shared/protocol.js'
 
 /** 全局工具开关文档形态（tool-switches.json）。 */
 export interface ToolSwitchDoc {
   /** 被关闭（父代理不可见）的工具名清单。 */
   disabled: string[]
+  /**
+   * 显式启用清单（默认关闭工具被用户打开后记账）：
+   * 没有它，「恢复默认」会把自主编排工具重新关掉——与用户刚做的开启操作相反。
+   */
+  enabled?: string[]
 }
 
-/** 空文档（所有工具启用；disabled 为空数组）。 */
+/**
+ * 默认关闭的工具（种子集合）：自主编排的勘察/写图工具（wf_org_catalog / wf_graph_patch）
+ * 属「组织权限」，用户未显式开启前不进任何会话的代理上下文（自主编排方案 §4.2）。
+ * 为什么在存储层做种子而不是注册层：开关语义是「关闭即从上下文剔除」，
+ * 种子里出现即等价于用户手动关闭；用户在组合管理里打开即从清单移出。
+ */
+export const DEFAULT_DISABLED_TOOLS: readonly string[] = ORG_AUTHORING_TOOLS
+
+/** 空文档（磁盘主体恒为「用户关闭项」；默认关闭种子只在内存权威快照里生效）。 */
 export function emptyToolSwitchDoc(): ToolSwitchDoc {
   return { disabled: [] }
 }
@@ -58,9 +72,11 @@ export class ToolSwitchStore {
   /** 读取磁盘文档（损坏 JSON 按空文档容忍；保存会重写完整文件）。 */
   private async readDoc(): Promise<ToolSwitchDoc> {
     try {
-      const doc = await readJson<ToolSwitchDoc | null>(this.path(), null)
+      const doc = await readJson<ToolSwitchDoc & { enabled?: unknown } | null>(this.path(), null)
+      const enabled = Array.isArray(doc?.enabled) ? doc.enabled.map((name) => String(name)).filter(Boolean) : []
       return {
         disabled: Array.isArray(doc?.disabled) ? doc.disabled.map((name) => String(name)).filter(Boolean) : [],
+        ...(enabled.length > 0 ? { enabled } : {}),
       }
     } catch (error) {
       if (error instanceof CorruptJsonError) return emptyToolSwitchDoc()
@@ -68,9 +84,9 @@ export class ToolSwitchStore {
     }
   }
 
-  /** 装载内存快照（Service.init 时调用；幂等）。 */
+  /** 装载内存快照（Service.init 时调用；幂等）：含默认关闭种子。 */
   async load(): Promise<void> {
-    this.current = new Set(await this.readDisabled())
+    this.current = new Set(await this.readDisabledWithDefaults())
   }
 
   /** 当前被关闭的工具名集合（瀑布过滤与白名单解析共用；同步读取）。 */
@@ -84,6 +100,17 @@ export class ToolSwitchStore {
     return [...doc.disabled]
   }
 
+  /** 完整关闭清单（用户关闭项 ∪ 默认关闭种子 − 显式启用项；顺序稳定：用户项在前）。 */
+  private async readDisabledWithDefaults(): Promise<string[]> {
+    const doc = await this.readDoc()
+    const explicitlyEnabled = new Set(doc.enabled ?? [])
+    const merged = new Set<string>([
+      ...doc.disabled,
+      ...DEFAULT_DISABLED_TOOLS.filter((name) => !explicitlyEnabled.has(name)),
+    ])
+    return [...merged]
+  }
+
   /**
    * 设置某个工具的开关状态（幂等）：
    *   - name 必须非空且非官方保留传输名 run_code（该名永远不可关闭）；
@@ -95,16 +122,28 @@ export class ToolSwitchStore {
     const toolName = String(name ?? '').trim()
     if (!toolName) throw new Error('工具名不能为空')
     const path = this.path()
+    let enabledForSnapshot = new Set<string>()
     const doc = await withJsonLock(path, async () => {
       const current = await this.readDoc()
+      const enabled = new Set(current.enabled ?? [])
+      enabledForSnapshot = enabled
       const set = new Set(current.disabled)
-      if (disabled) set.add(toolName)
-      else set.delete(toolName)
+      if (disabled) {
+        set.add(toolName)
+        enabled.delete(toolName)
+      } else {
+        set.delete(toolName)
+        // 显式开启默认关闭工具（自主编排）：记一笔「显式启用」，
+        // 否则用户「恢复默认」后种子会复活、工具又变不可见（与用户刚做的操作相反）。
+        if (DEFAULT_DISABLED_TOOLS.includes(toolName)) enabled.add(toolName)
+      }
       const next = [...set]
-      await atomicWriteJson(path, { disabled: next })
+      await atomicWriteJson(path, { disabled: next, ...(enabled.size > 0 ? { enabled: [...enabled] } : {}) })
       return next
     })
-    this.current = new Set(doc)
+    // 内存权威快照 = 用户关闭项 ∪（默认关闭种子 − 本次显式启用项）：
+    // 不能只用用户项覆盖，否则恢复默认后自主编排工具会「意外变可见」。
+    this.current = new Set([...doc, ...DEFAULT_DISABLED_TOOLS.filter((name) => !enabledForSnapshot.has(name))])
     return [...doc]
   }
 
@@ -122,17 +161,24 @@ export class ToolSwitchStore {
     const path = this.path()
     const doc = await withJsonLock(path, async () => {
       const current = await this.readDoc()
+      const enabled = new Set(current.enabled ?? [])
       const set = new Set(current.disabled)
       for (const toolName of toolNames) {
-        if (disabled) set.add(toolName)
-        else set.delete(toolName)
+        if (disabled) {
+          set.add(toolName)
+          enabled.delete(toolName)
+          continue
+        }
+        set.delete(toolName)
+        if (DEFAULT_DISABLED_TOOLS.includes(toolName)) enabled.add(toolName)
       }
       const next = [...set]
-      await atomicWriteJson(path, { disabled: next })
-      return next
+      await atomicWriteJson(path, { disabled: next, ...(enabled.size > 0 ? { enabled: [...enabled] } : {}) })
+      return { next, enabled }
     })
-    this.current = new Set(doc)
-    return [...doc]
+    // 同 setDisabled：内存快照 = 用户关闭项 ∪（种子 − 显式启用项）
+    this.current = new Set([...doc.next, ...DEFAULT_DISABLED_TOOLS.filter((name) => !doc.enabled.has(name))])
+    return [...doc.next]
   }
 }
 
