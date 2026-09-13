@@ -30,6 +30,7 @@ import type { ModelSelectionSetup } from '../../src/host/agent/model-selection.j
 import type { ChildPromptSetup } from '../../src/host/agent/prompt-setup.js'
 import type { NodeStartInput } from '../../src/host/orchestrator/runtime.js'
 import type { RoleNode, WorkflowDocument } from '../../src/host/shared/graph-model.js'
+import { CHILD_AGENT_HIDDEN_TOOLS } from '../../src/host/shared/protocol.js'
 
 const cleanups: Array<() => Promise<void>> = []
 
@@ -115,8 +116,10 @@ class FakeAgentsService implements AgentsServiceLike {
 class FakeToolsView implements ToolsView {
   // run_code：官方在非 native 模式自动注入 scope（visible 含它，但不得进 allow 名单）；
   // str_replace_editor：官方简单模式专用工具——存在于可见并集（来自无关 preset standing
-  // scope），但不在父代理 scope 视图（简单模式未启用），运行时被兜底剔除
-  visible: string[] = ['read', 'write', 'edit', 'wf_ask', 'wf_ask_agent', 'wf_db_query', 'wf_run_node', 'wf_finish', 'run_code', 'str_replace_editor', 'mcp__srv1__a', 'mcp__srv1__b']
+  // scope），但不在父代理 scope 视图（简单模式未启用），运行时被兜底剔除；
+  // wf_run_node_wait / wf_org_catalog / wf_graph_patch：CHILD_AGENT_HIDDEN_TOOLS 成员，
+  // 即使被组合勾选也永不进 allow（父代理专属）
+  visible: string[] = ['read', 'write', 'edit', 'wf_ask', 'wf_ask_agent', 'wf_db_query', 'wf_run_node', 'wf_run_node_wait', 'wf_finish', 'wf_org_catalog', 'wf_graph_patch', 'run_code', 'str_replace_editor', 'mcp__srv1__a', 'mcp__srv1__b']
   presets = new Map<string, string[] | null>()
   /** 父代理 scope 视图（默认=可见集去掉 run_code 与幽灵工具；测试可覆盖）。 */
   agentTools: string[] | null = null
@@ -235,14 +238,19 @@ describe('resolveAgentTools 白名单解析（§4.2 L219）', () => {
     expect(tools).toEqual([])
   })
 
-  it('combo：勾选 ∩ 可见（父代理工具集）+ 所选 MCP 前缀工具；wf_run_node/wf_finish/run_code/str_replace_editor 被白名单天然排除', async () => {
+  it('combo：勾选 ∩ 可见（父代理工具集）+ 所选 MCP 前缀工具；CHILD_AGENT_HIDDEN_TOOLS/run_code/str_replace_editor 被白名单天然排除', async () => {
     const h = await makeHarness()
-    await saveCombo(h, 'combo-c1', ['read', 'not-visible', 'wf_ask', 'wf_run_node', 'wf_finish', 'run_code', 'str_replace_editor'], ['srv1'])
+    await saveCombo(h, 'combo-c1', ['read', 'not-visible', 'wf_ask', 'wf_run_node', 'wf_run_node_wait', 'wf_finish', 'wf_org_catalog', 'wf_graph_patch', 'run_code', 'str_replace_editor'], ['srv1'])
     const tools = await resolveAgentTools({
       store: h.store, toolsView: h.toolsView, sessionId: 'session-1', flowId: 'flow-1',
       node: agentNode('n-a1'),
     })
     expect(tools).not.toContain('run_code') // 官方保留名（presentation transport）永不进入 allow
+    // 父代理专属工具（自主编排两工具 + 调度三工具）：勾选也不下发子代理
+    // （架构文档 §4.5 父子可见性表；runner 侧双保险第一层）
+    for (const name of CHILD_AGENT_HIDDEN_TOOLS) {
+      expect(tools).not.toContain(name)
+    }
     // str_replace_editor：官方简单模式专用工具，当前父代理视图（简单模式未启用）不含它
     // → 运行时兜底剔除，避免官方 tools.restrict 抛 "names unknown global tool"
     expect(tools).not.toContain('str_replace_editor')
@@ -286,10 +294,13 @@ describe('resolveAgentTools 白名单解析（§4.2 L219）', () => {
       store: h.store, toolsView: h.toolsView, sessionId: 'session-1', flowId: 'flow-1',
       node: agentNode('n-a1', { presetId: 'unknown-preset' }),
     })
-    // 回退全部可见，但 wf_run_node/wf_finish 仍被无条件剔除（§4.4.2 规则 7）；
+    // 回退全部可见，但 CHILD_AGENT_HIDDEN_TOOLS 仍被无条件剔除（§4.4.2 规则 7）；
     // run_code 为官方保留名、str_replace_editor 不在父代理视图（简单模式未启用）同样剔除
     expect(fallback.sort()).toEqual(
-      h.toolsView.visible.filter((n) => n !== 'wf_run_node' && n !== 'wf_finish' && n !== 'run_code' && n !== 'str_replace_editor').sort(),
+      h.toolsView.visible
+        .filter((n) => !CHILD_AGENT_HIDDEN_TOOLS.includes(n as (typeof CHILD_AGENT_HIDDEN_TOOLS)[number]))
+        .filter((n) => n !== 'run_code' && n !== 'str_replace_editor')
+        .sort(),
     )
   })
 
@@ -525,8 +536,8 @@ describe('NodeAgentRunner 创建/复用/派发', () => {
 // 可见性双保险贡献
 // ---------------------------------------------------------------------------
 
-describe('childVisibilityContribution（wf_run_node/wf_run_node_wait/wf_finish 双保险隐藏）', () => {
-  it('tools.restrict 可用 → deny 三个工具并返回 disposer', () => {
+describe('childVisibilityContribution（CHILD_AGENT_HIDDEN_TOOLS 双保险隐藏）', () => {
+  it('tools.restrict 可用 → deny CHILD_AGENT_HIDDEN_TOOLS（含自主编排两工具）并返回 disposer', () => {
     const denies: unknown[] = []
     const disposed: unknown[] = []
     const fakeTools = {
@@ -538,12 +549,35 @@ describe('childVisibilityContribution（wf_run_node/wf_run_node_wait/wf_finish �
     const contribution = childVisibilityContribution()
     const childCtx = { get: (name: string) => (name === 'tools' ? fakeTools : undefined) }
     const disposer = contribution(childCtx)
-    expect(denies).toEqual([{ deny: ['wf_run_node', 'wf_run_node_wait', 'wf_finish'] }])
+    // 全量名单与协议常量同源：新增父代理专属工具时自动纳入 deny（历史 BUG：内联三工具漏改）
+    expect(denies).toEqual([{ deny: [...CHILD_AGENT_HIDDEN_TOOLS] }])
+    expect([...CHILD_AGENT_HIDDEN_TOOLS]).toContain('wf_org_catalog')
+    expect([...CHILD_AGENT_HIDDEN_TOOLS]).toContain('wf_graph_patch')
       disposer()
     expect(disposed).toEqual(['disposed'])
   })
 
-  it('tools 缺失/restrict 抛错 → 返回 no-op（白名单仍兜底）', () => {
+  it('全量名单被官方拒绝（含未注册工具）→ 退回三常驻工具名单，双保险不整体失效', () => {
+    const denies: Array<{ deny?: string[] }> = []
+    const fakeTools = {
+      restrict: (filter: { deny?: string[] }) => {
+        denies.push(filter)
+        if ((filter.deny ?? []).some((name) => name === 'wf_org_catalog' || name === 'wf_graph_patch')) {
+          throw new Error('unknown global tool')
+        }
+        return () => {}
+      },
+    }
+    const contribution = childVisibilityContribution()
+    const disposer = contribution({ get: (name: string) => (name === 'tools' ? fakeTools : undefined) })
+    expect(denies).toEqual([
+      { deny: [...CHILD_AGENT_HIDDEN_TOOLS] },
+      { deny: ['wf_run_node', 'wf_run_node_wait', 'wf_finish'] },
+    ])
+    expect(typeof disposer).toBe('function')
+  })
+
+  it('tools 缺失/两次 restrict 都抛错 → 返回 no-op（白名单仍兜底）', () => {
     const contribution = childVisibilityContribution()
     expect(contribution({ get: () => undefined })()).toBeUndefined()
     const throwingTools = { restrict: () => { throw new Error('unknown tool') } }

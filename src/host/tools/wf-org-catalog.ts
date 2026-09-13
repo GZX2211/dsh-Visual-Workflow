@@ -56,8 +56,12 @@ export interface OrgCatalogHost {
     getRun(runId: string): Promise<unknown>
     listRuns(flowId: string): Promise<unknown[]>
   }
-  /** 全局工具开关现状（关闭即从所有会话上下文剔除）。 */
-  toolSwitches: { currentDisabled(): ReadonlySet<string> }
+  /**
+   * 全局工具开关现状（关闭即从所有会话上下文剔除）。
+   * ensureFresh 可选：宿主实现为 ToolSwitchStore 时会先做跨进程刷新（模式二服务进程
+   * 与 GUI 不在同一进程），单测 fake 可省略。
+   */
+  toolSwitches: { currentDisabled(): ReadonlySet<string>; ensureFresh?(): Promise<void> }
   /** 全局可见工具清单（缺失时返回空数组）。 */
   listTools?: () => Promise<Array<{ name: string; description?: string }>>
   /** agent preset 目录（缺失时返回空数组）。 */
@@ -165,6 +169,9 @@ export async function buildOrgCatalog(
   sessionId: string,
   options: { templateId?: string; includeRuns?: boolean; detailRoleId?: string },
 ): Promise<Record<string, unknown>> {
+  // 开关现状：先跨进程刷新（别的 dsh 进程可能刚改过 tool-switches.json），再取快照，
+  // 否则报告给父代理的 available/disabled 会是过期数据。
+  await host.toolSwitches.ensureFresh?.()
   const disabled = host.toolSwitches.currentDisabled()
   const activeRun = host.activeRunOf?.(sessionId) ?? null
   // 双保险（方案 §5.1）：勘察期间父代理在干活 → 刷新空闲基准，避免长勘察被看护误停

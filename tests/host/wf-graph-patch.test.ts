@@ -14,7 +14,7 @@
 // 故非法中间态不能出现在同一个补丁里——这正是「先建后连」需要拆两次提交的原因）。
 
 import { describe, expect, it } from 'vitest'
-import { executeGraphPatch, type GraphPatchHost } from '../../src/host/tools/wf-graph-patch.js'
+import { executeGraphPatch, registerWfGraphPatch, type GraphPatchHost } from '../../src/host/tools/wf-graph-patch.js'
 import { WfError } from '../../src/host/orchestrator/seams.js'
 import { stageLabel } from '../../src/host/graph/model.js'
 import type { GraphNode, Line, WorkflowDocument, WorkflowTemplate } from '../../src/host/shared/graph-model.js'
@@ -906,5 +906,91 @@ describe('wf_graph_patch · P4 代理补丁标注（lastPatch）', () => {
     })
     const saved = storeState.templates.get('tpl-mark') as { lastPatch?: { nodeIds?: string[] } }
     expect(saved.lastPatch?.nodeIds?.slice().sort()).toEqual(['a1', 'e', 's'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 工具注册面：output schema 必须覆盖 executeGraphPatch 的全部返回字段
+// ---------------------------------------------------------------------------
+// 宿主对工具返回体做 JSON Schema 校验（additionalProperties:false + properties 声明表）：
+// 漏声明字段会被判为 "returned invalid output: value.x is not a declared property"，
+// 一次**成功**的补丁在模型侧表现为错误。2026.09 实机验证发现：graph 组的
+// created/removed/updated/connected/disconnected 与 meta/mark 两组的 meta/marked 均未声明，
+// 三个 op 组全部不可用（单元测试直调 executeGraphPatch 会绕过该校验，故补注册面断言）。
+
+describe('wf_graph_patch · output schema 覆盖（工具注册面回归）', () => {
+  interface SchemaLike {
+    additionalProperties?: boolean
+    properties?: Record<string, unknown>
+  }
+
+  /** 捕获注册面的工具定义（fake tools 服务），返回其 output.schema。 */
+  function captureSchema(host: GraphPatchHost): SchemaLike {
+    const captured: Array<{ output?: { schema?: unknown } }> = []
+    const ctx = {
+      get: () => ({
+        register: (def: { output?: { schema?: unknown } }) => {
+          captured.push(def)
+          return () => {}
+        },
+      }),
+    }
+    registerWfGraphPatch(ctx, host)
+    expect(captured).toHaveLength(1)
+    return captured[0].output?.schema as SchemaLike
+  }
+
+  /** 返回 value 顶层未被 schema 声明的键（additionalProperties:false 时才有意义）。 */
+  function undeclaredKeys(value: unknown, schema: SchemaLike): string[] {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+    if (schema.additionalProperties !== false) return []
+    const declared = new Set(Object.keys(schema.properties ?? {}))
+    return Object.keys(value as Record<string, unknown>).filter((key) => !declared.has(key))
+  }
+
+  it('graph 组：created/removed/updated/connected/disconnected 已声明且确实返回', async () => {
+    const { host, storeState } = makeHost({ newTemplateId: () => 'tpl-schema-1' })
+    const schema = captureSchema(host)
+    const result = await executeGraphPatch(host, 'session-1', {
+      scope: 'template',
+      create: { name: 'schema 覆盖用例' },
+      ops: createOps(),
+    })
+    expect(undeclaredKeys(result, schema)).toEqual([])
+    // 反面保障：字段确实出现在返回体里（否则上面的断言会空转通过）
+    expect(result.created?.slice().sort()).toEqual(['a1', 'e', 's'])
+    expect(result.connected).toHaveLength(2)
+    expect(storeState.templates.has('tpl-schema-1')).toBe(true)
+  })
+
+  it('meta 组：meta 已声明且确实返回', async () => {
+    const { host, storeState } = makeHost()
+    storeState.workflows.set('wf-1', makeFlow())
+    const schema = captureSchema(host)
+    const result = await executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [{ op: 'set_meta', meta: { nodeMax: 12 } as never }],
+    })
+    expect(undeclaredKeys(result, schema)).toEqual([])
+    expect(result.meta).toEqual({ nodeMax: 12 })
+  })
+
+  it('mark 组：marked 已声明且确实返回', async () => {
+    const { host, entries } = makeHost({ persistRun: async () => {}, milestoneUsedOf: () => 0 })
+    const entry = makeRunEntry('wf-1', ['s', 'a1', 'e'])
+    entry.snapshot.meta = { milestoneMax: 2 }
+    entry.executorParentId = 'a1'
+    entry.executorIsMilestone = true
+    entry.milestoneProxyId = 'm1'
+    entries.set('session-1', entry)
+    const schema = captureSchema(host)
+    const result = await executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [{ op: 'mark_node', nodeId: 'a1', status: 'ok' }],
+    })
+    expect(undeclaredKeys(result, schema)).toEqual([])
+    expect(result.marked).toMatchObject({ nodeId: 'a1', status: 'ok' })
   })
 })

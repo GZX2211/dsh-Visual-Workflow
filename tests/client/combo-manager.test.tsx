@@ -122,6 +122,35 @@ describe('组合管理', () => {
     expect(container!.textContent).toContain('简单模式专用，非该模式禁止勾选')
   })
 
+  it('父代理专属工具（wf_org_catalog / wf_graph_patch）仍列在组合管理且可勾选（只是不下发子代理）', async () => {
+    const { remote } = makeRemote({
+      combos: [],
+      catalog: {
+        items: [
+          { key: 'tool:wf_org_catalog', name: 'wf_org_catalog', description: '只读勘察组织资产；仅父代理可用' },
+          { key: 'tool:wf_graph_patch', name: 'wf_graph_patch', description: '改写工作流图；仅父代理可用' },
+          { key: 'tool:read', name: 'read', description: '读取文件' },
+        ],
+        mcp: [],
+        loadedPlugins: [],
+      },
+    })
+    await openComboManager(remote)
+    const cards = Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-combo-card__main'))
+    expect(cards.some((item) => item.textContent?.includes('wf_org_catalog'))).toBe(true)
+    expect(cards.some((item) => item.textContent?.includes('wf_graph_patch'))).toBe(true)
+    // 描述节点带行数钳制（超长英文描述不再把文本挤出卡片边框）
+    const desc = document.querySelector('.wf-combo-card__desc')
+    expect(desc).toBeTruthy()
+    expect(desc?.textContent).toContain('只读勘察组织资产')
+    // 可勾选：同一页面兼作父代理全局开关面板，勾选后进入「已选」chip 区
+    await act(async () => {
+      cards.find((item) => item.textContent?.includes('wf_org_catalog'))?.click()
+    })
+    expect(document.querySelectorAll('.wf-combo-chip').length).toBe(1)
+    expect(container!.textContent).toContain('wf_org_catalog')
+  })
+
   it('勾选工具与 MCP → 保存：toolComboPut 参数正确（tools + mcpServers）', async () => {
     const { remote, state } = makeRemote()
     await openComboManager(remote)

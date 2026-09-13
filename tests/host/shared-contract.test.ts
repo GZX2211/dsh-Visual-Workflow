@@ -291,6 +291,18 @@ describe('T-014 protocol.ts 工具名常量与可见性', () => {
     expect(TOOL_VISIBILITY.childHidden).toContain('wf_finish')
   })
 
+  it('自主编排两工具（wf_org_catalog / wf_graph_patch）：子代理永久隐藏 + 默认开启（§4.5 规则）', () => {
+    // 架构文档 §4.5 父子可见性表：子代理行必须包含这两个工具（改图是父代理的组织权限）。
+    // 历史 BUG：runner 内联三工具名单漏了它们，组合勾选后子代理会拿到必然抛 WF_NOT_ROOT
+    // 的工具；现 runner 直接引用本常量（allow 剔除 + restrict deny 双保险）。
+    expect(CHILD_AGENT_HIDDEN_TOOLS).toContain('wf_org_catalog')
+    expect(CHILD_AGENT_HIDDEN_TOOLS).toContain('wf_graph_patch')
+    expect(TOOL_VISIBILITY.orgAuthoring).toEqual(['wf_org_catalog', 'wf_graph_patch'])
+    // 父代理专属工具不得出现在可选注入集（勾选即进子代理）里
+    expect(OPTIONAL_INJECT_TOOLS).not.toContain('wf_org_catalog')
+    expect(OPTIONAL_INJECT_TOOLS).not.toContain('wf_graph_patch')
+  })
+
   it('wf_ask / wf_ask_agent 在可选注入集（§4.5 规则）', () => {
     expect(OPTIONAL_INJECT_TOOLS).toContain('wf_ask')
     expect(OPTIONAL_INJECT_TOOLS).toContain('wf_ask_agent')

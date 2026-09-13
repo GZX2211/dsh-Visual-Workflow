@@ -24,7 +24,8 @@
 //   - **无强制追加**：wf_ask/wf_ask_agent 仅在组合勾选时进入 allow（旧项目自动
 //     追加 wf_ask 的行为删除——PRD §4.4.2 规则 7 定稿）；
 //   - wf_db_query 仅在存在 db-in 连线时追加（§4.4.3 规则 5）；
-//   - wf_run_node/wf_finish 永不进入 allow，且经 tools.restrict 显式 deny（双保险）。
+//   - CHILD_AGENT_HIDDEN_TOOLS（wf_run_node/wf_run_node_wait/wf_finish + 自主编排两工具）
+//     永不进入 allow，且经 tools.restrict 显式 deny（双保险）。
 
 import type { Context } from '@deepseek-ai/cordis'
 import { readFile } from 'node:fs/promises'
@@ -33,7 +34,7 @@ import type { FlowStore } from '../storage/flow-store.js'
 import type { GraphNode, RoleNode } from '../shared/graph-model.js'
 import type { NodeRunner, NodeStartInput, OrchestratorLogger } from '../orchestrator/runtime.js'
 import { consumeReactCappedOf, type ReactGuardBridge } from './guards.js'
-import { RESERVED_TRANSPORT_TOOL, WF_RUN_NODE, WF_RUN_NODE_WAIT } from '../shared/protocol.js'
+import { CHILD_AGENT_HIDDEN_TOOLS, RESERVED_TRANSPORT_TOOL, WF_FINISH, WF_RUN_NODE, WF_RUN_NODE_WAIT } from '../shared/protocol.js'
 import type { ModelSelectionLike, ModelSelectionSetup, SelectionChildContext } from './model-selection.js'
 import type { ChildPromptSetup, ChildPromptState } from './prompt-setup.js'
 
@@ -357,8 +358,17 @@ export interface ResolveToolsInput {
   disabledTools?: ReadonlySet<string>
 }
 
-/** 子代理永不可见的三工具（§4.4.2 规则 7）：白名单排除 + tools.restrict 双保险第一层。 */
-const CHILD_BLOCKED_TOOLS = [WF_RUN_NODE, WF_RUN_NODE_WAIT, 'wf_finish']
+/**
+ * 子代理永久隐藏工具：统一取自共享协议常量 CHILD_AGENT_HIDDEN_TOOLS
+ * （wf_run_node / wf_run_node_wait / wf_finish + 自主编排两工具 wf_org_catalog /
+ * wf_graph_patch），与 childVisibilityContribution 的 tools.restrict deny 同源。
+ *
+ * 历史 BUG（2026.09 修复）：本文件曾内联三工具数组，新增自主编排工具时漏改，
+ * 导致「架构文档 §4.5 声明子代理永久隐藏」与实现不一致——组合勾选后子代理会拿到
+ * 一个必然抛 WF_NOT_ROOT 的工具（或被全局开关静默剔除），用户看到的是「我勾了但
+ * 对方没收到」。改为引用协议常量，杜绝再次漏改。
+ */
+const CHILD_BLOCKED_TOOLS: readonly string[] = CHILD_AGENT_HIDDEN_TOOLS
 
 /**
  * 运行时解析节点工具白名单（架构文档 §4.2 L219）：
@@ -366,7 +376,7 @@ const CHILD_BLOCKED_TOOLS = [WF_RUN_NODE, WF_RUN_NODE_WAIT, 'wf_finish']
  *   - combo- 前缀 → 组合勾选 ∩ 可见工具集 + 所选 MCP 服务器前缀工具（缺失组合报错）；
  *   - 官方 preset → standing scope 工具名 ∩ 可见（服务缺失回退全部可见）；
  *   - db-in 连线存在 → 追加 wf_db_query（§4.4.3 规则 5）；
- *   - wf_run_node/wf_finish 无条件剔除（即便被勾选也不进入子代理）。
+ *   - CHILD_AGENT_HIDDEN_TOOLS 无条件剔除（即便被组合勾选也不进入子代理）。
  * 注意：无强制追加——wf_ask/wf_ask_agent 仅在组合勾选时进入（PRD §4.4.2 规则 7）。
  */
 export async function resolveAgentTools(input: ResolveToolsInput): Promise<string[]> {
@@ -392,7 +402,8 @@ export async function resolveAgentTools(input: ResolveToolsInput): Promise<strin
     const presetNames = await input.toolsView.presetToolNames(presetId)
     allow = presetNames ?? visible
   }
-  // wf_run_node/wf_finish 永不可见（§4.4.2 规则 7 双保险第一层）；
+  // CHILD_AGENT_HIDDEN_TOOLS（wf_run_node/wf_run_node_wait/wf_finish + 自主编排两工具）
+  // 永不可见（§4.4.2 规则 7 双保险第一层）；
   // 官方保留传输名 run_code 也必须剔除：它由官方自动注入子代理 scope（无需勾选），
   // 且进 allow 名单会让官方 tools.restrict 抛错（core/tools L1085 保留名校验）
   allow = allow.filter((name) => !CHILD_BLOCKED_TOOLS.includes(name) && name !== RESERVED_TRANSPORT_TOOL)
@@ -450,8 +461,12 @@ export interface NodeAgentRunnerDeps {
   modelSelection: ModelSelectionSetup
   /** 子代理系统提示词注入装配（prompt-setup.ts）。 */
   promptSetup: ChildPromptSetup
-  /** 全局关闭工具集快照（tool-switches 模块；同步读取；缺省空集 = 不做过滤）。 */
-  toolSwitches?: () => ReadonlySet<string>
+  /**
+   * 全局关闭工具集快照（tool-switches 模块；缺省空集 = 不做过滤）。
+   * host 注入的实现在取值前先做跨进程刷新（ensureFresh），因此允许返回 Promise；
+   * 旧实现（同步返回）仍兼容——调用点统一 await。
+   */
+  toolSwitches?: () => ReadonlySet<string> | Promise<ReadonlySet<string>>
   logger?: OrchestratorLogger
 }
 
@@ -575,7 +590,7 @@ export class NodeAgentRunner implements NodeRunner {
       sessionId: input.sessionId,
       flowId: input.flowId,
       node,
-      disabledTools: this.deps.toolSwitches?.(),
+      disabledTools: await this.deps.toolSwitches?.(),
       ...(input.mode ? { mode: input.mode } : {}),
     })
     const collabPrompt = String(input.collabPrompt ?? '').trim()
@@ -590,7 +605,7 @@ export class NodeAgentRunner implements NodeRunner {
     const provider = detectSubagentProvider(subagents)
     if (!provider) throw new Error('没有可用的子代理 provider（预期 spawn 或 fork）')
     // 白名单为空 → 不传 toolFilter（子代理继承父代理工具集边界由宿主组合决定）；
-    // wf_run_node/wf_finish 永不进入 allow（§4.4.2 规则 7）
+    // CHILD_AGENT_HIDDEN_TOOLS 永不进入 allow（§4.4.2 规则 7）
     const toolFilter = tools.length > 0 ? { allow: [...tools] } : undefined
     const agentOptions: { provider?: string; model?: string } = {}
     if (node.data?.provider) agentOptions.provider = node.data.provider
@@ -705,14 +720,19 @@ export class NodeAgentRunner implements NodeRunner {
 }
 
 // ---------------------------------------------------------------------------
-// 子代理 scope 双保险：wf_run_node / wf_run_node_wait / wf_finish 经 tools.restrict 显式隐藏
+// 子代理 scope 双保险：CHILD_AGENT_HIDDEN_TOOLS 经 tools.restrict 显式隐藏
 // ---------------------------------------------------------------------------
 
 /**
  * 子代理工具可见性贡献（经 registerContinuableSetup 注入）：
- * 在 child scope 上 tools.restrict({ deny: ['wf_run_node', 'wf_run_node_wait', 'wf_finish'] })——
- * 与白名单 allow（永不包含）构成双保险（架构文档 §4.2 L219）。restrict 对未注册
- * 工具会抛错（官方 core/tools L1091），故此处尽力而为：失败即跳过，白名单仍兜底。
+ * 在 child scope 上 `tools.restrict({ deny: CHILD_AGENT_HIDDEN_TOOLS })`——
+ * 与白名单 allow（永不包含）构成双保险（架构文档 §4.2 L219 / §4.5 父子可见性表）。
+ * 覆盖 wf_run_node / wf_run_node_wait / wf_finish + 自主编排两工具
+ * （wf_org_catalog / wf_graph_patch：改图是父代理的组织权限）。
+ *
+ * restrict 对未注册工具会抛错（官方 core/tools L1091），故此处尽力而为：
+ * 全量名单失败时退回「三常驻工具」名单（自主编排工具注册失败也不至于连带丢掉
+ * 三常驻工具的 deny），两者都失败即跳过——白名单 allow 仍兜底。
  */
 export function childVisibilityContribution(): (childCtx: unknown) => () => void {
   return (rawChildCtx) => {
@@ -721,7 +741,11 @@ export function childVisibilityContribution(): (childCtx: unknown) => () => void
       if (typeof childCtx.get !== 'function') return () => {}
       const tools = childCtx.get('tools') as ToolsServiceLike | null | undefined
       if (tools && typeof tools.restrict === 'function') {
-        return tools.restrict({ deny: ['wf_run_node', 'wf_run_node_wait', 'wf_finish'] })
+        try {
+          return tools.restrict({ deny: [...CHILD_AGENT_HIDDEN_TOOLS] })
+        } catch {
+          return tools.restrict({ deny: [WF_RUN_NODE, WF_RUN_NODE_WAIT, WF_FINISH] })
+        }
       }
     } catch {
       // 工具尚未注册或服务缺失：白名单 allow 已排除，双保险尽力而为

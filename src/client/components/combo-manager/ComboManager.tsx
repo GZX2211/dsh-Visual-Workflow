@@ -493,7 +493,7 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
                       <button
                         type="button"
                         className="wf-combo-card__main"
-                        style={{ display: 'flex', gap: 9, alignItems: 'flex-start', textAlign: 'left', border: 0, background: 'transparent', padding: 0, paddingRight: 88, paddingBottom: 30, flex: 1, cursor: item.disabled ? 'default' : 'pointer' }}
+                        style={{ display: 'flex', gap: 9, alignItems: 'flex-start', textAlign: 'left', border: 0, background: 'transparent', padding: 0, paddingRight: 88, paddingBottom: 30, flex: 1, minWidth: 0, cursor: item.disabled ? 'default' : 'pointer' }}
                         onClick={item.onToggle}
                         title={item.name}
                         disabled={item.disabled}

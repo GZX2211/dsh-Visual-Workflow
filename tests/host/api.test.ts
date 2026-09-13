@@ -31,6 +31,7 @@ import {
 } from '../../src/host/orchestrator/runtime.js'
 import * as EP from '../../src/host/shared/protocol.js'
 import { VisualWorkflowApi, registerRoutes, type ApiHost } from '../../src/host/remote/api.js'
+import { CARD_DESC_MAX, zhDescription } from '../../src/host/remote/api-catalog.js'
 import { registerDownloadRoute, copyIntoManagedFile, managedFilePath } from '../../src/host/remote/download.js'
 import { stageLabel } from '../../src/host/graph/model.js'
 import type { DatabaseNode, RoleNode, StageNode, WorkflowDocument } from '../../src/host/shared/graph-model.js'
@@ -556,6 +557,46 @@ describe('全局工具开关批量端点', () => {
   it('toolSwitchPutMany：toolSwitches 能力缺失 → 501', async () => {
     const h = await makeHarness()
     await expect(h.api.handle('toolSwitchPutMany', { names: ['read'], disabled: true })).rejects.toThrow(/tool switches unavailable/)
+  })
+
+  it('toolSwitches/pluginCatalog：生效态口径一致（跨进程刷新，含自主编排两工具默认开启）', async () => {
+    const h = await makeHarness()
+    h.host.toolSwitches = new ToolSwitchStore(h.dataDir)
+    await h.host.toolSwitches.load()
+    // 默认全部开启：自主编排两工具不再被种子隐藏（历史 BUG：界面显示已开启、上下文被隐藏）
+    const initial = (await h.api.handle('toolSwitches', {})) as { disabled?: string[] }
+    expect(initial.disabled).toEqual([])
+    // 另一进程（同一 dataDir 的第二个 store 实例）关闭 wf_graph_patch：
+    // 本进程端点必须经 effectiveDisabled 先刷新，再返回，不得返回过期快照
+    const other = new ToolSwitchStore(h.dataDir)
+    await other.load()
+    await other.setDisabled('wf_graph_patch', true)
+    expect(h.host.toolSwitches.currentDisabled().has('wf_graph_patch')).toBe(false)
+    const after = (await h.api.handle('toolSwitches', {})) as { disabled?: string[] }
+    expect(after.disabled).toEqual(['wf_graph_patch'])
+    expect(h.host.toolSwitches.currentDisabled().has('wf_graph_patch')).toBe(true)
+    // pluginCatalog 的 disabledTools 与 toolSwitches 同源（同一生效态读取路径）
+    const catalog = (await h.api.handle('pluginCatalog', {})) as { disabledTools?: string[] }
+    expect(catalog.disabledTools).toEqual(['wf_graph_patch'])
+  })
+})
+
+describe('组合管理卡片描述（zhDescription）', () => {
+  const longEnglish = 'Apply one patch to a workflow template or the running instance. This tool has three op groups. '.repeat(8)
+
+  it('自主编排两工具命中中文短描述（不再回退超长英文撑破卡片）', () => {
+    expect(zhDescription('wf_graph_patch', longEnglish)).toBe('改写工作流图（图结构 / 元参数 / 里程碑标记，一次补丁仅一组）；仅父代理可用')
+    expect(zhDescription('wf_org_catalog', longEnglish)).toContain('只读勘察组织资产')
+    expect(zhDescription('wf_org_catalog', longEnglish).length).toBeLessThanOrEqual(CARD_DESC_MAX)
+  })
+
+  it('未命中：中文原文照用；英文加 [EN] 前缀并按 CARD_DESC_MAX 截断；空描述有占位', () => {
+    expect(zhDescription('unknown-tool', '读取文件')).toBe('读取文件')
+    const clipped = zhDescription('unknown-tool', longEnglish)
+    expect(clipped.startsWith('[EN] ')).toBe(true)
+    expect(clipped.length).toBe(CARD_DESC_MAX)
+    expect(clipped.endsWith('…')).toBe(true)
+    expect(zhDescription('unknown-tool', '')).toBe('（暂无描述）')
   })
 })
 

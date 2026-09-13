@@ -145,7 +145,7 @@ export interface ResolveToolsInput {
  *   - combo- 前缀 → 组合勾选 ∩ 可见工具集 + 所选 MCP 服务器前缀工具（缺失组合报错）；
  *   - 官方 preset → standing scope 工具名 ∩ 可见（服务缺失回退全部可见）；
  *   - db-in 连线存在 → 追加 wf_db_query（§4.4.3 规则 5）；
- *   - wf_run_node/wf_finish 无条件剔除（即便被勾选也不进入子代理）。
+ *   - CHILD_AGENT_HIDDEN_TOOLS 无条件剔除（即便被组合勾选也不进入子代理）。
  * 注意：无强制追加——wf_ask/wf_ask_agent 仅在组合勾选时进入（PRD §4.4.2 规则 7）。
  */
 export declare function resolveAgentTools(input: ResolveToolsInput): Promise<string[]>;
@@ -164,8 +164,12 @@ export interface NodeAgentRunnerDeps {
     modelSelection: ModelSelectionSetup;
     /** 子代理系统提示词注入装配（prompt-setup.ts）。 */
     promptSetup: ChildPromptSetup;
-    /** 全局关闭工具集快照（tool-switches 模块；同步读取；缺省空集 = 不做过滤）。 */
-    toolSwitches?: () => ReadonlySet<string>;
+    /**
+     * 全局关闭工具集快照（tool-switches 模块；缺省空集 = 不做过滤）。
+     * host 注入的实现在取值前先做跨进程刷新（ensureFresh），因此允许返回 Promise；
+     * 旧实现（同步返回）仍兼容——调用点统一 await。
+     */
+    toolSwitches?: () => ReadonlySet<string> | Promise<ReadonlySet<string>>;
     logger?: OrchestratorLogger;
 }
 /**
@@ -243,8 +247,13 @@ export declare class NodeAgentRunner implements NodeRunner {
 }
 /**
  * 子代理工具可见性贡献（经 registerContinuableSetup 注入）：
- * 在 child scope 上 tools.restrict({ deny: ['wf_run_node', 'wf_run_node_wait', 'wf_finish'] })——
- * 与白名单 allow（永不包含）构成双保险（架构文档 §4.2 L219）。restrict 对未注册
- * 工具会抛错（官方 core/tools L1091），故此处尽力而为：失败即跳过，白名单仍兜底。
+ * 在 child scope 上 `tools.restrict({ deny: CHILD_AGENT_HIDDEN_TOOLS })`——
+ * 与白名单 allow（永不包含）构成双保险（架构文档 §4.2 L219 / §4.5 父子可见性表）。
+ * 覆盖 wf_run_node / wf_run_node_wait / wf_finish + 自主编排两工具
+ * （wf_org_catalog / wf_graph_patch：改图是父代理的组织权限）。
+ *
+ * restrict 对未注册工具会抛错（官方 core/tools L1091），故此处尽力而为：
+ * 全量名单失败时退回「三常驻工具」名单（自主编排工具注册失败也不至于连带丢掉
+ * 三常驻工具的 deny），两者都失败即跳过——白名单 allow 仍兜底。
  */
 export declare function childVisibilityContribution(): (childCtx: unknown) => () => void;

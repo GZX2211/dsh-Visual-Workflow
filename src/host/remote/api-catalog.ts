@@ -82,7 +82,7 @@ export class VisualWorkflowApiCatalog extends VisualWorkflowApiEcosystem {
     return {
       items,
       loadedPlugins,
-      disabledTools: await this.host.toolSwitches?.readDisabled().catch(() => []) ?? [],
+      disabledTools: await this.host.toolSwitches?.effectiveDisabled().catch(() => []) ?? [],
       mcp: mcpServers.map((server: { id?: unknown; serverName?: unknown; url?: unknown; command?: unknown; transport?: unknown; disabled?: unknown; args?: unknown; env?: unknown; headers?: unknown }) => ({
         id: server.id,
         name: server.serverName,
@@ -205,10 +205,15 @@ export class VisualWorkflowApiCatalog extends VisualWorkflowApiEcosystem {
 
   // ---------- 全局工具开关（父代理工具白名单「关闭」侧） ----------
 
-  /** 全局工具开关列表（被关闭 = 父代理上下文不可见；独立于工作流运行状态）。 */
+  /**
+   * 全局工具开关列表（被关闭 = 父代理上下文不可见；独立于工作流运行状态）。
+   * 生效态口径与 system-prompt/assemble 瀑布完全一致（effectiveDisabled 先做跨进程
+   * 刷新再取内存快照）——历史上这里读「磁盘用户项」曾与生效态分叉，导致组合管理
+   * 把被默认种子隐藏的工具显示成「已开启」（界面说谎 → 用户以为开关失灵）。
+   */
   async toolSwitches(): Promise<unknown> {
     if (!this.host.toolSwitches) throw httpError(501, 'tool switches unavailable')
-    return { disabled: await this.host.toolSwitches.readDisabled() }
+    return { disabled: await this.host.toolSwitches.effectiveDisabled() }
   }
 
   /** 设置单个工具开/关状态（全局即时生效；返回更新后的完整关闭清单）。 */
@@ -238,6 +243,14 @@ export class VisualWorkflowApiCatalog extends VisualWorkflowApiEcosystem {
   }
 }
 
+/**
+ * 组合管理卡片描述上限（字符）。
+ * 模型侧工具 description 面向模型可以长（错误码/op 组约束等），但卡片只有几十像素宽：
+ * 不截断就会把文本挤出卡片边框（2026.09 用户报障）。此处做数据层兜底，
+ * 客户端另有 CSS 行数钳制（styles.ts `.wf-combo-card__desc`）双保险。
+ */
+export const CARD_DESC_MAX = 120
+
 /** 内置常用工具中文描述映射（未命中回退原文，英文加 [EN] 前缀）。 */
 const TOOL_ZH: Record<string, string> = {
   read: '读取文件内容（支持多种编码与行区间）',
@@ -250,6 +263,7 @@ const TOOL_ZH: Record<string, string> = {
   grep: '在文件内容中按正则搜索并返回匹配行',
   todo_write: '维护并更新结构化任务清单',
   pwsh: '执行 PowerShell 命令',
+  ask_user_question: '向用户提问并等待答复',
   web_search: '联网搜索当前信息',
   ssh_exec: '在配置的 SSH 主机上执行远程命令',
   ssh_list: '列出已配置的 SSH 主机',
@@ -262,12 +276,31 @@ const TOOL_ZH: Record<string, string> = {
   interrupt_agent: '请求取消后台子代理当前回合',
   subagent: '委派自包含任务给子代理处理',
   workflow: '运行多子代理编排工作流脚本',
+  // —— dsh-visual-workflow 自有工具：卡片用短中文，模型侧 schema 描述（英文）不受影响 ——
+  wf_run_node: '启动节点子代理（异步非阻塞；父代理编排用）',
+  wf_run_node_wait: '启动节点子代理并等待其完成（模式二服务用）',
+  wf_finish: '结束工作流运行并释放运行锁',
+  wf_ask: '子代理向主会话用户提问（官网提问卡）',
+  wf_ask_agent: '代理间阻塞通信（ask / reply / resolve）',
+  wf_db_query: '数据库三模式访问（search / query / schema；需 db-in 连线）',
+  wf_org_catalog: '只读勘察组织资产（角色/组合/工具/preset/数据源/模板/预算）；仅父代理可用',
+  wf_graph_patch: '改写工作流图（图结构 / 元参数 / 里程碑标记，一次补丁仅一组）；仅父代理可用',
 }
 
-function zhDescription(name: string, fallback: string): string {
-  const hit = TOOL_ZH[name]
-  if (hit) return hit
-  const text = String(fallback ?? '').trim()
-  if (!text) return '（暂无描述）'
-  return /[\u4e00-\u9fa5]/.test(text) ? text : `[EN] ${text}`
+/**
+ * 组合管理卡片描述（纯函数，导出供单测）：
+ *   - 命中 TOOL_ZH → 短中文；
+ *   - 未命中 → schema 原文（英文加 [EN] 前缀；已是中文则原样）；
+ *   - **一律按 CARD_DESC_MAX 截断**（超长描述不得撑破卡片）。
+ */
+export function zhDescription(name: string, fallback: string): string {
+  const hit = TOOL_ZH[String(name ?? '')]
+  let text: string
+  if (hit) {
+    text = hit
+  } else {
+    const raw = String(fallback ?? '').trim()
+    text = !raw ? '（暂无描述）' : (/[\u4e00-\u9fa5]/.test(raw) ? raw : `[EN] ${raw}`)
+  }
+  return text.length > CARD_DESC_MAX ? `${text.slice(0, CARD_DESC_MAX - 1)}…` : text
 }

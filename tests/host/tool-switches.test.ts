@@ -1,23 +1,24 @@
 // tests/host/tool-switches.test.ts
 //
 // 全局工具开关模块单测：
-//   - ToolSwitchStore：持久化往返 / load 快照 / setDisabled 幂等 / 损坏文件容忍；
+//   - ToolSwitchStore：持久化往返 / load 快照 / setDisabled 幂等 / 损坏文件容忍 /
+//     **默认全部开启**（用户裁决 2026.09 删除「默认关闭种子」）/ 跨进程刷新 ensureFresh；
 //   - filterToolsInAssembly 纯函数：assembly.tools 与 tool:<name> 散文段剔除、
 //     tools:sdk / tools:code-only 恒保留、disabled 空集原样返回；
-//   - registerToolSwitchFilter：瀑布读写（next 链）与即时生效语义。
+//   - registerToolSwitchFilter：瀑布读写（next 链）、跨进程刷新与即时生效语义。
 
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  DEFAULT_DISABLED_TOOLS,
   filterToolsInAssembly,
   registerToolSwitchFilter,
   ToolSwitchStore,
   type FilterContextLike,
   type PromptAssemblyLike,
 } from '../../src/host/tools/tool-switches.js'
+import { ORG_AUTHORING_TOOLS } from '../../src/host/shared/protocol.js'
 
 const cleanups: Array<() => Promise<void>> = []
 
@@ -57,7 +58,7 @@ describe('ToolSwitchStore', () => {
     const { store } = await makeStore()
     await expect(store.setDisabled('', true)).rejects.toThrow('工具名不能为空')
     await store.setDisabled('read', true)
-    // 磁盘读取语义 = 用户关闭项（默认关闭种子只进内存权威快照，不写进磁盘清单）
+    // 磁盘读取语义 = 用户关闭项（默认全部开启，无任何种子）
     expect(await store.readDisabled()).toEqual(['read'])
   })
 
@@ -67,9 +68,9 @@ describe('ToolSwitchStore', () => {
     await store.setDisabled('read', true)
     await store.setDisabled('read', true)
     await store.setDisabled('wf_run_node', true)
-    expect([...store.currentDisabled()].sort()).toEqual(['read', 'wf_run_node', ...DEFAULT_DISABLED_TOOLS].sort())
+    expect([...store.currentDisabled()].sort()).toEqual(['read', 'wf_run_node'])
     await store.setDisabled('read', false)
-    expect([...store.currentDisabled()].sort()).toEqual(['wf_run_node', ...DEFAULT_DISABLED_TOOLS].sort())
+    expect([...store.currentDisabled()].sort()).toEqual(['wf_run_node'])
     expect((await store.readDisabled()).sort()).toEqual(['wf_run_node'])
   })
 
@@ -77,11 +78,11 @@ describe('ToolSwitchStore', () => {
     const { store } = await makeStore()
     await store.load()
     await store.setDisabledMany(['read', 'grep', '  ', ''], true)
-    expect([...store.currentDisabled()].sort()).toEqual(['grep', 'read', ...DEFAULT_DISABLED_TOOLS].sort())
+    expect([...store.currentDisabled()].sort()).toEqual(['grep', 'read'])
     // 已存在单工具关闭后，批量开启应从清单移出
     await store.setDisabled('wf_run_node', true)
     await store.setDisabledMany(['read', 'wf_run_node'], false)
-    expect([...store.currentDisabled()].sort()).toEqual(['grep', ...DEFAULT_DISABLED_TOOLS].sort())
+    expect([...store.currentDisabled()].sort()).toEqual(['grep'])
     expect((await store.readDisabled()).sort()).toEqual(['grep'])
   })
 
@@ -92,26 +93,68 @@ describe('ToolSwitchStore', () => {
     expect(await store.readDisabled()).toEqual(['read'])
   })
 
-  it('损坏 JSON 容忍：按空清单处置，后续保存重写（默认关闭种子仍在）', async () => {
+  it('损坏 JSON 容忍：按空清单处置，后续保存重写', async () => {
     const { dir, store } = await makeStore()
     await writeFile(join(dir, 'tool-switches.json'), '{broken', 'utf8')
     await store.load()
-    // 默认关闭种子（自主编排两工具）在任何情况下都生效，损坏文件只影响用户关闭项
-    expect([...store.currentDisabled()].sort()).toEqual([...DEFAULT_DISABLED_TOOLS].sort())
+    expect([...store.currentDisabled()]).toEqual([])
     await store.setDisabled('read', true)
     expect(await store.readDisabled()).toEqual(['read'])
   })
 
-  it('默认关闭种子：自主编排工具（wf_org_catalog / wf_graph_patch）未开启前不可见', async () => {
+  it('默认全部开启（用户裁决 2026.09：删除「默认关闭种子」）', async () => {
     const { store } = await makeStore()
     await store.load()
-    for (const name of DEFAULT_DISABLED_TOOLS) {
-      expect(store.currentDisabled().has(name)).toBe(true)
+    // 历史 BUG：自主编排两工具曾被种子隐藏，而组合管理读磁盘清单把它显示成「已开启」，
+    // 表现为「开关间歇性失灵」。删除种子后默认全部开启，两套状态不再分叉。
+    for (const name of ORG_AUTHORING_TOOLS) {
+      expect(store.currentDisabled().has(name)).toBe(false)
     }
-    // 用户显式开启后从清单移除（其余种子不受影响）
-    await store.setDisabled('wf_graph_patch', false)
-    expect(store.currentDisabled().has('wf_graph_patch')).toBe(false)
-    expect(store.currentDisabled().has('wf_org_catalog')).toBe(true)
+    expect([...store.currentDisabled()]).toEqual([])
+    expect(await store.effectiveDisabled()).toEqual([])
+    // 用户仍可显式关闭（组合管理统一开关）
+    await store.setDisabled(ORG_AUTHORING_TOOLS[0], true)
+    expect(store.currentDisabled().has(ORG_AUTHORING_TOOLS[0])).toBe(true)
+    expect(await store.effectiveDisabled()).toEqual([ORG_AUTHORING_TOOLS[0]])
+  })
+
+  it('历史文件兼容：遗留 enabled 记账键被忽略，且下一次写入自然清除', async () => {
+    const { dir, store } = await makeStore()
+    await writeFile(join(dir, 'tool-switches.json'), JSON.stringify({ disabled: [], enabled: ['wf_org_catalog'] }), 'utf8')
+    await store.load()
+    expect([...store.currentDisabled()]).toEqual([])
+    await store.setDisabled('read', true)
+    const raw = JSON.parse(await readFile(join(dir, 'tool-switches.json'), 'utf8')) as Record<string, unknown>
+    expect(raw.enabled).toBeUndefined()
+  })
+
+  it('ensureFresh：另一个进程（另一进程实例）改盘后按需重读', async () => {
+    const { dir, store } = await makeStore()
+    await store.load()
+    // 模拟模式二服务进程 / 其它 dsh 进程：同一 dataDir 的第二个 store 实例
+    const other = new ToolSwitchStore(dir)
+    await other.load()
+    await other.setDisabled('read', true)
+    // 未刷新前本进程仍是旧快照（这正是「同一个开关在不同 Agent 上表现不一致」的根因）
+    expect(store.currentDisabled().has('read')).toBe(false)
+    await store.ensureFresh()
+    expect(store.currentDisabled().has('read')).toBe(true)
+    expect(await store.effectiveDisabled()).toEqual(['read'])
+    // 反向：另一进程开启 → 再次刷新后同步
+    await other.setDisabled('read', false)
+    expect(await store.effectiveDisabled()).toEqual([])
+  })
+
+  it('ensureFresh：指纹未变时保持快照；文件被删除按空清单重载', async () => {
+    const { dir, store } = await makeStore()
+    await store.load()
+    await store.setDisabled('read', true)
+    await store.ensureFresh()
+    await store.ensureFresh()
+    expect([...store.currentDisabled()]).toEqual(['read'])
+    await rm(join(dir, 'tool-switches.json'), { force: true })
+    await store.ensureFresh()
+    expect([...store.currentDisabled()]).toEqual([])
   })
 })
 
@@ -156,8 +199,11 @@ describe('filterToolsInAssembly', () => {
 })
 
 describe('registerToolSwitchFilter', () => {
-  it('瀑布在 next 之后改写 assembly.tools；开关切换即时生效', async () => {
-    const store = new ToolSwitchStore(await mkdtemp(join(tmpdir(), 'vw-tool-switches-2-')))
+  /** 造一个只收集 listener 的瀑布上下文。 */
+  function makeFilterCtx(): {
+    ctx: FilterContextLike
+    run: (assembly: PromptAssemblyLike) => Promise<PromptAssemblyLike>
+  } {
     const listeners: Array<(assembly: unknown, context: unknown, next: () => Promise<unknown>) => Promise<unknown>> = []
     const ctx: FilterContextLike = {
       on(_name, listener) {
@@ -165,19 +211,41 @@ describe('registerToolSwitchFilter', () => {
         return () => {}
       },
     }
-    registerToolSwitchFilter(ctx, store)
-    expect(listeners).toHaveLength(1)
+    return {
+      ctx,
+      run: (assembly) => (listeners[0] as (a: unknown, c: unknown, next: () => Promise<unknown>) => Promise<unknown>)(
+        assembly, {}, () => Promise.resolve(assembly),
+      ) as Promise<PromptAssemblyLike>,
+    }
+  }
+
+  it('瀑布在 next 之后改写 assembly.tools；开关切换即时生效', async () => {
+    const store = new ToolSwitchStore(await mkdtemp(join(tmpdir(), 'vw-tool-switches-2-')))
+    const listener = makeFilterCtx()
+    registerToolSwitchFilter(listener.ctx, store)
     // 未装载：空集 → 原样通过
-    let assembly = await (listeners[0] as (a: unknown, _c: unknown, next: () => Promise<unknown>) => Promise<unknown>)(
-      sampleAssembly(), {}, () => Promise.resolve(sampleAssembly()),
-    ) as PromptAssemblyLike
+    let assembly = await listener.run(sampleAssembly())
     expect(assembly.tools).toHaveLength(3)
     // 装载并关闭 read：即时生效（无重注册）
     await store.load()
     await store.setDisabled('read', true)
-    assembly = await (listeners[0] as (a: unknown, _c: unknown, next: () => Promise<unknown>) => Promise<unknown>)(
-      sampleAssembly(), {}, () => Promise.resolve(sampleAssembly()),
-    ) as PromptAssemblyLike
+    assembly = await listener.run(sampleAssembly())
     expect(assembly.tools?.map((t) => t.name)).toEqual(['wf_run_node', 'mcp__codegraph__codegraph_explore'])
+  })
+
+  it('瀑布每次组装前跨进程刷新：另一进程关闭的工具当次组装即被剔除', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vw-tool-switches-3-'))
+    cleanups.push(() => rm(dir, { recursive: true, force: true }))
+    const store = new ToolSwitchStore(dir)
+    await store.load()
+    const listener = makeFilterCtx()
+    registerToolSwitchFilter(listener.ctx, store)
+    // 另一进程（同一 dataDir）关闭 read：本进程未主动刷新也应看到
+    const other = new ToolSwitchStore(dir)
+    await other.load()
+    await other.setDisabled('read', true)
+    const assembly = await listener.run(sampleAssembly())
+    expect(assembly.tools?.map((t) => t.name)).toEqual(['wf_run_node', 'mcp__codegraph__codegraph_explore'])
+    expect(assembly.sections?.map((s) => s.name)).not.toContain('tool:read')
   })
 })

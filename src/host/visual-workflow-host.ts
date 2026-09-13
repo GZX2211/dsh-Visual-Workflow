@@ -124,7 +124,12 @@ export class VisualWorkflowHost extends Service {
       agents: () => agentsServiceLike(ctx),
       subagents: () => subagentsServiceLike(ctx),
       toolsView: new CordisToolsView(ctx),
-      toolSwitches: () => this.toolSwitches.currentDisabled(),
+      // 全局关闭工具快照：取值前先跨进程刷新（ensureFresh）——模式二服务进程是 fork 的
+      // 独立 DSH 实例，只读一次 init 快照会让 GUI 里翻的开关在该进程里永远不生效。
+      toolSwitches: async () => {
+        await this.toolSwitches.ensureFresh()
+        return this.toolSwitches.currentDisabled()
+      },
       react: this.reactGuard.bridge,
       modelSelection: this.modelSelection,
       promptSetup: this.childPrompt,
@@ -419,8 +424,10 @@ export class VisualWorkflowHost extends Service {
     }
 
     // 自主编排工具注册（P1）：wf_org_catalog（只读勘察）+ wf_graph_patch（写图三分区）。
-    // 两者**默认关闭**（ToolSwitchStore 种子集）：关闭即从所有会话上下文剔除，用户在组合
-    // 管理里开启后才可见；子代理侧另有 CHILD_AGENT_HIDDEN_TOOLS 双保险 + 工具内身份校验。
+    // 两者**默认开启**（与其他工具同口径；历史「默认关闭种子」已被用户裁决删除，
+    // 见 protocol.ts ORG_AUTHORING_TOOLS 注释），由用户在组合管理中按需关闭。
+    // **父代理专属**：子代理侧经 CHILD_AGENT_HIDDEN_TOOLS 永久隐藏（allow 剔除 +
+    // tools.restrict 双保险，见 runner.ts），工具内另有调用者身份校验（WF_NOT_ROOT）。
     try {
       this.ctx.effect(() => registerWfOrgCatalog(this.ctx, this.ecosystemAdapters()), 'visualWorkflowHost.wfOrgCatalog')
     } catch (error) {

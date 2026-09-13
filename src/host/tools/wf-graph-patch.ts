@@ -558,6 +558,12 @@ export function registerWfGraphPatch(
       },
     },
     output: {
+      // 【关键】additionalProperties: false + 声明必须覆盖 executeGraphPatch 的全部返回字段，
+      // 否则宿主对工具返回体做 JSON Schema 校验时会判定「is not a declared property」并
+      // 把成功调用变成错误（2026.09 实机验证发现的 BUG：graph 组的 created/removed/
+      // updated/connected/disconnected 与 meta/mark 两组的 meta/marked 均未声明，
+      // 三个 op 组全部可用性受损）。单测直接调 executeGraphPatch 绕过该校验，
+      // 故另加 tests/host/wf-graph-patch.test.ts 的「output schema 覆盖」用例守护。
       schema: {
         type: 'object',
         additionalProperties: false,
@@ -570,6 +576,25 @@ export function registerWfGraphPatch(
           warnings: { type: 'array', required: true, description: 'Checker warnings (non-blocking).', items: { type: 'object', additionalProperties: true } },
           newTemplate: { type: 'boolean', description: 'true when this patch created a new template; targetId is then the new template id.' },
           milestoneUsed: { type: 'number', description: 'Completed milestone gates in this run after a mark_node patch (the first orchestration is not counted).' },
+          // graph 组：本次补丁实际改动的 id 清单（节点/连线），供模型继续引用
+          created: { type: 'array', items: { type: 'string' }, description: 'Node ids created by this patch (graph group).' },
+          removed: { type: 'array', items: { type: 'string' }, description: 'Node ids removed by this patch (graph group; includes proxy nodes dropped with their source).' },
+          updated: { type: 'array', items: { type: 'string' }, description: 'Node/group ids updated by this patch (graph group).' },
+          connected: { type: 'array', items: { type: 'string' }, description: 'Line ids created by this patch (graph group).' },
+          disconnected: { type: 'array', items: { type: 'string' }, description: 'Line ids removed by this patch (graph group).' },
+          // meta 组：落盘后的生效元参数（规范化/夹取结果）
+          meta: { type: 'object', additionalProperties: true, description: 'Effective org meta after a set_meta patch (meta group).' },
+          // mark 组：本次标记结果（nodeId/status/runId）
+          marked: {
+            type: 'object',
+            additionalProperties: false,
+            description: 'Marked milestone node after a mark_node patch (mark group).',
+            properties: {
+              nodeId: { type: 'string', required: true, description: 'The marked parent/gate node id.' },
+              status: { type: 'string', required: true, enum: ['ok', 'fail'] as const, description: 'Milestone marking status.' },
+              runId: { type: 'string', required: true, description: 'The active run id the marking belongs to.' },
+            },
+          },
         },
       },
       render: textRender,

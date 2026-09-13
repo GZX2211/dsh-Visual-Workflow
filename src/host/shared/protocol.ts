@@ -171,9 +171,12 @@ export const PARENT_AGENT_VISIBLE_TOOLS = [
 ] as const
 
 /**
- * 子代理永久隐藏工具集（经 tools.restrict 显式隐藏，双保险）：
+ * 子代理永久隐藏工具集（双保险：resolveAgentTools 的 allow 名单剔除 +
+ * child scope `tools.restrict({ deny })` 显式隐藏，两处均直接引用本常量）：
  * wf_run_node / wf_run_node_wait / wf_finish（仅父代理可调度）+ wf_org_catalog /
  * wf_graph_patch（自主编排方案 §4：勘察与改图都是「父代理的组织权限」，子代理不得改图）。
+ * 注意：全局工具开关（tool-switches）只影响「是否可见」，本集合是「永不进子代理」，
+ * 两者正交——组合管理仍列出本集合工具（同一页面兼作全局开关面板），但永不随组合下发。
  */
 export const CHILD_AGENT_HIDDEN_TOOLS = [
   WF_RUN_NODE,
@@ -184,9 +187,15 @@ export const CHILD_AGENT_HIDDEN_TOOLS = [
 ] as const
 
 /**
- * 自主编排工具集（默认**关闭**，走全局工具开关，由用户按需开启）：
- * 与 wf_run_node/wf_finish 等常开工具不同，勘察/改图属「组织权限」，默认不给父代理，
- * 避免未经用户同意就自动扩张组织；开启后 host 端仍按调用者身份二次校验。
+ * 自主编排工具集（**默认开启**，与其他工具同口径；由用户在组合管理中按需关闭）：
+ * 勘察/改图属「组织权限」，但**父代理专属**——子代理经 CHILD_AGENT_HIDDEN_TOOLS
+ * 永久隐藏（resolveAgentTools 的 allow 剔除 + child scope tools.restrict 双保险），
+ * 工具内另有调用者身份二次校验（WF_NOT_ROOT）。
+ *
+ * 历史（用户裁决 2026.09）：早期版本把本集合做成「默认关闭种子」
+ * （ToolSwitchStore.DEFAULT_DISABLED_TOOLS），造成磁盘权威清单（用户项）与内存生效
+ * 快照（用户项 ∪ 种子）两套状态并存——组合管理显示「已开启」而上下文里其实被隐藏。
+ * 该种子已删除（默认关闭属方案错误），本常量保留为可见性元数据。
  */
 export const ORG_AUTHORING_TOOLS = [WF_ORG_CATALOG, WF_GRAPH_PATCH] as const
 
@@ -217,7 +226,7 @@ export const TOOL_VISIBILITY = {
   childHidden: CHILD_AGENT_HIDDEN_TOOLS,
   /** 可选注入集（wf_ask / wf_ask_agent / wf_db_query）。 */
   optionalInject: OPTIONAL_INJECT_TOOLS,
-  /** 自主编排工具集（wf_org_catalog / wf_graph_patch；默认关闭，经全局工具开关开启）。 */
+  /** 自主编排工具集（wf_org_catalog / wf_graph_patch；默认开启、父代理专属，可经全局工具开关关闭）。 */
   orgAuthoring: ORG_AUTHORING_TOOLS,
 } as const
 

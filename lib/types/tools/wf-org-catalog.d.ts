@@ -32,9 +32,14 @@ export interface OrgCatalogHost {
         getRun(runId: string): Promise<unknown>;
         listRuns(flowId: string): Promise<unknown[]>;
     };
-    /** 全局工具开关现状（关闭即从所有会话上下文剔除）。 */
+    /**
+     * 全局工具开关现状（关闭即从所有会话上下文剔除）。
+     * ensureFresh 可选：宿主实现为 ToolSwitchStore 时会先做跨进程刷新（模式二服务进程
+     * 与 GUI 不在同一进程），单测 fake 可省略。
+     */
     toolSwitches: {
         currentDisabled(): ReadonlySet<string>;
+        ensureFresh?(): Promise<void>;
     };
     /** 全局可见工具清单（缺失时返回空数组）。 */
     listTools?: () => Promise<Array<{
