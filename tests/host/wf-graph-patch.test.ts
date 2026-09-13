@@ -994,3 +994,115 @@ describe('wf_graph_patch · output schema 覆盖（工具注册面回归）', ()
     expect(result.marked).toMatchObject({ nodeId: 'a1', status: 'ok' })
   })
 })
+
+// ---------------------------------------------------------------------------
+// D 组：参数层契约守卫（2026-09 实机取证回归）
+//
+// 三起真实故障（模型侧全部表现为「报错指向图，但真因在入参形状」）：
+//   1. connect 的端点字段猜成 from/to → 旧报错「源节点不存在「」」（空字符串，无法定位）；
+//   2. create_node 把 kind 平铺到 op 顶层（少了 node 包装）→ 旧报错「非法节点种类「」」；
+//   3. connect 省略 sourceHandle/targetHandle → 旧实现兜底成 ''，写出 isFlowLine()=false 的
+//      幽灵线，检查器随后报「启动节点没有流程出线」（真因被完全掩盖）。
+// 本组用例把「参数层 = WF_BAD_ARGS + 可自修正的错误文本」与「handle 缺省按流程通道补全」
+// 两条契约钉死，防止再次回退。
+// ---------------------------------------------------------------------------
+
+describe('wf_graph_patch · D 组参数层契约守卫', () => {
+  function fileNode(id: string): GraphNode {
+    return { id, kind: 'file', position: { x: 0, y: 0 }, data: { label: id, fileKind: 'text', content: '素材' } }
+  }
+
+  it('connect 端点写成 from/to：WF_BAD_ARGS，并把正确字段名说清楚', async () => {
+    const { host, storeState } = makeHost()
+    storeState.workflows.set('wf-1', makeFlow())
+    const err = await expectWfError(() => executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [{ op: 'connect', from: 's', to: 'a1' } as never],
+    }), 'WF_BAD_ARGS')
+    expect(err.message).toContain('source/target')
+  })
+
+  it('connect 缺 source/target：WF_BAD_ARGS（不再误报成「源节点不存在」）', async () => {
+    const { host, storeState } = makeHost()
+    storeState.workflows.set('wf-1', makeFlow())
+    const err = await expectWfError(() => executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [{ op: 'connect', source: 's' } as never],
+    }), 'WF_BAD_ARGS')
+    expect(err.message).toContain('source/target 必填')
+    expect(err.message).toContain("op:'connect'")
+  })
+
+  it('create_node 把 kind 平铺到 op 顶层：WF_BAD_ARGS 且指出需要 node 包装', async () => {
+    const { host, storeState } = makeHost()
+    storeState.workflows.set('wf-1', makeFlow())
+    const err = await expectWfError(() => executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [{ op: 'create_node', kind: 'agent', id: 'a9' } as never],
+    }), 'WF_BAD_ARGS')
+    expect(err.message).toContain('node 对象')
+    expect(err.message).toContain('顶层')
+  })
+
+  it('connect 省略 handle：按流程通道补全 flow-out/flow-in（不再写出幽灵线）', async () => {
+    const { host, storeState } = makeHost({ newTemplateId: () => 'tpl-handle-1' })
+    const result = await executeGraphPatch(host, 'session-1', {
+      scope: 'template',
+      create: { name: '省略 handle 用例' },
+      ops: [
+        { op: 'create_node', node: { id: 's', kind: 'start' } },
+        { op: 'create_node', node: { id: 'a1', kind: 'agent', data: { label: 'A' } } },
+        { op: 'create_node', node: { id: 'e', kind: 'end' } },
+        { op: 'connect', source: 's', target: 'a1' },
+        { op: 'connect', source: 'a1', target: 'e' },
+      ] as never,
+    })
+    expect(result.ok).toBe(true)
+    expect(result.connected).toHaveLength(2)
+    const saved = storeState.templates.get('tpl-handle-1')
+    expect(saved?.lines).toHaveLength(2)
+    expect(saved?.lines.every((line) => line.sourceHandle === 'flow-out' && line.targetHandle === 'flow-in')).toBe(true)
+  })
+
+  it('connect 的 handle 与该节点种类不匹配：WF_GRAPH_INVALID 并列出可用连接点', async () => {
+    const { host, storeState } = makeHost()
+    storeState.workflows.set('wf-1', makeFlow('wf-1', {
+      nodes: [stageNode('s', 'start'), roleNode('a1'), fileNode('f1'), stageNode('e', 'end')],
+      lines: [flowLine('l1', 's', 'a1'), flowLine('l2', 'a1', 'e')],
+    }))
+    const err = await expectWfError(() => executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [{ op: 'connect', source: 'f1', target: 'a1' } as never],
+    }), 'WF_GRAPH_INVALID')
+    expect(err.message).toContain('ctx-out')
+  })
+
+  it('condition 缺 type：WF_BAD_ARGS（条件线不得静默退化成普通流程线）', async () => {
+    const { host, storeState } = makeHost()
+    storeState.workflows.set('wf-1', makeFlow())
+    const err = await expectWfError(() => executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [{ op: 'connect', source: 's', target: 'a1', condition: { label: '通过' } } as never],
+    }), 'WF_BAD_ARGS')
+    expect(err.message).toContain('condition.type')
+  })
+
+  it('set_group_members 缺 memberIds：WF_BAD_ARGS（不再静默清空全组成员）', async () => {
+    const { host, storeState } = makeHost()
+    storeState.workflows.set('wf-1', makeFlow('wf-1', {
+      nodes: [stageNode('s', 'start'), roleNode('a1'), groupNode('g1', ['a1']), stageNode('e', 'end')],
+      lines: [flowLine('l1', 's', 'g1'), flowLine('l2', 'g1', 'e')],
+    }))
+    const err = await expectWfError(() => executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [{ op: 'set_group_members', groupId: 'g1' } as never],
+    }), 'WF_BAD_ARGS')
+    expect(err.message).toContain('memberIds')
+  })
+})

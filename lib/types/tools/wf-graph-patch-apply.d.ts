@@ -1,5 +1,16 @@
 import type { GraphNode, WorkflowDocument } from '../shared/graph-model.js';
 import type { GraphPatchOp, GraphPatchResult, MarkPatchOp, MarkPatchResult } from './wf-graph-patch-types.js';
+/**
+ * 各图操作的「最小字段契约」（**单一事实源**）。
+ *
+ * 为什么放在这里而不是只写进工具描述（2026-09 实机取证）：
+ *   模型写补丁时唯一能看到的事实源是工具 Schema，而 ops 是 `additionalProperties:true`
+ *   的自由对象——描述里只举 create_node 一例时，模型对 connect 的端点字段只能猜
+ *   （实测猜成 from/to，报「源节点不存在「」」）。契约文本同时供两处消费：
+ *     ① wf_graph_patch 的 ops 描述（可发现性）；② 参数层错误消息（自我修正通道）。
+ *   两处共用一份常量，避免文档与实现再次漂移。
+ */
+export declare const OP_FIELD_SHAPES: Record<string, string>;
 /** 深拷贝文档骨架（保持元数据字段；节点/连线走 JSON 深拷贝避免共享引用）。 */
 export declare function cloneDoc(doc: WorkflowDocument): WorkflowDocument;
 /**

@@ -33,7 +33,7 @@ import { effectiveOrgMeta, metaOfDocument, normalizeOrgMeta } from '../graph/org
 import { orgUsageOf } from '../graph/org-meta-usage.js'
 import { metaLimitIssues } from '../graph/org-meta-limits.js'
 import { validateFlow } from '../graph/validate.js'
-import { applyGraphOps, applyMarkOp } from './wf-graph-patch-apply.js'
+import { applyGraphOps, applyMarkOp, OP_FIELD_SHAPES } from './wf-graph-patch-apply.js'
 import {
   GROUP_HINTS,
   groupsOf,
@@ -514,6 +514,23 @@ export async function executeGraphPatch(
 }
 
 /**
+ * graph 组各 op 的**字段契约文本**（由 OP_FIELD_SHAPES 渲染）。
+ * 为什么必须出现在 Schema 里：ops 是 `additionalProperties:true` 的自由对象，模型无法从
+ * JSON Schema 推断字段名；2026-09 实机取证显示，只举一个 create_node 例子时模型会对
+ * connect 的端点字段靠猜（from/to），并把节点字段平铺到 op 顶层——两类失败都只能靠试错收敛。
+ * 契约文本与 apply 层错误消息共用 OP_FIELD_SHAPES，保证「文档说的」和「报错说的」永远一致。
+ */
+const GRAPH_OP_CONTRACT = [
+  `create_node ${OP_FIELD_SHAPES.create_node}`,
+  `remove_node ${OP_FIELD_SHAPES.remove_node}`,
+  `update_node_data ${OP_FIELD_SHAPES.update_node_data}`,
+  `connect ${OP_FIELD_SHAPES.connect}`,
+  `disconnect ${OP_FIELD_SHAPES.disconnect}`,
+  `create_group ${OP_FIELD_SHAPES.create_group}`,
+  `set_group_members ${OP_FIELD_SHAPES.set_group_members}`,
+].join('; ')
+
+/**
  * 注册 wf_graph_patch（全局层；ctx.tools.register）。
  * 返回 disposer：注销失败尽力而为。
  */
@@ -530,10 +547,12 @@ export function registerWfGraphPatch(
     description:
       'Apply one patch to a workflow template or the running instance. This tool has three op groups: graph structure, meta parameters, and run-state marking. A patch must use ops from ONE group at a time. ' +
       'Planning a NEW template: pass scope=template plus create={name, description?, mode?} with graph ops that build a complete valid graph (start + executable units + end). The response returns newTemplate=true and targetId = the new template id; never pass expectRevision there. ' +
-      'graph group: create_node/remove_node/update_node_data/connect/disconnect/create_group/set_group_members — validated by the graph checker and the org budget (limits), then persisted atomically. ' +
+      `graph group ops — EXACT field shapes, copy verbatim: ${GRAPH_OP_CONTRACT}. ` +
+      'Connections are validated by the graph checker and persisted atomically. Missing/misspelled op fields are rejected as WF_BAD_ARGS (fix the parameter shape); real graph problems come back as WF_GRAPH_INVALID (fix the graph, suggestions included). ' +
+      'The flow graph must stay an acyclic DAG even for review rework: model "review failed" as a forward conditional branch (condition={type:"fail"}) into a repair node that rejoins the main line downstream — a back-edge to an upstream node is rejected with flowCycle. ' +
       'meta group: set_meta — updates the org budget itself (re-checked against the current graph). ' +
       'mark group: mark_node — completes the CURRENT milestone gate: only valid while the parent turn is a gate driven by a proxy with data.role=milestone. Pass either the gate proxy id or the parent node id; the response reports milestoneUsed. ' +
-      'Fails with WF_* codes: WF_PATCH_MIXED_GROUPS (mixed groups), WF_GRAPH_INVALID (checker errors, details include fixes), WF_PATCH_CONFLICT (stale expectRevision; never retried), WF_ORG_NOT_FOUND, WF_SCOPE_INVALID, WF_MILESTONE_INVALID. ' +
+      'Fails with WF_* codes: WF_BAD_ARGS (bad op shape), WF_PATCH_MIXED_GROUPS (mixed groups), WF_GRAPH_INVALID (checker errors, details include fixes), WF_PATCH_CONFLICT (stale expectRevision; never retried), WF_ORG_NOT_FOUND, WF_SCOPE_INVALID, WF_MILESTONE_INVALID. ' +
       'Never pass node positions: coordinates are view-only and re-laid out by the canvas automatically.',
     parameters: {
       scope: { type: 'string', required: true, enum: ['template', 'instance'] as const, description: 'template: plan a reusable workflow template; instance: adjust the current running instance.' },
@@ -553,7 +572,11 @@ export function registerWfGraphPatch(
       ops: {
         type: 'array',
         required: true,
-        description: 'Patch operations; all ops must belong to ONE group (graph | meta | mark). Example: [{ "op": "create_node", "node": { "kind": "agent", "id": "n1", "data": { "label": "分析" } } }].',
+        description:
+          'Patch operations; all ops must belong to ONE group (graph | meta | mark). '
+          + `Exact field shapes — copy verbatim: ${GRAPH_OP_CONTRACT}. `
+          + 'Example: [{ "op": "create_node", "node": { "kind": "agent", "id": "n1", "data": { "label": "分析" } } }, '
+          + '{ "op": "connect", "source": "n1", "target": "n2" }].',
         items: { type: 'object', additionalProperties: true },
       },
     },

@@ -6,11 +6,52 @@
 //   - ensureGroupConsistency：协作组与成员的 groupId 双向一致（复用画布侧同款语义）。
 // 不触盘、不读时钟/随机源——落盘与校验在 wf-graph-patch.ts 执行层。
 
-import { newRoleNode, makeNodeId, makeLineId, NODE_KINDS } from '../graph/model.js'
+import { newRoleNode, makeNodeId, makeLineId, NODE_KINDS, NODE_HANDLES, HANDLE_PAIRING, CONDITION_TYPES } from '../graph/model.js'
 import { stageLabel } from '../graph/model.js'
 import { WfError } from '../orchestrator/seams.js'
-import type { GraphNode, Line, WorkflowDocument } from '../shared/graph-model.js'
+import type { GraphNode, Handle, Line, WorkflowDocument } from '../shared/graph-model.js'
 import type { GraphPatchOp, GraphPatchResult, MarkPatchOp, MarkPatchResult } from './wf-graph-patch-types.js'
+
+/**
+ * 各图操作的「最小字段契约」（**单一事实源**）。
+ *
+ * 为什么放在这里而不是只写进工具描述（2026-09 实机取证）：
+ *   模型写补丁时唯一能看到的事实源是工具 Schema，而 ops 是 `additionalProperties:true`
+ *   的自由对象——描述里只举 create_node 一例时，模型对 connect 的端点字段只能猜
+ *   （实测猜成 from/to，报「源节点不存在「」」）。契约文本同时供两处消费：
+ *     ① wf_graph_patch 的 ops 描述（可发现性）；② 参数层错误消息（自我修正通道）。
+ *   两处共用一份常量，避免文档与实现再次漂移。
+ */
+export const OP_FIELD_SHAPES: Record<string, string> = {
+  create_node: "{ op:'create_node', node:{ kind:'agent'|'parent'|'start'|'end'|'pause'|'group'|'proxy'|'file'|'database', id?:string, data?:{...} } }（节点字段必须在 node 里，不能平铺到 op 顶层）",
+  remove_node: "{ op:'remove_node', nodeId:string, cascade?:boolean }",
+  update_node_data: "{ op:'update_node_data', nodeId:string, data:{...} }",
+  connect: "{ op:'connect', source:string, target:string, sourceHandle?:'flow-out'|'ctx-out'|'db-out', targetHandle?:'flow-in'|'ctx-in'|'db-in', condition?:{ type:'pass'|'fail'|'content', label?:string } }（端点字段名是 source/target；handle 省略时按流程通道补全 flow-out→flow-in）",
+  disconnect: "{ op:'disconnect', lineId:string } 或 { op:'disconnect', key:{ source,target,sourceHandle,targetHandle } }",
+  create_group: "{ op:'create_group', groupId:string, label:string, collabPrompt?:string, memberIds?:string[] }",
+  set_group_members: "{ op:'set_group_members', groupId:string, memberIds:string[] }（memberIds 必填，缺省不会清空成员）",
+}
+
+/**
+ * 参数层错误（WF_BAD_ARGS）：字段没给对，**不是**图语义问题。
+ * 与 WF_GRAPH_INVALID 分开的理由：后者会诱导模型去改图，而真正要改的是自己的入参形状。
+ */
+function badArgs(message: string): never {
+  throw new WfError(message, 'WF_BAD_ARGS')
+}
+
+/** 校验连接点是否属于该节点种类；不属于则报出可用值（而不是写出一条无效连线）。 */
+function resolveHandle(handle: string, kind: string, side: 'out' | 'in'): Handle {
+  const def = NODE_HANDLES[kind as keyof typeof NODE_HANDLES]
+  const allowed = (side === 'out' ? def?.outputs : def?.inputs) ?? []
+  if (!allowed.includes(handle as Handle)) {
+    throw new WfError(
+      `connect: ${kind} 节点没有${side === 'out' ? '输出' : '输入'}点「${handle}」（可用：${allowed.join('/') || '无'}）`,
+      'WF_GRAPH_INVALID',
+    )
+  }
+  return handle as Handle
+}
 
 /** 深拷贝文档骨架（保持元数据字段；节点/连线走 JSON 深拷贝避免共享引用）。 */
 export function cloneDoc(doc: WorkflowDocument): WorkflowDocument {
@@ -94,8 +135,22 @@ export function applyGraphOps(input: {
   for (const op of input.ops ?? []) {
     switch (op.op) {
       case 'create_node': {
-        const raw = (op.node ?? {}) as Record<string, unknown>
-        const kind = String(raw.kind ?? '')
+        const opTop = op as unknown as Record<string, unknown>
+        const hasNodeObject = opTop.node !== undefined && opTop.node !== null
+          && typeof opTop.node === 'object' && !Array.isArray(opTop.node)
+        if (!hasNodeObject) {
+          // 实测最常见的写法错误：把 kind/data 平铺到 op 顶层。
+          // 以前这里只报「非法节点种类「」」，模型无法定位到自己少了一层 node 包装。
+          const flattened = 'kind' in opTop || 'data' in opTop
+          badArgs(
+            `create_node: 缺少 node 对象${flattened ? '（检测到 kind/data 被直接写在了 op 顶层）' : ''}——正确形状：${OP_FIELD_SHAPES.create_node}`,
+          )
+        }
+        const raw = opTop.node as Record<string, unknown>
+        const kind = String(raw.kind ?? '').trim()
+        if (!kind) {
+          badArgs(`create_node: node.kind 缺失——正确形状：${OP_FIELD_SHAPES.create_node}`)
+        }
         if (!NODE_KINDS.includes(kind as GraphNode['kind'])) {
           throw new WfError(`create_node: 非法节点种类「${kind}」（允许：${NODE_KINDS.join('/')}）`, 'WF_GRAPH_INVALID')
         }
@@ -141,7 +196,8 @@ export function applyGraphOps(input: {
         break
       }
       case 'remove_node': {
-        const nodeId = String(op.nodeId ?? '')
+        const nodeId = String(op.nodeId ?? '').trim()
+        if (!nodeId) badArgs(`remove_node: nodeId 必填——正确形状：${OP_FIELD_SHAPES.remove_node}`)
         const node = doc.nodes.find((item) => item.id === nodeId)
         if (!node) throw new WfError(`remove_node: 节点不存在「${nodeId}」`, 'WF_GRAPH_INVALID')
         const cascade = op.cascade !== false
@@ -173,7 +229,8 @@ export function applyGraphOps(input: {
         break
       }
       case 'update_node_data': {
-        const nodeId = String(op.nodeId ?? '')
+        const nodeId = String(op.nodeId ?? '').trim()
+        if (!nodeId) badArgs(`update_node_data: nodeId 必填——正确形状：${OP_FIELD_SHAPES.update_node_data}`)
         const node = doc.nodes.find((item) => item.id === nodeId)
         if (!node) throw new WfError(`update_node_data: 节点不存在「${nodeId}」`, 'WF_GRAPH_INVALID')
         if (node.kind === 'start' || node.kind === 'end' || node.kind === 'pause') {
@@ -206,29 +263,74 @@ export function applyGraphOps(input: {
         break
       }
       case 'connect': {
-        const source = String(op.source ?? '')
-        const target = String(op.target ?? '')
-        if (!doc.nodes.some((item) => item.id === source)) {
-          throw new WfError(`connect: 源节点不存在「${source}」`, 'WF_GRAPH_INVALID')
+        const opc = op as unknown as Record<string, unknown>
+        if (opc.from !== undefined || opc.to !== undefined) {
+          // 实测最常见的写法错误：端点字段猜成 from/to（契约是 source/target）。
+          badArgs(`connect: 端点字段是 source/target（不是 from/to）——正确形状：${OP_FIELD_SHAPES.connect}`)
         }
-        if (!doc.nodes.some((item) => item.id === target)) {
-          throw new WfError(`connect: 目标节点不存在「${target}」`, 'WF_GRAPH_INVALID')
+        const source = String(opc.source ?? '').trim()
+        const target = String(opc.target ?? '').trim()
+        if (!source || !target) {
+          badArgs(
+            `connect: source/target 必填（收到 source=${JSON.stringify(opc.source ?? null)}, target=${JSON.stringify(opc.target ?? null)}）`
+            + `——正确形状：${OP_FIELD_SHAPES.connect}`,
+          )
         }
-        const sourceHandle = String(op.sourceHandle ?? '')
-        const targetHandle = String(op.targetHandle ?? '')
+        const sourceNode = doc.nodes.find((item) => item.id === source)
+        const targetNode = doc.nodes.find((item) => item.id === target)
+        if (!sourceNode) {
+          throw new WfError(`connect: 源节点不存在「${source}」（请先用 wf_org_catalog 读取画布节点 id）`, 'WF_GRAPH_INVALID')
+        }
+        if (!targetNode) {
+          throw new WfError(`connect: 目标节点不存在「${target}」（请先用 wf_org_catalog 读取画布节点 id）`, 'WF_GRAPH_INVALID')
+        }
+        // handle：缺省按流程通道补全。
+        // 为什么不能沿用旧的 `?? ''` 兜底：'' 会写出 isFlowLine()=false 的**幽灵线**——
+        // 该线在流程 DAG 中不存在，检查器随后报「启动节点没有流程出线 / 悬空节点」，
+        // 把「handle 没写」误诊成「图缺线」，真因被完全掩盖。
+        const sourceHandle = resolveHandle(String(opc.sourceHandle ?? '').trim() || 'flow-out', sourceNode.kind, 'out')
+        const targetHandle = resolveHandle(String(opc.targetHandle ?? '').trim() || 'flow-in', targetNode.kind, 'in')
+        const expectedTarget = HANDLE_PAIRING[sourceHandle]
+        if (targetHandle !== expectedTarget) {
+          throw new WfError(`connect: ${sourceHandle} 只能连接 ${expectedTarget}（收到 ${targetHandle}）`, 'WF_GRAPH_INVALID')
+        }
+        // condition：必须显式带 type，否则条件线会**静默**退化成普通流程线（成对校验随之失效）。
+        // 放在「重复连线」之前：参数层错误优先于图状态错误，报错才指向模型真正该改的地方。
+        const rawCondition = opc.condition
+        let conditionType = ''
+        let conditionLabel: string | undefined
+        if (rawCondition !== undefined && rawCondition !== null) {
+          if (typeof rawCondition === 'string') {
+            conditionType = rawCondition.trim()
+          } else if (typeof rawCondition === 'object' && !Array.isArray(rawCondition)) {
+            const box = rawCondition as { type?: unknown; label?: unknown }
+            conditionType = String(box.type ?? '').trim()
+            if (box.label !== undefined && box.label !== null) conditionLabel = String(box.label)
+          }
+          if (!CONDITION_TYPES.includes(conditionType as (typeof CONDITION_TYPES)[number])) {
+            badArgs(
+              `connect: condition.type 必须是 ${CONDITION_TYPES.join('/')}（收到 ${JSON.stringify(conditionType)}）`
+              + `——漏写 type 会让条件线静默退化成普通流程线；正确形状：${OP_FIELD_SHAPES.connect}`,
+            )
+          }
+          if (conditionType === 'content' && !conditionLabel) {
+            badArgs(`connect: condition.type='content' 必须带 label（条件内容文本）——正确形状：${OP_FIELD_SHAPES.connect}`)
+          }
+        }
         if (doc.lines.some((line) => line.source === source && line.target === target
           && line.sourceHandle === sourceHandle && line.targetHandle === targetHandle)) {
           throw new WfError('connect: 该连线已存在（重复连线）', 'WF_GRAPH_INVALID')
         }
         const lineId = makeLineId()
-        const condition = op.condition?.type
         doc.lines.push({
           id: lineId,
           source,
           target,
           sourceHandle: sourceHandle as Line['sourceHandle'],
           targetHandle: targetHandle as Line['targetHandle'],
-          ...(condition ? { condition: { type: condition as 'pass' | 'fail' | 'content', ...(op.condition?.label ? { label: op.condition.label } : {}) } } : {}),
+          ...(conditionType
+            ? { condition: { type: conditionType as 'pass' | 'fail' | 'content', ...(conditionLabel ? { label: conditionLabel } : {}) } }
+            : {}),
         })
         connectedLineIds.push(lineId)
         break
@@ -242,7 +344,7 @@ export function applyGraphOps(input: {
           doc.lines = doc.lines.filter((line) => !(line.source === key.source && line.target === key.target
             && line.sourceHandle === key.sourceHandle && line.targetHandle === key.targetHandle))
         } else {
-          throw new WfError('disconnect: 需要 lineId 或 key（四个端点字段）', 'WF_GRAPH_INVALID')
+          badArgs(`disconnect: 需要 lineId 或 key（四个端点字段）——正确形状：${OP_FIELD_SHAPES.disconnect}`)
         }
         if (doc.lines.length === before) {
           throw new WfError('disconnect: 未找到匹配的连线（请先用 wf_org_catalog 读取拓扑）', 'WF_GRAPH_INVALID')
@@ -250,7 +352,8 @@ export function applyGraphOps(input: {
         break
       }
       case 'create_group': {
-        const groupId = String(op.groupId ?? '').trim() || makeNodeId()
+        const groupId = String(op.groupId ?? '').trim()
+        if (!groupId) badArgs(`create_group: groupId 必填——正确形状：${OP_FIELD_SHAPES.create_group}`)
         if (doc.nodes.some((item) => item.id === groupId)) {
           throw new WfError(`create_group: 节点 id 已存在「${groupId}」`, 'WF_GRAPH_INVALID')
         }
@@ -272,8 +375,13 @@ export function applyGraphOps(input: {
         break
       }
       case 'set_group_members': {
-        const groupId = String(op.groupId ?? '')
-        doc.nodes = ensureGroupConsistency(doc.nodes, groupId, Array.isArray(op.memberIds) ? op.memberIds : [])
+        const groupId = String(op.groupId ?? '').trim()
+        if (!groupId) badArgs(`set_group_members: groupId 必填——正确形状：${OP_FIELD_SHAPES.set_group_members}`)
+        // 旧实现把缺失的 memberIds 兜底成 []，等于「悄悄清空全组成员」——破坏性默认值必须拒绝。
+        if (!Array.isArray(op.memberIds)) {
+          badArgs(`set_group_members: memberIds 必须是数组（清空成员请显式传 []）——正确形状：${OP_FIELD_SHAPES.set_group_members}`)
+        }
+        doc.nodes = ensureGroupConsistency(doc.nodes, groupId, op.memberIds)
         updatedNodeIds.push(groupId)
         break
       }
