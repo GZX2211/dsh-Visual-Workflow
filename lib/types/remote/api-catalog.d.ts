@@ -55,10 +55,12 @@ export declare class VisualWorkflowApiCatalog extends VisualWorkflowApiEcosystem
 /**
  * 组合管理卡片描述上限（字符）。
  * 模型侧工具 description 面向模型可以长（错误码/op 组约束等），但卡片只有几十像素宽：
- * 不截断就会把文本挤出卡片边框（2026.09 用户报障）。此处做数据层兜底，
- * 客户端另有 CSS 行数钳制（styles.ts `.wf-combo-card__desc`）双保险。
+ * 不截断就会把文本挤出卡片边框（2026.09 用户报障）。此处做数据层兜底，客户端另有
+ * CSS 行数钳制（styles.ts `.wf-combo-card__desc`）与卡片最小高度（`.wf-combo-card`）。
+ * 取 80：约合卡片内 2 行文本（10px 字号 / 约 200px 内容宽），与卡片最小高度 96px 匹配，
+ * 保证「名称 + 描述 + 操作按钮」三者在卡片内互不重叠。
  */
-export declare const CARD_DESC_MAX = 120;
+export declare const CARD_DESC_MAX = 80;
 /**
  * 组合管理卡片描述（纯函数，导出供单测）：
  *   - 命中 TOOL_ZH → 短中文；
