@@ -8,7 +8,7 @@
 
 import { WF_RUN_NODE_WAIT } from '../shared/protocol.js'
 import { nodeById } from '../graph/model.js'
-import { ensureDatabaseIndexes } from '../tools/data-tools.js'
+import { ensureDatabaseIndexes } from '../tools/wf-db-query/service.js'
 import { DEFAULT_SYSTEM_LANGUAGE } from '../system-language.js'
 import { buildNodeBlocks, collabPromptOf, effectiveReactLimitOf, effectiveRetryLimitOf, effectiveThinkingOf, labelOf } from './helpers.js'
 import { createWaiter, type FinishArgs, type FinishResult, type RunEntry, type RunNodeArgs, type RunNodeResult, type Waiter } from './run-types.js'

@@ -132,7 +132,10 @@ describe('T-002 Host 入口契约（index/config/visual-workflow-host 拆分后�
     expect(entryText).toMatch(/reconcileStaleRuns/)
     expect(entryText).toMatch(/ctx\.effect/)
     expect(entryText).toMatch(/visualWorkflowHost\.dispose/)
-    expect(entryText).toMatch(/visualWorkflowHost\.wfTools/)
+    // 编排四工具各自独立的 effect 清理标签（目录治理：wf-tools 聚合入口拆为四个工具注册）
+    for (const label of ['wfRunNode', 'wfRunNodeWait', 'wfFinish', 'wfAsk']) {
+      expect(entryText, `缺少 effect 标签：visualWorkflowHost.${label}`).toMatch(new RegExp(`visualWorkflowHost\\.${label}`))
+    }
   })
 
   it('从 @deepseek-ai/schemastery 默认导入 z（非 zod）', () => {

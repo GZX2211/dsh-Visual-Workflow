@@ -3,7 +3,7 @@
 // 产出：<dataDir>/data/vector/database-mtfmuocq-aaun.json
 // 用法：node scripts/build-products-index.mjs
 import { createEmbeddingEngine } from '../lib/embedding/engine.js'
-import { buildIndexForDatabase } from '../lib/tools/data-tools.js'
+import { buildIndexForDatabase } from '../lib/tools/wf-db-query/service.js'
 
 const dataDir = 'C:\\Users\\GZX\\.dsh\\visual-workflow'
 const node = {

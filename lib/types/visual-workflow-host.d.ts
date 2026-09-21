@@ -9,7 +9,7 @@ import { ServiceManager } from './service/manager.js';
 import { SchedulerEngine } from './scheduler/engine.js';
 import { SchedulerTaskStore } from './scheduler/task-store.js';
 import { CordisSessionProvider } from './scheduler/session-provider.js';
-import { ToolSwitchStore } from './tools/tool-switches.js';
+import { ToolSwitchStore } from './tools/infrastructure/tool-switches.js';
 export declare const VisualWorkflowHostServiceName = "visualWorkflowHost";
 /**
  * 宿主 service：持有解析后的 config、FlowStore 与编排运行时，挂载事件观察、

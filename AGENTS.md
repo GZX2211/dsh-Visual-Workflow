@@ -1,149 +1,218 @@
 # AGENTS.md
 
-## 项目概述
+## 项目定位
 
-dsh-visual-workflow 是 DeepSeek Harness（dsh）生态的 **host + client 双面可视化多 Agent 工作流设计器插件**
+`dsh-Visual-Workflow` 是 DeepSeek Harness 生态中的可视化多 Agent Workflow 编排插件。
 
-- **需求文档**：`docs/需求文档.md`
-- **架构文档**：`docs/架构文档.md`
-- 审查时**必须逐条对照上述两份文档**，任何偏离均视为 BUG。
+核心方向：
 
-### 文档索引（用 read(offset, limit) 按任务需求读取片段，不要读取整个文件）
+- 可视化 Workflow / DAG 编排
+- 长任务执行、暂停、恢复与状态持久化
+- Parent Agent 自主编排与运行时治理
+- Workflow 动态结构调整
+- API 服务模式
+- 面向未来的元编排（Meta-Orchestration）
 
-**架构文档**：
+项目基于 DeepSeek Harness 扩展，不替代或修改 dsh 核心框架。
 
-- 1. 架构总览 - 起始行号：L11
-- 2. 插件契约 - 起始行号：L28
-   定义包名、入口、exports、挂载配置与 peer 依赖等 
-- 3. 目录结构（本项目） - 起始行号：L110  **不要读**
-- 4. Host 半区模块设计 - 起始行号：L144
-- 5. 关键协议与时序 - 起始行号：L334
-   运行启动、暂停与断点续跑、wf_ask_agent通信、协作组并行、模式二请求流 
-- 6. 数据与模型资产 - 起始行号：L403
-   run 快照、服务状态、模板、导入导出 v2 bundle、本地嵌入模型与向量索引   
-- 7. 模式二 serve 层（serve.patch.yml 模板） - 起始行号：L498 
-- 8. 官方源码引用索引（核心功能 -> 官方源码位置） - 起始行号：L520
-- 9. 安全、权限与边界 - 起始行号：L553
-- 10. Client 半区设计（由旧项目迁移；P11 起入口改版） - 起始行号：L564  
-- 11. 测试与验证矩阵 - 起始行号：L582  **必读**
-- 12. 风险与实现时验证项 - 起始行号：L598
-- 13. 编码与提示词工程规范（横切，所有任务必须遵守） - 起始行号：L615  **必读**
+---
 
-**需求文档**：
+## AI 开发时的权威来源
 
-- 1. 产品背景  - 起始行号：L9  
-- 2. 术语与缩写定义  - L27  **必读**
-- 3. 核心流程  - L57  
-  - 3.1 模式一：流程编排模式  - L59  
-    流程：拖拽配置→运行→暂停/续跑，断点续跑与双向同步  
-  - 3.2 模式二：API服务模式  - L78  
-    服务启动、API请求、多用户隔离及流式响应
-- 4. 功能需求  - L98  
-  - 4.1 双模式架构模块  - L100  
-  - 4.2 节点管理模块  - L191  
-  - 4.3 连线管理模块  - L474  
-  - 4.4 工具扩展模块  - L517  
-  - 4.5 UI 交互模块  - L588 
-  - 4.6 组合管理模块  - L649  
-  - 4.7 运行历史与断点恢复  - L669  
-- 5. 非功能需求  - L694  
-- 6. 开放问题清单  - L726  
-- 8. 设计约束  - L747  **必读**
-- 9. 复用与差异清单（旧项目 → 新项目）  - L761
+不同信息类型使用不同的权威来源，不得将所有文档视为同等权威。
 
-## 开发环境
+| 信息类型 | 当前权威 |
+|---|---|
+| 实际代码行为 | 当前代码 + 测试 |
+| 数据结构、接口、Tool Schema | 当前代码 + 测试 |
+| 当前项目原则 | 本目录及作用域内的 `AGENTS.md` |
 
-| 工具 | 版本 | 备注 |
-|------|------|------|
-| node | v24.17.0 | |
-| pnpm | 11.22.0 | 包管理器（不要用 npm/yarn） |
-| git | 2.53.0.windows.2 | 仓库主分支 main |
-| dsh CLI | 0.1.5-rc.1（目标适配） | 全局安装 `@deepseek-ai/dsh@0.1.5-rc.1`；host 升级需在外部终端执行：先完全停止 dsh 进程，再 `npm install -g @deepseek-ai/dsh@0.1.5-rc.1`。Windows 路径 `C:\Users\GZX\AppData\Roaming\npm\dsh.ps1` |
+---
 
-### 版本镜像约定
-
-与官方仓库 devDependencies 对齐：
-
-| 包 | 版本 | 用途 |
-|----|------|------|
-| typescript | ^6.0.3 | 双 program 编译（官方同款） |
-| tsdown | ^0.22.2 | client bundle 构建（复用官方 tsdown.client.ts 模式） |
-| vitest | ^4.1.8 | host/client 单测 |
-| jsdom | 29.1.1 | client 单测环境 |
-| @huggingface/transformers | 架构文档指定 | 唯一第三方**运行时**依赖（本地嵌入推理） |
-
-- react / react-dom 仅为 **devDependencies**：client bundle 由官方平台模块表提供，构建期从 `lib/` 找回资源。
-
-## 构建与测试命令
-
-```bash
-pnpm typecheck      # tsc 双 program 类型检查（host + client + test）
-pnpm build          # node scripts/build.mjs（tsc 发射 JS + tsdown 构建 client bundle）
-pnpm test           # vitest run --pool=threads
-pnpm client-smoke   # node scripts/client-smoke.mjs
-pnpm check          # typecheck + test + build + client-smoke（推荐合并命令）
-pnpm verify         # typecheck + build + test + client-smoke
-```
-
-- 构建产物在 `lib/`；`lib/types/` 存放声明文件。
-
-## 目录结构
+## 项目导航
 
 ```
 dsh-visual-workflow/
 ├── src/
 │   ├── host/                     # Host 插件
 │   │   ├── shared/               # 前后端共享纯类型契约
-│   │   ├── storage/              # 原子存储（FlowStore）
+│   │   ├── storage/              # 持久化存储
 │   │   ├── orchestrator/         # 运行锁、断点状态机、双向同步
 │   │   ├── agent/                # 子代理执行引擎、护栏、提示词注入
 │   │   ├── tools/                # wf_* 工具注册
 │   │   ├── remote/               # GUI API 端点
-│   │   ├── service/              # 模式二服务管理器（fork/端口池/恢复）
+│   │   ├── service/              # 模式二服务
 │   │   ├── embedding/            # 本地向量嵌入与索引
-│   │   ├── scheduler/            # 定时任务引擎
-│   │   └── prompts/              # 编排/节点任务提示词模板
+│   │   ├── scheduler/            # 定时任务
+│   │   ├── graph/                # 图模型校检
+│   │   ├── commands/             # / 命令注册
+│   │   ├── workspace/            # 工作区路径校验
+│   │   └── prompts/              # 编排提示词模板
 │   └── client/                   # WebUI 源码
-│       ├── sidebar/              # 官方插槽注册（右侧 Sidebar 标签页 / 侧边栏入口 / 常驻容器）
-│       ├── studio/               # 主状态机（useReducer）
-│       ├── components/           # 画布/面板/组合/历史/定时任务等
+│       ├── sidebar/              # 右侧 Sidebar 标签页 / 侧边栏入口 / 常驻容器
+│       ├── studio/               # 主状态机
+│       ├── components/           # 组件
 │       ├── hooks/                # 职责单一 hooks
 │       └── lib/                  # 纯逻辑（remote/graph-model/bundle/storage）
-├── tests/                        # 单元 + 集成测试
+├── tests/                        # 测试文件
 ├── scripts/                      # 构建与 watch 脚本
-├── assets/models/                # 本地嵌入模型资产
 ├── cordis.patch.yml              # Web profile 挂载层
-├── serve.patch.yml               # 模式二服务进程组合层模板
-├── docs/                         # 需求文档 / 架构文档 / MCP注册指南
+├── docs/                         # 文档统一存放
 └── package.json
 ```
 
-- `src/host/shared/` **禁止任何 import，禁止运行时值**（函数/常量一律不放）。client 经 `import type` 零风险引用。
-- 双 program 完全隔离：`tsconfig.host.json`（nodenext + node types）与 `tsconfig.client.json`（bundler + dom types）互不 include。
+实际文件结构以当前代码为准。
 
-## 硬性架构约束（违反即 BUG）
+当修改某个模块时，优先阅读该模块附近的代码及作用域内的 `AGENTS.md`，不要为了理解局部任务而读取整个项目。
 
-1. **零官方包运行时依赖**：`@deepseek-ai/*` 仅经 `ctx.get()` 运行时解析，工具以纯对象 `defineTool` 定义注册。唯一允许的第三方运行时依赖是 `@huggingface/transformers`（本地嵌入推理）。`@deepseek-ai/schemastery` 仅 devDependency。
-2. **不得修改 dsh 底层核心框架**，全部基于非侵入式扩展（patch 层、事件观察、ctx service）。
-3. **节点 JSON 即事实源**：模板与画布节点深拷贝解耦，节点数据全量内联，无 `templateId` 引用。
-4. **双模式解耦**：模式二服务进程 = fork 独立无头 DSH 实例，崩溃不得影响主进程。
-5. **提示词工程**（架构文档 §13）：
-   - 前缀稳定：系统提示/工具 schema 顺序固定，动态值**仅注入末段**（`TAIL_MARKER` 之后）。
-   - 关键约束双位：首段 + 末段重申（`HEAD_MARKER` / `TAIL_RESTATE_MARKER`）。
-   - 提示词模板构建器均为**纯函数**，不读 `Date.now`/随机源。
-   - 工具 `description` 用官方标准英文（≤120 tokens）；代码注释、JSDoc、README 用中文。
+---
 
-## 代码风格
+## 核心架构约束
 
-- TypeScript strict 模式，`verbatimModuleSyntax: true`（type 导入必须用 `import type`）。
-- React + 函数组件 + hooks；状态管理使用 `useReducer`（reducer 在 `studio/studio-state.ts`），所有变更经 `dispatch(action)` 单向流转。
-- 纯函数优先：图模型操作、提示词构建器、连线校验、BM25 打分等核心逻辑不依赖全局状态、不读时钟/随机源（便于单测）。
-- 依赖注入缝：运行时服务（`ctx.get`）通过接口最小化后注入，便于 fake 测试。
-- 错误处理：后端 `WfError` 带稳定 code（`WF_*`）；前端 `useToast` 统一展示。
-- 原子写协议：所有持久化经 `withJsonLock` + `atomicWriteJson`（临时文件 + fsync + rename），不得绕过直接写文件。
+以下规则属于硬性约束，除非明确进行架构变更，否则不得违反。
 
-## 其他约定
+### DeepSeek Harness
 
-- 文档更新：修改 `shared/protocol.ts`（端点名）、`shared/types.ts`（数据结构）、`shared/graph-model.ts`（节点/连线模型）后，**必须同步更新 `docs/架构文档.md`** 对应章节，保持文档与代码零漂移
-- 修改核心引擎（orchestrator/agent/tools）后必须运行 `pnpm test`；修改前后端契约（shared/protocol.ts、shared/types.ts、shared/graph-model.ts）后必须运行 `pnpm typecheck` 并检查前端编译
-- 不允许阅读项目根目录下 prompt/ 文件夹内的任何文件（除我指定之外）
+* 不得修改 dsh 底层核心框架。
+* 优先使用 patch、事件观察、`ctx` service 等非侵入式扩展机制。
+* `@deepseek-ai/*` 不作为运行时直接依赖；通过运行时能力获取机制使用。
+* `@huggingface/transformers` 是允许的第三方运行时依赖。
+
+### Runtime / Agent 职责边界
+
+Runtime 负责确定性事实，例如：
+
+* 生命周期
+* 完成 / 失败 / 超时
+* 权限错误
+* 状态持久化
+* 消息投递
+* Workflow 结构合法性
+
+Agent / Prompt 负责不确定性的判断，例如：
+
+* 是否需要重新规划
+* 是否存在设计风险
+* 是否需要向 Parent 汇报
+* 是否需要改变执行策略
+
+原则：
+
+> Runtime 管确定性事实，Agent 处理不确定性判断，Parent 负责高层编排与治理。
+
+---
+
+## 依赖与隔离
+
+* Host 与 Client 使用独立 TypeScript Program。
+* `src/host/shared/` 只允许放 Host / Client 共享的纯类型或无运行时依赖契约。
+* Client 不得引入 Host 运行时模块。
+* Host 不得依赖 Client 实现。
+* 优先通过明确的接口进行运行时能力注入。
+
+---
+
+## 代码规范
+
+* TypeScript strict 模式。
+* 类型导入使用 `import type`。
+* React 使用函数组件与 hooks。
+* Client 状态通过既定的单向状态流转机制管理。
+* 核心逻辑优先使用纯函数。
+* 运行时能力通过最小接口进行依赖注入。
+
+---
+
+## 编码规范
+
+- 命名：文件使用 `kebab-case`；变量、函数和参数使用 `camelCase`；类型、接口、类和组件使用 `PascalCase`。
+- 类型：公共函数必须显式声明参数和返回值类型；内部函数优先使用 TypeScript 类型推导。
+- 模块：每个文件承担一个明确职责，并尽量只有一个主要变更原因；不同职责应拆分为独立模块。
+- 依赖：优先保持单向依赖，避免循环依赖；共享逻辑应放入职责明确的模块，不创建无明确职责的 `utils.ts`、`helpers.ts` 等聚合文件。
+- 字符串：统一使用双引号 `"`，并遵循项目 formatter / linter 配置。
+- 注释：只解释非显而易见的设计原因、约束和副作用；避免重复代码本身已经表达的信息。
+- 公共 API：修改公共接口、Tool Schema、数据结构或运行时契约时，必须同步检查调用方、测试和相关架构文档。
+- 重构：纯重构应保持运行时行为不变；不得以“重构”为名顺便修改业务逻辑。
+
+---
+
+## 修改代码前
+
+进行非 trivial 修改前，先明确：
+
+1. 修改属于哪个模块？
+2. 该模块负责什么？
+3. 当前问题是什么？
+4. 为什么应该修改这里？
+5. 是否存在相关的其他模块？
+6. 是否改变公共接口或 Tool Schema？
+7. 是否改变运行时行为或状态机？
+
+不要因为某个问题表现于某个文件，就默认该文件是正确的修改位置。
+
+---
+
+## 修改代码后
+
+至少确认：
+
+* TypeScript 类型检查通过；
+* 相关测试通过；
+* 受影响模块的构建通过；
+* 公共接口 / Tool Schema 未被意外改变；
+* 没有引入跨层依赖；
+
+向用户汇报修改时，说明：
+
+* 修改了什么；
+* 为什么修改；
+* 是否改变公共接口；
+* 是否改变运行时行为；
+* 执行了哪些验证。
+
+---
+
+## 标准验证命令
+
+```bash
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm client-smoke
+```
+
+完整验证：
+
+```bash
+pnpm check
+```
+
+或：
+
+```bash
+pnpm verify
+```
+
+具体命令及脚本行为以当前 `package.json` 为准。
+
+---
+
+## 特别注意
+
+* 不要为了修复局部问题进行无关的大规模重构。
+* 不要在没有验证的情况下宣称修改完成。
+* 不要读取根目录 `prompt/` 中的文件，除非用户明确指定。
+
+---
+
+## 工作原则
+
+遇到冲突时，先识别冲突属于：
+
+* 实现问题
+* 架构问题
+* 设计未明确
+* 需求不清晰
+
+不要通过猜测自动解决架构冲突。
+遇到问题必须向用户说明并询问，再进行修改。

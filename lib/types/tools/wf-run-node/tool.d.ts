@@ -1,0 +1,8 @@
+import { type WfToolsHost } from '../infrastructure/caller.js';
+/**
+ * 注册 wf_run_node（全局层；ctx.tools.register）。
+ * 返回 disposer：注销失败尽力而为。
+ */
+export declare function registerWfRunNode(ctx: {
+    get(name: string): unknown;
+}, host: WfToolsHost): () => void;

@@ -17,7 +17,7 @@ import { mkdtemp, rm, writeFile, mkdir, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FlowStore } from '../../src/host/storage/flow-store.js'
-import { ToolSwitchStore } from '../../src/host/tools/tool-switches.js'
+import { ToolSwitchStore } from '../../src/host/tools/infrastructure/tool-switches.js'
 import { DatabaseSync } from 'node:sqlite'
 import {
   OrchestratorRuntime,

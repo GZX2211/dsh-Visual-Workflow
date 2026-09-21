@@ -41,7 +41,7 @@ import { ORCH_HARD_CONSTRAINTS } from '../../src/host/prompts/orchestration.js'
 import { ORCH_CHANGE_MARKER } from '../../src/host/prompts/orchestration-change.js'
 import { NODE_HARD_CONSTRAINTS } from '../../src/host/prompts/node-task.js'
 import { parentExecutorOf } from '../../src/host/orchestrator/helpers.js'
-import { executeGraphPatch, type GraphPatchHost } from '../../src/host/tools/wf-graph-patch.js'
+import { executeGraphPatch, type GraphPatchHost } from '../../src/host/tools/wf-graph-patch/tool.js'
 import { stageLabel } from '../../src/host/graph/model.js'
 import type { FileNode, GraphNode, RoleNode, StageNode, WorkflowDocument } from '../../src/host/shared/graph-model.js'
 

@@ -6,7 +6,8 @@
 
 import type { DatabaseNode } from '../shared/graph-model.js'
 import { findResumableRun } from '../orchestrator/resume.js'
-import { buildIndexForDatabase, createDatabaseDriver, indexPathOf, testDatabaseConnection } from '../tools/data-tools.js'
+import { buildIndexForDatabase, indexPathOf } from '../tools/wf-db-query/service.js'
+import { createDatabaseDriver, testDatabaseConnection } from '../tools/wf-db-query/driver.js'
 import { VectorIndex } from '../embedding/indexer.js'
 import { exportAgentTemplate, exportWorkflowBundle, importAgentTemplate, importWorkflowBundle } from './transfer.js'
 import { httpError } from './http.js'

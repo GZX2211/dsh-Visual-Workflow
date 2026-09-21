@@ -14,7 +14,7 @@ import type { OrchestratorRuntime } from '../orchestrator/runtime.js'
 import type { EmbeddingEngine } from '../embedding/engine.js'
 import type { SchedulerEngine } from '../scheduler/engine.js'
 import type { SchedulerTaskStore } from '../scheduler/task-store.js'
-import type { ToolSwitchStore } from '../tools/tool-switches.js'
+import type { ToolSwitchStore } from '../tools/infrastructure/tool-switches.js'
 import { httpError } from './http.js'
 
 /**
@@ -55,7 +55,7 @@ export interface ApiHost {
   scheduler?: SchedulerEngine
   /** 定时任务存储（scheduler/task-store.ts；缺失时调度端点返回 501）。 */
   schedulerTaskStore?: SchedulerTaskStore
-  /** 全局工具开关存储（tools/tool-switches.ts；缺失时开关端点返回 501）。 */
+  /** 全局工具开关存储（tools/infrastructure/tool-switches.ts；缺失时开关端点返回 501）。 */
   toolSwitches?: ToolSwitchStore
 }
 

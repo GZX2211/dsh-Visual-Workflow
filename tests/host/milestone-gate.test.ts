@@ -7,7 +7,7 @@
 // 运行时行为（不自动 ok / 显式标记生效 / 预算递减 / 续跑继承）见 orchestrator.test.ts 的
 // 「P3 里程碑闸门（运行时）」与 wf-graph-patch.test.ts 的 mark_node 状态机用例。
 import { describe, expect, it } from 'vitest'
-import { applyGraphOps } from '../../src/host/tools/wf-graph-patch-apply.js'
+import { applyGraphOps } from '../../src/host/tools/wf-graph-patch/apply.js'
 import {
   activeMilestoneGateOf,
   mainNodeIdOf,
