@@ -1,9 +1,11 @@
 /** 官方 sessions.list 快照的最小形状（运行时守卫后收窄）。 */
 export interface SessionsSnapshotLike {
-    /** 当前选中会话 id。 */
+    /** 当前选中会话 id（0.1.5-rc.1 及以前；0.1.6 起已移除，仅作旧运行时优先读法）。 */
     current?: unknown;
-    /** 会话 id → 摘要（含父链字段）。 */
+    /** 会话 id → 摘要（含父链字段；0.1.6 起含 retainedBy 引用计数）。 */
     byId?: Record<string, unknown>;
+    /** Host 列表顺序（0.1.6 起存在；缺省时按 byId 键序遍历）。 */
+    ids?: unknown;
 }
 /** 官方 sessions 服务的最小形状（快照读 + 订阅；双版本读法）。 */
 export interface SessionsServiceLike {
@@ -15,6 +17,7 @@ export interface SessionsServiceLike {
 }
 /**
  * 解析当前选中会话 id（无会话返回空串）。
+ * 双读兼容：0.1.5 读 snapshot.current；0.1.6（current 已移除）按 retainedBy.mainView 派生。
  * @param ctx - 取服务的最小上下文（`get(name)`）。
  * @returns 当前会话 id，或空串。
  */
