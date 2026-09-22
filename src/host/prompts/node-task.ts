@@ -15,20 +15,16 @@
 // 构建器为纯函数：不读 Date.now/随机源，同一 params 两次构建字节相同。
 
 import { HEAD_MARKER, MID_MARKER, TAIL_MARKER, TAIL_RESTATE_MARKER } from './markers.js'
+import { systemLanguageRule } from './prompt-rules.js'
 
 /**
  * 节点任务块的入参（中文注释每个字段）。
- * `facts` 为同一 run 内字节稳定的静态事实；`dynamic` 字段保留（向前兼容调用方），
- * 构建器当前不注入任何动态态信息。
+ * `facts` 为同一 run 内字节稳定的静态事实；构建器不注入任何动态态信息，
+ * 故不设 dynamic 段（动态段属编排系指令的形态，节点任务块没有此类内容）。
  */
 export interface NodeTaskBlockParams {
-  /** 静态事实：节点身份 / 任务 / 上下文注入（同一 run 内稳定）。 */
+  /** 静态事实：节点身份 / 上下文注入（同一 run 内稳定）。 */
   facts: {
-    /**
-     * 节点任务文本：节点自身的 System Prompt（persona），即子代理要完成的子任务。
-     * 任务正文经 prompt-setup 作为系统提示词段注入，本任务块不再重复正文。
-     */
-    task: string
     /**
      * 节点人类可读名称（身份行与中段指代）。
      */
@@ -75,13 +71,6 @@ export interface NodeTaskBlockParams {
      */
     systemLanguage: string
   }
-  /** 动态态信息（当前未注入任务块；字段保留以兼容既有调用方）。全部可选，缺省即默认值。 */
-  dynamic: {
-    /**
-     * 父代理会话 id（根 Agent 的会话 id；子代理的父 agent id）。
-     */
-    parentAgentId?: string
-  }
 }
 
 /**
@@ -103,20 +92,13 @@ export const DEFAULT_OUTPUT_CONTRACT =
   '结论 / 产出文件路径 / 关键决策 / 未决问题'
 
 /**
- * 交接契约声明句（首段与末段复用同一措辞源；术语一致性由本常量保证）。
+ * 交接契约声明句（末段复用默认结构短语；术语一致性由 DEFAULT_OUTPUT_CONTRACT 保证）。
+ * 模块内部 helper（仅本文件使用，不经公共入口公开）。
  * @param defaulted true = 这段结构是系统默认给出的（节点未配置），可用但可自行细化
  */
-export function outputContractRule(defaulted: boolean): string {
+function outputContractRule(defaulted: boolean): string {
   const base = `你的最终回复会被下游节点直接读取，必须包含：${DEFAULT_OUTPUT_CONTRACT}`
   return defaulted ? `${base}（这套结构是本节点的默认交接格式）` : base
-}
-
-/**
- * 系统语言规则短语（面向模型中文；各提示词构建器共用）。
- * 从 DSH 用户设置读取语言名，注入「所有对话回复、注释、思考过程必须使用该语言」。
- */
-export function systemLanguageRule(language: string): string {
-  return `所有对话回复、注释、思考过程必须使用${language}`
 }
 
 /**

@@ -4,8 +4,8 @@
 //   - 属**动态值** → 只在末段（TAIL_MARKER 之后）注入，前置段字节不受影响（架构文档 §13）；
 //   - 给**剩余量**而非上限（父代理据此判断还能扩张多少）；
 //   - 纯函数：入参不变则输出字节不变，不读时钟/随机源。
-// 本轮（P0）只提供构建器与单测，实际注入点由 P2 的 SOP 组装统一接入
-// （directiveParams.dynamic），避免 P0 改动运行时核心路径。
+// 注入点：编排运行时启动层（startRun/resumeRun 组装 directiveParams.dynamic.orgBudgetText，
+// 见 orchestrator/runtime-launch.ts），由父代理提示词末段渲染。
 
 import type { OrgBudget } from '../shared/types.js'
 

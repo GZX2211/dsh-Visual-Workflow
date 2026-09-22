@@ -1,16 +1,11 @@
 /**
  * 节点任务块的入参（中文注释每个字段）。
- * `facts` 为同一 run 内字节稳定的静态事实；`dynamic` 字段保留（向前兼容调用方），
- * 构建器当前不注入任何动态态信息。
+ * `facts` 为同一 run 内字节稳定的静态事实；构建器不注入任何动态态信息，
+ * 故不设 dynamic 段（动态段属编排系指令的形态，节点任务块没有此类内容）。
  */
 export interface NodeTaskBlockParams {
-    /** 静态事实：节点身份 / 任务 / 上下文注入（同一 run 内稳定）。 */
+    /** 静态事实：节点身份 / 上下文注入（同一 run 内稳定）。 */
     facts: {
-        /**
-         * 节点任务文本：节点自身的 System Prompt（persona），即子代理要完成的子任务。
-         * 任务正文经 prompt-setup 作为系统提示词段注入，本任务块不再重复正文。
-         */
-        task: string;
         /**
          * 节点人类可读名称（身份行与中段指代）。
          */
@@ -60,13 +55,6 @@ export interface NodeTaskBlockParams {
          */
         systemLanguage: string;
     };
-    /** 动态态信息（当前未注入任务块；字段保留以兼容既有调用方）。全部可选，缺省即默认值。 */
-    dynamic: {
-        /**
-         * 父代理会话 id（根 Agent 的会话 id；子代理的父 agent id）。
-         */
-        parentAgentId?: string;
-    };
 }
 /**
  * 节点任务块首段软约束短语（W-02 双位测试断言与组装任务引用）。
@@ -83,16 +71,6 @@ export declare const NODE_HARD_CONSTRAINTS: {
  * 大产物本身一律落盘（写在路径里），不靠回复正文传递。
  */
 export declare const DEFAULT_OUTPUT_CONTRACT = "\u7ED3\u8BBA / \u4EA7\u51FA\u6587\u4EF6\u8DEF\u5F84 / \u5173\u952E\u51B3\u7B56 / \u672A\u51B3\u95EE\u9898";
-/**
- * 交接契约声明句（首段与末段复用同一措辞源；术语一致性由本常量保证）。
- * @param defaulted true = 这段结构是系统默认给出的（节点未配置），可用但可自行细化
- */
-export declare function outputContractRule(defaulted: boolean): string;
-/**
- * 系统语言规则短语（面向模型中文；各提示词构建器共用）。
- * 从 DSH 用户设置读取语言名，注入「所有对话回复、注释、思考过程必须使用该语言」。
- */
-export declare function systemLanguageRule(language: string): string;
 /**
  * 节点任务块构建器（纯函数）。
  *

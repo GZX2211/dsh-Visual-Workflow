@@ -3,22 +3,13 @@
 // 「开启新会话 + 工作区」数据模型单测（工作台全局化改版）：
 //   - 模板 → 实例**不再继承** startNewSession/workspacePath（一次性临时选项，
 //     字段已退役——实例文档不携带）；
-//   - 覆盖语义：overwriteInstanceFromTemplate 复用既有实例 id（每会话单实例）；
-//   - 工作区路径校验（resolveWorkspacePath：存在目录通过 / 不存在报错 / 空值忽略）。
+//   - 覆盖语义：overwriteInstanceFromTemplate 复用既有实例 id（每会话单实例）。
+// 工作区路径校验（resolveWorkspacePath）测试归其自身模块所在位置
+// （tests/host/workspace-path.test.ts）。
 
-import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { describe, expect, it } from 'vitest'
 import { instantiateFromTemplate, overwriteInstanceFromTemplate } from '../../src/host/scheduler/instantiate.js'
-import { resolveWorkspacePath } from '../../src/host/workspace/verify.js'
 import type { WorkflowDocument, WorkflowTemplate } from '../../src/host/shared/graph-model.js'
-
-const cleanups: Array<() => Promise<void>> = []
-
-afterEach(async () => {
-  await Promise.all(cleanups.splice(0).map((fn) => fn()))
-})
 
 function template(extra: Partial<WorkflowTemplate> = {}): WorkflowTemplate {
   return {
@@ -91,31 +82,5 @@ describe('overwriteInstanceFromTemplate 覆盖语义（每会话单实例）', (
     )
     expect(overwritten.startNewSession).toBeUndefined()
     expect(overwritten.workspacePath).toBeUndefined()
-  })
-})
-
-describe('resolveWorkspacePath', () => {
-  it('存在的目录：通过并返回原路径', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'vw-ws-'))
-    cleanups.push(() => rm(dir, { recursive: true, force: true }))
-    expect(await resolveWorkspacePath(dir)).toBe(dir)
-  })
-
-  it('空值/空白：返回 undefined（未配置）', async () => {
-    expect(await resolveWorkspacePath('')).toBeUndefined()
-    expect(await resolveWorkspacePath(undefined)).toBeUndefined()
-    expect(await resolveWorkspacePath('   ')).toBeUndefined()
-  })
-
-  it('不存在的路径：明确报错（含路径提示）', async () => {
-    await expect(resolveWorkspacePath('D:\\no-such-dir-xyz\\abc')).rejects.toThrow(/工作区路径不存在或不可访问/)
-  })
-
-  it('文件而非目录：报错（须为目录）', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'vw-ws-'))
-    cleanups.push(() => rm(dir, { recursive: true, force: true }))
-    const file = join(dir, 'a.txt')
-    await (await import('node:fs/promises')).writeFile(file, 'x', 'utf8')
-    await expect(resolveWorkspacePath(file)).rejects.toThrow(/不是目录/)
   })
 })

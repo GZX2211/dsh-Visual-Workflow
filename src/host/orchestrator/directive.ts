@@ -6,9 +6,15 @@
 //   - buildParentRunPrompt：startRun/resumeRun 共用的整份提示词组装。
 // 入参（flow/defPath/mode/executor/动态）不变则输出字节不变。
 
-import type { OrchestrationDirectiveParams, ParentPromptVariant } from '../prompts/orchestration.js'
-import { buildHybridPrompt, buildOrchestratorPrompt } from '../prompts/orchestration.js'
-import { buildParentExecutorPrompt, buildParentTaskSpec, type ExecutorContextFacts } from '../prompts/executor.js'
+import {
+  buildHybridPrompt,
+  buildOrchestratorPrompt,
+  buildParentExecutorPrompt,
+  buildParentTaskSpec,
+  type ExecutorContextFacts,
+  type OrchestrationDirectiveParams,
+  type ParentPromptVariant,
+} from '../prompts/index.js'
 import { nodeHasFlowIn, nodeParticipatesInFlow } from '../graph/model.js'
 import type { WorkflowDocument } from '../shared/graph-model.js'
 import { collabGroupList, labelOf, orchestrationNodeList, pauseNodeIdsOf } from './graph-facts.js'

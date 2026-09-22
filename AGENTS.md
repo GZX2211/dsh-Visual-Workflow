@@ -46,7 +46,6 @@ dsh-visual-workflow/
 │   │   ├── scheduler/            # 定时任务
 │   │   ├── graph/                # 图模型校检
 │   │   ├── commands/             # / 命令注册
-│   │   ├── workspace/            # 工作区路径校验
 │   │   └── prompts/              # 编排提示词模板
 │   └── client/                   # WebUI 源码
 │       ├── sidebar/              # 右侧 Sidebar 标签页 / 侧边栏入口 / 常驻容器
@@ -125,7 +124,7 @@ Agent / Prompt 负责不确定性的判断，例如：
 
 ## 编码规范
 
-- 命名：文件使用 `kebab-case`；变量、函数和参数使用 `camelCase`；类型、接口、类和组件使用 `PascalCase`。
+- 命名：文件使用 `kebab-case`；变量、函数和参数使用 `camelCase`；类型、接口、类和组件使用 `PascalCase`。命名应描述职责，而不是描述实现方式。
 - 类型：公共函数必须显式声明参数和返回值类型；内部函数优先使用 TypeScript 类型推导。
 - 模块：每个文件承担一个明确职责，并尽量只有一个主要变更原因；不同职责应拆分为独立模块。
 - 依赖：优先保持单向依赖，避免循环依赖；共享逻辑应放入职责明确的模块，不创建无明确职责的 `utils.ts`、`helpers.ts` 等聚合文件。

@@ -5,7 +5,7 @@
 // （含运行时字段合并的完整 ServiceState 返回）。方法体逐字移动。
 
 import type { WorkflowDocument } from '../shared/graph-model.js'
-import { resolveWorkspacePath } from '../workspace/verify.js'
+import { resolveWorkspacePath } from '../workspace-path.js'
 import { httpError } from './http.js'
 import { stripClientMeta } from './api-base.js'
 import { VisualWorkflowApiBase } from './api-base.js'

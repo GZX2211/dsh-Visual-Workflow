@@ -1,7 +1,7 @@
 import type { WorkflowDocument } from '../shared/graph-model.js';
 import type { RunSnapshot, RunStatus } from '../shared/types.js';
 import { type ResumeResult } from './resume.js';
-import type { ExecutorContextFacts } from '../prompts/executor.js';
+import { type ExecutorContextFacts } from '../prompts/index.js';
 import type { MilestoneMarkResult, MilestoneRunFacts, OrchestratorDeps, RunEntry } from './run-entry.js';
 import { type ChildMeta, type FlowLockInfo, type OrchestratorLogger, type RootAgentLike, type TurnEndInfo } from './seams.js';
 export declare abstract class RuntimeBase {

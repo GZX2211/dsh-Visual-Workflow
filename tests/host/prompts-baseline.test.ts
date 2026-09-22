@@ -44,7 +44,6 @@ const orchFacts = {
 }
 
 const nodeFacts = {
-  task: '总结上游产出并给出结论',
   nodeLabel: '总结节点',
   upstreamContext: [{ source: 'node-a', content: '这是上游节点产出的一段很长的摘要内容。' }],
   filePaths: ['data/files/example.pdf'],
@@ -165,14 +164,14 @@ describe('T-005 父代理执行单元（情况3 纯执行 / 情况2 任务块正
 
 describe('T-005 节点任务块模板（软约束双位 + 过程性信息中段 + 条件注入）', () => {
   it('协作组成员才注入 wf_ask_agent 软约束；非组成员不注入（经导出常量引用）', () => {
-    const member = buildNodeTaskBlock({ facts: { ...nodeFacts, isGroupMember: true }, dynamic: {} })
+    const member = buildNodeTaskBlock({ facts: { ...nodeFacts, isGroupMember: true } })
     expect(member).toContain(NODE_HARD_CONSTRAINTS.collabAskOnly)
-    const plain = buildNodeTaskBlock({ facts: nodeFacts, dynamic: {} })
+    const plain = buildNodeTaskBlock({ facts: nodeFacts })
     expect(plain).not.toContain(NODE_HARD_CONSTRAINTS.collabAskOnly)
   })
 
   it('上游产出出现在中段（首段约束之后、末段重申之前）', () => {
-    const out = buildNodeTaskBlock({ facts: nodeFacts, dynamic: {} })
+    const out = buildNodeTaskBlock({ facts: nodeFacts })
     const headEnd = out.indexOf(MID_MARKER)
     const tailStart = out.indexOf(TAIL_MARKER)
     const mid = out.slice(headEnd, tailStart)
@@ -183,26 +182,24 @@ describe('T-005 节点任务块模板（软约束双位 + 过程性信息中段 
   })
 
   it('同一 params 两次构建字节相同（纯函数）', () => {
-    const params = { facts: nodeFacts, dynamic: { parentAgentId: 'sess-1' } }
+    const params = { facts: nodeFacts }
     expect(buildNodeTaskBlock(params)).toBe(buildNodeTaskBlock(params))
   })
 
   it('输入结构注入中段；缺省时不组装该段', () => {
     const withInput = buildNodeTaskBlock({
       facts: { ...nodeFacts, inputContract: '上游交付的调研纪要（markdown）' },
-      dynamic: {},
     })
     const midStart = withInput.indexOf(MID_MARKER)
     const tailStart = withInput.indexOf(TAIL_MARKER)
     expect(withInput.slice(midStart, tailStart)).toContain('上游交付的调研纪要（markdown）')
     expect(withInput.slice(0, midStart)).not.toContain('上游交付的调研纪要（markdown）')
-    expect(buildNodeTaskBlock({ facts: nodeFacts, dynamic: {} })).not.toContain('输入结构')
+    expect(buildNodeTaskBlock({ facts: nodeFacts })).not.toContain('输入结构')
   })
 
   it('交接契约注入末段（注意力末位），且经导出常量引用默认结构', () => {
     const out = buildNodeTaskBlock({
       facts: { ...nodeFacts, outputContract: DEFAULT_OUTPUT_CONTRACT, outputContractDefaulted: true },
-      dynamic: {},
     })
     const tail = out.slice(out.indexOf(TAIL_MARKER))
     expect(tail).toContain(TAIL_RESTATE_MARKER)
@@ -216,7 +213,6 @@ describe('T-005 节点任务块模板（软约束双位 + 过程性信息中段 
     const custom = '{结论, 数据表路径, 置信度}'
     const out = buildNodeTaskBlock({
       facts: { ...nodeFacts, outputContract: custom, outputContractDefaulted: false },
-      dynamic: {},
     })
     const tail = out.slice(out.indexOf(TAIL_MARKER))
     expect(tail).toContain(custom)
@@ -224,7 +220,7 @@ describe('T-005 节点任务块模板（软约束双位 + 过程性信息中段 
   })
 
   it('未提供交接契约时不组装该段（终端节点不受无关约束）', () => {
-    const out = buildNodeTaskBlock({ facts: nodeFacts, dynamic: {} })
+    const out = buildNodeTaskBlock({ facts: nodeFacts })
     expect(out).not.toContain('下游节点直接读取')
   })
 })

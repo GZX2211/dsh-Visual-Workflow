@@ -14,6 +14,11 @@
 // 需要本地嵌入时才动态 import；配置了外部端点或资产缺失时完全不加载，缩短
 // 启动时间并避免无谓报错。
 //
+// 并发契约：宿主全局共享一个引擎实例，而索引重建（编排开始）与检索
+// （wf_db_query）可能并发发生。就绪探测必须是**单飞**——同一时刻只加载一次
+// 本地模型，其余调用者等待同一次加载结果；否则后到者会在加载期间看到
+// bm25 降级态，把可用向量错写成非语义 BM25 索引。
+//
 // 池化策略：bge 系列官方语义为 CLS token 句向量（资产内 1_Pooling 配置
 // pooling_mode_cls_token=true），故显式 pooling: 'cls' + normalize: true。
 
@@ -63,8 +68,8 @@ interface RemoteEmbeddingsResponse {
   data?: Array<{ embedding?: number[] }>
 }
 
-/** 本地 transformers.js feature-extraction pipeline 的最小使用面（惰性 import）。 */
-interface LocalExtractorLike {
+/** 本地 transformers.js feature-extraction pipeline 的最小使用面（惰性 import；加载缝亦复用）。 */
+export interface LocalExtractorLike {
   (texts: string[], options: { pooling: 'cls'; normalize: true }): Promise<{
     data: Float32Array | Float64Array
     dims: number[]
@@ -82,55 +87,48 @@ export interface EmbeddingServiceOptions {
   logger?: { warn(message: string): void }
   /** fetch 实现注入（单测远程端点用；缺省全局 fetch）。 */
   fetchImpl?: typeof fetch
-  /** 资产目录定位注入（单测降级路径用临时目录）。 */
-  assetDir?: string
+  /**
+   * 本地 extractor 加载缝（单测用受控加载：验证并发单飞与释放竞态）。
+   * 缺省走真实路径：资产快速失败校验 + 动态 import transformers.js。
+   */
+  loadExtractor?: (modelDir: string) => Promise<LocalExtractorLike>
 }
 
 /**
  * 嵌入服务实现：按配置与资产可用性惰性选择来源。
- * - embed() 在 bm25 降级态抛错（调用方据此降级检索并标注）；
- * - dispose() 释放本地模型（幂等，多调用安全）。
+ * - ensureReady() 单飞（同一时刻只加载一次），不抛错：降级 bm25 是产品级路径；
+ * - embed() 在 bm25 降级态或已释放时抛错（调用方据此降级检索并标注）；
+ * - dispose() 释放本地模型（幂等，多调用安全；加载途中释放则加载完成后立即释放模型）。
  */
 export class EmbeddingService implements EmbeddingEngine {
   readonly source: EmbeddingSource = 'bm25'
   readonly dimension = 0
 
   private local: LocalExtractorLike | null = null
-  private ready = false
+  /** 就绪单飞：同一实例的并发就绪/嵌入请求共享同一次加载。 */
+  private readyPromise: Promise<EmbeddingSource> | null = null
   private disposed = false
 
   constructor(private readonly options: EmbeddingServiceOptions = {}) {}
 
   /**
-   * 确保嵌入能力就绪（惰性、幂等）：
+   * 确保嵌入能力就绪（惰性、幂等、单飞）：
    * remote 端点存在 → 采用 remote；否则尝试本地资产；再失败 → bm25 降级。
    * 加载失败不抛错——降级是产品级路径（界面标注「相似度检索（非语义）」）。
+   * 并发调用共享同一次加载（后到者等待，不会看到加载中的 bm25 中间态）。
    */
   async ensureReady(): Promise<EmbeddingSource> {
-    if (this.ready) return this.source
-    this.ready = true
-
-    if (this.options.endpoint) {
-      ;(this as { source: EmbeddingSource }).source = 'remote'
-      return this.source
-    }
-
-    try {
-      const extractor = await this.loadLocal()
-      this.local = extractor
-      ;(this as { source: EmbeddingSource }).source = 'local'
-      ;(this as { dimension: number }).dimension = 512
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      this.options.logger?.warn(`[visual-workflow] 本地嵌入模型加载失败，降级 BM25 相似度检索：${message}`)
-    }
-    return this.source
+    if (this.disposed) return this.source
+    this.readyPromise ??= this.prepare()
+    return this.readyPromise
   }
 
-  /** 批量嵌入（单位长度向量）。bm25 降级态抛明确错误。 */
+  /** 批量嵌入（单位长度向量）。bm25 降级态或引擎已释放时抛明确错误。 */
   async embed(texts: string[]): Promise<Float64Array[]> {
     if (this.disposed) throw new Error('嵌入引擎已释放')
     await this.ensureReady()
+    // 加载期间引擎可能已被释放：此处复检，避免把「已释放」报成「模型不可用」
+    if (this.disposed) throw new Error('嵌入引擎已释放')
     if (this.source === 'remote') {
       return this.embedRemote(texts)
     }
@@ -154,18 +152,47 @@ export class EmbeddingService implements EmbeddingEngine {
     this.local = null
   }
 
-  /** 解析本地资产目录：显式配置 > 注入定位 > 随包分发资产。 */
+  /** 就绪准备（单飞入口内的实际加载；只由 ensureReady 触发一次）。 */
+  private async prepare(): Promise<EmbeddingSource> {
+    if (this.disposed) return this.source
+    if (this.options.endpoint) {
+      ;(this as { source: EmbeddingSource }).source = 'remote'
+      return this.source
+    }
+
+    try {
+      const extractor = await this.loadLocal()
+      // 释放竞态：加载完成时引擎已被释放——不持有模型引用，立即释放尽到清理责任
+      if (this.disposed) {
+        try {
+          await extractor.dispose?.()
+        } catch {
+          // 释放尽力而为
+        }
+        return this.source
+      }
+      this.local = extractor
+      ;(this as { source: EmbeddingSource }).source = 'local'
+      ;(this as { dimension: number }).dimension = 512
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.options.logger?.warn(`[visual-workflow] 本地嵌入模型加载失败，降级 BM25 相似度检索：${message}`)
+    }
+    return this.source
+  }
+
+  /** 解析本地资产目录：显式配置 > 随包分发资产。 */
   private resolveModelDir(): string {
     const explicit = this.options.modelDir?.trim()
     if (explicit) return explicit
-    if (this.options.assetDir) return this.options.assetDir
     // 编译产物位于 lib/embedding/，随包资产位于包根 assets/——上两级即包根
     return fileURLToPath(new URL('../../assets/models/bge-small-zh-v1.5', import.meta.url))
   }
 
-  /** 惰性加载 transformers.js 并构造 feature-extraction pipeline。 */
+  /** 惰性加载本地 extractor（加载缝缺省走真实路径：快速失败校验 + 动态 import）。 */
   private async loadLocal(): Promise<LocalExtractorLike> {
     const dir = this.resolveModelDir()
+    if (this.options.loadExtractor) return this.options.loadExtractor(dir)
     // 快速失败：目录/配置缺失时不加载重依赖（transformers.js + onnxruntime），
     // 让降级路径（BM25）零开销——资产未随包分发时避免无谓的模块加载。
     const { existsSync } = await import('node:fs')
@@ -216,7 +243,10 @@ export class EmbeddingService implements EmbeddingEngine {
   }
 }
 
-/** 便捷构造：确保就绪后返回引擎（embed 前必须 await ensureReady）。 */
+/**
+ * 便捷构造：确保就绪后返回引擎（embed 前必须 await ensureReady）。
+ * 供非 TS 侧的维护脚本复用「就绪后引擎」这一契约（scripts/build-products-index.mjs）。
+ */
 export async function createEmbeddingEngine(options: EmbeddingServiceOptions): Promise<EmbeddingEngine> {
   const service = new EmbeddingService(options)
   await service.ensureReady()

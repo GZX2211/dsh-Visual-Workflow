@@ -5,8 +5,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { createRunSnapshot, parentExecutorOf, reconcileStaleRuns, setNodeStatus, sweepWatchdogOnce } from '../../../src/host/orchestrator/index.js'
-import { ORCH_HARD_CONSTRAINTS } from '../../../src/host/prompts/orchestration.js'
-import { ORCH_CHANGE_MARKER } from '../../../src/host/prompts/orchestration-change.js'
+import { ORCH_CHANGE_MARKER, ORCH_HARD_CONSTRAINTS } from '../../../src/host/prompts/index.js'
 import { type GraphNode, type RoleNode, type WorkflowDocument } from '../../../src/host/shared/graph-model.js'
 import { stage, agent, fileNode, parentNode, makeFlow, FakeRoot, type Harness, makeHarness, caller, start, cleanupTempDirs } from './fixtures/harness.js'
 

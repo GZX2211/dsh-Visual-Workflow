@@ -15,8 +15,7 @@ import {
   parentPromptVariantOf,
 } from '../../../src/host/orchestrator/index.js'
 import type { GraphNode, Line, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
-import type { ExecutorContextFacts } from '../../../src/host/prompts/executor.js'
-import { ORCH_HARD_CONSTRAINTS } from '../../../src/host/prompts/orchestration.js'
+import { ORCH_HARD_CONSTRAINTS, type ExecutorContextFacts } from '../../../src/host/prompts/index.js'
 
 // —— 画布构建小工具（分类测试用；不校验，仅结构）——
 function roleNode(id: string, kind: 'parent' | 'agent', label: string): GraphNode {

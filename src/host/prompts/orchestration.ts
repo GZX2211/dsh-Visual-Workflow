@@ -21,7 +21,7 @@
 // 构建器均为纯函数：不读 Date.now/随机源，同一 params 两次构建字节相同。
 
 import { HEAD_MARKER, MID_MARKER, TAIL_MARKER, TAIL_RESTATE_MARKER } from './markers.js'
-import { systemLanguageRule } from './node-task.js'
+import { languageRuleLine } from './prompt-rules.js'
 
 /** 父代理提示词变体（三情况组装分发）：orchestrator=纯编排 / hybrid=编排+自执行 / executor=纯执行。 */
 export type ParentPromptVariant = 'orchestrator' | 'hybrid' | 'executor'
@@ -106,36 +106,17 @@ export const ORCH_HARD_CONSTRAINTS = {
  */
 export function buildOrchestratorPrompt(params: OrchestrationDirectiveParams): string {
   const { facts, dynamic } = params
-  const langRule = String(facts.systemLanguage ?? '').trim()
-    ? `${systemLanguageRule(facts.systemLanguage)}。`
-    : ''
+  const langRule = languageRuleLine(facts.systemLanguage)
 
-  const head = [
-    HEAD_MARKER,
-    '',
+  const head = buildHeadSection(
     `你是工作流「${facts.workflowName}」的编排父代理。`,
-    '',
-    `1. ${ORCH_HARD_CONSTRAINTS.dispatchOnly}。`,
-    `2. ${ORCH_HARD_CONSTRAINTS.nodeSettledSignal}；收到前不得推进下游或收尾。`,
-    `3. ${ORCH_HARD_CONSTRAINTS.finishIdempotent}。`,
-    `4. ${ORCH_HARD_CONSTRAINTS.failureSemantics}；可重试一次，若仍失败则询问用户；若编排失控或确认无法继续，即终止运行。`,
-    `5. ${ORCH_HARD_CONSTRAINTS.conditionSemantics}。`,
-    `6. ${ORCH_HARD_CONSTRAINTS.askAgentTimeout}。`,
-    ...(langRule ? [`7. ${langRule}`] : []),
-  ].join('\n')
+    ORCH_HARD_CONSTRAINTS.dispatchOnly,
+    langRule,
+  )
 
   const mid = buildMidSection(facts)
 
-  const tail = [
-    TAIL_MARKER,
-    '',
-    TAIL_RESTATE_MARKER,
-    `- ${ORCH_HARD_CONSTRAINTS.finishIdempotent}。`,
-    `- ${ORCH_HARD_CONSTRAINTS.failureSemantics}。`,
-    ...(langRule ? [`- ${langRule}`] : []),
-    '',
-    renderDynamicState(dynamic),
-  ].join('\n')
+  const tail = buildTailSection(langRule, dynamic)
 
   return `${head}\n\n${mid}\n\n${tail}\n`
 }
@@ -148,27 +129,49 @@ export function buildOrchestratorPrompt(params: OrchestrationDirectiveParams): s
 export function buildHybridPrompt(params: OrchestrationDirectiveParams): string {
   const { facts, dynamic } = params
   const parent = facts.parentNode
-  const langRule = String(facts.systemLanguage ?? '').trim()
-    ? `${systemLanguageRule(facts.systemLanguage)}。`
-    : ''
+  const langRule = languageRuleLine(facts.systemLanguage)
 
-  const head = [
-    HEAD_MARKER,
-    '',
+  const head = buildHeadSection(
     `你是工作流「${facts.workflowName}」的编排父代理${parent ? `，同时以节点「${parent.nodeLabel}」（id=${parent.nodeId}）的身份执行自身任务` : ''}。`,
-    '',
-    `1. ${ORCH_HARD_CONSTRAINTS.executorRole}。`,
-    `2. ${ORCH_HARD_CONSTRAINTS.nodeSettledSignal}；收到前不得推进下游或收尾。`,
-    `3. ${ORCH_HARD_CONSTRAINTS.finishIdempotent}。`,
-    `4. ${ORCH_HARD_CONSTRAINTS.failureSemantics}；可重试一次，若仍失败则询问用户；若编排失控或确认无法继续，即终止运行。`,
-    `5. ${ORCH_HARD_CONSTRAINTS.conditionSemantics}。`,
-    `6. ${ORCH_HARD_CONSTRAINTS.askAgentTimeout}。`,
-    ...(langRule ? [`7. ${langRule}`] : []),
-  ].join('\n')
+    ORCH_HARD_CONSTRAINTS.executorRole,
+    langRule,
+  )
 
   const mid = buildMidSection(facts)
 
-  const tail = [
+  const tail = buildTailSection(langRule, dynamic)
+
+  return `${head}\n\n${mid}\n\n${tail}\n`
+}
+
+/**
+ * 编排系首段硬约束（情况1/2 共用；两个变体只差身份行与第 1 条身份约束）。
+ * 共用组装保证「完成判定信号 / 收尾 / 失败语义 / 条件连线 / 协作超时」的条目与顺序
+ * 在两种画布形态下始终一致（W-02 双位的第一位）。
+ */
+function buildHeadSection(identityLine: string, roleConstraint: string, langRule: string): string {
+  const c = ORCH_HARD_CONSTRAINTS
+  return [
+    HEAD_MARKER,
+    '',
+    identityLine,
+    '',
+    `1. ${roleConstraint}。`,
+    `2. ${c.nodeSettledSignal}；收到前不得推进下游或收尾。`,
+    `3. ${c.finishIdempotent}。`,
+    `4. ${c.failureSemantics}；可重试一次，若仍失败则询问用户；若编排失控或确认无法继续，即终止运行。`,
+    `5. ${c.conditionSemantics}。`,
+    `6. ${c.askAgentTimeout}。`,
+    ...(langRule ? [`7. ${langRule}`] : []),
+  ].join('\n')
+}
+
+/**
+ * 编排系末段（情况1/2 共用）：关键约束重申（W-02 双位的第二位）+ 本次动态状态。
+ * 动态值只在末段注入，保证前中段在同一 run 内字节稳定。
+ */
+function buildTailSection(langRule: string, dynamic: OrchestrationDirectiveParams['dynamic']): string {
+  return [
     TAIL_MARKER,
     '',
     TAIL_RESTATE_MARKER,
@@ -178,8 +181,6 @@ export function buildHybridPrompt(params: OrchestrationDirectiveParams): string 
     '',
     renderDynamicState(dynamic),
   ].join('\n')
-
-  return `${head}\n\n${mid}\n\n${tail}\n`
 }
 
 /** 中段过程性信息（情况1/2 共用）：事实源 + 目标 + 协作组（按需）。 */

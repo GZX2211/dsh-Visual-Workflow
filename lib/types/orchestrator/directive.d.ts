@@ -1,5 +1,4 @@
-import type { OrchestrationDirectiveParams, ParentPromptVariant } from '../prompts/orchestration.js';
-import { type ExecutorContextFacts } from '../prompts/executor.js';
+import { type ExecutorContextFacts, type OrchestrationDirectiveParams, type ParentPromptVariant } from '../prompts/index.js';
 import type { WorkflowDocument } from '../shared/graph-model.js';
 /**
  * 父代理提示词变体判定（三情况，纯函数）：

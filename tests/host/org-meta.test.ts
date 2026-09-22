@@ -26,7 +26,7 @@ import {
   orgUsageOf,
 } from '../../src/host/graph/org-meta-usage.js'
 import { META_BELOW_MIN_CODE, META_LIMIT_CODE, metaLimitIssues } from '../../src/host/graph/org-meta-limits.js'
-import { buildOrgBudgetText } from '../../src/host/prompts/org-budget.js'
+import { buildOrgBudgetText } from '../../src/host/prompts/index.js'
 import type { GraphNode } from '../../src/host/shared/graph-model.js'
 import type { RunSnapshot } from '../../src/host/shared/types.js'
 

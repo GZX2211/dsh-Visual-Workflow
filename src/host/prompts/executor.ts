@@ -17,7 +17,8 @@
 // 构建器均为纯函数：不读 Date.now/随机源，同一 params 两次构建字节相同。
 
 import { HEAD_MARKER, MID_MARKER, TAIL_MARKER, TAIL_RESTATE_MARKER } from './markers.js'
-import { NODE_HARD_CONSTRAINTS, systemLanguageRule } from './node-task.js'
+import { NODE_HARD_CONSTRAINTS } from './node-task.js'
+import { languageRuleLine } from './prompt-rules.js'
 
 /** 执行单元共用的过程性信息（上游产出 / 文件路径索引 / 数据库工具说明）。 */
 export interface ExecutorContextFacts {
@@ -105,9 +106,7 @@ export function buildParentTaskSpec(params: ParentTaskSpecParams): string {
  */
 export function buildParentExecutorPrompt(params: ParentExecutorPromptParams): string {
   const { workflowName, facts, runContextText, systemLanguage } = params
-  const langRule = String(systemLanguage ?? '').trim()
-    ? `${systemLanguageRule(systemLanguage)}。`
-    : ''
+  const langRule = languageRuleLine(systemLanguage)
 
   const head = [
     HEAD_MARKER,

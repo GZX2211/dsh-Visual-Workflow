@@ -7,7 +7,7 @@
 //   - 节点执行上下文事实：dbToolHintOf、buildNodeContextFacts（上游产出/文件路径/db 提示）。
 // 全部为纯函数（不读时钟/随机源），不依赖全局状态。
 
-import { buildCollabBlock } from '../prompts/collab.js'
+import { buildCollabBlock } from '../prompts/index.js'
 import { ctxInEdges, dbInEdges, nodeById, nodeParticipatesInFlow } from '../graph/model.js'
 import { validateFlow } from '../graph/validate.js'
 import type { DatabaseNode, GraphNode, GroupNode, RoleNode, WorkflowDocument } from '../shared/graph-model.js'

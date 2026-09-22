@@ -20,7 +20,7 @@
 
 import { HEAD_MARKER, MID_MARKER, TAIL_MARKER, TAIL_RESTATE_MARKER } from './markers.js'
 import { ORG_SOP_DESIGN_METHOD, ORG_SOP_L1_GRAPH_SEMANTICS } from './org-sop.js'
-import { systemLanguageRule } from './node-task.js'
+import { systemLanguageRule } from './prompt-rules.js'
 
 /**
  * 规划目标种类（三态；决定首段身份与改图语法的措辞）。

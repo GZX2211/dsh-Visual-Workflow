@@ -5,7 +5,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { GLOBAL_RUN_CALL_LIMIT, OUTPUT_SUMMARY_LIMIT } from '../../../src/host/orchestrator/index.js'
-import { HEAD_MARKER, MID_MARKER, TAIL_MARKER } from '../../../src/host/prompts/markers.js'
+import { HEAD_MARKER, MID_MARKER, TAIL_MARKER } from '../../../src/host/prompts/index.js'
 import { agent, fileNode, makeFlow, type Harness, makeHarness, caller, childCaller, start, cleanupTempDirs } from './fixtures/harness.js'
 
 // 临时目录：makeHarness 登记，文件结束统一清理

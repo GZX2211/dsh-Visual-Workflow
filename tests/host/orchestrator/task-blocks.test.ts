@@ -11,8 +11,7 @@
 // 契约字段清单经 DEFAULT_OUTPUT_CONTRACT 常量引用。
 import { describe, expect, it } from 'vitest'
 import { buildNodeBlocks, inputContractOf, outputContractOf } from '../../../src/host/orchestrator/index.js'
-import { DEFAULT_OUTPUT_CONTRACT } from '../../../src/host/prompts/index.js'
-import { HEAD_MARKER, MID_MARKER, TAIL_MARKER } from '../../../src/host/prompts/index.js'
+import { DEFAULT_OUTPUT_CONTRACT, HEAD_MARKER, MID_MARKER, TAIL_MARKER } from '../../../src/host/prompts/index.js'
 import type { RoleNode, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
 import type { RunSnapshot } from '../../../src/host/shared/types.js'
 

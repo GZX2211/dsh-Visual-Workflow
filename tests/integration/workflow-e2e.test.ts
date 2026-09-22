@@ -33,8 +33,7 @@ import { ServiceManager } from '../../src/host/service/manager.js'
 import { renderServePatch } from '../../src/host/service/serve-patch.js'
 import { registerWfAskAgent } from '../../src/host/tools/wf-ask-agent/tool.js'
 import { WF_ASK_AGENT } from '../../src/host/shared/protocol.js'
-import { ORCH_HARD_CONSTRAINTS } from '../../src/host/prompts/orchestration.js'
-import { HEAD_MARKER, TAIL_MARKER, TAIL_RESTATE_MARKER } from '../../src/host/prompts/markers.js'
+import { HEAD_MARKER, ORCH_HARD_CONSTRAINTS, TAIL_MARKER, TAIL_RESTATE_MARKER } from '../../src/host/prompts/index.js'
 
 const cleanups: Array<() => Promise<void>> = []
 

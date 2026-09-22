@@ -7,7 +7,7 @@
 import { httpError } from './http.js'
 import { VisualWorkflowApiRuns } from './api-runs.js'
 import { normalizeScheduledTask, validateScheduledTask } from '../scheduler/planner.js'
-import { resolveWorkspacePath } from '../workspace/verify.js'
+import { resolveWorkspacePath } from '../workspace-path.js'
 import type { ScheduledTask } from '../shared/types.js'
 
 /**

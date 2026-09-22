@@ -5,7 +5,7 @@
 // 编排语义变更判定（flow-diff）见 tests/host/orchestrator/flow-diff.test.ts。
 
 import { describe, expect, it } from 'vitest'
-import { ORCH_CHANGE_MARKER, buildOrchestrationChangeText } from '../../src/host/prompts/orchestration-change.js'
+import { ORCH_CHANGE_MARKER, buildOrchestrationChangeText } from '../../src/host/prompts/index.js'
 
 describe('orchestration-change 注入文案', () => {
   it('含【编排变更】标记、事实源路径与「不是新指令」澄清', () => {
