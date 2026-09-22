@@ -40,7 +40,9 @@ dsh-visual-workflow/
 │   │   ├── orchestrator/         # 运行锁、断点状态机、双向同步
 │   │   ├── agent/                # 子代理执行引擎、护栏、提示词注入
 │   │   ├── tools/                # wf_* 工具注册
-│   │   ├── remote/               # GUI API 端点
+│   │   ├── api/                  # GUI HTTP API 边界（端点分发/下载路由/调试流）
+│   │   ├── mcp/                  # Host 侧 MCP 配置注册表
+│   │   ├── transfer/             # 导入导出（bundle / 模板往返）
 │   │   ├── service/              # 模式二服务
 │   │   ├── embedding/            # 本地向量嵌入与索引
 │   │   ├── scheduler/            # 定时任务

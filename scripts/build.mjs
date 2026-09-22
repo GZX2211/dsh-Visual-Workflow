@@ -10,7 +10,8 @@
 // exports 形态逐字一致；单次 emit 会把声明与 JS 混在 lib/ 下，导致 exports 的 types
 // 路径（lib/types/index.d.ts）无法命中真实产物。
 import { execFileSync } from 'node:child_process'
-import { rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 // typescript 编译器入口（直接以 node 执行其 bin 脚本，跨平台且不依赖 shell shim）。
@@ -36,13 +37,27 @@ function runTsc(args) {
   runNodeBin(tscPath, args)
 }
 
-// 第零步：清空类型产物目录。
-// 为什么必须先清理：tsc 只「发射」不「删除」——源码模块被改名/删除后，lib/types 下的旧
-// .d.ts 会作为幽灵产物留在 git 分发包里（历史已出现过 lib/types/client/client/studio/
-// SplitWindow.d.ts 这类无源文件的声明）。lib/types 下的内容**全部**由本脚本第二~三步生成，
-// 故整体清空是安全且唯一的收敛手段。lib/ 下的 host JS 由 tsc 覆盖发射、lib/client.js 由
-// tsdown 覆盖发射，无需清理（且不能整体清空 lib/，否则会连带删掉 client bundle）。
+// 第零步：清空类型产物目录 + 回收模块改名/删除遗留的幽灵 JS 产物。
+// 为什么必须先清理：tsc 只「发射」不「删除」——源码模块被改名/删除后，旧 JS 与旧
+// .d.ts 会作为幽灵产物留在 lib/ 里（历史已出现过 lib/types/client/client/studio/
+// SplitWindow.d.ts 这类无源文件的声明；模块改名同样会留下旧目录）。lib/types 下的内容
+// **全部**由本脚本第二~三步生成，整体清空安全；lib/ 下的 host JS 与 src/host 布局一一
+// 对应，凡没有对应源码的顶层条目即为幽灵产物，予以回收。
+// 注意：幽灵回收按「条目」进行，不整目录清空 lib/——测试会与构建并行 import lib
+// （vitest 线程池内 build-artifacts 用例触发本脚本），整目录清空会让并行 import 读到
+// 瞬时缺失的模块。
+const libDir = fileURLToPath(new URL('../lib', import.meta.url))
+const hostSrcDir = fileURLToPath(new URL('../src/host', import.meta.url))
 rmSync(fileURLToPath(new URL('../lib/types', import.meta.url)), { recursive: true, force: true })
+if (existsSync(libDir)) {
+  // client bundle（tsdown 产物）不来自 src/host，单独保留。
+  const keep = new Set(['client.js', 'client.js.map', 'types'])
+  const emitted = new Set(readdirSync(hostSrcDir).map((name) => name.replace(/\.ts$/, '.js')))
+  for (const entry of readdirSync(libDir)) {
+    if (keep.has(entry) || emitted.has(entry)) continue
+    rmSync(join(libDir, entry), { recursive: true, force: true })
+  }
+}
 
 // 第一步：host JS 发射（declaration 已由 tsconfig.host.json 关闭）。
 runTsc(['-p', 'tsconfig.host.json'])

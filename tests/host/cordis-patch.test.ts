@@ -157,5 +157,8 @@ describe('T-002 编译产物可被 import（可选烟雾，取决于是否已构
     expect(typeof mod.apply).toBe('function')
     // schemastery 的 schema 是可调用函数（z.object 返回 Schema，函数对象），非普通对象。
     expect(typeof mod.Config).toBe('function')
-  })
+    // 为什么显式放宽超时：本用例动态 import 编译产物，而 build-artifacts 用例会在同一
+    // 测试运行中并行触发真实构建——IO 竞争下模块解析可远超 vitest 默认 5s。断言与预期
+    // 不变，仅适配「测试与构建并行」这一既有事实。
+  }, 30_000)
 })

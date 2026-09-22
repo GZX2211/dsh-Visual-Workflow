@@ -29,7 +29,7 @@
 - 存储仅类型与读取缝；图模型仅纯函数事实推导；shared 仅共享类型与协议常量；Node 内置模块（fs / async_hooks）。
 
 禁止：
-- 依赖 tools / remote / service / scheduler / client（任何形式，含类型）；
+- 依赖 tools / api / service / scheduler / client（任何形式，含类型）；
 - 新增 `@deepseek-ai/*` 运行时 import 或写入 `dependencies`；
 - 新增跨模块能力时绕过宿主注入、直接 import 其他模块的实现类型；
 - 让编排器或工具层直接持有本模块内部状态对象。

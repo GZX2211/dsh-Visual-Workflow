@@ -62,7 +62,7 @@
 ## 依赖边界
 
 - 只允许依赖共享契约层（Host/Client 共享的形状与协议常量）；
-- 不得依赖 orchestrator / tools / agent / storage / service / remote / client；
+- 不得依赖 orchestrator / tools / agent / storage / service / api / client；
 - 依赖方向单向：调用方依赖本模块的判定，本模块不反向依赖任何调用方。
 
 ## 契约稳定性

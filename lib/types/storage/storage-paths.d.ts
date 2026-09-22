@@ -3,6 +3,8 @@ import type { TemplateKind } from './template-model.js';
 export declare const DIRS: readonly ["workflows", "services", "roles", "data", "groups", "runs", "orchestrations", "flow-templates"];
 /** 嵌套子目录（相对 root 的路径；随顶层目录一并幂等创建）。 */
 export declare const NESTED_DIRS: readonly ["data/files"];
+/** 受管文件目录（data/files，存放非文本文件模板的受管拷贝）。 */
+export declare function managedFilesDir(root: string): string;
 /**
  * 文件名消毒：id 中非法字符替换为下划线（防路径穿越/坏文件名）。
  * `.` 与 `..` 单独出现时同样替换，避免生成指向目录自身的路径。

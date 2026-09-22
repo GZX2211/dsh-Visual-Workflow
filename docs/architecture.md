@@ -481,7 +481,9 @@ src/host/
 ├── agent/
 ├── tools/
 ├── commands/
-├── remote/
+├── api/
+├── mcp/
+├── transfer/
 ├── service/
 ├── embedding/
 ├── scheduler/
@@ -693,11 +695,29 @@ Command 负责进入规划流程，不直接替代 Workflow Runtime。
 
 ---
 
-## 7.8 remote
+## 7.8 api
 
-负责 Client 与 Host 的 HTTP / Remote API。
+负责 GUI（Client）与 Host 之间的 HTTP API 边界：`POST /visual-workflow/<endpoint>` 端点分发（共享协议常量派生白名单）、受管文件下载路由与服务调试流式代理。
 
-Remote 层负责协议转换，不拥有核心 Workflow 状态。
+边界（治理规则见 `src/host/api/AGENTS.md`）：
+
+* **薄边界**：只做协议转换（请求 → 领域调用 → 响应/错误翻译），不拥有 Workflow / 运行 / 持久化状态；
+* **契约单一来源**：端点名取自共享协议常量，白名单与其零漂移；
+* **错误翻译归边界**：领域模块只抛稳定错误码，HTTP 状态映射只发生在边界（领域模块不得依赖传输层错误类型）；
+* **无状态**：不缓存领域数据、不自建持久化；领域能力只经宿主能力缝注入，缺失时明确报错或降级；
+* **依赖单向**：边界依赖领域，领域不依赖边界；端点组之间不得互相依赖。
+
+---
+
+## 7.8.1 mcp
+
+Host 侧 MCP 服务器配置注册表：行托管在 profile 的 `cordis.patch.yml` 注释标记区内，行结构与官方 dsh-mcp-client 一致，修改后需重启 dsh web 生效。
+
+---
+
+## 7.8.2 transfer
+
+导入导出领域：工作流/服务 v2 bundle 与角色模板导出文件的序列化、嵌入式资源重建与名称冲突策略；只抛稳定领域错误码，不接触 HTTP 传输层。
 
 ---
 
@@ -768,7 +788,7 @@ Prompt 的结构设计必须考虑稳定前缀、动态尾部以及上下文成�
 
 * **单一公共入口**：模块外只从 `index.ts` 导入；入口只公开外部真实消费的契约（构建器、段落锚点、约束常量、入参类型），模块内部的措辞与渲染 helper 不对外公开。
 * **输出即契约**：提示词文本就是模型的输入契约，改动模板正文或段落顺序属行为变化；结构治理必须能证明输出逐字节不变后才能提交。
-* **依赖末端**：不依赖 orchestrator / agent / tools / storage / remote / service / scheduler，只接收调用方传入的事实与动态值；动态值只注入末段。
+* **依赖末端**：不依赖 orchestrator / agent / tools / storage / api / service / scheduler，只接收调用方传入的事实与动态值；动态值只注入末段。
 * **文案规范**：文案、语言政策与写作规范以 `src/host/prompts/README.md` 为准。
 
 治理规则见 `src/host/prompts/AGENTS.md`。

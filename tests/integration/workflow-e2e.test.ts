@@ -27,7 +27,7 @@ import {
 import type { RunSnapshot } from '../../src/host/shared/types.js'
 import type { StageNode, RoleNode, WorkflowDocument, Line } from '../../src/host/shared/graph-model.js'
 import { stageLabel } from '../../src/host/graph/index.js'
-import { VisualWorkflowApi, type ApiHost } from '../../src/host/remote/api.js'
+import { VisualWorkflowApi, type ApiHost } from '../../src/host/api/index.js'
 import { SessionMap, ServiceManager, renderServePatch } from '../../src/host/service/index.js'
 import { registerWfAskAgent } from '../../src/host/tools/wf-ask-agent/tool.js'
 import { WF_ASK_AGENT } from '../../src/host/shared/protocol.js'

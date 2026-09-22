@@ -17,7 +17,7 @@
 - 不做模型语义判断与运行态决策（属 agent / orchestrator）；
 - 不注册工具、不定义工具 Schema 与工具 description（属 tools）；
 - 不读运行时状态、存储、设置、文件或时钟——构建器只接收调用方传入的事实与动态值；
-- 不依赖 orchestrator / agent / tools / storage / remote / service / scheduler：本模块处于依赖链末端。
+- 不依赖 orchestrator / agent / tools / storage / api / service / scheduler：本模块处于依赖链末端。
 
 ## 公共边界
 
