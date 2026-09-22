@@ -306,6 +306,9 @@ export class ServiceManager {
       } catch {
         // stdin 已关
       }
+      // 重复 stop 时先撤销上一次的强杀定时器：否则旧 timer 的引用被覆盖但仍在运行，
+      // 会在原定时刻杀进程树（宽限期被双份计时，且旧 timer 无法再取消）。
+      if (managed.forceKill) clearTimeout(managed.forceKill)
       managed.forceKill = setTimeout(() => {
         killProcessTree(Number(child.pid ?? 0))
       }, STOP_GRACE_MS)

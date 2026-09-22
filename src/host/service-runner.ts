@@ -15,9 +15,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { VisualWorkflowHost } from './index.js'
-import { SessionMap } from './service/sessions-map.js'
-import { OpenAiApi, registerOpenAiApi } from './service/openai-api.js'
-import { CordisSessionProvider } from './scheduler/session-provider.js'
+import { SessionMap, OpenAiApi, registerOpenAiApi } from './service/index.js'
+import { CordisSessionProvider } from './sessions/session-provider.js'
 import { sweepWatchdogOnce } from './orchestrator/index.js'
 import type { FlowStore } from './storage/flow-store.js'
 

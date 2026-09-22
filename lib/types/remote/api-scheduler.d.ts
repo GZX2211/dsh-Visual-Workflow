@@ -8,8 +8,9 @@ export declare class VisualWorkflowApiScheduler extends VisualWorkflowApiRuns {
     schedulerTasks(): Promise<unknown>;
     /**
      * 保存定时任务（新建/更新统一）：
-     *   - id 须为 task- 前缀（新建由客户端生成，保存后回传归一化结果）；
+     *   - 请求体 → 任务实体（形状收敛 + id 前缀校验）归 scheduler 模块；
      *   - 字段校验（validateScheduledTask，中文错误消息）后规范化落盘；
+     *   - 新会话工作区在此处校验（输入校验属接受用户输入的端点）；
      *   - configUpdate=immediate：保存后无需等待次日，下一 tick 即按新配置决策。
      */
     schedulerTaskPut(args: {

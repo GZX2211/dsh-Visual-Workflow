@@ -1,19 +1,22 @@
 // src/host/service/openai-api.ts
 //
-// 模式二服务进程内的 OpenAI 兼容 API：
-//   POST /v1/chat/completions —— 流式（SSE 打字机）/ 非流式（完整 JSON）
-//   GET  /v1/models           —— 服务信息（兼容客户端发现）
-//
-// 请求处理链：鉴权（可选 Bearer）→ userId 校验（缺失 400）→ 并发上限（429）→
-// 问题提取（messages 末条 user 文本）→ 会话解析（userId→sessionId 持久化映射）→
-// 根 Agent 恢复/创建 → 编排运行（mode2；有断点自动续跑）→ 父代理回合
-// assistant/message 事件增量经轮询推进为 SSE 流；回合结束且 run 终态后收尾。
+// 模式二服务进程内的 OpenAI 兼容 API **核心**（不含 HTTP 适配，见 ./openai-http.ts）：
+//   - 请求解析与校验（messages 末条 user 文本、userId 必填）；
+//   - 鉴权与并发上限（in-flight 计数）；
+//   - 一次编排运行：userId → 会话 → 根 Agent → 编排运行（有断点自动续跑）
+//     → 父代理回合事件增量推进 → 回合结束且 run 终态后收尾；
+//   - 会话事件流读取适配（DSH 0.1.2 的 seq/eventAt，兼容 0.1.1 的 events）。
 //
 // 轮询推进同时调用 deps.sweep()（watchdog 单次扫描）——服务进程内看护周期
 // 默认 15s，请求等待需主动推进状态机（父代理回合终态判定/空闲超时）。
+//
+// 为什么与 HTTP 层分开：本核心只依赖编排运行时与数据层的抽象缝（可纯逻辑测试），
+// HTTP/SSE 是 webServer 官方契约的适配层（路由注册、响应序列化、请求体读取）——
+// 两者的变化依据不同（编排契约 vs webServer 契约）。
 
 import type { FlowStore } from '../storage/flow-store.js'
 import { findResumableRun, type OrchestratorRuntime } from '../orchestrator/index.js'
+import { resolveNewSessionCwd } from '../sessions/session-provider.js'
 import type { RunStatus } from '../shared/types.js'
 
 /** OpenAI 兼容错误（status 供 HTTP 层；type/code 供 error body）。 */
@@ -62,19 +65,13 @@ function sessionEventAt(session: unknown, index: number): unknown {
   return Array.isArray(s.events) ? s.events[index] : undefined
 }
 
-/** 请求体上限（16MB，聊天文本足够）。 */
-const BODY_LIMIT = 16 * 1024 * 1024
-
 /** 轮询间隔（流式增量刷新/终态检测）。 */
 export const OPENAI_POLL_MS = 200
-
-/** SSE 文本块最大长度（打字机分块粒度；超长文本分多块）。 */
-export const SSE_CHUNK_LIMIT = 120
 
 /** SSE 流式响应超时默认值（需求文档 §5：默认 5 分钟，可配置）。 */
 export const DEFAULT_SSE_TIMEOUT_MS = 5 * 60 * 1000
 
-/** 客户端断开时的内部错误码（streamResponse 用于静默收尾）。 */
+/** 客户端断开时的内部错误码（HTTP 层用于静默收尾）。 */
 export const CLIENT_CLOSED_CODE = 'client_closed'
 
 export interface OpenAiApiDeps {
@@ -183,7 +180,7 @@ function extractText(content: unknown): string {
 }
 
 /**
- * OpenAI 兼容 API 核心（纯逻辑可测；webServer 注册为薄壳）。
+ * OpenAI 兼容 API 核心（纯逻辑可测；webServer 注册为薄壳，见 ./openai-http.ts）。
  */
 export class OpenAiApi {
   /** in-flight 请求计数（并发上限）。 */
@@ -229,7 +226,8 @@ export class OpenAiApi {
     // 字段（保存端点剥除）——新服务恒为「userId 固定会话 + 断点续跑」语义。
     const serviceDoc = await this.deps.store.getServiceById(this.deps.serviceId).catch(() => null)
     const startNewSession = serviceDoc?.startNewSession === true
-    const workspacePath = String(serviceDoc?.workspacePath ?? '').trim()
+    // 服务级新会话不继承服务归属会话的 cwd（无创建者语义）；cwd 决策仍走唯一实现。
+    const workspacePath = await resolveNewSessionCwd({ workspacePath: serviceDoc?.workspacePath })
     const sessionId = startNewSession
       ? this.deps.createSession
         ? await this.deps.createSession({
@@ -337,228 +335,13 @@ export class OpenAiApi {
 }
 
 /** 终态失败的中文描述（SSE 错误行/非流式 error 用）。 */
-function failureText(status: RunStatus, summary: string): string {
+export function failureText(status: RunStatus, summary: string): string {
   if (status === 'failed') return summary || '编排运行失败'
   if (status === 'stopped') return summary || '编排运行被停止'
   if (status === 'paused') return summary || '编排已暂停'
   return `编排异常结束（${status}）`
 }
 
-/** SSE 数据行组装（OpenAI 兼容 chunk 形态）。 */
-export function sseChunk(id: string, model: string, delta: string, finishReason: string | null): string {
-  return `data: ${JSON.stringify({
-    id,
-    object: 'chat.completion.chunk',
-    created: Math.floor(Date.now() / 1000),
-    model,
-    choices: [{ index: 0, delta: { ...(delta ? { content: delta } : {}) }, finish_reason: finishReason }],
-  })}\n\n`
-}
-
-/** SSE 结束标记行。 */
-export function sseDone(): string {
-  return 'data: [DONE]\n\n'
-}
-
-/** SSE 错误行（流中异常收尾用）。 */
-export function sseError(message: string): string {
-  return `data: ${JSON.stringify({ error: { message, type: 'server_error' } })}\n\n`
-}
-
-/** 非流式成功响应体（OpenAI 兼容）。 */
-export function completionJson(id: string, model: string, content: string): Record<string, unknown> {
-  return {
-    id,
-    object: 'chat.completion',
-    created: Math.floor(Date.now() / 1000),
-    model,
-    choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
-    usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-  }
-}
-
-/** 错误响应体。 */
-export function errorJson(error: OpenAiError): Record<string, unknown> {
-  return { error: { message: error.message, type: error.type, code: error.code } }
-}
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-/** webServer 最小结构（官方 register 契约）。 */
-interface WebServerLike {
-  register(route: {
-    kind: 'exact' | 'prefix'
-    path: string
-    handler(req: unknown, res: unknown): Promise<void> | void
-  }): () => void
-}
-
-function sendJson(res: { writeHead(status: number, headers: Record<string, string>): unknown; end(body: string): unknown }, status: number, payload: unknown): void {
-  const body = JSON.stringify(payload)
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
-  res.end(body)
-}
-
-/**
- * 注册 OpenAI 兼容路由（webServer 可用时挂载；disposer 随 fiber 注销）。
- * 端点：POST /v1/chat/completions、GET /v1/models。
- */
-export function registerOpenAiApi(
-  ctx: { get(name: string): unknown; logger?: { warn?(message: string): void } },
-  api: OpenAiApi,
-): () => void {
-  const webServer = ctx.get('webServer') as WebServerLike | null | undefined
-  if (!webServer || typeof webServer.register !== 'function') {
-    ctx.logger?.warn?.('[visual-workflow-service] webServer 服务不可用，OpenAI 兼容 API 未挂载')
-    return () => {}
-  }
-  const disposers = [
-    webServer.register({
-      kind: 'exact',
-      path: '/v1/chat/completions',
-      async handler(req, res) {
-        const httpReq = req as { method?: unknown; headers?: Record<string, string | string[] | undefined> }
-        try {
-          if (httpReq.method !== 'POST') {
-            sendJson(res as never, 405, { error: { message: 'method not allowed', type: 'invalid_request_error' } })
-            return
-          }
-          api.authorize(httpReq.headers?.authorization)
-          const body = await readBody(req as never)
-          let parsed: unknown
-          try {
-            parsed = body.trim() ? JSON.parse(body) : {}
-          } catch {
-            throw new OpenAiError(400, 'invalid_request_error', 'bad_request', 'invalid JSON body')
-          }
-          const headerUserId = headerValue(httpReq.headers?.['x-user-id'])
-          const input = parseChatRequest(parsed, headerUserId)
-          if (input.stream) {
-            await streamResponse(api, input, req as never, res as never)
-          } else {
-            // 非流式同样支持客户端断开与 5 分钟超时（Bug 22/23）
-            const controller = new AbortController()
-            ;(req as { on?(event: string, listener: () => void): unknown })?.on?.('close', () => controller.abort())
-            const release = api.acquire()
-            try {
-              const result = await api.runChat(input, undefined, { signal: controller.signal })
-              if (result.status !== 'completed') {
-                sendJson(res as never, 500, { error: { message: result.error ?? '编排运行失败', type: 'server_error' } })
-                return
-              }
-              sendJson(res as never, 200, completionJson(`chatcmpl-${Date.now().toString(36)}`, input.model ?? 'workflow', result.text))
-            } finally {
-              release()
-            }
-          }
-        } catch (error) {
-          // 客户端已断开：不写任何响应
-          if (error instanceof OpenAiError && error.code === CLIENT_CLOSED_CODE) return
-          sendJson(res as never, error instanceof OpenAiError ? error.status : 500, errorJson(error instanceof OpenAiError ? error : new OpenAiError(500, 'server_error', 'internal_error', String(error instanceof Error ? error.message : error))))
-        }
-      },
-    }),
-    webServer.register({
-      kind: 'exact',
-      path: '/v1/models',
-      async handler(req, res) {
-        const httpReq = req as { method?: unknown }
-        if (httpReq.method !== 'GET') {
-          sendJson(res as never, 405, { error: { message: 'method not allowed', type: 'invalid_request_error' } })
-          return
-        }
-        try {
-          sendJson(res as never, 200, await api.models())
-        } catch (error) {
-          sendJson(res as never, 500, { error: { message: error instanceof Error ? error.message : String(error), type: 'server_error' } })
-        }
-      },
-    }),
-  ]
-  return () => {
-    for (const dispose of disposers) {
-      try {
-        dispose()
-      } catch {
-        // 卸载尽力而为
-      }
-    }
-  }
-}
-
-/** 流式响应：SSE 头 + 逐块 flush + [DONE] 收尾（监听客户端断开，Bug 23）。 */
-async function streamResponse(
-  api: OpenAiApi,
-  input: ParsedChatRequest,
-  req: { on(event: string, listener: (chunk?: unknown) => void): unknown; destroy?(): void },
-  res: { writeHead(status: number, headers: Record<string, string>): unknown; write(chunk: string): unknown; end(): unknown },
-): Promise<void> {
-  const release = api.acquire()
-  const id = `chatcmpl-${Date.now().toString(36)}`
-  const model = input.model ?? 'workflow'
-  const chunk = sseChunk
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream; charset=utf-8',
-    'Cache-Control': 'no-store',
-    Connection: 'keep-alive',
-  })
-  // 客户端断开监听：req 'close' 触发 AbortController → runChat 停止后台运行并抛
-  // client_closed（否则恶意客户端断开后运行继续、并发槽被占满，Bug 23）。
-  const controller = new AbortController()
-  const onClose = (): void => controller.abort()
-  req.on('close', onClose)
-  try {
-    const result = await api.runChat(input, (delta) => {
-      if (controller.signal.aborted) return
-      for (let offset = 0; offset < delta.length; offset += SSE_CHUNK_LIMIT) {
-        res.write(chunk(id, model, delta.slice(offset, offset + SSE_CHUNK_LIMIT), null))
-      }
-    }, { signal: controller.signal })
-    if (controller.signal.aborted) return // 客户端已断开：不再写任何 SSE
-    if (result.status === 'completed') {
-      res.write(chunk(id, model, '', 'stop'))
-    } else {
-      res.write(sseError(result.error ?? failureText(result.status, '')))
-    }
-    res.write(sseDone())
-  } catch (error) {
-    // 客户端断开场景静默收尾（连接已不存在，写响应无意义且可能抛错）
-    if (error instanceof OpenAiError && error.code === CLIENT_CLOSED_CODE) return
-    try {
-      res.write(sseError(error instanceof Error ? error.message : String(error)))
-      res.write(sseDone())
-    } catch {
-      // 响应通道已失效：忽略（断开竞态）
-    }
-  } finally {
-    release()
-  }
-  res.end()
-}
-
-/** 读取请求体（JSON 文本；超限 413 由调用方映射）。 */
-function readBody(req: { on(event: string, listener: (chunk?: unknown) => void): unknown; destroy?(): void }, limit = BODY_LIMIT): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = []
-    let size = 0
-    req.on('data', (chunk) => {
-      size += Buffer.byteLength(String(chunk ?? ''))
-      if (size > limit) {
-        reject(new OpenAiError(413, 'invalid_request_error', 'body_too_large', 'request body too large'))
-        req.destroy?.()
-        return
-      }
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk ?? '')))
-    })
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
-    req.on('error', reject)
-  })
-}
-
-/** header 取值归一（数组取首个）。 */
-function headerValue(value: string | string[] | undefined): string | undefined {
-  if (Array.isArray(value)) return value[0]
-  return value
 }

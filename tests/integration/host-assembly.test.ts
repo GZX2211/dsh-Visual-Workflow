@@ -15,7 +15,7 @@ import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { VisualWorkflowHost, VisualWorkflowHostServiceName, type Config } from '../../src/host/index.js'
 import { FlowStore } from '../../src/host/storage/flow-store.js'
-import { ServiceManager } from '../../src/host/service/manager.js'
+import { ServiceManager } from '../../src/host/service/index.js'
 import { VISUAL_WORKFLOW_PROMPT_SECTION } from '../../src/host/agent/prompt-setup.js'
 
 /** 构造含临时 dataDir 的完整配置（其余键取 schema 默认）。 */

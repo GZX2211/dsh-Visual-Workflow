@@ -12,8 +12,7 @@ import * as EP from '../shared/protocol.js'
 import type { FlowStore } from '../storage/flow-store.js'
 import type { OrchestratorRuntime } from '../orchestrator/index.js'
 import type { EmbeddingEngine } from '../embedding/engine.js'
-import type { SchedulerEngine } from '../scheduler/engine.js'
-import type { SchedulerTaskStore } from '../scheduler/task-store.js'
+import type { SchedulerEngine, SchedulerTaskStore } from '../scheduler/index.js'
 import type { ToolSwitchStore } from '../tools/infrastructure/tool-switches.js'
 import { httpError } from './http.js'
 
@@ -51,9 +50,9 @@ export interface ApiHost {
   }
   /** 服务 apiKey（调试流式代理携带鉴权头用；null 表示未启用，密钥不落浏览器）。 */
   apiKey?: string | null
-  /** 定时任务引擎（scheduler/engine.ts；缺失时调度端点返回 501）。 */
+  /** 定时任务引擎（scheduler 模块公共入口；缺失时调度端点返回 501）。 */
   scheduler?: SchedulerEngine
-  /** 定时任务存储（scheduler/task-store.ts；缺失时调度端点返回 501）。 */
+  /** 定时任务存储（scheduler-tasks.json；缺失时调度端点返回 501）。 */
   schedulerTaskStore?: SchedulerTaskStore
   /** 全局工具开关存储（tools/infrastructure/tool-switches.ts；缺失时开关端点返回 501）。 */
   toolSwitches?: ToolSwitchStore

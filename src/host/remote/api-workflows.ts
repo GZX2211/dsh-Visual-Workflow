@@ -6,6 +6,7 @@
 
 import type { WorkflowDocument } from '../shared/graph-model.js'
 import { resolveWorkspacePath } from '../workspace-path.js'
+import { resolveNewSessionCwd } from '../sessions/session-provider.js'
 import { httpError } from './http.js'
 import { stripClientMeta } from './api-base.js'
 import { VisualWorkflowApiBase } from './api-base.js'
@@ -39,14 +40,15 @@ export class VisualWorkflowApiWorkflows extends VisualWorkflowApiBase {
     }
     const creatorSessionId = String(args?.sessionId ?? '')
     const label = String(args?.label ?? '工作流实例').trim() || '工作流实例'
-    // 新会话工作区：显式路径优先（校验存在为目录）；否则继承创建者会话 cwd（读不到省略）
+    // 工作区输入校验在此处完成（HTTP 端点是用户输入的校验责任者）；cwd 决策
+    // （显式路径优先 → 否则继承创建者）归 sessions 模块的唯一实现 resolveNewSessionCwd。
     const explicit = String(args?.workspacePath ?? '').trim()
-    let cwd: string | undefined
-    if (explicit) {
-      cwd = await this.checkedWorkspacePath(explicit)
-    } else if (creatorSessionId && this.host.sessionCwdOf) {
-      cwd = await this.host.sessionCwdOf(creatorSessionId).catch(() => undefined)
-    }
+    const checked = explicit ? await this.checkedWorkspacePath(explicit) : undefined
+    const cwd = await resolveNewSessionCwd({
+      workspacePath: checked,
+      creatorSessionId,
+      sessionCwdOf: this.host.sessionCwdOf,
+    })
     const sessionId = await provider.createSession({
       label,
       agentPreset: 'standard',

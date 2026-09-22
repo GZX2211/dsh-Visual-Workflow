@@ -5,10 +5,9 @@ import { OrchestratorRuntime, type RootAgentLike } from './orchestrator/index.js
 import { NodeAgentRunner } from './agent/runner.js';
 import { CordisAgentHost } from './agent/agents-host.js';
 import { EmbeddingService } from './embedding/engine.js';
-import { ServiceManager } from './service/manager.js';
-import { SchedulerEngine } from './scheduler/engine.js';
-import { SchedulerTaskStore } from './scheduler/task-store.js';
-import { CordisSessionProvider } from './scheduler/session-provider.js';
+import { ServiceManager } from './service/index.js';
+import { SchedulerEngine, SchedulerTaskStore } from './scheduler/index.js';
+import { CordisSessionProvider } from './sessions/session-provider.js';
 import { ToolSwitchStore } from './tools/infrastructure/tool-switches.js';
 export declare const VisualWorkflowHostServiceName = "visualWorkflowHost";
 /**

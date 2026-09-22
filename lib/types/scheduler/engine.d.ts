@@ -76,10 +76,15 @@ export declare class SchedulerEngine {
     private startedAtMs;
     private timer;
     private disposed;
+    /** 在途扫描（重叠 tick 共享同一次扫描，见 sweep）。 */
+    private sweeping;
     private readonly tickMs;
     private readonly now;
     constructor(deps: SchedulerEngineDeps);
-    /** 启动定时器（返回 disposer；幂等）。 */
+    /**
+     * 启动定时器（返回 disposer；幂等）。
+     * dispose 后不再启动（对象已终止；静默降级为无操作，与「start 从不抛错」契约一致）。
+     */
     start(): () => void;
     /** 停止定时器（对象仍可被 start 再次启动；dispose 后不可）。 */
     dispose(): void;
@@ -91,8 +96,14 @@ export declare class SchedulerEngine {
     /**
      * 单次全量扫描（定时器与测试共用入口）：逐任务执行决策。
      * 任务间相互独立：单任务失败记录 lastError 后继续下一任务。
+     *
+     * 重入去重：tick 间隔可能短于一次扫描耗时（任务多/磁盘慢），重叠 tick 共享同一次
+     * 扫描而不是并发再扫一遍——否则同一任务被并发决策（重复触发、重复窗口挂起、
+     * 各自基于旧游标写回互相覆盖）。与 SessionMap.resolve 的在途去重同构。
      */
     sweep(): Promise<void>;
+    /** 扫描执行体（重入去重保护下运行）。 */
+    private sweepOnce;
     /** 手工删除任务后的运行时解绑（API 层调用；不中断运行中 run）。 */
     forgetTask(taskId: string): Promise<void>;
     private runtimeOf;

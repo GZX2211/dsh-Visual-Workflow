@@ -10,11 +10,9 @@ export declare class OpenAiError extends Error {
 }
 /** 轮询间隔（流式增量刷新/终态检测）。 */
 export declare const OPENAI_POLL_MS = 200;
-/** SSE 文本块最大长度（打字机分块粒度；超长文本分多块）。 */
-export declare const SSE_CHUNK_LIMIT = 120;
 /** SSE 流式响应超时默认值（需求文档 §5：默认 5 分钟，可配置）。 */
 export declare const DEFAULT_SSE_TIMEOUT_MS: number;
-/** 客户端断开时的内部错误码（streamResponse 用于静默收尾）。 */
+/** 客户端断开时的内部错误码（HTTP 层用于静默收尾）。 */
 export declare const CLIENT_CLOSED_CODE = "client_closed";
 export interface OpenAiApiDeps {
     /** 数据层（userId 映射/断点查找）。 */
@@ -84,7 +82,7 @@ export interface ChatRunResult {
 /** 解析并校验请求（鉴权在路由层经 headers 完成；此处校验 userId/messages）。 */
 export declare function parseChatRequest(body: unknown, userIdFromHeader?: string): ParsedChatRequest;
 /**
- * OpenAI 兼容 API 核心（纯逻辑可测；webServer 注册为薄壳）。
+ * OpenAI 兼容 API 核心（纯逻辑可测；webServer 注册为薄壳，见 ./openai-http.ts）。
  */
 export declare class OpenAiApi {
     private readonly deps;
@@ -108,23 +106,5 @@ export declare class OpenAiApi {
         }>;
     }>;
 }
-/** SSE 数据行组装（OpenAI 兼容 chunk 形态）。 */
-export declare function sseChunk(id: string, model: string, delta: string, finishReason: string | null): string;
-/** SSE 结束标记行。 */
-export declare function sseDone(): string;
-/** SSE 错误行（流中异常收尾用）。 */
-export declare function sseError(message: string): string;
-/** 非流式成功响应体（OpenAI 兼容）。 */
-export declare function completionJson(id: string, model: string, content: string): Record<string, unknown>;
-/** 错误响应体。 */
-export declare function errorJson(error: OpenAiError): Record<string, unknown>;
-/**
- * 注册 OpenAI 兼容路由（webServer 可用时挂载；disposer 随 fiber 注销）。
- * 端点：POST /v1/chat/completions、GET /v1/models。
- */
-export declare function registerOpenAiApi(ctx: {
-    get(name: string): unknown;
-    logger?: {
-        warn?(message: string): void;
-    };
-}, api: OpenAiApi): () => void;
+/** 终态失败的中文描述（SSE 错误行/非流式 error 用）。 */
+export declare function failureText(status: RunStatus, summary: string): string;
