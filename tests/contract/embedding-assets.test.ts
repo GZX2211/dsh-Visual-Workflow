@@ -8,6 +8,8 @@
 //
 // 关于 sha256：与本脚本 scripts/embedding-model.mjs 使用同一 node:crypto 逻辑（测试文件
 // 独立复刻该实现，因 .mjs 脚本不便于从 .ts 测试直接 import 而复制，注释说明）。
+// 层级归属：断言对象是随包分发的资产目录与生成脚本产物（不是 embedding 模块代码行为），
+// 故属 tests/contract（包与构建契约门禁）；模块代码行为见 tests/host/embedding/。
 // 运行环境：node（host 测试默认，不引入 jsdom）。
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, statSync } from 'node:fs'

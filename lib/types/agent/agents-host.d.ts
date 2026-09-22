@@ -1,5 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { AgentHost, RootAgentLike, RootInjectedMessage, TurnEndInfo } from '../orchestrator/index.js';
+import type { FlowStore } from '../storage/flow-store.js';
 import type { AgentsServiceLike, SubagentsServiceLike } from './runner.js';
 export declare class CordisAgentHost implements AgentHost {
     private readonly ctx;
@@ -32,6 +33,16 @@ export declare class CordisAgentHost implements AgentHost {
     latestRootAssistantText(sessionId: string, afterMs: number): string | null;
     childRunning(childId: string): boolean;
 }
+/**
+ * 按会话取/建服务会话的根 Agent（模式二服务进程装配使用）。
+ * 父代理节点声明的 provider/model 优先；会话已有 Agent 时直接复用（持久化上下文保留）。
+ * 「取/建」的官方 agents 服务守卫与形状收敛归本模块——进程入口只做装配，不承载实现。
+ */
+export declare function createOrGetServiceAgent(ctx: Context, store: FlowStore, serviceId: string, sessionId: string): Promise<{
+    agent: unknown;
+    provider?: string;
+    model?: string;
+}>;
 /** agents 服务惰性解析（节点子代理执行引擎用；与 CordisAgentHost 同一官方服务）。 */
 export declare function agentsServiceLike(ctx: Context): AgentsServiceLike | null;
 /** subagents 服务惰性解析（子代理创建/相邻投递/中断/provider 探测使用面）。 */

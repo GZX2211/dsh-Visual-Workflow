@@ -1,7 +1,10 @@
 // src/host/api/boundary.ts
 //
-// API 边界基座：宿主能力缝（ApiHost）、webServer 最小结构、端点白名单分发基类
+// API 边界基座：宿主能力缝（ApiHost）、端点白名单分发基类
 // VisualWorkflowApiBase，以及端点组汇聚工具。
+//
+// 官方 webServer 的最小结构契约由 host 根横切契约提供（../web-server.js）：
+// 两个 HTTP 边界必须消费同一份形状，本模块不自建第二份。
 //
 // 为什么端点组用组合而不是多层继承：端点组之间没有职责依赖（定时任务端点不需要
 // 依赖运行端点），用继承串联只会制造伪依赖并让模块内「谁能调用谁」不可见。各组
@@ -39,15 +42,6 @@ export interface ApiHost {
   schedulerTaskStore?: SchedulerTaskStore
   /** 全局工具开关存储（tools/infrastructure/tool-switches.ts；缺失时开关端点返回 501）。 */
   toolSwitches?: ToolSwitchStore
-}
-
-/** webServer 服务最小结构（官方 register 契约）。 */
-export interface WebServerLike {
-  register(route: {
-    kind: 'exact' | 'prefix'
-    path: string
-    handler(req: unknown, res: unknown): Promise<void> | void
-  }): () => void
 }
 
 /**

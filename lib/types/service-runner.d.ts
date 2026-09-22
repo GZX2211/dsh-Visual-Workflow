@@ -18,21 +18,6 @@ export interface Config {
     maxConcurrent: number;
 }
 export declare const Config: z<Config>;
-/** 进程 IO 缝（测试可替换）。 */
-interface RunnerIo {
-    stdout: {
-        write(chunk: string): unknown;
-    };
-    stderr: {
-        write(chunk: string): unknown;
-    };
-    exit(code: number): void;
-}
-/** 测试可见的进程流替换点。 */
-export declare const internals: {
-    stdout: RunnerIo['stdout'];
-    stderr: RunnerIo['stderr'];
-};
 /** 解析内层参数族：--visual-workflow-serve <serviceId> --port <n>。 */
 export declare function parseServiceArgs(args: readonly unknown[]): {
     serviceId: string;
@@ -43,4 +28,3 @@ export declare function parseServiceArgs(args: readonly unknown[]): {
  * appExit 由 launcher 提供（缺失报错——服务进程必须能请求退出）。
  */
 export declare function apply(ctx: Context, config: Config): void;
-export {};

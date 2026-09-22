@@ -2,6 +2,8 @@
 // 随后断言 client/host 两半产物并存、client 产物含 __ModuleLoader__ 包装与 style[data-plugin]
 // 注入、sourcemap 存在、exports["./client"].types 指向的 lib/types/client/index.d.ts 真实可命中。
 //
+// 层级归属：断言对象是构建链路对发布包的产出（跨 host/client 两半与构建脚本），
+// 不对应任何 src 模块，故属 tests/contract（包与构建契约门禁）。
 // 运行环境：node（host 测试默认）。构建产物断言与 P01 的 package-contract.test.ts 互补：
 // 前者校验 package.json 静态契约，本测试校验 P01/P02 构建链路产出的真实文件。
 import { execFileSync } from 'node:child_process'

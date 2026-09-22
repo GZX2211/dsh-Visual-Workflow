@@ -27,6 +27,7 @@ import { createModelSelectionSetup } from './agent/model-selection.js'
 import { createChildPromptSetup, type ChildPromptState } from './agent/prompt-setup.js'
 import { CordisAgentHost, agentsServiceLike, subagentsServiceLike } from './agent/agents-host.js'
 import { systemLanguageOf, type SettingsServiceLike } from './system-language.js'
+import { listAgentPresets, listEcosystemModels } from './ecosystem-directory.js'
 import { registerWfRunNode } from './tools/wf-run-node/tool.js'
 import { registerWfRunNodeWait } from './tools/wf-run-node-wait/tool.js'
 import { registerWfFinish } from './tools/wf-finish/tool.js'
@@ -161,7 +162,7 @@ export class VisualWorkflowHost extends Service {
           ensureDatabaseIndexes(config.dataDir, nodeId, flow, this.embedding, cordisLogger(ctx)),
       },
       // 系统语言名：从 DSH 用户设置（locale.preference）读取，供提示词注入语言规则
-      systemLanguage: () => systemLanguageOf(ctx.get('settings') as SettingsServiceLike | null),
+      systemLanguage: () => this.systemLanguage(),
       logger: cordisLogger(ctx),
     })
     // 新会话创建缝：装配到宿主（API createSession 端点使用；运行器不再消费——
@@ -200,6 +201,15 @@ export class VisualWorkflowHost extends Service {
   /** 按会话取根 Agent（wf_* 工具层提问/校验用；转发至 agents 适配）。 */
   getRootAgent(sessionId: string): RootAgentLike | null {
     return this.agents.getRootAgent(sessionId)
+  }
+
+  /**
+   * 系统语言名（从 DSH 用户设置 locale.preference 读取）。
+   * 单一读取路径：编排提示词注入与 /arrange 规划提示词注入共用，避免同一读取
+   * 表达式散落两处（口径分叉时界面与提示词语言会不一致）。
+   */
+  private systemLanguage(): string {
+    return systemLanguageOf(this.ctx.get('settings') as SettingsServiceLike | null)
   }
 
   // ---- 每子代理作用域装配（agent/session-start 创建窗口内提前安装） ----------------
@@ -469,7 +479,7 @@ export class VisualWorkflowHost extends Service {
     // commands 服务未组合（headless / 模式二服务进程）时内部静默跳过，不影响既有行为。
     try {
       this.ctx.effect(
-        () => registerArrangeCommand(this.ctx, { systemLanguage: () => systemLanguageOf(this.ctx.get('settings') as SettingsServiceLike | null) }),
+        () => registerArrangeCommand(this.ctx, { systemLanguage: () => this.systemLanguage() }),
         'visualWorkflowHost.arrangeCommand',
       )
     } catch (error) {
@@ -513,42 +523,25 @@ export class VisualWorkflowHost extends Service {
       toolSwitches: this.toolSwitches,
       // 注：不再注入 listTools——节点工具集只由 presetId（工具组合/官方 preset）决定，
       // 父代理无法点名工具，可用工具总清单对其没有决策价值（2026.09 决策）。
+      // preset/模型清单的官方服务投影与 GUI 生态端点共用同一实现（ecosystem-directory），
+      // 本处只做「工具需要的最小子集」收敛 + 勘察路径的 best-effort 降级。
       listPresets: async () => {
-        const agentPresets = ctx.get('agentPresets') as { list?: () => Promise<unknown[]> } | null | undefined
-        if (!agentPresets || typeof agentPresets.list !== 'function') return []
         try {
-          const items = (await agentPresets.list()) ?? []
-          return items
-            .filter((item) => (item as { broken?: unknown }).broken !== true)
-            .map((item) => {
-              const entry = item as { id?: unknown; name?: unknown; metadata?: { name?: unknown } }
-              return { id: String(entry.id ?? ''), name: String(entry.name ?? entry.metadata?.name ?? entry.id ?? '') }
-            })
+          const presets = await listAgentPresets(ctx)
+          return (presets ?? [])
+            .map((item) => ({ id: String(item.id ?? ''), name: String(item.name ?? item.id ?? '') }))
             .filter((item) => item.id)
         } catch {
           return []
         }
       },
       listModels: async () => {
-        const llm = ctx.get('llm') as
-          | { listProviders?: () => unknown[]; listModels?: (provider: string) => Promise<unknown[]> }
-          | null
-          | undefined
-        if (!llm || typeof llm.listProviders !== 'function' || typeof llm.listModels !== 'function') return []
-        const out: Array<{ provider: string; model: string }> = []
-        for (const entry of llm.listProviders() ?? []) {
-          const provider = typeof entry === 'string' ? entry : String((entry as { id?: unknown })?.id ?? '')
-          if (!provider) continue
-          try {
-            for (const model of (await llm.listModels(provider)) ?? []) {
-              const id = typeof model === 'string' ? model : String((model as { id?: unknown })?.id ?? '')
-              if (id) out.push({ provider, model: id })
-            }
-          } catch {
-            // 单 provider 失败跳过（与 models 端点语义一致）
-          }
+        try {
+          const models = await listEcosystemModels(ctx)
+          return models.map((item) => ({ provider: item.provider, model: item.model }))
+        } catch {
+          return []
         }
-        return out
       },
       activeRunOf: (sessionId: string) => this.orchestrator.activeRunForSession(sessionId),
       currentResolvedFlowOf: async (sessionId: string) => {

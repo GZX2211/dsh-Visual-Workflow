@@ -8,6 +8,7 @@
 // 限长、SSE 序列化、客户端断开信号、错误到 HTTP 状态与 error body 的映射。
 // 编排语义一律在 ./openai-api.ts 的核心中，本层不含业务判断。
 
+import { webServerOf } from '../web-server.js'
 import { CLIENT_CLOSED_CODE, failureText, OpenAiApi, OpenAiError, parseChatRequest, type ParsedChatRequest } from './openai-api.js'
 
 /** 请求体上限（16MB，聊天文本足够）。 */
@@ -54,15 +55,6 @@ export function errorJson(error: OpenAiError): Record<string, unknown> {
   return { error: { message: error.message, type: error.type, code: error.code } }
 }
 
-/** webServer 最小结构（官方 register 契约）。 */
-interface WebServerLike {
-  register(route: {
-    kind: 'exact' | 'prefix'
-    path: string
-    handler(req: unknown, res: unknown): Promise<void> | void
-  }): () => void
-}
-
 function sendJson(res: { writeHead(status: number, headers: Record<string, string>): unknown; end(body: string): unknown }, status: number, payload: unknown): void {
   const body = JSON.stringify(payload)
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
@@ -77,8 +69,8 @@ export function registerOpenAiApi(
   ctx: { get(name: string): unknown; logger?: { warn?(message: string): void } },
   api: OpenAiApi,
 ): () => void {
-  const webServer = ctx.get('webServer') as WebServerLike | null | undefined
-  if (!webServer || typeof webServer.register !== 'function') {
+  const webServer = webServerOf(ctx)
+  if (!webServer) {
     ctx.logger?.warn?.('[visual-workflow-service] webServer 服务不可用，OpenAI 兼容 API 未挂载')
     return () => {}
   }

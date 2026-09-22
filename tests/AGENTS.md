@@ -6,12 +6,14 @@
 ## 层级与选择
 - `tests/client/`、`tests/host/`：单元测试。覆盖纯函数、数据转换、Schema、状态转换、Tool 参数、权限、Runtime/Client 局部逻辑。
 - `tests/integration/`：集成测试。验证 Host/Runtime、Orchestrator/Storage、Tool/Capability、Workflow/Runtime、持久化等多模块协作。可用受控基础设施，但不得全量 Mock 内部模块。
+- `tests/contract/`：包与构建契约门禁。验证发布包形态（exports/files/dsh 元数据）、挂载契约（patch 文件）、构建产物与随包资产。只做静态文本/产物断言，不验证运行时协作。
 - `tests/e2e/`：端到端测试。覆盖完整 Workflow、Client → Host → Runtime、用户关键路径。不得替代 Unit / Integration。
 
 选择能最低成本验证目标行为的最低测试层级。不得因 E2E 可测而跳过 Unit / Integration，也不得为数量把真实协作全部 Mock 成 Unit。
 
 ## 文件与命名
 - `tests/client/`、`tests/host/` 必须镜像对应 `src/` 目录。
+- `tests/contract/` 不镜像 `src/`：其断言对象是包级产物与构建链路，按被验证的契约命名。
 - 测试文件统一为 `<source-name>.test.ts`。源码移动或重命名时，同步调整测试位置与 import。
 - 测试名格式：`test_<行为>_<条件>_<预期>`，描述行为而非实现。
 - 纯类型、声明、barrel、常量、极薄适配层、已被上层测试覆盖的代码，不强制创建空测试文件。

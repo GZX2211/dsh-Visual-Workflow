@@ -1,4 +1,4 @@
-// tests/host/arrange-command.test.ts
+// tests/host/commands/arrange.test.ts
 //
 // `/arrange` 斜杠命令单测（自主编排实施方案 §10 P2 验收项）：
 //   1. 只采集 + 注入：命令 handler 只经 ctx.get('commands') 取服务、只 followup 一条用户消息，
@@ -16,14 +16,14 @@ import {
   buildArrangePrompt,
   registerArrangeCommand,
   type ArrangeInjectedMessage,
-} from '../../src/host/commands/arrange.js'
+} from '../../../src/host/commands/arrange.js'
 import {
   HEAD_MARKER,
   MID_MARKER,
   TAIL_MARKER,
   ORG_SOP_L1_GRAPH_SEMANTICS,
   ORG_SOP_DESIGN_METHOD,
-} from '../../src/host/prompts/index.js'
+} from '../../../src/host/prompts/index.js'
 
 // ---------------------------------------------------------------------------
 // fake 命令面（只暴露 register；记录注册/注销）

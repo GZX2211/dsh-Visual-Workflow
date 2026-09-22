@@ -10,6 +10,7 @@
 import { readFile } from 'node:fs/promises'
 import { basename, extname } from 'node:path'
 import { managedFilePath } from '../storage/managed-files.js'
+import { webServerOf } from '../web-server.js'
 
 const MIME: Record<string, string> = {
   '.png': 'image/png',
@@ -37,11 +38,8 @@ export function registerDownloadRoute(
   ctx: { get(name: string): unknown; logger?: { warn?(message: string): void } },
   dataDir: string,
 ): () => void {
-  const webServer = ctx.get('webServer') as
-    | { register(route: { kind: 'exact' | 'prefix'; path: string; handler(req: unknown, res: unknown): Promise<void> | void }): () => void }
-    | null
-    | undefined
-  if (!webServer || typeof webServer.register !== 'function') {
+  const webServer = webServerOf(ctx)
+  if (!webServer) {
     ctx.logger?.warn?.('[visual-workflow] webServer 服务不可用，受管文件下载路由未挂载')
     return () => {}
   }

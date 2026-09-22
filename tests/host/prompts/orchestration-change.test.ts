@@ -1,11 +1,11 @@
-// tests/host/orchestration-change.test.ts
+// tests/host/prompts/orchestration-change.test.ts
 //
 // 「编排变更」注入通知文案单测（prompts/orchestration-change）：
 // 标记/事实源路径/语言规则/纯函数字节稳定。
 // 编排语义变更判定（flow-diff）见 tests/host/orchestrator/flow-diff.test.ts。
 
 import { describe, expect, it } from 'vitest'
-import { ORCH_CHANGE_MARKER, buildOrchestrationChangeText } from '../../src/host/prompts/index.js'
+import { ORCH_CHANGE_MARKER, buildOrchestrationChangeText } from '../../../src/host/prompts/index.js'
 
 describe('orchestration-change 注入文案', () => {
   it('含【编排变更】标记、事实源路径与「不是新指令」澄清', () => {

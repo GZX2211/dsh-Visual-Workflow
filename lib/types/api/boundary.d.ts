@@ -34,14 +34,6 @@ export interface ApiHost {
     /** 全局工具开关存储（tools/infrastructure/tool-switches.ts；缺失时开关端点返回 501）。 */
     toolSwitches?: ToolSwitchStore;
 }
-/** webServer 服务最小结构（官方 register 契约）。 */
-export interface WebServerLike {
-    register(route: {
-        kind: 'exact' | 'prefix';
-        path: string;
-        handler(req: unknown, res: unknown): Promise<void> | void;
-    }): () => void;
-}
 /**
  * GUI API 分发基座：按端点名分发（白名单禁止命中原型链方法）。
  * 所有方法为 async (args) => value；参数缺失抛 HttpError(400)。

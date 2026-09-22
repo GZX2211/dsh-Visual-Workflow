@@ -11,7 +11,8 @@ import * as EP from '../shared/protocol.js'
 import { HttpError, httpError, readBody, sendJson } from './http.js'
 import { ServiceDebugError } from './service-debug.js'
 import { streamServiceDebugEndpoint } from './service-debug-endpoint.js'
-import { mixInEndpointGroups, VisualWorkflowApiBase, type ApiHost, type WebServerLike } from './boundary.js'
+import { webServerOf } from '../web-server.js'
+import { mixInEndpointGroups, VisualWorkflowApiBase, type ApiHost } from './boundary.js'
 import { WorkflowEndpoints } from './workflows.js'
 import { TemplateEndpoints } from './templates.js'
 import { EcosystemEndpoints } from './ecosystem.js'
@@ -60,8 +61,8 @@ export function registerRoutes(
   host: ApiHost,
 ): () => void {
   const api = new VisualWorkflowApi(ctx, host)
-  const webServer = ctx.get('webServer') as WebServerLike | null | undefined
-  if (!webServer || typeof webServer.register !== 'function') {
+  const webServer = webServerOf(ctx)
+  if (!webServer) {
     ctx.logger?.warn?.('[visual-workflow] webServer 服务不可用，GUI API 未挂载')
     return () => {}
   }

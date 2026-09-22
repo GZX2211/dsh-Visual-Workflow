@@ -1,5 +1,8 @@
 // T-002 测试：cordis.patch.yml 的 insert 行与 src/host/index.ts 最小宿主入口骨架。
 //
+// 层级归属：断言对象是包的挂载契约（patch 文件）与宿主入口契约文本（跨模块装配声明），
+// 不对应任何单一 src 模块，故属 tests/contract（包与构建契约门禁）。
+//
 // 覆盖：
 //   1. cordis.patch.yml 文本断言——顶层 `- insert:`、id/name 正确、全部 config 键
 //      齐全且值正确（servicePortBase=7860 等）、dataDir 为 `!!js dshHomePath('visual-workflow')`。

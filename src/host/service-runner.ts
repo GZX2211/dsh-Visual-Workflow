@@ -9,16 +9,20 @@
 // 不接管主进程的运行记录）→ 等服务树稳定 → 按 serviceId 加载服务工作流 →
 // SessionMap（userId→sessionId）+ OpenAI 兼容 API 注册。
 //
+// 本文件是包级二级入口：只做装配与协调（参数解析、装配、退出码/stdin 生命周期），
+// 进程内实现归各自模块（服务/会话/Agent 能力均从模块公共入口取得）。
+//
 // 退出协调：失败写 stderr 并 appExit(1)；正常生命周期由主进程 SIGTERM 驱动
 // （launcher 的 bounded shutdown 会 dispose 整棵树）。
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { VisualWorkflowHost } from './index.js'
+import { resolveConfig, type Config as HostPluginConfig } from './config.js'
+import { createOrGetServiceAgent } from './agent/agents-host.js'
 import { SessionMap, OpenAiApi, registerOpenAiApi } from './service/index.js'
 import { CordisSessionProvider } from './sessions/session-provider.js'
 import { sweepWatchdogOnce } from './orchestrator/index.js'
-import type { FlowStore } from './storage/flow-store.js'
 
 /** 稳定插件名（serve.patch.yml 的 insert 行 name 解析目标）。 */
 export const name = 'visual-workflow-service'
@@ -48,17 +52,11 @@ export const Config: z<Config> = z.object({
   maxConcurrent: z.natural().default(50),
 })
 
-/** 进程 IO 缝（测试可替换）。 */
+/** 进程 IO 缝（apply 装配；boot 只经该缝写标准流与请求退出码）。 */
 interface RunnerIo {
   stdout: { write(chunk: string): unknown }
   stderr: { write(chunk: string): unknown }
   exit(code: number): void
-}
-
-/** 测试可见的进程流替换点。 */
-export const internals: { stdout: RunnerIo['stdout']; stderr: RunnerIo['stderr'] } = {
-  stdout: process.stdout,
-  stderr: process.stderr,
 }
 
 /** 解析内层参数族：--visual-workflow-serve <serviceId> --port <n>。 */
@@ -98,22 +96,22 @@ async function boot(ctx: Context, config: Config, io: RunnerIo): Promise<void> {
 
   // 主插件全量装配（编排/存储/工具/看护）；skipReconcile：磁盘对账属主进程职责。
   // Service 构造即注册（Cordis 语义），函数 plugin 形式仅承载构造选项。
-  ctx.plugin((innerCtx) => {
-    new VisualWorkflowHost(innerCtx, {
+  // 主插件配置：默认值经 Config schema 解析（唯一来源，禁止在此复制默认值清单）；
+  // 服务进程只暴露 4 个可配置键。schema 不为「可为 null」的键填默认（schemastery 视
+  // default(null) 为无默认），故显式声明：apiKey 取服务自身配置，嵌入式向量与外部
+  // 嵌入端点在服务进程不启用（固定 null）。
+  const hostConfig: HostPluginConfig = {
+    ...resolveConfig({
       dataDir: config.dataDir,
       servicePortBase: config.port,
-      apiKey: config.apiKey,
       maxConcurrentPerService: config.maxConcurrent,
-      wfAskAgentTimeoutMs: 120000,
-      runIdleTimeoutMs: 1800000,
-      runPollMs: 2000,
-      reactIterationLimitDefault: 50,
-      retryLimitDefault: 3,
-      outputFullLimit: 102400,
-      documentTextLimit: 20000,
-      embeddingModelDir: null,
-      embeddingEndpoint: null,
-    }, { skipReconcile: true })
+    }),
+    apiKey: config.apiKey,
+    embeddingModelDir: null,
+    embeddingEndpoint: null,
+  }
+  ctx.plugin((innerCtx) => {
+    new VisualWorkflowHost(innerCtx, hostConfig, { skipReconcile: true })
   })
 
   // Loader 兄弟行并发挂载：等待整树稳定后再读服务/建会话（headless 同款时序）
@@ -134,7 +132,7 @@ async function boot(ctx: Context, config: Config, io: RunnerIo): Promise<void> {
     resolveSession: (userId) => sessions.resolve(userId),
     // 「服务级新会话」：服务文档 startNewSession=true 时每请求新建会话（cwd=工作区）
     createSession: (options) => new CordisSessionProvider(ctx).createSession(options),
-    ensureRootAgent: (sessionId) => ensureRootAgent(ctx, host.store, serviceId, sessionId),
+    ensureRootAgent: (sessionId) => createOrGetServiceAgent(ctx, host.store, serviceId, sessionId),
     sweep: () => sweepWatchdogOnce(host.orchestrator),
     logger: { warn: (message) => ctx.logger.warn(message) },
   })
@@ -166,39 +164,6 @@ async function boot(ctx: Context, config: Config, io: RunnerIo): Promise<void> {
   })
 }
 
-/** 按会话取/建根 Agent（父代理节点 provider/model 优先；会话持久化上下文保留）。 */
-async function ensureRootAgent(
-  ctx: Context,
-  store: FlowStore,
-  serviceId: string,
-  sessionId: string,
-): Promise<{ agent: unknown; provider?: string; model?: string }> {
-  const agents = ctx.get('agents') as {
-    get?(id: string): unknown
-    create?(options: Record<string, unknown>): Promise<{ agent?: unknown } | unknown>
-  } | null
-  if (!agents || typeof agents.get !== 'function' || typeof agents.create !== 'function') {
-    throw new Error('agents 服务不可用，无法建立服务会话')
-  }
-  const service = await store.getServiceById(serviceId)
-  const parent = service?.nodes?.find((node) => node.kind === 'parent')
-  const data = (parent as { data?: Record<string, unknown> } | undefined)?.data
-  const provider = typeof data?.provider === 'string' && data.provider ? data.provider : undefined
-  const model = typeof data?.model === 'string' && data.model ? data.model : undefined
-
-  let agent = agents.get(sessionId)
-  if (!agent) {
-    const created = await agents.create({
-      sessionId,
-      meta: { cwd: process.cwd() },
-      ...(provider && model ? { agentOptions: { provider, model } } : {}),
-    })
-    agent = (created as { agent?: unknown })?.agent ?? created
-  }
-  if (agent === null || agent === undefined) throw new Error('服务会话 Agent 建立失败')
-  return { agent, provider, model }
-}
-
 /**
  * 插件入口：启动异步装配（不阻塞树挂载）。
  * appExit 由 launcher 提供（缺失报错——服务进程必须能请求退出）。
@@ -208,6 +173,6 @@ export function apply(ctx: Context, config: Config): void {
   if (typeof exit !== 'function') {
     throw new Error('visual-workflow-service: the launcher must provide ctx.appExit before the tree mounts')
   }
-  const io: RunnerIo = { stdout: internals.stdout, stderr: internals.stderr, exit: exit as (code: number) => void }
+  const io: RunnerIo = { stdout: process.stdout, stderr: process.stderr, exit: exit as (code: number) => void }
   void boot(ctx, config, io).catch((error: unknown) => { fail(io, error) })
 }

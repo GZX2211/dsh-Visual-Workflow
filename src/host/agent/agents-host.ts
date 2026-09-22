@@ -6,6 +6,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { AgentHost, RootAgentLike, RootInjectedMessage, TurnEndInfo } from '../orchestrator/index.js'
+import type { FlowStore } from '../storage/flow-store.js'
 import type { AgentsServiceLike, SubagentsServiceLike } from './runner.js'
 
 // ---------------------------------------------------------------------------
@@ -168,6 +169,43 @@ export class CordisAgentHost implements AgentHost {
       return true // 查询失败保守视为仍在运行
     }
   }
+}
+
+/**
+ * 按会话取/建服务会话的根 Agent（模式二服务进程装配使用）。
+ * 父代理节点声明的 provider/model 优先；会话已有 Agent 时直接复用（持久化上下文保留）。
+ * 「取/建」的官方 agents 服务守卫与形状收敛归本模块——进程入口只做装配，不承载实现。
+ */
+export async function createOrGetServiceAgent(
+  ctx: Context,
+  store: FlowStore,
+  serviceId: string,
+  sessionId: string,
+): Promise<{ agent: unknown; provider?: string; model?: string }> {
+  const agents = ctx.get('agents') as {
+    get?(id: string): unknown
+    create?(options: Record<string, unknown>): Promise<{ agent?: unknown } | unknown>
+  } | null
+  if (!agents || typeof agents.get !== 'function' || typeof agents.create !== 'function') {
+    throw new Error('agents 服务不可用，无法建立服务会话')
+  }
+  const service = await store.getServiceById(serviceId)
+  const parent = service?.nodes?.find((node) => node.kind === 'parent')
+  const data = (parent as { data?: Record<string, unknown> } | undefined)?.data
+  const provider = typeof data?.provider === 'string' && data.provider ? data.provider : undefined
+  const model = typeof data?.model === 'string' && data.model ? data.model : undefined
+
+  let agent = agents.get(sessionId)
+  if (!agent) {
+    const created = await agents.create({
+      sessionId,
+      meta: { cwd: process.cwd() },
+      ...(provider && model ? { agentOptions: { provider, model } } : {}),
+    })
+    agent = (created as { agent?: unknown })?.agent ?? created
+  }
+  if (agent === null || agent === undefined) throw new Error('服务会话 Agent 建立失败')
+  return { agent, provider, model }
 }
 
 /** agents 服务惰性解析（节点子代理执行引擎用；与 CordisAgentHost 同一官方服务）。 */

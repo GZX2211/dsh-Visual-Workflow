@@ -55,7 +55,7 @@ dsh-visual-workflow/
 │       ├── components/           # 组件
 │       ├── hooks/                # 职责单一 hooks
 │       └── lib/                  # 纯逻辑（remote/graph-model/bundle/storage）
-├── tests/                        # 测试文件
+├── tests/                        # 测试文件（client / host / contract / integration）
 ├── scripts/                      # 构建与 watch 脚本
 ├── cordis.patch.yml              # Web profile 挂载层
 ├── docs/                         # 文档统一存放

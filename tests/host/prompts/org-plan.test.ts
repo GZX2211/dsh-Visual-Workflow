@@ -1,6 +1,7 @@
 // 自主编排 P2：规划期提示词变体与三层 SOP 注入测试（自主编排实施方案 §10 P2）。
 //
-// 断言策略与 prompts-baseline.test.ts 一致：**不对提示词做硬编码文案断言**，只断言
+// 断言策略与同目录基线测试（orchestration/executor/node-task/collab）一致：**不对提示词
+// 做硬编码文案断言**，只断言
 //   1. 字节稳定 / 纯函数（同参数两次构建字节相同；仅改动态参数时 TAIL_MARKER 之前不变）；
 //   2. 段落位置（HEAD → MID → TAIL → 重申 的顺序与区段归属）；
 //   3. 三层 SOP：L1/L2 稳定段落在中段且与动态值无关；L3 注入点默认不组装、给出时仅出现在末段；
@@ -19,8 +20,8 @@ import {
   ORG_SOP_DESIGN_METHOD,
   buildOrgBudgetText,
   buildOrgPlanPrompt,
-} from '../../src/host/prompts/index.js'
-import type { OrgBudget } from '../../src/host/shared/types.js'
+} from '../../../src/host/prompts/index.js'
+import type { OrgBudget } from '../../../src/host/shared/types.js'
 
 // —— 测试用稳定 facts（默认：按意图新建模板，规划期主用例） ——
 const facts = {

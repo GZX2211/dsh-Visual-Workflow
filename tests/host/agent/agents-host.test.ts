@@ -5,9 +5,12 @@
 //   - 0.1.2 移除 events getter，改为 seq / eventAt()（branded number 运行时仍为整数）。
 // 本测试验证 latestTurnEnd / latestRootAssistantText 对两种形状都给出相同结果，
 // 且 afterMs 过滤、仅 completed/aborted/error 语义保持不变。
+//
+// 另覆盖 createOrGetServiceAgent（模式二服务进程的会话根 Agent 取/建适配）：
+// 服务缺失报错、已有 Agent 复用、新建时携带父代理节点 provider/model。
 
 import { describe, expect, it } from 'vitest'
-import { CordisAgentHost } from '../../../src/host/agent/agents-host.js'
+import { CordisAgentHost, createOrGetServiceAgent } from '../../../src/host/agent/agents-host.js'
 import type { RootAgentLike, TurnEndInfo } from '../../../src/host/orchestrator/index.js'
 
 /** 构造一个最小 root session：0.1.1 形状（events 数组）。 */
@@ -75,5 +78,64 @@ describe('CordisAgentHost 会话事件读取（0.1.2 seq/eventAt 与 0.1.1 event
     const host = hostWith({} as RootAgentLike['session'])
     expect(host.latestTurnEnd('s1', 0)).toBeNull()
     expect(host.latestRootAssistantText?.('s1', 0)).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// createOrGetServiceAgent（模式二服务进程的会话根 Agent 取/建）
+// ---------------------------------------------------------------------------
+
+/** fake ctx：仅提供 agents 服务（get/create 形状可控）。 */
+function serviceCtx(agents: unknown): never {
+  return { get: (name: string) => (name === 'agents' ? agents : undefined) } as never
+}
+
+/** fake store：服务文档含 parent 节点的 provider/model。 */
+function serviceStore(nodes: unknown[] | null): never {
+  return { getServiceById: async (id: string) => (id === 'svc-1' && nodes ? { nodes } : null) } as never
+}
+
+describe('createOrGetServiceAgent（服务会话根 Agent 取/建）', () => {
+  it('agents 服务缺失或形状不完整 → 明确报错（不含糊降级）', async () => {
+    await expect(createOrGetServiceAgent(serviceCtx(undefined), serviceStore([]), 'svc-1', 'session-1')).rejects.toThrow(
+      /agents 服务不可用/,
+    )
+    await expect(createOrGetServiceAgent(serviceCtx({ get: () => undefined }), serviceStore([]), 'svc-1', 'session-1')).rejects.toThrow(
+      /agents 服务不可用/,
+    )
+  })
+
+  it('会话已有 Agent → 直接复用（不重复创建）', async () => {
+    const existing = { id: 'session-1', followup: () => {} }
+    let createCalls = 0
+    const ctx = serviceCtx({ get: () => existing, create: async () => { createCalls += 1; return existing } })
+    const result = await createOrGetServiceAgent(ctx, serviceStore([{ kind: 'parent', data: { provider: 'p1', model: 'm1' } }]), 'svc-1', 'session-1')
+    expect(result.agent).toBe(existing)
+    expect(createCalls).toBe(0)
+    // 父代理节点的 provider/model 仍从服务文档解析（供调用方回显）
+    expect(result).toMatchObject({ provider: 'p1', model: 'm1' })
+  })
+
+  it('会话无 Agent → 创建并携带父代理节点 provider/model 与会话 id', async () => {
+    const created = { id: 'session-1' }
+    const options: Array<Record<string, unknown>> = []
+    const ctx = serviceCtx({ get: () => undefined, create: async (input: Record<string, unknown>) => { options.push(input); return { agent: created } } })
+    const result = await createOrGetServiceAgent(ctx, serviceStore([{ kind: 'parent', data: { provider: 'p1', model: 'm1' } }]), 'svc-1', 'session-1')
+    expect(result.agent).toBe(created)
+    expect(options).toHaveLength(1)
+    expect(options[0]).toMatchObject({ sessionId: 'session-1', agentOptions: { provider: 'p1', model: 'm1' } })
+    expect((options[0].meta as { cwd?: unknown }).cwd).toBe(process.cwd())
+  })
+
+  it('服务文档缺 parent 节点（或无 provider/model）→ 创建时不带 agentOptions（官方按默认选择）', async () => {
+    const options: Array<Record<string, unknown>> = []
+    const ctx = serviceCtx({ get: () => undefined, create: async (input: Record<string, unknown>) => { options.push(input); return { id: 'session-1' } } })
+    await createOrGetServiceAgent(ctx, serviceStore([{ kind: 'agent', data: {} }]), 'svc-1', 'session-1')
+    expect(options[0].agentOptions).toBeUndefined()
+  })
+
+  it('create 返回空值 → 明确报错（不把 undefined 当 Agent 返回）', async () => {
+    const ctx = serviceCtx({ get: () => undefined, create: async () => undefined })
+    await expect(createOrGetServiceAgent(ctx, serviceStore([]), 'svc-1', 'session-1')).rejects.toThrow(/建立失败/)
   })
 })

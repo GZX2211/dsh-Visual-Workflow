@@ -2,6 +2,8 @@
 // dsh 元数据（bundle.patch / client）、依赖约束（W-05：零 @deepseek-ai/* 运行时依赖）、
 // patch 文件形态，以及 files/exports 引用的静态文件在磁盘上真实存在。
 //
+// 层级归属：断言对象是整个发布包（跨 host/client 两半），不对应任何 src 模块，
+// 故属 tests/contract（包与构建契约门禁），不属 tests/host 的模块镜像测试。
 // 运行环境：node（host 测试默认，不引入 jsdom）。
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
