@@ -35,9 +35,8 @@ export interface TmpOptions {
     /** 显式临时目录。 */
     tmpDir?: string;
 }
-/** 原子替换通用选项。 */
-export interface AtomicReplaceOptions extends TmpOptions {
-}
+/** 原子替换通用选项（与临时目录选项同形；独立别名便于后续分化）。 */
+export type AtomicReplaceOptions = TmpOptions;
 /** releaseDiskLock 返回的锁信息。 */
 export interface DiskLockInfo {
     /** 锁文件路径。 */
@@ -136,4 +135,20 @@ export declare function withJsonLock<T>(filePath: string, fn: () => Promise<T> |
  * @param opts 可注入临时目录。
  */
 export declare function atomicReplaceFile(filePath: string, data: Buffer, opts?: AtomicReplaceOptions): Promise<void>;
+/**
+ * 清理目录下残留的临时文件与陈旧锁文件（崩溃恢复入口）。
+ * 目标：进程崩溃可能留下 `.tmp-<pid>-<rand>` 残留或 `.lock` 锁文件。
+ * 规则（保守安全）：
+ *   - `.tmp` 前缀的残留：仅删除「持有进程已死」的临时文件（文件名携带创建进程
+ *     pid：`.tmp-<pid>-<rand>`）。pid 存活 → 该进程正在使用（已创建尚未 rename），
+ *     跳过不删，避免并发写不同文件时互相误删活跃临时文件导致 rename 失败/数据丢失；
+ *     pid 已死 → 崩溃残留，删除；解析不出 pid（畸形文件）→ 保守删除（与旧行为一致）。
+ *   - 锁文件：仅回收「持有 pid 已死」的陈旧锁（复用 tryReapStaleLock 的安全逻辑）；
+ *     活泼锁（pid 存活）绝不删除，避免干扰其他进程正在进行的临界区。
+ * 每次写路径（atomicWriteJson → 本函数）都调用，保证「下次写自动回收」；也可显式调用。
+ *
+ * @param dir 要扫描清理的目录。
+ * @param opts 陈旧锁阈值与时钟注入。
+ * @returns 被清理的文件路径数组。
+ */
 export declare function cleanupStaleTemp(dir: string, opts?: DiskLockOptions): Promise<string[]>;

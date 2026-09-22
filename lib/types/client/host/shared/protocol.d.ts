@@ -1,3 +1,4 @@
+import type { NodeKind } from './graph-model.js';
 /** 工作流列表端点名。 */
 export declare const EP_LIST_WORKFLOWS = "listWorkflows";
 /** 获取单个工作流。 */
@@ -173,7 +174,7 @@ export declare const TOOL_VISIBILITY: {
     readonly orgAuthoring: readonly ["wf_org_catalog", "wf_graph_patch"];
 };
 /**
- * 运行状态枚举（RUN_STATUSES）：与 types.ts 的 RunStatus / 架构文档 §6.1
+ * 运行状态枚举（RUN_STATUSES）：与 ./run-types.js 的 RunStatus / 架构文档 §6.1
  * RunSnapshot.status 逐字一致（六态）。
  * running <-> paused -> completed / failed / stopped；宿主重启后
  * running/paused -> interrupted（可恢复）（架构文档 §4.3）。
@@ -183,12 +184,23 @@ export declare const TOOL_VISIBILITY: {
  */
 export declare const RUN_STATUSES: readonly ["running", "paused", "completed", "failed", "stopped", "interrupted"];
 /**
- * 节点状态枚举（NODE_STATUSES）：与架构文档 §6.1 RunSnapshot.nodes[].status 一致。
+ * 节点状态枚举（NODE_STATUSES）：与 ./run-types.js 的 NodeRunStatus /
+ * 架构文档 §6.1 RunSnapshot.nodes[].status 逐字一致（七态，含协作组「待命」armed——
+ * 非终态：回合结束但仍在协作组内可被唤醒，父代理 wf_finish 后终态化，P0-1）。
  * react-capped 为 ReAct 软截停（非失败，正常产出）。
+ * 与该类型的双向穷尽由测试的编译期断言锁定（禁止固定长度断言）。
  */
-export declare const NODE_STATUSES: readonly ["pending", "running", "ok", "fail", "skipped", "react-capped"];
+export declare const NODE_STATUSES: readonly ["pending", "running", "armed", "ok", "fail", "skipped", "react-capped"];
 /** 模式枚举：mode1 编排执行 / mode2 后台服务（需求文档 §1 双模式架构）。 */
 export declare const MODES: readonly ["mode1", "mode2"];
+/**
+ * 可执行单元节点种类（元参数规模统计口径，自主编排方案 §6.4）：
+ * 子代理（agent）、父代理（parent）与协作组卡片（group，组内成员并行执行为一单元）。
+ * 为什么放在协议常量层而不是纯形状层：该口径是 Host 检查器 / 写图工具 / 客户端预算
+ * 展示共用的跨层契约常量，改一处必须三端一致；纯形状文件不得含运行时值。
+ * 口径漂移会直接导致预算判定与展示不一致，故以 NodeKind 标注类型并由测试锁定取值。
+ */
+export declare const EXECUTABLE_UNIT_KINDS: readonly NodeKind[];
 /** 流程连线颜色变量（冷灰/银白）。 */
 export declare const COLOR_VAR_FLOW = "--wf-flow";
 /** 上下文连线颜色变量（琥珀金）。 */

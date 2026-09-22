@@ -1,17 +1,18 @@
-// tests/host/flow-store.test.ts
+// tests/host/storage/flow-store.test.ts
 //
 // FlowStore 数据层测试（T-012）：全 CRUD、会话隔离（workflow/service 按 sessionId）、
 // revision 冲突保护、原子性与锁一致性（并发保存无撕裂/无垃圾文件）、userId 映射持久化、
-// 编排事实源、模板深拷贝解耦（§4.2.1）。断言依据：架构文档 §4.1 + 需求文档 §4.2.2/§4.7/§6。
+// 编排事实源、模板时间戳记账与单资源读语义。断言依据：架构文档 §4.1 + 需求文档 §4.2.2/§4.7/§6
+// + src/host/storage/AGENTS.md。
 
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
-import { mkdtemp, readdir, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { FlowStore, FlowRevisionConflictError, type TemplateKind } from '../../src/host/storage/flow-store.js'
-import type { WorkflowDocument } from '../../src/host/shared/graph-model.js'
-import type { ServiceState, RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate, ToolCombo, RunSnapshot } from '../../src/host/shared/types.js'
-import { newRoleNode, newStageNode, newLine } from '../../src/host/graph/model.js'
+import { FlowStore, FlowRevisionConflictError } from '../../../src/host/storage/flow-store.js'
+import type { WorkflowDocument } from '../../../src/host/shared/graph-model.js'
+import type { ServiceState, RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate, ToolCombo, RunSnapshot } from '../../../src/host/shared/types.js'
+import { newRoleNode, newStageNode, newLine } from '../../../src/host/graph/model.js'
 
 let dir: string
 let store: FlowStore
@@ -62,10 +63,17 @@ function makeRoleTemplate(id: string): RoleTemplate {
 }
 
 describe('FlowStore.init 目录结构', () => {
-  it('创建全部规划目录（§6 目录规划）', async () => {
+  it('创建全部规划目录（顶层 DIRS + 嵌套 NESTED_DIRS）', async () => {
     const names = await readdir(dir)
     for (const d of FlowStore.DIRS) {
-      expect(names).toContain(d.split('/')[0])
+      expect(names, `缺少顶层目录 ${d}`).toContain(d)
+    }
+    // 嵌套子目录（受管文件副本目录）单独成表，避免顶层目录常量混入路径片段
+    for (const d of FlowStore.NESTED_DIRS) {
+      const parts = d.split('/')
+      expect(names, `缺少顶层目录 ${parts[0]}`).toContain(parts[0])
+      const nested = await readdir(join(dir, parts[0]))
+      expect(nested, `缺少嵌套子目录 ${d}`).toContain(parts[1])
     }
     // 幂等：重复 init 不抛错
     await store.init()
@@ -133,7 +141,7 @@ describe('服务 CRUD 与会话隔离', () => {
   it('保存→列出→读取→删除；sessions 映射文件不混入列表', async () => {
     const svc = makeService('svc1', 's1')
     await store.saveService(svc, 's1')
-    await store.saveUserIdMap('svc1', { u1: 'sess-1' })
+    await store.mergeUserIdMap('svc1', { u1: 'sess-1' })
     const list = await store.listServices('s1')
     expect(list.map((s) => s.id)).toEqual(['svc1'])
     expect(list[0].status).toBe('stopped')
@@ -161,9 +169,48 @@ describe('服务 CRUD 与会话隔离', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// 服务文档 ↔ 模式二工作流视图（getServiceAsFlow / saveServiceAsFlow）
+// ---------------------------------------------------------------------------
+
+describe('服务视图读写（模式二编排入口）', () => {
+  function serviceView(id: string, sessionId: string, nodes: WorkflowDocument['nodes'] = []): WorkflowDocument {
+    return { id, sessionId, mode: 'mode2', name: '服务', description: '', nodes, lines: [] }
+  }
+
+  it('saveServiceAsFlow 只覆盖图结构与元参数，保留服务运行字段', async () => {
+    await store.saveService({ ...makeService('svc-view', 's1'), status: 'running', port: 7861, apiKeyHash: 'hash' }, 's1')
+    const start = newStageNode('start', 'mode2')
+    const saved = await store.saveServiceAsFlow(serviceView('svc-view', 's1', [start]), 's1', { force: true })
+    expect(saved.id).toBe('svc-view')
+    expect(saved.mode).toBe('mode2')
+    expect(saved.nodes.map((n) => n.kind)).toEqual(['start'])
+    const onDisk = await store.getServiceById('svc-view')
+    expect(onDisk?.status).toBe('running')
+    expect(onDisk?.port).toBe(7861)
+    expect(onDisk?.apiKeyHash).toBe('hash')
+  })
+
+  it('saveServiceAsFlow 转发实例元参数到工作流视图（P0-3 数据链路）', async () => {
+    await store.saveService(makeService('svc-meta', 's1'), 's1')
+    const saved = await store.saveServiceAsFlow({ ...serviceView('svc-meta', 's1'), meta: { nodeMax: 4 } }, 's1', { force: true })
+    expect(saved.meta).toEqual({ nodeMax: 4 })
+    expect((await store.getServiceById('svc-meta'))?.meta).toEqual({ nodeMax: 4 })
+  })
+
+  it('saveServiceAsFlow 校验存在性与会话归属（错误消息保持稳定）', async () => {
+    await expect(store.saveServiceAsFlow(serviceView('svc-ghost', 's1'), 's1')).rejects.toThrow('服务不存在：svc-ghost')
+    await store.saveService(makeService('svc-own', 's1'), 's1')
+    await expect(store.saveServiceAsFlow(serviceView('svc-own', 's2'), 's2')).rejects.toThrow('服务不属于该会话：svc-own')
+  })
+
+  it('getServiceAsFlow 对不存在服务返回 null', async () => {
+    expect(await store.getServiceAsFlow('nope')).toBeNull()
+  })
+})
+
 describe('列表容错：损坏 JSON 不阻塞整个列表（Bug 21）', () => {
   it('listWorkflows 跳过损坏文件，正常文件仍返回', async () => {
-    const { writeFile } = await import('node:fs/promises')
     await store.saveWorkflow(makeFlow('good', 's1'), 's1')
     await writeFile(join(dir, 'workflows', 'corrupt.json'), '{ broken json', 'utf8')
     const list = await store.listWorkflows('s1')
@@ -171,7 +218,6 @@ describe('列表容错：损坏 JSON 不阻塞整个列表（Bug 21）', () => {
   })
 
   it('listServices/listServicesAll/listTemplates/listRuns 同样跳过损坏文件', async () => {
-    const { writeFile } = await import('node:fs/promises')
     await store.saveService(makeService('svc1', 's1'), 's1')
     await store.saveTemplate('role', makeRoleTemplate('r1'))
     const run: RunSnapshot = {
@@ -217,63 +263,48 @@ describe('模板 CRUD（全局共享）与子类过滤', () => {
     expect((await store.listTemplates('role')).length).toBe(1)
   })
 
-  it('协作组模板增删查 + templateToNode 深拷贝解耦（用户批注：协作组模板列表）', async () => {
+  it('协作组模板增删查（groups/ 目录，全局共享）', async () => {
     const group: GroupTemplate = { id: 'gt1', name: '审查组', collabPrompt: '你们是双 Agent 协作组' }
     await store.saveTemplate('group', group)
     expect((await store.listTemplates('group')).map((t) => t.id)).toEqual(['gt1'])
     expect(await store.getTemplate('group', 'gt1')).not.toBeNull()
-
-    // templateToNode → GroupNode：名称/协作 Prompt 内联，成员为空（§4.2.5.2）
-    const node = store.templateToNode(group, 'node-g', { x: 0, y: 0 })
-    expect(node!.kind).toBe('group')
-    const gd = (node as { data: { label: string; collabPrompt: string; memberIds: string[] } }).data
-    expect(gd.label).toBe('审查组')
-    expect(gd.collabPrompt).toBe('你们是双 Agent 协作组')
-    expect(gd.memberIds).toEqual([])
 
     // 删除后列表为空（模板与画布节点深拷贝解耦：删模板不影响已生成节点）
     expect(await store.deleteTemplate('group', 'gt1')).toBe(true)
     expect(await store.listTemplates('group')).toEqual([])
   })
 
-  it('templateToNode 深拷贝解耦：模板后续修改不影响节点（§4.2.1）', async () => {
-    const role = makeRoleTemplate('r1')
-    await store.saveTemplate('role', role)
-    const node = store.templateToNode(role, 'node-1', { x: 1, y: 2 })
-    expect(node).not.toBeNull()
-    expect(node!.kind).toBe('agent')
-    expect(node!.id).toBe('node-1')
-    expect(node!.position).toEqual({ x: 1, y: 2 })
-    // 修改模板 → 节点不受影响（深拷贝断引用）
-    role.systemPrompt = '改后'
-    expect((node as { data: { systemPrompt: string } }).data.systemPrompt).toBe('p')
+  it('单资源读 getTemplate：file/database 同目录混存时按字段判别，不串类', async () => {
+    const fileT: FileTemplate = { id: 'dt-mix', name: '文本', fileKind: 'text', content: 'x' }
+    const dbT: DatabaseTemplate = { id: 'dt-mix2', name: '库', description: '', dbType: 'local', dbKind: 'sqlite', localPath: '/tmp/x.db' }
+    await store.saveTemplate('file', fileT)
+    await store.saveTemplate('database', dbT)
 
-    const dbT: DatabaseTemplate = { id: 'dt1', name: '库', description: 'd', dbType: 'server', dbKind: 'mysql', conn: { host: 'h', port: 3306, user: 'u', password: 'p', db: 'x' } }
-    const dbNode = store.templateToNode(dbT, 'node-2', { x: 0, y: 0 })
-    expect(dbNode!.kind).toBe('database')
-    expect((dbNode as { data: { label: string } }).data.label).toBe('库')
-
-    const fileT: FileTemplate = { id: 'ft1', name: '文件', fileKind: 'file', managedPath: 'data/files/a.pdf' }
-    const fileNode = store.templateToNode(fileT, 'node-3', { x: 0, y: 0 })
-    expect(fileNode!.kind).toBe('file')
-    expect((fileNode as { data: { fileName: string } }).data.fileName).toBe('a.pdf')
+    expect(await store.getTemplate('file', 'dt-mix')).not.toBeNull()
+    expect(await store.getTemplate('database', 'dt-mix2')).not.toBeNull()
+    // 同 id 但类型不符：按子类判别返回 null（不把库模板当文件模板返回）
+    const other: DatabaseTemplate = { id: 'dt-dup', name: '库2', description: '', dbType: 'local', dbKind: 'sqlite', localPath: '/tmp/y.db' }
+    await store.saveTemplate('database', other)
+    expect(await store.getTemplate('file', 'dt-dup')).toBeNull()
   })
 
-  it('Bug 26：templateToNode 保留 systemPromptSource 与模板源文件名', async () => {
-    // 角色模板带 .md 提示词来源：拖入画布后来源文件名必须保留（左侧栏卡片展示）
-    const role = { ...makeRoleTemplate('r1'), systemPromptSource: '角色说明.md' }
-    const roleNode = store.templateToNode(role, 'node-src', { x: 0, y: 0 })
-    expect((roleNode as { data: { systemPromptSource?: string } }).data.systemPromptSource).toBe('角色说明.md')
+  it('单资源读 getTemplate 对损坏 JSON 抛 CorruptJsonError（不伪装成不存在）', async () => {
+    await writeFile(join(dir, 'roles', 'broken.json'), '{ broken json', 'utf8')
+    await expect(store.getTemplate('role', 'broken')).rejects.toMatchObject({ name: 'CorruptJsonError' })
+    // 列表读仍跳过损坏项（可用性优先），不阻塞同目录其他模板
+    await store.saveTemplate('role', makeRoleTemplate('r-ok'))
+    expect((await store.listTemplates('role')).map((t) => t.id)).toEqual(['r-ok'])
+  })
 
-    // 文件模板显式记录源文件名：不得回退为受管路径 basename 的猜测值
-    const fileT: FileTemplate = { id: 'ft2', name: '文件', fileKind: 'file', managedPath: 'data/files/abc/报告-final.pdf', fileName: '报告-final.pdf' }
-    const fileNode = store.templateToNode(fileT, 'node-file', { x: 0, y: 0 })
-    const fileData = (fileNode as { data: { fileName?: string } }).data
-    expect(fileData.fileName).toBe('报告-final.pdf')
-    // 模板缺 fileName 时仍回退 basename（向后兼容）
-    const legacy: FileTemplate = { id: 'ft3', name: '遗留', fileKind: 'file', managedPath: 'data/files/old/legacy.txt' }
-    const legacyNode = store.templateToNode(legacy, 'node-legacy', { x: 0, y: 0 })
-    expect((legacyNode as { data: { fileName?: string } }).data.fileName).toBe('legacy.txt')
+  it('saveTemplate 时间戳记账：缺省保留既有 createdAt，updatedAt 恒刷新', async () => {
+    const first = await store.saveTemplate('role', makeRoleTemplate('r-ts'))
+    const createdAt = (first as { createdAt: string }).createdAt
+    // 第二次保存不携带 createdAt（如导入路径）：必须保留既有创建时间
+    await store.saveTemplate('role', { ...makeRoleTemplate('r-ts'), name: '改名' })
+    const saved = (await store.getTemplate('role', 'r-ts')) as { createdAt: string; updatedAt: string; name: string }
+    expect(saved.name).toBe('改名')
+    expect(saved.createdAt).toBe(createdAt)
+    expect(Date.parse(saved.updatedAt)).toBeGreaterThanOrEqual(Date.parse(createdAt))
   })
 })
 
@@ -300,8 +331,7 @@ describe('运行历史（runs/<runId>.json）', () => {
     expect((await store.listRuns('f1')).map((r) => r.id).sort()).toEqual(['run-1', 'run-2'].sort())
     expect((await store.listRuns('f2')).map((r) => r.id)).toEqual(['run-3'])
     expect(await store.getRun('run-1')).not.toBeNull()
-    expect(await store.runExists('run-1')).toBe(true)
-    expect(await store.runExists('ghost')).toBe(false)
+    expect(await store.getRun('ghost')).toBeNull()
     expect((await store.listAllRunIds()).sort()).toEqual(['run-1', 'run-2', 'run-3'].sort())
   })
 
@@ -334,8 +364,8 @@ describe('工具组合（combos.json）', () => {
 })
 
 describe('userId → sessionId 映射（§4.1.3 规则 7）', () => {
-  it('保存→读取→持久化（新实例可见）', async () => {
-    await store.saveUserIdMap('svc1', { u1: 'sess-a', u2: 'sess-b' })
+  it('合并写入→读取→持久化（新实例可见）', async () => {
+    await store.mergeUserIdMap('svc1', { u1: 'sess-a', u2: 'sess-b' })
     const map = await store.userIdMap('svc1')
     expect(map).toEqual({ u1: 'sess-a', u2: 'sess-b' })
     // 新 FlowStore 实例（模拟服务重启后重新加载）读取同一映射
@@ -346,16 +376,31 @@ describe('userId → sessionId 映射（§4.1.3 规则 7）', () => {
     map2.u1 = 'hacked'
     expect(await store.userIdMap('svc1')).toEqual({ u1: 'sess-a', u2: 'sess-b' })
   })
+
+  it('合并写入是读改写同临界区：并发不同 userId 首解析互不覆盖', async () => {
+    // 映射写入必须走 mergeUserIdMap（单锁内 read-modify-write）；若拆成「先读再整表写回」，
+    // 不同 userId 并发首解析会相互覆盖（SessionMap 的并发用例覆盖该语义，此处锁定 storage 契约）。
+    const merged = await Promise.all([
+      store.mergeUserIdMap('svc-c', { 'user-1': 'sess-1' }),
+      store.mergeUserIdMap('svc-c', { 'user-2': 'sess-2' }),
+      store.mergeUserIdMap('svc-c', { 'user-3': 'sess-3' }),
+    ])
+    expect(merged.length).toBe(3)
+    const disk = JSON.parse(await readFile(join(dir, 'services', 'svc-c.sessions.json'), 'utf8')) as Record<string, string>
+    expect(Object.keys(disk).sort()).toEqual(['user-1', 'user-2', 'user-3'])
+  })
 })
 
 describe('编排事实源（orchestrations/<runId>.json）', () => {
-  it('保存→读取→删除', async () => {
+  it('保存→读取→路径可解析（父代理只读事实源）', async () => {
     const flow = makeFlow('f1', 's1')
     await store.saveOrchestration('run-1', flow)
     expect(await store.readOrchestration('run-1')).not.toBeNull()
-    expect(await store.deleteOrchestration('run-1')).toBe(true)
-    expect(await store.readOrchestration('run-1')).toBeNull()
-    expect(await store.deleteOrchestration('run-1')).toBe(false)
+    // 编排指令注入的绝对路径与读取入口指向同一文件
+    expect(store.orchestrationFilePath('run-1')).toBe(join(dir, 'orchestrations', 'run-1.json'))
+    expect(JSON.parse(await readFile(store.orchestrationFilePath('run-1'), 'utf8'))).toMatchObject({ id: 'f1' })
+    // 未写入的 run 读取为 null（不抛错）
+    expect(await store.readOrchestration('run-missing')).toBeNull()
   })
 })
 

@@ -1,7 +1,9 @@
-// tests/host/sessions-map.test.ts
+// tests/integration/sessions-map.test.ts
 //
-// userId→sessionId 映射单测（T-033）：映射隔离（不同 userId 独立）/同 userId
-// 稳定/磁盘持久化/服务重启恢复/并发解析单 sessionId/映射文件按服务隔离。
+// userId→sessionId 映射集成测试（T-033；原 tests/host/sessions-map.test.ts）：
+// Service 层 SessionMap 与 Storage 层 FlowStore 的真实协作——映射隔离（不同 userId 独立）/
+// 同 userId 稳定/磁盘持久化/服务重启恢复/并发解析单 sessionId/映射文件按服务隔离。
+// 为什么在 integration：断言对象是「服务层解析 + 数据层落盘」的多模块协作，而非单一模块内部逻辑。
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'

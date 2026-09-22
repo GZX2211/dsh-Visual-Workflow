@@ -492,17 +492,28 @@ src/host/
 
 ## 7.1 shared
 
-定义 Host / Client 之间共享的纯类型与协议。
+定义 Host / Client 之间共享的契约：Graph Model、Workflow Types、Protocol、OrgMeta、Run State 等。
 
-包括：
+边界：
 
-* Graph Model
-* Workflow Types
-* Protocol
-* OrgMeta
-* Run State
+* **共享契约的唯一来源**：同一语义只允许一处本体；Host 与 Client 引用同一份定义，禁止各自镜像或复制形状。
+* **形状与逻辑分离**：`shared` 不包含业务逻辑（校验、归一化、判定、编排、持久化），只描述形状与跨层常量。
+* **零运行时依赖**：禁止运行时 import（仅允许 `import type`，编译期完全擦除）；纯形状文件不得导出运行时值，跨层常量只落在协议常量文件。
+* **枚举双向穷尽**：协议层取值域与类型层联合必须一致（类型 ⊆ 常量 ∧ 常量 ⊆ 类型），并由编译期断言锁定。
+* **契约路径稳定**：内部按职责拆分不得改变对外 import 说明符；拆分通过 type-only barrel 保持路径。
 
-`shared` 不包含运行时逻辑。
+文件职责（治理规则见 `src/host/shared/AGENTS.md`）：
+
+```text
+graph-model.ts     节点/连线/工作流文档形状
+org-meta.ts        元参数类型本体（OrgMeta / OrgBudget）
+run-types.ts       run 快照与节点执行记录
+service-types.ts   模式二服务实例与 userId→sessionId 映射
+template-types.ts  模板与导入导出 v2 bundle
+scheduler-types.ts 定时任务实体与运行态
+protocol.ts        跨层协议常量（端点名/工具名/可见性/状态枚举/口径/颜色）
+types.ts           type-only barrel（保持既有契约路径 `from './types.js'`）
+```
 
 ---
 
@@ -515,12 +526,34 @@ src/host/
 * Run
 * Orchestration State
 * Tool Combo
-* Scheduler State
 * User/Session Mapping
 
 存储采用原子写入与并发保护。
 
 Storage 是持久化事实层，不负责 Workflow 语义决策。
+
+边界：
+
+* **单一公共门面**：持久化文档的读写经一个门面统一进入；调用方不得绕过它直接写同一数据文件。
+* **单一写者与临界区**：所有写入经「磁盘锁 + 进程内锁」组合原语；读改写必须在同一临界区内完成，禁止跨锁 check-then-act。
+* **不持有运行态**：运行锁、运行快照、等待器、子代理表等运行事实归 orchestrator；storage 只做持久化。
+* **不定义第二套结构事实源**：磁盘文档即结构事实源，storage 不额外缓存或镜像一份结构。
+* **读语义统一**：单资源读遇损坏 JSON 抛可诊断错误；列表读跳过损坏项，但不得吞掉权限等其它错误。
+* **纯逻辑与 IO 分离**：路径计算、字段剥除、版本记账、文档投影为纯函数；副作用只出现在门面方法与原子原语内。
+* **跨文件边界**：跨文件事务（如服务文档与其会话映射文件）不在保证范围内，调用方必须校验主资源存在并保证写顺序。
+
+文件职责（治理规则见 `src/host/storage/AGENTS.md`）：
+
+```text
+flow-store.ts       持久化门面（各资源 CRUD + 会话隔离 + 锁编排）
+storage-paths.ts    数据目录布局与资源路径计算（含文件名消毒）
+document-policy.ts  写入字段剥除与 revision 记账
+template-model.ts   模板种类判别模型
+service-view.ts     服务文档 → 模式二工作流视图投影
+atomic.ts           原子写/读、进程内与跨进程锁、崩溃恢复
+```
+
+注：scheduler、tools 基础设施、embedding 等模块各自持有其存储文件，仅复用 `atomic.ts` 的原子原语；storage 不代替它们持有数据。
 
 ---
 

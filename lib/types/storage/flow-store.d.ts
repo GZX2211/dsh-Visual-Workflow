@@ -1,46 +1,19 @@
-import type { WorkflowDocument, GraphNode, WorkflowTemplate } from '../shared/graph-model.js';
-import type { ServiceState, RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate, ToolCombo, RunSnapshot } from '../shared/types.js';
-/** 模板种类：角色 / 文件 / 数据库 / 协作组（§4.2.3/§4.2.4/§4.2.5.2；左侧栏各 Tab）。 */
-export type TemplateKind = 'role' | 'file' | 'database' | 'group';
-/** 全部模板的判别联合（按目录区分；data/ 内 file/database 以字段判别；groups/ 为协作组）。 */
-export type Template = RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate;
-/** 保存选项：陈旧快照冲突保护（旧项目 nextFlowRevision 语义保留）。 */
-export interface SaveOptions {
-    /** 客户端加载时的 revision；与当前不一致且非 force 时抛冲突。 */
-    expectedRevision?: number | null;
-    /** 强制覆盖（跳过冲突检查）。 */
-    force?: boolean;
-    /**
-     * 保留服务端字段（`lastPatch`，P4 代理补丁标注）。
-     * 缺省 false = 用户保存路径：清除代理标注（用户已看过/改过画布）。
-     * 只有 `wf_graph_patch` 的代理补丁路径传 true（否则刚写的标注会被自己剥掉）。
-     */
-    keepServerFields?: boolean;
-}
-/** revision 冲突错误：另一会话已保存更新的版本（架构文档 §4.1 原子性与锁一致）。 */
-export declare class FlowRevisionConflictError extends Error {
-    readonly id: string;
-    readonly expectedRevision: number | null;
-    readonly actualRevision: number;
-    readonly code = "FLOW_REVISION_CONFLICT";
-    constructor(id: string, expectedRevision: number | null, actualRevision: number);
-}
+import { type Template, type TemplateKind } from './template-model.js';
+import { type SaveOptions } from './document-policy.js';
+import type { WorkflowDocument, WorkflowTemplate } from '../shared/graph-model.js';
+import type { ServiceState, ToolCombo, RunSnapshot, RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate } from '../shared/types.js';
+export type { Template, TemplateKind } from './template-model.js';
+export type { SaveOptions } from './document-policy.js';
+export { FlowRevisionConflictError } from './document-policy.js';
 export declare class FlowStore {
     readonly root: string;
-    /** 全部子目录名（init 时创建，常量表供测试断言）。 */
-    static readonly DIRS: readonly ["workflows", "services", "roles", "data", "data/files", "groups", "runs", "orchestrations", "flow-templates"];
+    /** 顶层数据目录（init 时创建；常量表供测试与外部工具断言布局）。 */
+    static readonly DIRS: readonly ["workflows", "services", "roles", "data", "groups", "runs", "orchestrations", "flow-templates"];
+    /** 嵌套子目录（相对 root；随顶层目录一并幂等创建）。 */
+    static readonly NESTED_DIRS: readonly ["data/files"];
     constructor(root: string);
     /** 初始化目录结构（幂等：mkdir recursive，重复调用安全）。 */
     init(): Promise<void>;
-    private workflowPath;
-    private servicePath;
-    private sessionsPath;
-    private templatePath;
-    /** 工作流模板文件路径（flow-templates/ 目录，全局共享）。 */
-    private flowTemplatePath;
-    private runsPath;
-    private orchestrationPath;
-    private combosPath;
     /**
      * 列出工作流（按 updatedAt 倒序）。
      * 工作台全局化改版：sessionId 缺省时列出**全部会话**的工作流实例（工作台
@@ -66,15 +39,23 @@ export declare class FlowStore {
     getServiceById(serviceId: string): Promise<ServiceState | null>;
     /** 列出全部服务（不按会话过滤；自动恢复扫描用）。 */
     listServicesAll(): Promise<ServiceState[]>;
-    /** 服务文档 → 模式二工作流视图（编排运行入口的 flow 形态）。 */
+    /** 服务文档 → 模式二工作流视图（编排运行入口的 flow 形态；纯投影，不读盘）。 */
     getServiceAsFlow(serviceId: string): Promise<WorkflowDocument | null>;
     /**
      * 按「工作流视图」写回服务实例（补丁工具用）：只覆盖图结构与元参数，
      * 保留服务自身的运行字段（status/port/apiKeyHash/时间戳），避免调用方拼错形状。
+     *
+     * 并发契约：存在性/归属校验、合并、revision 记账与写盘全部在**同一把服务文件锁**内
+     * 完成——若在锁外读取再锁内写回，会覆盖 ServiceManager 并发写入的运行字段（丢更新）。
      */
     saveServiceAsFlow(doc: WorkflowDocument, sessionId: string, options?: SaveOptions): Promise<WorkflowDocument>;
     /** 保存服务（revision 递增 + 冲突保护；status/port 等运行字段由服务管理器独立更新）。 */
     saveService(service: ServiceState, sessionId: string, options?: SaveOptions): Promise<ServiceState>;
+    /**
+     * 服务文档写回（调用方必须已持该服务文件锁，且已完成各自的校验）：
+     * revision 记账 + 客户端字段剥除 + 原子写，返回落盘副本。
+     */
+    private writeServiceDoc;
     /** 删除服务（级联删除其 sessions 映射文件）。 */
     deleteService(sessionId: string, serviceId: string): Promise<boolean>;
     /** 列出角色模板（精确返回类型重载，供调用方免断言）。 */
@@ -87,9 +68,17 @@ export declare class FlowStore {
     listTemplates(kind: 'group'): Promise<GroupTemplate[]>;
     /** 列出某类模板（kind 联合兜底；具体子类型请用窄签名）。 */
     listTemplates(kind: TemplateKind): Promise<Template[]>;
-    /** 按 id 取单个模板（无则 null；导入导出用）。 */
+    /**
+     * 按 id 取单个模板（无则 null；导入导出用）。
+     * 单资源读：直接按 id 定位文件并保持 file/database 子类判别；损坏 JSON 抛
+     * CorruptJsonError（不伪装成「不存在」，避免导入路径静默覆盖损坏数据）。
+     */
     getTemplate(kind: TemplateKind, id: string): Promise<Template | null>;
-    /** 保存模板（原子写；模板 id 由调用方生成；返回带 createdAt/updatedAt 的持久化副本）。 */
+    /**
+     * 保存模板（原子写；模板 id 由调用方生成；返回带 createdAt/updatedAt 的持久化副本）。
+     * 时间戳策略与其余 save* 一致：createdAt = 调用方值 ?? 既有值 ?? now，
+     * 避免更新时把创建时间重置为当前时间。
+     */
     saveTemplate(kind: TemplateKind, template: Template): Promise<Template>;
     /** 删除模板（仅删文件，不影响画布中已深拷贝的节点——§4.2.1 解耦语义）。 */
     deleteTemplate(kind: TemplateKind, id: string): Promise<boolean>;
@@ -109,8 +98,6 @@ export declare class FlowStore {
     listRuns(flowId: string, sessionId?: string): Promise<RunSnapshot[]>;
     /** 读取单个 run 快照。 */
     getRun(runId: string): Promise<RunSnapshot | null>;
-    /** run 是否存在（恢复入口校验用）。 */
-    runExists(runId: string): Promise<boolean>;
     /** 保存 run 快照（断点持久化走同一入口；原子写保证崩溃不撕裂）。 */
     saveRun(run: RunSnapshot): Promise<RunSnapshot>;
     /** 扫描全部 run id（reconcileStaleRuns 用，T-027）。 */
@@ -123,13 +110,14 @@ export declare class FlowStore {
     deleteToolCombo(id: string): Promise<boolean>;
     /** 读取某服务的 userId 映射（返回副本，防调用方意外修改内部缓存）。 */
     userIdMap(serviceId: string): Promise<Record<string, string>>;
-    /** 保存某服务的 userId 映射（原子写；映射持久化在服务重启后仍有效）。 */
-    saveUserIdMap(serviceId: string, map: Record<string, string>): Promise<void>;
     /**
      * 合并写入某服务的 userId 映射（读改写在同一把 withJsonLock 内完成）。
-     * 为什么必须合并而不是「先 userIdMap 再 saveUserIdMap」：后者是两次独立锁
-     * 作用域内的读改-写，不同 userId 并发首解析时互相覆盖（丢失映射 → 重启后
-     * 上下文断裂）。合并写把 read-modify-write 收进同一临界区，并发安全。
+     * 为什么必须合并而不是「先读再整表写回」：后者是两次独立锁作用域内的读改-写，
+     * 不同 userId 并发首解析时互相覆盖（丢失映射 → 重启后上下文断裂）。合并写把
+     * read-modify-write 收进同一临界区，并发安全。
+     *
+     * 生命周期不变式（跨文件，见 ./AGENTS.md）：映射文件从属于服务文档。删除服务后
+     * 不得再写映射；调用方在写入前须确认服务仍存在（storage 不保证跨文件事务）。
      */
     mergeUserIdMap(serviceId: string, entries: Record<string, string>): Promise<Record<string, string>>;
     /** 保存运行时流程定义（startRun 时写入，父代理只读的事实源）。 */
@@ -138,13 +126,4 @@ export declare class FlowStore {
     readOrchestration(runId: string): Promise<WorkflowDocument | null>;
     /** 运行时流程定义文件的绝对路径（编排指令 facts.definitionPath 注入用，T-021）。 */
     orchestrationFilePath(runId: string): string;
-    /** 删除运行时流程定义（run 收尾/清理时调用）。 */
-    deleteOrchestration(runId: string): Promise<boolean>;
-    /** 数据模板按子类筛选：file（文件）或 database（数据库）——复用 listTemplates 重载的精确过滤。 */
-    listDataTemplates(subKind: 'file' | 'database'): Promise<Array<FileTemplate | DatabaseTemplate>>;
-    /** 节点 → 模板深拷贝（§4.2.1：拖入画布时深拷贝模板嵌入工作流 JSON，此后断引用）。 */
-    templateToNode(template: Template, id: string, position: {
-        x: number;
-        y: number;
-    }): GraphNode | null;
 }

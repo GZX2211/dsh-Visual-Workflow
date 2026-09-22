@@ -4,16 +4,13 @@
 // 「graph/（工作流数据模型与校验）」代码块，并补充需求文档 PRD-001 §4.2（节点
 // 管理模块）/ §4.3（连线管理模块）的业务语义说明。
 //
-// 约束（架构文档 §2.3 / SKILL.md §6.3）：
-//   - 本文件为 client 半区可零风险类型引用的纯类型层，**禁止任何 import**，
-//     也不得定义运行时值（函数/对象常量一律不放这里，运行时校验归 T-013 的
-//     src/host/graph/ 负责，本文件只约束「形状」）。
+// 约束（见 ./AGENTS.md）：
+//   - 本文件为 client 半区可零风险类型引用的纯形状层：**只允许 `import type`**
+//     （编译期完全擦除），**禁止运行时 import，也不得定义运行时值**（函数/对象常量
+//     一律不放这里，运行时校验与工厂归 src/host/graph/ 负责，本文件只约束「形状」）。
 //   - 每个字段均以中文 JSDoc 说明业务语义，并引用需求条款号（PRD §4.x.y）。
 
-// 为何镜像而不是 import type：shared 层纯度门要求本文件**完全零 import**（连 type import 也无），
-// 而 OrgMeta 的类型本体在 ./org-meta.ts。下方 MIRROR 保留字段结构并与本体逐字段一致——
-// 由文件末尾的「结构一致性类型断言」在编译期强制（改本体不改镜像 → typecheck 失败），
-// 因此不存在静默漂移风险，且本文件仍保持零 import。
+import type { OrgMeta } from './org-meta.js'
 
 // ---------------------------------------------------------------------------
 // 节点判别联合（架构文档 §4.2 代码块 + 需求文档 §4.2）
@@ -225,40 +222,10 @@ export interface ProxyNode extends BaseNode {
 }
 
 /**
- * 元参数结构镜像（本体见 ./org-meta.ts 的 OrgMeta，文档注释以本体为准）。
- * 字段顺序与本体一致；结构一致性由文件末尾类型断言在编译期强制。
+ * 节点判别联合：按 kind 判别具体数据形状（架构文档 §4.2）。
+ * 注：元参数规模统计口径的「可执行单元节点种类」是跨层常量，见 ./protocol.js 的
+ * `EXECUTABLE_UNIT_KINDS`（本文件保持纯形状，不含运行时值）。
  */
-export interface OrgMeta {
-  nodeMin?: number
-  nodeMax?: number
-  groupMax?: number
-  membersMin?: number
-  membersMax?: number
-  parallelBranchMax?: number
-  planFreedom?: 'templates-only' | 'allow-new-role'
-  promptSource?: 'user-template' | 'agent-generated'
-  roleGranularity?: 'broad' | 'narrow'
-  roleReuse?: 'forbid' | 'allow'
-  milestoneMax?: number
-  interveneTrigger?: Array<'user' | 'threshold' | 'milestone'>
-  patchOpsMax?: number
-  askPerNodeMax?: number
-  crossGroupPolicy?: 'via-parent' | 'forbid'
-  failurePolicy?: { retry: 1; thenEscalate: true; askUserOnUnresolved: true }
-  forbiddenShapes?: string[]
-  namingConvention?: string | null
-  eval?: Record<string, unknown>
-  restructure?: Record<string, unknown>
-}
-
-/**
- * 可执行单元节点种类（元参数规模统计口径，自主编排方案 §6.4）：
- * 子代理（agent）、父代理（parent）与协作组卡片（group，组内成员并行执行为一单元）。
- * 三端（host 检查器 / 客户端预算展示 / P1 写图工具）共用同一口径，避免统计漂移。
- */
-export const EXECUTABLE_UNIT_KINDS: readonly NodeKind[] = ['agent', 'parent', 'group']
-
-/** 节点判别联合：按 kind 判别具体数据形状（架构文档 §4.2）。 */
 export type GraphNode =
   | RoleNode
   | FileNode
@@ -375,7 +342,7 @@ export interface LastAgentPatch {
  * （需求文档 §4.2.1 数据模型核心规则）。
  */
 export interface WorkflowDocument {
-  // 说明：meta 字段类型为本文件的元参数结构镜像（本体见 ./org-meta.ts 的 OrgMeta）
+  // 说明：meta 字段类型即 ./org-meta.ts 的 OrgMeta 本体（type-only 引用，编译期擦除）
   /** 工作流稳定标识（flowId，会话内唯一；按 sessionId + flowId 维度隔离，需求文档 §4.2.2 规则 3）。 */
   id: string
   /** 归属会话 id（会话隔离存储，需求文档 §4.2.2 规则 3）。 */

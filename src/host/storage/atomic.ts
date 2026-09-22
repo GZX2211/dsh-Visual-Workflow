@@ -138,8 +138,8 @@ export interface TmpOptions {
   tmpDir?: string
 }
 
-/** 原子替换通用选项。 */
-export interface AtomicReplaceOptions extends TmpOptions {}
+/** 原子替换通用选项（与临时目录选项同形；独立别名便于后续分化）。 */
+export type AtomicReplaceOptions = TmpOptions
 
 /** releaseDiskLock 返回的锁信息。 */
 export interface DiskLockInfo {
@@ -474,6 +474,12 @@ export async function atomicReplaceFile(
 
 // ── 崩溃恢复：清理残留临时文件 / 锁文件 ───────────────────────────────────
 
+/** 解析临时文件名携带的创建进程 pid（格式 `.tmp-<pid>-<rand>`；非该格式返回 undefined）。 */
+function tempFileOwnerPid(entry: string): number | undefined {
+  const match = /^\.tmp-(\d+)-/.exec(entry)
+  return match ? Number(match[1]) : undefined
+}
+
 /**
  * 清理目录下残留的临时文件与陈旧锁文件（崩溃恢复入口）。
  * 目标：进程崩溃可能留下 `.tmp-<pid>-<rand>` 残留或 `.lock` 锁文件。
@@ -490,12 +496,6 @@ export async function atomicReplaceFile(
  * @param opts 陈旧锁阈值与时钟注入。
  * @returns 被清理的文件路径数组。
  */
-/** 解析临时文件名携带的创建进程 pid（格式 `.tmp-<pid>-<rand>`；非该格式返回 undefined）。 */
-function tempFileOwnerPid(entry: string): number | undefined {
-  const match = /^\.tmp-(\d+)-/.exec(entry)
-  return match ? Number(match[1]) : undefined
-}
-
 export async function cleanupStaleTemp(dir: string, opts?: DiskLockOptions): Promise<string[]> {
   const target = resolve(dir)
   const staleAfterMs = opts?.staleAfterMs ?? DEFAULT_STALE_LOCK_MS

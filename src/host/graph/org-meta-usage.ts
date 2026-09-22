@@ -6,7 +6,7 @@
 // 三处必须一致），集中一处便于单测锁定。
 // 纯函数：不读时钟/随机源，不改写入参。
 
-import { EXECUTABLE_UNIT_KINDS } from '../shared/graph-model.js'
+import { EXECUTABLE_UNIT_KINDS } from '../shared/protocol.js'
 import type { GraphNode, WorkflowDocument } from '../shared/graph-model.js'
 
 /** 已用量（元参数判定的输入；可选维度未提供时不做该维度判定）。 */

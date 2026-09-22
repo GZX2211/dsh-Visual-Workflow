@@ -1,3 +1,4 @@
+import type { OrgMeta } from './org-meta.js';
 /** 节点种类：9 种判别的稳定字面量（架构文档 §4.2；需求文档 §4.2.3~§4.2.5）。 */
 export type NodeKind = 'parent' | 'agent' | 'file' | 'database' | 'start' | 'end' | 'pause' | 'group' | 'proxy';
 /** 节点公共基座：所有节点的共有最小字段（架构文档 §4.2 代码块）。 */
@@ -204,42 +205,10 @@ export interface ProxyNode extends BaseNode {
     };
 }
 /**
- * 元参数结构镜像（本体见 ./org-meta.ts 的 OrgMeta，文档注释以本体为准）。
- * 字段顺序与本体一致；结构一致性由文件末尾类型断言在编译期强制。
+ * 节点判别联合：按 kind 判别具体数据形状（架构文档 §4.2）。
+ * 注：元参数规模统计口径的「可执行单元节点种类」是跨层常量，见 ./protocol.js 的
+ * `EXECUTABLE_UNIT_KINDS`（本文件保持纯形状，不含运行时值）。
  */
-export interface OrgMeta {
-    nodeMin?: number;
-    nodeMax?: number;
-    groupMax?: number;
-    membersMin?: number;
-    membersMax?: number;
-    parallelBranchMax?: number;
-    planFreedom?: 'templates-only' | 'allow-new-role';
-    promptSource?: 'user-template' | 'agent-generated';
-    roleGranularity?: 'broad' | 'narrow';
-    roleReuse?: 'forbid' | 'allow';
-    milestoneMax?: number;
-    interveneTrigger?: Array<'user' | 'threshold' | 'milestone'>;
-    patchOpsMax?: number;
-    askPerNodeMax?: number;
-    crossGroupPolicy?: 'via-parent' | 'forbid';
-    failurePolicy?: {
-        retry: 1;
-        thenEscalate: true;
-        askUserOnUnresolved: true;
-    };
-    forbiddenShapes?: string[];
-    namingConvention?: string | null;
-    eval?: Record<string, unknown>;
-    restructure?: Record<string, unknown>;
-}
-/**
- * 可执行单元节点种类（元参数规模统计口径，自主编排方案 §6.4）：
- * 子代理（agent）、父代理（parent）与协作组卡片（group，组内成员并行执行为一单元）。
- * 三端（host 检查器 / 客户端预算展示 / P1 写图工具）共用同一口径，避免统计漂移。
- */
-export declare const EXECUTABLE_UNIT_KINDS: readonly NodeKind[];
-/** 节点判别联合：按 kind 判别具体数据形状（架构文档 §4.2）。 */
 export type GraphNode = RoleNode | FileNode | DatabaseNode | StageNode | GroupNode | ProxyNode;
 /**
  * 连接点类型（Handle）：节点上的物理接线端，分方向属类（架构文档 §4.2 代码块）。

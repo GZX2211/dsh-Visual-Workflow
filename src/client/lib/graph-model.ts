@@ -142,8 +142,9 @@ export function templateToNodeData(
   if (kind === 'file') {
     const file = template as FileTemplate
     const managedPath = String(file.managedPath ?? '')
-    // files 列表（多选）优先；兼容单选旧字段（fileName/managedPath）——与后端
-    // FlowStore.templateToNode 逐字段对齐，拖入画布不丢失多选文件路径（需求 §4.2.4.1）。
+    // files 列表（多选）优先；兼容单选旧字段（fileName/managedPath）——
+    // 拖入画布的数据形状以本函数为唯一实现（后端曾有的同名映射已随 storage 模块治理
+    // 删除：模板→节点映射属客户端画布职责），不丢失多选文件路径（需求 §4.2.4.1）。
     const files = Array.isArray(file.files) && file.files.length > 0
       ? file.files.map((item) => ({ fileName: String(item?.fileName ?? ''), managedPath: String(item?.managedPath ?? '') }))
       : []

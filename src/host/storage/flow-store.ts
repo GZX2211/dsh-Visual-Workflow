@@ -1,104 +1,70 @@
 // src/host/storage/flow-store.ts
 //
-// FlowStore（T-012）：插件数据层。目录规划按需求文档 §6（默认 <dataDir>/）：
-//   workflows/<flowId>.json              模式一工作流实例（文件内 sessionId 字段标记归属）
-//   services/<serviceId>.json            模式二服务实例（工作流定义 + 端口/鉴权/状态）
-//   services/<serviceId>.sessions.json   userId → sessionId 映射（§4.7 sessions-map）
-//   roles/<roleId>.json                  角色模板（全局共享）
-//   data/<dataId>.json                   数据模板（文件/数据库，全局共享）
-//   data/files/                          受管文件副本（T-026 拷贝）
-//   flow-templates/<templateId>.json     工作流模板（全局共享；图2 交互改造新增）
-//   combos.json                          工具组合列表（全局共享）
-//   runs/<runId>.json                    运行历史（RunSnapshot，含 flowId/断点/节点产出）
-//   orchestrations/<runId>.json          运行时流程定义（父代理只读的事实源）
+// FlowStore：插件持久化事实层的唯一公共门面。
 //
-// 为什么每个实例单独成文件（架构文档 §4.1 / 需求 §6）：单文件即单资源，
-// 原子写粒度=资源粒度——并发编辑同一工作流经 withJsonLock 串行化，
-// 不同资源互不阻塞；删除即删文件，无"数组中残留空洞"。
+// 核心职责（见 ./AGENTS.md）：把 Host 的持久化文档以「单文件即单资源 + 原子发布 +
+// 进程内/跨进程锁」保存与读取。目录布局与路径计算的稳定契约见 ./storage-paths.ts；
+// 原子写/读与锁原语见 ./atomic.ts；写入字段与版本策略的纯逻辑见 ./document-policy.ts；
+// 模板种类判别见 ./template-model.ts；服务↔工作流投影见 ./service-view.ts。
+//
+// 非职责：不做 Workflow/图语义决策（合法性、状态机、运行推进、结构编辑）；不持有
+// 运行态内存事实（运行锁/快照/等待器归 orchestrator）；不定义第二套 Workflow 结构
+// 事实源。
 //
 // 会话隔离（需求 §4.2.2 规则 3 / Q23）：workflow/service 文件内记录 sessionId，
-// 列出/读取按 sessionId 过滤；模板（roles/data/combos）全局共享不隔离。
-//
-// 原子性：所有写操作走 atomic.ts 的 withJsonLock + atomicWriteJson（临时文件 +
-// fsync + 原子发布）；进程内锁 FIFO + 磁盘锁跨进程互斥（T-011 已验证）。
+// 列出/读取按 sessionId 过滤；模板（roles/data/groups/flow-templates）与工具组合
+// 全局共享不隔离。
 
 import { mkdir, readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { atomicWriteJson, readJson, withJsonLock, CorruptJsonError } from './atomic.js'
-import type { WorkflowDocument, GraphNode, WorkflowTemplate } from '../shared/graph-model.js'
+import {
+  DIRS as DATA_DIRS,
+  NESTED_DIRS as NESTED_DATA_DIRS,
+  combosPath,
+  flowTemplatePath,
+  orchestrationPath,
+  runsPath,
+  servicePath,
+  sessionsPath,
+  templateDir,
+  templatePath,
+  workflowPath,
+} from './storage-paths.js'
+import { isDatabaseTemplate, type Template, type TemplateKind } from './template-model.js'
+import {
+  keepServerFieldsOf,
+  nextFlowRevision,
+  stripClientMeta,
+  type SaveOptions,
+} from './document-policy.js'
+import { serviceToWorkflowView } from './service-view.js'
+import type { WorkflowDocument, WorkflowTemplate } from '../shared/graph-model.js'
 import type {
   ServiceState,
+  ToolCombo,
+  RunSnapshot,
   RoleTemplate,
   FileTemplate,
   DatabaseTemplate,
   GroupTemplate,
-  ToolCombo,
-  RunSnapshot,
 } from '../shared/types.js'
 
-// ---------------------------------------------------------------------------
-// 类型与错误
-// ---------------------------------------------------------------------------
-
-/** 模板种类：角色 / 文件 / 数据库 / 协作组（§4.2.3/§4.2.4/§4.2.5.2；左侧栏各 Tab）。 */
-export type TemplateKind = 'role' | 'file' | 'database' | 'group'
-
-/** 全部模板的判别联合（按目录区分；data/ 内 file/database 以字段判别；groups/ 为协作组）。 */
-export type Template = RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate
-
-/** 保存选项：陈旧快照冲突保护（旧项目 nextFlowRevision 语义保留）。 */
-export interface SaveOptions {
-  /** 客户端加载时的 revision；与当前不一致且非 force 时抛冲突。 */
-  expectedRevision?: number | null
-  /** 强制覆盖（跳过冲突检查）。 */
-  force?: boolean
-  /**
-   * 保留服务端字段（`lastPatch`，P4 代理补丁标注）。
-   * 缺省 false = 用户保存路径：清除代理标注（用户已看过/改过画布）。
-   * 只有 `wf_graph_patch` 的代理补丁路径传 true（否则刚写的标注会被自己剥掉）。
-   */
-  keepServerFields?: boolean
-}
-
-/** revision 冲突错误：另一会话已保存更新的版本（架构文档 §4.1 原子性与锁一致）。 */
-export class FlowRevisionConflictError extends Error {
-  readonly code = 'FLOW_REVISION_CONFLICT'
-  constructor(
-    readonly id: string,
-    readonly expectedRevision: number | null,
-    readonly actualRevision: number,
-  ) {
-    super(`资源 "${id}" 在加载后被修改（期望 revision ${expectedRevision ?? '无'}，当前 ${actualRevision}），请刷新后合并再保存`)
-    this.name = 'FlowRevisionConflictError'
-  }
-}
+// 公共契约再导出（保持既有 import 路径：`from '.../storage/flow-store.js'`）：
+// 模板种类判别（template-model）与保存选项/冲突错误（document-policy）。
+export type { Template, TemplateKind } from './template-model.js'
+export type { SaveOptions } from './document-policy.js'
+export { FlowRevisionConflictError } from './document-policy.js'
 
 // ---------------------------------------------------------------------------
-// 工具函数
+// 列表读取容错（持久化层策略）
 // ---------------------------------------------------------------------------
-
-/** 文件名消毒：id 中非法字符替换为下划线（防路径穿越/坏文件名）。 */
-function safeFilePart(value: string): string {
-  const sanitized = String(value).replace(/[^a-zA-Z0-9._-]/g, '_')
-  if (!sanitized || sanitized === '.' || sanitized === '..') return '_'
-  return sanitized
-}
-
-/** 前端快照标记字段（保存时剥除，绝不落盘——旧实现把 _draft 写盘导致已入库对象被误判草稿）。 */
-const CLIENT_META_KEYS = ['_draft', '_clientMeta'] as const
-
-/**
- * 保存时**必须清除**的服务端字段（P4）：`lastPatch` 只描述「父代理最近一次补丁」。
- * 任何经用户保存路径（putWorkflow/putService/putFlowTemplate）写回的文档都携带的是
- * 客户端快照，因此用户一保存即视为「用户已看过/改过画布」——清除标注是正确语义，
- * 也顺带避免客户端伪造该字段。
- */
-const SERVER_ONLY_KEYS = ['lastPatch'] as const
 
 /**
  * 列表场景逐文件读取：单个文件损坏（CorruptJsonError）时跳过该文件返回 null，
  * 不阻塞整个列表——一个损坏的 JSON 不应让同目录其他正常文件全部不可见（Bug 21）。
  * 其余读取失败（EACCES 等）仍上浮（保留可诊断性，防止把权限问题伪装成空列表）。
+ * 注意：单资源读取不使用本函数——单资源读遇损坏必须抛错（见 ./AGENTS.md）。
  */
 async function readListEntry<T>(dir: string, name: string): Promise<T | null> {
   try {
@@ -109,50 +75,9 @@ async function readListEntry<T>(dir: string, name: string): Promise<T | null> {
   }
 }
 
-/** 剥除前端快照标记（浅拷贝，不修改入参）；keepServerFields=true 时保留 lastPatch。 */
-function stripClientMeta<T>(value: T, keepServerFields = false): T {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return value
-  const next = { ...(value as Record<string, unknown>) }
-  for (const key of CLIENT_META_KEYS) delete next[key]
-  if (!keepServerFields) for (const key of SERVER_ONLY_KEYS) delete next[key]
-  return next as T
-}
-
-/** 保存选项 → 是否保留服务端字段（缺省 false：用户保存即清除代理标注）。 */
-function keepServerFieldsOf(options: SaveOptions | undefined): boolean {
-  return options?.keepServerFields === true
-}
-
-/** 提取当前 revision（非法/缺失按 0 处理，旧项目 flowRevision 语义）。 */
-function flowRevision(value: { revision?: number } | null): number {
-  const r = Number(value?.revision)
-  return Number.isInteger(r) && r >= 0 ? r : 0
-}
-
-/**
- * 计算保存后的 revision：无显式冲突期望时自动 +1；有期望时必须匹配（除非 force）。
- * 为什么只认显式 expectedRevision（不沿用旧项目 incoming.revision 回退）：文档内
- * revision 是存储层记账字段，保存方携带的任意快照值不应隐式变成冲突期望——
- * 否则"复制快照再保存"会误触发乐观锁（旧项目客户端每次显式传 expectedRevision，
- * 本项目把该语义收敛为显式参数）。
- */
-function nextFlowRevision(incoming: { revision?: number; id?: string }, current: { revision?: number } | null, options: SaveOptions = {}): number {
-  if (!current) return 1
-  const actual = flowRevision(current)
-  const rawExpected = options.expectedRevision
-  if (rawExpected === undefined || rawExpected === null) {
-    return actual + 1
-  }
-  const expected = Number(rawExpected)
-  if (options.force !== true && expected !== actual) {
-    throw new FlowRevisionConflictError(incoming?.id ?? (current as { id?: string })?.id ?? '?', expected, actual)
-  }
-  return actual + 1
-}
-
-/** 判断数据模板对象是数据库模板（以 dbType 字段判别）。 */
-function isDatabaseTemplate(t: Template): t is DatabaseTemplate {
-  return typeof (t as DatabaseTemplate).dbType === 'string'
+/** 按 updatedAt 倒序（缺失时间戳按空串处理，稳定排序）。 */
+function byUpdatedAtDesc<T extends { updatedAt?: string }>(a: T, b: T): number {
+  return String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? ''))
 }
 
 // ---------------------------------------------------------------------------
@@ -160,52 +85,18 @@ function isDatabaseTemplate(t: Template): t is DatabaseTemplate {
 // ---------------------------------------------------------------------------
 
 export class FlowStore {
-  /** 全部子目录名（init 时创建，常量表供测试断言）。 */
-  static readonly DIRS = ['workflows', 'services', 'roles', 'data', 'data/files', 'groups', 'runs', 'orchestrations', 'flow-templates'] as const
+  /** 顶层数据目录（init 时创建；常量表供测试与外部工具断言布局）。 */
+  static readonly DIRS = DATA_DIRS
+  /** 嵌套子目录（相对 root；随顶层目录一并幂等创建）。 */
+  static readonly NESTED_DIRS = NESTED_DATA_DIRS
 
   constructor(public readonly root: string) {}
 
   /** 初始化目录结构（幂等：mkdir recursive，重复调用安全）。 */
   async init(): Promise<void> {
-    for (const dir of FlowStore.DIRS) {
+    for (const dir of [...FlowStore.DIRS, ...FlowStore.NESTED_DIRS]) {
       await mkdir(join(this.root, dir), { recursive: true })
     }
-  }
-
-  // ---- 路径计算（内部） ----------------------------------------------------
-
-  private workflowPath(flowId: string): string {
-    return join(this.root, 'workflows', `${safeFilePart(flowId)}.json`)
-  }
-
-  private servicePath(serviceId: string): string {
-    return join(this.root, 'services', `${safeFilePart(serviceId)}.json`)
-  }
-
-  private sessionsPath(serviceId: string): string {
-    return join(this.root, 'services', `${safeFilePart(serviceId)}.sessions.json`)
-  }
-
-  private templatePath(kind: TemplateKind, id: string): string {
-    const dir = kind === 'role' ? 'roles' : kind === 'group' ? 'groups' : 'data'
-    return join(this.root, dir, `${safeFilePart(id)}.json`)
-  }
-
-  /** 工作流模板文件路径（flow-templates/ 目录，全局共享）。 */
-  private flowTemplatePath(templateId: string): string {
-    return join(this.root, 'flow-templates', `${safeFilePart(templateId)}.json`)
-  }
-
-  private runsPath(runId: string): string {
-    return join(this.root, 'runs', `${safeFilePart(runId)}.json`)
-  }
-
-  private orchestrationPath(runId: string): string {
-    return join(this.root, 'orchestrations', `${safeFilePart(runId)}.json`)
-  }
-
-  private combosPath(): string {
-    return join(this.root, 'combos.json')
   }
 
   // ---- 工作流（模式一；工作台全局化后列表按需跨会话） ------------------------
@@ -230,12 +121,12 @@ export class FlowStore {
       const doc = await readListEntry<WorkflowDocument>(dir, name)
       if (doc && (sessionId === undefined || doc.sessionId === sessionId)) items.push(doc)
     }
-    return items.sort((a, b) => String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? '')))
+    return items.sort(byUpdatedAtDesc)
   }
 
   /** 读取单个工作流；不属于该会话返回 null（隔离语义）。 */
   async getWorkflow(sessionId: string, flowId: string): Promise<WorkflowDocument | null> {
-    const doc = await readJson<WorkflowDocument | null>(this.workflowPath(flowId), null)
+    const doc = await readJson<WorkflowDocument | null>(workflowPath(this.root, flowId), null)
     if (!doc || doc.sessionId !== sessionId) return null
     return doc
   }
@@ -244,7 +135,7 @@ export class FlowStore {
   async saveWorkflow(flow: WorkflowDocument, sessionId: string, options: SaveOptions = {}): Promise<WorkflowDocument> {
     if (!sessionId) throw new Error('saveWorkflow 需要 sessionId')
     if (!flow?.id) throw new Error('saveWorkflow 需要 flow id')
-    const path = this.workflowPath(flow.id)
+    const path = workflowPath(this.root, flow.id)
     return withJsonLock(path, async () => {
       const current = await readJson<WorkflowDocument | null>(path, null)
       const revision = nextFlowRevision(flow, current, options)
@@ -263,7 +154,7 @@ export class FlowStore {
 
   /** 删除工作流；仅当归属会话匹配时删除（返回是否删除成功）。 */
   async deleteWorkflow(sessionId: string, flowId: string): Promise<boolean> {
-    const path = this.workflowPath(flowId)
+    const path = workflowPath(this.root, flowId)
     return withJsonLock(path, async () => {
       const current = await readJson<WorkflowDocument | null>(path, null)
       if (!current || current.sessionId !== sessionId) return false
@@ -293,19 +184,19 @@ export class FlowStore {
       const doc = await readListEntry<ServiceState>(dir, name)
       if (doc && (sessionId === undefined || doc.sessionId === sessionId)) items.push(doc)
     }
-    return items.sort((a, b) => String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? '')))
+    return items.sort(byUpdatedAtDesc)
   }
 
   /** 读取单个服务；不属于该会话返回 null。 */
   async getService(sessionId: string, serviceId: string): Promise<ServiceState | null> {
-    const doc = await readJson<ServiceState | null>(this.servicePath(serviceId), null)
+    const doc = await readJson<ServiceState | null>(servicePath(this.root, serviceId), null)
     if (!doc || doc.sessionId !== sessionId) return null
     return doc
   }
 
   /** 按 id 读取服务（不校验归属会话；服务管理器/服务进程用）。 */
   async getServiceById(serviceId: string): Promise<ServiceState | null> {
-    return readJson<ServiceState | null>(this.servicePath(serviceId), null)
+    return readJson<ServiceState | null>(servicePath(this.root, serviceId), null)
   }
 
   /** 列出全部服务（不按会话过滤；自动恢复扫描用）。 */
@@ -323,80 +214,87 @@ export class FlowStore {
       const doc = await readListEntry<ServiceState>(dir, name)
       if (doc) items.push(doc)
     }
-    return items.sort((a, b) => String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? '')))
+    return items.sort(byUpdatedAtDesc)
   }
 
-  /** 服务文档 → 模式二工作流视图（编排运行入口的 flow 形态）。 */
+  /** 服务文档 → 模式二工作流视图（编排运行入口的 flow 形态；纯投影，不读盘）。 */
   async getServiceAsFlow(serviceId: string): Promise<WorkflowDocument | null> {
     const service = await this.getServiceById(serviceId)
     if (!service) return null
-    return {
-      id: service.id,
-      sessionId: service.sessionId,
-      mode: 'mode2',
-      name: service.name,
-      description: service.description,
-      nodes: service.nodes,
-      lines: service.lines,
-      startNewSession: service.startNewSession,
-      workspacePath: service.workspacePath,
-      revision: service.revision,
-      // 元参数（实例层，可选）：模式二运行时同样按「有效元参数」组装指令与冻结快照，
-      // 漏转发会让服务实例的 meta 在运行期被静默丢弃（P0-3 数据链路）。
-      ...(service.meta ? { meta: service.meta } : {}),
-      createdAt: service.createdAt,
-      updatedAt: service.updatedAt,
-    }
+    return serviceToWorkflowView(service)
   }
 
   /**
    * 按「工作流视图」写回服务实例（补丁工具用）：只覆盖图结构与元参数，
    * 保留服务自身的运行字段（status/port/apiKeyHash/时间戳），避免调用方拼错形状。
+   *
+   * 并发契约：存在性/归属校验、合并、revision 记账与写盘全部在**同一把服务文件锁**内
+   * 完成——若在锁外读取再锁内写回，会覆盖 ServiceManager 并发写入的运行字段（丢更新）。
    */
   async saveServiceAsFlow(doc: WorkflowDocument, sessionId: string, options: SaveOptions = {}): Promise<WorkflowDocument> {
-    const current = await this.getServiceById(doc.id)
-    if (!current) throw new Error(`服务不存在：${doc.id}`)
-    if (current.sessionId !== sessionId) throw new Error(`服务不属于该会话：${doc.id}`)
-    const saved = await this.saveService({
-      ...current,
-      name: doc.name ?? current.name,
-      description: doc.description ?? current.description,
-      nodes: doc.nodes,
-      lines: doc.lines,
-      ...(doc.meta ? { meta: doc.meta } : {}),
-    } as ServiceState, sessionId, options)
-    return (await this.getServiceAsFlow(saved.id)) as WorkflowDocument
+    if (!sessionId) throw new Error('saveServiceAsFlow 需要 sessionId')
+    if (!doc?.id) throw new Error('saveServiceAsFlow 需要 service id')
+    const path = servicePath(this.root, doc.id)
+    return withJsonLock(path, async () => {
+      const current = await readJson<ServiceState | null>(path, null)
+      if (!current) throw new Error(`服务不存在：${doc.id}`)
+      if (current.sessionId !== sessionId) throw new Error(`服务不属于该会话：${doc.id}`)
+      const merged: ServiceState = {
+        ...current,
+        name: doc.name ?? current.name,
+        description: doc.description ?? current.description,
+        nodes: doc.nodes,
+        lines: doc.lines,
+        ...(doc.meta ? { meta: doc.meta } : {}),
+      }
+      const saved = await this.writeServiceDoc(path, merged, current, sessionId, options)
+      return serviceToWorkflowView(saved)
+    })
   }
 
   /** 保存服务（revision 递增 + 冲突保护；status/port 等运行字段由服务管理器独立更新）。 */
   async saveService(service: ServiceState, sessionId: string, options: SaveOptions = {}): Promise<ServiceState> {
     if (!sessionId) throw new Error('saveService 需要 sessionId')
     if (!service?.id) throw new Error('saveService 需要 service id')
-    const path = this.servicePath(service.id)
+    const path = servicePath(this.root, service.id)
     return withJsonLock(path, async () => {
       const current = await readJson<ServiceState | null>(path, null)
-      const revision = nextFlowRevision(service, current, options)
-      const now = new Date().toISOString()
-      const saved: ServiceState = {
-        ...stripClientMeta(service, keepServerFieldsOf(options)),
-        revision,
-        sessionId,
-        createdAt: service.createdAt ?? current?.createdAt ?? now,
-        updatedAt: now,
-      }
-      await atomicWriteJson(path, saved)
-      return saved
+      return this.writeServiceDoc(path, service, current, sessionId, options)
     })
+  }
+
+  /**
+   * 服务文档写回（调用方必须已持该服务文件锁，且已完成各自的校验）：
+   * revision 记账 + 客户端字段剥除 + 原子写，返回落盘副本。
+   */
+  private async writeServiceDoc(
+    path: string,
+    incoming: ServiceState,
+    current: ServiceState | null,
+    sessionId: string,
+    options: SaveOptions,
+  ): Promise<ServiceState> {
+    const revision = nextFlowRevision(incoming, current, options)
+    const now = new Date().toISOString()
+    const saved: ServiceState = {
+      ...stripClientMeta(incoming, keepServerFieldsOf(options)),
+      revision,
+      sessionId,
+      createdAt: incoming.createdAt ?? current?.createdAt ?? now,
+      updatedAt: now,
+    }
+    await atomicWriteJson(path, saved)
+    return saved
   }
 
   /** 删除服务（级联删除其 sessions 映射文件）。 */
   async deleteService(sessionId: string, serviceId: string): Promise<boolean> {
-    const path = this.servicePath(serviceId)
+    const path = servicePath(this.root, serviceId)
     return withJsonLock(path, async () => {
       const current = await readJson<ServiceState | null>(path, null)
       if (!current || current.sessionId !== sessionId) return false
       await rm(path, { force: true })
-      await rm(this.sessionsPath(serviceId), { force: true })
+      await rm(sessionsPath(this.root, serviceId), { force: true })
       return true
     })
   }
@@ -415,7 +313,7 @@ export class FlowStore {
   async listTemplates(kind: TemplateKind): Promise<Template[]>
   /** 列出某类模板（roles/ 角色；groups/ 协作组；data/ 文件+数据库按字段判别过滤）。 */
   async listTemplates(kind: TemplateKind): Promise<Template[]> {
-    const dir = kind === 'role' ? join(this.root, 'roles') : kind === 'group' ? join(this.root, 'groups') : join(this.root, 'data')
+    const dir = join(this.root, templateDir(kind))
     let names: string[] = []
     try {
       names = await readdir(dir)
@@ -432,22 +330,38 @@ export class FlowStore {
       if (kind === 'database' && !isDatabaseTemplate(t)) continue
       items.push(t)
     }
-    return items.sort((a, b) => String((a as RoleTemplate).name ?? '').localeCompare(String((b as RoleTemplate).name ?? '')))
+    return items.sort((a, b) => String((a as { name?: string }).name ?? '').localeCompare(String((b as { name?: string }).name ?? '')))
   }
 
-  /** 按 id 取单个模板（无则 null；导入导出用）。 */
+  /**
+   * 按 id 取单个模板（无则 null；导入导出用）。
+   * 单资源读：直接按 id 定位文件并保持 file/database 子类判别；损坏 JSON 抛
+   * CorruptJsonError（不伪装成「不存在」，避免导入路径静默覆盖损坏数据）。
+   */
   async getTemplate(kind: TemplateKind, id: string): Promise<Template | null> {
-    const list = await this.listTemplates(kind)
-    return list.find((item) => item.id === id) ?? null
+    const t = await readJson<Template | null>(templatePath(this.root, kind, id), null)
+    if (!t) return null
+    if (kind === 'file' && isDatabaseTemplate(t)) return null
+    if (kind === 'database' && !isDatabaseTemplate(t)) return null
+    return t
   }
 
-  /** 保存模板（原子写；模板 id 由调用方生成；返回带 createdAt/updatedAt 的持久化副本）。 */
+  /**
+   * 保存模板（原子写；模板 id 由调用方生成；返回带 createdAt/updatedAt 的持久化副本）。
+   * 时间戳策略与其余 save* 一致：createdAt = 调用方值 ?? 既有值 ?? now，
+   * 避免更新时把创建时间重置为当前时间。
+   */
   async saveTemplate(kind: TemplateKind, template: Template): Promise<Template> {
     if (!template?.id) throw new Error('saveTemplate 需要 template id')
-    const path = this.templatePath(kind, template.id)
+    const path = templatePath(this.root, kind, template.id)
     return withJsonLock(path, async () => {
+      const current = await readJson<Template | null>(path, null)
       const now = new Date().toISOString()
-      const saved = { ...stripClientMeta(template), createdAt: (template as { createdAt?: string }).createdAt ?? now, updatedAt: now }
+      const saved = {
+        ...stripClientMeta(template),
+        createdAt: template.createdAt ?? current?.createdAt ?? now,
+        updatedAt: now,
+      }
       await atomicWriteJson(path, saved)
       return saved as Template
     })
@@ -455,7 +369,7 @@ export class FlowStore {
 
   /** 删除模板（仅删文件，不影响画布中已深拷贝的节点——§4.2.1 解耦语义）。 */
   async deleteTemplate(kind: TemplateKind, id: string): Promise<boolean> {
-    const path = this.templatePath(kind, id)
+    const path = templatePath(this.root, kind, id)
     return withJsonLock(path, async () => {
       const exists = (await readJson<Template | null>(path, null)) !== null
       if (!exists) return false
@@ -481,18 +395,18 @@ export class FlowStore {
       const t = await readListEntry<WorkflowTemplate>(dir, name)
       if (t) items.push(t)
     }
-    return items.sort((a, b) => String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? '')))
+    return items.sort(byUpdatedAtDesc)
   }
 
   /** 按 id 读取单个工作流模板（无则 null）。 */
   async getFlowTemplate(templateId: string): Promise<WorkflowTemplate | null> {
-    return readJson<WorkflowTemplate | null>(this.flowTemplatePath(templateId), null)
+    return readJson<WorkflowTemplate | null>(flowTemplatePath(this.root, templateId), null)
   }
 
   /** 保存工作流模板（新建/更新统一；revision 递增 + 冲突保护 + 原子写；无 sessionId 隔离）。 */
   async saveFlowTemplate(template: WorkflowTemplate, options: SaveOptions = {}): Promise<WorkflowTemplate> {
     if (!template?.id) throw new Error('saveFlowTemplate 需要模板 id')
-    const path = this.flowTemplatePath(template.id)
+    const path = flowTemplatePath(this.root, template.id)
     return withJsonLock(path, async () => {
       const current = await readJson<WorkflowTemplate | null>(path, null)
       const revision = nextFlowRevision(template, current, options)
@@ -510,7 +424,7 @@ export class FlowStore {
 
   /** 删除工作流模板（仅删文件，不影响已生成的实例——模板/实例深拷贝解耦语义）。 */
   async deleteFlowTemplate(templateId: string): Promise<boolean> {
-    const path = this.flowTemplatePath(templateId)
+    const path = flowTemplatePath(this.root, templateId)
     return withJsonLock(path, async () => {
       const exists = (await readJson<WorkflowTemplate | null>(path, null)) !== null
       if (!exists) return false
@@ -545,18 +459,13 @@ export class FlowStore {
 
   /** 读取单个 run 快照。 */
   async getRun(runId: string): Promise<RunSnapshot | null> {
-    return readJson<RunSnapshot | null>(this.runsPath(runId), null)
-  }
-
-  /** run 是否存在（恢复入口校验用）。 */
-  async runExists(runId: string): Promise<boolean> {
-    return (await readJson<RunSnapshot | null>(this.runsPath(runId), null)) !== null
+    return readJson<RunSnapshot | null>(runsPath(this.root, runId), null)
   }
 
   /** 保存 run 快照（断点持久化走同一入口；原子写保证崩溃不撕裂）。 */
   async saveRun(run: RunSnapshot): Promise<RunSnapshot> {
     if (!run?.id) throw new Error('saveRun 需要 run id')
-    const path = this.runsPath(run.id)
+    const path = runsPath(this.root, run.id)
     return withJsonLock(path, async () => {
       await atomicWriteJson(path, run)
       return run
@@ -577,7 +486,7 @@ export class FlowStore {
 
   /** 列出全部工具组合（全局共享）。 */
   async listToolCombos(): Promise<ToolCombo[]> {
-    const state = await readJson<{ combos: ToolCombo[] }>(this.combosPath(), { combos: [] })
+    const state = await readJson<{ combos: ToolCombo[] }>(combosPath(this.root), { combos: [] })
     return state.combos ?? []
   }
 
@@ -585,7 +494,7 @@ export class FlowStore {
   async saveToolCombo(combo: ToolCombo): Promise<ToolCombo> {
     if (!combo?.id || !combo.id.startsWith('combo-')) throw new Error('工具组合 id 必须以 combo- 前缀')
     if (!Array.isArray(combo.tools)) throw new Error('工具组合 tools 必须为数组')
-    const path = this.combosPath()
+    const path = combosPath(this.root)
     return withJsonLock(path, async () => {
       const state = await readJson<{ combos: ToolCombo[] }>(path, { combos: [] })
       const combos = [combo, ...(state.combos ?? []).filter((c) => c.id !== combo.id)]
@@ -596,7 +505,7 @@ export class FlowStore {
 
   /** 删除工具组合。 */
   async deleteToolCombo(id: string): Promise<boolean> {
-    const path = this.combosPath()
+    const path = combosPath(this.root)
     return withJsonLock(path, async () => {
       const state = await readJson<{ combos: ToolCombo[] }>(path, { combos: [] })
       const existed = (state.combos ?? []).some((c) => c.id === id)
@@ -610,28 +519,24 @@ export class FlowStore {
 
   /** 读取某服务的 userId 映射（返回副本，防调用方意外修改内部缓存）。 */
   async userIdMap(serviceId: string): Promise<Record<string, string>> {
-    const map = await readJson<Record<string, string>>(this.sessionsPath(serviceId), {})
+    const map = await readJson<Record<string, string>>(sessionsPath(this.root, serviceId), {})
     return { ...(map ?? {}) }
-  }
-
-  /** 保存某服务的 userId 映射（原子写；映射持久化在服务重启后仍有效）。 */
-  async saveUserIdMap(serviceId: string, map: Record<string, string>): Promise<void> {
-    await withJsonLock(this.sessionsPath(serviceId), async () => {
-      await atomicWriteJson(this.sessionsPath(serviceId), map ?? {})
-    })
   }
 
   /**
    * 合并写入某服务的 userId 映射（读改写在同一把 withJsonLock 内完成）。
-   * 为什么必须合并而不是「先 userIdMap 再 saveUserIdMap」：后者是两次独立锁
-   * 作用域内的读改-写，不同 userId 并发首解析时互相覆盖（丢失映射 → 重启后
-   * 上下文断裂）。合并写把 read-modify-write 收进同一临界区，并发安全。
+   * 为什么必须合并而不是「先读再整表写回」：后者是两次独立锁作用域内的读改-写，
+   * 不同 userId 并发首解析时互相覆盖（丢失映射 → 重启后上下文断裂）。合并写把
+   * read-modify-write 收进同一临界区，并发安全。
+   *
+   * 生命周期不变式（跨文件，见 ./AGENTS.md）：映射文件从属于服务文档。删除服务后
+   * 不得再写映射；调用方在写入前须确认服务仍存在（storage 不保证跨文件事务）。
    */
   async mergeUserIdMap(serviceId: string, entries: Record<string, string>): Promise<Record<string, string>> {
-    return withJsonLock(this.sessionsPath(serviceId), async () => {
-      const current = await readJson<Record<string, string>>(this.sessionsPath(serviceId), {})
+    return withJsonLock(sessionsPath(this.root, serviceId), async () => {
+      const current = await readJson<Record<string, string>>(sessionsPath(this.root, serviceId), {})
       const merged: Record<string, string> = { ...(current ?? {}), ...entries }
-      await atomicWriteJson(this.sessionsPath(serviceId), merged)
+      await atomicWriteJson(sessionsPath(this.root, serviceId), merged)
       return merged
     })
   }
@@ -640,116 +545,18 @@ export class FlowStore {
 
   /** 保存运行时流程定义（startRun 时写入，父代理只读的事实源）。 */
   async saveOrchestration(runId: string, flow: WorkflowDocument): Promise<void> {
-    await withJsonLock(this.orchestrationPath(runId), async () => {
-      await atomicWriteJson(this.orchestrationPath(runId), flow)
+    await withJsonLock(orchestrationPath(this.root, runId), async () => {
+      await atomicWriteJson(orchestrationPath(this.root, runId), flow)
     })
   }
 
   /** 读取运行时流程定义。 */
   async readOrchestration(runId: string): Promise<WorkflowDocument | null> {
-    return readJson<WorkflowDocument | null>(this.orchestrationPath(runId), null)
+    return readJson<WorkflowDocument | null>(orchestrationPath(this.root, runId), null)
   }
 
   /** 运行时流程定义文件的绝对路径（编排指令 facts.definitionPath 注入用，T-021）。 */
   orchestrationFilePath(runId: string): string {
-    return this.orchestrationPath(runId)
-  }
-
-  /** 删除运行时流程定义（run 收尾/清理时调用）。 */
-  async deleteOrchestration(runId: string): Promise<boolean> {
-    const path = this.orchestrationPath(runId)
-    return withJsonLock(path, async () => {
-      const exists = (await readJson<WorkflowDocument | null>(path, null)) !== null
-      if (!exists) return false
-      await rm(path, { force: true })
-      return true
-    })
-  }
-
-  // ---- 数据模板辅助 ---------------------------------------------------------
-
-  /** 数据模板按子类筛选：file（文件）或 database（数据库）——复用 listTemplates 重载的精确过滤。 */
-  async listDataTemplates(subKind: 'file' | 'database'): Promise<Array<FileTemplate | DatabaseTemplate>> {
-    return subKind === 'database' ? this.listTemplates('database') : this.listTemplates('file')
-  }
-
-  /** 节点 → 模板深拷贝（§4.2.1：拖入画布时深拷贝模板嵌入工作流 JSON，此后断引用）。 */
-  templateToNode(template: Template, id: string, position: { x: number; y: number }): GraphNode | null {
-    if ((template as RoleTemplate).kind === 'parent' || (template as RoleTemplate).kind === 'agent') {
-      const r = template as RoleTemplate
-      return {
-        id,
-        kind: r.kind,
-        position: { ...position },
-        data: {
-          label: r.name,
-          systemPrompt: r.systemPrompt,
-          systemPromptSource: r.systemPromptSource,
-          provider: r.provider,
-          model: r.model,
-          reasoning: r.reasoning,
-          presetId: r.presetId ?? null,
-          retryLimit: r.retryLimit,
-          reactLimit: r.reactLimit ?? null,
-          inputSchema: r.inputSchema ?? '',
-          outputSchema: r.outputSchema ?? '',
-          injectSystemPrompt: r.injectSystemPrompt !== false,
-          injectToolSections: r.injectToolSections !== false,
-          promptFilePath: r.promptFilePath ?? undefined,
-          groupId: null,
-        },
-      }
-    }
-    if (isDatabaseTemplate(template)) {
-      return {
-        id,
-        kind: 'database',
-        position: { ...position },
-        data: {
-          label: template.name,
-          description: template.description,
-          dbType: template.dbType,
-          dbKind: template.dbKind,
-          localPath: template.localPath,
-          conn: template.conn,
-          vectorSource: template.vectorSource,
-        },
-      }
-    }
-    // 协作组模板 → GroupNode（§4.2.5.2；成员在画布内拖入组时登记，模板不固化成员）
-    if (typeof (template as GroupTemplate).collabPrompt === 'string') {
-      const g = template as GroupTemplate
-      return {
-        id,
-        kind: 'group',
-        position: { ...position },
-        data: {
-          label: g.name,
-          collabPrompt: g.collabPrompt ?? '',
-          memberIds: [],
-          size: { w: 300, h: 220 },
-        },
-      }
-    }
-    const f = template as FileTemplate
-    // files 列表（多选）优先；兼容单选旧字段（fileName/managedPath）
-    const files = Array.isArray(f.files) && f.files.length > 0
-      ? f.files.map((item) => ({ fileName: String(item?.fileName ?? ''), managedPath: String(item?.managedPath ?? '') }))
-      : []
-    return {
-      id,
-      kind: 'file',
-      position: { ...position },
-      data: {
-        label: f.name,
-        fileKind: f.fileKind,
-        content: f.content ?? '',
-        managedPath: f.managedPath,
-        // 源文件名优先取模板显式字段（.md/.txt 等源名称），
-        // 仅当模板未记录时才回退从受管路径推断 basename（Bug 26）。
-        fileName: f.fileName ?? (f.managedPath ? f.managedPath.split(/[\\/]/).pop() : ''),
-        ...(files.length > 0 ? { files } : {}),
-      },
-    }
+    return orchestrationPath(this.root, runId)
   }
 }

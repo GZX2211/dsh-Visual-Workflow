@@ -27,7 +27,7 @@ import {
   releaseDiskLock,
   withFileLock,
   withJsonLock,
-} from '../../src/host/storage/atomic.js'
+} from '../../../src/host/storage/atomic.js'
 
 // ── 临时目录管理（每个用例独立随机子目录，结束强制删除）──────────────────
 

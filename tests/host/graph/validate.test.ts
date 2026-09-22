@@ -1,13 +1,13 @@
-// tests/host/graph-model.test.ts
+// tests/host/graph/validate.test.ts
 //
-// 图模型与校验测试（T-013）：连接点兼容矩阵、非法用例拒绝（自环/重复/主虚互斥/
-// 条件仅流程线/阶段唯一/父代理唯一/协作组边界/模式差异）、归一化默认值、入口解析
-// 与拓扑助手。断言依据：架构文档 §4.2 校验规则 + 需求文档 §4.2/§4.3/§4.2.5。
+// 图校验与归一化测试（原 tests/host/graph-model.test.ts 拆分）：单连线检测、全量校验
+// （自环/重复/主虚互斥/条件仅流程线/阶段唯一/父代理唯一/协作组边界/模式差异）、
+// 归一化默认值与运行前完整性检查。
+// 数据模型与拓扑助手（model.ts）见 ./model.test.ts。
+// 断言依据：架构文档 §4.2 校验规则 + 需求文档 §4.2/§4.3/§4.2.5。
 
 import { describe, expect, it } from 'vitest'
 import {
-  NODE_HANDLES,
-  NODE_KINDS,
   newRoleNode,
   newFileNode,
   newDatabaseNode,
@@ -15,49 +15,24 @@ import {
   newGroupNode,
   newProxyNode,
   newLine,
-  entryNodes,
-  flowOutEdges,
-  ctxInEdges,
-  dbInEdges,
-  upstreamCtxNodeIds,
-  proxiesOf,
-  isGroupMember,
   stageLabel,
-} from '../../src/host/graph/model.js'
-import { connectionProblem, validateFlow, normalizeFlow, missingStageNodes } from '../../src/host/graph/validate.js'
-import type { GraphNode, WorkflowDocument } from '../../src/host/shared/graph-model.js'
+} from '../../../src/host/graph/model.js'
+import { connectionProblem, validateFlow, normalizeFlow, missingStageNodes } from '../../../src/host/graph/validate.js'
+import type { GraphNode, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
+import { makeFlow } from './fixtures/flow-fixture.js'
 
-/** 组装最小工作流（mode 可选，默认 mode1）。 */
-function makeFlow(nodes: GraphNode[], lines: WorkflowDocument['lines'] = [], mode: 'mode1' | 'mode2' = 'mode1'): Partial<WorkflowDocument> {
-  return { id: 'f1', sessionId: 's1', mode, name: 't', description: '', nodes, lines }
-}
-
+/** 校验问题码提取（断言用）。 */
 function codes(flow: Partial<WorkflowDocument>): string[] {
   return validateFlow(flow).issues.map((i) => i.code)
 }
-
-describe('连接点兼容矩阵（NODE_HANDLES）', () => {
-  it('9 类节点矩阵齐全且与需求连接点定义一致', () => {
-    expect(NODE_KINDS).toHaveLength(9)
-    expect(NODE_HANDLES.parent.inputs).toEqual(['flow-in', 'ctx-in', 'db-in'])
-    expect(NODE_HANDLES.parent.outputs).toEqual(['flow-out', 'ctx-out'])
-    expect(NODE_HANDLES.file).toEqual({ inputs: [], outputs: ['ctx-out'] })
-    expect(NODE_HANDLES.database).toEqual({ inputs: [], outputs: ['db-out'] })
-    expect(NODE_HANDLES.start).toEqual({ inputs: [], outputs: ['flow-out', 'ctx-out'] })
-    expect(NODE_HANDLES.end.outputs).toEqual([])
-    expect(NODE_HANDLES.pause).toEqual({ inputs: ['flow-in'], outputs: ['flow-out'] })
-    expect(NODE_HANDLES.group).toEqual({ inputs: ['flow-in'], outputs: ['flow-out'] })
-    expect(NODE_HANDLES.proxy).toEqual(NODE_HANDLES.agent)
-  })
-})
 
 describe('单连线检测 connectionProblem：合法矩阵', () => {
   const start = newStageNode('start', 'mode1')
   const end = newStageNode('end', 'mode1')
   const agent = newRoleNode('agent', 'a')
   const parent = newRoleNode('parent', 'p')
-  const file = newFileNode('text','f')
-  const db = newDatabaseNode('local','db')
+  const file = newFileNode('text', 'f')
+  const db = newDatabaseNode('local', 'db')
   const proxy = newProxyNode(agent.id)
 
   it.each([
@@ -77,8 +52,8 @@ describe('单连线检测 connectionProblem：合法矩阵', () => {
 describe('单连线检测 connectionProblem：非法用例', () => {
   const a = newRoleNode('agent', 'a')
   const b = newRoleNode('agent', 'b')
-  const file = newFileNode('text','f')
-  const db = newDatabaseNode('local','db')
+  const file = newFileNode('text', 'f')
+  const db = newDatabaseNode('local', 'db')
   const nodes = [a, b, file, db]
 
   it('自环拒绝', () => {
@@ -179,7 +154,7 @@ describe('validateFlow 全量校验', () => {
   it('虚拟节点引用缺失 → proxySourceMissing；引用非角色 → proxySourceKind', () => {
     const ghost = newProxyNode('nope')
     expect(codes(makeFlow([ghost]))).toContain('proxySourceMissing')
-    const file = newFileNode('text','f')
+    const file = newFileNode('text', 'f')
     const p2 = newProxyNode(file.id)
     expect(codes(makeFlow([file, p2]))).toContain('proxySourceKind')
   })
@@ -262,7 +237,7 @@ describe('validateFlow 全量校验', () => {
     g.data.memberIds = ['ghost']
     expect(codes(makeFlow([g]))).toContain('groupMemberMissing')
     const g2 = newGroupNode('g2')
-    const f = newFileNode('text','f')
+    const f = newFileNode('text', 'f')
     g2.data.memberIds = [f.id]
     expect(codes(makeFlow([g2, f]))).toContain('groupMemberKind')
   })
@@ -355,46 +330,6 @@ describe('normalizeFlow 归一化', () => {
     g.data.memberIds = ['m-1']
     const ok = validateFlow(makeFlow([g, m]))
     expect(ok.issues.filter((i) => i.code === 'groupGhost')).toHaveLength(0)
-  })
-})
-
-describe('入口解析与拓扑助手', () => {
-  it('entryNodes：start 即显式入口；缺失时为空（§4.2 入口解析）', () => {
-    const s = newStageNode('start', 'mode1')
-    const a = newRoleNode('agent', 'a')
-    expect(entryNodes(makeFlow([s, a])).map((n) => n.id)).toEqual([s.id])
-    expect(entryNodes(makeFlow([a]))).toEqual([])
-  })
-
-  it('flowOutEdges/ctxInEdges/dbInEdges/upstreamCtxNodeIds 正确', () => {
-    const a = newRoleNode('agent', 'a')
-    const b = newRoleNode('agent', 'b')
-    const c = newRoleNode('agent', 'c')
-    const db = newDatabaseNode('local','db')
-    const f = newFileNode('text','f')
-    const lines = [
-      newLine(a.id, b.id, 'flow-out', 'flow-in'),
-      newLine(f.id, c.id, 'ctx-out', 'ctx-in'),
-      newLine(a.id, c.id, 'ctx-out', 'ctx-in'),
-      newLine(db.id, c.id, 'db-out', 'db-in'),
-    ]
-    const flow = makeFlow([a, b, c, db, f], lines)
-    expect(flowOutEdges(flow, a.id).map((l) => l.target)).toEqual([b.id])
-    expect(ctxInEdges(flow, c.id).map((l) => l.source).sort()).toEqual([a.id, f.id].sort())
-    expect(dbInEdges(flow, c.id).map((l) => l.source)).toEqual([db.id])
-    expect(upstreamCtxNodeIds(flow, c.id).sort()).toEqual([a.id, f.id].sort())
-  })
-
-  it('proxiesOf/isGroupMember 正确', () => {
-    const main = newRoleNode('agent', 'main')
-    const proxy = newProxyNode(main.id)
-    const g = newGroupNode('g')
-    const member = newRoleNode('agent', 'm')
-    member.data.groupId = g.id
-    const flow = makeFlow([main, proxy, g, member])
-    expect(proxiesOf(flow, main.id).map((n) => n.id)).toEqual([proxy.id])
-    expect(isGroupMember(flow, member.id)).toBe(true)
-    expect(isGroupMember(flow, main.id)).toBe(false)
   })
 })
 
