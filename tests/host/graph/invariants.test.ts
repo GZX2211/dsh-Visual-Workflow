@@ -1,4 +1,4 @@
-// tests/host/graph-invariants.test.ts
+// tests/host/graph/invariants.test.ts
 //
 // 图检查器单测（自主编排方案 §6.1/§6.2/§6.3）：
 //   - 规则矩阵完整性：遍历 GRAPH_INVARIANT_CODES，每个 code 至少一条构造用例触发，
@@ -10,11 +10,19 @@
 // 断言策略：只断言 code 集合与级别（不绑定中文文案——文案属可润色内容）。
 
 import { describe, expect, it } from 'vitest'
-import { checkGraphInvariants, hasBlockingIssues, GRAPH_INVARIANT_CODES, invariantCodeInfo } from '../../src/host/graph/invariants.js'
-import { buildFlowDag, computeFlowLayers, detectCycleNodes, maxLayerWidth } from '../../src/host/graph/dag.js'
-import type { GraphIssue } from '../../src/host/graph/invariants-types.js'
-import type { GraphNode, Line, WorkflowDocument } from '../../src/host/shared/graph-model.js'
-import type { OrgMeta } from '../../src/host/shared/types.js'
+import {
+  GRAPH_INVARIANT_CODES,
+  buildFlowDag,
+  checkGraphInvariants,
+  computeFlowLayers,
+  detectCycleNodes,
+  hasBlockingIssues,
+  invariantCodeInfo,
+  maxLayerWidth,
+  type GraphIssue,
+} from '../../../src/host/graph/index.js'
+import type { GraphNode, Line, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
+import type { OrgMeta } from '../../../src/host/shared/types.js'
 
 // ---------------------------------------------------------------------------
 // 构造帮手（每个用例只触发目标 code，避免级联噪声干扰断言）

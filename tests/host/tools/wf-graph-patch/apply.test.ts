@@ -1,22 +1,19 @@
-// tests/host/milestone-gate.test.ts
+// tests/host/tools/wf-graph-patch/apply.test.ts
 //
-// P3 里程碑闸门（自主编排方案 §5.2 扩展1 + §10 P3 验收）——**纯函数部分**：
-//   - 虚拟节点角色判定（proxyRoleOf / milestoneProxiesOf / activeMilestoneGateOf）；
-//   - 闸门标记目标归一化（mainNodeIdOf：闸门虚拟节点 id ↔ 父代理节点 id）；
-//   - 补丁层 proxy data 归一化（label/role 落盘；role 越界拒绝；executor 不进闸门预算）。
-// 运行时行为（不自动 ok / 显式标记生效 / 预算递减 / 续跑继承）见 orchestrator.test.ts 的
-// 「P3 里程碑闸门（运行时）」与 wf-graph-patch.test.ts 的 mark_node 状态机用例。
+// wf_graph_patch 纯函数内核的**虚拟节点 data 归一化**用例
+// （原 tests/host/milestone-gate.test.ts 的「补丁层 proxy data 归一化」段，
+//   按 tests/AGENTS.md 的镜像规则迁到被测源文件 apply.ts 旁）：
+//   - create_node：虚拟节点只保留 label / role 两个字段；
+//   - role 越界 → WF_GRAPH_INVALID（错误文本给出取值域）；
+//   - update_node_data：提升为闸门 / 清空退回 executor（data 整体删除）；
+//   - proxySourceId 顶层字段语义不变；引用不存在的主节点 → 拒绝。
+// 角色语义判定（proxyRoleOf 等）与闸门归一化（mainNodeIdOf）见 tests/host/graph/model.test.ts。
+
 import { describe, expect, it } from 'vitest'
-import { applyGraphOps } from '../../src/host/tools/wf-graph-patch/apply.js'
-import {
-  activeMilestoneGateOf,
-  mainNodeIdOf,
-  milestoneProxiesOf,
-  proxyRoleOf,
-} from '../../src/host/graph/model.js'
-import { WfError } from '../../src/host/orchestrator/index.js'
-import { stageLabel } from '../../src/host/graph/model.js'
-import type { GraphNode, Line, WorkflowDocument } from '../../src/host/shared/graph-model.js'
+import { applyGraphOps } from '../../../../src/host/tools/wf-graph-patch/apply.js'
+import { proxyRoleOf, stageLabel } from '../../../../src/host/graph/index.js'
+import { WfError } from '../../../../src/host/orchestrator/index.js'
+import type { GraphNode, Line, WorkflowDocument } from '../../../../src/host/shared/graph-model.js'
 
 // ---------------------------------------------------------------------------
 // 图构造
@@ -66,66 +63,7 @@ function gateFlow(role?: 'executor' | 'milestone'): WorkflowDocument {
   }
 }
 
-// ---------------------------------------------------------------------------
-// 角色与闸门判定（纯函数）
-// ---------------------------------------------------------------------------
-
-describe('P3 虚拟节点角色判定', () => {
-  it('proxyRoleOf：缺省 executor（向后兼容既有画布），显式 milestone 才识别为闸门', () => {
-    expect(proxyRoleOf(proxyNode('m1', 'p1'))).toBe('executor')
-    expect(proxyRoleOf(proxyNode('m1', 'p1', { role: 'executor' }))).toBe('executor')
-    expect(proxyRoleOf(proxyNode('m1', 'p1', { role: 'milestone' }))).toBe('milestone')
-    expect(proxyRoleOf(null)).toBe('executor')
-  })
-
-  it('milestoneProxiesOf：只挑出该主节点的 milestone 虚拟节点', () => {
-    const flow = gateFlow('milestone')
-    flow.nodes.push(proxyNode('x1', 'p1', { role: 'executor' }))
-    expect(milestoneProxiesOf(flow, 'p1').map((n) => n.id)).toEqual(['m1'])
-    expect(milestoneProxiesOf(flow, 'a1')).toEqual([])
-  })
-
-  it('activeMilestoneGateOf：闸门被流程驱动（有 flow-in）才算生效', () => {
-    const live = gateFlow('milestone')
-    expect(activeMilestoneGateOf(live, 'p1')).toEqual({ proxyId: 'm1' })
-    // 去掉流程入口 → 闸门不会被驱动，视为未生效
-    const dead = gateFlow('milestone')
-    dead.lines = dead.lines.filter((line) => line.target !== 'm1')
-    expect(activeMilestoneGateOf(dead, 'p1')).toBeNull()
-  })
-
-  it('activeMilestoneGateOf：executor 角色的虚拟节点不算闸门（保留既有自动完成行为）', () => {
-    expect(activeMilestoneGateOf(gateFlow('executor'), 'p1')).toBeNull()
-    expect(activeMilestoneGateOf(gateFlow(undefined), 'p1')).toBeNull()
-  })
-
-  it('activeMilestoneGateOf：带 label 时一并返回（画布显示名），多个闸门取画布顺序第一个', () => {
-    const flow = gateFlow('milestone')
-    ;(flow.nodes.find((n) => n.id === 'm1') as { data?: { label?: string; role?: 'milestone' } }).data = { label: '里程碑①：方案评审', role: 'milestone' }
-    expect(activeMilestoneGateOf(flow, 'p1')).toEqual({ proxyId: 'm1', label: '里程碑①：方案评审' })
-    flow.nodes.push(proxyNode('m2', 'p1', { role: 'milestone' }))
-    flow.lines.push(flowLine('l4', 'a1', 'm2'))
-    expect(activeMilestoneGateOf(flow, 'p1')?.proxyId).toBe('m1')
-  })
-})
-
-describe('P3 闸门标记目标归一化（mainNodeIdOf）', () => {
-  it('普通节点返回自身 id；虚拟节点返回主节点 id；不存在返回 null', () => {
-    const flow = gateFlow('milestone')
-    expect(mainNodeIdOf(flow, 'p1')).toBe('p1')
-    expect(mainNodeIdOf(flow, 'm1')).toBe('p1')
-    expect(mainNodeIdOf(flow, 'a1')).toBe('a1')
-    expect(mainNodeIdOf(flow, '不存在')).toBeNull()
-  })
-
-  it('悬挂虚拟节点（主节点已移除）返回 null（不把错目标当成闸门）', () => {
-    const flow = gateFlow('milestone')
-    flow.nodes = flow.nodes.filter((n) => n.id !== 'p1')
-    expect(mainNodeIdOf(flow, 'm1')).toBeNull()
-  })
-})
-
-describe('P3 补丁层 proxy data 归一化（applyGraphOps 纯函数）', () => {
+describe('补丁层 proxy data 归一化（applyGraphOps 纯函数）', () => {
   it('create_node：虚拟节点的 label / role 落盘（只保留这两个字段）', () => {
     const doc = gateFlow('milestone')
     const { doc: next } = applyGraphOps({

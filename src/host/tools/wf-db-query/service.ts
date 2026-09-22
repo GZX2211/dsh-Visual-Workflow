@@ -8,7 +8,7 @@
 
 import { join } from 'node:path'
 import type { DatabaseNode, WorkflowDocument } from '../../shared/graph-model.js'
-import { dbInEdges, nodeById } from '../../graph/model.js'
+import { dbInEdges, nodeById } from '../../graph/index.js'
 import type { EmbeddingEngine } from '../../embedding/engine.js'
 import { VectorIndex, type IndexRecord, type VectorIndexFile } from '../../embedding/indexer.js'
 import { CHUNK_OVERLAP_DEFAULT, CHUNK_SIZE_DEFAULT } from '../../embedding/chunker.js'

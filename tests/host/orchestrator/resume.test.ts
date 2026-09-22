@@ -10,7 +10,7 @@
 // 装配与测试替身见 fixtures/harness.ts（共享，不在本文件内重复）。
 
 import { afterEach, describe, expect, it } from 'vitest'
-import { stageLabel } from '../../../src/host/graph/model.js'
+import { stageLabel } from '../../../src/host/graph/index.js'
 import type { RoleNode, StageNode, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
 import type { RunSnapshot } from '../../../src/host/shared/types.js'
 import { buildResumedSnapshot, findResumableRun, type CallerInfo } from '../../../src/host/orchestrator/index.js'

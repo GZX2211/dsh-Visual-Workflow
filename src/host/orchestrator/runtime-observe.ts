@@ -5,7 +5,7 @@
 // 方法体逐字移动。
 
 import type { WorkflowDocument } from '../shared/graph-model.js'
-import { memberGroupId } from '../graph/model.js'
+import { memberGroupId } from '../graph/index.js'
 import { lastAssistantText, setNodeStatus } from './snapshot.js'
 import { SUBAGENT_END_RETRY_DELAY_MS, SUBAGENT_END_RETRY_MAX } from './seams.js'
 import type { RunEntry, SubagentEndInfo } from './run-entry.js'

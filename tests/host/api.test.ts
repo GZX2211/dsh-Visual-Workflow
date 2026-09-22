@@ -33,7 +33,7 @@ import * as EP from '../../src/host/shared/protocol.js'
 import { VisualWorkflowApi, registerRoutes, type ApiHost } from '../../src/host/remote/api.js'
 import { CARD_DESC_MAX, zhDescription } from '../../src/host/remote/api-catalog.js'
 import { registerDownloadRoute, copyIntoManagedFile, managedFilePath } from '../../src/host/remote/download.js'
-import { stageLabel } from '../../src/host/graph/model.js'
+import { stageLabel } from '../../src/host/graph/index.js'
 import type { DatabaseNode, RoleNode, StageNode, WorkflowDocument } from '../../src/host/shared/graph-model.js'
 import type { EmbeddingEngine } from '../../src/host/embedding/engine.js'
 

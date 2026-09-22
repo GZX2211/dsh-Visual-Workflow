@@ -1,4 +1,4 @@
-// src/host/graph/invariants-meta-rules.ts
+// src/host/graph/invariants-rules-meta.ts
 //
 // 图质量规则（自主编排方案 §6.2 规则表）第三期：**元参数与命名**维度——命名约定、
 // 角色名重复、元参数硬护栏（节点/组/人数/并行分支/单轮 op 上限）。

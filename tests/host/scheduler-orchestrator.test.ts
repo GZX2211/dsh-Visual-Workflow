@@ -21,7 +21,7 @@ import {
   type TurnEndInfo,
   findResumableRun,
 } from '../../src/host/orchestrator/index.js'
-import { stageLabel } from '../../src/host/graph/model.js'
+import { stageLabel } from '../../src/host/graph/index.js'
 import type { RoleNode, StageNode, WorkflowDocument } from '../../src/host/shared/graph-model.js'
 
 const cleanups: Array<() => Promise<void>> = []

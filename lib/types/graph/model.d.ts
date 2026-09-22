@@ -76,12 +76,10 @@ export declare function newProxyNode(sourceId: string, position?: {
 export declare function newLine(source: string, target: string, sourceHandle: Handle, targetHandle: Handle, condition?: Line['condition']): Line;
 /** 显式启动节点：kind='start' 的节点即流程入口（§4.2.5.1；架构文档 §4.2 入口解析）。 */
 export declare function entryNodes(flow: Partial<WorkflowDocument>): GraphNode[];
-/** 某节点的 flow-out 出边列表（用于下游推进/条件分支，§4.3）。 */
+/** 某节点的流程出边列表（用于下游推进/条件分支，§4.3；仅完整通道配对的流程线）。 */
 export declare function flowOutEdges(flow: Partial<WorkflowDocument>, nodeId: string): Line[];
-/** 某节点的 flow-in 入边列表（上游流程来源）。 */
+/** 某节点的流程入边列表（上游流程来源；仅完整通道配对的流程线）。 */
 export declare function flowInEdges(flow: Partial<WorkflowDocument>, nodeId: string): Line[];
-/** 某连线是否为流程线（流程出 → 流程入；ctx/db 连线不参与编排调度，§4.3 连线类型规范）。 */
-export declare function isFlowLine(line: Line): boolean;
 /**
  * 节点是否参与流程拓扑（作为任一流程线的源或目标；ctx/db 连线不计）。
  * 虚拟节点（proxy）的流程线归属其主角色节点：主节点自身或其任一虚拟节点参与
@@ -90,10 +88,12 @@ export declare function isFlowLine(line: Line): boolean;
  */
 export declare function nodeParticipatesInFlow(flow: Partial<WorkflowDocument>, nodeId: string): boolean;
 /**
- * 节点是否被流程线**驱动**（存在 flow-in 入边，或其任一虚拟节点存在 flow-in 入边）。
- * 与「参与流程」的区别：仅有 flow-out 而无 flow-in 的节点不会被上游激活——
- * 父代理「被流程线连接」的判定以驱动（flow-in）为准，与编排运行时
+ * 节点是否被流程线**驱动**（存在流程入边，或其任一虚拟节点存在流程入边）。
+ * 与「参与流程」的区别：仅有流程出而无流程入的节点不会被上游激活——
+ * 父代理「被流程线连接」的判定以驱动（流程入）为准，与编排运行时
  * （prepareParentExecutor/parentExecutorOf）语义保持一致。
+ * 入边判定复用 isFlowLine（两端通道配对）：只看目标侧 handle 会把「上下文出 → 流程入」
+ * 这类幽灵线算成驱动，与流程子图口径分裂——本函数与 isFlowLine 同源。
  */
 export declare function nodeHasFlowIn(flow: Partial<WorkflowDocument>, nodeId: string): boolean;
 /** 某节点的 ctx-in 入边列表（上游上下文来源，§4.2.3.2 规则 5 显式连线）。 */

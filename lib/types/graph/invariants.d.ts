@@ -1,6 +1,4 @@
-import { type CheckGraphInput, type GraphIssue } from './invariants-types.js';
-export type { CheckGraphInput, GraphIssue, IssueCodeInfo, IssueLevel } from './invariants-types.js';
-export { GRAPH_INVARIANT_CODES, invariantCodeInfo } from './invariants-types.js';
+import type { CheckGraphInput, GraphIssue } from './invariants-types.js';
 /**
  * 检查编排图（纯函数）。
  *
@@ -13,5 +11,3 @@ export { GRAPH_INVARIANT_CODES, invariantCodeInfo } from './invariants-types.js'
 export declare function checkGraphInvariants(input: CheckGraphInput): GraphIssue[];
 /** 是否含阻断级问题（调用方落盘前判定用）。 */
 export declare function hasBlockingIssues(issues: GraphIssue[] | null | undefined): boolean;
-/** 注册表校验（供测试断言：每条规则 code 必须登记在 GRAPH_INVARIANT_CODES）。 */
-export declare function isRegisteredCode(code: string): boolean;

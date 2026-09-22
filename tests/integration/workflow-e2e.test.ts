@@ -26,7 +26,7 @@ import {
 } from '../../src/host/orchestrator/index.js'
 import type { RunSnapshot } from '../../src/host/shared/types.js'
 import type { StageNode, RoleNode, WorkflowDocument, Line } from '../../src/host/shared/graph-model.js'
-import { stageLabel } from '../../src/host/graph/model.js'
+import { stageLabel } from '../../src/host/graph/index.js'
 import { VisualWorkflowApi, type ApiHost } from '../../src/host/remote/api.js'
 import { SessionMap } from '../../src/host/service/sessions-map.js'
 import { ServiceManager } from '../../src/host/service/manager.js'

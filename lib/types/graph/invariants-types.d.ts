@@ -44,6 +44,14 @@ export interface IssueCodeInfo {
     description: string;
 }
 /**
+ * 元参数硬护栏超限 code 的**唯一本体**。
+ * 为什么写在这里：该 code 由「元参数护栏判定」产出，却登记在检查器 code 注册表中；
+ * 两处各写一份字面量会造成静默漂移，故字面量只在此定义，护栏实现引用本常量。
+ */
+export declare const META_LIMIT_EXCEEDED_CODE = "metaLimitExceeded";
+/** 元参数低于下限 code 的唯一本体（提示级，不阻断落盘）。 */
+export declare const META_BELOW_MIN_CODE = "metaBelowMin";
+/**
  * 检查器 code 全集（自主编排方案 §6.2 规则表逐条对应）。
  * 新增规则必须同步登记本表——测试会遍历它，确保每条规则至少一例覆盖。
  */

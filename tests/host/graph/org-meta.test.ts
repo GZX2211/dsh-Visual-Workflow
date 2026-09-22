@@ -1,4 +1,4 @@
-// tests/host/org-meta.test.ts
+// tests/host/graph/org-meta.test.ts
 //
 // 元参数纯函数单测（自主编排方案 §6.4 / 决策 D-04、D-13、D-21）：
 //   - normalizeOrgMeta：未知字段丢弃、数值夹取、区间自洽、枚举白名单、数组去重；
@@ -11,24 +11,24 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  effectiveOrgMeta,
-  freezeOrgMeta,
-  metaOfDocument,
-  normalizeOrgMeta,
+  META_BELOW_MIN_CODE,
+  META_LIMIT_EXCEEDED_CODE,
   ORG_META_LIMIT_DEFAULTS,
   ORG_META_NORMALIZE_CAPS,
-  orgBudgetOf,
-} from '../../src/host/graph/org-meta.js'
-import {
+  effectiveOrgMeta,
   executableUnitCount,
+  freezeOrgMeta,
   groupCount,
   maxGroupMembers,
+  metaLimitIssues,
+  metaOfDocument,
+  normalizeOrgMeta,
+  orgBudgetOf,
   orgUsageOf,
-} from '../../src/host/graph/org-meta-usage.js'
-import { META_BELOW_MIN_CODE, META_LIMIT_CODE, metaLimitIssues } from '../../src/host/graph/org-meta-limits.js'
-import { buildOrgBudgetText } from '../../src/host/prompts/index.js'
-import type { GraphNode } from '../../src/host/shared/graph-model.js'
-import type { RunSnapshot } from '../../src/host/shared/types.js'
+} from '../../../src/host/graph/index.js'
+import { buildOrgBudgetText } from '../../../src/host/prompts/index.js'
+import type { GraphNode } from '../../../src/host/shared/graph-model.js'
+import type { RunSnapshot } from '../../../src/host/shared/types.js'
 
 /** 可执行节点（agent/parent/group 三类各一）。 */
 function agent(id: string): GraphNode {
@@ -220,20 +220,20 @@ describe('metaLimitIssues：硬护栏与下限提示', () => {
 
   it('节点数超限：error + 修复建议', () => {
     const issues = metaLimitIssues({ nodeMax: 4 }, usage)
-    expect(codes(issues)).toEqual([META_LIMIT_CODE])
+    expect(codes(issues)).toEqual([META_LIMIT_EXCEEDED_CODE])
     expect(issues[0].level).toBe('error')
     expect(String(issues[0].suggestion ?? '').length).toBeGreaterThan(0)
   })
 
   it('组数/组内人数超限：各一例', () => {
-    expect(codes(metaLimitIssues({ groupMax: 1 }, usage))).toEqual([META_LIMIT_CODE])
-    expect(codes(metaLimitIssues({ membersMax: 3 }, usage))).toEqual([META_LIMIT_CODE])
+    expect(codes(metaLimitIssues({ groupMax: 1 }, usage))).toEqual([META_LIMIT_EXCEEDED_CODE])
+    expect(codes(metaLimitIssues({ membersMax: 3 }, usage))).toEqual([META_LIMIT_EXCEEDED_CODE])
   })
 
   it('并行分支/单轮 op：仅在维度提供时判定', () => {
     expect(codes(metaLimitIssues({ parallelBranchMax: 2 }, usage))).toEqual([])
-    expect(codes(metaLimitIssues({ parallelBranchMax: 2 }, { ...usage, parallelBranchMax: 3 }))).toEqual([META_LIMIT_CODE])
-    expect(codes(metaLimitIssues({ patchOpsMax: 1 }, { ...usage, patchOps: 4 }))).toEqual([META_LIMIT_CODE])
+    expect(codes(metaLimitIssues({ parallelBranchMax: 2 }, { ...usage, parallelBranchMax: 3 }))).toEqual([META_LIMIT_EXCEEDED_CODE])
+    expect(codes(metaLimitIssues({ patchOpsMax: 1 }, { ...usage, patchOps: 4 }))).toEqual([META_LIMIT_EXCEEDED_CODE])
   })
 
   it('下限：只提示（warning），不阻断', () => {

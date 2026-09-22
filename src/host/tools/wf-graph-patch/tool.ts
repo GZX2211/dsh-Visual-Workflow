@@ -26,13 +26,18 @@ import { defineTool, type ToolDefinitionLike, type ToolExecLike } from '../infra
 import { textRender } from '../infrastructure/text-render.js'
 import { callerOf } from '../infrastructure/caller.js'
 import { WfError } from '../../orchestrator/index.js'
-import { checkGraphInvariants, hasBlockingIssues } from '../../graph/invariants.js'
-import { mainNodeIdOf } from '../../graph/model.js'
-import type { GraphIssue } from '../../graph/invariants.js'
-import { effectiveOrgMeta, metaOfDocument, normalizeOrgMeta } from '../../graph/org-meta.js'
-import { orgUsageOf } from '../../graph/org-meta-usage.js'
-import { metaLimitIssues } from '../../graph/org-meta-limits.js'
-import { validateFlow } from '../../graph/validate.js'
+import {
+  checkGraphInvariants,
+  effectiveOrgMeta,
+  hasBlockingIssues,
+  mainNodeIdOf,
+  metaLimitIssues,
+  metaOfDocument,
+  normalizeOrgMeta,
+  orgUsageOf,
+  validateFlow,
+  type GraphIssue,
+} from '../../graph/index.js'
 import { applyGraphOps, applyMarkOp, OP_FIELD_SHAPES, ROLE_NODE_DATA_CONTRACT } from './apply.js'
 import {
   GROUP_HINTS,

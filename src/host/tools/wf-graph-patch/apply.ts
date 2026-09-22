@@ -6,8 +6,16 @@
 //   - ensureGroupConsistency：协作组与成员的 groupId 双向一致（复用画布侧同款语义）。
 // 不触盘、不读时钟/随机源——落盘与校验在 tool.ts 执行层。
 
-import { newRoleNode, makeNodeId, makeLineId, NODE_KINDS, NODE_HANDLES, HANDLE_PAIRING, CONDITION_TYPES } from '../../graph/model.js'
-import { stageLabel } from '../../graph/model.js'
+import {
+  CONDITION_TYPES,
+  HANDLE_PAIRING,
+  NODE_HANDLES,
+  NODE_KINDS,
+  makeLineId,
+  makeNodeId,
+  newRoleNode,
+  stageLabel,
+} from '../../graph/index.js'
 import { WfError } from '../../orchestrator/index.js'
 import type { GraphNode, Handle, Line, WorkflowDocument } from '../../shared/graph-model.js'
 import type { GraphPatchOp, GraphPatchResult, MarkPatchOp, MarkPatchResult } from './types.js'

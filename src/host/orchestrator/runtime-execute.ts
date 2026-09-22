@@ -7,7 +7,7 @@
 // paused/stopped/interrupted 断点时自动续跑接管，不再以 WF_PAUSED/WF_STOPPED 阻断。
 
 import { WF_RUN_NODE_WAIT } from '../shared/protocol.js'
-import { nodeById } from '../graph/model.js'
+import { nodeById } from '../graph/index.js'
 import { DEFAULT_SYSTEM_LANGUAGE } from '../system-language.js'
 import { collabPromptOf, labelOf } from './graph-facts.js'
 import { effectiveReactLimitOf, effectiveRetryLimitOf, effectiveThinkingOf } from './node-params.js'

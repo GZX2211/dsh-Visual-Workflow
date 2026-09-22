@@ -6,7 +6,7 @@
 //   - OP_GROUP 工具箱：op → 组名（服务端据此拒绝同一补丁混用不同组）。
 // 纯类型 + 常量（无 IO），可在 host 单测与后续客户端角标渲染侧复用。
 
-import type { GraphIssue } from '../../graph/invariants.js'
+import type { GraphIssue } from '../../graph/index.js'
 import type { OrgMeta } from '../../shared/types.js'
 
 /** 补丁作用域：template = 工作流模板（规划期改模板）；instance = 工作流/服务实例（运行期改实例）。 */

@@ -24,7 +24,7 @@ import {
   ruleStageDirection,
   ruleStartFlowOut,
   ruleStartRequired,
-} from './invariants-rules.js'
+} from './invariants-rules-flow.js'
 import {
   ruleCtxSource,
   ruleDataNodeComplete,
@@ -35,11 +35,10 @@ import {
   ruleProxySource,
   ruleRoleNodeConfigured,
 } from './invariants-rules-nodes.js'
-import { ruleDuplicateRoleLabel, ruleMetaLimits, ruleNamingConvention } from './invariants-meta-rules.js'
-import { GRAPH_INVARIANT_CODES, type CheckGraphInput, type GraphIssue } from './invariants-types.js'
+import { ruleDuplicateRoleLabel, ruleMetaLimits, ruleNamingConvention } from './invariants-rules-meta.js'
+import type { CheckGraphInput, GraphIssue } from './invariants-types.js'
 
-export type { CheckGraphInput, GraphIssue, IssueCodeInfo, IssueLevel } from './invariants-types.js'
-export { GRAPH_INVARIANT_CODES, invariantCodeInfo } from './invariants-types.js'
+// code 注册表与问题类型契约的出口在 invariants-types.ts；本文件只负责规则聚合。
 
 /** error 级 issue 缺少修复建议时的兜底文案（模型自我修正通道必须非空）。 */
 const FALLBACK_SUGGESTION = '按提示修正画布拓扑后重新提交；若为设计意图，请先调整元参数（set_meta）再改图。'
@@ -135,9 +134,4 @@ export function checkGraphInvariants(input: CheckGraphInput): GraphIssue[] {
 /** 是否含阻断级问题（调用方落盘前判定用）。 */
 export function hasBlockingIssues(issues: GraphIssue[] | null | undefined): boolean {
   return (issues ?? []).some((issue) => issue.level === 'error')
-}
-
-/** 注册表校验（供测试断言：每条规则 code 必须登记在 GRAPH_INVARIANT_CODES）。 */
-export function isRegisteredCode(code: string): boolean {
-  return GRAPH_INVARIANT_CODES.some((item) => item.code === code)
 }

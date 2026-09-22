@@ -17,7 +17,7 @@ import { existsSync } from 'node:fs'
 import { join, delimiter, isAbsolute } from 'node:path'
 import { atomicReplaceFile } from '../storage/atomic.js'
 import type { FlowStore } from '../storage/flow-store.js'
-import { validateFlow } from '../graph/validate.js'
+import { validateFlow } from '../graph/index.js'
 import { renderServePatch } from './serve-patch.js'
 import { findFreePort } from './port-pool.js'
 

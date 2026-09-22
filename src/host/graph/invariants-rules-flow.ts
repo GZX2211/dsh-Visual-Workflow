@@ -1,9 +1,9 @@
-// src/host/graph/invariants-rules.ts
+// src/host/graph/invariants-rules-flow.ts
 //
 // 图质量规则（自主编排方案 §6.2 规则表）第一期：**流程与阶段**维度——启动/结束唯一性
 // 与端点合法性、孤立节点、条件分支配对、环路、可达性与断头流程、阶段节点方向。
 // 节点/组/数据/虚拟节点维度见 invariants-rules-nodes.ts；元参数维度见
-// invariants-meta-rules.ts；汇总与级别提升见 invariants.ts。
+// invariants-rules-meta.ts；汇总与级别提升见 invariants.ts。
 //
 // 每个规则一个纯函数（入参 CheckGraphInput + 已构建的流程子图 FlowDag，返回 GraphIssue[]）：
 // 规则表逐条对应单测（每 code 一例），单函数即可被精确断言。
@@ -12,9 +12,9 @@
 // 阶段唯一/父唯一）；本层 = 编排质量（可达性/孤岛/断头/条件分支完整性）。
 // 纯函数：不读时钟/随机源，不改写入参，输出顺序稳定（按输入顺序遍历）。
 
-import { isFlowLine, type FlowDag } from './dag.js'
+import type { FlowDag } from './dag.js'
 import type { CheckGraphInput, GraphIssue } from './invariants-types.js'
-import type { GraphNode, Line } from '../shared/graph-model.js'
+import type { GraphNode } from '../shared/graph-model.js'
 
 /** 可执行单元种类（流程端点判定用：agent/parent/group）。 */
 const UNIT_KINDS: readonly string[] = ['agent', 'parent', 'group']
@@ -27,11 +27,6 @@ function isUnit(node: GraphNode | undefined): boolean {
 /** 按 id 建索引（保持输入顺序）。 */
 function nodeMapOf(flow: CheckGraphInput['flow']): Map<string, GraphNode> {
   return new Map((flow?.nodes ?? []).map((node) => [node.id, node]))
-}
-
-/** 全部流程线（仅 flow-out → flow-in）。 */
-export function flowLinesOf(flow: CheckGraphInput['flow']): Array<Line & { id: string }> {
-  return (flow?.lines ?? []).filter((line) => isFlowLine(line))
 }
 
 /** a) 恰好 1 个启动/输入节点（缺失/多个都是 error）。 */

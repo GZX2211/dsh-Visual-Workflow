@@ -18,7 +18,7 @@ import {
 } from '../../src/host/service/manager.js'
 import type { ServiceState } from '../../src/host/shared/types.js'
 import type { RoleNode, StageNode, WorkflowDocument, Line } from '../../src/host/shared/graph-model.js'
-import { stageLabel } from '../../src/host/graph/model.js'
+import { stageLabel } from '../../src/host/graph/index.js'
 
 const cleanups: Array<() => Promise<void>> = []
 

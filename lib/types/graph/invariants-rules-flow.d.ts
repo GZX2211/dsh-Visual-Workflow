@@ -1,10 +1,5 @@
-import { type FlowDag } from './dag.js';
+import type { FlowDag } from './dag.js';
 import type { CheckGraphInput, GraphIssue } from './invariants-types.js';
-import type { Line } from '../shared/graph-model.js';
-/** 全部流程线（仅 flow-out → flow-in）。 */
-export declare function flowLinesOf(flow: CheckGraphInput['flow']): Array<Line & {
-    id: string;
-}>;
 /** a) 恰好 1 个启动/输入节点（缺失/多个都是 error）。 */
 export declare function ruleStartRequired({ flow }: CheckGraphInput): GraphIssue[];
 /** b) 启动节点的流程出 ≥1 且目标为可执行单元。 */

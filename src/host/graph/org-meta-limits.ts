@@ -10,13 +10,10 @@
 
 import type { OrgMeta } from '../shared/types.js'
 import type { OrgUsage } from './org-meta-usage.js'
-import type { GraphIssue } from './invariants-types.js'
+import { META_BELOW_MIN_CODE, META_LIMIT_EXCEEDED_CODE, type GraphIssue } from './invariants-types.js'
 
-/** 元参数超限 issue 的稳定 code（error 级）。 */
-export const META_LIMIT_CODE = 'metaLimitExceeded'
-
-/** 元参数低于下限 issue 的稳定 code（warning 级）。 */
-export const META_BELOW_MIN_CODE = 'metaBelowMin'
+// 两个稳定 code 的字面量本体在 invariants-types.ts（检查器 code 注册表同侧）：
+// 注册表是唯一事实源，本文件只引用，不再重复定义字面量。
 
 /**
  * 元参数硬护栏判定：返回稳定 code 的 issue 列表；空数组 = 通过。
@@ -27,7 +24,7 @@ export function metaLimitIssues(meta: OrgMeta, usage: OrgUsage): GraphIssue[] {
   const nodeMax = Number(meta.nodeMax) || 0
   if (nodeMax > 0 && usage.nodeCount > nodeMax) {
     issues.push({
-      code: META_LIMIT_CODE,
+      code: META_LIMIT_EXCEEDED_CODE,
       level: 'error',
       message: `可执行节点数 ${usage.nodeCount} 超过元参数上限 ${nodeMax}`,
       suggestion: `删减或合并可执行节点（agent/parent/group）至 ${nodeMax} 个以内；如需更大规模，请先以 set_meta 提高 nodeMax`,
@@ -36,7 +33,7 @@ export function metaLimitIssues(meta: OrgMeta, usage: OrgUsage): GraphIssue[] {
   const groupMax = Number(meta.groupMax) || 0
   if (groupMax > 0 && usage.groupCount > groupMax) {
     issues.push({
-      code: META_LIMIT_CODE,
+      code: META_LIMIT_EXCEEDED_CODE,
       level: 'error',
       message: `协作组数 ${usage.groupCount} 超过元参数上限 ${groupMax}`,
       suggestion: `减少协作组卡片数量至 ${groupMax} 个以内，或把成员改为独立节点串行执行`,
@@ -45,7 +42,7 @@ export function metaLimitIssues(meta: OrgMeta, usage: OrgUsage): GraphIssue[] {
   const membersMax = Number(meta.membersMax) || 0
   if (membersMax > 0 && usage.maxGroupMembers > membersMax) {
     issues.push({
-      code: META_LIMIT_CODE,
+      code: META_LIMIT_EXCEEDED_CODE,
       level: 'error',
       message: `存在组内人数 ${usage.maxGroupMembers} 超过元参数上限 ${membersMax}`,
       suggestion: `把超限协作组拆成多个组（每组 ≤ ${membersMax} 人），或减少组成员数`,
@@ -54,7 +51,7 @@ export function metaLimitIssues(meta: OrgMeta, usage: OrgUsage): GraphIssue[] {
   const parallelBranchMax = Number(meta.parallelBranchMax) || 0
   if (parallelBranchMax > 0 && usage.parallelBranchMax !== undefined && usage.parallelBranchMax > parallelBranchMax) {
     issues.push({
-      code: META_LIMIT_CODE,
+      code: META_LIMIT_EXCEEDED_CODE,
       level: 'error',
       message: `单列并行分支 ${usage.parallelBranchMax} 超过元参数上限 ${parallelBranchMax}`,
       suggestion: `把并行分支改为串行或分批，单列并行数不超过 ${parallelBranchMax}`,
@@ -63,7 +60,7 @@ export function metaLimitIssues(meta: OrgMeta, usage: OrgUsage): GraphIssue[] {
   const patchOpsMax = Number(meta.patchOpsMax) || 0
   if (patchOpsMax > 0 && usage.patchOps !== undefined && usage.patchOps > patchOpsMax) {
     issues.push({
-      code: META_LIMIT_CODE,
+      code: META_LIMIT_EXCEEDED_CODE,
       level: 'error',
       message: `单轮改图 ${usage.patchOps} 个操作超过元参数上限 ${patchOpsMax}`,
       suggestion: `拆成多轮补丁提交，每轮不超过 ${patchOpsMax} 个操作`,

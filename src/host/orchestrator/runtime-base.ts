@@ -12,8 +12,7 @@
 // RuntimeObserve ← RuntimeLifecycle ← OrchestratorRuntime（runtime.ts 收口）。
 
 import { randomUUID } from 'node:crypto'
-import { activeMilestoneGateOf, isGroupMember } from '../graph/model.js'
-import { normalizeOrgMeta } from '../graph/org-meta.js'
+import { activeMilestoneGateOf, isGroupMember, normalizeOrgMeta } from '../graph/index.js'
 import type { RoleNode, WorkflowDocument } from '../shared/graph-model.js'
 import type { RunSnapshot, RunStatus } from '../shared/types.js'
 import { cloneSnapshot, setNodeStatus } from './snapshot.js'

@@ -4,7 +4,7 @@
 // 事实来源统一走 graph-facts.buildNodeContextFacts（与父代理执行单元共用同一上下文口径）。
 
 import { buildNodeTaskBlock, DEFAULT_OUTPUT_CONTRACT } from '../prompts/index.js'
-import { isGroupMember } from '../graph/model.js'
+import { isGroupMember } from '../graph/index.js'
 import type { RoleNode, WorkflowDocument } from '../shared/graph-model.js'
 import type { RunSnapshot } from '../shared/types.js'
 import { buildNodeContextFacts, collabBlockOf } from './graph-facts.js'

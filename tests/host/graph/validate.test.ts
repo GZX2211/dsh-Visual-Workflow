@@ -8,16 +8,19 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  newRoleNode,
-  newFileNode,
+  connectionProblem,
+  missingStageNodes,
   newDatabaseNode,
-  newStageNode,
+  newFileNode,
   newGroupNode,
-  newProxyNode,
   newLine,
+  newProxyNode,
+  newRoleNode,
+  newStageNode,
+  normalizeFlow,
   stageLabel,
-} from '../../../src/host/graph/model.js'
-import { connectionProblem, validateFlow, normalizeFlow, missingStageNodes } from '../../../src/host/graph/validate.js'
+  validateFlow,
+} from '../../../src/host/graph/index.js'
 import type { GraphNode, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
 import { makeFlow } from './fixtures/flow-fixture.js'
 

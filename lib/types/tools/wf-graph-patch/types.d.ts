@@ -1,4 +1,4 @@
-import type { GraphIssue } from '../../graph/invariants.js';
+import type { GraphIssue } from '../../graph/index.js';
 import type { OrgMeta } from '../../shared/types.js';
 /** 补丁作用域：template = 工作流模板（规划期改模板）；instance = 工作流/服务实例（运行期改实例）。 */
 export type PatchScope = 'template' | 'instance';

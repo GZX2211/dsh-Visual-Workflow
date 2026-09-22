@@ -28,6 +28,7 @@ import type {
   WorkflowMode,
 } from '../shared/graph-model.js'
 import { createHash } from 'node:crypto'
+import { isFlowLine } from './dag.js'
 
 // ---------------------------------------------------------------------------
 // 连接点兼容矩阵（每类节点的可用连接点；语义依据需求文档 §4.2.3~§4.2.5）
@@ -222,20 +223,19 @@ export function entryNodes(flow: Partial<WorkflowDocument>): GraphNode[] {
   return (flow.nodes ?? []).filter((n) => n.kind === 'start')
 }
 
-/** 某节点的 flow-out 出边列表（用于下游推进/条件分支，§4.3）。 */
+/** 某节点的流程出边列表（用于下游推进/条件分支，§4.3；仅完整通道配对的流程线）。 */
 export function flowOutEdges(flow: Partial<WorkflowDocument>, nodeId: string): Line[] {
-  return (flow.lines ?? []).filter((l) => l.source === nodeId && l.sourceHandle === 'flow-out')
+  return (flow.lines ?? []).filter((l) => isFlowLine(l) && l.source === nodeId)
 }
 
-/** 某节点的 flow-in 入边列表（上游流程来源）。 */
+/** 某节点的流程入边列表（上游流程来源；仅完整通道配对的流程线）。 */
 export function flowInEdges(flow: Partial<WorkflowDocument>, nodeId: string): Line[] {
-  return (flow.lines ?? []).filter((l) => l.target === nodeId && l.targetHandle === 'flow-in')
+  return (flow.lines ?? []).filter((l) => isFlowLine(l) && l.target === nodeId)
 }
 
-/** 某连线是否为流程线（流程出 → 流程入；ctx/db 连线不参与编排调度，§4.3 连线类型规范）。 */
-export function isFlowLine(line: Line): boolean {
-  return line.sourceHandle === 'flow-out' || line.targetHandle === 'flow-in'
-}
+// 流程线判定（isFlowLine）的**唯一本体在 dag.ts**：本文件的「参与流程 / 被流程驱动」
+// 判定复用该实现，避免同一概念出现两套口径（历史上曾以「或」语义重复实现，会把
+// ctx/db 通道的非法线误判为流程线）。
 
 /**
  * 节点是否参与流程拓扑（作为任一流程线的源或目标；ctx/db 连线不计）。
@@ -250,14 +250,16 @@ export function nodeParticipatesInFlow(flow: Partial<WorkflowDocument>, nodeId: 
 }
 
 /**
- * 节点是否被流程线**驱动**（存在 flow-in 入边，或其任一虚拟节点存在 flow-in 入边）。
- * 与「参与流程」的区别：仅有 flow-out 而无 flow-in 的节点不会被上游激活——
- * 父代理「被流程线连接」的判定以驱动（flow-in）为准，与编排运行时
+ * 节点是否被流程线**驱动**（存在流程入边，或其任一虚拟节点存在流程入边）。
+ * 与「参与流程」的区别：仅有流程出而无流程入的节点不会被上游激活——
+ * 父代理「被流程线连接」的判定以驱动（流程入）为准，与编排运行时
  * （prepareParentExecutor/parentExecutorOf）语义保持一致。
+ * 入边判定复用 isFlowLine（两端通道配对）：只看目标侧 handle 会把「上下文出 → 流程入」
+ * 这类幽灵线算成驱动，与流程子图口径分裂——本函数与 isFlowLine 同源。
  */
 export function nodeHasFlowIn(flow: Partial<WorkflowDocument>, nodeId: string): boolean {
   const lines = flow.lines ?? []
-  const hasIn = (id: string): boolean => lines.some((l) => l.target === id && l.targetHandle === 'flow-in')
+  const hasIn = (id: string): boolean => lines.some((l) => isFlowLine(l) && l.target === id)
   if (hasIn(nodeId)) return true
   return proxiesOf(flow, nodeId).some((p) => hasIn(p.id))
 }

@@ -12,7 +12,7 @@ import { join } from 'node:path'
 import { FlowStore, FlowRevisionConflictError } from '../../../src/host/storage/flow-store.js'
 import type { WorkflowDocument } from '../../../src/host/shared/graph-model.js'
 import type { ServiceState, RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate, ToolCombo, RunSnapshot } from '../../../src/host/shared/types.js'
-import { newRoleNode, newStageNode, newLine } from '../../../src/host/graph/model.js'
+import { newRoleNode, newStageNode, newLine } from '../../../src/host/graph/index.js'
 
 let dir: string
 let store: FlowStore

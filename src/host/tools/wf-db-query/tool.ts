@@ -17,7 +17,7 @@
 
 import { WF_DB_QUERY } from '../../shared/protocol.js'
 import type { DatabaseNode, RoleNode, WorkflowDocument } from '../../shared/graph-model.js'
-import { dbInEdges } from '../../graph/model.js'
+import { dbInEdges } from '../../graph/index.js'
 import { WfError, type CallerInfo, type OrchestratorRuntime, type RunEntry } from '../../orchestrator/index.js'
 import { VectorIndex } from '../../embedding/indexer.js'
 import { callerOf } from '../infrastructure/caller.js'

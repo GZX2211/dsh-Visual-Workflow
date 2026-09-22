@@ -2,7 +2,7 @@
 //
 // 图质量规则（自主编排方案 §6.2 规则表）第二期：**节点维度**——协作组一致性、虚拟节点
 // 引用、数据节点完整性、上下文/数据库连线合法性、里程碑闸门（指向父代理的虚拟节点）。
-// 流程/阶段维度见 invariants-rules.ts；元参数维度见 invariants-meta-rules.ts。
+// 流程/阶段维度见 invariants-rules-flow.ts；元参数维度见 invariants-rules-meta.ts。
 //
 // 每个规则一个纯函数（入参 CheckGraphInput + 可选 FlowDag，返回 GraphIssue[]）。
 // 纯函数：不读时钟/随机源，不改写入参，输出顺序稳定（按输入顺序遍历）。

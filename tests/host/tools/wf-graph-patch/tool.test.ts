@@ -16,7 +16,7 @@
 import { describe, expect, it } from 'vitest'
 import { executeGraphPatch, registerWfGraphPatch, type GraphPatchHost } from '../../../../src/host/tools/wf-graph-patch/tool.js'
 import { WfError, type RunEntry } from '../../../../src/host/orchestrator/index.js'
-import { stageLabel } from '../../../../src/host/graph/model.js'
+import { stageLabel } from '../../../../src/host/graph/index.js'
 import type { GraphNode, Line, WorkflowDocument, WorkflowTemplate } from '../../../../src/host/shared/graph-model.js'
 import type { RunSnapshot } from '../../../../src/host/shared/types.js'
 

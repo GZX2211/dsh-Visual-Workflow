@@ -17,7 +17,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { readFile } from 'node:fs/promises'
-import { dbInEdges } from '../graph/model.js'
+import { dbInEdges } from '../graph/index.js'
 import type { FlowStore } from '../storage/flow-store.js'
 import type { GraphNode, RoleNode } from '../shared/graph-model.js'
 import type { NodeRunner, NodeStartInput, OrchestratorLogger } from '../orchestrator/index.js'

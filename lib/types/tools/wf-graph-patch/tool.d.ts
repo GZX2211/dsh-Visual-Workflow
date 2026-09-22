@@ -1,4 +1,4 @@
-import { hasBlockingIssues } from '../../graph/invariants.js';
+import { hasBlockingIssues } from '../../graph/index.js';
 import { type PatchScope } from './types.js';
 import type { GraphNode, Line, WorkflowDocument, WorkflowTemplate } from '../../shared/graph-model.js';
 import type { OrgMeta } from '../../shared/types.js';

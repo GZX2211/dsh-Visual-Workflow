@@ -15,7 +15,7 @@ import {
   type OrchestrationDirectiveParams,
   type ParentPromptVariant,
 } from '../prompts/index.js'
-import { nodeHasFlowIn, nodeParticipatesInFlow } from '../graph/model.js'
+import { nodeHasFlowIn, nodeParticipatesInFlow } from '../graph/index.js'
 import type { WorkflowDocument } from '../shared/graph-model.js'
 import { collabGroupList, labelOf, orchestrationNodeList, pauseNodeIdsOf } from './graph-facts.js'
 

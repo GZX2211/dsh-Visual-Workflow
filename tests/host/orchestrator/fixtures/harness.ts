@@ -23,7 +23,7 @@ import {
   type RootInjectedMessage,
   type TurnEndInfo,
 } from '../../../../src/host/orchestrator/index.js'
-import { stageLabel } from '../../../../src/host/graph/model.js'
+import { stageLabel } from '../../../../src/host/graph/index.js'
 import type { FileNode, RoleNode, StageNode, WorkflowDocument } from '../../../../src/host/shared/graph-model.js'
 
 // ---------------------------------------------------------------------------

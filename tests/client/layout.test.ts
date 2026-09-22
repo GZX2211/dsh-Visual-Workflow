@@ -5,16 +5,17 @@
 // 覆盖：9 条布局不变量 + 自动布局判定 + 重叠检测 + 整理布局入口（tidyNodes）。
 //
 // 环境：纯函数测试，无需 jsdom（不触碰 DOM）。
+//
+// 注（治理）：本文件曾 import host 侧 computeFlowLayers 并 `void` 掉（无任何断言），
+// 既形成 Client 测试对 Host 运行时模块的跨层依赖，也不构成验证——已移除。
+// client 侧流程线判定（layout.ts 的 isFlowLine）由下方「仅流程线参与分层」用例锁定。
 
 import { describe, expect, it } from 'vitest'
 import { layoutGraph, toLayoutInputs } from '../../src/client/lib/layout.js'
 import { needsAutoLayout, findLayoutOverlaps, layoutBoxesOf, tidyNodes, boxesOverlap, collapsedIdsOf } from '../../src/client/lib/layout-fit.js'
-import { computeFlowLayers as _unusedGuard } from '../../src/host/graph/dag.js'
 import { groupCardSizeOf, GRAPH_GROUP_HEIGHT, GRAPH_GROUP_WIDTH, GRAPH_NODE_HEIGHT, GRAPH_NODE_WIDTH, GRAPH_STAGE_HEIGHT, GRAPH_STAGE_WIDTH } from '../../src/client/components/canvas/geometry.js'
 import type { LayoutNodeInput } from '../../src/client/lib/layout-types.js'
 import type { Line } from '../../src/host/shared/graph-model.js'
-
-void _unusedGuard
 
 // ---------------------------------------------------------------------------
 // 构造帮手
@@ -106,6 +107,22 @@ describe('布局不变量：分层与列序', () => {
     expect(positions.get('s')!.x).toBeLessThan(positions.get('a1')!.x)
     expect(positions.get('a1')!.x).toBeLessThan(positions.get('a2')!.x)
     expect(positions.get('a2')!.x).toBeLessThan(positions.get('e')!.x)
+  })
+
+  it('③′ 仅 flow-out → flow-in 参与分层：ctx 线与幽灵线都不算流程边', () => {
+    // 幽灵线 = 单侧命中流程通道（源为上下文出、目标为流程入）的历史/手改数据。
+    // 通道互斥，它不是流程边：不得影响列号（若被当成 a1 → s 的回边，start 列会漂移）。
+    const nodes = [node('s', 'start'), node('a1', 'agent'), node('e', 'end')]
+    const lines: Line[] = [
+      flowLine('l1', 's', 'a1'),
+      flowLine('l2', 'a1', 'e'),
+      ctxLine('c1', 'a1', 'e'),
+      { id: 'g1', source: 'a1', target: 's', sourceHandle: 'ctx-out', targetHandle: 'flow-in' },
+    ]
+    const { colOf } = layoutGraph(nodes, lines)
+    expect(colOf.get('s')).toBe(0)
+    expect(colOf.get('a1')).toBe(1)
+    expect(colOf.get('e')).toBe(2)
   })
 })
 

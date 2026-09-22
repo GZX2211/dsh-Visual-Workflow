@@ -16,8 +16,16 @@ import { defineTool, type ToolDefinitionLike, type ToolExecLike } from '../infra
 import { textRender } from '../infrastructure/text-render.js'
 import { callerOf } from '../infrastructure/caller.js'
 import { WfError, labelOf } from '../../orchestrator/index.js'
-import { executableUnitCount, groupCount, maxGroupMembers, orgUsageOf } from '../../graph/org-meta-usage.js'
-import { effectiveOrgMeta, metaOfDocument, normalizeOrgMeta, orgBudgetOf } from '../../graph/org-meta.js'
+import {
+  effectiveOrgMeta,
+  executableUnitCount,
+  groupCount,
+  maxGroupMembers,
+  metaOfDocument,
+  normalizeOrgMeta,
+  orgBudgetOf,
+  orgUsageOf,
+} from '../../graph/index.js'
 import type { GraphNode, WorkflowDocument, WorkflowTemplate } from '../../shared/graph-model.js'
 import type { OrgBudget } from '../../shared/types.js'
 

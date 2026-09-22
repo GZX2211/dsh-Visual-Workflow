@@ -14,7 +14,14 @@ export interface FlowDag {
         target: string;
     }>;
 }
-/** 是否为流程线（flow-out → flow-in）。 */
+/**
+ * 是否为流程线（flow-out → flow-in）。
+ *
+ * 为什么必须是**双向匹配**而不是「或」：连接点分 flow / ctx / db 三通道且互斥，
+ * 一条线的源点与目标点必须同通道成对。只看单侧（`flow-out` 或 `flow-in`）会把
+ * `ctx-out → flow-in` 这类非法/历史手持线判成流程线，使「参与流程」的判定与实际
+ * 流程子图（本文件构建的 DAG）口径分裂。本函数是 host 侧**流程线判定的唯一本体**。
+ */
 export declare function isFlowLine(line: Line): boolean;
 /** 构建流程子图（忽略端点缺失的线，避免悬空引用影响判定）。 */
 export declare function buildFlowDag(nodes: GraphNode[] | null | undefined, lines: Line[] | null | undefined): FlowDag;
