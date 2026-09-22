@@ -12,21 +12,22 @@
 // RuntimeObserve ← RuntimeLifecycle ← OrchestratorRuntime（runtime.ts 收口）。
 
 import { randomUUID } from 'node:crypto'
-import { resolveRolePrompt } from '../agent/runner.js'
 import { activeMilestoneGateOf, isGroupMember } from '../graph/model.js'
+import { normalizeOrgMeta } from '../graph/org-meta.js'
 import type { RoleNode, WorkflowDocument } from '../shared/graph-model.js'
 import type { RunSnapshot, RunStatus } from '../shared/types.js'
-import { cloneSnapshot, statusText, setNodeStatus } from './snapshot.js'
+import { cloneSnapshot, setNodeStatus } from './snapshot.js'
 import { RESUMABLE_STATUSES, type ResumeResult } from './resume.js'
 import type { ExecutorContextFacts } from '../prompts/executor.js'
 import { buildOrchestrationChangeText } from '../prompts/orchestration-change.js'
 import { DEFAULT_SYSTEM_LANGUAGE } from '../system-language.js'
-import { coordinatorMessage } from './ask-types.js'
+import { coordinatorMessage } from './ask-protocol.js'
 import { summarizeFlowChange } from './flow-diff.js'
-import { buildNodeContextFacts, messageOf, parentExecutorOf } from './helpers.js'
-import type { OrchestratorDeps, RunEntry } from './run-types.js'
+import { buildNodeContextFacts } from './graph-facts.js'
+import { parentExecutorOf } from './directive.js'
+import { WfError, messageOf } from './errors.js'
+import type { MilestoneMarkResult, MilestoneRunFacts, OrchestratorDeps, RunEntry } from './run-entry.js'
 import {
-  WfError,
   type ChildMeta,
   type FlowLockInfo,
   type OrchestratorLogger,
@@ -87,12 +88,12 @@ export abstract class RuntimeBase {
   protected async bindParentConfig(flow: WorkflowDocument, root: RootAgentLike, sessionId: string): Promise<void> {
     const ctx = root.ctx
     if (!ctx || typeof ctx !== 'object') return
-    if (!this.deps.promptSetup || !this.deps.modelSelection) return
+    if (!this.deps.promptSetup || !this.deps.modelSelection || !this.deps.resolveRolePrompt) return
     const parentNode = flow.nodes.find((n): n is RoleNode => n.kind === 'parent')
     if (!parentNode) return
     try {
       // 角色 Prompt 实际注入文本（.md 路径设置时读取文件当前内容，与子代理一致）
-      const rolePrompt = await resolveRolePrompt(parentNode)
+      const rolePrompt = await this.deps.resolveRolePrompt(parentNode)
       this.deps.promptSetup.bindParent(ctx, {
         systemPrompt: rolePrompt,
         injectSystemPrompt: parentNode.data.injectSystemPrompt !== false,
@@ -415,6 +416,71 @@ export abstract class RuntimeBase {
     return this.childIndex.get(childId) ?? null
   }
 
+  /**
+   * 子代理 id → 其所属在编运行条目（childIndex 归属反查）。
+   * 为什么提供方法而不是让调用方遍历 runs：运行表的定位口径（会话 + 工作流 + running）
+   * 是运行时的内部知识，模块外只应表达「我要这个子代理的运行」。
+   * 无登记记录、或对应运行已非 running 时返回 null。
+   */
+  runForChild(childId: string): RunEntry | null {
+    const meta = this.childIndex.get(childId)
+    if (!meta) return null
+    for (const entry of this.runs.values()) {
+      const s = entry.snapshot
+      if (s.sessionId === meta.sessionId && s.flowId === meta.flowId && s.status === 'running') return entry
+    }
+    return null
+  }
+
+  /**
+   * 闸门标记所需的运行事实（只读，D-07/D-21）：闸门轮身份 + 快照节点清单 + 预算口径。
+   * 为什么收敛在此：快照归编排器所有，工具层不应直读 RunEntry/snapshot；预算上限的
+   * 判定仍由调用方（wf_graph_patch 的纯函数）按本事实裁决，本方法不做语义判断。
+   */
+  milestoneFactsFor(sessionId: string): MilestoneRunFacts | null {
+    const entry = this.activeRunForSession(sessionId)
+    if (!entry) return null
+    const snapshot = entry.snapshot
+    const meta = normalizeOrgMeta(snapshot.meta ?? {})
+    return {
+      runId: snapshot.id,
+      executorParentId: String(entry.executorParentId ?? ''),
+      executorIsMilestone: entry.executorIsMilestone === true,
+      ...(entry.milestoneProxyId ? { milestoneProxyId: entry.milestoneProxyId } : {}),
+      nodeIds: snapshot.nodes.map((node) => node.nodeId),
+      milestoneUsed: Math.max(0, Math.floor(Number(snapshot.milestoneUsed) || 0)),
+      milestoneMax: Number(meta.milestoneMax) || 0,
+    }
+  }
+
+  /**
+   * 闸门节点状态标记（**运行快照写者的唯一入口**，P3 / D-07）：写节点状态、回合明细
+   * 与结束时间，并按 status='ok' 递增快照 milestoneUsed（D-21：不含首次编排）。
+   * 写前防御校验：运行存在且 running、nodeId 在当前快照内、status 合法；**不落盘**——
+   * 持久化时机由调用方决定，保持「逐项标记、末尾落盘一次」的既有语义。
+   * 时间源用注入时钟（this.now），与快照其他时间戳口径一致。
+   */
+  markMilestoneNode(
+    sessionId: string,
+    input: { nodeId: string; status: 'ok' | 'fail' },
+  ): MilestoneMarkResult {
+    const entry = this.activeRunForSession(sessionId)
+    if (!entry || entry.snapshot.status !== 'running') {
+      throw new WfError('mark_node: 当前会话没有正在运行的编排（闸门标记只在运行期有意义）', 'WF_MILESTONE_INVALID')
+    }
+    const { nodeId, status } = input
+    if (status !== 'ok' && status !== 'fail') {
+      throw new WfError('mark_node: status 必须是 ok 或 fail', 'WF_GRAPH_INVALID')
+    }
+    const snapshot = entry.snapshot
+    if (!snapshot.nodes.some((node) => node.nodeId === nodeId)) {
+      throw new WfError(`mark_node: 节点不在当前运行快照中「${nodeId}」`, 'WF_MILESTONE_INVALID')
+    }
+    setNodeStatus(snapshot, nodeId, status, { now: this.now(), stopReason: 'milestone', recordTurn: true })
+    const milestoneUsed = Math.max(0, Math.floor(Number(snapshot.milestoneUsed) || 0)) + (status === 'ok' ? 1 : 0)
+    snapshot.milestoneUsed = milestoneUsed
+    return { nodeId, status, runId: snapshot.id, milestoneUsed }
+  }
 
   // ---- 运行时读取 --------------------------------------------------------------
 

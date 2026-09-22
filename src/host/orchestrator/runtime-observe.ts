@@ -8,7 +8,7 @@ import type { WorkflowDocument } from '../shared/graph-model.js'
 import { memberGroupId } from '../graph/model.js'
 import { lastAssistantText, setNodeStatus } from './snapshot.js'
 import { SUBAGENT_END_RETRY_DELAY_MS, SUBAGENT_END_RETRY_MAX } from './seams.js'
-import type { RunEntry, SubagentEndInfo } from './run-types.js'
+import type { RunEntry, SubagentEndInfo } from './run-entry.js'
 import { RuntimeComm } from './runtime-comm.js'
 
 export class RuntimeObserve extends RuntimeComm {

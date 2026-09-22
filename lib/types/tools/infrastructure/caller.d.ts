@@ -1,4 +1,4 @@
-import type { CallerInfo, OrchestratorRuntime, RootAgentLike } from '../../orchestrator/runtime.js';
+import type { CallerInfo, OrchestratorRuntime, RootAgentLike } from '../../orchestrator/index.js';
 import type { ToolExecLike } from './define-tool.js';
 /**
  * 从工具执行上下文派生调用方身份（CallerInfo）。

@@ -2,7 +2,7 @@ import type { WorkflowDocument } from '../shared/graph-model.js';
 import type { RunSnapshot, RunStatus } from '../shared/types.js';
 import { type ResumeResult } from './resume.js';
 import type { ExecutorContextFacts } from '../prompts/executor.js';
-import type { OrchestratorDeps, RunEntry } from './run-types.js';
+import type { MilestoneMarkResult, MilestoneRunFacts, OrchestratorDeps, RunEntry } from './run-entry.js';
 import { type ChildMeta, type FlowLockInfo, type OrchestratorLogger, type RootAgentLike, type TurnEndInfo } from './seams.js';
 export declare abstract class RuntimeBase {
     protected readonly deps: OrchestratorDeps;
@@ -146,6 +146,30 @@ export declare abstract class RuntimeBase {
     entryFor(runId: string): RunEntry | null;
     /** childId → 运行位置反查（subagent/end 观察用；未登记返回 null）。 */
     childMetaFor(childId: string): ChildMeta | null;
+    /**
+     * 子代理 id → 其所属在编运行条目（childIndex 归属反查）。
+     * 为什么提供方法而不是让调用方遍历 runs：运行表的定位口径（会话 + 工作流 + running）
+     * 是运行时的内部知识，模块外只应表达「我要这个子代理的运行」。
+     * 无登记记录、或对应运行已非 running 时返回 null。
+     */
+    runForChild(childId: string): RunEntry | null;
+    /**
+     * 闸门标记所需的运行事实（只读，D-07/D-21）：闸门轮身份 + 快照节点清单 + 预算口径。
+     * 为什么收敛在此：快照归编排器所有，工具层不应直读 RunEntry/snapshot；预算上限的
+     * 判定仍由调用方（wf_graph_patch 的纯函数）按本事实裁决，本方法不做语义判断。
+     */
+    milestoneFactsFor(sessionId: string): MilestoneRunFacts | null;
+    /**
+     * 闸门节点状态标记（**运行快照写者的唯一入口**，P3 / D-07）：写节点状态、回合明细
+     * 与结束时间，并按 status='ok' 递增快照 milestoneUsed（D-21：不含首次编排）。
+     * 写前防御校验：运行存在且 running、nodeId 在当前快照内、status 合法；**不落盘**——
+     * 持久化时机由调用方决定，保持「逐项标记、末尾落盘一次」的既有语义。
+     * 时间源用注入时钟（this.now），与快照其他时间戳口径一致。
+     */
+    markMilestoneNode(sessionId: string, input: {
+        nodeId: string;
+        status: 'ok' | 'fail';
+    }): MilestoneMarkResult;
     /**
      * 触碰运行的空闲基准（工具层调用）：wf_ask 提问等长阻塞交互期间持续
      * 刷新 lastActiveAt，防止空闲看护（runIdleTimeoutMs）把等待用户的运行误判为空闲

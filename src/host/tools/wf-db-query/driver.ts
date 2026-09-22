@@ -8,7 +8,7 @@
 // 连接按次创建即用即关（不保留长连接）。
 
 import { DatabaseSync } from 'node:sqlite'
-import { WfError } from '../../orchestrator/runtime.js'
+import { WfError } from '../../orchestrator/index.js'
 import type { DatabaseNode } from '../../shared/graph-model.js'
 import type { DatabaseDriver, QueryResult, ServerConnection, TableInfo } from './types.js'
 

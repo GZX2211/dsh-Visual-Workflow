@@ -5,7 +5,7 @@
 // 服务的惰性解析（运行时守卫，零官方类型依赖）。
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { AgentHost, RootAgentLike, RootInjectedMessage, TurnEndInfo } from '../orchestrator/runtime.js'
+import type { AgentHost, RootAgentLike, RootInjectedMessage, TurnEndInfo } from '../orchestrator/index.js'
 import type { AgentsServiceLike, SubagentsServiceLike } from './runner.js'
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
-// tests/host/node-handoff-contract.test.ts
+// tests/host/orchestrator/task-blocks.test.ts
 //
-// 节点交接契约与任务块注入测试（用户裁决 2026.09：方案 A+「按需自动兜底」）：
+// 节点任务块与交接契约测试（用户裁决 2026.09：方案 A+「按需自动兜底」）：
 //   - inputContractOf：data.inputSchema → 任务块中段「输入结构」；
 //   - outputContractOf：data.outputSchema 优先；**仅当该节点存在 ctx-out 出线**（确有下游要读它）
 //     且未配置时，才注入系统默认结构（结论 / 产出文件路径 / 关键决策 / 未决问题）；
@@ -10,11 +10,11 @@
 // 断言策略：不断言提示词具体文案（提示词属长期优化项），只断言「注入/不注入」与段位归属，
 // 契约字段清单经 DEFAULT_OUTPUT_CONTRACT 常量引用。
 import { describe, expect, it } from 'vitest'
-import { buildNodeBlocks, inputContractOf, outputContractOf } from '../../src/host/orchestrator/helpers.js'
-import { DEFAULT_OUTPUT_CONTRACT } from '../../src/host/prompts/index.js'
-import { HEAD_MARKER, MID_MARKER, TAIL_MARKER } from '../../src/host/prompts/index.js'
-import type { RoleNode, WorkflowDocument } from '../../src/host/shared/graph-model.js'
-import type { RunSnapshot } from '../../src/host/shared/types.js'
+import { buildNodeBlocks, inputContractOf, outputContractOf } from '../../../src/host/orchestrator/index.js'
+import { DEFAULT_OUTPUT_CONTRACT } from '../../../src/host/prompts/index.js'
+import { HEAD_MARKER, MID_MARKER, TAIL_MARKER } from '../../../src/host/prompts/index.js'
+import type { RoleNode, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
+import type { RunSnapshot } from '../../../src/host/shared/types.js'
 
 /** 角色节点（可覆盖 inputSchema / outputSchema）。 */
 function role(id: string, kind: 'parent' | 'agent' = 'agent', overrides: Record<string, unknown> = {}): RoleNode {

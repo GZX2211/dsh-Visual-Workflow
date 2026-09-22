@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { CordisAgentHost } from '../../src/host/agent/agents-host.js'
-import type { RootAgentLike, TurnEndInfo } from '../../src/host/orchestrator/runtime.js'
+import type { RootAgentLike, TurnEndInfo } from '../../src/host/orchestrator/index.js'
 
 /** 构造一个最小 root session：0.1.1 形状（events 数组）。 */
 function rc2Session(events: Array<Record<string, unknown>>): { events: unknown[] } {

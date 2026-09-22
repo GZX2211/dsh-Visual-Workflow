@@ -5,7 +5,7 @@
 // 导入导出与角色模板往返。方法体逐字移动。
 
 import type { DatabaseNode } from '../shared/graph-model.js'
-import { findResumableRun } from '../orchestrator/resume.js'
+import { findResumableRun } from '../orchestrator/index.js'
 import { buildIndexForDatabase, indexPathOf } from '../tools/wf-db-query/service.js'
 import { createDatabaseDriver, testDatabaseConnection } from '../tools/wf-db-query/driver.js'
 import { VectorIndex } from '../embedding/indexer.js'

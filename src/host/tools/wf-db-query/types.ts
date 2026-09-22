@@ -3,7 +3,7 @@
 // wf_db_query 的契约类型：查询结果 / 驱动接口 / 服务器连接 / SQL 校验结果 / 工具宿主缝。
 // 纯类型（无 IO、无运行时依赖），供同目录 driver/service/policy/tool 与外部消费者共用。
 
-import type { OrchestratorRuntime } from '../../orchestrator/runtime.js'
+import type { OrchestratorRuntime } from '../../orchestrator/index.js'
 import type { FlowStore } from '../../storage/flow-store.js'
 import type { EmbeddingEngine } from '../../embedding/engine.js'
 

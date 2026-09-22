@@ -29,7 +29,7 @@
 | `README.md` | 本文件：§13.1 检查单落地表 + W-03 工具描述英文写作规范 |
 
 **三情况组装**：父代理提示词按画布形态**整体替换组装**（用户评审定稿）——判定纯函数
-`parentPromptVariantOf(flow)`（`orchestrator/helpers.ts`）返回 `orchestrator | hybrid | executor`，
+`parentPromptVariantOf(flow)`（`orchestrator/directive.ts`）返回 `orchestrator | hybrid | executor`，
 `buildParentRunPrompt`（同文件）按变体输出整份自洽提示词：情况1 只含编排措辞；情况2 以「执行者模式」
 取代「仅编排」并附【你的节点任务】；情况3 剔除全部编排/流程要素、仅保留任务执行与 `wf_finish` 收尾一句。
 三套变体共用 `ORCH_HARD_CONSTRAINTS` 等短语常量与段落标记，不逐条跨情况拼装（避免身份措辞残留矛盾）。
@@ -44,7 +44,7 @@
 | **注意力位置（关键约束双位）** | 每个变体的 `HEAD_MARKER`（首段软约束）+ `TAIL_MARKER`/`TAIL_RESTATE_MARKER`（末段重申） | 最重要约束 **（AI 有选择权、值得强调的软约束）** 同时出现在输出首段与末段，测试断言这一点 |
 | **稳定段落化（同一 run 不再变化）** | 模板集中在本目录；运行态动态信息以变量注入尾部（各构建器 `renderDynamicState` 内部纯函数） | 后续组装任务（T-021 等）复用构建器，不在运行时重排模板字符串 |
 | **协作 Prompt 追加位置** | `collab.ts` 的 `buildCollabBlock`（始终列出成员 ID + 角色名） | 追加到组内成员**首条用户消息（任务块）末尾**，不再注入系统提示词；无论用户文本是否为空都默认列出全部成员，再追加自定义说明 |
-| **三情况整体替换组装** | `parentPromptVariantOf`（`orchestrator/helpers.ts`）+ `buildParentRunPrompt` | startRun/resumeRun 注入前按画布形态判定变体，整份输出；情况间身份措辞互斥（测试断言互斥） |
+| **三情况整体替换组装** | `parentPromptVariantOf`（`orchestrator/directive.ts`）+ `buildParentRunPrompt` | startRun/resumeRun 注入前按画布形态判定变体，整份输出；情况间身份措辞互斥（测试断言互斥） |
 | **双重汇报软约束** | 编排系 `ORCH_HARD_CONSTRAINTS.nodeSettledSignal` | 父代理只以结算通知判定节点完成（report 仅中途汇报）；子代理 report 不在工具白名单内（AI 无选择权），任务块不再提示（用户批注） |
 | **工具 schema 稳定性** | 本基线不注册工具；但要求工具 description 走 W-03（见 §3） | 输出 render 键序稳定 |
 | **部署级旁路（可选）** | 子代理节点「工具散文段开关」`injectToolSections=false` 会隐藏官方 `tool:report` 指引段（不改变工具调用能力） | 需要时由用户在节点面板关闭；插件层不主动启用 |

@@ -2,7 +2,7 @@ import { hasBlockingIssues } from '../../graph/invariants.js';
 import { type PatchScope } from './types.js';
 import type { GraphNode, Line, WorkflowDocument, WorkflowTemplate } from '../../shared/graph-model.js';
 import type { OrgMeta } from '../../shared/types.js';
-import type { RunEntry } from '../../orchestrator/run-types.js';
+import type { MilestoneMarkResult, MilestoneRunFacts, RunEntry } from '../../orchestrator/index.js';
 /** 工具层所需宿主能力（宿主 service 的最小结构适配；单测 fake）。 */
 export interface GraphPatchHost {
     /** 数据层读写（模板/实例文档 + 运行事实源刷新）。 */
@@ -36,6 +36,13 @@ export interface GraphPatchHost {
         currentResolvedFlow(entry: RunEntry): Promise<WorkflowDocument>;
         touchRunForSession(sessionId: string): boolean;
         refreshActiveDefinitions(flowId: string, sessionId: string, flow: WorkflowDocument): Promise<void>;
+        /** 闸门标记所需的运行事实（只读；快照归运行时所有）。 */
+        milestoneFactsFor(sessionId: string): MilestoneRunFacts | null;
+        /** 闸门节点状态写入（运行快照的唯一写者）；返回递增后的已用次数。 */
+        markMilestoneNode(sessionId: string, input: {
+            nodeId: string;
+            status: 'ok' | 'fail';
+        }): MilestoneMarkResult;
     };
     /** 运行快照落盘（mark_node 后固化状态；缺省跳过持久化——单测可省）。 */
     persistRun?: (runId: string) => Promise<void>;

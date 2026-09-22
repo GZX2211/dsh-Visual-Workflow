@@ -1,48 +1,15 @@
 // src/host/agent/prompt-setup.ts
 //
-// 角色 Prompt 系统提示词段注入 + 官方系统提示词开关（T-021 配套，需求变更后重写）。
-//
-// 背景：此前实现把节点自定义 System Prompt 作为「完整系统提示词」注入，整段替换/追加
-//       官方 system prompt（含 Code Mode 保留官方工具调用提示词）。该方案被否决：
-//       官方已对系统提示词做缓存/稳定性优化，插件不应随意插入或替换官方段。
-//
-// 统一语义（子代理与父代理共用）：
-//   - 角色 Prompt（节点自定义 System Prompt）注册为**独立命名段** `visual-workflow:prompt`
-//     （order 1），注入一次、会话/回合间稳定不变（KV 缓存前缀友好）；
-//   - **不再整段替换/插入**官方 system prompt，也**不再传** `request.persona` 占用官方人设；
-//   - 开关一 `injectSystemPrompt`（默认 true，界面上是「人设段」开关）：
-//     ON（开）= 官方身份/人设/系统/上下文段正常注入；
-//     OFF（关）= 清空这些官方段（除 `tool:*` 散文段与 Code Mode 协议段之外的全部官方段
-//     都被移除，并清空全部 runtime context 快照），仅保留角色段 + 工具相关段。
-//     管辖范围（0.1.5-rc.1 取证后的官方段全表）：harness:identity、
-//     deployment:persona-prefix、deployment:persona-suffix、plan:policy(500)、
-//     subagent:delegation(600)、sandbox:policy(110)、approval:policy(115)、
-//     context:file-reference(900)、ui:deliverable-file-references(9000)、
-//     harness:source(10000)、app:web-surface(10100) —— 以及 assembly.contexts 整体。
-//   - 开关二 `injectToolSections`（默认 true）：ON（开）= 各工具包注册的 `tool:*` 散文段
-//     正常注入；OFF（关）= 移除所有 `tool:*` 散文段。
-//     **只动散文段，绝不动工具注入表**：本模块的过滤纯函数只重写 `assembly.sections` /
-//     `assembly.contexts`，`assembly.tools[]`（工具 Schema 清单）原样透传——模型能否调用
-//     某工具只由 `tools[]` 决定，关掉散文段仅去掉「何时该用它」的英文使用指引。
-//     （对比：正菜单的「全局工具开关」走 tool-switches.ts 的 filterToolsInAssembly，
-//      它会同时剔除 `tools[]` 条目与该工具的 `tool:<name>` 段——那才是剥夺调用能力的开关。）
-//   - **无论两个开关如何组合，Code Mode 协议段 `tools:sdk` / `tools:ptc-only`（0.1.5-rc.1
-//     更名前的 `tools:code-only`）与 tools[] 工具 Schema 都**始终保留**：前者是 Code Mode 的
-//     调用协议声明（旧实现用 `startsWith('tool:')` 误用了单数匹配，把复数的 `tools:*` 一并
-//     清掉，属操作失误）；后者决定工具是否可被调用，与散文段注入无关。
-//   - 工具能否被调用**只由 tools[] Schema 决定**；移除 `tool:*` 散文段仅去掉使用指引，
-//     不改变调用能力。
-//   - 本插件**不注册任何 `tool:*` 散文段**：官方 registry 的 register() 不会为每个工具自动
-//     注册散文段（`tool:*` 段由各工具包自行注册，如 tool:bash / tool:read / tool:web_search）；
-//     本插件唯一注册过的段是角色段 `visual-workflow:prompt`（恒保留）。
-//
-// 两类 Agent 的注入路径：
-//   - 子代理：经 registerContinuableSetup 的 contribution（创建窗口读取 withPending 状态，
-//     经 AsyncLocalStorage 隔离并发创建），resolvePromptOnCtx 装配；
-//   - 父代理（会话根 Agent）：经 bindParent 把节点级状态写入根 Agent 的 ctx（运行时直接
-//     调用，官方 `agents.get(sessionId)?.ctx` 可达；非侵入，仅挂载而不改源码）。
-//
-// 零官方运行时依赖：section() 与 on('system-prompt/assemble') 均以最小结构守卫收窄。
+// 角色 Prompt 段注入 + 官方系统提示词开关
+// 背景：官方 system prompt 有缓存/稳定性优化，旧“整段替换/追加”方案已否决。
+// 统一语义（父子代理共用）：
+// - 角色 Prompt 注册为独立段 `visual-workflow:prompt`(order 1)，会话/回合稳定，KV 缓存友好；不替换官方段，不传 `request.persona`。
+// - `injectSystemPrompt`（默认 true，界面“人设段”开关）：ON 正常注入官方身份/人设/系统/上下文段；OFF 清空这些官方段（harness:identity、deployment:persona-*、plan/subagent/sandbox/approval/context/ui/harness:source/app 等及 assembly.contexts、runtime context 快照），仅留角色段+工具相关段。
+// - `injectToolSections`（默认 true）：ON 注入 `tool:*` 散文段；OFF 移除全部 `tool:*` 散文段。只重写 assembly.sections/contexts，不动 assembly.tools[]。
+// - 工具调用能力只由 tools[] 决定；移除 `tool:*` 散文段仅去掉使用指引。
+// - Code Mode 协议段 `tools:sdk`/`tools:ptc-only` 与 tools[] 始终保留；旧 `startsWith('tool:')` 曾误删复数 `tools:*`。
+// - 本插件不注册 `tool:*`，唯一注册段为 `visual-workflow:prompt`。
+// 注入路径：子代理经 registerContinuableSetup contribution + AsyncLocalStorage + resolvePromptOnCtx；父代理经 bindParent 写根 Agent ctx。零官方运行时依赖。
 
 import { AsyncLocalStorage } from 'node:async_hooks'
 

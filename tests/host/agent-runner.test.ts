@@ -28,7 +28,7 @@ import {
 import type { ReactGuardBridge } from '../../src/host/agent/guards.js'
 import type { ModelSelectionSetup } from '../../src/host/agent/model-selection.js'
 import type { ChildPromptSetup } from '../../src/host/agent/prompt-setup.js'
-import type { NodeStartInput } from '../../src/host/orchestrator/runtime.js'
+import type { NodeStartInput } from '../../src/host/orchestrator/index.js'
 import type { RoleNode, WorkflowDocument } from '../../src/host/shared/graph-model.js'
 import { CHILD_AGENT_HIDDEN_TOOLS } from '../../src/host/shared/protocol.js'
 

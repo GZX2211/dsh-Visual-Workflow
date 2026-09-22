@@ -1,7 +1,7 @@
 import { Context, Service } from '@deepseek-ai/cordis';
 import type { Config } from './config.js';
 import { FlowStore } from './storage/flow-store.js';
-import { OrchestratorRuntime, type RootAgentLike } from './orchestrator/runtime.js';
+import { OrchestratorRuntime, type RootAgentLike } from './orchestrator/index.js';
 import { NodeAgentRunner } from './agent/runner.js';
 import { CordisAgentHost } from './agent/agents-host.js';
 import { EmbeddingService } from './embedding/engine.js';

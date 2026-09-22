@@ -14,7 +14,7 @@ import {
   milestoneProxiesOf,
   proxyRoleOf,
 } from '../../src/host/graph/model.js'
-import { WfError } from '../../src/host/orchestrator/seams.js'
+import { WfError } from '../../src/host/orchestrator/index.js'
 import { stageLabel } from '../../src/host/graph/model.js'
 import type { GraphNode, Line, WorkflowDocument } from '../../src/host/shared/graph-model.js'
 

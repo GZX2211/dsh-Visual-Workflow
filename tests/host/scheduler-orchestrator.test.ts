@@ -19,8 +19,8 @@ import {
   type RootAgentLike,
   type RootInjectedMessage,
   type TurnEndInfo,
-} from '../../src/host/orchestrator/runtime.js'
-import { findResumableRun } from '../../src/host/orchestrator/resume.js'
+  findResumableRun,
+} from '../../src/host/orchestrator/index.js'
 import { stageLabel } from '../../src/host/graph/model.js'
 import type { RoleNode, StageNode, WorkflowDocument } from '../../src/host/shared/graph-model.js'
 

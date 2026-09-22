@@ -18,8 +18,7 @@
 import { WF_DB_QUERY } from '../../shared/protocol.js'
 import type { DatabaseNode, RoleNode, WorkflowDocument } from '../../shared/graph-model.js'
 import { dbInEdges } from '../../graph/model.js'
-import type { CallerInfo, OrchestratorRuntime, RunEntry } from '../../orchestrator/runtime.js'
-import { WfError } from '../../orchestrator/runtime.js'
+import { WfError, type CallerInfo, type OrchestratorRuntime, type RunEntry } from '../../orchestrator/index.js'
 import { VectorIndex } from '../../embedding/indexer.js'
 import { callerOf } from '../infrastructure/caller.js'
 import { defineTool, type ToolDefinitionLike, type ToolExecLike } from '../infrastructure/define-tool.js'
@@ -54,14 +53,8 @@ function resolveActiveRun(
     const childId = String((exec.agent as { id?: unknown } | null | undefined)?.id ?? '')
     const meta = childId ? orchestrator.childMetaFor(childId) : null
     if (!meta) throw new WfError('调用者不属于任何正在运行的工作流', 'WF_NO_ACTIVE_RUN')
-    let run = null
-    for (const entry of orchestrator.runs.values()) {
-      const snapshot = entry.snapshot
-      if (snapshot.sessionId === meta.sessionId && snapshot.flowId === meta.flowId && snapshot.status === 'running') {
-        run = entry
-        break
-      }
-    }
+    // 运行定位经运行时查询（childId 归属反查）：不再由工具层遍历运行表内部结构。
+    const run = childId ? orchestrator.runForChild(childId) : null
     if (!run) throw new WfError('该工作流已停止，无法访问数据库', 'WF_STOPPED')
     return { run, callerNodeId: meta.nodeId }
   }

@@ -15,10 +15,9 @@
 
 import { describe, expect, it } from 'vitest'
 import { executeGraphPatch, registerWfGraphPatch, type GraphPatchHost } from '../../../../src/host/tools/wf-graph-patch/tool.js'
-import { WfError } from '../../../../src/host/orchestrator/seams.js'
+import { WfError, type RunEntry } from '../../../../src/host/orchestrator/index.js'
 import { stageLabel } from '../../../../src/host/graph/model.js'
 import type { GraphNode, Line, WorkflowDocument, WorkflowTemplate } from '../../../../src/host/shared/graph-model.js'
-import type { RunEntry } from '../../../../src/host/orchestrator/run-types.js'
 import type { RunSnapshot } from '../../../../src/host/shared/types.js'
 
 // ---------------------------------------------------------------------------
@@ -110,6 +109,36 @@ function makeHost(overrides: Partial<GraphPatchHost> = {}, state?: FakeStoreStat
       currentResolvedFlow: async (entry: RunEntry) => entry.baseFlow,
       touchRunForSession: (sessionId: string) => { touched.push(sessionId); return true },
       refreshActiveDefinitions: async (flowId: string) => { refreshed.push(flowId) },
+      // 闸门事实/写入：fake 仅按运行时契约的最小语义镜像（真实写入语义由 orchestrator 单测覆盖）
+      milestoneFactsFor: (sessionId: string) => {
+        const entry = entries.get(sessionId)
+        if (!entry) return null
+        const meta = (entry.snapshot.meta ?? {}) as { milestoneMax?: unknown }
+        return {
+          runId: entry.snapshot.id,
+          executorParentId: String(entry.executorParentId ?? ''),
+          executorIsMilestone: entry.executorIsMilestone === true,
+          ...(entry.milestoneProxyId ? { milestoneProxyId: entry.milestoneProxyId } : {}),
+          nodeIds: entry.snapshot.nodes.map((node) => node.nodeId),
+          milestoneUsed: Math.max(0, Math.floor(Number(entry.snapshot.milestoneUsed) || 0)),
+          milestoneMax: Number(meta.milestoneMax) || 0,
+        }
+      },
+      markMilestoneNode: (sessionId: string, input: { nodeId: string; status: 'ok' | 'fail' }) => {
+        const entry = entries.get(sessionId)
+        if (!entry) throw new Error('mark_node: 当前会话没有正在运行的编排')
+        const node = entry.snapshot.nodes.find((item) => item.nodeId === input.nodeId)
+        if (node) {
+          node.status = input.status
+          node.endedAt = new Date().toISOString()
+          node.stopReason = 'milestone'
+          node.turns ??= []
+          node.turns.push({ startedAt: node.startedAt, endedAt: node.endedAt, stopReason: 'milestone', outputSummary: '' })
+        }
+        const milestoneUsed = Math.max(0, Math.floor(Number(entry.snapshot.milestoneUsed) || 0)) + (input.status === 'ok' ? 1 : 0)
+        entry.snapshot.milestoneUsed = milestoneUsed
+        return { nodeId: input.nodeId, status: input.status, runId: entry.snapshot.id, milestoneUsed }
+      },
     },
     ...overrides,
   }

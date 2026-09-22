@@ -1,4 +1,4 @@
-import type { RootAgentLike } from '../../orchestrator/runtime.js';
+import type { RootAgentLike } from '../../orchestrator/index.js';
 import { type WfToolsHost } from '../infrastructure/caller.js';
 /** 宿主能力缝（index.ts 装配；单测 fake）：在 wf 工具宿主之上加子代理查询与冷恢复。 */
 export interface WfAskAgentHost extends WfToolsHost {

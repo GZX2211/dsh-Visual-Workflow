@@ -8,7 +8,7 @@
 //
 // 职责边界：只做纯身份派生与类型契约，不含任何业务执行语义。
 
-import type { CallerInfo, OrchestratorRuntime, RootAgentLike } from '../../orchestrator/runtime.js'
+import type { CallerInfo, OrchestratorRuntime, RootAgentLike } from '../../orchestrator/index.js'
 import type { ToolExecLike } from './define-tool.js'
 
 /**

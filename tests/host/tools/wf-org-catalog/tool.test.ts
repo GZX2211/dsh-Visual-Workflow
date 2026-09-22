@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { buildOrgCatalog, CATALOG_LIMITS, clip, type OrgCatalogHost } from '../../../../src/host/tools/wf-org-catalog/tool.js'
-import { WfError } from '../../../../src/host/orchestrator/seams.js'
+import { WfError } from '../../../../src/host/orchestrator/index.js'
 import type { WorkflowDocument, WorkflowTemplate } from '../../../../src/host/shared/graph-model.js'
 
 function stageNode(id: string, kind: 'start' | 'end'): WorkflowDocument['nodes'][number] {

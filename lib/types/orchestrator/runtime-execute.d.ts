@@ -1,4 +1,4 @@
-import { type FinishArgs, type FinishResult, type RunNodeArgs, type RunNodeResult } from './run-types.js';
+import { type FinishArgs, type FinishResult, type RunNodeArgs, type RunNodeResult } from './run-entry.js';
 import { type CallerInfo } from './seams.js';
 import { RuntimeLaunch } from './runtime-launch.js';
 export declare class RuntimeExecute extends RuntimeLaunch {

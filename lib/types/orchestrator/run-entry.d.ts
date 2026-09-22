@@ -1,11 +1,10 @@
 import type { FlowStore } from '../storage/flow-store.js';
-import type { WorkflowDocument } from '../shared/graph-model.js';
+import type { RoleNode, WorkflowDocument } from '../shared/graph-model.js';
 import type { RunSnapshot, RunStatus } from '../shared/types.js';
 import type { ChildPromptSetup } from '../agent/prompt-setup.js';
 import type { ModelSelectionSetup } from '../agent/model-selection.js';
-import type { EmbeddingEngine } from '../embedding/engine.js';
 import type { AgentHost, NodeRunner, OrchestratorConfig, OrchestratorLogger } from './seams.js';
-import type { PendingAsk } from './ask-types.js';
+import type { PendingAsk } from './ask-protocol.js';
 /** 单次运行的内存条目（旧项目 entry 同构：快照 + 护栏计数 + in-flight 表）。 */
 export interface RunEntry {
     /** 运行级取消控制器（停止/终止/插件卸载时 abort；阻塞中的 wait/提问随之取消）。 */
@@ -84,16 +83,21 @@ export interface OrchestratorDeps {
     promptSetup?: ChildPromptSetup;
     /** 模型选择装配（父代理模型/思考强度注入；缺省跳过父代理绑定）。 */
     modelSelection?: ModelSelectionSetup;
+    /**
+     * 父代理角色 Prompt 读取能力（宿主注入：agent 层实现，含 .md 路径设置时的文件读取）。
+     * 为什么经缝注入：读角色 Prompt 文件属 agent 关注点，编排器只做「注入到根 Agent ctx」。
+     */
+    resolveRolePrompt?: (node: RoleNode) => Promise<string>;
     /** 配置子集。 */
     config: OrchestratorConfig;
     /**
      * 运行期数据库索引预建能力（宿主注入；缺省跳过预建，交由 wf_db_query(mode=search)
-     * 的惰性构建兜底）。用于在启动节点子代理之前为其 db-in 所连本地库预建索引，
+     * 的惰性构建兜底）。用于在启动节点子代理之前为其 db-in 所连库预建索引，
      * 吸收构建耗时、避免子代理首次检索才构建。
+     * 为什么注入能力而非具体实现：具体索引服务属数据工具域，编排器不反向依赖 tools。
      */
     dbIndexer?: {
-        dataDir: string;
-        engine: EmbeddingEngine;
+        ensureIndexes(nodeId: string, flow: WorkflowDocument): Promise<void>;
     };
     /** 系统语言名读取（宿主注入：从 DSH 用户设置读取；缺省回退默认语言）。 */
     systemLanguage?: () => string;
@@ -105,6 +109,26 @@ export interface OrchestratorDeps {
     newRunId?: () => string;
     /** 消息 id 生成注入（缺省 randomUUID）。 */
     uuid?: () => string;
+}
+/**
+ * 闸门标记所需的运行事实（只读；wf_graph_patch 的 mark_node 路径消费）。
+ * 快照归编排器所有，工具层据此裁决预算与目标合法性，不再直读 RunEntry/snapshot。
+ */
+export interface MilestoneRunFacts {
+    runId: string;
+    executorParentId: string;
+    executorIsMilestone: boolean;
+    milestoneProxyId?: string;
+    nodeIds: string[];
+    milestoneUsed: number;
+    milestoneMax: number;
+}
+/** 闸门节点标记结果（markMilestoneNode 返回；milestoneUsed 为递增后的已用次数）。 */
+export interface MilestoneMarkResult {
+    nodeId: string;
+    status: 'ok' | 'fail';
+    runId: string;
+    milestoneUsed: number;
 }
 export interface StartRunOptions {
     /** 运行模式（缺省 mode1；模式二由服务管理器传入 mode2）。 */

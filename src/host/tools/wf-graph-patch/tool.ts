@@ -25,7 +25,7 @@ import { WF_GRAPH_PATCH } from '../../shared/protocol.js'
 import { defineTool, type ToolDefinitionLike, type ToolExecLike } from '../infrastructure/define-tool.js'
 import { textRender } from '../infrastructure/text-render.js'
 import { callerOf } from '../infrastructure/caller.js'
-import { WfError } from '../../orchestrator/seams.js'
+import { WfError } from '../../orchestrator/index.js'
 import { checkGraphInvariants, hasBlockingIssues } from '../../graph/invariants.js'
 import { mainNodeIdOf } from '../../graph/model.js'
 import type { GraphIssue } from '../../graph/invariants.js'
@@ -48,7 +48,7 @@ import {
 } from './types.js'
 import type { GraphNode, Line, WorkflowDocument, WorkflowTemplate } from '../../shared/graph-model.js'
 import type { OrgMeta } from '../../shared/types.js'
-import type { RunEntry } from '../../orchestrator/run-types.js'
+import type { MilestoneMarkResult, MilestoneRunFacts, RunEntry } from '../../orchestrator/index.js'
 
 /** 工具层所需宿主能力（宿主 service 的最小结构适配；单测 fake）。 */
 export interface GraphPatchHost {
@@ -70,6 +70,10 @@ export interface GraphPatchHost {
     currentResolvedFlow(entry: RunEntry): Promise<WorkflowDocument>
     touchRunForSession(sessionId: string): boolean
     refreshActiveDefinitions(flowId: string, sessionId: string, flow: WorkflowDocument): Promise<void>
+    /** 闸门标记所需的运行事实（只读；快照归运行时所有）。 */
+    milestoneFactsFor(sessionId: string): MilestoneRunFacts | null
+    /** 闸门节点状态写入（运行快照的唯一写者）；返回递增后的已用次数。 */
+    markMilestoneNode(sessionId: string, input: { nodeId: string; status: 'ok' | 'fail' }): MilestoneMarkResult
   }
   /** 运行快照落盘（mark_node 后固化状态；缺省跳过持久化——单测可省）。 */
   persistRun?: (runId: string) => Promise<void>
@@ -292,72 +296,62 @@ async function runMetaGroup(
 /**
  * C 组：运行状态标记（闸门状态机；D-07/D-21/§5.2 扩展2）。
  * 状态机三关（任一不过即 WF_MILESTONE_INVALID，绝不静默放过）：
- *   ① 必须在**闸门轮**：entry.executorIsMilestone（由 proxy.data.role='milestone' 驱动）——
+ *   ① 必须在**闸门轮**：fact.executorIsMilestone（由 proxy.data.role='milestone' 驱动）——
  *      纯编排轮、普通执行轮都没有可标记的闸门；
  *   ② 目标必须是**当前闸门**：nodeId 可写闸门虚拟节点 id 或父代理节点 id，两者都归一到
- *      父代理节点 id 后与 entry.executorParentId 比对；
- *   ③ 预算：status=ok 时 milestoneUsed 不得达到 meta.milestoneMax（0 = 不限制；不含首次编排 D-21）。
- * 落地：写父代理节点的快照状态（stopReason=milestone）+ 递增快照 milestoneUsed + 持久化。
+ *      父代理节点 id 后与 fact.executorParentId 比对；
+ *   ③ 预算：status=ok 时 milestoneUsed 不得达到 milestoneMax（0 = 不限制；不含首次编排 D-21）。
+ * 落地：快照写入**只能经运行时的 markMilestoneNode**（运行事实唯一写者）——工具层只做
+ * 判定与归一化，再持久化（persistRun 缝）。
  */
 async function runMarkGroup(
   host: GraphPatchHost,
   sessionId: string,
   ops: MarkPatchOp[],
 ): Promise<{ marked: { nodeId: string; status: 'ok' | 'fail'; runId: string }[]; issues: GraphIssue[] }> {
-  const entry = host.orchestrator.activeRunForSession(sessionId)
-  if (!entry) {
+  const facts = host.orchestrator.milestoneFactsFor(sessionId)
+  if (!facts) {
     throw new WfError('mark_node: 当前会话没有正在运行的编排（闸门标记只在运行期有意义）', 'WF_MILESTONE_INVALID')
   }
   host.orchestrator.touchRunForSession(sessionId)
-  const snapshot = entry.snapshot
-  const parentId = String(entry.executorParentId ?? '')
-  if (!entry.executorIsMilestone || !parentId) {
+  const parentId = facts.executorParentId
+  if (!facts.executorIsMilestone || !parentId) {
     throw new WfError(
       'mark_node: 当前不是父代理闸门轮——只有被 proxy（data.role=\'milestone\'）驱动的闸门轮才需要标记',
       'WF_MILESTONE_INVALID',
     )
   }
+  const entry = host.orchestrator.activeRunForSession(sessionId)
+  if (!entry) {
+    throw new WfError('mark_node: 当前会话没有正在运行的编排（闸门标记只在运行期有意义）', 'WF_MILESTONE_INVALID')
+  }
   const flow = await host.orchestrator.currentResolvedFlow(entry)
-  const nodeIds = snapshot.nodes.map((node) => node.nodeId)
-  const meta = normalizeOrgMeta(snapshot.meta ?? {})
-  const milestoneMax = Number(meta.milestoneMax) || 0
   const marked: Array<{ nodeId: string; status: 'ok' | 'fail'; runId: string }> = []
-  let used = Math.max(0, Math.floor(Number(snapshot.milestoneUsed) || 0))
+  let used = facts.milestoneUsed
   for (const op of ops) {
     const requested = String(op?.nodeId ?? '')
     const mainId = mainNodeIdOf(flow, requested) ?? requested
     if (mainId !== parentId) {
       throw new WfError(
-        `mark_node:「${requested}」不是当前父代理闸门节点（当前闸门：${entry.milestoneProxyId ?? parentId}）`,
+        `mark_node:「${requested}」不是当前父代理闸门节点（当前闸门：${facts.milestoneProxyId ?? parentId}）`,
         'WF_MILESTONE_INVALID',
       )
     }
+    // 参数层与预算判定仍由本工具的纯函数完成（nodeId 合法性 / status 取值 / 闸门预算）
     const result = applyMarkOp({
       op: { ...op, nodeId: mainId },
-      runId: snapshot.id,
-      nodeIds,
+      runId: facts.runId,
+      nodeIds: facts.nodeIds,
       milestoneUsed: used,
-      milestoneMax,
+      milestoneMax: facts.milestoneMax,
     })
-    const node = snapshot.nodes.find((item) => item.nodeId === result.nodeId)
-    if (node) {
-      node.status = result.status
-      node.endedAt = new Date().toISOString()
-      node.stopReason = 'milestone'
-      node.turns ??= []
-      node.turns.push({
-        startedAt: node.startedAt,
-        endedAt: node.endedAt,
-        stopReason: 'milestone',
-        outputSummary: '',
-      })
-      if (result.status === 'ok') used += 1
-    }
+    // 快照写入交还运行时的唯一写者（工具层不再直接改写节点状态与 milestoneUsed）
+    const written = host.orchestrator.markMilestoneNode(sessionId, { nodeId: result.nodeId, status: result.status })
+    used = written.milestoneUsed
     marked.push(result)
   }
-  // 预算落在快照上（可审计 + 续跑继承；父代理自动完成路径永不写它）
-  snapshot.milestoneUsed = used
-  if (host.persistRun) await host.persistRun(snapshot.id)
+  // 预算已随每次写入落在快照上（可审计 + 续跑继承；父代理自动完成路径永不写它）
+  if (host.persistRun) await host.persistRun(facts.runId)
   return { marked, issues: [] }
 }
 

@@ -3,36 +3,24 @@
 // 节点子代理执行引擎（T-022）：ensureNodeChild / 配置签名复用 / 工具白名单解析 /
 // startNodeTask / interruptChild / 软截停消费。
 //
-// 官方 seam 取证（§8 索引 #1/#6/#7，零官方运行时依赖 W-05；DSH 0.1.5-rc.1 复核）：
-//   - ctx.subagents.startContinuable({ provider, label, request: { prompt, parent,
-//     persona?, toolFilter?, agentOptions? }, signal }) → { childId, messageId }；
-//     request.prompt 是首条 user 消息，创建即开始推理——首次创建必须把完整任务块
-//     作为 prompt 注入，否则子代理以「无任务」状态空转（旧项目关键时序结论）；
-//   - 复用派发：官方 SubagentRuntime 自 0.1.2 起已无 rc.2 的 followup，改相邻 Agent 通道
-//     sendMessage(sender, childId, content, { signal }) / queuePrompt(...)（A4-01）；
-//     0.1.5-rc.1 复核：followup 仍不存在，sendMessage 为唯一推荐通道；
-//   - ctx.subagents.interrupt(childId, { kind: 'user', parentSessionId })——尽力中断；
-//   - 每子代理作用域贡献：官方无 registerContinuableSetup，改为经 agent/session-start
-//     事件在创建窗口内按 agent.ctx（发布后的 scoped ctx）安装四类贡献
-//     （可见性/软截停/模型选择/角色提示词）——与官方 installModelSelection(agentCtx, …) 范式一致。
+// 官方 seam 取证：
+// - startContinuable({ provider, label, request:{prompt,parent,persona?,toolFilter?,agentOptions?}, signal }) → {childId,messageId}；request.prompt 为首条 user 消息，创建即推理；首次必须注入完整任务块，否则子代理空转。
+// - interrupt(childId,{kind:'user',parentSessionId}) 尽力中断。
+// - 每子代理作用域贡献：官方无 registerContinuableSetup，改为 agent/session-start 事件在创建窗口按 agent.ctx 安装四类贡献（可见性/软截停/模型选择/角色提示词），与 installModelSelection(agentCtx,…) 范式一致。
 //
-// 白名单规则（架构文档 §4.2 L219，与旧项目行为差异已标注）：
-//   - combo：combo.tools ∩ 可见工具集（父代理工具集）+ 所选 MCP 服务器前缀工具；
-//   - 官方 preset：经 agentPresets.standingKeyFor 取 standing scope 工具名 ∩ 可见
-//     （服务缺失回退全部可见——旧项目兜底语义）；旧项目 minimal/ptc 硬编码正则
-//     列表被真实 preset 解析取代（更精确）；
-//   - **无强制追加**：wf_ask/wf_ask_agent 仅在组合勾选时进入 allow（旧项目自动
-//     追加 wf_ask 的行为删除——PRD §4.4.2 规则 7 定稿）；
-//   - wf_db_query 仅在存在 db-in 连线时追加（§4.4.3 规则 5）；
-//   - CHILD_AGENT_HIDDEN_TOOLS（wf_run_node/wf_run_node_wait/wf_finish + 自主编排两工具）
-//     永不进入 allow，且经 tools.restrict 显式 deny（双保险）。
+// 白名单规则：
+// - combo：combo.tools ∩ 可见工具集（父代理）+ 所选 MCP 前缀工具；
+// - 官方 preset：agentPresets.standingKeyFor 取 standing scope 工具名 ∩ 可见（服务缺失回退全部可见）；旧 minimal/ptc 硬编码正则被真实 preset 解析取代；
+// - 无强制追加：wf_ask/wf_ask_agent 仅组合勾选时进 allow（旧自动追加删除，PRD §4.4.2 规则 7）；
+// - wf_db_query 仅存在 db-in 连线时追加（§4.4.3 规则 5）；
+// - CHILD_AGENT_HIDDEN_TOOLS（wf_run_node/wf_run_node_wait/wf_finish + 自主编排两工具）永不进 allow，且 tools.restrict 显式 deny（双保险）。
 
 import type { Context } from '@deepseek-ai/cordis'
 import { readFile } from 'node:fs/promises'
 import { dbInEdges } from '../graph/model.js'
 import type { FlowStore } from '../storage/flow-store.js'
 import type { GraphNode, RoleNode } from '../shared/graph-model.js'
-import type { NodeRunner, NodeStartInput, OrchestratorLogger } from '../orchestrator/runtime.js'
+import type { NodeRunner, NodeStartInput, OrchestratorLogger } from '../orchestrator/index.js'
 import { consumeReactCappedOf, type ReactGuardBridge } from './guards.js'
 import { CHILD_AGENT_HIDDEN_TOOLS, RESERVED_TRANSPORT_TOOL, WF_FINISH, WF_RUN_NODE, WF_RUN_NODE_WAIT } from '../shared/protocol.js'
 import type { ModelSelectionLike, ModelSelectionSetup, SelectionChildContext } from './model-selection.js'

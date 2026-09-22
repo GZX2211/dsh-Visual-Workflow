@@ -1,11 +1,10 @@
-// src/host/orchestrator/ask-types.ts
+// src/host/orchestrator/ask-protocol.ts
 //
-// wf_ask_agent 三态通信协议（ask/reply/resolve）的纯类型、常量与消息文本构建
+// wf_ask_agent 三态通信协议（ask/reply/resolve）的类型、常量与消息文本构建
 // 纯函数：Request/Result/挂起记录/投递缝 + 协作消息、ask 文本、超时通知文本。
 // 文本构建函数均为纯函数（不读时钟/随机源），供编排运行时与单测共用。
 
 import type { CoordinatorMessage } from './seams.js'
-import { truncateText } from './snapshot.js'
 
 /** wf_ask_agent 三态命令。 */
 export type AskAgentCmd = 'ask' | 'reply' | 'resolve'

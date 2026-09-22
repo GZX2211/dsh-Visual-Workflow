@@ -1,4 +1,4 @@
-// tests/host/resume.test.ts
+// tests/host/orchestrator/resume.test.ts
 //
 // 断点续跑单测：
 //   - buildResumedSnapshot 纯函数：已 ok/react-capped 继承（resumed+完整产出）、
@@ -7,37 +7,23 @@
 //   - runtime.resumeRun：paused/interrupted 恢复、继承链落盘、旧 paused 内存条目
 //     释放（锁移交）、编排指令 isResume 动态态、错误路径（无断点/不可恢复/
 //     不存在/锁冲突）。
+// 装配与测试替身见 fixtures/harness.ts（共享，不在本文件内重复）。
 
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { FlowStore } from '../../src/host/storage/flow-store.js'
-import {
-  OrchestratorRuntime,
-  type AgentHost,
-  type CallerInfo,
-  type NodeRunner,
-  type NodeStartInput,
-  type OrchestratorConfig,
-  type RootAgentLike,
-  type RootInjectedMessage,
-  type TurnEndInfo,
-} from '../../src/host/orchestrator/runtime.js'
-import { buildResumedSnapshot, findResumableRun } from '../../src/host/orchestrator/resume.js'
-import { stageLabel } from '../../src/host/graph/model.js'
-import type { RoleNode, StageNode, WorkflowDocument } from '../../src/host/shared/graph-model.js'
+import { stageLabel } from '../../../src/host/graph/model.js'
+import type { RoleNode, StageNode, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
+import type { RunSnapshot } from '../../../src/host/shared/types.js'
+import { buildResumedSnapshot, findResumableRun, type CallerInfo } from '../../../src/host/orchestrator/index.js'
+import { caller, cleanupTempDirs, makeHarness, type Harness } from './fixtures/harness.js'
 
-const cleanups: Array<() => Promise<void>> = []
+afterEach(cleanupTempDirs)
 
-afterEach(async () => {
-  await Promise.all(cleanups.splice(0).map((fn) => fn()))
-})
-
+/** 阶段节点（固定 id，确定性测试）。 */
 function stage(id: string, kind: 'start' | 'end' | 'pause'): StageNode {
   return { id, kind, position: { x: 0, y: 0 }, data: { label: stageLabel(kind, 'mode1') } }
 }
 
+/** 角色节点（固定 id + 固定数据）。 */
 function agent(id: string, label: string): RoleNode {
   return {
     id,
@@ -77,87 +63,7 @@ function makeFlow(): WorkflowDocument {
   }
 }
 
-class FakeRoot implements RootAgentLike {
-  id: string
-  status = 'idle'
-  messages: RootInjectedMessage[] = []
-  session: { events: unknown[] } = { events: [] }
-  constructor(id: string) {
-    this.id = id
-  }
-}
-
-class FakeAgents implements AgentHost {
-  roots = new Map<string, FakeRoot>()
-  available(): boolean {
-    return true
-  }
-  getRootAgent(id: string): RootAgentLike | null {
-    return this.roots.get(id) ?? null
-  }
-  followupRoot(agent: RootAgentLike, message: RootInjectedMessage): void {
-    ;(agent as FakeRoot).messages.push(message)
-  }
-  latestTurnEnd(): TurnEndInfo | null {
-    return null
-  }
-  childRunning(): boolean {
-    return false
-  }
-}
-
-class FakeRunner implements NodeRunner {
-  calls: NodeStartInput[] = []
-  async startNodeTask(input: NodeStartInput): Promise<{ childId: string; created: boolean }> {
-    this.calls.push(input)
-    return { childId: `child-${this.calls.length}`, created: true }
-  }
-  async interruptChild(): Promise<void> {}
-}
-
-interface Harness {
-  runtime: OrchestratorRuntime
-  store: FlowStore
-  agents: FakeAgents
-  runner: FakeRunner
-  clock: { now: number }
-}
-
-async function makeHarness(config?: Partial<OrchestratorConfig>): Promise<Harness> {
-  const dir = await mkdtemp(join(tmpdir(), 'vw-resume-'))
-  cleanups.push(() => rm(dir, { recursive: true, force: true }))
-  const store = new FlowStore(dir)
-  await store.init()
-  const clock = { now: 1_000_000 }
-  const runSeq = { n: 0 }
-  const agents = new FakeAgents()
-  agents.roots.set('session-1', new FakeRoot('session-1'))
-  const runner = new FakeRunner()
-  const runtime = new OrchestratorRuntime({
-    store,
-    runner,
-    agents,
-    config: {
-      outputFullLimit: 400,
-      documentTextLimit: 200,
-      runIdleTimeoutMs: 500,
-      retryLimitDefault: 3,
-      reactIterationLimitDefault: 50,
-      wfAskAgentTimeoutMs: 500,
-      ...config,
-    },
-    logger: { warn: () => {}, info: () => {}, debug: () => {} },
-    now: () => clock.now,
-    newRunId: () => {
-      runSeq.n += 1
-      return `run-${runSeq.n}`
-    },
-    uuid: () => `uuid-${runSeq.n}`,
-  })
-  return { runtime, store, agents, runner, clock }
-}
-
-const rootCaller: CallerInfo = { isChild: false, sessionId: 'session-1' }
+const rootCaller: CallerInfo = caller
 
 /** 构造 paused 断点：a1 完成（ok + 产出）→ 暂停门（paused + resumeFromNodeId）。 */
 async function makePausedRun(h: Harness): Promise<void> {
@@ -173,7 +79,7 @@ async function makePausedRun(h: Harness): Promise<void> {
 // ---------------------------------------------------------------------------
 
 describe('buildResumedSnapshot', () => {
-  const prev: import('../../src/host/shared/types.js').RunSnapshot = {
+  const prev: RunSnapshot = {
     id: 'run-1',
     flowId: 'flow-1',
     flowName: '测试流程',
@@ -240,7 +146,7 @@ describe('buildResumedSnapshot', () => {
 
   it('Bug 21：interrupted（无暂停点）恢复时推断 resumeFromNodeId = 首个未完成节点', async () => {
     // 宿主重启中断：prev 无 resumeFromNodeId（中断发生在任意节点，无暂停门）
-    const interrupted: import('../../src/host/shared/types.js').RunSnapshot = {
+    const interrupted: RunSnapshot = {
       ...prev,
       status: 'interrupted',
       resumeFromNodeId: undefined,
@@ -367,7 +273,7 @@ describe('runtime.resumeRun', () => {
     expect(resumed.resumedFromRunId).toBe('run-1')
 
     // completed 仍不可恢复
-    const { createRunSnapshot } = await import('../../src/host/orchestrator/snapshot.js')
+    const { createRunSnapshot } = await import('../../../src/host/orchestrator/index.js')
     const done = createRunSnapshot({ runId: 'run-done', flow: makeFlow(), sessionId: 'session-1', mode: 'mode1', now: h.clock.now })
     done.status = 'completed'
     await h.store.saveRun(done)
@@ -390,7 +296,7 @@ describe('runtime.resumeRun', () => {
     const h = await makeHarness()
     await h.store.saveWorkflow(makeFlow(), 'session-1', { force: true })
     // 磁盘写入 paused 断点（内存无条目——另一会话占用了运行锁）
-    const { createRunSnapshot } = await import('../../src/host/orchestrator/snapshot.js')
+    const { createRunSnapshot } = await import('../../../src/host/orchestrator/index.js')
     const diskPrev = createRunSnapshot({ runId: 'run-1', flow: makeFlow(), sessionId: 'session-1', mode: 'mode1', now: h.clock.now })
     diskPrev.status = 'paused'
     diskPrev.resumeFromNodeId = 'n-pause'

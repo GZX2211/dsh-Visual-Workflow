@@ -1,4 +1,4 @@
-import type { SubagentEndInfo } from './run-types.js';
+import type { SubagentEndInfo } from './run-entry.js';
 import { RuntimeComm } from './runtime-comm.js';
 export declare class RuntimeObserve extends RuntimeComm {
     /**

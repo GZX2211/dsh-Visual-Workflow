@@ -1,5 +1,5 @@
 import type { FlowStore } from '../storage/flow-store.js';
-import type { OrchestratorRuntime } from '../orchestrator/runtime.js';
+import type { OrchestratorRuntime } from '../orchestrator/index.js';
 import type { EmbeddingEngine } from '../embedding/engine.js';
 import type { SchedulerEngine } from '../scheduler/engine.js';
 import type { SchedulerTaskStore } from '../scheduler/task-store.js';

@@ -5,8 +5,8 @@
 // 方法体逐字移动。
 
 import { terminalizeNodes } from './snapshot.js'
-import { messageOf } from './helpers.js'
-import type { RunEntry, TerminateOptions } from './run-types.js'
+import { messageOf } from './errors.js'
+import type { RunEntry, TerminateOptions } from './run-entry.js'
 import { RuntimeObserve } from './runtime-observe.js'
 
 export class RuntimeLifecycle extends RuntimeObserve {

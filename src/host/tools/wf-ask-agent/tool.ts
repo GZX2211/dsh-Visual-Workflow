@@ -19,7 +19,7 @@
 // 插队）；单条 description 目标 ≤ 120 tokens。
 
 import { WF_ASK_AGENT } from '../../shared/protocol.js'
-import type { AskAgentDelivery, OrchestratorRuntime, RootAgentLike } from '../../orchestrator/runtime.js'
+import type { AskAgentDelivery, OrchestratorRuntime, RootAgentLike } from '../../orchestrator/index.js'
 import { callerOf, type WfToolsHost } from '../infrastructure/caller.js'
 import { defineTool, type ToolDefinitionLike } from '../infrastructure/define-tool.js'
 import { textRender } from '../infrastructure/text-render.js'

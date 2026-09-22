@@ -1,6 +1,6 @@
 // src/host/commands/arrange.ts
 //
-// `/arrange` 斜杠命令（自主编排实施方案 §10 P2；用户裁决：命令名用英文 `/arrange`）。
+// `/arrange` 斜杠命令。
 //
 // 职责边界（**只采集 + 注入，绝不改图**）：
 //   - 采集：调用者 agent（接收方）+ rawInput（用户意图）+ 系统语言；

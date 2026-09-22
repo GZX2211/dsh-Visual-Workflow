@@ -564,7 +564,37 @@ checkGraphInvariants
 * Watchdog
 * Runtime recovery
 
-Orchestrator 不替 Agent 做语义判断。
+边界：
+
+* **持有运行事实的唯一写者**：`RunSnapshot`、运行锁、子代理/等待器/协作通信的内存表只由 orchestrator 方法改写；工具层需要写运行状态时必须经语义化方法（如 `markMilestoneNode`），不得直接改写快照。
+* **不做 Agent 语义判断**：是否需要重规划、换人、汇报由 Agent 决定；orchestrator 只提供确定性事实（状态、锁、终态、错误码、事件回写）。
+* **不持有工作流文档写权**：文档读写归 storage 与写图工具；orchestrator 只读最新文档并刷新运行事实源文件。
+* **不反向依赖具体实现**：数据工具（索引预建）与 Agent（角色 Prompt 读取）能力经依赖缝注入，模块外统一从 `index.ts` 导入。
+
+文件职责（详见 `src/host/orchestrator/AGENTS.md`）：
+
+```text
+index.ts             唯一公共入口（barrel）
+runtime.ts           OrchestratorRuntime 收口类（继承链最终类）
+runtime-base.ts      字段/查询/上下文自动接续/清理/父代理配置注入
+runtime-launch.ts    startRun / resumeRun
+runtime-execute.ts   wf_run_node / wf_finish
+runtime-comm.ts      wf_ask_agent 三态协议
+runtime-observe.ts   subagent/end 回写与协作组聚合
+runtime-lifecycle.ts 终止 / 停止 / 挂起
+seams.ts             依赖缝、常量、配置与身份类型
+errors.ts            WfError / messageOf
+run-entry.ts         RunEntry 与运行接口契约
+ask-protocol.ts      三态协议类型与消息文本纯函数
+snapshot.ts          运行快照纯函数（截断口径唯一来源）
+graph-facts.ts       图推导与节点上下文事实（纯函数）
+task-blocks.ts       节点任务块与交接契约（纯函数）
+directive.ts         父代理提示词变体与编排指令组装（纯函数）
+node-params.ts       节点级执行参数解析（纯函数）
+resume.ts            断点候选查找与继承快照构建
+flow-diff.ts         编排语义变更判定（纯函数）
+watchdog.ts          空闲看护、扫描与宿主重启对账
+```
 
 ---
 

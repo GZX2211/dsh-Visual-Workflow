@@ -1,36 +1,17 @@
 // src/host/agent/guards.ts
 //
-// ReAct 软截停护栏（T-022；V-01 定稿语义）。
+// ReAct 软截停护栏
 //
-// 官方取证（需求文档 V-01 + 架构文档 §8 索引 #5、#22）：
-//   - 官方无内置 turn 预算（packages/core/agent-loop/README.md Known Limitations：
-//     "tool calls or steering continue the current turn; a policy that bounds
-//     runaway turns must cancel from an existing lifecycle extension point"）；
-//   - 因此按需求文档 §4.2.3.2 规则 3 实现插件侧「软截停（强制收尾）」——不硬性
-//     中断代理：达到上限后子代理不再发起新的工具调用（工具调用被强制拒绝），
-//     并被要求基于已有进展输出最终结论后正常结束。
+// 机制：
+// ① agent/pre-step 计步（waterfall，每步≈一次思考-行动迭代）：达到迭代上限时，将本步进入消息替换为「强制收尾指令」，让模型直接产出最终结论（官方 runtime-types L231 pre-step 可替换 messages，PreStepDecision enter 分支）；
+// ② tools.guard()（child scope，官方 core/tools L1110）：触达上限后同步拒绝该子代理一切工具调用（原因「已达迭代上限」），模型无视指令也会被拒，双保险迫使输出结论。
+// 软截停后回合正常结束（stopReason=completed），节点标记 react-capped（非失败，正常产出）。
 //
-// 机制（两线，架构文档 §4.2 L221）：
-//   ① agent/pre-step 计步（waterfall，每步 ≈ 一次思考-行动迭代）：当前回合迭代数
-//      达到上限时，替换本步进入消息为「强制收尾指令」，让模型直接产出最终结论
-//      （官方扩展点：runtime-types L231 pre-step 可替换 messages，PreStepDecision
-//      的 enter 分支，来自 §8 索引 #5 取证）；
-//   ② tools.guard()（child scope，官方 core/tools L1110）：触达上限后同步拒绝
-//      该子代理的一切工具调用（原因「已达迭代上限」）——即便模型无视指令继续
-//      调用，调用也会被强制拒绝，双保险迫使模型输出结论。软截停完成后回合正常
-//      结束（stopReason=completed），节点标记 react-capped（非失败，正常产出）。
+// 生命周期（按 childId 隔离；经 registerContinuableSetup 注入未发布 childCtx，§8 #7）：每回合开始（turn 变化）重置计数与标记；标记由编排器经 consumeCapped 在 subagent/end 消费；若 child 不属于任何运行，下回合 pre-step 重置会自然清掉未消费标记，不残留。
 //
-// 生命周期（按 childId 隔离；经 registerContinuableSetup 注入每个子代理的
-// 未发布 childCtx，§8 索引 #7）：每回合开始时（turn 变化）重置计数与软截停标记；
-// 标记由编排器经 consumeCapped 在 subagent/end 观察时消费——若该 child 不属于
-// 任何运行，下回合 pre-step 的重置会自然清掉未消费的标记（不残留）。
-//
-// 为什么工具拒绝走 tools.guard 而不是 tools.restrict（W-04 注释，§8 索引 #10）：
-// guard 是「运行时判定拒绝」——只在软截停窗口内拒绝、回合结束即自动恢复；
-// restrict 是「声明式掩码」——需要成对 disposer 管理且 unknown 名称会抛错。
-// 软截停是瞬态窗口，guard 语义精确匹配。
+// 为何用 tools.guard 而非 tools.restrict：guard 是运行时判定拒绝，仅软截停窗口内拒绝、回合结束自动恢复；restrict 是声明式掩码，需成对 disposer 管理且 unknown 名称抛错。软截停是瞬态窗口，guard 语义精确匹配。
 
-import type { NodeRunner } from '../orchestrator/runtime.js'
+import type { NodeRunner } from '../orchestrator/index.js'
 
 /** 软截停的强制收尾指令（面向模型，英文；W-03 面向模型的文本与工具描述一致）。 */
 export const REACT_CAP_MESSAGE =

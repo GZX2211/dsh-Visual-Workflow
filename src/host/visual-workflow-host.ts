@@ -9,14 +9,16 @@ import type { Config } from './config.js'
 import { FlowStore } from './storage/flow-store.js'
 import {
   OrchestratorRuntime,
+  reconcileStaleRuns,
+  scheduleIdleWatchdog,
   type OrchestratorLogger,
   type RootAgentLike,
-} from './orchestrator/runtime.js'
-import { reconcileStaleRuns, scheduleIdleWatchdog } from './orchestrator/watchdog.js'
+} from './orchestrator/index.js'
 import {
   CordisToolsView,
   NodeAgentRunner,
   childVisibilityContribution,
+  resolveRolePrompt,
   type AgentsServiceLike,
   type SubagentsServiceLike,
 } from './agent/runner.js'
@@ -34,6 +36,7 @@ import { registerWfOrgCatalog, type OrgCatalogHost } from './tools/wf-org-catalo
 import { registerWfGraphPatch, type GraphPatchHost } from './tools/wf-graph-patch/tool.js'
 import { registerArrangeCommand } from './commands/arrange.js'
 import { registerWfDbQuery } from './tools/wf-db-query/tool.js'
+import { ensureDatabaseIndexes } from './tools/wf-db-query/service.js'
 import { registerRoutes } from './remote/api.js'
 import { registerDownloadRoute } from './remote/download.js'
 import { EmbeddingService } from './embedding/engine.js'
@@ -144,6 +147,8 @@ export class VisualWorkflowHost extends Service {
       agents: this.agents,
       promptSetup: this.childPrompt,
       modelSelection: this.modelSelection,
+      // 角色 Prompt 读取（agent 能力经缝注入：编排器不反向依赖 agent 运行时）
+      resolveRolePrompt: (node) => resolveRolePrompt(node),
       config: {
         outputFullLimit: config.outputFullLimit,
         documentTextLimit: config.documentTextLimit,
@@ -152,7 +157,11 @@ export class VisualWorkflowHost extends Service {
         reactIterationLimitDefault: config.reactIterationLimitDefault,
         wfAskAgentTimeoutMs: config.wfAskAgentTimeoutMs,
       },
-      dbIndexer: { dataDir: config.dataDir, engine: this.embedding },
+      // 索引预建能力经缝注入（具体数据工具域实现不进编排器；best-effort 语义由其内部保证）
+      dbIndexer: {
+        ensureIndexes: (nodeId, flow) =>
+          ensureDatabaseIndexes(config.dataDir, nodeId, flow, this.embedding, cordisLogger(ctx)),
+      },
       // 系统语言名：从 DSH 用户设置（locale.preference）读取，供提示词注入语言规则
       systemLanguage: () => systemLanguageOf(ctx.get('settings') as SettingsServiceLike | null),
       logger: cordisLogger(ctx),

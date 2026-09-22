@@ -1,12 +1,14 @@
-// T-005b 数据库连线提示注入测试：验证 dbToolHintOf 携带所连数据节点 id/label，
+// tests/host/orchestrator/graph-facts.test.ts
+//
+// 数据库连线提示注入测试：验证 dbToolHintOf 携带所连数据节点 id/label，
 // 且 buildNodeBlocks 将该提示注入节点任务块（子代理据此向 wf_db_query 传正确 dataId）。
 //
 // BUG 修复回归：此前 DB_TOOL_HINT 只描述三模式、不携带 dataId，子代理只能凭猜测
 // 的 id 调用 → WF_DB_BAD_DATA「数据节点不存在或已从画布移除」。
 import { describe, expect, it } from 'vitest'
-import { buildNodeBlocks, dbToolHintOf } from '../../src/host/orchestrator/helpers.js'
-import type { DatabaseNode, RoleNode, WorkflowDocument } from '../../src/host/shared/graph-model.js'
-import type { RunSnapshot } from '../../src/host/shared/types.js'
+import { buildNodeBlocks, dbToolHintOf } from '../../../src/host/orchestrator/index.js'
+import type { DatabaseNode, RoleNode, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
+import type { RunSnapshot } from '../../../src/host/shared/types.js'
 
 /** 数据库节点。 */
 function dbNode(id: string, label: string): DatabaseNode {

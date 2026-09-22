@@ -1,4 +1,4 @@
-import { type AskAgentArgs, type AskAgentDelivery, type AskAgentResult } from './ask-types.js';
+import { type AskAgentArgs, type AskAgentDelivery, type AskAgentResult } from './ask-protocol.js';
 import { type CallerInfo } from './seams.js';
 import { RuntimeExecute } from './runtime-execute.js';
 export declare class RuntimeComm extends RuntimeExecute {

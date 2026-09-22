@@ -21,7 +21,7 @@ import {
   type RootAgentLike,
   type RootInjectedMessage,
   type TurnEndInfo,
-} from '../../src/host/orchestrator/runtime.js'
+} from '../../src/host/orchestrator/index.js'
 import type { ServiceState } from '../../src/host/shared/types.js'
 import type { RoleNode, StageNode, WorkflowDocument, Line } from '../../src/host/shared/graph-model.js'
 import { stageLabel } from '../../src/host/graph/model.js'

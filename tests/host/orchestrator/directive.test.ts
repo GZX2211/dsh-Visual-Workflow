@@ -1,3 +1,5 @@
+// tests/host/orchestrator/directive.test.ts
+//
 // 父代理提示词三情况组装测试（用户评审新增）：
 //   - parentPromptVariantOf：画布形态 → 'orchestrator' | 'hybrid' | 'executor' 判定
 //     （含用户补充边界：父代理被流程线连接、其余 agent 均未参与流程 → 仍判 executor，
@@ -11,10 +13,10 @@ import {
   orchestrationNodeList,
   parentExecutorOf,
   parentPromptVariantOf,
-} from '../../src/host/orchestrator/helpers.js'
-import type { GraphNode, Line, WorkflowDocument } from '../../src/host/shared/graph-model.js'
-import type { ExecutorContextFacts } from '../../src/host/prompts/executor.js'
-import { ORCH_HARD_CONSTRAINTS } from '../../src/host/prompts/orchestration.js'
+} from '../../../src/host/orchestrator/index.js'
+import type { GraphNode, Line, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
+import type { ExecutorContextFacts } from '../../../src/host/prompts/executor.js'
+import { ORCH_HARD_CONSTRAINTS } from '../../../src/host/prompts/orchestration.js'
 
 // —— 画布构建小工具（分类测试用；不校验，仅结构）——
 function roleNode(id: string, kind: 'parent' | 'agent', label: string): GraphNode {

@@ -1,4 +1,4 @@
-import type { RunEntry, TerminateOptions } from './run-types.js';
+import type { RunEntry, TerminateOptions } from './run-entry.js';
 import { RuntimeObserve } from './runtime-observe.js';
 export declare class RuntimeLifecycle extends RuntimeObserve {
     /**

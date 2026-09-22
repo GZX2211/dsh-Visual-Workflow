@@ -13,9 +13,8 @@
 // 默认 15s，请求等待需主动推进状态机（父代理回合终态判定/空闲超时）。
 
 import type { FlowStore } from '../storage/flow-store.js'
-import type { OrchestratorRuntime } from '../orchestrator/runtime.js'
+import { findResumableRun, type OrchestratorRuntime } from '../orchestrator/index.js'
 import type { RunStatus } from '../shared/types.js'
-import { findResumableRun } from '../orchestrator/resume.js'
 
 /** OpenAI 兼容错误（status 供 HTTP 层；type/code 供 error body）。 */
 export class OpenAiError extends Error {

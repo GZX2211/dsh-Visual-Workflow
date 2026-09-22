@@ -15,8 +15,7 @@
 // 随后是前置条件/失败语义（WF_* 稳定错误码）/副作用（阻塞提问）；目标 ≤ 120 tokens。
 
 import { WF_ASK } from '../../shared/protocol.js'
-import { WfError } from '../../orchestrator/runtime.js'
-import { statusText } from '../../orchestrator/snapshot.js'
+import { WfError, statusText } from '../../orchestrator/index.js'
 import { callerOf, type WfToolsHost } from '../infrastructure/caller.js'
 import { defineTool, type ToolDefinitionLike } from '../infrastructure/define-tool.js'
 import { textRender } from '../infrastructure/text-render.js'

@@ -18,7 +18,7 @@ import { VisualWorkflowHost } from './index.js'
 import { SessionMap } from './service/sessions-map.js'
 import { OpenAiApi, registerOpenAiApi } from './service/openai-api.js'
 import { CordisSessionProvider } from './scheduler/session-provider.js'
-import { sweepWatchdogOnce } from './orchestrator/watchdog.js'
+import { sweepWatchdogOnce } from './orchestrator/index.js'
 import type { FlowStore } from './storage/flow-store.js'
 
 /** 稳定插件名（serve.patch.yml 的 insert 行 name 解析目标）。 */

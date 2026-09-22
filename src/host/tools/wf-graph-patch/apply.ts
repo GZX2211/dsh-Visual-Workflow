@@ -8,7 +8,7 @@
 
 import { newRoleNode, makeNodeId, makeLineId, NODE_KINDS, NODE_HANDLES, HANDLE_PAIRING, CONDITION_TYPES } from '../../graph/model.js'
 import { stageLabel } from '../../graph/model.js'
-import { WfError } from '../../orchestrator/seams.js'
+import { WfError } from '../../orchestrator/index.js'
 import type { GraphNode, Handle, Line, WorkflowDocument } from '../../shared/graph-model.js'
 import type { GraphPatchOp, GraphPatchResult, MarkPatchOp, MarkPatchResult } from './types.js'
 

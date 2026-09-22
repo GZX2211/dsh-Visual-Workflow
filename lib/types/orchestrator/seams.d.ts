@@ -9,11 +9,6 @@ export declare const GLOBAL_RUN_CALL_LIMIT = 500;
  */
 export declare const SUBAGENT_END_RETRY_DELAY_MS = 10;
 export declare const SUBAGENT_END_RETRY_MAX = 20;
-/** 编排器错误：稳定 code（工具层转 isError 工具结果/测试断言共用）。 */
-export declare class WfError extends Error {
-    readonly code: string;
-    constructor(message: string, code: string, extras?: Record<string, unknown>);
-}
 /** 节点子代理执行引擎（startContinuable 创建/签名复用/followup 派发）。 */
 export interface NodeRunner {
     /**

@@ -13,7 +13,7 @@
 //   - 情况2 编排+自执行：buildHybridPrompt（orchestration.ts，父代理执行单元任务块
 //     来自 buildParentTaskSpec，executor.ts）；
 //   - 情况3 纯执行：buildParentExecutorPrompt（executor.ts）；
-//   画布形态判定 parentPromptVariantOf 在 orchestrator/helpers.ts（三情况分类纯函数）。
+//   画布形态判定 parentPromptVariantOf 在 orchestrator/directive.ts（三情况分类纯函数）。
 
 // 段落标记常量（锚点见 markers.ts 内注释）。
 export {

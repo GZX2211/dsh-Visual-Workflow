@@ -1,5 +1,5 @@
 import type { FlowStore } from '../storage/flow-store.js';
-import type { OrchestratorRuntime } from '../orchestrator/runtime.js';
+import { type OrchestratorRuntime } from '../orchestrator/index.js';
 import type { RunStatus } from '../shared/types.js';
 /** OpenAI 兼容错误（status 供 HTTP 层；type/code 供 error body）。 */
 export declare class OpenAiError extends Error {

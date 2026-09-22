@@ -1,5 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis';
-import type { AgentHost, RootAgentLike, RootInjectedMessage, TurnEndInfo } from '../orchestrator/runtime.js';
+import type { AgentHost, RootAgentLike, RootInjectedMessage, TurnEndInfo } from '../orchestrator/index.js';
 import type { AgentsServiceLike, SubagentsServiceLike } from './runner.js';
 export declare class CordisAgentHost implements AgentHost {
     private readonly ctx;

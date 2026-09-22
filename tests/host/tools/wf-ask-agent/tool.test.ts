@@ -27,7 +27,7 @@ import {
   type OrchestratorConfig,
   type RootAgentLike,
   type TurnEndInfo,
-} from '../../../../src/host/orchestrator/runtime.js'
+} from '../../../../src/host/orchestrator/index.js'
 import { stageLabel } from '../../../../src/host/graph/model.js'
 import type { RoleNode, StageNode, WorkflowDocument } from '../../../../src/host/shared/graph-model.js'
 import { WF_ASK_AGENT, WF_RUN_NODE } from '../../../../src/host/shared/protocol.js'

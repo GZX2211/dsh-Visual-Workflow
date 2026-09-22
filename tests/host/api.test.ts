@@ -28,7 +28,7 @@ import {
   type RootAgentLike,
   type RootInjectedMessage,
   type TurnEndInfo,
-} from '../../src/host/orchestrator/runtime.js'
+} from '../../src/host/orchestrator/index.js'
 import * as EP from '../../src/host/shared/protocol.js'
 import { VisualWorkflowApi, registerRoutes, type ApiHost } from '../../src/host/remote/api.js'
 import { CARD_DESC_MAX, zhDescription } from '../../src/host/remote/api-catalog.js'

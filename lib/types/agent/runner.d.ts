@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { FlowStore } from '../storage/flow-store.js';
 import type { GraphNode, RoleNode } from '../shared/graph-model.js';
-import type { NodeRunner, NodeStartInput, OrchestratorLogger } from '../orchestrator/runtime.js';
+import type { NodeRunner, NodeStartInput, OrchestratorLogger } from '../orchestrator/index.js';
 import { type ReactGuardBridge } from './guards.js';
 import type { ModelSelectionSetup } from './model-selection.js';
 import type { ChildPromptSetup } from './prompt-setup.js';

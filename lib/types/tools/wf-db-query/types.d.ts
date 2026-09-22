@@ -1,4 +1,4 @@
-import type { OrchestratorRuntime } from '../../orchestrator/runtime.js';
+import type { OrchestratorRuntime } from '../../orchestrator/index.js';
 import type { FlowStore } from '../../storage/flow-store.js';
 import type { EmbeddingEngine } from '../../embedding/engine.js';
 /** SQL 校验结果：通过（含规范化后的单条 SQL）或拒绝（错误原因）。 */
