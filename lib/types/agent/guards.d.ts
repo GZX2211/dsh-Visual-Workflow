@@ -30,8 +30,8 @@ export interface ReactGuardBridge {
 }
 /**
  * 创建软截停护栏：返回桥（runner 登记上限/编排器消费标记）与贡献
- * （经 ctx.subagents.registerContinuableSetup 注入每个子代理的未发布 childCtx，
- * 官方 activation-setup-registry L26 契约：(childCtx) => disposer）。
+ * （贡献签名为 `(childCtx) => disposer`；由宿主在子代理创建窗口内对 childCtx 调用，
+ * 撤销函数归宿主持有——本模块不持有作用域撤销表，见同目录 AGENTS.md § 状态所有权）。
  */
 export declare function createReactGuard(): {
     bridge: ReactGuardBridge;

@@ -9,10 +9,16 @@
 //     LlmCallConfig 的 provider/model/reasoningEffort），selection.current 可变，
 //     由调用入口持有；
 //
-// 本移植：结构逐条对齐官方 installModelSelection，
+// 本移植：结构逐条对齐官方 installModelSelection 的双瀑布与可变 selection 语义，
 // payload/next 全部 unknown 收窄；selection 以 WeakMap 按 childCtx 对象身份登记，
 // runner 在 startContinuable 返回后经 agents.get(childId).ctx 找到同一对象并写入
 // 节点级 { provider, model, reasoningEffort }——无全局 pending 状态
+//
+// 【与官方的已知差异（取证：dsh-agent/lib/types/model-selection.d.ts L23-41）】该版本官方
+// installModelSelection 在 provider/model **变化**时还会向下一次被受理的请求追加以
+// user 角色写入的持久化告知（durable notice），effort 单变与空决策不写。本平台按
+// 「节点子代理的 provider/model 在创建时确定、运行中不切换」使用该能力，故未移植告知线；
+// 若将来允许节点级运行中切换模型，必须补齐该行为并同步测试（见同目录 AGENTS.md § 依赖边界）。
 
 /** 节点模型选择（官方 ModelSelection 同构；reasoningEffort 取值域以适配器公布为准）。 */
 export interface ModelSelectionLike {
@@ -80,11 +86,11 @@ export function installModelSelectionLike(childCtx: SelectionChildContext, selec
 
 /** 模型选择装配（index.ts 使用：贡献 + 挂接入口）。 */
 export interface ModelSelectionSetup {
-  /** 经 registerContinuableSetup 注册的贡献（每 child 安装双瀑布 + 登记 selection）。 */
+  /** 贡献（每 child 安装双瀑布 + 登记 selection）；由宿主在子代理创建窗口内对 childCtx 调用。 */
   contribution: (childCtx: unknown) => () => void
   /**
    * 子代理创建完成后由 runner 调用：把节点级选择写入该 child 的 selection。
-   * childCtx 以对象身份匹配（contribition 执行时的同一 childCtx = Agent.ctx）。
+   * childCtx 以对象身份匹配（contribution 执行时的同一 childCtx = Agent.ctx）。
    */
   attach(childCtx: SelectionChildContext, selection: ModelSelectionLike): void
   /**
@@ -105,6 +111,8 @@ export function createModelSelectionSetup(): ModelSelectionSetup {
   const selections = new WeakMap<object, ModelSelectionRefLike>()
 
   // 父代理（根 Agent）按 sessionId 的绑定表：每会话只注册一次，更新走 selection.current。
+  // 【释放路径】监听器注册在根 Agent 的 ctx 上，随该 ctx 的 fiber 卸载自动移除；
+  // 本表只保留调用入口引用，随宿主实例一起回收（宿主持有本装配对象，不单独释放）。
   const parentRefs = new Map<string, ModelSelectionRefLike>()
   const parentDisposers = new Map<string, () => void>()
 

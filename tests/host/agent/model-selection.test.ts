@@ -1,4 +1,4 @@
-// tests/host/model-selection.test.ts
+// tests/host/agent/model-selection.test.ts
 //
 // 思考强度模型选择单测（T-022；V-02）：
 //   - 官方 installModelSelection 双瀑布移植：system-prompt/assemble 注入 provider/model
@@ -9,7 +9,7 @@
 // 断言依据：需求文档 V-02、架构文档 §4.2 L220、官方 model-selection.ts L40-70。
 
 import { describe, expect, it } from 'vitest'
-import { createModelSelectionSetup, type SelectionChildContext } from '../../src/host/agent/model-selection.js'
+import { createModelSelectionSetup, type SelectionChildContext } from '../../../src/host/agent/model-selection.js'
 
 /** 最小 childCtx fake：waterfall 事件链（可变参：assemble 为 (assembly, context, next)）。 */
 class FakeChildCtx implements SelectionChildContext {

@@ -20,11 +20,11 @@ export interface SelectionChildContext {
 export declare function installModelSelectionLike(childCtx: SelectionChildContext, selection: ModelSelectionRefLike): () => void;
 /** 模型选择装配（index.ts 使用：贡献 + 挂接入口）。 */
 export interface ModelSelectionSetup {
-    /** 经 registerContinuableSetup 注册的贡献（每 child 安装双瀑布 + 登记 selection）。 */
+    /** 贡献（每 child 安装双瀑布 + 登记 selection）；由宿主在子代理创建窗口内对 childCtx 调用。 */
     contribution: (childCtx: unknown) => () => void;
     /**
      * 子代理创建完成后由 runner 调用：把节点级选择写入该 child 的 selection。
-     * childCtx 以对象身份匹配（contribition 执行时的同一 childCtx = Agent.ctx）。
+     * childCtx 以对象身份匹配（contribution 执行时的同一 childCtx = Agent.ctx）。
      */
     attach(childCtx: SelectionChildContext, selection: ModelSelectionLike): void;
     /**

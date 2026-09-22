@@ -1,4 +1,4 @@
-// tests/host/guards.test.ts
+// tests/host/agent/guards.test.ts
 //
 // ReAct 软截停护栏单测（T-022；V-01）：
 //   - pre-step 计步：达到上限后替换本步消息为强制收尾指令（enter 分支）；
@@ -7,7 +7,7 @@
 // 断言依据：架构文档 §4.2 L221、需求文档 §4.2.3.2 规则 3（软截停不硬性中断）。
 
 import { describe, expect, it } from 'vitest'
-import { REACT_CAP_DENY_REASON, REACT_CAP_MESSAGE, createReactGuard, type GuardChildContext } from '../../src/host/agent/guards.js'
+import { REACT_CAP_DENY_REASON, REACT_CAP_MESSAGE, createReactGuard, type GuardChildContext } from '../../../src/host/agent/guards.js'
 
 /** 最小 childCtx fake：waterfall 事件链 + tools.guard 记录。 */
 class FakeChildCtx implements GuardChildContext {
@@ -85,6 +85,16 @@ describe('ReAct 软截停护栏（guards.ts）', () => {
     // 软截停窗口内持续替换（不重置计数）
     expect(((await preStep(1)) as { messages: Array<{ content: Array<{ text: string }> }> }).messages[0].content[0].text).toBe(REACT_CAP_MESSAGE)
     expect(ctx.listenerCount('agent/pre-step')).toBe(1)
+  })
+
+  it('软截停注入消息满足官方 plugin 来源契约（kind + 具名 plugin；缺失时官方只显示通用「插件」）', async () => {
+    const { preStep } = setup(1)
+    const capped = (await preStep(1)) as {
+      kind: string
+      messages: Array<{ role: string; source?: { kind?: string; plugin?: string } }>
+    }
+    expect(capped.messages[0].role).toBe('user')
+    expect(capped.messages[0].source).toEqual({ kind: 'plugin', plugin: 'visual-workflow' })
   })
 
   it('tools.guard 双保险：上限前放行，软截停窗口内拒绝并给出「已达迭代上限」原因', async () => {

@@ -1,3 +1,5 @@
+// tests/host/agent/prompt-setup.test.ts
+//
 // T-021 提示词注入装配测试：验证 bindParent 把父代理（根 Agent）提示词状态写入其 ctx，
 // 注册 visual-workflow:prompt 段。
 //
@@ -14,7 +16,7 @@
 // 运行环境：node（host 测试默认）。
 
 import { describe, expect, it } from 'vitest'
-import { createChildPromptSetup, VISUAL_WORKFLOW_PROMPT_SECTION } from '../../src/host/agent/prompt-setup.js'
+import { createChildPromptSetup, VISUAL_WORKFLOW_PROMPT_SECTION } from '../../../src/host/agent/prompt-setup.js'
 
 /**
  * 0.1.5-rc.1 官方段名（**测试内独立字面量**：故意不与实现共享常量，

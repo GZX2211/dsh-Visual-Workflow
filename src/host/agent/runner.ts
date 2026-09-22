@@ -148,9 +148,11 @@ export interface SubagentsServiceLike {
   /** 相邻 Agent 投递（live 父 Agent → direct child 派发下一回合）；**0.1.5 唯一推荐通道**。 */
   sendMessage?(sender: unknown, targetId: string, content: Array<{ type: 'text'; text: string }>, options: { signal?: AbortSignal }): Promise<unknown>
   /**
-   * host 协议投递（distinct child turn，durable host source）；无 sendMessage 时的**旧版兼容**兜底。
-   * 0.1.5-rc.1 该方法的 source 与 signal 均为必填（官方 continuation.d.ts 的 queuePrompt 签名），
-   * 故本插件只在 sendMessage 缺失时才走它。
+   * host 协议投递（distinct child turn，durable host source）；**旧宿主兼容兜底**。
+   * 【取证】当前官方公开 `SubagentRuntime`（dsh-subagent/lib/types/index.d.ts）只暴露
+   * `startContinuable` / `sendMessage` / `interrupt` / `getProvider` / `list` / `drain*`——
+   * `queuePrompt` 仅存在于内部 continuation manager（同包 continuation.d.ts，经符号键方法转发），
+   * 故该分支在新宿主上不可达，仅作旧宿主降级路径保留（缺失时 deliverReuse 给出明确错误）。
    */
   queuePrompt?(parent: unknown, childId: string, content: Array<{ type: 'text'; text: string }>, source?: unknown, signal?: AbortSignal): Promise<unknown>
   /** 尽力中断当前回合（同步签名 interrupt(target, authority)；保留会话）。 */
@@ -532,8 +534,8 @@ export class NodeAgentRunner implements NodeRunner {
   /**
    * 复用子代理的下一回合派发：0.1.2 起 SubagentRuntime 已移除 rc.2 的 followup，改为相邻
    * Agent 通道。优先 sendMessage（免自定义 source：sender 即 live 父代理，来源由服务派生）；
-   * 次选 queuePrompt（host distinct turn，**旧版兼容路径**：0.1.5-rc.1 该方法的
-   * source/signal 已是必填，调用方需显式给全，故仅作兜底）。
+   * 次选 queuePrompt（host distinct turn，**旧宿主兼容路径**：当前官方公开 runtime 已无该通道，
+   * 见 SubagentsServiceLike.queuePrompt 取证；其 source/signal 为必填，故仅作兜底）。
    *
    * 【0.1.5-rc.1 取证】官方 SubagentRuntime **没有** followup 方法
    * （dsh-subagent/lib/types/index.d.ts：startContinuable/sendMessage/interrupt/
@@ -712,11 +714,13 @@ export class NodeAgentRunner implements NodeRunner {
 // ---------------------------------------------------------------------------
 
 /**
- * 子代理工具可见性贡献（经 registerContinuableSetup 注入）：
- * 在 child scope 上 `tools.restrict({ deny: CHILD_AGENT_HIDDEN_TOOLS })`——
+ * 子代理工具可见性贡献：在 child scope 上 `tools.restrict({ deny: CHILD_AGENT_HIDDEN_TOOLS })`——
  * 与白名单 allow（永不包含）构成双保险（架构文档 §4.2 L219 / §4.5 父子可见性表）。
  * 覆盖 wf_run_node / wf_run_node_wait / wf_finish + 自主编排两工具
  * （wf_org_catalog / wf_graph_patch：改图是父代理的组织权限）。
+ *
+ * 贡献由宿主在子代理创建窗口内安装（官方 0.1.2 起无 registerContinuableSetup；
+ * 撤销函数归宿主，见同目录 AGENTS.md § 状态所有权）。
  *
  * restrict 对未注册工具会抛错（官方 core/tools L1091），故此处尽力而为：
  * 全量名单失败时退回「三常驻工具」名单（自主编排工具注册失败也不至于连带丢掉

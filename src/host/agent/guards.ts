@@ -7,7 +7,8 @@
 // ② tools.guard()（child scope，官方 core/tools L1110）：触达上限后同步拒绝该子代理一切工具调用（原因「已达迭代上限」），模型无视指令也会被拒，双保险迫使输出结论。
 // 软截停后回合正常结束（stopReason=completed），节点标记 react-capped（非失败，正常产出）。
 //
-// 生命周期（按 childId 隔离；经 registerContinuableSetup 注入未发布 childCtx，§8 #7）：每回合开始（turn 变化）重置计数与标记；标记由编排器经 consumeCapped 在 subagent/end 消费；若 child 不属于任何运行，下回合 pre-step 重置会自然清掉未消费标记，不残留。
+// 生命周期（按 childId 隔离）：贡献由宿主在子代理创建窗口内安装到 childCtx（官方 0.1.2 起已移除
+// registerContinuableSetup，安装/撤销归宿主，见同目录 AGENTS.md § 状态所有权）；每回合开始（turn 变化）重置计数与标记；标记由编排器经 consumeCapped 在 subagent/end 消费；若 child 不属于任何运行，下回合 pre-step 重置会自然清掉未消费标记，不残留。
 //
 // 为何用 tools.guard 而非 tools.restrict：guard 是运行时判定拒绝，仅软截停窗口内拒绝、回合结束自动恢复；restrict 是声明式掩码，需成对 disposer 管理且 unknown 名称抛错。软截停是瞬态窗口，guard 语义精确匹配。
 
@@ -20,6 +21,16 @@ export const REACT_CAP_MESSAGE =
 
 /** tools.guard 拒绝原因（面向模型，英文）。 */
 export const REACT_CAP_DENY_REASON = 'ReAct iteration limit reached — conclude this turn with your final output now.'
+
+/**
+ * 注入消息的来源插件标识。
+ *
+ * 【取证】官方消息来源 `plugin` 分支持有必填 `plugin` 字段
+ * （dsh-llm/lib/types/message.d.ts L94-104：`plugin: { kind: 'plugin'; plugin: string } & ContextFormed`）。
+ * 该字段决定官方转录的归因文案；缺失时官方只回显通用「插件」标签
+ * （dsh-client-ui-trajectory：`typeof plugin === 'string' && plugin !== ''` 才用具名文案）。
+ */
+const PLUGIN_SOURCE_ID = 'visual-workflow'
 
 /** 每回合计数与软截停标记（childCtx 维度，WeakMap 键随子代理释放自动回收）。 */
 interface CapState {
@@ -61,8 +72,8 @@ interface PreStepPayload {
 
 /**
  * 创建软截停护栏：返回桥（runner 登记上限/编排器消费标记）与贡献
- * （经 ctx.subagents.registerContinuableSetup 注入每个子代理的未发布 childCtx，
- * 官方 activation-setup-registry L26 契约：(childCtx) => disposer）。
+ * （贡献签名为 `(childCtx) => disposer`；由宿主在子代理创建窗口内对 childCtx 调用，
+ * 撤销函数归宿主持有——本模块不持有作用域撤销表，见同目录 AGENTS.md § 状态所有权）。
  */
 export function createReactGuard(): {
   bridge: ReactGuardBridge
@@ -120,6 +131,8 @@ export function createReactGuard(): {
     const disposers: Array<() => void> = []
 
     // ① pre-step 计步 + 触达上限后替换本步消息为强制收尾指令（waterfall 透传放行）
+    // 【取证】官方 dsh-agent runtime-types 'agent/pre-step'：payload { agent, messages, turn, step, signal }，
+    // waterfall 返回 PreStepDecision（enter = 以给定 messages 进入本步）。
     try {
       disposers.push(
         childCtx.on('agent/pre-step', async (rawPayload, next) => {
@@ -156,7 +169,8 @@ export function createReactGuard(): {
               {
                 role: 'user',
                 content: [{ type: 'text', text: REACT_CAP_MESSAGE }],
-                source: { kind: 'plugin' },
+                // source 必须满足官方 plugin 来源的全部必填字段（见 PLUGIN_SOURCE_ID 取证）
+                source: { kind: 'plugin', plugin: PLUGIN_SOURCE_ID },
               },
             ],
           }

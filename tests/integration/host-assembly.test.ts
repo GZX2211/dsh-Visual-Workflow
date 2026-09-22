@@ -1,9 +1,11 @@
-// tests/host/host-assembly.test.ts
+// tests/integration/host-assembly.test.ts
 //
-// Host 装配测试（T-015）：用真实 @deepseek-ai/cordis Context（peer，测试期物化）
-// 启动插件 fiber——断言 ① 启动无错且数据目录结构建立；② dataDir 缺失时 fiber 失败；
-// ③ fiber 卸载后事件监听与显式清理生效（dispose 幂等）。断言依据：架构文档 §4.1/
-// §9.6、SKILL §4.3 Effect 所有权、任务清单 T-015 DoD。
+// Host 装配集成测试（T-015，原 tests/host/host-assembly.test.ts）：用真实 @deepseek-ai/cordis
+// Context（peer，测试期物化）启动插件 fiber——覆盖 host ↔ storage ↔ service ↔ agent 的多模块装配：
+//   ① 启动无错且数据目录结构建立；② dataDir 缺失时 fiber 失败；③ fiber 卸载后事件监听与显式清理生效；
+//   ④ agent/session-start 创建窗口内为子代理装配四类贡献（角色提示词/工具可见性/模型选择/软截停），
+//      以及重发布/冷恢复时的重装语义。
+// 断言依据：架构文档 §4.1/§9.6、SKILL §4.3 Effect 所有权、任务清单 T-015 DoD。
 
 import { describe, expect, it, afterEach, vi } from 'vitest'
 import { Context, Service } from '@deepseek-ai/cordis'

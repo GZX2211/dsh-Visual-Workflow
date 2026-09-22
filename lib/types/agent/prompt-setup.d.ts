@@ -9,9 +9,9 @@ export interface ChildPromptState {
     /** 工具提示词（tool:* 散文段）注入开关（默认 true）。 */
     injectToolSections: boolean;
 }
-/** 子代理/父代理提示词注入装配（contribution/attach/bindParent 三段式 + 创建期 withPending）。 */
+/** 子代理/父代理提示词注入装配（contribution/withPending/attach/bindParent + 全局瀑布与 pending 读取）。 */
 export interface ChildPromptSetup {
-    /** 经 registerContinuableSetup 注册的贡献（每个子代理创建时安装监听）。 */
+    /** 贡献（每个子代理创建时安装角色段与开关过滤瀑布）；由宿主在子代理创建窗口内对 childCtx 调用。 */
     contribution: (childCtx: unknown) => () => void;
     /**
      * 在 startContinuable 调用前后夹住节点级状态：作用域内注册的贡献可同步取得
@@ -65,7 +65,9 @@ interface PromptChildContextLike {
 /**
  * 创建子代理/父代理提示词注入装配。
  *
- * @returns contribution + attach + withPending + bindParent 四段式接口。
+ * @returns contribution（每 child 装配）/ withPending（创建窗口状态作用域）/
+ *          attach（创建后按 childCtx 写入状态）/ bindParent（父代理按会话绑定）/
+ *          registerGlobalAssemblyHook（宿主 unscoped 首轮瀑布）/ hasPending / peekPending。
  */
 export declare function createChildPromptSetup(): ChildPromptSetup;
 export {};

@@ -1,4 +1,4 @@
-// tests/host/agent-runner.test.ts
+// tests/host/agent/runner.test.ts
 //
 // 节点子代理执行引擎单测（T-022）：复用键/配置签名/白名单解析（可选注入）/
 // ensureNodeChild（创建/签名重建）/startNodeTask（相邻 Agent 通道派发）/interruptChild/
@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { FlowStore } from '../../src/host/storage/flow-store.js'
+import { FlowStore } from '../../../src/host/storage/flow-store.js'
 import {
   NodeAgentRunner,
   childKey,
@@ -24,13 +24,13 @@ import {
   type AgentsServiceLike,
   type SubagentsServiceLike,
   type ToolsView,
-} from '../../src/host/agent/runner.js'
-import type { ReactGuardBridge } from '../../src/host/agent/guards.js'
-import type { ModelSelectionSetup } from '../../src/host/agent/model-selection.js'
-import type { ChildPromptSetup } from '../../src/host/agent/prompt-setup.js'
-import type { NodeStartInput } from '../../src/host/orchestrator/index.js'
-import type { RoleNode, WorkflowDocument } from '../../src/host/shared/graph-model.js'
-import { CHILD_AGENT_HIDDEN_TOOLS } from '../../src/host/shared/protocol.js'
+} from '../../../src/host/agent/runner.js'
+import type { ReactGuardBridge } from '../../../src/host/agent/guards.js'
+import type { ModelSelectionSetup } from '../../../src/host/agent/model-selection.js'
+import type { ChildPromptSetup } from '../../../src/host/agent/prompt-setup.js'
+import type { NodeStartInput } from '../../../src/host/orchestrator/index.js'
+import type { RoleNode, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
+import { CHILD_AGENT_HIDDEN_TOOLS } from '../../../src/host/shared/protocol.js'
 
 const cleanups: Array<() => Promise<void>> = []
 
@@ -64,14 +64,13 @@ function blocks(text = '任务块'): Array<{ type: 'text'; text: string }> {
   return [{ type: 'text', text }]
 }
 
-/** 子代理服务 fake：记录创建/派发/中断/贡献注册。 */
+/** 子代理服务 fake：记录创建/派发/中断（旧宿主面；无 getProvider，走 list 回退）。 */
 class FakeSubagents implements SubagentsServiceLike {
   providers: string[] = ['spawn', 'fork', 'acp']
   started: Array<Parameters<SubagentsServiceLike['startContinuable']>[0]> = []
   /** 复用派发记录（0.1.5-rc.1：sendMessage 为唯一推荐通道）。 */
   dispatches: Array<{ sender: unknown; targetId: string; content: unknown[]; signal?: AbortSignal }> = []
   interrupts: Array<{ childId: string; authority: { kind: 'user'; parentSessionId: string } }> = []
-  setups: Array<(childCtx: unknown) => () => void> = []
   failStart: unknown = null
   /** 时序断言钩子（派发触发时回调，用于验证 setLimit 先于派发）。 */
   onDispatch?: () => void
@@ -96,10 +95,6 @@ class FakeSubagents implements SubagentsServiceLike {
   }
   async interrupt(childId: string, authority: { kind: 'user'; parentSessionId: string }): Promise<void> {
     this.interrupts.push({ childId, authority })
-  }
-  registerContinuableSetup(contribution: (childCtx: unknown) => () => void): () => void {
-    this.setups.push(contribution)
-    return () => {}
   }
 }
 
@@ -590,7 +585,7 @@ describe('childVisibilityContribution（CHILD_AGENT_HIDDEN_TOOLS 双保险隐藏
 // ---------------------------------------------------------------------------
 // 取证（0.1.2-rc.1 类型）：rc.2 的 list()/followup/registerContinuableSetup 移除；
 // 改 getProvider 按名探测、sendMessage/queuePrompt 相邻投递、interrupt(target, authority)。
-// 每子代理作用域装配由 runner 在 startContinuable 返回后按 agents.get(childId).ctx 安装。
+// 每子代理作用域装配由宿主在 agent/session-start 创建窗口内安装到 childCtx（runner 只负责创建）。
 
 /** rc.1 面子代理服务 fake（无 list/followup/registerContinuableSetup）。 */
 class Rc1FakeSubagents implements SubagentsServiceLike {

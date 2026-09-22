@@ -9,7 +9,9 @@
 // - 工具调用能力只由 tools[] 决定；移除 `tool:*` 散文段仅去掉使用指引。
 // - Code Mode 协议段 `tools:sdk`/`tools:ptc-only` 与 tools[] 始终保留；旧 `startsWith('tool:')` 曾误删复数 `tools:*`。
 // - 本插件不注册 `tool:*`，唯一注册段为 `visual-workflow:prompt`。
-// 注入路径：子代理经 registerContinuableSetup contribution + AsyncLocalStorage + resolvePromptOnCtx；父代理经 bindParent 写根 Agent ctx。零官方运行时依赖。
+// 注入路径：子代理经宿主在创建窗口内调用 contribution（官方 0.1.2 起无 registerContinuableSetup，
+// 撤销归宿主，见同目录 AGENTS.md § 状态所有权）+ AsyncLocalStorage + registerPromptOnCtx 安装；
+// 父代理经 bindParent 写根 Agent ctx。零官方运行时依赖。
 
 import { AsyncLocalStorage } from 'node:async_hooks'
 
@@ -33,9 +35,9 @@ export interface ChildPromptState {
   injectToolSections: boolean
 }
 
-/** 子代理/父代理提示词注入装配（contribution/attach/bindParent 三段式 + 创建期 withPending）。 */
+/** 子代理/父代理提示词注入装配（contribution/withPending/attach/bindParent + 全局瀑布与 pending 读取）。 */
 export interface ChildPromptSetup {
-  /** 经 registerContinuableSetup 注册的贡献（每个子代理创建时安装监听）。 */
+  /** 贡献（每个子代理创建时安装角色段与开关过滤瀑布）；由宿主在子代理创建窗口内对 childCtx 调用。 */
   contribution: (childCtx: unknown) => () => void
   /**
    * 在 startContinuable 调用前后夹住节点级状态：作用域内注册的贡献可同步取得
@@ -235,13 +237,17 @@ function registerPromptOnCtx(childCtx: PromptChildContextLike, ref: PromptStateR
 /**
  * 创建子代理/父代理提示词注入装配。
  *
- * @returns contribution + attach + withPending + bindParent 四段式接口。
+ * @returns contribution（每 child 装配）/ withPending（创建窗口状态作用域）/
+ *          attach（创建后按 childCtx 写入状态）/ bindParent（父代理按会话绑定）/
+ *          registerGlobalAssemblyHook（宿主 unscoped 首轮瀑布）/ hasPending / peekPending。
  */
 export function createChildPromptSetup(): ChildPromptSetup {
   const states = new WeakMap<object, PromptStateRef>()
   const pending = new AsyncLocalStorage<ChildPromptState>()
 
   // 父代理（根 Agent）按 sessionId 的绑定表：每会话只注册一次，更新走可变状态。
+  // 【释放路径】监听器注册在根 Agent 的 ctx 上，随该 ctx 的 fiber 卸载自动移除；
+  // 本表只保留调用入口引用，随宿主实例一起回收（宿主持有本装配对象，不单独释放）。
   const parentRefs = new Map<string, PromptStateRef>()
   const parentDisposers = new Map<string, () => void>()
 

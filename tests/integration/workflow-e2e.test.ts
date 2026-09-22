@@ -25,11 +25,11 @@ import {
   type TurnEndInfo,
 } from '../../src/host/orchestrator/index.js'
 import type { RunSnapshot } from '../../src/host/shared/types.js'
-import type { StageNode, RoleNode, WorkflowDocument } from '../../src/host/shared/graph-model.js'
+import type { StageNode, RoleNode, WorkflowDocument, Line } from '../../src/host/shared/graph-model.js'
 import { stageLabel } from '../../src/host/graph/model.js'
 import { VisualWorkflowApi, type ApiHost } from '../../src/host/remote/api.js'
 import { SessionMap } from '../../src/host/service/sessions-map.js'
-import { ServiceManager, type ManagedChild } from '../../src/host/service/manager.js'
+import { ServiceManager } from '../../src/host/service/manager.js'
 import { renderServePatch } from '../../src/host/service/serve-patch.js'
 import { registerWfAskAgent } from '../../src/host/tools/wf-ask-agent/tool.js'
 import { WF_ASK_AGENT } from '../../src/host/shared/protocol.js'
@@ -117,7 +117,7 @@ function agent(id: string, label: string, kind: 'agent' | 'parent' = 'agent'): R
 
 function makeFlow(pause = false): WorkflowDocument {
   const nodes = [stage('n-start', 'start'), agent('n-a1', '子任务A')]
-  const lines = [{ id: 'l1', source: 'n-start', target: 'n-a1', sourceHandle: 'flow-out', targetHandle: 'flow-in' }]
+  const lines: Line[] = [{ id: 'l1', source: 'n-start', target: 'n-a1', sourceHandle: 'flow-out', targetHandle: 'flow-in' }]
   if (pause) {
     nodes.push(stage('n-pause', 'pause'), agent('n-a2', '子任务B'), stage('n-end', 'end'))
     lines.push(

@@ -11,6 +11,17 @@ export declare class CordisAgentHost implements AgentHost {
     /** 按会话 id 取子代理 agent（wf_ask_agent 投递缝用；未激活返回 null）。 */
     getChildAgent(childId: string): RootAgentLike | null;
     followupRoot(agent: RootAgentLike, message: RootInjectedMessage): void;
+    /**
+     * 会话根 Agent 在 afterMs 之后的最新 turn/end（无则 null）。
+     *
+     * 【官方词表取证】dsh-session/dsh-agent 的 `TurnEndReasonMap`（merge-extensible）含
+     * `completed` / `aborted`（带 cancel cause）/ `blocked`（pre-step 拒绝）/ `error`
+     * （结构化 LlmFailure）/ `max-tokens`。本适配只把 **error → 编排已死**、**aborted →
+     * 用户中止** 两种翻译成 TurnEndInfo，其余（completed/blocked/max-tokens/未知 kind）
+     * 一律返回 null（看护不据此判终态，运行由主动停止或空闲看护收敛）。
+     * 若将来需要把 blocked/max-tokens 也纳入终态判定，属编排语义变更：必须同时改
+     * TurnEndInfo 契约、看护分支与测试（见同目录 AGENTS.md § 依赖边界：适配必须取证可追溯）。
+     */
     latestTurnEnd(sessionId: string, afterMs: number): TurnEndInfo | null;
     /**
      * 最近一条父代理 assistant/message 文本（afterMs 之后；无则 null）。

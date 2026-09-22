@@ -103,6 +103,17 @@ export class CordisAgentHost implements AgentHost {
     agent.followup(message)
   }
 
+  /**
+   * 会话根 Agent 在 afterMs 之后的最新 turn/end（无则 null）。
+   *
+   * 【官方词表取证】dsh-session/dsh-agent 的 `TurnEndReasonMap`（merge-extensible）含
+   * `completed` / `aborted`（带 cancel cause）/ `blocked`（pre-step 拒绝）/ `error`
+   * （结构化 LlmFailure）/ `max-tokens`。本适配只把 **error → 编排已死**、**aborted →
+   * 用户中止** 两种翻译成 TurnEndInfo，其余（completed/blocked/max-tokens/未知 kind）
+   * 一律返回 null（看护不据此判终态，运行由主动停止或空闲看护收敛）。
+   * 若将来需要把 blocked/max-tokens 也纳入终态判定，属编排语义变更：必须同时改
+   * TurnEndInfo 契约、看护分支与测试（见同目录 AGENTS.md § 依赖边界：适配必须取证可追溯）。
+   */
   latestTurnEnd(sessionId: string, afterMs: number): TurnEndInfo | null {
     const root = this.getRootAgent(sessionId)
     if (!root) return null
@@ -174,7 +185,9 @@ export function subagentsServiceLike(ctx: Context): SubagentsServiceLike | null 
   if (
     service !== null && typeof service === 'object'
     && typeof (service as { startContinuable?: unknown }).startContinuable === 'function'
-    // 相邻投递二选一：sendMessage（0.1.5-rc.1 唯一推荐通道）/ queuePrompt（旧版兼容兜底）。
+    // 相邻投递二选一：sendMessage（当前官方公开 runtime 唯一通道；sender 即 live 父代理，
+    // 来源由服务派生）/ queuePrompt（旧宿主兼容兜底：当前官方公开 runtime 已无该通道，
+    // 仅内部 continuation manager 持有 —— 取证见 runner.ts 的 SubagentsServiceLike）。
     // 【0.1.5-rc.1 取证】官方 SubagentRuntime 已无 followup 方法（rc.2 面），故不再作为
     // 可用性判据；registerContinuableSetup 亦早已移除，不再判定。
     && (typeof (service as { sendMessage?: unknown }).sendMessage === 'function'

@@ -1,9 +1,11 @@
 {
   // Host 测试 program（仅类型检查，不发射）：
-  // 覆盖 src/host + tests/host，使单元测试同样受 TS 严格检查（T-073 门禁精度）。
+  // 覆盖 src/host + tests/host + tests/integration，使单元测试与集成测试同样受 TS 严格检查。
+  // 为什么分开：tests/integration 验证跨模块协作（Host/Runtime/Storage/Service/Agent），
+  // 与单元测试同属 host 侧 TypeScript 语义，故共用本 program；client 测试另设
+  // tsconfig.test.client.json（P16）。
   // 为什么不并入 tsconfig.host.json：该 program 用于发射 lib/ 产物，若 include
   // tests 会把测试编译进 lib/ 污染发布物；独立 noEmit program 两全。
-  // client 测试（jsdom，T-062）另设 tsconfig.test.client.json（P16 引入）。
   "compilerOptions": {
     "target": "es2022",
     "module": "nodenext",
@@ -16,6 +18,6 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src/host/**/*.ts", "tests/host/**/*.ts"],
+  "include": ["src/host/**/*.ts", "tests/host/**/*.ts", "tests/integration/**/*.ts"],
   "exclude": ["node_modules", "lib", "src/client", "scripts"]
 }
