@@ -1,8 +1,7 @@
 import type { FlowStore } from '../storage/flow-store.js';
 import type { RoleNode, WorkflowDocument } from '../shared/graph-model.js';
 import type { RunSnapshot, RunStatus } from '../shared/types.js';
-import type { ChildPromptSetup } from '../agent/prompt-setup.js';
-import type { ModelSelectionSetup } from '../agent/model-selection.js';
+import type { ChildPromptSetup, ModelSelectionSetup } from '../agent/index.js';
 import type { AgentHost, NodeRunner, OrchestratorConfig, OrchestratorLogger } from './seams.js';
 import type { PendingAsk } from './ask-protocol.js';
 /** 单次运行的内存条目（旧项目 entry 同构：快照 + 护栏计数 + in-flight 表）。 */

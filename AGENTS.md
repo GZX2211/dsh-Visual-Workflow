@@ -1,4 +1,4 @@
-# AGENTS.md
+# Root AGENTS.md
 
 ## 项目定位
 
@@ -7,7 +7,6 @@
 核心方向：
 
 - 可视化 Workflow / DAG 编排
-- 长任务执行、暂停、恢复与状态持久化
 - Parent Agent 自主编排与运行时治理
 - Workflow 动态结构调整
 - API 服务模式
@@ -26,6 +25,21 @@
 | 实际代码行为 | 当前代码 + 测试 |
 | 数据结构、接口、Tool Schema | 当前代码 + 测试 |
 | 当前项目原则 | 本目录及作用域内的 `AGENTS.md` |
+| 测试规则 | `tests/AGENTS.md` |
+
+---
+
+## 仓库治理体系
+
+`AGENTS.md` 分三层。每层只写自己管辖的规则，同一规则不在各层重复。
+
+| 层级 | 文件 | 管辖范围 | 内容职责 |
+|---|---|---|---|
+| 仓库层 | `AGENTS.md` | 全仓库 | 全仓库通用规范 |
+| Host/Client 层 | `src/host/AGENTS.md`、`src/client/AGENTS.md` | 前/后端 | 前/后端公共规则 |
+| 模块层 | `src/host/<module>/AGENTS.md` | 单个模块 | 仅本模块专属规则 |
+
+`tests/AGENTS.md` 与模块层平行
 
 ---
 
@@ -40,10 +54,11 @@ dsh-visual-workflow/
 │   │   ├── orchestrator/         # 运行锁、断点状态机、双向同步
 │   │   ├── agent/                # 子代理执行引擎、护栏、提示词注入
 │   │   ├── tools/                # wf_* 工具注册
-│   │   ├── api/                  # GUI HTTP API 边界（端点分发/下载路由/调试流）
+│   │   ├── api/                  # GUI HTTP API 边界
 │   │   ├── mcp/                  # Host 侧 MCP 配置注册表
-│   │   ├── transfer/             # 导入导出（bundle / 模板往返）
+│   │   ├── transfer/             # 导入导出
 │   │   ├── service/              # 模式二服务
+│   │   ├── sessions/             # 会话提供者
 │   │   ├── embedding/            # 本地向量嵌入与索引
 │   │   ├── scheduler/            # 定时任务
 │   │   ├── graph/                # 图模型校检
@@ -62,10 +77,6 @@ dsh-visual-workflow/
 └── package.json
 ```
 
-实际文件结构以当前代码为准。
-
-当修改某个模块时，优先阅读该模块附近的代码及作用域内的 `AGENTS.md`，不要为了理解局部任务而读取整个项目。
-
 ---
 
 ## 核心架构约束
@@ -76,7 +87,7 @@ dsh-visual-workflow/
 
 * 不得修改 dsh 底层核心框架。
 * 优先使用 patch、事件观察、`ctx` service 等非侵入式扩展机制。
-* `@deepseek-ai/*` 不作为运行时直接依赖；通过运行时能力获取机制使用。
+* `@deepseek-ai/*` 不作为运行时直接依赖（不写入 `dependencies`）；通过运行时能力获取机制使用。
 * `@huggingface/transformers` 是允许的第三方运行时依赖。
 
 ### Runtime / Agent 职责边界
@@ -109,7 +120,6 @@ Agent / Prompt 负责不确定性的判断，例如：
 * `src/host/shared/` 只允许放 Host / Client 共享的纯类型或无运行时依赖契约。
 * Client 不得引入 Host 运行时模块。
 * Host 不得依赖 Client 实现。
-* 优先通过明确的接口进行运行时能力注入。
 
 ---
 
@@ -146,7 +156,7 @@ Agent / Prompt 负责不确定性的判断，例如：
 3. 当前问题是什么？
 4. 为什么应该修改这里？
 5. 是否存在相关的其他模块？
-6. 是否改变公共接口或 Tool Schema？
+6. 是否改变公共接口？
 7. 是否改变运行时行为或状态机？
 
 不要因为某个问题表现于某个文件，就默认该文件是正确的修改位置。
@@ -160,16 +170,10 @@ Agent / Prompt 负责不确定性的判断，例如：
 * TypeScript 类型检查通过；
 * 相关测试通过；
 * 受影响模块的构建通过；
-* 公共接口 / Tool Schema 未被意外改变；
+* 公共接口未被意外改变；
 * 没有引入跨层依赖；
 
-向用户汇报修改时，说明：
-
-* 修改了什么；
-* 为什么修改；
-* 是否改变公共接口；
-* 是否改变运行时行为；
-* 执行了哪些验证。
+Host 半区的附加确认项见 `src/host/AGENTS.md`。
 
 ---
 

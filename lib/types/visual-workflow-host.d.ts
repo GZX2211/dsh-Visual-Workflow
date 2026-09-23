@@ -2,13 +2,12 @@ import { Context, Service } from '@deepseek-ai/cordis';
 import type { Config } from './config.js';
 import { FlowStore } from './storage/flow-store.js';
 import { OrchestratorRuntime, type RootAgentLike } from './orchestrator/index.js';
-import { NodeAgentRunner } from './agent/runner.js';
-import { CordisAgentHost } from './agent/agents-host.js';
+import { CordisAgentHost, NodeAgentRunner } from './agent/index.js';
+import { ToolSwitchStore } from './tools/index.js';
 import { EmbeddingService } from './embedding/engine.js';
 import { ServiceManager } from './service/index.js';
 import { SchedulerEngine, SchedulerTaskStore } from './scheduler/index.js';
 import { CordisSessionProvider } from './sessions/session-provider.js';
-import { ToolSwitchStore } from './tools/infrastructure/tool-switches.js';
 export declare const VisualWorkflowHostServiceName = "visualWorkflowHost";
 /**
  * 宿主 service：持有解析后的 config、FlowStore 与编排运行时，挂载事件观察、

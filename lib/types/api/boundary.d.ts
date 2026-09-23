@@ -2,7 +2,7 @@ import type { FlowStore } from '../storage/flow-store.js';
 import type { OrchestratorRuntime } from '../orchestrator/index.js';
 import type { EmbeddingEngine } from '../embedding/engine.js';
 import type { SchedulerEngine, SchedulerTaskStore } from '../scheduler/index.js';
-import type { ToolSwitchStore } from '../tools/infrastructure/tool-switches.js';
+import type { ToolSwitchStore } from '../tools/index.js';
 /** 宿主能力缝（index.ts 装配；单测 fake）。 */
 export interface ApiHost {
     orchestrator: OrchestratorRuntime;
@@ -31,7 +31,7 @@ export interface ApiHost {
     scheduler?: SchedulerEngine;
     /** 定时任务存储（scheduler-tasks.json；缺失时调度端点返回 501）。 */
     schedulerTaskStore?: SchedulerTaskStore;
-    /** 全局工具开关存储（tools/infrastructure/tool-switches.ts；缺失时开关端点返回 501）。 */
+    /** 全局工具开关存储（经 tools 模块公共入口取得；缺失时开关端点返回 501）。 */
     toolSwitches?: ToolSwitchStore;
 }
 /**

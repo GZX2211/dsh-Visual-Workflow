@@ -15,35 +15,43 @@ import {
   type RootAgentLike,
 } from './orchestrator/index.js'
 import {
+  CordisAgentHost,
   CordisToolsView,
   NodeAgentRunner,
+  agentsServiceLike,
   childVisibilityContribution,
+  createChildPromptSetup,
+  createModelSelectionSetup,
+  createReactGuard,
   resolveRolePrompt,
+  subagentsServiceLike,
   type AgentsServiceLike,
+  type ChildPromptState,
   type SubagentsServiceLike,
-} from './agent/runner.js'
-import { createReactGuard } from './agent/guards.js'
-import { createModelSelectionSetup } from './agent/model-selection.js'
-import { createChildPromptSetup, type ChildPromptState } from './agent/prompt-setup.js'
-import { CordisAgentHost, agentsServiceLike, subagentsServiceLike } from './agent/agents-host.js'
+} from './agent/index.js'
 import { systemLanguageOf, type SettingsServiceLike } from './system-language.js'
 import { listAgentPresets, listEcosystemModels } from './ecosystem-directory.js'
-import { registerWfRunNode } from './tools/wf-run-node/tool.js'
-import { registerWfRunNodeWait } from './tools/wf-run-node-wait/tool.js'
-import { registerWfFinish } from './tools/wf-finish/tool.js'
-import { registerWfAsk } from './tools/wf-ask/tool.js'
-import { registerWfAskAgent } from './tools/wf-ask-agent/tool.js'
-import { registerWfOrgCatalog, type OrgCatalogHost } from './tools/wf-org-catalog/tool.js'
-import { registerWfGraphPatch, type GraphPatchHost } from './tools/wf-graph-patch/tool.js'
+import {
+  ToolSwitchStore,
+  ensureDatabaseIndexes,
+  registerToolSwitchFilter,
+  registerWfAsk,
+  registerWfAskAgent,
+  registerWfDbQuery,
+  registerWfFinish,
+  registerWfGraphPatch,
+  registerWfOrgCatalog,
+  registerWfRunNode,
+  registerWfRunNodeWait,
+  type GraphPatchHost,
+  type OrgCatalogHost,
+} from './tools/index.js'
 import { registerArrangeCommand } from './commands/arrange.js'
-import { registerWfDbQuery } from './tools/wf-db-query/tool.js'
-import { ensureDatabaseIndexes } from './tools/wf-db-query/service.js'
 import { registerDownloadRoute, registerRoutes } from './api/index.js'
 import { EmbeddingService } from './embedding/engine.js'
 import { ServiceManager } from './service/index.js'
 import { SchedulerEngine, SchedulerTaskStore } from './scheduler/index.js'
 import { CordisSessionProvider, sessionCwdResolver } from './sessions/session-provider.js'
-import { registerToolSwitchFilter, ToolSwitchStore } from './tools/infrastructure/tool-switches.js'
 
 export const VisualWorkflowHostServiceName = 'visualWorkflowHost'
 
