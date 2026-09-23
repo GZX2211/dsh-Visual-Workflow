@@ -1,9 +1,10 @@
 import type { GroupNode } from '../../host/shared/graph-model.js';
-/** 组卡片内成员横向留白（布局专用；行高/列表起始复用 geometry 常量，仅一处定义）。 */
-export declare const GROUP_MEMBER_PADDING = 10;
+import { GROUP_MEMBER_PADDING } from './card-geometry.js';
+/** 组卡片内成员横向留白（布局专用；本体在 lib/card-geometry.ts，与卡片最小高度共用同一常量）。 */
+export { GROUP_MEMBER_PADDING };
 /**
  * 组卡片最小高度（容纳成员列表；用户手动设的更大高度优先）。
- * 与 geometry.groupCardSizeOf 同一口径（同一常量），两侧不会漂移。
+ * 与 card-geometry.groupCardSizeOf 同一口径（同一常量），两侧不会漂移。
  */
 export declare function groupCardMinHeight(group: GroupNode | {
     data?: {

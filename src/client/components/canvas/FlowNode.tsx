@@ -19,7 +19,8 @@
 import type { Dict } from '../../i18n.js'
 import type { CanvasNode } from '../../studio/studio-state.js'
 import { HANDLES } from '../../lib/graph-model.js'
-import { handleY, nodeSizeOf } from './geometry.js'
+import { nodeSizeOf } from '../../lib/card-geometry.js'
+import { handleY } from './geometry.js'
 
 interface FlowNodeProps {
   node: CanvasNode

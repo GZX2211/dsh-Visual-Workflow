@@ -6,21 +6,23 @@
 //   - 文档已布局过（无哨兵坐标）→ 不做任何事，绝不覆盖用户手动调整；
 //   - 检测到节点矩形重叠 → 非阻断提示「建议整理布局」（不自动重排，尊重用户当前布局）。
 //
-// 职责边界：本 hook 只负责「判定 + 触发 + 落盘 + 提示」，
-// 布局算法在 lib/layout.ts、判定与几何工具在 lib/layout-fit.ts（纯函数、可单测）。
+// 职责边界：本 hook 只负责「判定 + 触发 + 落盘 + 提示」；统一布局入口为
+// lib/graph-model.layoutNodes（内部 = lib/layout-fit.tidyNodes → lib/layout.layoutGraph），
+// 判定与几何工具在 lib/layout-fit.ts（纯函数、可单测）。
 
 import { useEffect, useRef } from 'react'
 import type { Dispatch } from 'react'
 import type { CanvasNode, StudioAction, StudioState } from '../studio/studio-state.js'
-import type { CanvasLine } from '../lib/graph-model.js'
-import { applyLayout, collapsedIdsOf, findLayoutOverlaps, layoutBoxesOf, needsAutoLayout } from '../lib/layout-fit.js'
-import { layoutGraph, toLayoutInputs } from '../lib/layout.js'
-import { groupCardSizeOf } from '../components/canvas/geometry.js'
+import type { SaveCanvasOptions } from './useDocumentActions.js'
+import { layoutNodes, type CanvasLine } from '../lib/graph-model.js'
+import { collapsedIdsOf, findLayoutOverlaps, layoutBoxesOf, needsAutoLayout } from '../lib/layout-fit.js'
+import { toLayoutInputs } from '../lib/layout.js'
+import { groupCardSizeOf } from '../lib/card-geometry.js'
 
 /** 自动布局钩子依赖（全部可选注入，便于单测与「能力缺失即降级」）。 */
 export interface AutoLayoutOptions {
   /** 画布保存入口（静默落盘；缺省则只更新本地画布，不落盘）。 */
-  saveCanvas?: (options?: { auto?: boolean }) => Promise<unknown> | void
+  saveCanvas?: (options?: SaveCanvasOptions) => Promise<unknown> | void
   /** 轻提示（重叠提示用；缺省静默）。 */
   notify?: (kind: 'info' | 'success' | 'error', text: string) => void
   /** 提示文案（词典缺省时用内置中文）。 */
@@ -31,7 +33,7 @@ export interface AutoLayoutOptions {
 
 /**
  * 自动布局接线（每个「当前文档 id」只尝试一次；失败不阻断编辑）。
- * 与 tidyGraph 共用同一布局入口（lib/layout.ts），保证两条路径结果一致。
+ * 与「整理布局」共用同一布局入口 lib/graph-model.layoutNodes，保证两条路径结果一致。
  */
 export function useAutoLayout(
   state: StudioState,
@@ -55,14 +57,14 @@ export function useAutoLayout(
 
     // ① 缺坐标/哨兵坐标 → 自动重排一次并立即落盘
     if (needsAutoLayout(nodes as never)) {
-      const inputs = toLayoutInputs(
-        nodes as unknown as Array<{ id: string; kind: string; data?: Record<string, unknown> }>,
-        (node) => groupCardSizeOf(node as never),
-      )
-      const result = layoutGraph(inputs, canvas.edges as unknown as CanvasLine[])
-      const next = applyLayout(nodes as never, result) as unknown as CanvasNode[]
+      // 单入口：layoutNodes（lib/graph-model）内部即 tidyNodes（lib/layout-fit）的
+      // 「形状解析 → 分层布局 → 坐标写回」四步收敛，与「整理布局」按钮走同一实现，
+      // 输出坐标与旧写法（toLayoutInputs → layoutGraph → applyLayout）逐项一致。
+      const next = layoutNodes(nodes, canvas.edges as unknown as CanvasLine[])
       dispatch({ type: 'GRAPH_REPLACED', nodes: next, edges: canvas.edges, dirty: true })
-      void Promise.resolve(optionsRef.current.saveCanvas?.({ auto: true })).catch(() => {
+      // 落盘必须带上本次重排后的新坐标：saveCanvas 的 state 闭包仍是本次渲染前的
+      // 旧画布，不传 nodes 会把旧坐标写回后端（自动布局看着生效、刷新即丢）。
+      void Promise.resolve(optionsRef.current.saveCanvas?.({ auto: true, nodes: next, edges: canvas.edges })).catch(() => {
         // 自动落盘失败不阻断编辑（用户仍可手动保存；既有保存路径负责报错提示）
       })
       optionsRef.current.onApplied?.(next)

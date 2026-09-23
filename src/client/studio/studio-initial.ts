@@ -39,7 +39,6 @@ export function createInitialState(sessionId: string): StudioState {
     savedGraph: null,
     run: { runId: null, sessionId: null, snapshot: null },
     toasts: [],
-    message: '',
     history: { past: [], future: [] },
     panels: defaultPanels(),
     confirm: null,

@@ -1,18 +1,18 @@
 // src/client/lib/layout-types.ts
 //
 // 布局算法的类型契约（纯类型 + 常量；自主编排方案 §7.2）：输入节点元数据、选项、
-// 结果与告警。与 geometry.ts 的分工：geometry 负责「单个卡片尺寸/接点位置」，
+// 结果与告警。与 card-geometry.ts 的分工：card-geometry 负责「单个卡片尺寸/成员行尺寸」，
 // 本层负责「整图坐标」——布局只依赖传入的 width/height，不反向 import host 契约。
 
 import type { GroupNode } from '../../host/shared/graph-model.js'
-import { GROUP_MEMBER_LIST_TOP, GROUP_MEMBER_ROW_H } from '../components/canvas/geometry.js'
+import { GROUP_MEMBER_LIST_TOP, GROUP_MEMBER_PADDING, GROUP_MEMBER_ROW_H } from './card-geometry.js'
 
-/** 组卡片内成员横向留白（布局专用；行高/列表起始复用 geometry 常量，仅一处定义）。 */
-export const GROUP_MEMBER_PADDING = 10
+/** 组卡片内成员横向留白（布局专用；本体在 lib/card-geometry.ts，与卡片最小高度共用同一常量）。 */
+export { GROUP_MEMBER_PADDING }
 
 /**
  * 组卡片最小高度（容纳成员列表；用户手动设的更大高度优先）。
- * 与 geometry.groupCardSizeOf 同一口径（同一常量），两侧不会漂移。
+ * 与 card-geometry.groupCardSizeOf 同一口径（同一常量），两侧不会漂移。
  */
 export function groupCardMinHeight(group: GroupNode | { data?: { memberIds?: string[]; size?: { h?: unknown } } }): number {
   const members = [...new Set(Array.isArray(group?.data?.memberIds) ? group.data.memberIds : [])]

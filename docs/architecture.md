@@ -830,7 +830,7 @@ Prompt 的结构设计必须考虑稳定前缀、动态尾部以及上下文成�
 
 # 8. Client 架构
 
-Client 是 Workflow 的可视化编辑层。
+Client 是单页可视化工作台：负责 Workflow 的可视化编辑、运行控制、状态展示与管理界面。
 
 ```text
 src/client/
@@ -865,11 +865,11 @@ src/client/
 
 ### hooks
 
-负责交互控制逻辑。
+负责状态组合、生命周期与交互编排。
 
 ### lib
 
-负责纯逻辑：
+负责与 UI 生命周期无关的逻辑（纯计算与转换、网络访问、持久化）：
 
 * Graph Model
 * Layout

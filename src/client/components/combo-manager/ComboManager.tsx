@@ -62,6 +62,13 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
   const [mcpImportOpen, setMcpImportOpen] = useState(false)
   const [mcpImportText, setMcpImportText] = useState('')
   const loadedRef = useRef(false)
+  // 卸载后不得再写状态（异步返回的归属校验）：本弹层由 comboOpen 条件渲染，关闭即卸载，
+  // 而目录/组合加载可能仍在飞。
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -70,6 +77,7 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
         remote.call(EP.EP_TOOL_COMBOS).catch(() => []),
       ]) as [unknown, unknown]
       const cat = (catalogData ?? {}) as { items?: Array<{ key: string; name: string; description: string }>; mcp?: McpEntry[]; loadedPlugins?: string[]; disabledTools?: string[] }
+      if (!mountedRef.current) return
       setCatalog({
         items: Array.isArray(cat.items) ? cat.items : [],
         mcp: Array.isArray(cat.mcp) ? cat.mcp : [],
@@ -96,6 +104,7 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
         return current
       })
     } catch (error) {
+      if (!mountedRef.current) return
       onToast('error', String((error as Error)?.message ?? error))
     }
   }, [remote, sessionId, onToast])

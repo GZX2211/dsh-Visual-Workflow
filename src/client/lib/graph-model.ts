@@ -10,7 +10,7 @@ import type { GraphNode, Line, NodeKind, WorkflowDocument } from '../../host/sha
 import type { RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate, RunSnapshot } from '../../host/shared/types.js'
 import { tidyNodes } from './layout-fit.js'
 import type { LayoutBoxNode } from './layout-fit.js'
-import { groupCardSizeOf } from '../components/canvas/geometry.js'
+import { groupCardSizeOf } from './card-geometry.js'
 
 // ---------------------------------------------------------------------------
 // 连接点表（与 Host graph/model.ts 保持一致的客户端镜像）
@@ -78,16 +78,20 @@ export function conditionLabel(condition: Line['condition'] | null | undefined):
   return ''
 }
 
-/** 连线颜色 class（flow 默认 / ctx / db / 条件 pass|fail|content）。 */
+/**
+ * 连线颜色 class（条件 pass|fail|content / 通道 db / ctx / 默认 flow 空串）。
+ * 优先级（用户裁决 2026-02）：**条件优先**——用户显式设了条件就显示条件颜色，
+ * 否则按通道着色。画布渲染与 flowToCanvasLines 共用本函数（唯一本体）。
+ */
 export function lineColorClass(line: Line): string {
-  const sourceHandle = line?.sourceHandle ?? ''
-  const targetHandle = line?.targetHandle ?? ''
-  if (sourceHandle === 'db-out' || targetHandle === 'db-in') return 'is-db'
-  if (sourceHandle === 'ctx-out' || targetHandle === 'ctx-in') return 'is-ctx'
   const condition = line?.condition?.type
   if (condition === 'pass') return 'is-pass'
   if (condition === 'fail') return 'is-fail'
   if (condition === 'content') return 'is-content'
+  const sourceHandle = line?.sourceHandle ?? ''
+  const targetHandle = line?.targetHandle ?? ''
+  if (sourceHandle === 'db-out' || targetHandle === 'db-in') return 'is-db'
+  if (sourceHandle === 'ctx-out' || targetHandle === 'ctx-in') return 'is-ctx'
   return ''
 }
 
@@ -336,7 +340,7 @@ export interface LayoutNodeLike {
  * 新实现落点：
  *   - 算法：src/client/lib/layout.ts（分层 + 层内重心排序 + 按实际尺寸生成坐标）；
  *   - 统一入口：src/client/lib/layout-fit.ts 的 tidyNodes（尺寸解析 + 坐标写回四步收敛）；
- *   - 尺寸口径：src/client/components/canvas/geometry.ts 的 groupCardSizeOf。
+ *   - 尺寸口径：src/client/lib/card-geometry.ts 的 groupCardSizeOf。
  * 本函数保持原有签名与「返回含新 position 的新数组」语义：既有调用方与测试零改动。
  */
 export function layoutNodes<T extends LayoutNodeLike>(nodes: T[], lines: CanvasLine[]): T[] {

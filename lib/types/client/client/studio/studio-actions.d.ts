@@ -177,9 +177,6 @@ export type StudioAction = {
     type: 'TOAST_DROP';
     id: string;
 } | {
-    type: 'SET_MESSAGE';
-    message: string;
-} | {
     type: 'HISTORY_PUSH';
     snapshot: GraphSnapshot;
 } | {

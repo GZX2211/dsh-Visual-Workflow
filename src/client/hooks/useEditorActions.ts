@@ -3,7 +3,7 @@
 // 编辑器/选择操作面：左侧库卡片选中、编辑器字段 patch、保存编辑器对象，
 // 以及删除编辑器对象（草稿直删 / 已入库走确认框 + 后端删除 / 节点连线级联）。
 
-import { useCallback } from 'react'
+import { useCallback, useRef } from 'react'
 import type { Dispatch } from 'react'
 import type { LibSelKind, StudioAction, StudioState } from '../studio/studio-state.js'
 import { currentFlowOf, currentServiceOf } from '../studio/studio-state.js'
@@ -52,6 +52,26 @@ export function useEditorActions(
   options: EditorActionsOptions,
 ): EditorActionsFace {
   const { locks } = options
+  /**
+   * 最新状态的 ref：删除是「先落库、后清画布」的两段式，回调里的 state 闭包是删除发起时的
+   * 快照，判断不了「期间用户是否已切到别的文档」。ref 每次渲染更新，回调读它即当前事实。
+   */
+  const stateRef = useRef(state)
+  stateRef.current = state
+
+  /**
+   * 删除落库后的画布归属校验（缺陷修复：删除在途切文档会误清新文档的画布）：
+   *   - 被删对象仍是当前打开的文档 → 照旧清空画布（用户预期）；
+   *   - 期间已打开**别的**文档 → 只移除列表项，绝不动新文档的画布；
+   *   - 期间未打开任何文档（currentId=null，例如切换模式已清空画布）→ 没有他人的
+   *     画布需要保护，照旧清空（保持既有行为，清空本身无副作用）。
+   */
+  const clearCanvasIfOwned = useCallback((kind: 'workflow' | 'service' | 'flowTemplate', id: string) => {
+    const live = stateRef.current
+    if (live.currentId !== null && (live.currentKind !== kind || live.currentId !== id)) return
+    dispatch({ type: 'CLEAR_CANVAS' })
+  }, [dispatch])
+
   // ---------- 左侧库选中 ----------
   // 打开工作流/服务/模板（selectWorkflow/selectFlowTemplate 由文档面注入，未保存守卫在后端）
   const selectLibraryCard = useCallback((kind: LibSelKind, id: string) => {
@@ -172,7 +192,8 @@ export function useEditorActions(
           message: `${t.confirmDelete}（${flow.name}）`,
           onConfirm: () => {
             void workflows.deleteWorkflow(flow).then(() => {
-              dispatch({ type: 'CLEAR_CANVAS' })
+              // 归属校验：删除期间用户已切到别的文档 → 不清新文档的画布
+              clearCanvasIfOwned('workflow', flow.id)
               notify('info', t.toastDeleted)
             }).catch((error) => {
               toastError(error)
@@ -204,7 +225,8 @@ export function useEditorActions(
             // 工作台全局化：删除归属校验用实例绑定的会话（可能不是当前主会话）
             void remote.call(EP.EP_DELETE_SERVICE, { sessionId: service.sessionId, id: service.id }).then(() => {
               dispatch({ type: 'SERVICE_REMOVED', id: service.id })
-              dispatch({ type: 'CLEAR_CANVAS' })
+              // 归属校验：删除期间用户已切到别的文档 → 不清新文档的画布
+              clearCanvasIfOwned('service', service.id)
               notify('info', t.toastDeleted)
             }).catch((error) => {
               toastError(error)
@@ -228,7 +250,8 @@ export function useEditorActions(
         return
       }
       void flowTemplates.deleteFlowTemplate(template.id).then(() => {
-        dispatch({ type: 'CLEAR_CANVAS' })
+        // 归属校验：删除期间用户已切到别的模板/实例 → 不清新文档的画布
+        clearCanvasIfOwned('flowTemplate', template.id)
         notify('info', t.toastDeleted)
       }).catch((error) => {
         // 删除失败不改动本地列表（与后端保持一致），仅提示
@@ -260,7 +283,7 @@ export function useEditorActions(
     if (editor.source === 'edge') {
       removeLine(editor.id)
     }
-  }, [dispatch, notify, removeLine, removeSelected, state.editor, state.sessionId, state.templates, state.flowTemplates, t.confirmDelete, t.deleteFlow, t.toastDeleted, templates, flowTemplates, toastError, workflows])
+  }, [clearCanvasIfOwned, dispatch, notify, removeLine, removeSelected, state.editor, state.sessionId, state.templates, state.flowTemplates, t.confirmDelete, t.deleteFlow, t.toastDeleted, templates, flowTemplates, toastError, workflows])
 
   return { selectLibraryCard, patchEditor, saveEditor, deleteEditor }
 }

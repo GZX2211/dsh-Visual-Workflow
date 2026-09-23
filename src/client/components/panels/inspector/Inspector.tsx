@@ -8,7 +8,7 @@ import type { Dict } from '../../../i18n.js'
 import type { EditorData } from '../../../studio/studio-state.js'
 import {
   RoleForm, FileForm, DatabaseForm, StageForm, GroupForm, ProxyForm, LinePanel, WorkflowForm,
-} from './forms.js'
+} from './field-forms.js'
 
 export interface InspectorProps {
   copy: Dict

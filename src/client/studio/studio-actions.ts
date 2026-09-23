@@ -66,7 +66,6 @@ export type StudioAction =
   | { type: 'RUN_CLEARED' }
   | { type: 'TOAST_PUSH'; toast: ToastItem }
   | { type: 'TOAST_DROP'; id: string }
-  | { type: 'SET_MESSAGE'; message: string }
   | { type: 'HISTORY_PUSH'; snapshot: GraphSnapshot }
   | { type: 'UNDO' }
   | { type: 'REDO' }

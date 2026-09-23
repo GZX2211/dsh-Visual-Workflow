@@ -6,7 +6,7 @@
 //   本文件负责组件装配、派生数据与初始化编排；交互逻辑拆至 hooks/ 下的
 //   controller hooks（useDocumentActions / useCanvasActions / useEditorActions /
 //   useRunActions / useStudioTransfer / useLibraryDrag / useStudioBoot /
-//   useKeyShortcuts），渲染 JSX 在 StudioLayout（纯展示，props 注入）。
+//   useKeyShortcuts），渲染 JSX 在 StudioLayout（经 props 注入数据与回调）。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Dict } from '../i18n.js'
@@ -140,9 +140,10 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
     dispatch({ type: 'SET_SESSION', sessionId })
   }, [dispatch, sessionId])
 
-  // 「开启新会话」/工作区路径缓存（用户裁决）：instanceOptions 任何变化（含
-  // 创建实例消费后的重置）即落盘 localStorage；初始恢复在 useStudioState 初始化
-  // 工厂完成。配合工作台保持挂载（关闭不卸载），重复进入不丢失，刷新亦恢复。
+  // 「开启新会话」/工作区路径缓存（用户裁决）：instanceOptions 任何变化即落盘
+  // localStorage；初始恢复在 useStudioState 初始化工厂完成。instanceOptions 的
+  // 唯一重置在 OPEN_FLOW_TEMPLATE（打开模板时回到「不新开会话」默认），实例创建
+  // 只消费、不回写。配合工作台保持挂载（关闭不卸载），重复进入不丢失，刷新亦恢复。
   useEffect(() => {
     if (typeof window === 'undefined') return
     keepInstanceOptions(window.localStorage, state.instanceOptions)
@@ -211,7 +212,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
   }, [dispatch, onRunImmersive, run, state.mode])
 
   // 批注：顶部折叠/切换按钮不再控制右侧栏，只控制左栏/底栏的展开、折叠、切换。
-  // 六态循环：左展→切底→底收→底展→切左→左收→左展（默认左栏展开）。
+  // 三态循环：左栏展开→切到底栏→全隐→左栏展开（默认左栏展开）。
   const panelsCollapsed = panelsFullyCollapsedOf(state)
   const togglePanels = useCallback(() => {
     dispatch({ type: 'PANELS_SET', panels: { mode: nextPanelMode(state.panels.mode) } })

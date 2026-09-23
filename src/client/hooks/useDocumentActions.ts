@@ -8,7 +8,7 @@ import { useCallback } from 'react'
 import type { Dispatch } from 'react'
 import type { WorkflowDocument, WorkflowTemplate } from '../../host/shared/graph-model.js'
 import type { ServiceState } from '../../host/shared/types.js'
-import { currentFlowOf, currentFlowTemplateOf, currentServiceOf, instanceRunningOf, type LibTab, type StudioAction, type StudioState } from '../studio/studio-state.js'
+import { currentFlowOf, currentFlowTemplateOf, currentServiceOf, instanceRunningOf, type CanvasEdge, type CanvasNode, type LibTab, type StudioAction, type StudioState } from '../studio/studio-state.js'
 import type { WorkflowsFace } from './useWorkflows.js'
 import type { FlowTemplatesFace } from './useFlowTemplates.js'
 import type { TemplatesFace } from './useTemplates.js'
@@ -28,6 +28,19 @@ export interface SaveCanvasOptions {
    * 它不是「编排变更」通道：若画布内容没变，宿主侧 diff 也不会向父代理注入。
    */
   auto?: boolean
+  /**
+   * 本次要落库的画布内容（缺省 = 当前 state.canvas）。
+   * 必须显式传入的场景：同一批 dispatch 之后立即保存的路径（自动布局）——调用方闭包
+   * 里的 state.canvas 仍是本次渲染前的旧画布，不传会把旧坐标落盘。
+   */
+  nodes?: CanvasNode[]
+  edges?: CanvasEdge[]
+  /**
+   * 真实落库成功后的回调（失败/未落库一律不触发）。
+   * 「保存并继续」类守卫用它接续原操作：需要二次确认时 saveCanvas 返回 null，
+   * 此时只有用户确认且真正落库成功才会走这里。
+   */
+  onSaved?: () => void
 }
 
 export interface DocumentActionsFace {
@@ -73,13 +86,18 @@ export function useDocumentActions(
   // ---------- 保存 / 打开 ----------
   const saveCanvas = useCallback(async (options?: SaveCanvasOptions) => {
     const auto = options?.auto === true
+    // 画布内容：缺省 = 当前 state.canvas；自动布局等「同批 dispatch 后立即落盘」的
+    // 调用方显式传入新坐标（否则闭包里的 state.canvas 仍是本次渲染前的旧画布）。
+    const nodes = options?.nodes ?? state.canvas.nodes
+    const edges = options?.edges ?? state.canvas.edges
+    const onSaved = options?.onSaved
     if (state.currentKind === 'workflow') {
       const flow = currentFlowOf(state)
       if (!flow) return null
       /** 真正落库（二次确认确认后与即时路径共用）。 */
       const doSave = async (): Promise<WorkflowDocument | null> => {
         try {
-          const saved = await workflows.saveWorkflow(flow, state.canvas.nodes, state.canvas.edges)
+          const saved = await workflows.saveWorkflow(flow, nodes, edges)
           if (saved) {
             // MARK_SAVED：同时记录「已保存图快照」，供撤销/重做精确判定 dirty（Bug 17）
             dispatch({ type: 'MARK_SAVED' })
@@ -104,7 +122,9 @@ export function useDocumentActions(
             title: t.saveRunningTitle,
             message: t.saveRunningMessage,
             confirmLabel: t.saveRunningConfirm,
-            onConfirm: () => { void doSave() },
+            // 返回值 null 只表示「本次调用没落库」（待确认/失败）；真实落库成功才回调
+            // onSaved，让「保存并继续」在确认路径完成后接续原操作。
+            onConfirm: () => { void doSave().then((saved) => { if (saved) onSaved?.() }) },
           },
         })
         return null
@@ -116,7 +136,7 @@ export function useDocumentActions(
       const template = currentFlowTemplateOf(state)
       if (!template) return null
       try {
-        const saved = await flowTemplates.saveFlowTemplate(template, state.canvas.nodes, state.canvas.edges)
+        const saved = await flowTemplates.saveFlowTemplate(template, nodes, edges)
         if (saved) {
           dispatch({ type: 'MARK_SAVED' })
           if (!auto) notify('success', t.toastSaved)
@@ -131,7 +151,7 @@ export function useDocumentActions(
       const service = currentServiceOf(state)
       if (!service) return null
       try {
-        const saved = await serviceControl.saveService(service, state.canvas.nodes, state.canvas.edges)
+        const saved = await serviceControl.saveService(service, nodes, edges)
         if (saved) {
           dispatch({ type: 'MARK_SAVED' })
           if (!auto) notify('success', t.toastSaved)

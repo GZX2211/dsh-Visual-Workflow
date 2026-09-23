@@ -4,7 +4,7 @@ import type { Line } from '../../host/shared/graph-model.js';
 export declare function isFlowLine(line: Line): boolean;
 /**
  * 布局输入装配：把节点投影为「尺寸 + 关系」元数据。
- * 尺寸由调用方提供（通常是 geometry.nodeSizeOf），布局不反向依赖渲染细节。
+ * 尺寸由调用方提供（通常是 card-geometry.nodeSizeOf），布局不反向依赖渲染细节。
  */
 export declare function toLayoutInputs(nodes: Array<{
     id: string;

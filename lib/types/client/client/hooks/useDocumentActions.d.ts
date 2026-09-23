@@ -1,7 +1,7 @@
 import type { Dispatch } from 'react';
 import type { WorkflowDocument, WorkflowTemplate } from '../../host/shared/graph-model.js';
 import type { ServiceState } from '../../host/shared/types.js';
-import { type LibTab, type StudioAction, type StudioState } from '../studio/studio-state.js';
+import { type CanvasEdge, type CanvasNode, type LibTab, type StudioAction, type StudioState } from '../studio/studio-state.js';
 import type { WorkflowsFace } from './useWorkflows.js';
 import type { FlowTemplatesFace } from './useFlowTemplates.js';
 import type { TemplatesFace } from './useTemplates.js';
@@ -19,6 +19,19 @@ export interface SaveCanvasOptions {
      * 它不是「编排变更」通道：若画布内容没变，宿主侧 diff 也不会向父代理注入。
      */
     auto?: boolean;
+    /**
+     * 本次要落库的画布内容（缺省 = 当前 state.canvas）。
+     * 必须显式传入的场景：同一批 dispatch 之后立即保存的路径（自动布局）——调用方闭包
+     * 里的 state.canvas 仍是本次渲染前的旧画布，不传会把旧坐标落盘。
+     */
+    nodes?: CanvasNode[];
+    edges?: CanvasEdge[];
+    /**
+     * 真实落库成功后的回调（失败/未落库一律不触发）。
+     * 「保存并继续」类守卫用它接续原操作：需要二次确认时 saveCanvas 返回 null，
+     * 此时只有用户确认且真正落库成功才会走这里。
+     */
+    onSaved?: () => void;
 }
 export interface DocumentActionsFace {
     /** 保存当前画布（实例/模板/服务；成功记录已保存快照并 toast）。返回保存成功的文档（类型为三态并集，与原实现推断一致）。 */

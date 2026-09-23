@@ -1,9 +1,12 @@
 // src/client/studio/StudioLayout.tsx
 //
-// 工作台渲染层（纯展示，无状态/无副作用）：标题顶栏 + 三栏工作区 + 浮层
-// （确认弹窗/运行历史/组合管理/拖拽预览/轻提示）。所有数据与回调由
-// Studio 主组件经 props 注入（各 controller hook 的 face + 派生数据），
-// 本组件只负责 JSX 组合，不承载任何业务逻辑。
+// 工作台渲染层：标题顶栏 + 三栏工作区 + 浮层（确认弹窗/运行历史/组合管理/
+// 拖拽预览/轻提示）。所有数据与回调由 Studio 主组件经 props 注入（各 controller
+// hook 的 face + 派生数据），本组件不拥有业务状态、不写状态机。
+//
+// 除 JSX 组合外，本层还承载两处装配职责（均作用于展示，不构成业务事实）：
+//   - 自动布局接线：useAutoLayout 挂在这里（打开文档后重排坐标并由调用方落盘）；
+//   - 弹层装配：由 props 注入的运行历史/组合/定时任务等弹层，其内部自带远端调用。
 
 import type { Dispatch } from 'react'
 import type { Dict } from '../i18n.js'
@@ -102,7 +105,7 @@ export interface StudioLayoutProps {
   onTogglePanels: () => void
 }
 
-/** 工作台渲染层（纯 JSX 组合；回调/数据全部来自 props）。 */
+/** 工作台渲染层（JSX 组合 + 自动布局接线与弹层装配；数据/回调全部来自 props）。 */
 export function StudioLayout(props: StudioLayoutProps) {
   const {
     t, state, sessionId, remote,
@@ -377,13 +380,13 @@ export function StudioLayout(props: StudioLayoutProps) {
           )
         : null}
 
-      {state.message ? <div className="wf-message">{state.message}</div> : null}
-
+      {/* 确认弹窗：「保存并继续」在真实保存完成后才继续原操作——需要二次确认的路径
+          （运行中实例保存）本次返回 null，落库发生在用户确认之后，经 onSaved 接续 */}
       <ConfirmDialog
         confirm={state.confirm}
         copy={t}
         onClose={() => dispatch({ type: 'CONFIRM_SET', confirm: null })}
-        onSaveAndProceed={() => { void guard.saveAndProceed(() => doc.saveCanvas()) }}
+        onSaveAndProceed={() => { void guard.saveAndProceed((onSaved) => doc.saveCanvas({ onSaved })) }}
         onDiscardAndProceed={guard.discardAndProceed}
         onResolveImport={(mode) => { void transfer.resolveImportConflict(mode as 'rename' | 'overwrite') }}
       />

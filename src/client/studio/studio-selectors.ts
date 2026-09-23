@@ -4,7 +4,7 @@
 // 运行状态判定与编辑器渲染数据。组件与 hooks 消费；Inspector 按
 // editorData 的 kind 分发表单。
 
-import type { StudioState, EditorData } from './studio-types.js'
+import type { StudioState, EditorData, CanvasNode } from './studio-types.js'
 import type { WorkflowDocument, WorkflowTemplate } from '../../host/shared/graph-model.js'
 import type { ServiceState } from '../../host/shared/types.js'
 
@@ -62,6 +62,15 @@ export function instanceRunningOf(state: StudioState): boolean {
   return state.activeRuns.some((item) => item.flowId === flow.id && item.sessionId === flow.sessionId && item.status === 'running')
 }
 
+/**
+ * 协作组成员显示名（唯一本体）：成员节点缺失或 label 缺失/为 null 时回退成员 id。
+ * 画布组卡片（GraphCanvas）与右侧属性栏（editorDataOf）共用，避免两处各写一份回退规则。
+ * 只接受已解析出的成员节点，节点的查找方式（Map / find）由调用方决定。
+ */
+export function memberLabelOf(member: CanvasNode | undefined, memberId: string): string {
+  return String((member?.data as { label?: unknown } | undefined)?.label ?? memberId)
+}
+
 /** 编辑器数据（右侧面板渲染源）。 */
 export function editorDataOf(state: StudioState): EditorData | null {
   const editor = state.editor
@@ -109,10 +118,10 @@ export function editorDataOf(state: StudioState): EditorData | null {
     if (node.kind === 'group') {
       // 去重展示（历史数据可能残留重复 memberIds），与删除逻辑保持一致，避免出现「重复成员行/计数虚高」
       const memberIds = [...new Set((data.memberIds as string[] | undefined) ?? [])]
-      const members = memberIds.map((memberId) => {
-        const member = state.canvas.nodes.find((item) => item.id === memberId)
-        return { id: memberId, label: String((member?.data as { label?: unknown } | undefined)?.label ?? memberId) }
-      })
+      const members = memberIds.map((memberId) => ({
+        id: memberId,
+        label: memberLabelOf(state.canvas.nodes.find((item) => item.id === memberId), memberId),
+      }))
       return { kind: 'group', data, name: String(data.label ?? ''), nodeId: node.id, members }
     }
     if (node.kind === 'start' || node.kind === 'end' || node.kind === 'pause') return { kind: 'stage', data, name: String(data.label ?? ''), nodeId: node.id }

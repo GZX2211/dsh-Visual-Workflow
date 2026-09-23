@@ -45,6 +45,17 @@ export function ServiceConsole({ copy, service, sessionId, busy }: ServiceConsol
   const [streaming, setStreaming] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const outputRef = useRef<HTMLPreElement | null>(null)
+  // 卸载后不得再写状态，且进行中的 SSE 流必须中止（谁创建谁释放）：
+  // 本组件由服务状态条件渲染，服务停止/切换即可能卸载，而流式回调仍在飞。
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      abortRef.current?.abort()
+      abortRef.current = null
+    }
+  }, [])
 
   const status = service?.status ?? 'stopped'
   const running = status === 'running'
@@ -82,6 +93,7 @@ export function ServiceConsole({ copy, service, sessionId, busy }: ServiceConsol
         EP.EP_SERVICE_DEBUG,
         { serviceId: service?.id ?? '', sessionId, prompt: text },
         (line) => {
+          if (!mountedRef.current) return
           if (!line.startsWith('data: ')) return
           const data = line.slice(6).trim()
           if (!data || data === '[DONE]') return
@@ -96,10 +108,11 @@ export function ServiceConsole({ copy, service, sessionId, busy }: ServiceConsol
         controller.signal,
       )
     } catch (error) {
+      if (!mountedRef.current) return
       const message = error instanceof Error ? error.message : String(error)
       setOutput((prev) => `${prev ? `${prev}\n\n` : ''}[错误] ${message}`)
     } finally {
-      setStreaming(false)
+      if (mountedRef.current) setStreaming(false)
       abortRef.current = null
     }
   }, [prompt, running, sessionId, service?.id, streaming])

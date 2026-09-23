@@ -1,7 +1,9 @@
 // src/client/lib/files.ts
 //
 // Client 文件与浏览器工具（照搬旧项目 src/client/lib/files.js，TS 化）：
-// 文件读取（文本/Base64）、下载、localStorage 数值/布尔读写。
+// 文件读取（文本/Base64）与下载。
+// localStorage 读写不在此处：界面布局等持久化统一走 lib/storage.ts 的 StorageLike
+// 注入面（调用方负责传入具体存储），避免 lib 直接依赖 window。
 
 /** 读取文件为 UTF-8 文本。 */
 export function readFileAsText(file: File): Promise<string> {
@@ -38,39 +40,4 @@ export function download(content: string, fileName: string, mediaType = 'applica
   anchor.click()
   anchor.remove()
   setTimeout(() => URL.revokeObjectURL(url), 1000)
-}
-
-/** localStorage 数值读取（非法回退）。 */
-export function storedNumber(key: string, fallback: number): number {
-  try {
-    const value = Number(localStorage.getItem(key))
-    return Number.isFinite(value) && value > 0 ? value : fallback
-  } catch {
-    return fallback
-  }
-}
-
-/** localStorage 布尔读取（"1" 为真，缺失回退）。 */
-export function storedBoolean(key: string, fallback: boolean): boolean {
-  try {
-    const value = localStorage.getItem(key)
-    return value === null ? fallback : value === '1'
-  } catch {
-    return fallback
-  }
-}
-
-/** localStorage 写入（尽力而为）。 */
-export function keepLayout(key: string, value: string | number): void {
-  try {
-    localStorage.setItem(key, String(value))
-  } catch {
-    // 忽略（隐私模式等）
-  }
-}
-
-/** 文本截断（超出加省略号；空值回退 —）。 */
-export function truncateText(value: unknown, limit: number): string {
-  const text = String(value ?? '').trim()
-  return text.length > limit ? `${text.slice(0, limit)}…` : (text || '—')
 }

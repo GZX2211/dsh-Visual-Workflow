@@ -58,6 +58,24 @@ export function serializeWorkflow(flow: WorkflowDocument, nodes: CanvasNode[], e
   }
 }
 
+/** 待补发的最新画布内容（在途保存期间到达的后一次保存）。 */
+interface PendingSave {
+  flow: WorkflowDocument
+  nodes: CanvasNode[]
+  edges: CanvasEdge[]
+}
+
+/**
+ * 在途保存条目（按 flowId 区分；尾随合并）：
+ *   - promise：本次在途的「首存 + 尾随补发」链，完成前复用给同 flowId 的后续调用；
+ *   - pending：在途期间到达的最新内容，当前请求完成后用它补发一次（后到内容不会被丢弃）。
+ */
+interface SaveInflightEntry {
+  flowId: string
+  promise: Promise<WorkflowDocument | null>
+  pending: PendingSave | null
+}
+
 /** 工作流列表面（远端失败抛错，由调用方 toast）。 */
 export function useWorkflows(
   dispatch: Dispatch<StudioAction>,
@@ -115,36 +133,52 @@ export function useWorkflows(
     return draft
   }, [dispatch])
 
-  /** 在途保存 Promise（快速双击/重复触发时共享同一请求，避免第二次携带旧 revision 触发 409）。 */
-  const saveInflight = useRef<{ flowId: string; promise: Promise<WorkflowDocument | null> } | null>(null)
+  /** 在途保存条目（快速双击/重复触发时合并到同一在途链，避免第二次携带旧 revision 触发 409）。 */
+  const saveInflight = useRef<SaveInflightEntry | null>(null)
 
   const saveWorkflow = useCallback(async (
     flow: WorkflowDocument,
     nodes: CanvasNode[],
     edges: CanvasEdge[],
   ): Promise<WorkflowDocument | null> => {
-    // 并发去重：上一次保存尚未返回时，重复调用直接复用同一在途请求。去重必须
-    // 按 flowId 区分——否则切换工作流后保存时会复用前一工作流的 Promise，
-    // 新工作流内容根本没被持久化（「保存成功」但实际没保存，Bug 清单 P1）。
-    if (saveInflight.current?.flowId === flow.id) return saveInflight.current.promise
-    const task = (async (): Promise<WorkflowDocument | null> => {
-      const serialized = serializeWorkflow(flow, nodes, edges)
+    // 并发去重 + 尾随合并（Bug 清单 P1）：上一次保存尚未返回时再次保存同一工作流，
+    // **不得**把后一次的新内容丢掉——登记为 pending，当前请求完成后用最新内容补发
+    // 一次，调用方拿到的是「包含自己内容的最终落库结果」。去重必须按 flowId 区分：
+    // 否则切换工作流后保存会复用前一工作流的 Promise，新工作流内容根本没被持久化。
+    const inflight = saveInflight.current
+    if (inflight?.flowId === flow.id) {
+      inflight.pending = { flow, nodes, edges }
+      return inflight.promise
+    }
+    /** 单次真实落库（序列化 → PUT → 更新列表）。 */
+    const runSave = async (input: PendingSave): Promise<WorkflowDocument | null> => {
+      const serialized = serializeWorkflow(input.flow, input.nodes, input.edges)
       // 保存统一走 putWorkflow：后端在文档不存在时视为创建（revision 0 → 1），
       // id 保持不变——草稿首存不再另 assign id，避免 WORKFLOW_UPDATED 无法命中
       // 列表项、当前画布继续引用旧草稿 id（旧实现每次保存都新建一个副本，
       // 用户感知「保存成功但实际没保存」）。
       // 归属会话 = 实例自身 sessionId（工作台全局化：实例与运行/校验同会话）。
       const saved = await remote.call(EP.EP_PUT_WORKFLOW, {
-        sessionId: flow.sessionId,
+        sessionId: input.flow.sessionId,
         flow: serialized,
       }) as WorkflowDocument
       dispatch({ type: 'WORKFLOW_UPDATED', flow: saved })
       return saved
+    }
+    const entry: SaveInflightEntry = { flowId: flow.id, pending: null, promise: Promise.resolve(null) }
+    entry.promise = (async (): Promise<WorkflowDocument | null> => {
+      let last = await runSave({ flow, nodes, edges })
+      // 首存返回后，若期间又到达了保存请求 → 用最新内容补发（循环处理补发期间的新请求）
+      while (entry.pending) {
+        const queued = entry.pending
+        entry.pending = null
+        last = await runSave(queued)
+      }
+      return last
     })()
-    const entry = { flowId: flow.id, promise: task }
     saveInflight.current = entry
     try {
-      return await task
+      return await entry.promise
     } finally {
       // 仅当仍是自己的在途条目时清空（期间切到别的工作流保存时不得覆盖其条目）
       if (saveInflight.current === entry) saveInflight.current = null

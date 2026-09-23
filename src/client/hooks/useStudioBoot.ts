@@ -44,8 +44,8 @@ export function useStudioBoot(
 ): void {
   // 会话 id 经 ref 读取：boot 只在挂载时执行一次——工作台全局化后列表是全量
   // 跨会话的，DSH 会话切换不应重新加载/自动选中（用户裁决：打开期间切换仅更新
-  // 「当前」标签，不强制跳转画布；重新打开工作台（重新 mount）时才按新当前会话
-  // 自动选中）。
+  // 「当前」标签，不强制跳转画布；Studio 常驻不卸载，故不存在「重新打开即重新
+  // mount」的第二次 boot；只有插件级重新加载才会再跑一次）。
   const stateRef = useRef(state)
   stateRef.current = state
   useEffect(() => {
@@ -123,11 +123,11 @@ export function useStudioBoot(
         // 活跃 run 查询失败不阻断（列表徽标缺省、自动选中回退当前会话实例第一个）
       }
 
-      // 「进入工作台自动选中实例」（工作台全局化改版）：每次点击悬浮窗进入时
-      // （浮窗关闭即卸载 Studio、重开重新 mount → boot 重跑），若**当前主会话**
-      // 有实例则默认选中并显示在画布（运行中优先、其次暂停、否则最新）——
-      // 从任何会话进入，画布都显示「与当前会话对应」的实例；当前会话无实例则
-      // 保持空白画布（不自动打开其他会话的实例）。用最新加载列表直接 dispatch。
+      // 「进入工作台自动选中实例」（工作台全局化改版）：boot 在 Studio 挂载时
+      // 执行一次（Studio 常驻不卸载，关闭再打开不会重跑；仅插件级重新加载会重来），
+      // 若**当前主会话**有实例则默认选中并显示在画布（运行中优先、其次暂停、否则
+      // 最新）——从任何会话进入，画布都显示「与当前会话对应」的实例；当前会话无
+      // 实例则保持空白画布（不自动打开其他会话的实例）。用最新加载列表直接 dispatch。
       const currentSessionId = bootedSessionId()
       if (cancelled || !currentSessionId) return
       if (stateRef.current.mode === 'mode1') {

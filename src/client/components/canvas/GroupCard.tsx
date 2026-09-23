@@ -6,7 +6,7 @@
 
 import type { Dict } from '../../i18n.js'
 import type { CanvasNode } from '../../studio/studio-state.js'
-import { nodeSizeOf } from './geometry.js'
+import { nodeSizeOf } from '../../lib/card-geometry.js'
 
 interface GroupCardProps {
   node: CanvasNode

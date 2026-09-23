@@ -8,10 +8,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Dict } from '../../i18n.js'
 import type { CanvasEdge, CanvasNode } from '../../studio/studio-state.js'
-import { conditionLabel } from '../../lib/graph-model.js'
+import { memberLabelOf } from '../../studio/studio-selectors.js'
+import { conditionLabel, lineColorClass } from '../../lib/graph-model.js'
+import { GRAPH_NODE_SIZE, nodeSizeOf } from '../../lib/card-geometry.js'
 import { FlowNode } from './FlowNode.js'
 import { GroupCard } from './GroupCard.js'
-import { connectionTargetAt, groupOfMember, groupSurfaceUnderPoint, swappedOf, edgeGeometry, GRAPH_NODE_SIZE, GRAPH_MIN_ZOOM, GRAPH_MAX_ZOOM, nodeSizeOf, clamp } from './geometry.js'
+import { connectionTargetAt, groupOfMember, groupSurfaceUnderPoint, swappedOf, edgeGeometry, GRAPH_MIN_ZOOM, GRAPH_MAX_ZOOM, clamp } from './geometry.js'
 
 export interface CanvasApi {
   fitView(options?: { padding?: number; nodes?: CanvasNode[] }): void
@@ -364,7 +366,10 @@ export function GraphCanvas(props: GraphCanvasProps) {
     const isRunning = runStatusOf(edge.source)?.status === 'running'
     // 运行中锁定连线：属于已完成流程或执行中节点的左入口 → 灰化虚线、点击不选中（属性栏不展开）
     const isLocked = isLockedEdge(edge.id)
-    const lineType = conditionLabel(edge.condition) ? edgeConditionClass(edge) : edgeChannelClass(edge)
+    // 连线颜色 class 与 lib/graph-model.lineColorClass 同源（条件优先 + 通道回退）；
+    // 改动前此处是 edgeConditionClass/edgeChannelClass 两份本地实现，同为条件优先，
+    // 故渲染结果不变。
+    const lineType = lineColorClass(edge)
     const label = conditionLabel(edge.condition)
     // 流程通道有向（箭头）；上下文/数据库线无方向要求
     const channel = lineType.startsWith('is-') ? lineType.slice(3) : ''
@@ -437,7 +442,8 @@ export function GraphCanvas(props: GraphCanvasProps) {
       const member = byId.get(memberId)
       return {
         id: memberId,
-        label: String((member?.data as { label?: unknown } | undefined)?.label ?? memberId),
+        // 成员显示名与属性栏共用同一回退规则（studio-selectors.memberLabelOf）
+        label: memberLabelOf(member, memberId),
         status: runStatusOf(memberId)?.status ?? null,
         locked: isLockedNode(memberId),
       }
@@ -528,22 +534,4 @@ export function GraphCanvas(props: GraphCanvasProps) {
       </div>
     </div>
   )
-}
-
-/** 连线通道颜色 class（流程/上下文/数据库）。 */
-function edgeChannelClass(edge: CanvasEdge): string {
-  const sourceHandle = edge.sourceHandle ?? ''
-  const targetHandle = edge.targetHandle ?? ''
-  if (sourceHandle === 'db-out' || targetHandle === 'db-in') return 'is-db'
-  if (sourceHandle === 'ctx-out' || targetHandle === 'ctx-in') return 'is-ctx'
-  return ''
-}
-
-/** 条件连线颜色 class（通过/不通过/内容）。 */
-function edgeConditionClass(edge: CanvasEdge): string {
-  const type = edge.condition?.type
-  if (type === 'pass') return 'is-pass'
-  if (type === 'fail') return 'is-fail'
-  if (type === 'content') return 'is-content'
-  return ''
 }

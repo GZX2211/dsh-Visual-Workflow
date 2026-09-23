@@ -17,7 +17,7 @@ import { TimeInput } from '../time-input/TimeInput.js'
 import {
   createTaskDraft, detectLocalTimezone, formatIso, localDateOnly, newTaskId, shiftDateOnly,
   taskFromView, validateTaskDraft, WEEKDAY_LABELS,
-} from './scheduler-utils.js'
+} from '../../lib/scheduler-task.js'
 
 /** 时区建议列表（UI 下拉用；权威校验在 host）。 */
 const TIMEZONE_SUGGESTIONS = [
@@ -56,6 +56,13 @@ export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: 
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [calendarOpen, setCalendarOpen] = useState(false)
   const loadedRef = useRef(false)
+  // 卸载后不得再写状态（异步返回的归属校验）：本弹层由 schedulerOpen 条件渲染，关闭即卸载，
+  // 而加载/保存请求可能仍在飞。
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -66,6 +73,7 @@ export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: 
       const items = Array.isArray(viewsData) ? viewsData as ScheduledTaskView[] : []
       const tpls = (Array.isArray(templatesData) ? templatesData : [])
         .filter((item) => (item as TemplateItem).mode === 'mode1') as TemplateItem[]
+      if (!mountedRef.current) return
       setViews(items)
       setTemplates(tpls)
       setActiveTaskId((current) => {
@@ -78,6 +86,7 @@ export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: 
         return current
       })
     } catch (error) {
+      if (!mountedRef.current) return
       onToast('error', String((error as Error)?.message ?? error))
     }
   }, [remote, onToast])
@@ -136,12 +145,14 @@ export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: 
     try {
       const saved = await remote.call(EP.EP_SCHEDULER_TASK_PUT, { task: draft }) as ScheduledTask
       await load()
+      if (!mountedRef.current) return
       setActiveTaskId(saved.taskId)
       onToast('success', copy.schedulerSaved)
     } catch (error) {
+      if (!mountedRef.current) return
       onToast('error', String((error as Error)?.message ?? error))
     } finally {
-      setBusy(false)
+      if (mountedRef.current) setBusy(false)
     }
   }, [copy, draft, load, onToast, remote])
 
@@ -155,14 +166,17 @@ export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: 
     setBusy(true)
     try {
       await remote.call(EP.EP_SCHEDULER_TASK_DELETE, { taskId: activeTaskId })
+      if (!mountedRef.current) return
       setActiveTaskId(null)
       setDraft(null)
       await load()
+      if (!mountedRef.current) return
       onToast('success', copy.schedulerDeleted)
     } catch (error) {
+      if (!mountedRef.current) return
       onToast('error', String((error as Error)?.message ?? error))
     } finally {
-      setBusy(false)
+      if (mountedRef.current) setBusy(false)
     }
   }, [activeTaskId, confirmDelete, copy.schedulerDeleted, load, onToast, remote])
 

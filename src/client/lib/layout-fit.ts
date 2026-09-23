@@ -115,7 +115,7 @@ export function collapsedIdsOf(inputs: Array<{ id: string; kind: string; sourceI
  * 统一布局入口（「整理布局」按钮与自动布局共用同一实现）：
  * 「宿主节点 → 布局输入 → 分层布局 → 坐标写回」四步收敛在一处，
  * 避免两条路径各写一遍而坐实「两份布局算法漂移」（Bug 25 的教训）。
- * @param sizeOf 卡片尺寸解析（通常为 geometry.groupCardSizeOf）
+ * @param sizeOf 卡片尺寸解析（通常为 card-geometry.groupCardSizeOf）
  */
 export function tidyNodes<T extends LayoutBoxNode>(
   nodes: T[],

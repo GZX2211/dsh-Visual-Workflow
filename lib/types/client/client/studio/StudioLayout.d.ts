@@ -74,5 +74,5 @@ export interface StudioLayoutProps {
     /** 顶部一键折叠/展开左右侧栏回调。 */
     onTogglePanels: () => void;
 }
-/** 工作台渲染层（纯 JSX 组合；回调/数据全部来自 props）。 */
+/** 工作台渲染层（JSX 组合 + 自动布局接线与弹层装配；数据/回调全部来自 props）。 */
 export declare function StudioLayout(props: StudioLayoutProps): import("react").JSX.Element;

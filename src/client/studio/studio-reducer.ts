@@ -240,8 +240,6 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       return { ...state, toasts: [...state.toasts, action.toast] }
     case 'TOAST_DROP':
       return { ...state, toasts: state.toasts.filter((toast) => toast.id !== action.id) }
-    case 'SET_MESSAGE':
-      return { ...state, message: action.message }
     case 'HISTORY_PUSH': {
       const past = [...state.history.past, action.snapshot]
       if (past.length > HISTORY_LIMIT) past.shift()

@@ -1,4 +1,4 @@
-import type { StudioState, EditorData } from './studio-types.js';
+import type { StudioState, EditorData, CanvasNode } from './studio-types.js';
 import type { WorkflowDocument, WorkflowTemplate } from '../../host/shared/graph-model.js';
 import type { ServiceState } from '../../host/shared/types.js';
 /** 当前工作流文档（内存列表优先；草稿回退）。 */
@@ -25,6 +25,12 @@ export declare function isRunningOf(state: StudioState): boolean;
  * 暂停（paused）不算运行中：暂停时保存既不弹确认、也不锁画布。
  */
 export declare function instanceRunningOf(state: StudioState): boolean;
+/**
+ * 协作组成员显示名（唯一本体）：成员节点缺失或 label 缺失/为 null 时回退成员 id。
+ * 画布组卡片（GraphCanvas）与右侧属性栏（editorDataOf）共用，避免两处各写一份回退规则。
+ * 只接受已解析出的成员节点，节点的查找方式（Map / find）由调用方决定。
+ */
+export declare function memberLabelOf(member: CanvasNode | undefined, memberId: string): string;
 /** 编辑器数据（右侧面板渲染源）。 */
 export declare function editorDataOf(state: StudioState): EditorData | null;
 /** 折叠/切换循环长度（共 3 态：左展开→切换底栏→收起底栏→左展开）。 */
