@@ -55,11 +55,25 @@ declare module '@deepseek-ai/cordis' {
       agent?: { id?: unknown }
       status?: unknown
     }): void
-    /** 代理会话启动事件（子代理创建窗口内同步触发；用于提前安装每子代理作用域贡献）。 */
-    'agent/session-start'(payload: {
+    /**
+     * 代理创建事件（子代理创建窗口内**异步串行**触发；用于提前安装每子代理作用域贡献）。
+     * 【0.1.7-rc.1 取证】官方 `agent/session-start` 已移除，改为本事件：
+     *   - 类型：dsh-agent/lib/types/runtime-types.d.ts L227-231
+     *     `'agent/created'(payload: { agent: Agent; source: SessionStartSource; signal?: AbortSignal })`
+     *     （SessionStartSource = 'startup' | 'resume' | 'clear' | 'compact'，L105）；
+     *   - 派发点：dsh-agent/lib/index.js L579 `ctx.serial(entry.carrier, "agent/created", …)`
+     *     位于 registry.announce 内 —— factory setup 完成后、creation resolve 之前，
+     *     监听器按序 await 且**抛错会让创建失败**（故处理器不得抛错）；
+     *     官方注释另明确「listeners must not await agent.whenIdle()」（L214-226）。
+     *   - 全官方包 grep `agent/session-start` 零命中，无兼容别名。
+     * payload 全字段声明为可选 unknown：处理器（visual-workflow-host.onAgentCreated）
+     * 再做运行时守卫，与官方版本漂移时静默降级而非崩溃。
+     */
+    'agent/created'(payload: {
       agent?: { id?: unknown; ctx?: unknown }
       source?: unknown
-    }): void
+      signal?: unknown
+    }): void | Promise<void>
     /** 代理销毁事件（用于回收已安装的子代理作用域装配）。 */
     'agent/disposed'(payload: {
       agent?: { id?: unknown }

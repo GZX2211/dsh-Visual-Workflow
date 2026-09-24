@@ -6,11 +6,11 @@
 // 官方 seam 取证：
 // - startContinuable({ provider, label, request:{prompt,parent,persona?,toolFilter?,agentOptions?}, signal }) → {childId,messageId}；request.prompt 为首条 user 消息，创建即推理；首次必须注入完整任务块，否则子代理空转。
 // - interrupt(childId,{kind:'user',parentSessionId}) 尽力中断。
-// - 每子代理作用域贡献：官方无 registerContinuableSetup，改为 agent/session-start 事件在创建窗口按 agent.ctx 安装四类贡献（可见性/软截停/模型选择/角色提示词），与 installModelSelection(agentCtx,…) 范式一致。
+// - 每子代理作用域贡献：官方无 registerContinuableSetup，改为 agent/created 事件（0.1.7 前名为 agent/session-start）在创建窗口按 agent.ctx 安装四类贡献（可见性/软截停/模型选择/角色提示词），与 installModelSelection(agentCtx,…) 范式一致。
 //
 // 白名单规则：
 // - combo：combo.tools ∩ 可见工具集（父代理）+ 所选 MCP 前缀工具；
-// - 官方 preset：agentPresets.standingKeyFor 取 standing scope 工具名 ∩ 可见（服务缺失回退全部可见）；旧 minimal/ptc 硬编码正则被真实 preset 解析取代；
+// - 官方 preset：agentPresets.acquireScope 取 standing scope 租约 → 工具名 ∩ 可见（服务缺失回退全部可见）；旧 minimal/ptc 硬编码正则被真实 preset 解析取代；
 // - 无强制追加：wf_ask/wf_ask_agent 仅组合勾选时进 allow（旧自动追加删除，PRD §4.4.2 规则 7）；
 // - wf_db_query 仅存在 db-in 连线时追加（§4.4.3 规则 5）；
 // - CHILD_AGENT_HIDDEN_TOOLS（wf_run_node/wf_run_node_wait/wf_finish + 自主编排两工具）永不进 allow，且 tools.restrict 显式 deny（双保险）。
@@ -168,9 +168,60 @@ interface ToolsServiceLike {
 }
 
 /** agentPresets 服务最小结构（官方 preset standing scope 解析）。 */
-interface AgentPresetsServiceLike {
+export interface AgentPresetsServiceLike {
   list(): Promise<unknown[]>
-  standingKeyFor(presetId: string): Promise<unknown>
+  /**
+   * 取得某 preset 当前 revision 的 standing scope 租约（`{ key: ScopeKey }`）。
+   *
+   * 【0.1.7-rc.1 取证】官方 0.1.5-rc.3 的 `standingKeyFor(id)` 已被移除
+   * （dsh-agent-preset-registry/lib/types/index.d.ts L123-125 只保留 `acquireScope`；
+   * 全官方包 grep `standingKeyFor` 零命中）。返回值为**引用租约**
+   * （`{ key: ScopeKey } & AsyncDisposable`），读完后必须经 `Symbol.asyncDispose`
+   * 释放——实现是 `users--` 并触发 generation 回收（同包 lib/index.js L787-799），
+   * 不释放会让 preset standing scope 常驻不回收。官方同源范式见
+   * dsh-api-session-controller 的 `scopeFor(agentPreset)`。
+   */
+  acquireScope(id?: string): Promise<{ key: unknown } & object>
+}
+
+/**
+ * `Symbol.asyncDispose` 的运行时取值。
+ * 为什么经类型断言取值：host program 的 lib 为 es2022（不含 esnext.disposable），
+ * 直接书写 `Symbol.asyncDispose` 无法通过类型检查；该协议本身由 Node 运行时提供。
+ */
+const ASYNC_DISPOSE_SYMBOL: symbol | undefined = (Symbol as unknown as { asyncDispose?: symbol }).asyncDispose
+
+/**
+ * 释放 preset standing scope 租约（best-effort，幂等）。
+ * 协议缺失或释放抛错都只跳过释放：清单读取属辅助路径，不得因回收失败而失败。
+ */
+export async function releasePresetLease(lease: unknown): Promise<void> {
+  if (ASYNC_DISPOSE_SYMBOL === undefined) return
+  if (lease === null || typeof lease !== 'object') return
+  const disposer = (lease as Record<symbol, unknown>)[ASYNC_DISPOSE_SYMBOL]
+  if (typeof disposer !== 'function') return
+  try {
+    await (disposer as () => unknown).call(lease)
+  } catch {
+    // 租约释放失败：引用计数至多多留一次，不影响本次清单读取的正确性
+  }
+}
+
+/**
+ * 解析官方 agentPresets 服务（能力守卫的**单一来源**：GUI 目录端点与节点工具白名单
+ * 解析共用；缺失或不支持 standing scope 取用时返回 null，由调用方决定降级语义）。
+ */
+export function agentPresetsServiceOf(ctx: { get(name: string): unknown }): AgentPresetsServiceLike | null {
+  const service: unknown = ctx.get('agentPresets')
+  if (
+    service !== null && typeof service === 'object'
+    && typeof (service as { list?: unknown }).list === 'function'
+    // standing scope 取用能力：0.1.7 起唯一通道是 acquireScope（见接口取证）
+    && typeof (service as { acquireScope?: unknown }).acquireScope === 'function'
+  ) {
+    return service as AgentPresetsServiceLike
+  }
+  return null
 }
 
 /** 工具视图缝（白名单解析依赖；CordisToolsView 为真实实现，单测 fake）。 */
@@ -216,15 +267,7 @@ export class CordisToolsView implements ToolsView {
   }
 
   private agentPresetsService(): AgentPresetsServiceLike | null {
-    const service: unknown = this.ctx.get('agentPresets')
-    if (
-      service !== null && typeof service === 'object'
-      && typeof (service as { list?: unknown }).list === 'function'
-      && typeof (service as { standingKeyFor?: unknown }).standingKeyFor === 'function'
-    ) {
-      return service as AgentPresetsServiceLike
-    }
-    return null
+    return agentPresetsServiceOf(this.ctx)
   }
 
   async visibleToolNames(sessionId?: string): Promise<string[]> {
@@ -261,7 +304,8 @@ export class CordisToolsView implements ToolsView {
         }
         for (const agent of candidates) collect(agent)
       }
-      // agent preset 的 standing scope key（无存活会话时也能列全各 preset 工具）
+      // agent preset 的 standing scope key（无存活会话时也能列全各 preset 工具）。
+      // 0.1.7-rc.1：经 acquireScope 取租约，用完必须释放（见接口取证）。
       const presets = this.agentPresetsService()
       if (presets) {
         try {
@@ -270,8 +314,12 @@ export class CordisToolsView implements ToolsView {
             const pid = String((item as { id?: unknown })?.id ?? '').trim()
             if (!pid) continue
             try {
-              const key = await presets.standingKeyFor(pid)
-              if (key !== undefined) collect(key)
+              const lease = await presets.acquireScope(pid)
+              try {
+                if (lease?.key !== undefined) collect(lease.key)
+              } finally {
+                await releasePresetLease(lease)
+              }
             } catch {
               // 单个 preset 失败跳过
             }
@@ -288,8 +336,10 @@ export class CordisToolsView implements ToolsView {
     const tools = this.toolsService()
     const presets = this.agentPresetsService()
     if (!tools || !presets) return null
+    let lease: unknown
     try {
-      const key = await presets.standingKeyFor(presetId)
+      lease = await presets.acquireScope(presetId)
+      const key = (lease as { key?: unknown } | null | undefined)?.key
       if (key === undefined) return null
       const list = (tools.schemas(key) ?? []) as unknown[]
       return (Array.isArray(list) ? list : [])
@@ -297,6 +347,9 @@ export class CordisToolsView implements ToolsView {
         .filter(Boolean)
     } catch {
       return null
+    } finally {
+      // 无论成功失败都释放租约（best-effort；见 AcquireScope 取证）
+      await releasePresetLease(lease)
     }
   }
 
@@ -521,7 +574,7 @@ export class NodeAgentRunner implements NodeRunner {
 
   /** 清理子代理表与护栏登记（宿主 dispose 调用；不中断子代理——由运行时统一中止）。
    *  每子代理作用域装配（角色提示词/工具可见性/模型选择/软截停）由 host 层
-   *  `agent/session-start` 处理器在创建窗口内安装，其撤销函数归 host 的
+   *  `agent/created` 处理器在创建窗口内安装，其撤销函数归 host 的
    *  `childScopeDisposers` 管理（见 visual-workflow-host.ts），runner 不再持有。 */
   dispose(): void {
     for (const childId of this.childIds) {
@@ -607,8 +660,8 @@ export class NodeAgentRunner implements NodeRunner {
       injectToolSections,
     }
     // 【关键时序】每子代理作用域装配（角色提示词/工具可见性/模型选择/软截停）由 host 层
-    // `agent/session-start` 处理器在子代理创建窗口内安装（该事件在 agents.create 发布、
-    // 首轮 followup 组装之前同步触发；此时 withPending 的 AsyncLocalStorage 状态仍在作用域内，
+    // `agent/created` 处理器在子代理创建窗口内安装（该事件在 agents.create 发布、
+    // 首轮 followup 组装之前串行 await 触发；此时 withPending 的 AsyncLocalStorage 状态仍在作用域内，
     // 各 contribution 能读到本次创建的 promptState/manifest）。因此 startContinuable 只需要
     // 创建子代理并提交首条任务，不再在返回后重复安装——避免二次「工具已更新」。
     const started = await this.deps.promptSetup.withPending(promptState, async () => {

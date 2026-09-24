@@ -3,7 +3,7 @@
 // Host 装配集成测试（T-015，原 tests/host/host-assembly.test.ts）：用真实 @deepseek-ai/cordis
 // Context（peer，测试期物化）启动插件 fiber——覆盖 host ↔ storage ↔ service ↔ agent 的多模块装配：
 //   ① 启动无错且数据目录结构建立；② dataDir 缺失时 fiber 失败；③ fiber 卸载后事件监听与显式清理生效；
-//   ④ agent/session-start 创建窗口内为子代理装配四类贡献（角色提示词/工具可见性/模型选择/软截停），
+//   ④ agent/created 创建窗口内为子代理装配四类贡献（角色提示词/工具可见性/模型选择/软截停），
 //      以及重发布/冷恢复时的重装语义。
 // 断言依据：架构文档 §4.1/§9.6、SKILL §4.3 Effect 所有权、任务清单 T-015 DoD。
 
@@ -134,7 +134,7 @@ describe('VisualWorkflowHost 装配', () => {
     }
   })
 
-  it('agent/session-start：在 withPending 创建窗口内为视觉工作流子代理提前装配四类贡献', async () => {
+  it('agent/created：在 withPending 创建窗口内为视觉工作流子代理提前装配四类贡献', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vw-host-'))
     cleanups.push(() => rm(dir, { recursive: true, force: true }))
     const root = new Context()
@@ -163,12 +163,12 @@ describe('VisualWorkflowHost 装配', () => {
       },
     }
 
-    // 模拟 startContinuable 内（withPending 作用域）出现的 agent/session-start
+    // 模拟 startContinuable 内（withPending 作用域）出现的 agent/created
     await (host as unknown as { childPrompt: { withPending(s: unknown, o: () => Promise<void>): Promise<void> } })
       .childPrompt.withPending(
         { systemPrompt: '子代理角色', injectSystemPrompt: true, injectToolSections: true },
         async () => {
-          ;(host as unknown as { onAgentSessionStart(p: unknown): void }).onAgentSessionStart({
+          ;(host as unknown as { onAgentCreated(p: unknown): void }).onAgentCreated({
             agent: { id: 'child-x', ctx: childCtx },
           })
         },
@@ -185,7 +185,7 @@ describe('VisualWorkflowHost 装配', () => {
     await root.fiber.dispose()
   })
 
-  it('agent/session-start 再次触发（重发布/恢复，不在 withPending 内）：用首建持久化状态重装，不回退官方提示词', async () => {
+  it('agent/created 再次触发（重发布/恢复，不在 withPending 内）：用首建持久化状态重装，不回退官方提示词', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vw-host-'))
     cleanups.push(() => rm(dir, { recursive: true, force: true }))
     const root = new Context()
@@ -213,14 +213,14 @@ describe('VisualWorkflowHost 装配', () => {
 
     const hostAs = host as unknown as {
       childPrompt: { withPending(s: unknown, o: () => Promise<void>): Promise<void>; hasPending(): boolean }
-      onAgentSessionStart(p: unknown): void
+      onAgentCreated(p: unknown): void
     }
 
     // 首建：withPending 作用域内，install + 持久化状态
     const first = makeCtx()
     await hostAs.childPrompt.withPending(
       { systemPrompt: '子代理角色', injectSystemPrompt: true, injectToolSections: true },
-      async () => { hostAs.onAgentSessionStart({ agent: { id: 'child-x', ctx: first.childCtx } }) },
+      async () => { hostAs.onAgentCreated({ agent: { id: 'child-x', ctx: first.childCtx } }) },
     )
     expect(first.sections.map((s) => s.name)).toContain(VISUAL_WORKFLOW_PROMPT_SECTION)
 
@@ -228,7 +228,7 @@ describe('VisualWorkflowHost 装配', () => {
     // 关键：必须用首建持久化状态重装四类贡献，否则回退官方提示词（二次重置 BUG 回归）
     const second = makeCtx()
     expect(hostAs.childPrompt.hasPending()).toBe(false)
-    hostAs.onAgentSessionStart({ agent: { id: 'child-x', ctx: second.childCtx } })
+    hostAs.onAgentCreated({ agent: { id: 'child-x', ctx: second.childCtx } })
 
     expect(second.sections.map((s) => s.name)).toContain(VISUAL_WORKFLOW_PROMPT_SECTION)
     expect(second.handlers.get('system-prompt/assemble')?.length ?? 0).toBeGreaterThan(0)
@@ -266,7 +266,7 @@ describe('VisualWorkflowHost 装配', () => {
 
     const hostAs = host as unknown as {
       childPrompt: { withPending(s: unknown, o: () => Promise<void>): Promise<void> }
-      onAgentSessionStart(p: unknown): void
+      onAgentCreated(p: unknown): void
       onAgentDisposed(p: unknown): void
     }
 
@@ -274,7 +274,7 @@ describe('VisualWorkflowHost 装配', () => {
     const first = makeCtx()
     await hostAs.childPrompt.withPending(
       { systemPrompt: '子代理角色', injectSystemPrompt: true, injectToolSections: true },
-      async () => { hostAs.onAgentSessionStart({ agent: { id: 'child-x', ctx: first.childCtx } }) },
+      async () => { hostAs.onAgentCreated({ agent: { id: 'child-x', ctx: first.childCtx } }) },
     )
     expect(first.sections.map((s) => s.name)).toContain(VISUAL_WORKFLOW_PROMPT_SECTION)
 
@@ -282,10 +282,10 @@ describe('VisualWorkflowHost 装配', () => {
     // 旧实现在此 delete 持久化状态，导致后续冷恢复无法重装（回归根因）。
     hostAs.onAgentDisposed({ agent: { id: 'child-x' } })
 
-    // ③ 第二轮父代理派发 → coldResume 冷恢复（重新发布）→ 再次 agent/session-start
+    // ③ 第二轮父代理派发 → coldResume 冷恢复（重新发布）→ 再次 agent/created
     //    （不在 withPending 内）。必须用首建持久化状态重装四类贡献，否则回退官方提示词。
     const second = makeCtx()
-    hostAs.onAgentSessionStart({ agent: { id: 'child-x', ctx: second.childCtx } })
+    hostAs.onAgentCreated({ agent: { id: 'child-x', ctx: second.childCtx } })
 
     // 角色提示词段 / 组装瀑布 / 工具可见性 deny 均已重装（不因 dispose 丢失）
     expect(second.sections.map((s) => s.name)).toContain(VISUAL_WORKFLOW_PROMPT_SECTION)

@@ -11,6 +11,17 @@ export interface McpServerRow {
 }
 /** 定位 profile 的 cordis.patch.yml（优先 "web"，回退第一个含该文件的 profile 目录）。 */
 export declare function hostPatchPath(): string;
+/**
+ * serverName 规范化：对齐官方校验口径。
+ *
+ * 【0.1.7-rc.1 取证】官方 dsh-mcp-client 的 serverName 正则为
+ * `/^[A-Za-z0-9_-]{1,32}$/`（lib/index.js L767，schema 见 L782/L793）：仅允许
+ * 字母/数字/下划线/连字符，长度 1–32。旧实现替换规则放行 `.` 且不设长度上限，
+ * 含点或超长的名字写入 profile 行后会在挂载时 schemastery 校验失败。
+ * 此处按官方口径替换非法字符并截断到 32 字符；全非法输入退化为固定兜底名，
+ * 保证结果始终合法且非空（官方要求 ≥1 字符）。
+ */
+export declare function normalizeServerName(name: string): string;
 /** 运行宿主平台（默认 process.platform，单测可注入固定平台）。 */
 type Platform = NodeJS.Platform | string;
 /**

@@ -43,12 +43,12 @@ export interface ChildPromptSetup {
     registerGlobalAssemblyHook(ctx: PromptChildContextLike): () => void;
     /**
      * 当前是否处于 `withPending`（视觉工作流子代理创建）作用域内。
-     * host 层 `agent/session-start` 处理器据此判断「正在创建的是视觉工作流子代理」，
+     * host 层 `agent/created` 处理器据此判断「正在创建的是视觉工作流子代理」，
      * 从而在其创建窗口内提前安装四类每子代理作用域贡献（角色提示词段 / 工具可见性 deny /
      * 模型选择 / 软截停），使首轮系统提示词与工具集均在第一回合就位（修复「工具第二轮才更新」）。
      */
     hasPending(): boolean;
-    /** 读取当前 withPending 作用域内的状态（若在作用域内）；`agent/session-start` 首建时据此取状态。 */
+    /** 读取当前 withPending 作用域内的状态（若在作用域内）；`agent/created` 首建时据此取状态。 */
     peekPending(): ChildPromptState | undefined;
 }
 /** 子代理/父代理上下文最小结构（on + systemPrompt.section 用于挂瀑布与注册角色段）。 */

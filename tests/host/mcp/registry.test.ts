@@ -1,9 +1,31 @@
 // tests/host/mcp/registry.test.ts
-// MCP 命令行解析：shell 感知启动解析（npx/.cmd/.ps1 展开）与 commandLine 回填往返。
+// MCP 命令行解析与 serverName 规范化：shell 感知启动解析（npx/.cmd/.ps1 展开）、
+// commandLine 回填往返、serverName 对齐官方字符集与长度约束。
 // 纯函数单测，不依赖 harness；resolveSpawnCommandLine 通过 platform 参数固定分支。
 
 import { describe, expect, it } from 'vitest'
-import { resolveSpawnCommandLine, renderCommandLine } from '../../../src/host/mcp/registry.js'
+import { normalizeServerName, resolveSpawnCommandLine, renderCommandLine } from '../../../src/host/mcp/registry.js'
+
+describe('normalizeServerName：对齐官方 serverName 校验口径', () => {
+  it('保留合法字符（字母/数字/下划线/连字符）并 trim', () => {
+    expect(normalizeServerName('  demo_server-1 ')).toBe('demo_server-1')
+  })
+
+  it('含点等非法字符 → 替换为连字符（0.1.7-rc.1 官方正则只允许 [A-Za-z0-9_-]）', () => {
+    expect(normalizeServerName('demo.server')).toBe('demo-server')
+    expect(normalizeServerName('a b/c')).toBe('a-b-c')
+  })
+
+  it('超长名字截断到 32 字符', () => {
+    expect(normalizeServerName('a'.repeat(40))).toBe('a'.repeat(32))
+  })
+
+  it('空 / 全非法输入 → 非空兜底名（官方要求长度 ≥1）', () => {
+    expect(normalizeServerName('')).toBe('mcp')
+    expect(normalizeServerName('   ')).toBe('mcp')
+    expect(normalizeServerName('///')).toBe('---')
+  })
+})
 
 describe('resolveSpawnCommandLine：shell 感知启动解析', () => {
   it('Windows + npx → 展开为 cmd.exe /d /c npx …', () => {

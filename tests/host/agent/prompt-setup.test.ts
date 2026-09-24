@@ -374,7 +374,7 @@ describe('T-021b 子代理首轮角色 Prompt 注入（全局 unscoped 瀑布）
     expect(names).toContain(SEC.ptcOnly)
   })
 
-  it('hasPending：withPending 作用域内为 true，之外为 false（agent/session-start 判定视觉工作流子代理依据）', async () => {
+  it('hasPending：withPending 作用域内为 true，之外为 false（agent/created 判定视觉工作流子代理依据）', async () => {
     const setup = createChildPromptSetup()
     expect(setup.hasPending()).toBe(false)
     await setup.withPending({ systemPrompt: 'x', injectSystemPrompt: true, injectToolSections: true }, async () => {

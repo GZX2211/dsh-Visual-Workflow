@@ -517,7 +517,7 @@ service-runner.ts        模式二服务进程入口（包级二级入口；只�
 config.ts                插件契约（name/inject/Config schema）与默认值解析
 events.d.ts              官方 cordis 事件的本地收窄声明（仅 host program）
 visual-workflow-host.ts  宿主 Service：装配各模块能力、事件观察与生命周期汇总
-system-language.ts       系统语言读取（settings.locale.preference → 语言名）
+system-language.ts       系统语言读取（settings.describe() 的 locale.preference → 语言名）
 workspace-path.ts        新会话工作区路径校验（GUI 端点与定时任务端点共用）
 web-server.ts            官方 webServer 最小结构契约（两个 HTTP 边界共用）
 ecosystem-directory.ts   官方生态枚举投影（preset 模式 / 可选模型）

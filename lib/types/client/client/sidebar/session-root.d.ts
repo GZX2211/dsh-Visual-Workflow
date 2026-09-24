@@ -1,8 +1,10 @@
 /** 官方 sessions.list 快照的最小形状（运行时守卫后收窄）。 */
 export interface SessionsSnapshotLike {
-    /** 当前选中会话 id。 */
+    /** 当前选中会话 id（≤0.1.5 字段；0.1.7 已移除，仅作旧宿主兼容读法保留）。 */
     current?: unknown;
-    /** 会话 id → 摘要（含父链字段）。 */
+    /** 会话顺序（0.1.6+ 新增）：多个 mainView 候选按此顺序取第一个。 */
+    ids?: unknown;
+    /** 会话 id → 摘要（含父链字段与 retainedBy 视图持有计数）。 */
     byId?: Record<string, unknown>;
 }
 /** 官方 sessions 服务的最小形状（快照读 + 订阅；双版本读法）。 */

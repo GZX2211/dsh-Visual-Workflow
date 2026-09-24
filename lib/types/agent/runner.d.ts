@@ -88,6 +88,36 @@ export interface SubagentsServiceLike {
     /** provider 按名探测（探测 provider 是否注册；未注册返回 undefined）。 */
     getProvider?(name: string): unknown;
 }
+/** agentPresets 服务最小结构（官方 preset standing scope 解析）。 */
+export interface AgentPresetsServiceLike {
+    list(): Promise<unknown[]>;
+    /**
+     * 取得某 preset 当前 revision 的 standing scope 租约（`{ key: ScopeKey }`）。
+     *
+     * 【0.1.7-rc.1 取证】官方 0.1.5-rc.3 的 `standingKeyFor(id)` 已被移除
+     * （dsh-agent-preset-registry/lib/types/index.d.ts L123-125 只保留 `acquireScope`；
+     * 全官方包 grep `standingKeyFor` 零命中）。返回值为**引用租约**
+     * （`{ key: ScopeKey } & AsyncDisposable`），读完后必须经 `Symbol.asyncDispose`
+     * 释放——实现是 `users--` 并触发 generation 回收（同包 lib/index.js L787-799），
+     * 不释放会让 preset standing scope 常驻不回收。官方同源范式见
+     * dsh-api-session-controller 的 `scopeFor(agentPreset)`。
+     */
+    acquireScope(id?: string): Promise<{
+        key: unknown;
+    } & object>;
+}
+/**
+ * 释放 preset standing scope 租约（best-effort，幂等）。
+ * 协议缺失或释放抛错都只跳过释放：清单读取属辅助路径，不得因回收失败而失败。
+ */
+export declare function releasePresetLease(lease: unknown): Promise<void>;
+/**
+ * 解析官方 agentPresets 服务（能力守卫的**单一来源**：GUI 目录端点与节点工具白名单
+ * 解析共用；缺失或不支持 standing scope 取用时返回 null，由调用方决定降级语义）。
+ */
+export declare function agentPresetsServiceOf(ctx: {
+    get(name: string): unknown;
+}): AgentPresetsServiceLike | null;
 /** 工具视图缝（白名单解析依赖；CordisToolsView 为真实实现，单测 fake）。 */
 export interface ToolsView {
     /** 全部可见工具名（全局层 ∪ 存活 agent scope ∪ preset standing scope）。 */
@@ -204,7 +234,7 @@ export declare class NodeAgentRunner implements NodeRunner {
     interruptChild(childId: string, sessionId: string): Promise<void>;
     /** 清理子代理表与护栏登记（宿主 dispose 调用；不中断子代理——由运行时统一中止）。
      *  每子代理作用域装配（角色提示词/工具可见性/模型选择/软截停）由 host 层
-     *  `agent/session-start` 处理器在创建窗口内安装，其撤销函数归 host 的
+     *  `agent/created` 处理器在创建窗口内安装，其撤销函数归 host 的
      *  `childScopeDisposers` 管理（见 visual-workflow-host.ts），runner 不再持有。 */
     dispose(): void;
     /**

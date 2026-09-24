@@ -11,8 +11,11 @@
 export {
   CordisToolsView,
   NodeAgentRunner,
+  agentPresetsServiceOf,
   childVisibilityContribution,
+  releasePresetLease,
   resolveRolePrompt,
+  type AgentPresetsServiceLike,
   type AgentsServiceLike,
   type SubagentsServiceLike,
 } from './runner.js'

@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FlowStore } from '../../../src/host/storage/flow-store.js'
 import {
+  CordisToolsView,
   NodeAgentRunner,
   childKey,
   childVisibilityContribution,
@@ -585,7 +586,7 @@ describe('childVisibilityContribution（CHILD_AGENT_HIDDEN_TOOLS 双保险隐藏
 // ---------------------------------------------------------------------------
 // 取证（0.1.2-rc.1 类型）：rc.2 的 list()/followup/registerContinuableSetup 移除；
 // 改 getProvider 按名探测、sendMessage/queuePrompt 相邻投递、interrupt(target, authority)。
-// 每子代理作用域装配由宿主在 agent/session-start 创建窗口内安装到 childCtx（runner 只负责创建）。
+// 每子代理作用域装配由宿主在 agent/created 创建窗口内安装到 childCtx（runner 只负责创建）。
 
 /** rc.1 面子代理服务 fake（无 list/followup/registerContinuableSetup）。 */
 class Rc1FakeSubagents implements SubagentsServiceLike {
@@ -663,14 +664,14 @@ describe('DSH 0.1.2 子代理 seam（getProvider 探测 / childSetup 安装 / se
     expect(detectSubagentProvider(legacy)).toBe('fork')
   })
 
-  it('创建：startContinuable(provider=spawn)（getProvider 探测）返回 created=true；装配由 host 的 agent/session-start 负责', async () => {
+  it('创建：startContinuable(provider=spawn)（getProvider 探测）返回 created=true；装配由 host 的 agent/created 负责', async () => {
     const h = await makeHarness()
     await h.store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read'], mcpServers: [] })
     // 换成 rc.1 面 subagents：startContinuable 即发布 child agent（带 ctx）
     const rc1 = new Rc1FakeSubagents()
     rc1.onStart = (childId) => { h.agents.children.set(childId, { id: childId, ctx: { tag: `ctx-${childId}` } }) }
     // 0.1.2 起每子代理作用域装配（角色提示词/工具可见性/模型选择/软截停）不再由 runner 在
-    // startContinuable 返回后安装，而是由 host 层监听 agent/session-start 在创建窗口内安装
+    // startContinuable 返回后安装，而是由 host 层监听 agent/created 在创建窗口内安装
     // （见 visual-workflow-host.ts），避免首轮系统提示词/工具第二轮才更新。runner 只负责创建。
     const runner = new NodeAgentRunner({
       store: h.store,
@@ -741,5 +742,98 @@ describe('DSH 0.1.2 子代理 seam（getProvider 探测 / childSetup 安装 / se
     await runner.interruptChild('rc1-1', 'session-1')
     expect(queueOnly.interrupts).toEqual([{ childId: 'rc1-1', authority: { kind: 'user', parentSessionId: 'session-1' } }])
     runner.dispose()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// CordisToolsView：preset standing scope 经 acquireScope 租约取用
+// ---------------------------------------------------------------------------
+// 【0.1.7-rc.1】官方 agentPresets 移除 standingKeyFor，唯一通道是
+// acquireScope(id?) → { key } & AsyncDisposable（引用租约，读完必须释放）。
+// 这些用例锁定：取用路径、租约释放（不泄漏引用计数）、能力缺失/失败时的降级。
+
+/** `Symbol.asyncDispose` 运行时取值（host program lib 为 es2022，不含 esnext.disposable）。 */
+const ASYNC_DISPOSE = (Symbol as unknown as { asyncDispose: symbol }).asyncDispose
+
+/** 构造 CordisToolsView 所需的最小 ctx fake。 */
+function toolsViewCtx(services: Record<string, unknown>): never {
+  return { get: (name: string) => services[name] } as never
+}
+
+describe('CordisToolsView / preset standing scope（acquireScope 租约）', () => {
+  it('presetToolNames：取租约 → schemas(key) → 释放租约', async () => {
+    const presetKey = { preset: 'standard' }
+    let released = 0
+    const view = new CordisToolsView(toolsViewCtx({
+      tools: { schemas: (scope?: unknown) => (scope === presetKey ? [{ name: 'read' }, { name: 'write' }] : []) },
+      agentPresets: {
+        list: async () => [{ id: 'standard' }],
+        acquireScope: async () => ({ key: presetKey, [ASYNC_DISPOSE]: async () => { released += 1 } }),
+      },
+    }))
+
+    expect(await view.presetToolNames('standard')).toEqual(['read', 'write'])
+    expect(released).toBe(1)
+  })
+
+  it('acquireScope 缺失（0.1.5 旧宿主）：能力守卫判为不可用 → presetToolNames 返回 null', async () => {
+    const view = new CordisToolsView(toolsViewCtx({
+      tools: { schemas: () => [{ name: 'read' }] },
+      agentPresets: { list: async () => [{ id: 'standard' }], standingKeyFor: async () => ({}) },
+    }))
+
+    expect(await view.presetToolNames('standard')).toBeNull()
+  })
+
+  it('acquireScope 抛错：返回 null 不抛（降级为「无 preset 白名单」）', async () => {
+    const view = new CordisToolsView(toolsViewCtx({
+      tools: { schemas: () => [{ name: 'read' }] },
+      agentPresets: {
+        list: async () => [{ id: 'standard' }],
+        acquireScope: async () => { throw new Error('preset 未激活') },
+      },
+    }))
+
+    expect(await view.presetToolNames('standard')).toBeNull()
+  })
+
+  it('租约缺 key：返回 null，且租约仍被释放（不泄漏引用计数）', async () => {
+    let released = 0
+    const view = new CordisToolsView(toolsViewCtx({
+      tools: { schemas: () => [{ name: 'read' }] },
+      agentPresets: {
+        list: async () => [{ id: 'standard' }],
+        acquireScope: async () => ({ [ASYNC_DISPOSE]: async () => { released += 1 } }),
+      },
+    }))
+
+    expect(await view.presetToolNames('standard')).toBeNull()
+    expect(released).toBe(1)
+  })
+
+  it('visibleToolNames：并入全局层与各 preset standing scope，且每个租约都被释放', async () => {
+    const scopeA = { preset: 'a' }
+    const scopeB = { preset: 'b' }
+    let released = 0
+    const view = new CordisToolsView(toolsViewCtx({
+      tools: {
+        schemas: (scope?: unknown) => {
+          if (scope === undefined) return [{ name: 'glob' }]
+          if (scope === scopeA) return [{ name: 'read' }]
+          if (scope === scopeB) return [{ name: 'write' }]
+          return []
+        },
+      },
+      agentPresets: {
+        list: async () => [{ id: 'a' }, { id: 'b' }],
+        acquireScope: async (id?: string) => ({
+          key: id === 'a' ? scopeA : scopeB,
+          [ASYNC_DISPOSE]: async () => { released += 1 },
+        }),
+      },
+    }))
+
+    expect((await view.visibleToolNames()).sort()).toEqual(['glob', 'read', 'write'])
+    expect(released).toBe(2)
   })
 })

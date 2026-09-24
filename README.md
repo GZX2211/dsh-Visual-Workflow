@@ -211,10 +211,10 @@
 
 ## 安装（Windows）
 
-> **版本适配**：本插件适配 **DeepSeek Harness `0.1.5-rc.1`**（宿主侧提示词段名、子代理投递 API、会话 cwd 读取与客户端插槽均按该版本取证适配）。请先安装或升级宿主（升级前先在外部终端**完全停止 dsh 进程**）：
+> **版本适配**：本插件适配 **DeepSeek Harness `0.1.7-rc.1`**（宿主侧 Agent 创建事件、prompt 段名、子代理投递 API、会话 cwd / 当前会话读取、预设 standing scope 与设置读取均按该版本取证适配）。请先安装或升级宿主（升级前先在外部终端**完全停止 dsh 进程**）：
 >
 > ```bash
-> npm install -g @deepseek-ai/dsh@0.1.5-rc.1
+> npm install -g @deepseek-ai/dsh@0.1.7-rc.1
 > ```
 
 1. **文件管理器定位**：`%USERPROFILE%\.dsh\profiles\web\pnpm-workspace.yaml`,在其中添加：
@@ -340,7 +340,7 @@ pnpm install
 dsh plugin --profile web add "link:$PWD"
 ```
 
-> 开发/验证目标宿主版本：**`@deepseek-ai/dsh@0.1.5-rc.1`**（`npm install -g @deepseek-ai/dsh@0.1.5-rc.1`；升级前先完全停止 dsh 进程）。
+> 开发/验证目标宿主版本：**`@deepseek-ai/dsh@0.1.7-rc.1`**（`npm install -g @deepseek-ai/dsh@0.1.7-rc.1`；升级前先完全停止 dsh 进程）。
 
 常用命令：
 ```bash

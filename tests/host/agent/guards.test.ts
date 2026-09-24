@@ -87,14 +87,25 @@ describe('ReAct 软截停护栏（guards.ts）', () => {
     expect(ctx.listenerCount('agent/pre-step')).toBe(1)
   })
 
-  it('软截停注入消息满足官方 plugin 来源契约（kind + 具名 plugin；缺失时官方只显示通用「插件」）', async () => {
+  it('软截停注入消息满足官方 UserMessage 契约（必填 id + plugin 来源）', async () => {
     const { preStep } = setup(1)
     const capped = (await preStep(1)) as {
       kind: string
-      messages: Array<{ role: string; source?: { kind?: string; plugin?: string } }>
+      messages: Array<{ id?: unknown; role: string; source?: { kind?: string; plugin?: string } }>
     }
     expect(capped.messages[0].role).toBe('user')
+    // id 为官方 MessageBase 的必填字段（0.1.7-rc.1 取证）：缺失会让追加进
+    // user/message 的消息没有稳定身份，故必须为非空字符串
+    expect(typeof capped.messages[0].id).toBe('string')
+    expect(String(capped.messages[0].id).length).toBeGreaterThan(0)
     expect(capped.messages[0].source).toEqual({ kind: 'plugin', plugin: 'visual-workflow' })
+  })
+
+  it('软截停注入消息的 id 每次唯一（同回合多次替换不复用消息身份）', async () => {
+    const { preStep } = setup(1)
+    const first = (await preStep(1)) as { messages: Array<{ id?: unknown }> }
+    const second = (await preStep(1)) as { messages: Array<{ id?: unknown }> }
+    expect(first.messages[0].id).not.toBe(second.messages[0].id)
   })
 
   it('tools.guard 双保险：上限前放行，软截停窗口内拒绝并给出「已达迭代上限」原因', async () => {

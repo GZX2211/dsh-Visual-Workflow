@@ -60,7 +60,7 @@ describe('T-003 构建链路（client bundle + host/client 并存）', () => {
     expect(dts).toContain("export * from './client/entry'")
   })
 
-  it('lib/client.js 含 v0.1.5-rc.1 迁移后的官方插槽注册面（标签页 / 入口 / 全屏缩回）', () => {
+  it('lib/client.js 含官方插槽注册面（标签页 / 入口 / 全屏缩回；0.1.5-rc.1 迁移引入、0.1.7-rc.1 契约未变）', () => {
     const code = readArtifact('lib/client.js')
     // 两阶段注册：类型注册表 + keyed 插槽 body + 官方侧边栏底部动作插槽
     expect(code).toContain('sidebarRightTabs')

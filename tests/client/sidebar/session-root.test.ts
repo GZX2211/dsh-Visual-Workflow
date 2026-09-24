@@ -6,6 +6,9 @@
 // 【0.1.5-rc.1 关键】官方 client 侧 SessionSummary 的父链字段是 **parentId**
 // （dsh-api-session-controller/client/sessions/service.d.ts:39），0.1.2 时代曾写作
 // parentSessionId —— 两者都要能读（双读兼容），否则子代理会话无法上溯到根。
+// 【0.1.7-rc.1 关键】同一快照类型已删除 `current` 字段（SessionListState 只剩
+// ids/byId/phase/projectionsBySession），当前会话改由「retainedBy.mainView > 0」派生，
+// 故 currentSessionOf 双读：旧字段优先，缺失时按 ids 顺序取首个 mainView 会话。
 
 import { describe, expect, it, vi } from 'vitest'
 import { currentSessionOf, rootSessionIdOf } from '../../../src/client/sidebar/session-root.js'
@@ -28,6 +31,23 @@ function sessionsOf(
   return { list } as never
 }
 
+/**
+ * 构造 0.1.7-rc.1 形态的 sessions 服务 fake：快照无 current，
+ * 改由每项的 retainedBy.mainView 持有计数与官方 ids 顺序派生当前会话。
+ */
+function mainViewSessions(
+  entries: Array<{ id: string; mainView?: number }>,
+  options: { ids?: string[] } = {},
+) {
+  const byId: Record<string, unknown> = {}
+  for (const entry of entries) {
+    byId[entry.id] = entry.mainView === undefined ? {} : { retainedBy: { mainView: entry.mainView } }
+  }
+  const state: Record<string, unknown> = { byId }
+  if (options.ids !== undefined) state.ids = options.ids
+  return { list: { getSnapshot: () => state } } as never
+}
+
 describe('currentSessionOf：当前选中会话解析', () => {
   it('getSnapshot().current 命中（0.1.5 读法）', () => {
     expect(currentSessionOf({ get: () => sessionsOf([{ id: 's-1' }], { current: 's-9' }) })).toBe('s-9')
@@ -41,6 +61,42 @@ describe('currentSessionOf：当前选中会话解析', () => {
     expect(currentSessionOf({ get: () => null })).toBe('')
     expect(currentSessionOf({})).toBe('')
     expect(currentSessionOf({ get: () => ({ list: { getSnapshot: () => ({ current: 42 }) } }) })).toBe('')
+  })
+
+  it('无 current（0.1.7 读法）：取 retainedBy.mainView > 0 的会话', () => {
+    const sessions = mainViewSessions([
+      { id: 's-background', mainView: 0 },
+      { id: 's-current', mainView: 1 },
+    ])
+    expect(currentSessionOf({ get: () => sessions })).toBe('s-current')
+  })
+
+  it('多个 mainView 会话：按官方 ids 顺序取第一个', () => {
+    const sessions = mainViewSessions(
+      [
+        { id: 's-a', mainView: 1 },
+        { id: 's-b', mainView: 2 },
+      ],
+      { ids: ['s-b', 's-a'] },
+    )
+    expect(currentSessionOf({ get: () => sessions })).toBe('s-b')
+  })
+
+  it('ids 缺失：按 byId 键序回退取首个 mainView 会话', () => {
+    const sessions = mainViewSessions([
+      { id: 's-first', mainView: 0 },
+      { id: 's-second', mainView: 1 },
+    ])
+    expect(currentSessionOf({ get: () => sessions })).toBe('s-second')
+  })
+
+  it('retainedBy 缺失或 mainView 非正数：返回空串', () => {
+    const missing = mainViewSessions([{ id: 's-plain' }])
+    expect(currentSessionOf({ get: () => missing })).toBe('')
+    const negative = mainViewSessions([{ id: 's-neg', mainView: -1 }])
+    expect(currentSessionOf({ get: () => negative })).toBe('')
+    const byIdOnly = { list: { getSnapshot: () => ({ byId: undefined }) } }
+    expect(currentSessionOf({ get: () => byIdOnly })).toBe('')
   })
 })
 

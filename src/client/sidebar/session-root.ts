@@ -8,16 +8,24 @@
 // 实例被误认为「跟随代理 ID」。因此实例/服务按**会话树根**隔离：沿官方
 // sessions.list 快照的父链字段上溯到无父（根）会话，主代理与其全部后代子代理共享同一实例列表。
 //
-// 【0.1.5-rc.1 字段取证】客户端投影层（dsh-api-session-controller/client/sessions）
-// 的 SessionSummary 父链字段名为 **parentId**（client/service.d.ts:39），而 0.1.2 时代
-// 曾被写作 parentSessionId —— 故双读兼容：优先 parentId、回退 parentSessionId。
+// 【0.1.7-rc.1 字段取证】客户端投影层（dsh-api-session-controller/client/sessions）
+// 的 `SessionListState` 为 `{ ids, byId, phase, projectionsBySession }`
+// （lib/types/client/sessions/service.d.ts L43-52）：**已删除 `current`**（0.1.5-rc.3 曾
+// 存在），当前选中会话改为「被主视图持有」派生——官方同款实现见 dsh-client-ui-layout /
+// dsh-client-ui-workspace 的
+// `Object.values(state.byId).find((session) => (session.retainedBy.mainView ?? 0) > 0)?.id`。
+// 故本模块双读：优先旧字段 `current`（旧宿主兼容），缺失时按 `ids` 顺序找第一个
+// `retainedBy.mainView > 0` 的会话（`ids` 缺失再回退 `byId` 键序）。
+// SessionSummary 父链字段名仍为 **parentId**；0.1.2 时代曾写作 parentSessionId —— 保持双读兼容。
 // 快照缺 byId（旧运行时/非浏览器环境）时回退当前会话自身（行为不变，单代理场景无回归）。
 
 /** 官方 sessions.list 快照的最小形状（运行时守卫后收窄）。 */
 export interface SessionsSnapshotLike {
-  /** 当前选中会话 id。 */
+  /** 当前选中会话 id（≤0.1.5 字段；0.1.7 已移除，仅作旧宿主兼容读法保留）。 */
   current?: unknown
-  /** 会话 id → 摘要（含父链字段）。 */
+  /** 会话顺序（0.1.6+ 新增）：多个 mainView 候选按此顺序取第一个。 */
+  ids?: unknown
+  /** 会话 id → 摘要（含父链字段与 retainedBy 视图持有计数）。 */
   byId?: Record<string, unknown>
 }
 
@@ -40,14 +48,36 @@ function snapshotOf(sessions: SessionsServiceLike | null | undefined): SessionsS
 }
 
 /**
+ * 取被主视图（mainView）持有的第一个会话 id（无则空串）。
+ * 顺序口径：优先官方 `ids` 数组（多个 mainView 时取第一个），缺失时回退 `byId` 键序。
+ */
+function mainViewSessionOf(snapshot: SessionsSnapshotLike | undefined): string {
+  const byId = snapshot?.byId
+  if (!byId || typeof byId !== 'object') return ''
+  const rawIds: unknown = snapshot?.ids
+  const order: string[] = Array.isArray(rawIds) ? rawIds.map((id) => String(id ?? '')) : Object.keys(byId)
+  for (const id of order) {
+    if (!id) continue
+    const entry = byId[id] as { retainedBy?: { mainView?: unknown } } | undefined
+    const retained = Number(entry?.retainedBy?.mainView ?? 0)
+    if (Number.isFinite(retained) && retained > 0) return id
+  }
+  return ''
+}
+
+/**
  * 解析当前选中会话 id（无会话返回空串）。
  * @param ctx - 取服务的最小上下文（`get(name)`）。
  * @returns 当前会话 id，或空串。
  */
 export function currentSessionOf(ctx: { get?(name: string): unknown }): string {
   const sessions = ctx.get?.('sessions') as SessionsServiceLike | null | undefined
-  const current = snapshotOf(sessions)?.current
-  return typeof current === 'string' ? current : ''
+  const snapshot = snapshotOf(sessions)
+  // 旧宿主读法：快照直接给出当前会话（0.1.5-rc.3 及更早）
+  const current = snapshot?.current
+  if (typeof current === 'string' && current) return current
+  // 0.1.7-rc.1 读法：当前会话由「主视图持有」派生（见文件头取证）
+  return mainViewSessionOf(snapshot)
 }
 
 /**

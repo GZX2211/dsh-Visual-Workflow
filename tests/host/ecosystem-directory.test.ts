@@ -37,6 +37,21 @@ describe('listAgentPresets', () => {
     ])
   })
 
+  it('broken 为诊断字符串（0.1.7-rc.1 形态）时同样剔除', async () => {
+    // 0.1.7-rc.1：官方 AgentPreset.broken 由布尔 true 改为 error.message 字符串；
+    // 旧判定 `!== true` 会让这类激活失败的 preset 混入清单。
+    const presets = await listAgentPresets(ctxOf({
+      agentPresets: {
+        list: async () => [
+          { id: 'ok' },
+          { id: 'broken-empty', broken: '' },
+          { id: 'broken-msg', broken: '依赖的 Host 服务未装载' },
+        ],
+      },
+    }))
+    expect(presets).toEqual([{ id: 'ok', name: 'ok', description: '', trust: 'user' }])
+  })
+
   it('list 故障向上抛（服务存在但读取失败属可诊断错误，不静默降级为空）', async () => {
     const ctx = ctxOf({ agentPresets: { list: async () => { throw new Error('boom') } } })
     await expect(listAgentPresets(ctx)).rejects.toThrow('boom')

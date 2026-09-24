@@ -88,19 +88,19 @@ export class VisualWorkflowHost extends Service {
   /** 子代理系统提示词与协作 Prompt 注入装配。 */
   private readonly childPrompt = createChildPromptSetup()
   /**
-   * 每子代理作用域装配撤销表（agentId → disposer）：由 `agent/session-start` 处理器在
+   * 每子代理作用域装配撤销表（agentId → disposer）：由 `agent/created` 处理器在
    * 子代理创建窗口内安装四类贡献（角色提示词/工具可见性/模型选择/软截停），
    * `agent/disposed` 或宿主 dispose 时撤销。持 key 的是 agent id（而非 childId）。
    */
   private readonly childScopeDisposers = new Map<string, () => void>()
   /**
-   * 每个视觉工作流子代理的提示词状态（agentId → ChildPromptState）。在首次 `agent/session-start`
-   * 时写入；此后即使子代理被重发布/恢复（`agent/session-start` 再次触发、但不在 withPending
+   * 每个视觉工作流子代理的提示词状态（agentId → ChildPromptState）。在首次 `agent/created`
+   * 时写入；此后即使子代理被重发布/恢复（`agent/created` 再次触发、但不在 withPending
    * 作用域内）也能据此状态重新安装四类贡献——避免「第二轮被官方提示词顶替、贡献被卸载」的
    * 二次重置 BUG。
    * 【关键生命周期】`agent/disposed` **不再**删除此状态：可延续子代理（startContinuable）在
    * 回合间会因官方 watchSettlement（空闲+settled）被销毁并触发 `agent/disposed`，第二轮父代理
-   * 再派发时经 coldResume 冷恢复（重新发布 → 再次 `agent/session-start`）。若在 dispose 时删除
+   * 再派发时经 coldResume 冷恢复（重新发布 → 再次 `agent/created`）。若在 dispose 时删除
    * 状态，重发布将找不到该子代理的 ChildPromptState → 四类贡献不再重装 → 第二轮回退官方提示词。
    * 条目为极小字符串、会话内数量有限，仅随宿主 dispose 统一清理即可。
    */
@@ -220,7 +220,7 @@ export class VisualWorkflowHost extends Service {
     return systemLanguageOf(this.ctx.get('settings') as SettingsServiceLike | null)
   }
 
-  // ---- 每子代理作用域装配（agent/session-start 创建窗口内提前安装） ----------------
+  // ---- 每子代理作用域装配（agent/created 创建窗口内提前安装） ----------------
 
   /**
    * 在子代理创建窗口内安装四类每子代理作用域贡献，返回合并 disposer（host 管理生命周期）。
@@ -229,7 +229,7 @@ export class VisualWorkflowHost extends Service {
    *   - ReAct 软截停护栏；
    *   - 模型选择（provider/model/reasoning）；
    *   - 角色提示词段 + 开关过滤。
-   * 因在 `agent/session-start`（agents.create 发布、首轮组装之前同步触发）执行，
+   * 因在 `agent/created`（agents.create 发布、首轮组装之前串行 await）执行，
    * 四类贡献在首轮即可见——修复「系统提示词/工具第二轮才更新」的同源时序 BUG。
    * 单个贡献失败则跳过（其余照装），返回的 disposer 为已成功安装贡献的合并撤销。
    */
@@ -273,15 +273,21 @@ export class VisualWorkflowHost extends Service {
   }
 
   /**
-   * 监听官方 `agent/session-start`：子代理创建/重发布窗口（startContinuable 内部、first assembly
-   * 之前）同步触发。
+   * 监听官方 `agent/created`：子代理创建/重发布窗口（startContinuable 内部、first assembly
+   * 之前，**串行 await**）触发。
    *   - 首建：此时 `withPending` 状态仍在作用域内 → `peekPending()` 取到本次创建的 ChildPromptState；
-   *   - 重发布/恢复：`agent/session-start` 再次触发但不在 withPending 作用域内 → 从
+   *   - 重发布/恢复：`agent/created` 再次触发但不在 withPending 作用域内 → 从
    *     `childPromptStates`（首建时持久化）取回状态。
    * 据此在其 ctx 上提前（重新）安装四类贡献，使首轮 + 后续每轮系统提示词与工具集都保持就位，
    * 不会「第二轮被官方提示词顶替、贡献被卸载」（二次重置 BUG）。
+   *
+   * 【0.1.7-rc.1 取证】事件名与 payload 见 `src/host/events.d.ts` 的 `agent/created` 条目；
+   * 官方对该事件**按序 await 监听器，且监听器抛错会让创建失败**（dsh-agent/lib/index.js
+   * L579 的 `ctx.serial`），故本处理器全程同步且不抛错（贡献安装由 installChildScope
+   * 逐项 try/catch 隔离）。根 Agent 创建（source='startup'）同样触发本事件：此时
+   * `peekPending()` 为空且 `childPromptStates` 无该 id → 直接返回，无副作用。
    */
-  private onAgentSessionStart(payload: { agent?: { id?: unknown; ctx?: unknown } }): void {
+  private onAgentCreated(payload: { agent?: { id?: unknown; ctx?: unknown } }): void {
     const agent = payload?.agent
     if (!agent || typeof agent !== 'object') return
     const childCtx = agent.ctx
@@ -305,7 +311,7 @@ export class VisualWorkflowHost extends Service {
    * 子代理被销毁时回收其作用域装配（重建配置签名变化 / 正常运行结束）。
    * 【关键】**不删除** `childPromptStates`：可延续子代理在回合间会因官方 watchSettlement
    * （空闲+settled）被销毁并触发 `agent/disposed`，第二轮父代理再派发时经 coldResume 冷恢复
-   * （重新发布 → 再次 `agent/session-start`）。若此处删除持久化状态，重发布时将无法找到该
+   * （重新发布 → 再次 `agent/created`）。若此处删除持久化状态，重发布时将无法找到该
    * 子代理的 ChildPromptState，四类贡献（角色提示词段/工具可见性/模型选择/软截停）不会重装
    * → 第二轮回退官方提示词（「系统提示词和工具已更新」二次重置 BUG）。状态仅随宿主 dispose
    * 统一清理。
@@ -402,8 +408,12 @@ export class VisualWorkflowHost extends Service {
     //   - subagent/end：节点子代理结束回写（ok/fail/react-capped + output + wait 唤醒）
     //   - agent/error：父代理回合报错（只记录，不终止运行——对话区停止=打断修正，
     //     真实错误终态由 watchdog 的 latestTurnEnd 权威判定）
-    //   - agent/session-start：子代理创建窗口内提前安装四类每子代理作用域贡献
+    //   - agent/created：子代理创建窗口内提前安装四类每子代理作用域贡献
     //     （角色提示词/工具可见性/模型选择/软截停），使首轮系统提示词与工具集就位
+    //     【0.1.7-rc.1】官方 `agent/session-start` 已移除，改为异步串行的
+    //     `agent/created`（payload { agent, source, signal }）——语义等价：同为
+    //     factory setup 完成后、首轮提示词组装之前的创建窗口，且本插件处理器在其
+    //     内部包裹 withPending，AsyncLocalStorage 状态仍在作用域内。
     //   - agent/disposed：撤销对应子代理的作用域装配（重建/正常销毁回收）
     //   - agent/status：**运行活性基准刷新**（自主编排方案 §5.1）。父代理只在调用 wf_*
     //     工具时刷新 lastActiveAt（runtime-execute.ts），规划/思考/读写文件期间不刷新
@@ -414,15 +424,15 @@ export class VisualWorkflowHost extends Service {
     // ctx.on 随本 fiber 自动反注册，无需手动 removeListener。
     this.ctx.on('subagent/end', (payload) => this.onSubagentEnd(payload))
     this.ctx.on('agent/error', (payload) => this.onAgentError(payload))
-    this.ctx.on('agent/session-start', (payload) => this.onAgentSessionStart(payload))
+    this.ctx.on('agent/created', (payload) => this.onAgentCreated(payload))
     this.ctx.on('agent/disposed', (payload) => this.onAgentDisposed(payload))
     this.ctx.on('agent/status', (payload) => this.onAgentStatus(payload))
 
     // 0.1.2 适配：rc.2 的 registerContinuableSetup 已从官方移除。每子代理作用域装配改为
-    // 由 host 监听 `agent/session-start`（子代理创建窗口内同步触发）提前安装四类贡献
-    // （见 onAgentSessionStart / installChildScope），不再由 runner 在 startContinuable
-    // 返回后安装——否则首轮系统提示词/工具尚未就位、第二轮才更新。此处仅检测 subagents
-    // 服务可用性并提示。
+    // 由 host 监听 `agent/created`（0.1.7 前名为 `agent/session-start`；子代理创建窗口内
+    // 串行 await 触发）提前安装四类贡献（见 onAgentCreated / installChildScope），
+    // 不再由 runner 在 startContinuable 返回后安装——否则首轮系统提示词/工具尚未就位、
+    // 第二轮才更新。此处仅检测 subagents 服务可用性并提示。
     if (!subagentsServiceLike(this.ctx)) {
       this.ctx.logger.warn('[visual-workflow] subagents 服务不可用：子代理执行/护栏将受限（运行时按需报错或降级）')
     }

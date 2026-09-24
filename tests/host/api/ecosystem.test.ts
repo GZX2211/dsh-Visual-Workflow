@@ -12,6 +12,13 @@ import { cleanupAll, makeHarness, snapshotDshHome } from './fixtures/api-harness
 
 const restoreDshHome = snapshotDshHome()
 
+/**
+ * `Symbol.asyncDispose` 的运行时取值。
+ * 为什么经断言取值：测试 program 的 lib 与 host program 一致（es2022，不含
+ * esnext.disposable），直接书写 `Symbol.asyncDispose` 无法通过类型检查。
+ */
+const ASYNC_DISPOSE = (Symbol as unknown as { asyncDispose: symbol }).asyncDispose
+
 afterEach(async () => {
   await cleanupAll()
   restoreDshHome()
@@ -26,8 +33,9 @@ describe('生态端点', () => {
 
     h.ctx.services.set('agentPresets', {
       list: async () => [
-        { id: 'standard', name: '标准模式', description: '默认', trust: 'user' },
-        { id: 'broken-one', broken: true },
+        { id: 'standard', name: '标准模式', description: '默认' },
+        // 0.1.7-rc.1：broken 为诊断字符串（0.1.5 曾为布尔 true）——两种形态都应剔除
+        { id: 'broken-one', broken: '依赖的 Host 服务未装载' },
       ],
     })
     const presets = (await h.api.handle('presets', {})) as Array<{ id?: string }>
@@ -78,9 +86,17 @@ describe('生态端点', () => {
       'utf8',
     )
     const presetKey = { presetScope: true }
+    let leaseReleased = 0
     h.ctx.services.set('agentPresets', {
       list: async () => [{ id: 'standard' }],
-      standingKeyFor: async () => presetKey,
+      // 0.1.7-rc.1：standing scope 经 acquireScope 取引用租约，读完必须经
+      // Symbol.asyncDispose 释放（standingKeyFor 已从官方移除）
+      acquireScope: async () => ({
+        key: presetKey,
+        [ASYNC_DISPOSE]: async () => {
+          leaseReleased += 1
+        },
+      }),
     })
     h.ctx.services.set('tools', {
       schemas: (scope?: unknown) =>
@@ -99,5 +115,7 @@ describe('生态端点', () => {
     const read = catalog.items.find((item) => item.name === 'read')
     expect(read?.description).toContain('读取文件')
     expect(catalog.mcp[0]).toMatchObject({ id: 'mcp-demo' })
+    // standing scope 租约必须被释放（引用计数回收），否则 preset scope 常驻
+    expect(leaseReleased).toBe(1)
   })
 })
