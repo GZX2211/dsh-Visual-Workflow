@@ -90,7 +90,7 @@ describe('wf_run_node_wait 工具执行', () => {
     // subagent/end 会因 childIndex 尚未登记而漏掉唤醒）
     await vi.waitFor(() => {
       expect(h.runtime.childMetaFor('child-1')).not.toBeNull()
-    })
+    }, { timeout: 5000 })
     // 子代理结束事件回写（与 wait 等待共用完成通道）
     await h.runtime.handleSubagentEnd({
       id: 'child-1',

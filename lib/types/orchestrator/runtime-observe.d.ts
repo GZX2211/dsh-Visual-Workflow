@@ -3,8 +3,9 @@ import { RuntimeComm } from './runtime-comm.js';
 export declare class RuntimeObserve extends RuntimeComm {
     /**
      * 子代理结束观察：
-     *   - 运行快照：completed/max-tokens → 节点 ok（outputSummary 取最后一条 assistant 文本）；
-     *     error/aborted 等 → 节点 fail；
+     *   - 运行快照：completed → 节点 ok（outputSummary 取最后一条 assistant 文本）；
+     *     error/aborted 等 → 节点 fail；max-tokens 亦为 fail（内容被硬截断，Bug 19）；
+     *   - 已退役 child（被重建替换的旧子代理）的事件静默丢弃，不参与节点结论；
      *   - 清空 inflight、刷新 lastActiveAt（避免空闲看护误停）；
      *   - 唤醒 wait:true 阻塞等待器（ok/fail + output）。
      * 只观察 DSH 事件，不向父代理注入任何额外内容——父代理继续推进由官方汇报链路驱动。

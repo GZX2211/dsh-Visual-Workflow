@@ -422,17 +422,37 @@ describe('NodeAgentRunner 创建/复用/派发', () => {
     expect(h.react.setLimit).toHaveBeenCalledWith('child-1', 7)
   })
 
-  it('签名一致复用：不重建；签名变化（rolePrompt）→ 重建（旧子代理保留历史）', async () => {
+  it('签名一致复用：不重建；签名变化（rolePrompt）→ 重建且旧 child 上报 + 尽力中断', async () => {
     const h = await makeHarness()
     await h.store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read'], mcpServers: [] })
     const first = await h.runner.ensureNodeChild(taskInput())
     const reused = await h.runner.ensureNodeChild(taskInput())
     expect(reused).toEqual({ childId: first.childId, created: false })
     expect(h.subagents.started).toHaveLength(1)
+    expect(h.subagents.interrupts).toHaveLength(0)
 
     const rebuilt = await h.runner.ensureNodeChild(taskInput({ node: agentNode('n-a1', { systemPrompt: '新任务' }) }))
-    expect(rebuilt).toEqual({ childId: 'child-2', created: true })
+    // 行为变化（2026.10）：签名变化重建时额外上报被替换的旧 childId——编排器据此把旧
+    // child 退役，使其迟到 subagent/end 不再覆写同一节点的状态（旧行为：无声替换，
+    // 旧 child 的产出会张冠李戴）。create/reuse 两条路径的 created 语义不变。
+    expect(rebuilt).toEqual({ childId: 'child-2', created: true, replacedChildId: 'child-1' })
     expect(h.subagents.started).toHaveLength(2)
+    // 旧子代理被尽力中断（保留会话；authority 为触发本次重建的会话）
+    await vi.waitFor(() => {
+      expect(h.subagents.interrupts).toEqual([
+        { childId: 'child-1', authority: { kind: 'user', parentSessionId: 'session-1' } },
+      ])
+    }, { timeout: 5000 })
+  })
+
+  it('复用路径（签名一致）不触发中断：只有重建才中断旧 child', async () => {
+    const h = await makeHarness()
+    await h.store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read'], mcpServers: [] })
+    await h.runner.ensureNodeChild(taskInput())
+    await h.runner.ensureNodeChild(taskInput())
+    await h.runner.ensureNodeChild(taskInput())
+    expect(h.subagents.started).toHaveLength(1)
+    expect(h.subagents.interrupts).toHaveLength(0)
   })
 
   it('白名单空 → 不传 toolFilter（边界由宿主组合决定）', async () => {

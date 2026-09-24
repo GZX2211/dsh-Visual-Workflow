@@ -245,6 +245,33 @@ describe('T-011 陈旧磁盘锁回收', () => {
     // 锁文件仍在，未被回收（新鲜锁保护）。
     expect(await readFile(lockPath, 'utf8')).toContain(String(process.pid))
   })
+
+  it('Windows delete-pending 过渡态：锁被 rm 后仍持句柄，获取方轮询重试而非立即上浮 EPERM', async () => {
+    // 复现真实竞态：锁持有者 releaseDiskLock 的 rm 在 Windows 上把文件置为
+    // 「删除待完成」，直到最后一个句柄关闭才真正移除目录项。此窗口内 open('wx') 返回
+    // EPERM 而非 EEXIST/ENOENT——旧实现直接上浮，报「获取失败」而实际锁已释放。
+    // 修法（本次治理）：把 EPERM/EACCES 当「未获取」继续轮询，句柄关闭后自然成功。
+    const dir = makeTmpDir()
+    const lockPath = join(dir, 'delete-pending.lock')
+    await writeFile(lockPath, JSON.stringify({ pid: process.pid, createdAt: Date.now() }), 'utf8')
+
+    const { open } = await import('node:fs/promises')
+    const holder = await open(lockPath, 'r+')
+    // 持有句柄期间删除：Windows 进入 delete-pending；POSIX 目录项立即消失（此时本测试
+    // 退化为「无锁获取」，两条路径都必须成功，断言不依赖平台差异）。
+    await rm(lockPath, { force: true })
+
+    // 获取方在过渡态窗口内启动；100ms 后释放句柄，过渡态结束。
+    const releaseTimer = setTimeout(() => { void holder.close() }, 100)
+    try {
+      const info = await acquireDiskLock(lockPath, { timeoutMs: 5000, pollIntervalMs: 10 })
+      expect(info.pid).toBe(process.pid)
+      await releaseDiskLock(info)
+    } finally {
+      clearTimeout(releaseTimer)
+      await holder.close().catch(() => {})
+    }
+  })
 })
 
 // ── 6. 锁互斥（跨实例语义）── 用「已死 pid 的陈旧锁 + 存活 pid 的新鲜锁」模拟 ─

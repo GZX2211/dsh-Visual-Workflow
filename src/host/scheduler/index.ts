@@ -50,8 +50,9 @@ export {
 export type { ZonedParts } from './calendar.js'
 
 // ── 执行窗口判定（第一层）────────────────────────────────────────────────
-export { isValidDate, isWithinWindow, nextWindowStartAt, timeInRanges, windowSpansOfDate } from './window.js'
-export type { WindowSpan } from './window.js'
+// 注：曾导出的 windowSpansOfDate（按本地日期展开窗口区间）零引用且与 isWithinWindow
+// 构成第二套展开口径，2026.10 治理中删除（见 window.ts 头部说明）。
+export { isValidDate, isWithinWindow, nextWindowStartAt, timeInRanges } from './window.js'
 
 // ── 触发点计算（第二层）──────────────────────────────────────────────────
 export { nextTriggerAt, triggerPointsForDate } from './trigger.js'

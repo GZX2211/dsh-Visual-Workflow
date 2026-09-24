@@ -7,6 +7,8 @@
   // 故共用本 program；client 测试另设 tsconfig.test.client.json（P16）。
   // 为什么不并入 tsconfig.host.json：该 program 用于发射 lib/ 产物，若 include
   // tests 会把测试编译进 lib/ 污染发布物；独立 noEmit program 两全。
+  // 为什么带上根 vitest.config.ts：测试超时契约（testTimeout）的唯一承接点，属测试侧
+  // 配置，纳入本 program 才能让它的类型正确性受同一门禁保护（否则该文件是类型检查盲区）。
   "compilerOptions": {
     "target": "es2022",
     "module": "nodenext",
@@ -19,6 +21,6 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src/host/**/*.ts", "tests/host/**/*.ts", "tests/integration/**/*.ts", "tests/contract/**/*.ts"],
+  "include": ["src/host/**/*.ts", "tests/host/**/*.ts", "tests/integration/**/*.ts", "tests/contract/**/*.ts", "vitest.config.ts"],
   "exclude": ["node_modules", "lib", "src/client", "scripts"]
 }

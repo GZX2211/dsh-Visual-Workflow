@@ -222,7 +222,7 @@ describe('ServiceManager.start', () => {
     const p2Assertion = expect(p2).rejects.toMatchObject({ code: SERVICE_ERR.RUNNING })
     // 互斥登记在 start 开头同步完成：第二个并发调用在 findPort（首个异步点）前即被拦截。
     // 显式等待目标条件（首个 start 需先跨过若干磁盘 await 才到达 findPort），不固定 sleep。
-    await vi.waitFor(() => { expect(portCalls).toBe(1) })
+    await vi.waitFor(() => { expect(portCalls).toBe(1) }, { timeout: 5000 })
     release()
     // 修复前：两个都 spawn → 双进程/双端口（孤儿 + 泄漏）；修复后：仅首个成功
     await expect(p1).resolves.toMatchObject({ serviceId: 'svc-1', status: 'running', port: 17860 })
@@ -299,7 +299,7 @@ describe('ServiceManager 生命周期', () => {
     h.children[0].emitExit(0)
     await vi.waitFor(async () => {
       expect((await store.getServiceById('svc-1'))?.status).toBe('stopped')
-    })
+    }, { timeout: 5000 })
   })
 
   it('重复 stop：撤销上一次的强杀定时器（宽限期不双份计时）', async () => {
@@ -337,9 +337,10 @@ describe('ServiceManager 生命周期', () => {
     await h.manager.start('svc-1')
     expect(await h.manager.status('svc-1')).toMatchObject({ serviceId: 'svc-1', status: 'running', port: 17860, pid: 4242 })
     h.children[0].emitExit(1)
+    // 等待文档落盘为 crashed（真实原子写 + fsync；并行负载下实测可达数秒，故显式放宽上限）
     await vi.waitFor(async () => {
       expect((await h.manager.status('svc-1')).status).toBe('crashed')
-    })
+    }, { timeout: 15_000 })
     await expect(h.manager.status('nope')).rejects.toMatchObject({ code: SERVICE_ERR.NOT_FOUND })
   })
 

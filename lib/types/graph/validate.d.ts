@@ -28,14 +28,3 @@ export declare function connectionProblem(nodes: GraphNode[], line: Line): Conne
  * 保存中间态画布应当被允许——与旧项目语义一致）。
  */
 export declare function validateFlow(flow: Partial<WorkflowDocument>): ValidateResult;
-/**
- * 归一化工作流：为节点/连线补全默认值并锁定阶段节点属性。
- * 深拷贝语义（§4.2.1）：返回新对象，不改写入参；结果经 validateFlow 校验后保存。
- */
-export declare function normalizeFlow(flow: Partial<WorkflowDocument>): WorkflowDocument;
-/**
- * 运行前完整性检查（§4.2.5.1 规则 6）：必须包含启动/输入与结束/输出节点。
- * 供 T-021 编排器启动前调用，返回缺失项（空数组=齐备），与 validateFlow 的
- * 「允许保存中间态」语义分离。
- */
-export declare function missingStageNodes(flow: Partial<WorkflowDocument>): string[];

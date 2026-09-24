@@ -161,8 +161,13 @@ export class FakeRunner implements NodeRunner {
   interrupts: Array<{ childId: string; sessionId: string }> = []
   nextFail: unknown = null
   capped = new Set<string>()
+  /**
+   * 下一次 startNodeTask 上报被替换的旧 childId（模拟「配置签名变化 → 子代理重建」）。
+   * 只在下一次调用生效（一次性），使测试能精确控制重建发生在第几次派发。
+   */
+  nextReplacedChildId: string | null = null
   private seq = 0
-  async startNodeTask(input: NodeStartInput): Promise<{ childId: string; created: boolean }> {
+  async startNodeTask(input: NodeStartInput): Promise<{ childId: string; created: boolean; replacedChildId?: string }> {
     this.calls.push(input)
     if (this.nextFail !== null) {
       const error = this.nextFail
@@ -170,7 +175,9 @@ export class FakeRunner implements NodeRunner {
       throw error instanceof Error ? error : new Error(String(error))
     }
     this.seq += 1
-    return { childId: `child-${this.seq}`, created: true }
+    const replaced = this.nextReplacedChildId
+    this.nextReplacedChildId = null
+    return replaced === null ? { childId: `child-${this.seq}`, created: true } : { childId: `child-${this.seq}`, created: true, replacedChildId: replaced }
   }
   async interruptChild(childId: string, sessionId: string): Promise<void> {
     this.interrupts.push({ childId, sessionId })

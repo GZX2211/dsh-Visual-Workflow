@@ -224,3 +224,20 @@ export declare const EP_SCHEDULER_TASKS = "schedulerTasks";
 export declare const EP_SCHEDULER_TASK_PUT = "schedulerTaskPut";
 /** 删除定时任务端点名。 */
 export declare const EP_SCHEDULER_TASK_DELETE = "schedulerTaskDelete";
+/**
+ * 定时任务「常用时区」下拉建议列表（**唯一本体**）。
+ *
+ * 为什么放在共享协议层：该清单同时服务两端——host 侧的任务配置默认值/文档示例与
+ * client 侧的下拉候选。此前 host（scheduler/task-config.ts 的 COMMON_TIMEZONES）与
+ * client（SchedulerManager.tsx 的 TIMEZONE_SUGGESTIONS）各维护一份逐项相同的字面量，
+ * 任一端增删都会静默漂移（AGENTS.md「同一语义只允许一处本体」）。
+ *
+ * 语义限定：这是**展示建议**，不是校验白名单——时区合法性一律由
+ * `Intl.DateTimeFormat` 的 IANA 名称解析裁决（见 scheduler/calendar.ts），本列表
+ * 只决定下拉里先给出哪些候选，用户可以填任意合法 IANA 时区。
+ * 排序：按使用频次（Asia 主要时区 → 欧美 → UTC 兜底）。
+ *
+ * 类型标注为 `readonly string[]`（而非字面量联合）：调用方要往候选里插入本机时区
+ * （`Intl` 解析出的任意 IANA 名），字面量联合会让 includes/unshift 需要窄化断言。
+ */
+export declare const SCHEDULER_TIMEZONE_SUGGESTIONS: readonly string[];

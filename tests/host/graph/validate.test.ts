@@ -1,15 +1,17 @@
 // tests/host/graph/validate.test.ts
 //
-// 图校验与归一化测试（原 tests/host/graph-model.test.ts 拆分）：单连线检测、全量校验
-// （自环/重复/主虚互斥/条件仅流程线/阶段唯一/父代理唯一/协作组边界/模式差异）、
-// 归一化默认值与运行前完整性检查。
+// 图结构校验测试（原 tests/host/graph-model.test.ts 拆分）：单连线检测、全量校验
+// （自环/重复/主虚互斥/条件仅流程线/阶段唯一/父代理唯一/协作组边界/模式差异）与
+// 运行前完整性检查。
 // 数据模型与拓扑助手（model.ts）见 ./model.test.ts。
 // 断言依据：架构文档 §4.2 校验规则 + 需求文档 §4.2/§4.3/§4.2.5。
+// 注：原「normalizeFlow 归一化」用例已随该函数删除（2026.10 治理：生产零调用且实现为
+// 字段白名单重写）；其中真正生效的角色节点 data 补全断言迁移到
+// tests/host/tools/wf-graph-patch/apply.test.ts（normalizeRoleNodeData）。
 
 import { describe, expect, it } from 'vitest'
 import {
   connectionProblem,
-  missingStageNodes,
   newDatabaseNode,
   newFileNode,
   newGroupNode,
@@ -17,7 +19,6 @@ import {
   newProxyNode,
   newRoleNode,
   newStageNode,
-  normalizeFlow,
   stageLabel,
   validateFlow,
 } from '../../../src/host/graph/index.js'
@@ -243,106 +244,5 @@ describe('validateFlow 全量校验', () => {
     const f = newFileNode('text', 'f')
     g2.data.memberIds = [f.id]
     expect(codes(makeFlow([g2, f]))).toContain('groupMemberKind')
-  })
-})
-
-describe('normalizeFlow 归一化', () => {
-  it('角色节点补默认值（retryLimit=3、reactLimit=null、presetId=null、空串字段）', () => {
-    const a = newRoleNode('agent', 'a')
-    a.data.retryLimit = undefined as unknown as number
-    a.data.systemPrompt = undefined as unknown as string
-    const flow = normalizeFlow(makeFlow([a]))
-    const n = flow.nodes[0]
-    expect(n.kind).toBe('agent')
-    if (n.kind === 'agent' || n.kind === 'parent') {
-      expect(n.data.retryLimit).toBe(3)
-      expect(n.data.reactLimit).toBeNull()
-      expect(n.data.presetId).toBeNull()
-      expect(n.data.systemPrompt).toBe('')
-      expect(n.data.inputSchema).toBe('')
-      expect(n.data.outputSchema).toBe('')
-      expect(n.data.groupId).toBeNull()
-    }
-  })
-
-  it('阶段节点 label 按模式硬编码锁定（mode1 启动/结束，mode2 输入/输出）', () => {
-    const s = newStageNode('start', 'mode1')
-    const e = newStageNode('end', 'mode1')
-    const flow1 = normalizeFlow(makeFlow([s, e]))
-    expect(flow1.nodes.map((n) => (n as { data: { label: string } }).data.label)).toEqual(['启动', '结束'])
-    const s2 = newStageNode('start', 'mode2')
-    const e2 = newStageNode('end', 'mode2')
-    const flow2 = normalizeFlow(makeFlow([s2, e2], [], 'mode2'))
-    expect(flow2.nodes.map((n) => (n as { data: { label: string } }).data.label)).toEqual(['输入', '输出'])
-    expect(stageLabel('pause', 'mode1')).toBe('暂停')
-  })
-
-  it('归一化不改写入参（深拷贝语义，§4.2.1）', () => {
-    const a = newRoleNode('agent', 'a')
-    const original = JSON.parse(JSON.stringify(a))
-    normalizeFlow(makeFlow([a]))
-    expect(a).toEqual(original)
-  })
-
-  it('模式缺省为 mode1', () => {
-    const flow = normalizeFlow({ id: 'x', sessionId: 's', nodes: [], lines: [] })
-    expect(flow.mode).toBe('mode1')
-    expect(flow.description).toBe('')
-  })
-
-  it('Bug 15：normalizeFlow 保留文件节点多选 files 字段（保存不丢数据）', () => {
-    const f = newFileNode('file', '资料')
-    ;(f.data as { files?: Array<{ fileName: string; managedPath: string }> }).files = [
-      { fileName: 'a.pdf', managedPath: 'data/files/a.pdf' },
-      { fileName: 'b.pdf', managedPath: 'data/files/b.pdf' },
-    ]
-    const flow = normalizeFlow(makeFlow([f]))
-    const n = flow.nodes[0]
-    expect(n.kind).toBe('file')
-    expect((n as { data: { files?: unknown[] } }).data.files).toEqual([
-      { fileName: 'a.pdf', managedPath: 'data/files/a.pdf' },
-      { fileName: 'b.pdf', managedPath: 'data/files/b.pdf' },
-    ])
-  })
-
-  it('Bug 21：normalizeFlow 保留角色节点 systemPromptSource（保存不丢来源文件名，§4.2.3.1）', () => {
-    const a = newRoleNode('agent', '角色')
-    a.data.systemPromptSource = '角色说明.md'
-    const flow = normalizeFlow(makeFlow([a]))
-    const n = flow.nodes[0]
-    expect(n.kind).toBe('agent')
-    if (n.kind === 'agent' || n.kind === 'parent') {
-      expect(n.data.systemPromptSource).toBe('角色说明.md')
-    }
-  })
-
-  it('Bug 27：角色节点声明 groupId 但组不存在 → groupGhost 报错', () => {
-    const a = newRoleNode('agent', '幽灵')
-    a.id = 'a-ghost'
-    a.data.groupId = 'group-nope' // 指向不存在的组
-    const issues = validateFlow(makeFlow([a]))
-    expect(issues.ok).toBe(false)
-    expect(codes(makeFlow([a]))).toContain('groupGhost')
-
-    // 组真实存在且成员双向一致 → 不报幽灵组员
-    const g = newGroupNode('组')
-    g.id = 'group-ok'
-    const m = newRoleNode('agent', '成员')
-    m.id = 'm-1'
-    m.data.groupId = 'group-ok'
-    g.data.memberIds = ['m-1']
-    const ok = validateFlow(makeFlow([g, m]))
-    expect(ok.issues.filter((i) => i.code === 'groupGhost')).toHaveLength(0)
-  })
-})
-
-describe('运行前完整性检查 missingStageNodes', () => {
-  it('缺启动/结束逐项报告（§4.2.5.1 规则 6）', () => {
-    const a = newRoleNode('agent', 'a')
-    expect(missingStageNodes(makeFlow([a])).sort()).toEqual(['end', 'start'])
-    const s = newStageNode('start', 'mode1')
-    expect(missingStageNodes(makeFlow([s, a]))).toEqual(['end'])
-    const e = newStageNode('end', 'mode1')
-    expect(missingStageNodes(makeFlow([s, e, a]))).toEqual([])
   })
 })

@@ -9,16 +9,24 @@ export declare const GLOBAL_RUN_CALL_LIMIT = 500;
  */
 export declare const SUBAGENT_END_RETRY_DELAY_MS = 10;
 export declare const SUBAGENT_END_RETRY_MAX = 20;
-/** 节点子代理执行引擎（startContinuable 创建/签名复用/followup 派发）。 */
+/** 节点子代理执行引擎（startContinuable 创建/签名复用/相邻 Agent 通道派发）。 */
 export interface NodeRunner {
     /**
      * 启动（或复用）一个角色节点的子代理并派发本轮任务。
-     * 首条创建即开始推理（官方 startContinuable 语义）；复用经 followup 派发。
+     * 首条创建即开始推理（官方 startContinuable 语义）；复用经相邻 Agent 通道派发
+     * （sendMessage 优先、queuePrompt 旧宿主兜底；官方 SubagentRuntime 自 0.1.2 起已无
+     * followup，措辞以 agent/runner.ts 的 deliverReuse 取证为准）。
      * 立即返回，不等待子代理完成——完成事件经 subagent/end 观察。
+     *
+     * `replacedChildId`：本次调用因**配置签名变化**替换了该节点的旧子代理时，返回被替换的
+     * childId（未发生替换则缺省）。引擎内部已尽力中断旧子代理（interrupt 是尽力而为，
+     * 见同目录 AGENTS.md § 生命周期）；编排器据此把旧 child 从参与汇聚的登记中退役，
+     * 使其迟到事件不再回写同一节点（否则旧配置的产出会覆写新子代理的节点状态）。
      */
     startNodeTask(input: NodeStartInput): Promise<{
         childId: string;
         created: boolean;
+        replacedChildId?: string;
     }>;
     /** 尽力中断某子代理当前回合（保留会话；官方 interrupt 语义）。 */
     interruptChild(childId: string, sessionId: string): Promise<void>;
@@ -142,6 +150,41 @@ export interface OrchestratorLogger {
     info: (message: string, ...args: unknown[]) => void;
     debug: (message: string, ...args: unknown[]) => void;
 }
+/** 子代理/父代理角色提示词状态（编排器只表达「要注入什么文本与两个开关」）。 */
+export interface PromptStateLike {
+    /** 角色 Prompt 文本（可为空）。 */
+    systemPrompt: string;
+    /** 官方系统提示词注入开关（默认 true）。 */
+    injectSystemPrompt: boolean;
+    /** 工具散文段（tool:*）注入开关（默认 true）。 */
+    injectToolSections: boolean;
+}
+/**
+ * 父代理提示词装配的最小能力（编排器只用 bindParent：
+ * 把父代理节点的角色 Prompt 与两开关写进会话根 Agent 的 ctx）。
+ */
+export interface ParentPromptSetupLike {
+    bindParent(ctx: unknown, state: PromptStateLike, sessionId: string): void;
+}
+/**
+ * 模型选择值（编排器侧最小三元组）。
+ * 与 agent/model-selection.ts 的 ModelSelectionLike 结构兼容，但**归属不同模块**：
+ * 命名刻意区分，避免两个模块出现同名却各自维护的契约类型（改名会同时误导读者
+ * 「这是同一个契约」与「谁才是本体」）。
+ */
+export interface ModelSelectionValue {
+    provider: string;
+    model: string;
+    /** 思考强度（缺省表示恢复所选模型默认行为）。 */
+    reasoningEffort?: string;
+}
+/**
+ * 父代理模型选择装配的最小能力（编排器只用 bindParent：
+ * 把父代理节点的模型三元组写进会话根 Agent 的 ctx）。
+ */
+export interface ParentModelSelectionLike {
+    bindParent(ctx: unknown, selection: ModelSelectionValue, sessionId: string): void;
+}
 export declare const consoleLogger: OrchestratorLogger;
 /** 运行锁信息（flowLockInfo 结果；暂停保留锁，status 供消息区分）。 */
 export interface FlowLockInfo {
@@ -163,4 +206,14 @@ export interface ChildMeta {
     sessionId: string;
     flowId: string;
     nodeId: string;
+    /**
+     * 该 child 已被同节点的更新配置替换（子代理重建），不再参与节点结论汇聚。
+     *
+     * 为什么必须显式退役而不是直接删表项：删掉后旧 child 的 subagent/end 会走
+     * 「childIndex 未登记」的迟到重试路径（有界重试 + 告警），既浪费事件循环又产出
+     * 误导性告警；且 wf_ask_agent 的越权校验会把「已退役的子代理」误报成「不属于本运行」。
+     * 保留表项 + 退役标记，可把这类事件判定为「已知无主、静默丢弃」。
+     * 表项仍随 run 生命周期统一清理（上界 = 本轮运行内的重建次数）。
+     */
+    retired?: true;
 }

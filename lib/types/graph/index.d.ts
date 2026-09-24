@@ -7,7 +7,7 @@ export { nodeHasFlowIn, nodeParticipatesInFlow } from './model.js';
 export { activeMilestoneGateOf, groupMemberIds, isGroupMember, mainNodeIdOf, memberGroupId, milestoneProxiesOf, proxyRoleOf, } from './model.js';
 export { buildFlowDag, computeFlowLayers, detectCycleNodes, maxLayerWidth } from './dag.js';
 export type { FlowDag } from './dag.js';
-export { connectionProblem, missingStageNodes, normalizeFlow, validateFlow } from './validate.js';
+export { connectionProblem, validateFlow } from './validate.js';
 export type { ConnectionCheck, FlowIssue, ValidateResult } from './validate.js';
 export { checkGraphInvariants, hasBlockingIssues } from './invariants.js';
 export { GRAPH_INVARIANT_CODES, META_BELOW_MIN_CODE, META_LIMIT_EXCEEDED_CODE, invariantCodeInfo, } from './invariants-types.js';

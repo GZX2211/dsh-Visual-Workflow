@@ -12,19 +12,14 @@ import type { Dict } from '../../i18n.js'
 import { EP } from '../../lib/remote.js'
 import type { RemoteFace } from '../../hooks/useRemote.js'
 import type { ScheduledTask, ScheduledTaskView, TimeRangeConfig } from '../../../host/shared/types.js'
+// 常用时区建议列表：共享协议常量的唯一本体（host/client 共用，禁止在本组件再维护一份）
+import { SCHEDULER_TIMEZONE_SUGGESTIONS } from '../../../host/shared/protocol.js'
 import { DateRangePicker, type DateRangeValue } from '../date-picker/DateRangePicker.js'
 import { TimeInput } from '../time-input/TimeInput.js'
 import {
   createTaskDraft, detectLocalTimezone, formatIso, localDateOnly, newTaskId, shiftDateOnly,
   taskFromView, validateTaskDraft, WEEKDAY_LABELS,
 } from '../../lib/scheduler-task.js'
-
-/** 时区建议列表（UI 下拉用；权威校验在 host）。 */
-const TIMEZONE_SUGGESTIONS = [
-  'Asia/Shanghai', 'Asia/Hong_Kong', 'Asia/Tokyo', 'Asia/Singapore', 'Asia/Seoul', 'Asia/Taipei',
-  'Asia/Kolkata', 'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'America/New_York',
-  'America/Chicago', 'America/Los_Angeles', 'America/Sao_Paulo', 'Australia/Sydney', 'UTC',
-]
 
 interface TemplateItem { id: string; name?: string; description?: string; mode?: string }
 
@@ -235,7 +230,7 @@ export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: 
   }, [])
 
   const timezones = useMemo(() => {
-    const list = [...TIMEZONE_SUGGESTIONS]
+    const list = [...SCHEDULER_TIMEZONE_SUGGESTIONS]
     const local = detectLocalTimezone()
     if (!list.includes(local)) list.unshift(local)
     return list

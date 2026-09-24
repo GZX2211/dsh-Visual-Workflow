@@ -10,8 +10,14 @@
 import type { FlowStore } from '../storage/flow-store.js'
 import type { RoleNode, WorkflowDocument } from '../shared/graph-model.js'
 import type { RunSnapshot, RunStatus } from '../shared/types.js'
-import type { ChildPromptSetup, ModelSelectionSetup } from '../agent/index.js'
-import type { AgentHost, NodeRunner, OrchestratorConfig, OrchestratorLogger } from './seams.js'
+import type {
+  AgentHost,
+  NodeRunner,
+  OrchestratorConfig,
+  OrchestratorLogger,
+  ParentModelSelectionLike,
+  ParentPromptSetupLike,
+} from './seams.js'
 import type { PendingAsk } from './ask-protocol.js'
 
 /** 单次运行的内存条目（旧项目 entry 同构：快照 + 护栏计数 + in-flight 表）。 */
@@ -103,9 +109,9 @@ export interface OrchestratorDeps {
   /** 父代理宿主能力（index.ts 的 CordisAgentHost；单测 fake）。 */
   agents: AgentHost
   /** 子代理/父代理提示词注入装配（角色 Prompt 段 + 官方系统提示词开关；缺省跳过父代理绑定）。 */
-  promptSetup?: ChildPromptSetup
+  promptSetup?: ParentPromptSetupLike
   /** 模型选择装配（父代理模型/思考强度注入；缺省跳过父代理绑定）。 */
-  modelSelection?: ModelSelectionSetup
+  modelSelection?: ParentModelSelectionLike
   /**
    * 父代理角色 Prompt 读取能力（宿主注入：agent 层实现，含 .md 路径设置时的文件读取）。
    * 为什么经缝注入：读角色 Prompt 文件属 agent 关注点，编排器只做「注入到根 Agent ctx」。

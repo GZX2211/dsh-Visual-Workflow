@@ -7,6 +7,12 @@
 //
 // 窗口是「触发的前提」：触发点必须同时落在窗口内才执行（第二层见 ./trigger.ts）。
 // 本层的判定全部基于调用方传入的 UTC 毫秒，不读系统时钟。
+//
+// 窗口展开的权威实现是 isWithinWindow（把时间段展开为 UTC 瞬时闭开区间后比对）。
+// 此前另有 windowSpansOfDate（按「本地日期内的分钟区间」展开），与它构成两套口径，
+// 且全仓库零引用、无测试，2026.10 治理中已删除。timeInRanges（按本地分钟判定）保留：
+// 它是「本地分钟 → 是否在区间」的独立时间基元（有单测锁定跨天语义），与
+// isWithinWindow 的 UTC 瞬时判定口径不同，不得互相替代。
 
 import type { ScheduleWindowConfig, TimeRangeConfig } from '../shared/types.js'
 import {
@@ -50,48 +56,6 @@ export function isValidDate(dateOnly: string, window: ScheduleWindowConfig): boo
   if (days.length === 0) return true
   const weekday = new Date(key(parsed)).getUTCDay()
   return days.includes(weekday)
-}
-
-/** 某本地日期上覆盖到的全部窗口区间（含前一日跨天区间延伸到本日的情形）。 */
-export interface WindowSpan {
-  /** 窗口开始（本地分钟；跨天区间时为前一日 start）。 */
-  startMin: number
-  /** 窗口结束（本地分钟；跨天区间时为次日 end）。 */
-  endMin: number
-  /** 窗口起始所属的本地日期（跨天区间凌晨部分属于前一日）。 */
-  startDate: string
-  /** 该区间是否跨天。 */
-  crossesDays: boolean
-}
-
-/**
- * 计算某本地日期 D 上「生效」的窗口区间列表（即该日期内窗口为「开」的时刻范围）：
- *   - 非跨天区间 [s,e)：D 的 [s,e)（要求 D 有效）；
- *   - 跨天区间 [s,1440)∪[0,e)：D 的凌晨段 [0,e)（起始日 = D-1，要求 D-1 有效）。
- * 供 UI/调试展示用；窗口判定以 isWithinWindow（瞬时边界比对）为准。
- */
-export function windowSpansOfDate(dateOnly: string, window: ScheduleWindowConfig): WindowSpan[] {
-  const spans: WindowSpan[] = []
-  const ranges = window.timeRanges ?? []
-  for (const range of ranges) {
-    const start = parseTime(range.start)
-    const end = parseTime(range.end)
-    if (start === null || end === null) continue
-    const crossings = end <= start
-    if (!crossings) {
-      if (isValidDate(dateOnly, window)) {
-        spans.push({ startMin: start, endMin: end, startDate: dateOnly, crossesDays: false })
-      }
-      continue
-    }
-    // 跨天：凌晨部分 [0,end) 属于前一日的区间（起始日 = dateOnly - 1）
-    const prev = addDays(parseDateOnly(dateOnly) ?? { year: 1970, month: 1, day: 1 }, -1)
-    const prevDate = formatDateOnly(prev)
-    if (isValidDate(prevDate, window)) {
-      spans.push({ startMin: start, endMin: end, startDate: prevDate, crossesDays: true })
-    }
-  }
-  return spans
 }
 
 /**

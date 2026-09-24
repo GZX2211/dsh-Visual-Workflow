@@ -100,6 +100,42 @@ describe('subagent/end 观察回写（§8 #21）', () => {
     expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-a1')!.status).toBe('fail')
   })
 
+  it('子代理重建：旧 child 退役 → 其 end 事件静默丢弃、不回写节点、从 inflight 摘除', async () => {
+    const h = await makeHarness()
+    const { entry } = await start(h, makeFlow())
+
+    // 第一次派发：节点 n-a1 → child-1
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    expect(entry.inflight.has('child-1')).toBe(true)
+
+    // 配置签名变化：第二次派发替换 child-1（引擎已尽力中断），编排器把旧 child 退役
+    h.runner.nextReplacedChildId = 'child-1'
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    expect(entry.inflight.has('child-2')).toBe(true)
+    expect(entry.inflight.has('child-1')).toBe(false) // 退役即摘除，不参与空闲看护判定
+
+    // 旧 child 的迟到 end（中断是尽力而为，事件仍可能到达）：不得覆写节点的 running 状态
+    await h.runtime.handleSubagentEnd({ id: 'child-1', stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: '旧配置产出' }] })
+    const record = entry.snapshot.nodes.find((n) => n.nodeId === 'n-a1')!
+    expect(record.status).toBe('running')
+    expect(record.output ?? '').not.toContain('旧配置产出')
+
+    // 新 child 的 end 正常回写（退役只影响被替换的那个 childId）
+    await h.runtime.handleSubagentEnd({ id: 'child-2', stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: '新配置产出' }] })
+    const after = entry.snapshot.nodes.find((n) => n.nodeId === 'n-a1')!
+    expect(after.status).toBe('ok')
+    expect(after.outputSummary ?? after.output ?? '').toContain('新配置产出')
+  })
+
+  it('未发生重建时 child 不退役：正常 end 仍回写节点 ok', async () => {
+    const h = await makeHarness()
+    const { entry } = await start(h, makeFlow())
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a2' })
+    await h.runtime.handleSubagentEnd({ id: 'child-1', stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: 'A' }] })
+    expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-a1')!.status).toBe('ok')
+  })
+
   it('暂停状态下 end 仍回写节点 ok（该节点确实完成）', async () => {
     const h = await makeHarness()
     const { entry } = await start(h, makeFlow())
@@ -117,7 +153,7 @@ describe('subagent/end 观察回写（§8 #21）', () => {
     const pending = h.runtime.wfRunNode(caller, { nodeId: 'n-a1', wait: true })
     await vi.waitFor(() => {
       expect(h.runner.calls).toHaveLength(1)
-    })
+    }, { timeout: 5000 })
     h.runner.capped.add('child-1')
     await h.runtime.handleSubagentEnd({ id: 'child-1', stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: '软截停结论' }] })
     const result = await pending

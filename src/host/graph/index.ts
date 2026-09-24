@@ -63,8 +63,11 @@ export {
 export { buildFlowDag, computeFlowLayers, detectCycleNodes, maxLayerWidth } from './dag.js'
 export type { FlowDag } from './dag.js'
 
-// ── 结构校验与归一化 ─────────────────────────────────────────────────────
-export { connectionProblem, missingStageNodes, normalizeFlow, validateFlow } from './validate.js'
+// ── 结构校验（运行前完整性归编排入口，见 validate.ts 尾部说明）─────────────
+// 注意：本模块曾导出保存前归一化 normalizeFlow，但它从未被生产代码调用，且实现为
+// 「字段白名单重写」（会丢 meta/lastPatch 与未来新增字段）。见 validate.ts 头部说明，
+// 2026.10 治理中删除；落盘形状由各写入路径（工厂函数 / wf-graph-patch）自行保证。
+export { connectionProblem, validateFlow } from './validate.js'
 export type { ConnectionCheck, FlowIssue, ValidateResult } from './validate.js'
 
 // ── 编排质量检查器（问题聚合入口 + code 注册表）────────────────────────────

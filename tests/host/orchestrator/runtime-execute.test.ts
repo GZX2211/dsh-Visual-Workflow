@@ -276,7 +276,7 @@ describe('wait 阻塞（§4.4.2 规则 1，模式二调度）', () => {
   async function waitStarted(h: Harness): Promise<void> {
     await vi.waitFor(() => {
       expect(h.runner.calls).toHaveLength(1)
-    })
+    }, { timeout: 5000 })
   }
 
   it('wait:true 挂起等待；subagent/end completed 唤醒 → ok + output', async () => {

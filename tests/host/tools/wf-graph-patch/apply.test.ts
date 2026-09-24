@@ -110,3 +110,70 @@ describe('补丁层 proxy data 归一化（applyGraphOps 纯函数）', () => {
       .toThrowError(/必须引用已存在的角色节点/)
   })
 })
+
+// ---------------------------------------------------------------------------
+// 角色节点 data 补全（apply.ts 的 normalizeRoleNodeData）
+// ---------------------------------------------------------------------------
+// 为什么归到这里：原 graph/validate.ts 的 normalizeFlow 也做「角色节点补默认值」，
+// 但它从未被生产代码调用且实现为字段白名单重写（会丢 meta/lastPatch 与未来新增字段），
+// 2026.10 治理中已删除。真正生效的补全入口是本模块的 normalizeRoleNodeData（父代理
+// 经 wf_graph_patch 建/改节点时的唯一规范化点），故其补全语义的断言收敛于此。
+
+describe('角色节点 data 补全（normalizeRoleNodeData）', () => {
+  // 入参用严格契约 WorkflowDocument（applyGraphOps 输入类型）；出参 doc 是宽松的
+  // GraphPatchResult.doc 形状，故断言后用 roleDataOf 读取节点 data。
+  type PatchDoc = ReturnType<typeof applyGraphOps>['doc']
+  const flowOf = (nodes: GraphNode[]): WorkflowDocument => ({
+    id: 'wf-1', sessionId: 'session-1', mode: 'mode1', name: 'x', description: '', revision: 1,
+    nodes, lines: [],
+  })
+  const roleDataOf = (doc: PatchDoc, id: string): Record<string, unknown> => {
+    const node = (doc.nodes as GraphNode[]).find((n) => n.id === id)
+    return (node as unknown as { data: Record<string, unknown> }).data
+  }
+
+  it('create_node：模型只给 label/systemPrompt 时补全运行必需字段（presetId=null、retryLimit=3 等）', () => {
+    const { doc } = applyGraphOps({
+      doc: flowOf([stage('s', 'start')]),
+      ops: [{ op: 'create_node', node: { id: 'a1', kind: 'agent', position: { x: 0, y: 0 }, data: { label: '评审', systemPrompt: '你是评审' } } }],
+    })
+    const data = roleDataOf(doc, 'a1')
+    expect(data.label).toBe('评审')
+    expect(data.systemPrompt).toBe('你是评审')
+    expect(data.presetId).toBeNull() // 空 = 运行期零工具集（工具描述已写明契约）
+    expect(data.retryLimit).toBe(3)
+    expect(data.reactLimit).toBeNull()
+    expect(data.provider).toBe('')
+    expect(data.model).toBe('')
+    expect(data.inputSchema).toBe('')
+    expect(data.outputSchema).toBe('')
+    expect(data.groupId).toBeNull()
+    expect(data.injectSystemPrompt).toBe(true)
+    expect(data.injectToolSections).toBe(true)
+  })
+
+  it('create_node：显式空串 / 数字 / 布尔原样保留（只把 null/undefined 视为未提供）', () => {
+    const { doc } = applyGraphOps({
+      doc: flowOf([stage('s', 'start')]),
+      ops: [{
+        op: 'create_node',
+        node: {
+          id: 'a1', kind: 'agent', position: { x: 0, y: 0 },
+          data: { label: 'L', systemPrompt: '', provider: '', model: '', presetId: 'combo-x', retryLimit: 0, injectSystemPrompt: false },
+        },
+      }],
+    })
+    const data = roleDataOf(doc, 'a1')
+    expect(data.presetId).toBe('combo-x')
+    expect(data.retryLimit).toBe(0)
+    expect(data.injectSystemPrompt).toBe(false)
+  })
+
+  it('update_node_data：补全不剥离未知字段（systemPromptSource 等展示字段保留）', () => {
+    const { doc } = applyGraphOps({
+      doc: flowOf([stage('s', 'start'), agentNode('a1')]),
+      ops: [{ op: 'update_node_data', nodeId: 'a1', data: { label: '改', systemPromptSource: '角色说明.md' } }],
+    })
+    expect(roleDataOf(doc, 'a1').systemPromptSource).toBe('角色说明.md')
+  })
+})

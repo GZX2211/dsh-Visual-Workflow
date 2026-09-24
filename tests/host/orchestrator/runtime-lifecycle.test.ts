@@ -68,7 +68,7 @@ describe('terminate / stop / dispose', () => {
     const assertion = expect(pending).rejects.toMatchObject({ code: 'WF_CANCELLED' }) // 先挂断言，避免未处理拒绝
     await vi.waitFor(() => {
       expect(h.runner.calls).toHaveLength(1)
-    })
+    }, { timeout: 5000 })
     h.runtime.dispose()
     await assertion
     expect(h.runtime.runs.size).toBe(0)

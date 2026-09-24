@@ -65,14 +65,17 @@ describe('watchdog 看护与陈旧记录对账', () => {
     const { entry } = await start(h, makeFlow())
     const dispose = scheduleIdleWatchdog(h.runtime, { intervalMs: 20 })
     h.clock.now += 10_000
+    // 显式超时（并行负载下默认 1s 会被调度放大而偶发失败；真实挂起仍会失败）
     await vi.waitFor(() => {
       expect(entry.snapshot.status).toBe('stopped')
-    })
+    }, { timeout: 5000 })
     dispose() // 停止后不再有副作用
-    // 等本轮扫描的持久化落盘完成，避免清理目录竞态
+    // 等本轮扫描的持久化落盘完成，避免清理目录竞态。
+    // 该等待是**真实磁盘写**（原子写 + fsync + 目录 fsync），在 141 个测试文件并行的
+    // Windows 上实测可达数秒；故显式放宽上限（不是放宽断言——条件仍是「落盘为 stopped」）。
     await vi.waitFor(async () => {
       expect((await h.store.getRun('run-1'))?.status).toBe('stopped')
-    })
+    }, { timeout: 15_000 })
   })
 
   it('reconcileStaleRuns：running/paused → interrupted（running 节点回退 pending、ok 保留）；completed 不动', async () => {

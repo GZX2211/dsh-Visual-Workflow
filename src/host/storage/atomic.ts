@@ -77,6 +77,27 @@ function isEEXIST(error: unknown): boolean {
   return (error as NodeJS.ErrnoException | null)?.code === 'EEXIST'
 }
 
+/**
+ * 判断 open('wx') 失败是否为**过渡态失败**：目标锁文件已被持有者 rm 但仍处于
+ * Windows 「delete pending」窗口（文件名尚在、打开被拒），或目录项正被并发回收。
+ *
+ * 为什么必须单独识别（Windows 实机取证）：Node 的 `rm`/`unlink` 在 Windows 上会先把
+ * 文件标记为「删除待完成」，直到最后一个句柄关闭才真正移除目录项。此窗口内
+ * `open(path,'wx')` 不返回 EEXIST（文件已不可见）也不返回 ENOENT（目录项还在），
+ * 而是返回 **EPERM**；`rm(path,{force})` 则返回 **EACCES**（Node 对 force 删除的
+ * EPERM 归一化）。当锁由自己或并发进程在上一轮回收、又立刻重试创建时，这个窗口
+ * 命中率不低——直接上浮会把「锁刚被释放」误报成获取失败。
+ *
+ * 语义代价（显式记录）：真实权限不足（锁目录不可写、ACL 拒绝）同样返回
+ * EPERM/EACCES，因此这类失败从「立即失败」变为「在 timeoutMs 内重试后失败」，
+ * 错误类型仍是 DiskLockError（信息里带原始 code）。宽限期有界，不改变「获取失败
+ * 必须抛出可诊断错误」的契约。
+ */
+function isTransientLockOpenFailure(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | null)?.code
+  return code === 'EPERM' || code === 'EACCES'
+}
+
 /** 判断 Windows 报告「文件不存在」的变体 code（跨平台路径存在的鲁棒处理）。 */
 function isAbsent(error: unknown): boolean {
   return isENOENT(error) || (error as NodeJS.ErrnoException | null)?.code === 'ENOTDIR'
@@ -257,9 +278,17 @@ export async function withFileLock<T>(path: string, fn: () => Promise<T> | T): P
  * `open(lockPath, 'wx')` = O_CREAT|O_EXCL：目标已存在即失败 EEXIST（Node 文档明确其
  * 按单次原子检查创建，跨进程安全）。锁内容为「owner pid + 创建时间戳」的 JSON 元数据，
  * 供陈旧锁回收判定与 release 的内容匹配校验。create 后 fsync 句柄保证元数据落盘。
- * @returns 成功返回元数据 payload 与时间戳；EEXIST 返回 null（未获取）；其余错误上浮。
+ *
+ * 失败分类（为什么必须三分）：EEXIST = 锁被他人持有；EPERM/EACCES =
+ * Windows delete-pending 过渡态（见 isTransientLockOpenFailure），返回 transient 让
+ * 调用方在下一轮重试而非上浮；其余错误（ENOENT 目录缺失等）直接上浮。
+ *
+ * @returns 成功返回 { info }；EEXIST 返回 { info: null }；过渡态返回 { transient: true }；其余错误上浮。
  */
-async function tryCreateLockFile(lockPath: string, now: () => number): Promise<DiskLockInfo | null> {
+async function tryCreateLockFile(
+  lockPath: string,
+  now: () => number,
+): Promise<{ info: DiskLockInfo } | { info: null } | { transient: true; code: string }> {
   const pid = process.pid
   const createdAt = now()
   const payload = JSON.stringify({ pid, createdAt })
@@ -268,7 +297,10 @@ async function tryCreateLockFile(lockPath: string, now: () => number): Promise<D
     handle = await open(lockPath, 'wx', 0o600)
   } catch (error) {
     // 目标已存在只意味着「锁被他人持有」，非错误；其余失败（EACCES/ENOENT 等）上浮。
-    if (isEEXIST(error)) return null
+    if (isEEXIST(error)) return { info: null }
+    if (isTransientLockOpenFailure(error)) {
+      return { transient: true, code: String((error as NodeJS.ErrnoException).code ?? '') }
+    }
     throw error
   }
   try {
@@ -277,7 +309,7 @@ async function tryCreateLockFile(lockPath: string, now: () => number): Promise<D
   } finally {
     await handle.close()
   }
-  return { lockPath, payload, pid, createdAt }
+  return { info: { lockPath, payload, pid, createdAt } }
 }
 
 /**
@@ -294,11 +326,17 @@ async function tryCreateLockFile(lockPath: string, now: () => number): Promise<D
  *   删除用 rm(force)，理论上同路径被抢建会把它也删掉——但 size+mtime 双重比对把
  *   这个窗口缩到 stat 与 rm 之间极窄的竞态；若真发生，被误删者下次获取会重新建锁，
  *   语义上等价于「锁丢失」，可接受（详见报告「风险遗留」）。
+ *
+ * @param forceWindowsTransition 本次获取刚遇到 EPERM/EACCES 过渡态失败（Windows
+ *   delete-pending）。置位时跳过 mtime 陈旧阈值：过渡态的锁 mtime 必然很新，按阈值
+ *   判定会白等一整个 staleAfterMs；而「open 返回 EPERM/EACCES」本身已经证明该锁
+ *   不可用（不是被持有——被持有会返回 EEXIST），故仍按「pid 已死才回收」的规则安全回收。
  */
 async function tryReapStaleLock(
   lockPath: string,
   staleAfterMs: number,
   now: () => number,
+  forceWindowsTransition = false,
 ): Promise<boolean> {
   let info
   try {
@@ -309,7 +347,7 @@ async function tryReapStaleLock(
     throw error
   }
   const mtimeMs = info.mtimeMs
-  if (now() - mtimeMs < staleAfterMs) return false // 未超阈值：新鲜锁，不动。
+  if (!forceWindowsTransition && now() - mtimeMs < staleAfterMs) return false // 未超阈值：新鲜锁，不动。
   // 解析 owner pid：内容损坏（半写）视为「无有效 owner」，可回收。
   let pid: number | undefined
   try {
@@ -346,6 +384,11 @@ function isProcessAlive(pid: number): boolean {
  *  为何「重试」而非「抛 EEXIST」：磁盘锁的使用方（withJsonLock）需要串行化读改写，
  *   正常等待语义（就像进程内 withFileLock 的排队）比立即失败更符合「保证串行」的目标；
  *   等待是有限的，超时抛明确错误避免死等。
+ *  为何把 EPERM/EACCES 也纳入同一重试循环（修复，不新增等待语义）：Windows 上锁被 rm
+ *   后存在 delete-pending 过渡窗口，`open('wx')` 在该窗口返回 EPERM（见
+ *   isTransientLockOpenFailure 取证）；把它当「未获取」继续轮询，才能让「锁刚被释放」
+ *   这一正常情形收敛。真实权限不足同样落在这里，代价是「立即失败」→「timeoutMs 后失败」，
+ *   错误类型仍为 DiskLockError（message 带最后失败原因）。
  *
  * @param lockPath 锁文件路径（建议 `<数据文件路径>.lock`）。
  * @param opts 超时/陈旧阈值/轮询间隔/时钟注入。
@@ -359,14 +402,19 @@ export async function acquireDiskLock(lockPath: string, opts?: DiskLockOptions):
   const pollIntervalMs = opts?.pollIntervalMs ?? DEFAULT_LOCK_POLL_MS
   const now = opts?.now ?? Date.now
   const startedAt = now()
+  /** 最近一次失败原因（超时错误里带上，便于区分「被持有」与「权限/过渡态」）。 */
+  let lastFailure = ''
   for (;;) {
-    const info = await tryCreateLockFile(target, now)
-    if (info !== null) return info
-    // 未获取：若存在陈旧锁则回收（删除后即可重试创建）；非陈旧则等待下一轮。
-    await tryReapStaleLock(target, staleAfterMs, now)
+    const attempt = await tryCreateLockFile(target, now)
+    if ('info' in attempt && attempt.info !== null) return attempt.info
+    // 过渡态：锁正被回收（Windows delete-pending），按「可回收」语义尝试回收后重试。
+    const transient = 'transient' in attempt
+    lastFailure = transient ? `EPERM/EACCES 过渡态（${attempt.code}）` : '锁被其他持有者占用'
+    // 未获取：若存在陈旧锁（或处于过渡态）则回收（删除后即可重试创建）；否则等待下一轮。
+    await tryReapStaleLock(target, staleAfterMs, now, transient)
     if (now() - startedAt >= timeoutMs) {
       throw new DiskLockError(
-        `获取磁盘锁超时（${timeoutMs}ms）：${target}`,
+        `获取磁盘锁超时（${timeoutMs}ms）：${target}（最后失败原因：${lastFailure}）`,
         target,
       )
     }

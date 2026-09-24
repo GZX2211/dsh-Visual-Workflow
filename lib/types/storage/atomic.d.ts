@@ -96,6 +96,11 @@ export declare function withFileLock<T>(path: string, fn: () => Promise<T> | T):
  *  为何「重试」而非「抛 EEXIST」：磁盘锁的使用方（withJsonLock）需要串行化读改写，
  *   正常等待语义（就像进程内 withFileLock 的排队）比立即失败更符合「保证串行」的目标；
  *   等待是有限的，超时抛明确错误避免死等。
+ *  为何把 EPERM/EACCES 也纳入同一重试循环（修复，不新增等待语义）：Windows 上锁被 rm
+ *   后存在 delete-pending 过渡窗口，`open('wx')` 在该窗口返回 EPERM（见
+ *   isTransientLockOpenFailure 取证）；把它当「未获取」继续轮询，才能让「锁刚被释放」
+ *   这一正常情形收敛。真实权限不足同样落在这里，代价是「立即失败」→「timeoutMs 后失败」，
+ *   错误类型仍为 DiskLockError（message 带最后失败原因）。
  *
  * @param lockPath 锁文件路径（建议 `<数据文件路径>.lock`）。
  * @param opts 超时/陈旧阈值/轮询间隔/时钟注入。

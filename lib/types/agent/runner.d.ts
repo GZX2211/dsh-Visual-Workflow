@@ -224,15 +224,18 @@ export declare class NodeAgentRunner implements NodeRunner {
      * 异步启动一个节点任务（消息驱动，立即返回）：
      *   - 首次创建：任务块已在首条 prompt 注入，子代理立即开始执行；
      *   - 复用：经相邻 Agent 通道派发本轮任务；
+     *   - 配置签名变化：重建子代理并尽力中断旧子代理（见 ensureNodeChild）；
      *   - 完成事件由编排器监听 subagent/end 更新快照，本方法不等待执行结果。
      */
     startNodeTask(input: NodeStartInput): Promise<{
         childId: string;
         created: boolean;
+        replacedChildId?: string;
     }>;
     /** 尽力中断子代理当前回合（保留会话；官方 interrupt 语义）。 */
     interruptChild(childId: string, sessionId: string): Promise<void>;
-    /** 清理子代理表与护栏登记（宿主 dispose 调用；不中断子代理——由运行时统一中止）。
+    /** 清理子代理表与护栏登记（宿主 dispose 调用；不中断**存活**子代理——由运行时统一中止）。
+     *  （例外：配置签名变化重建时被替换的旧子代理立即尽力中断，见 ensureNodeChild。）
      *  每子代理作用域装配（角色提示词/工具可见性/模型选择/软截停）由 host 层
      *  `agent/created` 处理器在创建窗口内安装，其撤销函数归 host 的
      *  `childScopeDisposers` 管理（见 visual-workflow-host.ts），runner 不再持有。 */
@@ -250,13 +253,22 @@ export declare class NodeAgentRunner implements NodeRunner {
      */
     private deliverReuse;
     /**
-     * 确保节点子代理存在且配置匹配；返回 { childId, created }。
+     * 确保节点子代理存在且配置匹配；返回 { childId, created, replacedChildId }。
      * 【关键时序】startContinuable 把 request.prompt 作为第一条 user 消息立即提交，
      * 子代理创建即开始第一轮推理——首次创建必须把完整任务块 blocks 作为 prompt 注入。
+     *
+     * 签名变化 = 重建：新 child 创建成功后**尽力中断旧 child**并把旧 childId 经
+     * replacedChildId 上报编排器（见 NodeRunner.startNodeTask 契约）。
+     * 为什么必须中断（2026.10 修复）：旧 child 若继续运行，其 subagent/end 会经编排
+     * childIndex 回写**同一个节点**——旧配置的产出/结论覆写新子代理正在推进的状态，
+     * 表现为「节点状态错位、输出张冠李戴」。中断是尽力而为（官方 interrupt 语义），
+     * 因此编排器侧另有「旧 child 退役」兜底：即便中断未生效，其迟到事件也不再回写。
+     * 时序：中断放在新 child 登记之后（登记先于中断，保证编排器先拿到 replaced 通知）。
      */
     ensureNodeChild(input: NodeStartInput): Promise<{
         childId: string;
         created: boolean;
+        replacedChildId?: string;
     }>;
     private requireSubagents;
     private requireParent;

@@ -69,7 +69,15 @@ export declare class ServiceManager {
     }>;
     /** start 实际执行体（starting 互斥集合保护下运行）。 */
     private startInner;
-    /** 停止服务（SIGTERM → 5s → SIGKILL；立即持久化 stopped）。 */
+    /**
+     * 停止服务（SIGTERM → 5s → SIGKILL；立即持久化 stopped）。
+     *
+     * 服务不存在时抛 WF_SERVICE_NOT_FOUND：服务状态的事实源是持久化文档（见 ./AGENTS.md
+     * § 生命周期契约「启动幂等 / 停止必须收敛」），persistRuntime 找不到文档会静默返回，
+     * 若此处照旧返回 'stopped' 就等于「对不存在的资源报告成功」——调用方（未来新增的
+     * 批量停止/清理入口）会据此以为服务已停机。API 层虽已先校验存在性故当前不可达，
+     * 但领域层不应依赖调用方的前置校验来保证自身语义正确。
+     */
     stop(serviceId: string): Promise<{
         serviceId: string;
         status: string;
