@@ -58,7 +58,7 @@ dsh-visual-workflow 是 DeepSeek Harness（dsh）生态的 **host + client 双�
 | node | v24.17.0 | |
 | pnpm | 11.22.0 | 包管理器（不要用 npm/yarn） |
 | git | 2.53.0.windows.2 | 仓库主分支 main |
-| dsh CLI | 0.1.5-rc.1（目标适配） | 全局安装 `@deepseek-ai/dsh@0.1.5-rc.1`；host 升级需在外部终端执行：先完全停止 dsh 进程，再 `npm install -g @deepseek-ai/dsh@0.1.5-rc.1`。Windows 路径 `C:\Users\GZX\AppData\Roaming\npm\dsh.ps1` |
+| dsh CLI | 0.1.6-alpha.2（目标适配；0.1.5-rc.1 兼容） | 客户端会话读缝双读兼容：0.1.5 `sessions.list.getSnapshot().current` / 0.1.6 `retainedBy.mainView > 0` 派生（官方 6830e1460d 移除 current 字段）。host 升级需在外部终端执行：先完全停止 dsh 进程，再 `npm install -g @deepseek-ai/dsh@0.1.6-alpha.2`。 |
 
 ### 版本镜像约定
 
