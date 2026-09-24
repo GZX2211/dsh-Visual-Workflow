@@ -1,21 +1,22 @@
-# 统一行尾，消除 Windows 下的 CRLF 告警
-* text=auto
+# 行尾策略：所有文本文件入库归一化为 LF，且在任何平台检出后都保持 LF。
+#
+# 为什么必须是 `* text=auto eol=lf`，而不能只写 `* text=auto`：
+# `text=auto` 只保证「写入仓库时是 LF」，检出到工作区时仍由平台与 core.autocrlf 决定；
+# GitHub 的 windows-latest runner 默认 core.autocrlf=true，会把文本文件检出成 CRLF。
+# 而 assets/models/** 是随包分发的模型资产，其字节数与 sha256 被 manifest.json 固定，
+# 并由 tests/contract/embedding-assets.test.ts 逐文件校验，行尾一变校验必然失败：
+#   vocab.txt 109540 字节(LF) → 130668 字节(CRLF，21128 行各多一个 \r)
+# 即「本地绿、CI 红」：本地文件由生成脚本写成 LF，全新检出才会被转成 CRLF。
+# 强制 eol=lf 后本地与 CI 的字节完全一致。
+* text=auto eol=lf
 
-# 默认自动处理文本文件
-* text=auto
+# 二进制与含二进制内容的资产：显式关闭文本处理，避免被行尾归一化破坏内容。
+# 这些规则写在 `*` 之后，后匹配的规则覆盖前面的 text 属性。
+*.onnx binary
+*.sqlite binary
 
-# 核心修复：针对所有 JSON 强制使用 LF，绝不允许转成 Windows 的 CRLF
+# JSON 参与 manifest.json 的 bytes/sha256 校验：显式声明为文本并固定 LF。
 *.json text eol=lf
 
-# 针对模型资产目录（重要，精准打击你报错的 1_Pooling 目录）
-1_Pooling/* text eol=lf
-
-# Git 钩子是 sh 脚本：必须保持 LF，否则 Windows 检出后行尾的 \r 会让 sh 解析失败
+# Git 钩子是 sh 脚本，必须保持 LF，否则 Windows 检出后行尾的 \r 会让 sh 解析失败。
 .githooks/* text eol=lf
-
-# 源代码与文档统一使用 LF，避免跨平台差异
-*.ts text eol=lf
-*.js text eol=lf
-*.md text eol=lf
-*.yml text eol=lf
-*.yaml text eol=lf
