@@ -18,6 +18,12 @@ import { stageLabel } from '../../../src/host/graph/index.js'
 
 const cleanups: Array<() => Promise<void>> = []
 
+// 并行负载下的显式等待预算（口径见 vitest.config.ts）：本仓库以 --pool=threads 并行跑大量带
+// 真实磁盘/子进程/构建副作用的用例，5s 的 vi.waitFor 会与用例整体上限互相竞争，表现为本文件
+// 「crashed 回写」「内存条目清理」两处偶发超时（单独跑必过）。放宽的只是「最多等多久」，
+// 等待条件与断言原样保留，任何真实挂起或逻辑回归仍会失败。
+const WAIT_MS = 15_000
+
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((fn) => fn()))
 })
@@ -222,7 +228,7 @@ describe('ServiceManager.start', () => {
     const p2Assertion = expect(p2).rejects.toMatchObject({ code: SERVICE_ERR.RUNNING })
     // 互斥登记在 start 开头同步完成：第二个并发调用在 findPort（首个异步点）前即被拦截。
     // 显式等待目标条件（首个 start 需先跨过若干磁盘 await 才到达 findPort），不固定 sleep。
-    await vi.waitFor(() => { expect(portCalls).toBe(1) }, { timeout: 5000 })
+    await vi.waitFor(() => { expect(portCalls).toBe(1) }, { timeout: WAIT_MS })
     release()
     // 修复前：两个都 spawn → 双进程/双端口（孤儿 + 泄漏）；修复后：仅首个成功
     await expect(p1).resolves.toMatchObject({ serviceId: 'svc-1', status: 'running', port: 17860 })
@@ -280,7 +286,7 @@ describe('ServiceManager 生命周期', () => {
       const saved = await store.getServiceById('svc-1')
       expect(saved?.status).toBe('crashed')
       expect(saved?.lastStoppedAt).toBeTruthy()
-    }, { timeout: 5000 })
+    }, { timeout: WAIT_MS })
     // crashed 后可重启
     await expect(h.manager.start('svc-1')).resolves.toMatchObject({ status: 'running' })
   })
@@ -299,7 +305,7 @@ describe('ServiceManager 生命周期', () => {
     h.children[0].emitExit(0)
     await vi.waitFor(async () => {
       expect((await store.getServiceById('svc-1'))?.status).toBe('stopped')
-    }, { timeout: 5000 })
+    }, { timeout: WAIT_MS })
   })
 
   it('重复 stop：撤销上一次的强杀定时器（宽限期不双份计时）', async () => {

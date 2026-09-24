@@ -1,2 +1,5 @@
 # 统一行尾，消除 Windows 下的 CRLF 告警
 * text=auto
+
+# Git 钩子是 sh 脚本：必须保持 LF，否则 Windows 检出后行尾的 \r 会让 sh 解析失败
+.githooks/* text eol=lf

@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Dict } from '../../i18n.js'
+import { RESERVED_TRANSPORT_TOOL } from '../../../host/shared/protocol.js'
 import type { RemoteFace } from '../../hooks/useRemote.js'
 import { useToolCombos, type ComboEntry } from '../../hooks/useToolCombos.js'
 import { mcpFormFromJson, mcpFormFromServer, mcpServerPayload, parseJsonObject, type McpFormState } from '../../lib/mcp-form.js'
@@ -34,11 +35,11 @@ function newComboId(): string {
   return `combo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
 }
 
-/** 组合条目 → 编辑草稿（剔除官方保留传输名 run_code：子代理自带，且官方 restrict 禁止其进入名单）。 */
+/** 组合条目 → 编辑草稿（剔除官方保留传输名：子代理自带，且官方 restrict 禁止其进入名单）。 */
 function draftOf(combo: ComboEntry | undefined): { name: string; tools: string[]; mcpServers: string[] } {
   return {
     name: combo?.name ?? '',
-    tools: (combo?.tools ?? []).filter((name) => name !== 'run_code'),
+    tools: (combo?.tools ?? []).filter((name) => name !== RESERVED_TRANSPORT_TOOL),
     mcpServers: [...(combo?.mcpServers ?? [])],
   }
 }

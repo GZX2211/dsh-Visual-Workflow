@@ -7,7 +7,6 @@ export const zh = {
   studio: '工作流设计器',
   badge: '可视化编排',
   note: '拖拽卡片 · 连线编排 · 一键运行',
-  currentSession: '当前会话',
   // 工作台 × 官方右侧 Sidebar 标签页（0.1.5-rc.1 迁移）：
   // 多标签页 body 并存（分栏 / 多会话）时，常驻容器只能归最新的那个 body，
   // 其余 body 显示本提示，避免出现无解释的空白面板。
@@ -21,7 +20,6 @@ export const zh = {
   // 图2 交互改造：左侧「工作流」Tab 双区（实例列表 + 工作流模板列表）
   flowInstances: '实例',
   flowTemplates: '工作流模板',
-  instanceRunning: '运行中',
   parentAgent: '父代理',
   builtinParentPrompt: '你是工作流编排的父代理，仅负责调度子代理、判断流程走向，不执行节点任务。',
   roleTemplates: '角色模板',
@@ -44,7 +42,6 @@ export const zh = {
   tidy: '整理布局',
   // 批注：顶部折叠/切换按钮不再控制右侧栏；只控制左栏/底栏的展开、折叠、切换（3 态循环：左栏展开→底栏展开→全隐）
   togglePanels: '切换左栏/底栏',
-  save: '保存',
   createInstance: '创建实例',
   saveInstance: '保存实例',
   createService: '创建服务',
@@ -408,7 +405,6 @@ export const en: Dict = {
   studio: 'Workflow Designer',
   badge: 'Visual Orchestration',
   note: 'Drag cards · Wire connections · Run',
-  currentSession: 'Current session',
   workbenchInUse: 'The studio is already open in another tab',
   mode1: 'Orchestration Mode',
   mode2: 'Service Mode',
@@ -418,7 +414,6 @@ export const en: Dict = {
   // 图2 交互改造：左侧「工作流」Tab 双区（实例列表 + 工作流模板列表）
   flowInstances: 'Instances',
   flowTemplates: 'Workflow templates',
-  instanceRunning: 'Running',
   parentAgent: 'Parent Agent',
   builtinParentPrompt: 'You are the parent agent of a workflow: you only schedule sub-agents and decide the flow direction, and never execute node tasks yourself.',
   roleTemplates: 'Agent templates',
@@ -439,7 +434,6 @@ export const en: Dict = {
   clearRunningHint: 'Cannot clear the canvas while the instance is running (completed/running flow is frozen); stop the run first',
   tidy: 'Tidy layout',
   togglePanels: 'Switch left/bottom panel',
-  save: 'Save',
   createInstance: 'Create instance',
   saveInstance: 'Save instance',
   createService: 'Create service',

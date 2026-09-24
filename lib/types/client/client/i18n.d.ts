@@ -2,7 +2,6 @@ export declare const zh: {
     studio: string;
     badge: string;
     note: string;
-    currentSession: string;
     workbenchInUse: string;
     mode1: string;
     mode2: string;
@@ -16,7 +15,6 @@ export declare const zh: {
     };
     flowInstances: string;
     flowTemplates: string;
-    instanceRunning: string;
     parentAgent: string;
     builtinParentPrompt: string;
     roleTemplates: string;
@@ -37,7 +35,6 @@ export declare const zh: {
     clearRunningHint: string;
     tidy: string;
     togglePanels: string;
-    save: string;
     createInstance: string;
     saveInstance: string;
     createService: string;

@@ -73,6 +73,7 @@
     "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.client.json --noEmit && tsc -p tsconfig.test.json && tsc -p tsconfig.test.client.json",
     "build": "node scripts/build.mjs",
     "test": "vitest run --pool=threads",
+    "gates": "vitest run --pool=threads tests/contract",
     "client-smoke": "node scripts/client-smoke.mjs",
     "check": "pnpm typecheck && pnpm test && pnpm build && pnpm client-smoke",
     "verify": "pnpm typecheck && pnpm build && pnpm test && pnpm client-smoke"

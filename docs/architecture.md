@@ -839,8 +839,8 @@ src/client/
 ├── components/
 ├── hooks/
 ├── lib/
+├── styles/
 ├── i18n.ts
-└── styles.ts
 ```
 
 ### sidebar
@@ -877,6 +877,14 @@ src/client/
 * File
 * Bundle
 * Serialization
+
+### styles
+
+工作台样式的唯一存放处。按域拆分为片段，由 `styles/index.ts` 按固定顺序拼接后导出单个 `styles` 字符串（经 `entry.ts` 注入 `style[data-plugin]`）：
+
+* 片段是纯 CSS 字符串常量，零 import、零依赖，不使用 CSS Modules；
+* 片段数组顺序即覆盖顺序（同特异性下后写的覆盖先写的），禁止重排；
+* 分域：`tokens`（设计 token）、`chrome`、`toolbar`、`canvas`、`rails`、`inspector`、`overlays`、`host-mount`、`combo`、`service-console`、`sidebar-entry`、`responsive`（窄屏覆盖）、`scheduler`。
 
 Client 不直接拥有 Host Runtime 状态。
 

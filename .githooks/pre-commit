@@ -1,0 +1,35 @@
+#!/bin/sh
+# .githooks/pre-commit
+#
+# 提交前门禁：只跑 tests/contract 下的包/构建/客户端漂移门禁（约 20 秒，不跑全量测试）。
+#
+# 启用（每个克隆执行一次）：git config core.hooksPath .githooks
+# 跳过：git commit --no-verify —— 仅限确认无漂移时（例如只改文档）。
+#
+# 口径说明：
+#   · 检查的是工作区内容而非暂存区快照；部分暂存时会比「将要提交的内容」更严格，只多拦不漏拦；
+#   · 完整验收（typecheck / test / build / client-smoke）仍以 `pnpm check` 与 CI 为准，
+#     本钩子只做「提交那一刻」的快速兜底，不替代它们。
+
+set -e
+
+if [ ! -d node_modules ]; then
+  echo "[pre-commit] 未安装依赖（缺 node_modules），跳过门禁；请先执行 pnpm install" >&2
+  exit 0
+fi
+
+if ! command -v pnpm >/dev/null 2>&1; then
+  echo "[pre-commit] 当前环境没有 pnpm（GUI 客户端常见），跳过门禁；CI 仍会校验" >&2
+  exit 0
+fi
+
+if ! pnpm -s gates; then
+  cat >&2 <<'EOF'
+
+[pre-commit] 门禁未通过，提交已阻止。
+  · 按失败提示修代码：新增文案迁入 src/client/i18n.ts、新增样式按域归位并走 tokens.ts。
+  · 存量豁免只允许「修好一处 → 删一条」，禁止放宽断言或直接加豁免（见 tests/AGENTS.md）。
+  · 确认本次改动与门禁无关时，用 git commit --no-verify 显式跳过。
+EOF
+  exit 1
+fi

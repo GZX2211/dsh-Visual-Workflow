@@ -18,7 +18,7 @@ import React from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { WorkbenchHost } from './studio/WorkbenchHost.js'
 import { zh, en, text, detectLanguage, type Dict } from './i18n.js'
-import { styles } from './styles.js'
+import { styles } from './styles/index.js'
 import {
   WORKBENCH_CONTAINER_ID,
   WORKBENCH_HOLDER_ID,
@@ -40,7 +40,7 @@ import {
   rootSessionIdOf,
   type SessionsServiceLike,
 } from './sidebar/session-root.js'
-// 全局样式占位（触发 client 构建链路的 CSS 注入机制 style[data-plugin]；真实主题样式在 styles.ts）
+// 全局样式占位（触发 client 构建链路的 CSS 注入机制 style[data-plugin]；真实主题样式在 styles/ 各域片段）
 import './entry.css'
 
 /** i18n 命名空间（注册进官方 locale 服务）。 */

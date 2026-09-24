@@ -4,7 +4,7 @@ export declare const WORKBENCH_TAB_ID = "dsh-visual-workflow";
 export declare const WORKBENCH_TAB_KIND = "visual-workflow";
 /** body 注册的插槽 key。 */
 export declare const WORKBENCH_TAB_SLOT = "sidebar.right.pane.tab";
-/** 常驻容器的 DOM id（entry.ts 创建；样式在 styles.ts）。 */
+/** 常驻容器的 DOM id（entry.ts 创建；样式在 styles/host-mount.ts）。 */
 export declare const WORKBENCH_CONTAINER_ID = "visual-workflow-workbench-host";
 /** 常驻容器的隐藏持有者 id（无标签页持有容器时容器回到这里）。 */
 export declare const WORKBENCH_HOLDER_ID = "visual-workflow-workbench-holder";

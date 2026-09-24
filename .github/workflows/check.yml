@@ -1,0 +1,49 @@
+# .github/workflows/check.yml
+#
+# CI 门禁：与本地 `pnpm check` 完全同一口径（typecheck ×4 → test → build → client-smoke），
+# 再校验构建产物已随源码提交。本地与 CI 用同一命令是刻意的：避免「本地绿、CI 红」的双口径。
+#
+# Runner 为什么是 windows-latest：本仓库测试含真实子进程、真实磁盘锁与 Windows 路径语义，
+# 目前只在 Windows 上验证过全绿；ubuntu 更快更便宜，但要先单独验证一遍再切（改这一行即可）。
+#
+# 为什么单独校验 lib/：本仓库把构建产物入库（lib/ 受版本控制），改 src 忘记重建是真实发生过的
+# 漂移形态，用 `git diff --exit-code` 兜住；Windows runner 上若出现行尾不一致，请检查
+# actions/checkout 的 core.autocrlf 设置，不要直接删掉这一步。
+name: check
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: 安装依赖（严格按 lockfile）
+        run: pnpm install --frozen-lockfile
+
+      - name: 本地验收同口径（typecheck / test / build / client-smoke）
+        run: pnpm check
+
+      - name: 构建产物与源码同步（lib/ 必须随源码一起提交）
+        run: git diff --exit-code --stat -- lib

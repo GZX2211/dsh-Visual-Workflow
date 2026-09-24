@@ -16,20 +16,7 @@
 
 ---
 
-## AI 开发时的权威来源
-
-不同信息类型使用不同的权威来源，不得将所有文档视为同等权威。
-
-| 信息类型 | 当前权威 |
-|---|---|
-| 实际代码行为 | 当前代码 + 测试 |
-| 数据结构、接口、Tool Schema | 当前代码 + 测试 |
-| 当前项目原则 | 本目录及作用域内的 `AGENTS.md` |
-| 测试规则 | `tests/AGENTS.md` |
-
----
-
-## 仓库治理体系
+## 仓库治理体系（权威来源）
 
 `AGENTS.md` 分三层。每层只写自己管辖的规则，同一规则不在各层重复。
 
@@ -163,42 +150,35 @@ Agent / Prompt 负责不确定性的判断，例如：
 
 ---
 
-## 修改代码后
+## 改动类型与最小验证
 
-至少确认：
+按改动内容选择最小验证集，不确定时一律跑 `pnpm check`：
 
-* TypeScript 类型检查通过；
-* 相关测试通过；
-* 受影响模块的构建通过；
-* 公共接口未被意外改变；
-* 没有引入跨层依赖；
+| 改动内容 | 至少执行 |
+|---|---|
+| 纯文档（`docs/`、`*.md`） | 无需 |
+| 任意 `src/` 代码 | `pnpm typecheck` + `pnpm test` |
+| Client 文案（`src/client/i18n.ts`）、样式（`src/client/styles/**`）、组件文案或类名 | `pnpm check`（含客户端漂移门禁） |
+| 共享契约（`src/host/shared/**`）、端点名 / 工具名 / 错误码 | `pnpm check` |
+| `package.json`、构建脚本、`lib/` 产物 | `pnpm check` |
 
-Host 半区的附加确认项见 `src/host/AGENTS.md`。
+客户端漂移门禁（`tests/contract/client-*.test.ts`，静态断言、随 `pnpm test` 执行）机械拦截：
 
----
+* 词典死键、词典字面量兜底、内联中文文案（`client-copy`）；
+* 死样式类名、未定义/未使用的设计 token、样式内颜色字面量、静态内联样式、样式片段漏登记（`client-style`）；
+* client 引入 Host 运行时、host 依赖 client、lib 依赖 UI、组件自建网络访问、端点字面量硬编码（`client-boundary`）。
 
-## 标准验证命令
+门禁失败一律修代码或按提示更新基线条目；**禁止放宽断言**（见 `tests/AGENTS.md`）。
+CI 在 push / PR 上执行同一套 `pnpm check`，见 `.github/workflows/check.yml`。
 
-```bash
-pnpm typecheck
-pnpm test
-pnpm build
-pnpm client-smoke
-```
-
-完整验证：
+提交前快速兜底（可选，每个克隆执行一次）：
 
 ```bash
-pnpm check
+git config core.hooksPath .githooks   # 启用后 git commit 前会跑 pnpm gates（约 20 秒）
+pnpm gates                            # 手动执行同一套契约门禁（只跑 tests/contract）
 ```
 
-或：
-
-```bash
-pnpm verify
-```
-
-具体命令及脚本行为以当前 `package.json` 为准。
+确认本次改动与门禁无关时用 `git commit --no-verify` 显式跳过。
 
 ---
 
