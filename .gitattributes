@@ -1,5 +1,21 @@
 # 统一行尾，消除 Windows 下的 CRLF 告警
 * text=auto
 
+# 默认自动处理文本文件
+* text=auto
+
+# 核心修复：针对所有 JSON 强制使用 LF，绝不允许转成 Windows 的 CRLF
+*.json text eol=lf
+
+# 针对模型资产目录（重要，精准打击你报错的 1_Pooling 目录）
+1_Pooling/* text eol=lf
+
 # Git 钩子是 sh 脚本：必须保持 LF，否则 Windows 检出后行尾的 \r 会让 sh 解析失败
 .githooks/* text eol=lf
+
+# 源代码与文档统一使用 LF，避免跨平台差异
+*.ts text eol=lf
+*.js text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
