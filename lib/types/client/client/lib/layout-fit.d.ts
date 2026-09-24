@@ -82,3 +82,22 @@ export declare function tidyNodes<T extends LayoutBoxNode>(nodes: T[], lines: Ar
  * 布局结果里没有坐标的节点保持原样（防御：理论上布局覆盖全部节点）。
  */
 export declare function applyLayout<T extends LayoutBoxNode>(nodes: T[], result: LayoutResult): T[];
+/**
+ * 层次布局（「整理布局」与自动布局的共用入口）：委托给分层布局实现（自主编排方案 §7）。
+ *
+ * 为什么重写（§7.1 旧实现的 7 项缺陷）：proxy 入边计入 indegree 导致主节点被推到引用节点
+ * 之后、不看卡片实际尺寸必然重叠、组内成员不参与布局、无层内排序、孤立节点塞进流程最右列、
+ * 无长边处理、无环路处理。
+ *
+ * 新实现落点：
+ *   - 算法：src/client/lib/layout.ts（分层 + 层内重心排序 + 按实际尺寸生成坐标）；
+ *   - 统一入口：本文件 tidyNodes（尺寸解析 + 坐标写回四步收敛）；
+ *   - 尺寸口径：src/client/lib/card-geometry.ts 的 groupCardSizeOf。
+ * 本函数保持原有签名与「返回含新 position 的新数组」语义：既有调用方与测试零改动。
+ */
+export declare function layoutNodes<T extends LayoutBoxNode>(nodes: T[], lines: Array<{
+    source: string;
+    target: string;
+    sourceHandle?: string;
+    targetHandle?: string;
+}>): T[];

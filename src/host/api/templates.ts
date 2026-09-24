@@ -4,6 +4,7 @@
 // 工作流模板（全局共享）与受管文件上传（内容落盘归 storage 受管文件入口）。
 
 import { httpError } from './http.js'
+import { ERR_REVISION_CONFLICT } from '../shared/protocol.js'
 import { copyIntoManagedFile } from '../storage/managed-files.js'
 import { VisualWorkflowApiBase } from './boundary.js'
 
@@ -77,7 +78,7 @@ export class TemplateEndpoints extends VisualWorkflowApiBase {
       return await this.host.store.saveFlowTemplate(normalized as never, { expectedRevision: expected })
     } catch (error) {
       const code = (error as { code?: string })?.code ?? ''
-      if (code === 'FLOW_REVISION_CONFLICT') throw httpError(409, String((error as Error).message), code)
+      if (code === ERR_REVISION_CONFLICT) throw httpError(409, String((error as Error).message), code)
       throw error
     }
   }

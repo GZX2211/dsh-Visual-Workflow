@@ -4,8 +4,8 @@ import type { StudioAction, CanvasNode, CanvasEdge } from '../studio/studio-stat
 import type { RemoteFace } from './useRemote.js';
 export interface FlowTemplatesFace {
     loadFlowTemplates(): Promise<void>;
-    /** 新建本地模板草稿（_draft 标记；首次保存时真正入库）。 */
-    createFlowTemplateDraft(mode: 'mode1' | 'mode2'): WorkflowTemplate;
+    /** 新建本地模板草稿（_draft 标记；首次保存时真正入库）。name 由调用方从词典注入。 */
+    createFlowTemplateDraft(mode: 'mode1' | 'mode2', name: string): WorkflowTemplate;
     /** 保存模板（画布节点/连线序列化后入库；草稿首存保持 id）。 */
     saveFlowTemplate(template: WorkflowTemplate, nodes: CanvasNode[], edges: CanvasEdge[]): Promise<WorkflowTemplate | null>;
     deleteFlowTemplate(id: string): Promise<void>;

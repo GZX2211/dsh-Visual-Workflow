@@ -10,12 +10,13 @@
 // 无变化不产生任何 reducer 更新。本地未落盘的模板草稿由 reducer 的
 // FLOW_TEMPLATES_SYNCED 分支保留（服务端列表里没有它们）。
 
-import { useEffect, useRef } from 'react'
+import { useRef } from 'react'
 import type { Dispatch } from 'react'
 import type { WorkflowTemplate } from '../../host/shared/graph-model.js'
 import type { StudioAction } from '../studio/studio-state.js'
 import type { RemoteFace } from './useRemote.js'
 import { EP } from '../lib/remote.js'
+import { usePolling } from './usePolling.js'
 
 /** 模板列表轮询间隔（模板变更频率低；比活跃 run 的 2s 慢，降低空转）。 */
 export const FLOW_TEMPLATES_POLL_MS = 5_000
@@ -35,26 +36,13 @@ export function flowTemplatesSignature(items: readonly WorkflowTemplate[]): stri
 /** 轮询 effect：挂载即拉一次，随后定时拉取；仅签名变化时 dispatch。 */
 export function useFlowTemplatesPolling(dispatch: Dispatch<StudioAction>, remote: RemoteFace): void {
   const lastSignature = useRef<string | null>(null)
-  useEffect(() => {
-    let cancelled = false
-    const poll = async (): Promise<void> => {
-      try {
-        const items = await remote.call(EP.EP_LIST_FLOW_TEMPLATES)
-        if (cancelled) return
-        const list = Array.isArray(items) ? (items as WorkflowTemplate[]) : []
-        const signature = flowTemplatesSignature(list)
-        if (lastSignature.current === signature) return
-        lastSignature.current = signature
-        dispatch({ type: 'FLOW_TEMPLATES_SYNCED', items: list })
-      } catch {
-        // 偶发失败下一轮重试（列表刷新不是关键路径，不打扰用户）
-      }
-    }
-    void poll()
-    const timer = setInterval(() => { void poll() }, FLOW_TEMPLATES_POLL_MS)
-    return () => {
-      cancelled = true
-      clearInterval(timer)
-    }
-  }, [dispatch, remote])
+  usePolling(async ({ signal, timeoutMs, isCurrent }) => {
+    const items = await remote.call(EP.EP_LIST_FLOW_TEMPLATES, {}, { signal, timeoutMs })
+    if (!isCurrent()) return
+    const list = Array.isArray(items) ? (items as WorkflowTemplate[]) : []
+    const signature = flowTemplatesSignature(list)
+    if (lastSignature.current === signature) return
+    lastSignature.current = signature
+    dispatch({ type: 'FLOW_TEMPLATES_SYNCED', items: list })
+  }, { intervalMs: FLOW_TEMPLATES_POLL_MS }, [dispatch, remote])
 }

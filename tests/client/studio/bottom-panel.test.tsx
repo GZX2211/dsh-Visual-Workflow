@@ -41,6 +41,7 @@ afterEach(() => {
 
 function remoteStub(): RemoteFace {
   const remote: RemoteFace = {
+    stream: vi.fn(async () => undefined),
     call: vi.fn(async (endpoint: string, args?: Record<string, unknown>) => {
       if (endpoint === EP.EP_LIST_TEMPLATES && String(args?.kind ?? '') === 'role') {
         return [

@@ -18,7 +18,7 @@ import type { ServiceControlFace } from './useServiceControl.js'
 import type { RemoteFace } from './useRemote.js'
 import type { ToastFace } from './useToast.js'
 import type { Dict } from '../i18n.js'
-import { EP } from '../lib/remote.js'
+import { EP, isRevisionConflict } from '../lib/remote.js'
 
 /** 画布保存选项。 */
 export interface SaveCanvasOptions {
@@ -84,6 +84,21 @@ export function useDocumentActions(
   t: Dict,
 ): DocumentActionsFace {
   // ---------- 保存 / 打开 ----------
+  /**
+   * 保存失败处理（唯一实现）：乐观锁冲突（ERR_REVISION_CONFLICT）按冲突语义处理——
+   * 刷新服务端最新列表（使下次保存携带最新 revision）并明确提示用户重试；
+   * 当前画布上的未保存编辑一律保留（不自动覆盖、不静默丢失）。
+   * 其余失败走通用错误提示。
+   */
+  const handleSaveFailure = useCallback(async (error: unknown, reload: () => Promise<unknown>): Promise<void> => {
+    if (isRevisionConflict(error)) {
+      await reload().catch(() => undefined)
+      notify('error', t.revisionConflictRetry)
+      return
+    }
+    toastError(error)
+  }, [notify, t.revisionConflictRetry, toastError])
+
   const saveCanvas = useCallback(async (options?: SaveCanvasOptions) => {
     const auto = options?.auto === true
     // 画布内容：缺省 = 当前 state.canvas；自动布局等「同批 dispatch 后立即落盘」的
@@ -106,7 +121,7 @@ export function useDocumentActions(
           }
           return saved
         } catch (error) {
-          toastError(error)
+          await handleSaveFailure(error, workflows.loadWorkflows)
           return null
         }
       }
@@ -143,7 +158,7 @@ export function useDocumentActions(
         }
         return saved
       } catch (error) {
-        toastError(error)
+        await handleSaveFailure(error, flowTemplates.loadFlowTemplates)
         return null
       }
     }
@@ -158,12 +173,12 @@ export function useDocumentActions(
         }
         return saved
       } catch (error) {
-        toastError(error)
+        await handleSaveFailure(error, serviceControl.loadServices)
         return null
       }
     }
     return null
-  }, [dispatch, notify, state, toastError, workflows, flowTemplates, serviceControl, t.saveRunningConfirm, t.saveRunningMessage, t.saveRunningTitle, t.toastSaved])
+  }, [dispatch, handleSaveFailure, notify, state, workflows, flowTemplates, serviceControl, t.saveRunningConfirm, t.saveRunningMessage, t.saveRunningTitle, t.toastSaved])
 
   /**
    * 创建实例（图2 交互改造核心；工作台全局化改版重写）：
@@ -202,7 +217,7 @@ export function useDocumentActions(
           label: `${t.sessionLabelWorkflowPrefix}${template.name ?? ''}`,
         }) as { sessionId?: unknown }
         targetSessionId = String(created?.sessionId ?? '')
-        if (!targetSessionId) throw new Error('新建会话失败：未返回会话 id')
+        if (!targetSessionId) throw new Error(t.sessionCreateFailed)
       } catch (error) {
         toastError(error)
         return null
@@ -240,7 +255,7 @@ export function useDocumentActions(
                 ...(template.meta ? { meta: template.meta } : {}),
                 createdAt: source.createdAt,
               }
-            : workflows.instantiateFromTemplate(template, targetSessionId)
+            : workflows.instantiateFromTemplate(template, targetSessionId, t.untitledWorkflow)
           const saved = await workflows.saveWorkflow(draft, state.canvas.nodes, state.canvas.edges)
           if (!saved) return
           dispatch({ type: 'MARK_SAVED' })
@@ -265,7 +280,7 @@ export function useDocumentActions(
                 // 覆盖仅非运行态可达（上方已拒绝 running）；保留既有进程状态
                 status: source.status,
               }
-            : serviceControl.instantiateFromTemplate(template, targetSessionId)
+            : serviceControl.instantiateFromTemplate(template, targetSessionId, t.untitledService)
           const saved = await serviceControl.saveService(draft, state.canvas.nodes, state.canvas.edges)
           if (!saved) return
           dispatch({ type: 'MARK_SAVED' })
@@ -273,7 +288,7 @@ export function useDocumentActions(
           afterCreate?.(saved)
         }
       } catch (error) {
-        toastError(error)
+        await handleSaveFailure(error, state.mode === 'mode1' ? workflows.loadWorkflows : serviceControl.loadServices)
       }
     }
 
@@ -293,7 +308,7 @@ export function useDocumentActions(
     }
     await doCreate()
     return null
-  }, [dispatch, notify, remote, saveCanvas, serviceControl, state, t, toastError, workflows])
+  }, [dispatch, handleSaveFailure, notify, remote, saveCanvas, serviceControl, state, t, toastError, workflows])
 
   /** 实例 → 模板（另存为模板）：当前实例内容复制为全局共享的工作流模板。 */
   const saveCurrentAsFlowTemplate = useCallback(async (): Promise<void> => {
@@ -304,7 +319,7 @@ export function useDocumentActions(
         : null
     if (!source) return
     try {
-      const template = flowTemplates.createFlowTemplateDraft(state.mode)
+      const template = flowTemplates.createFlowTemplateDraft(state.mode, t.untitledFlowTemplate)
       template.name = source.name
       template.description = source.description ?? ''
       template.nodes = JSON.parse(JSON.stringify(state.canvas.nodes)) as never
@@ -312,9 +327,9 @@ export function useDocumentActions(
       const saved = await flowTemplates.saveFlowTemplate(template, state.canvas.nodes, state.canvas.edges)
       if (saved) notify('success', t.toastSavedAsTemplate)
     } catch (error) {
-      toastError(error)
+      await handleSaveFailure(error, flowTemplates.loadFlowTemplates)
     }
-  }, [dispatch, flowTemplates, notify, state, t.toastSavedAsTemplate, toastError])
+  }, [dispatch, flowTemplates, handleSaveFailure, notify, state, t.toastSavedAsTemplate])
 
   const openFlowById = useCallback((id: string) => {
     const flow = state.workflows.find((item) => item.id === id)
@@ -354,7 +369,7 @@ export function useDocumentActions(
       if (section === 'flowTemplate') {
         // 图2 交互改造：+ 号新建「工作流模板」（空白模板，编辑后保存回模板库；
         // 实例只能从模板拖入画布「创建实例」后产生——实例列表无 + 号）。
-        const draft = flowTemplates.createFlowTemplateDraft(state.mode)
+        const draft = flowTemplates.createFlowTemplateDraft(state.mode, state.mode === 'mode2' ? t.untitledServiceTemplate : t.untitledFlowTemplate)
         flowTemplates.openFlowTemplate(draft)
         notify('info', t.newWorkflow)
         return
@@ -364,7 +379,7 @@ export function useDocumentActions(
       return
     }
     if (tab === 'role') {
-      const template = templates.createTemplateDraft('role')
+      const template = templates.createTemplateDraft('role', t.templateDefaultName.role)
       selection.selectEditor({ source: 'template', kind: 'role', id: template.id })
       selection.selectLib('role', (template as { id: string }).id)
       notify('info', t.newTemplate)
@@ -373,7 +388,7 @@ export function useDocumentActions(
     if (tab === 'data') {
       // 数据 Tab 分区独立新建：文件分区建文件模板、数据库分区建数据库模板
       const kind = section === 'database' ? 'database' : 'file'
-      const template = templates.createTemplateDraft(kind)
+      const template = templates.createTemplateDraft(kind, t.templateDefaultName[kind])
       selection.selectEditor({ source: 'template', kind, id: template.id })
       selection.selectLib(kind, (template as { id: string }).id)
       notify('info', t.newTemplate)
@@ -381,13 +396,13 @@ export function useDocumentActions(
     }
     if (tab === 'other' && section === 'group') {
       // 用户批注：协作组像其他列表一样，标题右侧 + 号新建协作组模板。
-      const template = templates.createTemplateDraft('group')
+      const template = templates.createTemplateDraft('group', t.templateDefaultName.group)
       selection.selectEditor({ source: 'template', kind: 'group', id: template.id })
       selection.selectLib('groupTemplate', (template as { id: string }).id)
       notify('info', t.newTemplate)
       return
     }
-  }, [notify, selection, serviceControl, state.mode, state.sessionId, t.newTemplate, t.newWorkflow, flowTemplates, templates, workflows])
+  }, [notify, selection, state.mode, t.newTemplate, t.newWorkflow, t.templateDefaultName, t.untitledFlowTemplate, t.untitledServiceTemplate, flowTemplates, templates])
 
   return {
     saveCanvas, createInstanceFromCanvas, saveCurrentAsFlowTemplate,

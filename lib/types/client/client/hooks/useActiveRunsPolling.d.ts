@@ -10,5 +10,5 @@ export interface ActiveRunItem {
     status: string;
     runId: string;
 }
-/** 全量活跃 run 轮询 effect：挂载即拉一次，随后每 2s 刷新（卸载清理定时器）。 */
+/** 全量活跃 run 轮询 effect：挂载即拉一次，随后每 2s 刷新。 */
 export declare function useActiveRunsPolling(dispatch: Dispatch<StudioAction>, remote: RemoteFace): void;

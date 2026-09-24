@@ -21,7 +21,7 @@
 
 import { randomUUID } from 'node:crypto'
 
-import { WF_GRAPH_PATCH } from '../../shared/protocol.js'
+import { WF_GRAPH_PATCH, ERR_REVISION_CONFLICT } from '../../shared/protocol.js'
 import { defineTool, type ToolDefinitionLike, type ToolExecLike } from '../infrastructure/define-tool.js'
 import { textRender } from '../infrastructure/text-render.js'
 import { callerOf } from '../infrastructure/caller.js'
@@ -410,7 +410,7 @@ async function saveDoc(
     return { id: saved.id, revision: Number(saved.revision) || 0 }
   } catch (error) {
     const code = (error as { code?: string })?.code ?? ''
-    if (code === 'FLOW_REVISION_CONFLICT') {
+    if (code === ERR_REVISION_CONFLICT) {
       throw new WfError('画布刚被修改，请基于最新拓扑重新提交（expectRevision 不匹配，本工具不自动重试）', 'WF_PATCH_CONFLICT')
     }
     throw error

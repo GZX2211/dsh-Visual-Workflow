@@ -14,8 +14,8 @@ import { EP } from '../lib/remote.js'
 
 export interface FlowTemplatesFace {
   loadFlowTemplates(): Promise<void>
-  /** 新建本地模板草稿（_draft 标记；首次保存时真正入库）。 */
-  createFlowTemplateDraft(mode: 'mode1' | 'mode2'): WorkflowTemplate
+  /** 新建本地模板草稿（_draft 标记；首次保存时真正入库）。name 由调用方从词典注入。 */
+  createFlowTemplateDraft(mode: 'mode1' | 'mode2', name: string): WorkflowTemplate
   /** 保存模板（画布节点/连线序列化后入库；草稿首存保持 id）。 */
   saveFlowTemplate(template: WorkflowTemplate, nodes: CanvasNode[], edges: CanvasEdge[]): Promise<WorkflowTemplate | null>
   deleteFlowTemplate(id: string): Promise<void>
@@ -53,12 +53,12 @@ export function useFlowTemplates(dispatch: Dispatch<StudioAction>, remote: Remot
     dispatch({ type: 'FLOW_TEMPLATES_LOADED', items: Array.isArray(items) ? (items as WorkflowTemplate[]) : [] })
   }, [dispatch, remote])
 
-  const createFlowTemplateDraft = useCallback((mode: 'mode1' | 'mode2'): WorkflowTemplate => {
+  const createFlowTemplateDraft = useCallback((mode: 'mode1' | 'mode2', name: string): WorkflowTemplate => {
     const now = new Date().toISOString()
     const draft = {
       id: `tpl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
       mode,
-      name: mode === 'mode1' ? '未命名工作流模板' : '未命名服务模板',
+      name,
       description: '',
       revision: 0,
       nodes: [],

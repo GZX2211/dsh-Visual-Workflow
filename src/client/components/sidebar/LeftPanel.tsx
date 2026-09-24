@@ -10,6 +10,7 @@ import type { Dict } from '../../i18n.js'
 import type { LibTab } from '../../studio/studio-state.js'
 import type { RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate } from '../../../host/shared/types.js'
 import type { WorkflowTemplate } from '../../../host/shared/graph-model.js'
+import { statusLabelOf } from '../../lib/status-label.js'
 import { buildLibraryModel } from './library-model.js'
 
 // 以下类型由本文件导出（供 useLibraryDrag/library-model 等消费，保持既有导入路径不变）。
@@ -100,7 +101,7 @@ export function LeftPanel(props: LeftPanelProps) {
             {section.cards.length === 0
               ? <div className="wf-hint" style={{ padding: '2px 8px' }}>{t.libEmptyTemplates}</div>
               : section.cards.map((item) => {
-                  const statusText = item.runStatus ? String((t.status as Record<string, string>)[item.runStatus] ?? '') : ''
+                  const statusText = statusLabelOf(t, item.runStatus)
                   return (
                     <button
                       key={item.key}

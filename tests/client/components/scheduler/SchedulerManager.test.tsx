@@ -88,6 +88,7 @@ function makeRemote(initial: Partial<RemoteState> = {}): { remote: RemoteFace; s
     deleted: null,
   }
   const remote: RemoteFace = {
+    stream: vi.fn(async () => undefined),
     call: vi.fn(async (endpoint: string, args?: Record<string, unknown>) => {
       if (endpoint === EP.EP_SCHEDULER_TASKS) return state.views
       if (endpoint === EP.EP_LIST_FLOW_TEMPLATES) return state.templates
@@ -224,5 +225,19 @@ describe('SchedulerManager', () => {
     })
     expect(onToast).toHaveBeenCalled()
     expect(state.saved).toBe(null)
+  })
+
+  it('星期按钮文案取自词典（schedulerWeekdays 索引即 0..6，不再硬编码中文）', async () => {
+    const { remote } = makeRemote()
+    await act(async () => {
+      root = createRoot(container!)
+      root.render(React.createElement(SchedulerManager, {
+        copy: zh, remote, sessionId: 's-1', onClose: vi.fn(), onToast: vi.fn(),
+      }))
+    })
+    await waitFor(() => document.querySelectorAll('.wf-sched-day').length > 0)
+    const labels = Array.from(document.querySelectorAll('.wf-sched-day')).map((item) => item.textContent)
+    // 前 7 个为星期按钮（第 8 个是「每天」）
+    expect(labels.slice(0, 7)).toEqual(zh.schedulerWeekdays)
   })
 })

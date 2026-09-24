@@ -37,7 +37,7 @@ mixInEndpointGroups(VisualWorkflowApi, [
  * 领域模块只抛稳定 code，翻译成对外状态是边界的职责。
  */
 const ERROR_STATUS: Record<string, number> = {
-  FLOW_REVISION_CONFLICT: 409,
+  [EP.ERR_REVISION_CONFLICT]: 409,
   WF_LOCKED: 409,
   WF_SERVICE_RUNNING: 409,
   WF_SERVICE_NOT_RUNNING: 409,

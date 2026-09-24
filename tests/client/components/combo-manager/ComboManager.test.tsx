@@ -54,6 +54,7 @@ function makeRemote(initial: Partial<RemoteState> = {}): { remote: RemoteFace; s
     calls: [],
   }
   const remote: RemoteFace = {
+    stream: vi.fn(async () => undefined),
     call: vi.fn(async (endpoint: string, args?: Record<string, unknown>) => {
       state.calls.push({ endpoint, args: args ?? {} })
       if (endpoint === EP.EP_PLUGIN_CATALOG) return state.catalog

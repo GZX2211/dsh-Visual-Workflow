@@ -19,8 +19,9 @@ export interface ServiceControlFace {
    * 模板 → 服务实例（图2 交互改造：模板拖入画布「创建服务」后转服务实例；深拷贝断引用）。
    * 目标会话由调用方决定（当前主会话 / 新建主会话）；「开启新会话/工作区」为一次性
    * 临时选项，不继承到实例文档（字段已退役）。
+   * fallbackName：模板无名称时的默认名（调用方从词典注入）。
    */
-  instantiateFromTemplate(template: WorkflowTemplate, targetSessionId: string): ServiceState
+  instantiateFromTemplate(template: WorkflowTemplate, targetSessionId: string, fallbackName: string): ServiceState
   /** 保存服务（草稿入库 / 正式带 revision 更新）。 */
   saveService(service: ServiceState, nodes: CanvasNode[], edges: CanvasEdge[]): Promise<ServiceState | null>
   /** 启动服务：携带实例归属会话 id 供后端归属校验。 */
@@ -59,12 +60,12 @@ export function useServiceControl(dispatch: Dispatch<StudioAction>, remote: Remo
     return draft
   }, [dispatch])
 
-  const instantiateFromTemplate = useCallback((template: WorkflowTemplate, targetSessionId: string): ServiceState => {
+  const instantiateFromTemplate = useCallback((template: WorkflowTemplate, targetSessionId: string, fallbackName: string): ServiceState => {
     const now = new Date().toISOString()
     const draft = {
       id: `svc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
       sessionId: targetSessionId,
-      name: template.name ?? '未命名服务',
+      name: template.name ?? fallbackName,
       description: template.description ?? '',
       revision: 0,
       nodes: JSON.parse(JSON.stringify(template.nodes ?? [])) as ServiceState['nodes'],

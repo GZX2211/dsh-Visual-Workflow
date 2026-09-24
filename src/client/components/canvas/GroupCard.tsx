@@ -7,6 +7,7 @@
 import type { Dict } from '../../i18n.js'
 import type { CanvasNode } from '../../studio/studio-state.js'
 import { nodeSizeOf } from '../../lib/card-geometry.js'
+import { statusLabelOf } from '../../lib/status-label.js'
 
 interface GroupCardProps {
   node: CanvasNode
@@ -38,15 +39,15 @@ export function GroupCard({ node, copy, members, selected, dropTarget, locked, l
     >
       <div className={`wf-node wf-node--group${selected ? ' is-selected' : ''}${dropTarget ? ' is-drop-target' : ''}${locked ? ' is-locked' : ''}`} title={locked ? lockHint : undefined}>
         <div className="wf-node__kind">
-          <span>{String(copy.nodeKinds?.group ?? '协作组')}</span>
-          <span className="wf-hint">{`${memberIds.length} ${String(copy.groupMembers ?? '个成员')}`}</span>
+          <span>{String(copy.nodeKinds.group)}</span>
+          <span className="wf-hint">{`${memberIds.length} ${String(copy.groupMembers)}`}</span>
           {locked ? <span className="wf-node__lock-badge" title={lockHint}>🔒</span> : null}
         </div>
-        {dropTarget ? <div className="wf-group__drop-hint">{String(copy.groupDropHint ?? '放开以入组')}</div> : null}
-        <div className="wf-node__label">{String(node.data.label ?? copy.nodeKinds?.group ?? '协作组')}</div>
+        {dropTarget ? <div className="wf-group__drop-hint">{String(copy.groupDropHint)}</div> : null}
+        <div className="wf-node__label">{String(node.data.label ?? copy.nodeKinds.group)}</div>
         <div className="wf-group__members">
           {members.length === 0
-            ? <div className="wf-hint">{String(copy.groupMemberHint ?? '把角色拖入组内')}</div>
+            ? <div className="wf-hint">{String(copy.groupMemberHint)}</div>
             : members.map((member) => (
                 <button
                   key={member.id}
@@ -61,7 +62,7 @@ export function GroupCard({ node, copy, members, selected, dropTarget, locked, l
                   {member.status ? (
                     <span className="wf-group__member-status">
                       <span className={`wf-status-dot is-${member.status}`} />
-                      <span className="wf-hint">{String((copy.status as Record<string, string>)[member.status] ?? '')}</span>
+                      <span className="wf-hint">{statusLabelOf(copy, member.status)}</span>
                     </span>
                   ) : null}
                   {/* 组内成员仅数据库/上下文接点，无流程接点（流程由组卡片承担，§4.2.5.2 规则 4）；

@@ -7,15 +7,14 @@
 //   - 检测到节点矩形重叠 → 非阻断提示「建议整理布局」（不自动重排，尊重用户当前布局）。
 //
 // 职责边界：本 hook 只负责「判定 + 触发 + 落盘 + 提示」；统一布局入口为
-// lib/graph-model.layoutNodes（内部 = lib/layout-fit.tidyNodes → lib/layout.layoutGraph），
-// 判定与几何工具在 lib/layout-fit.ts（纯函数、可单测）。
+// lib/layout-fit.layoutNodes（内部 = layout-fit.tidyNodes → layout.layoutGraph），
+// 判定与几何工具同在该文件（纯函数、可单测）。
 
 import { useEffect, useRef } from 'react'
 import type { Dispatch } from 'react'
 import type { CanvasNode, StudioAction, StudioState } from '../studio/studio-state.js'
 import type { SaveCanvasOptions } from './useDocumentActions.js'
-import { layoutNodes, type CanvasLine } from '../lib/graph-model.js'
-import { collapsedIdsOf, findLayoutOverlaps, layoutBoxesOf, needsAutoLayout } from '../lib/layout-fit.js'
+import { collapsedIdsOf, findLayoutOverlaps, layoutBoxesOf, layoutNodes, needsAutoLayout } from '../lib/layout-fit.js'
 import { toLayoutInputs } from '../lib/layout.js'
 import { groupCardSizeOf } from '../lib/card-geometry.js'
 
@@ -57,10 +56,10 @@ export function useAutoLayout(
 
     // ① 缺坐标/哨兵坐标 → 自动重排一次并立即落盘
     if (needsAutoLayout(nodes as never)) {
-      // 单入口：layoutNodes（lib/graph-model）内部即 tidyNodes（lib/layout-fit）的
-      // 「形状解析 → 分层布局 → 坐标写回」四步收敛，与「整理布局」按钮走同一实现，
-      // 输出坐标与旧写法（toLayoutInputs → layoutGraph → applyLayout）逐项一致。
-      const next = layoutNodes(nodes, canvas.edges as unknown as CanvasLine[])
+    // 单入口：layoutNodes（lib/layout-fit）内部即 tidyNodes 的
+    // 「形状解析 → 分层布局 → 坐标写回」四步收敛，与「整理布局」按钮走同一实现，
+    // 输出坐标与旧写法（toLayoutInputs → layoutGraph → applyLayout）逐项一致。
+      const next = layoutNodes(nodes, canvas.edges)
       dispatch({ type: 'GRAPH_REPLACED', nodes: next, edges: canvas.edges, dirty: true })
       // 落盘必须带上本次重排后的新坐标：saveCanvas 的 state 闭包仍是本次渲染前的
       // 旧画布，不传 nodes 会把旧坐标写回后端（自动布局看着生效、刷新即丢）。
@@ -79,7 +78,8 @@ export function useAutoLayout(
     )
     const excluded = collapsedIdsOf(inputs)
     const boxes = layoutBoxesOf(nodes as never, (node) => groupCardSizeOf(node as never), excluded)
-    if (findLayoutOverlaps(boxes).length === 0) return
-    optionsRef.current.notify?.('info', optionsRef.current.tips?.overlap ?? '画布存在重叠节点，建议点击「整理布局」')
+    const overlapTip = optionsRef.current.tips?.overlap
+    if (findLayoutOverlaps(boxes).length === 0 || !overlapTip) return
+    optionsRef.current.notify?.('info', overlapTip)
   }, [currentId, currentKind, canvas.nodes, canvas.edges, dispatch])
 }

@@ -10,7 +10,7 @@
 
 import type { Dispatch } from 'react'
 import type { Dict } from '../i18n.js'
-import type { StudioAction, StudioState, EditorData } from './studio-state.js'
+import type { StudioAction, StudioState, EditorData, CanvasEdge } from './studio-state.js'
 import { agentPatchedNodeIdsOf } from './studio-selectors.js'
 import type { DocumentActionsFace } from '../hooks/useDocumentActions.js'
 import type { CanvasActionsFace } from '../hooks/useCanvasActions.js'
@@ -26,7 +26,8 @@ import type { RemoteFace } from '../hooks/useRemote.js'
 import type { ToastFace } from '../hooks/useToast.js'
 import type { WorkflowDocument, WorkflowTemplate } from '../../host/shared/graph-model.js'
 import type { GroupTemplate, RoleTemplate, ServiceState } from '../../host/shared/types.js'
-import type { flowToCanvasLines, runStatusMap, runningNodeIds, stageTemplateKinds } from '../lib/graph-model.js'
+import type { runStatusMap, runningNodeIds } from '../lib/run-status-map.js'
+import type { stageTemplateKinds } from '../lib/graph-handles.js'
 import { EP } from '../lib/remote.js'
 import type { CanvasApi } from '../components/canvas/GraphCanvas.js'
 import { GraphCanvas } from '../components/canvas/GraphCanvas.js'
@@ -40,6 +41,7 @@ import { ServiceConsole } from '../components/service-console/ServiceConsole.js'
 import { ComboManager } from '../components/combo-manager/ComboManager.js'
 import { SchedulerManager } from '../components/scheduler/SchedulerManager.js'
 import { useAutoLayout } from '../hooks/useAutoLayout.js'
+import { useServiceDebugStream } from '../hooks/useServiceDebugStream.js'
 
 export interface StudioLayoutProps {
   t: Dict
@@ -51,7 +53,7 @@ export interface StudioLayoutProps {
   currentService: ServiceState | null
   currentFlowTemplate: WorkflowTemplate | null
   editorData: EditorData | null
-  edgeList: ReturnType<typeof flowToCanvasLines>
+  edgeList: CanvasEdge[]
   stageKinds: ReturnType<typeof stageTemplateKinds>
   parentTemplate: RoleTemplate | null
   roleTemplates: RoleTemplate[]
@@ -127,6 +129,15 @@ export function StudioLayout(props: StudioLayoutProps) {
     notify: toast,
     tips: { overlap: t.canvasOverlapHint },
     onApplied: () => canvasApiRef.current?.fitView(),
+  })
+
+  // 服务调试流（模式二）：网络访问与生命周期集中在 hook，组件只消费其面。
+  // 调试身份用实例绑定的会话（工作台全局化：实例会话可能不是当前主会话）。
+  const serviceDebug = useServiceDebugStream(remote, {
+    serviceId: currentService?.id ?? '',
+    sessionId: currentService?.sessionId ?? sessionId,
+    enabled: state.mode === 'mode2' && currentService?.status === 'running',
+    errorPrefix: t.serviceDebugErrorPrefix,
   })
 
   // 左栏（LeftPanel）与底栏（BottomPanel）共用同一份库内容 props（内容/选中/拖拽逻辑一致，
@@ -281,9 +292,8 @@ export function StudioLayout(props: StudioLayoutProps) {
             ? <ServiceConsole
                 copy={t}
                 service={currentService}
-                // 服务调试身份用实例绑定的会话（工作台全局化：实例会话可能不是当前主会话）
-                sessionId={currentService?.sessionId ?? sessionId}
                 busy={state.run.runId !== null}
+                debug={serviceDebug}
               />
             : null}
           <GraphCanvas

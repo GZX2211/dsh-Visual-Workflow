@@ -370,3 +370,14 @@ export const SCHEDULER_TIMEZONE_SUGGESTIONS: readonly string[] = [
   'Australia/Sydney',
   'UTC',
 ] as const
+
+// ---------------------------------------------------------------------------
+// 稳定错误码常量（Host 产出 / Client 按语义消费）
+// ---------------------------------------------------------------------------
+// 说明：领域模块抛稳定 code，边界（api/routes.ts）翻译为 HTTP 状态；Client 侧
+// 按 code 分支处理（如 ERR_REVISION_CONFLICT 走乐观锁冲突语义，而非仅展示通用
+// message）。字面量只在本文件出现一次，两端引用本体，禁止在调用点硬编码。
+
+/** 乐观锁冲突：资源在客户端加载后已被别的写入修改（HTTP 409）。 */
+export const ERR_REVISION_CONFLICT = 'FLOW_REVISION_CONFLICT'
+

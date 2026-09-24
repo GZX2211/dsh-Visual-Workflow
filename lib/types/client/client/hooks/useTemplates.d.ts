@@ -11,8 +11,8 @@ export interface TemplatesFace {
         database: AnyTemplate[];
         group: AnyTemplate[];
     }>;
-    /** 新建本地草稿（id 正式格式；保存落库后 id 不变，画布引用不失效）。 */
-    createTemplateDraft(kind: TemplateKind): AnyTemplate;
+    /** 新建本地草稿（id 正式格式；保存落库后 id 不变，画布引用不失效）。name 由调用方从词典注入。 */
+    createTemplateDraft(kind: TemplateKind, name: string): AnyTemplate;
     saveTemplate(kind: TemplateKind, template: AnyTemplate): Promise<void>;
     deleteTemplate(kind: TemplateKind, id: string): Promise<void>;
 }

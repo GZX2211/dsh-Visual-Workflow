@@ -7,6 +7,7 @@ import type { WorkflowDocument } from '../shared/graph-model.js'
 import { resolveWorkspacePath } from '../workspace-path.js'
 import { resolveNewSessionCwd } from '../sessions/session-provider.js'
 import { httpError } from './http.js'
+import { ERR_REVISION_CONFLICT } from '../shared/protocol.js'
 import { VisualWorkflowApiBase } from './boundary.js'
 
 export class WorkflowEndpoints extends VisualWorkflowApiBase {
@@ -105,7 +106,7 @@ export class WorkflowEndpoints extends VisualWorkflowApiBase {
       return saved
     } catch (error) {
       const code = (error as { code?: string })?.code ?? ''
-      if (code === 'FLOW_REVISION_CONFLICT') throw httpError(409, String((error as Error).message), code)
+      if (code === ERR_REVISION_CONFLICT) throw httpError(409, String((error as Error).message), code)
       throw error
     }
   }
@@ -174,7 +175,7 @@ export class WorkflowEndpoints extends VisualWorkflowApiBase {
       return saved
     } catch (error) {
       const code = (error as { code?: string })?.code ?? ''
-      if (code === 'FLOW_REVISION_CONFLICT') throw httpError(409, String((error as Error).message), code)
+      if (code === ERR_REVISION_CONFLICT) throw httpError(409, String((error as Error).message), code)
       throw error
     }
   }

@@ -23,6 +23,7 @@ import { useRunControl } from '../hooks/useRunControl.js'
 import { useRunPolling } from '../hooks/useRunPolling.js'
 import { useActiveRunsPolling } from '../hooks/useActiveRunsPolling.js'
 import { useFlowTemplatesPolling } from '../hooks/useFlowTemplatesPolling.js'
+import { useServiceStatusPolling } from '../hooks/useServiceStatusPolling.js'
 import { useFlowFileSync } from '../hooks/useFlowFileSync.js'
 import { useServiceControl } from '../hooks/useServiceControl.js'
 import { useModeSwitch } from '../hooks/useModeSwitch.js'
@@ -42,7 +43,8 @@ import {
 } from './studio-state.js'
 import { StudioLayout } from './StudioLayout.js'
 import type { CanvasApi } from '../components/canvas/GraphCanvas.js'
-import { flowToCanvasLines, runStatusMap, runningNodeIds, stageTemplateKinds } from '../lib/graph-model.js'
+import { runStatusMap, runningNodeIds } from '../lib/run-status-map.js'
+import { stageTemplateKinds } from '../lib/graph-handles.js'
 import { computeRunLocks } from '../lib/run-locks.js'
 import { keepInstanceOptions } from './instance-options.js'
 
@@ -83,6 +85,8 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
   useActiveRunsPolling(dispatch, remote)
   // 工作流模板列表轮询（P2）：父代理经 wf_graph_patch 在宿主侧产出的模板要能被看见
   useFlowTemplatesPolling(dispatch, remote)
+  // 模式二服务状态轮询：宿主侧进程崩溃/被回收时把运行事实拉回界面（此前只在动作后刷新）
+  useServiceStatusPolling(state, dispatch, remote)
 
   const canvasApiRef = useRef<CanvasApi | null>(null)
   const canvasShellRef = useRef<HTMLDivElement | null>(null)
@@ -96,11 +100,11 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
   const running = isRunningOf(state)
   // 画布左上角工作流名称角标（用户批注：显示方式「模板/实例（工作流名称）」；采用「模板：名」「实例：名」）
   const canvasCaption = currentFlowTemplate
-    ? `模板：${currentFlowTemplate.name ?? ''}`
+    ? `${t.canvasCaptionTemplate}${currentFlowTemplate.name ?? ''}`
     : currentService
-      ? `实例：${currentService.name ?? ''}`
+      ? `${t.canvasCaptionInstance}${currentService.name ?? ''}`
       : currentFlow
-        ? `实例：${currentFlow.name ?? ''}`
+        ? `${t.canvasCaptionInstance}${currentFlow.name ?? ''}`
         : ''
   // 运行中双向同步（需求 §4.5.8）：当前运行节点高亮 = 快照中 status=running 的节点
   // id 列表（GraphCanvas 渲染 is-highlighted；防回环：只写视图，不进保存/撤销历史）。
@@ -155,7 +159,13 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
   }, [toast])
 
   // 双向同步②「流程文件→画布」：外部修改实例文件后轮询检测并响应（自动刷新/提示）
-  useFlowFileSync(state, dispatch, remote, useCallback((message: string) => notify('error', message), [notify]))
+  useFlowFileSync(
+    state,
+    dispatch,
+    remote,
+    { workflow: t.workflowFileExternalChange, service: t.serviceFileExternalChange },
+    useCallback((message: string) => notify('error', message), [notify]),
+  )
 
   // ---------- 模式名映射 ----------
   const modeName = useCallback((presetId: string | null | undefined): string => {
@@ -222,7 +232,8 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
   const stageKinds = useMemo(() => stageTemplateKinds(state.mode), [state.mode])
   const parentTemplate = useMemo(() => (state.templates.role as import('../../host/shared/types.js').RoleTemplate[]).find((item) => item.kind === 'parent') ?? null, [state.templates.role])
   const roleTemplates = useMemo(() => (state.templates.role as import('../../host/shared/types.js').RoleTemplate[]).filter((item) => item.kind !== 'parent'), [state.templates.role])
-  const edgeList = useMemo(() => flowToCanvasLines(state.canvas.edges), [state.canvas.edges])
+  // 画布连线即投影本体（CanvasEdge），渲染期按需计算颜色/条件标签，无需视图补充字段
+  const edgeList = state.canvas.edges
   const toolbarRunning = state.mode === 'mode2' ? currentService?.status === 'running' : running
   // 面板显隐推导：左栏/底栏由折叠循环位置推导，右侧属性栏由选中对象是否具备属性推导。
   const leftOpen = leftPanelOpenOf(state)

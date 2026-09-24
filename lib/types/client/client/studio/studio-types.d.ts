@@ -1,30 +1,18 @@
-import type { WorkflowDocument, GraphNode, Line, WorkflowTemplate } from '../../host/shared/graph-model.js';
+import type { WorkflowDocument, WorkflowTemplate } from '../../host/shared/graph-model.js';
 import type { ServiceState, RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate, ToolCombo, RunSnapshot } from '../../host/shared/types.js';
+import type { CanvasEdge, CanvasNode } from '../lib/canvas-model.js';
 /** 左侧栏 Tab（需求 §4.5.4：工作流 / 角色 / 数据（文件+数据库）/ 其他（阶段+协作组））。 */
 export type LibTab = 'workflow' | 'role' | 'data' | 'other';
 /** 左侧库选中种类（模板 kind + 固定卡片 + 工作流模板）。 */
 export type LibSelKind = 'workflow' | 'service' | 'workflowTemplate' | 'role' | 'file' | 'database' | 'parentTemplate' | 'stage' | 'groupTemplate';
 /** 模板种类（与后端 listTemplates 契约一致；group 为协作组模板，需求 §4.2.5.2）。 */
 export type TemplateKind = 'role' | 'file' | 'database' | 'group';
-/** 画布节点投影（位置/数据全量内联）。 */
-export interface CanvasNode {
-    id: string;
-    kind: GraphNode['kind'];
-    position: {
-        x: number;
-        y: number;
-    };
-    data: Record<string, unknown>;
-}
-/** 画布连线投影（条件标签由条件类型生成）。 */
-export interface CanvasEdge {
-    id: string;
-    source: string;
-    target: string;
-    sourceHandle: Line['sourceHandle'];
-    targetHandle: Line['targetHandle'];
-    condition?: Line['condition'];
-}
+/**
+ * 画布节点/连线投影类型的**本体在 lib/canvas-model.ts**（渲染、布局、连接校验共用
+ * 同一份形状）；此处再导出，使既有调用方（studio 内各模块、组件、hooks）的
+ * import 路径保持不变。
+ */
+export type { CanvasNode, CanvasEdge };
 /** 图快照（撤销重做栈元素）。 */
 export interface GraphSnapshot {
     nodes: CanvasNode[];

@@ -1,6 +1,6 @@
 import type { Dispatch } from 'react';
 import type { Dict } from '../i18n.js';
-import type { StudioAction, StudioState, EditorData } from './studio-state.js';
+import type { StudioAction, StudioState, EditorData, CanvasEdge } from './studio-state.js';
 import type { DocumentActionsFace } from '../hooks/useDocumentActions.js';
 import type { CanvasActionsFace } from '../hooks/useCanvasActions.js';
 import type { EditorActionsFace } from '../hooks/useEditorActions.js';
@@ -15,7 +15,8 @@ import type { RemoteFace } from '../hooks/useRemote.js';
 import type { ToastFace } from '../hooks/useToast.js';
 import type { WorkflowDocument, WorkflowTemplate } from '../../host/shared/graph-model.js';
 import type { GroupTemplate, RoleTemplate, ServiceState } from '../../host/shared/types.js';
-import type { flowToCanvasLines, runStatusMap, runningNodeIds, stageTemplateKinds } from '../lib/graph-model.js';
+import type { runStatusMap, runningNodeIds } from '../lib/run-status-map.js';
+import type { stageTemplateKinds } from '../lib/graph-handles.js';
 import type { CanvasApi } from '../components/canvas/GraphCanvas.js';
 export interface StudioLayoutProps {
     t: Dict;
@@ -26,7 +27,7 @@ export interface StudioLayoutProps {
     currentService: ServiceState | null;
     currentFlowTemplate: WorkflowTemplate | null;
     editorData: EditorData | null;
-    edgeList: ReturnType<typeof flowToCanvasLines>;
+    edgeList: CanvasEdge[];
     stageKinds: ReturnType<typeof stageTemplateKinds>;
     parentTemplate: RoleTemplate | null;
     roleTemplates: RoleTemplate[];

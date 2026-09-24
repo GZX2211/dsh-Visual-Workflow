@@ -7,7 +7,8 @@
 import type { CanvasEdge, CanvasNode } from './studio-types.js'
 import type { WorkflowDocument } from '../../host/shared/graph-model.js'
 import type { ServiceState } from '../../host/shared/types.js'
-import { consolidateGroups } from '../lib/graph-model.js'
+import { consolidateGroups } from '../lib/group-members.js'
+import { lineToCanvasEdge } from '../lib/graph-edges.js'
 
 /** 工作流文档/模板 → 画布投影（节点全量内联，位置缺省落默认格点）。 */
 export function flowToCanvas(flow: Pick<WorkflowDocument, 'nodes' | 'lines'>): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
@@ -24,14 +25,7 @@ export function flowToCanvas(flow: Pick<WorkflowDocument, 'nodes' | 'lines'>): {
         ? { proxySourceId: (node as { proxySourceId?: string }).proxySourceId }
         : {}),
     }))),
-    edges: (flow.lines ?? []).map((line) => ({
-      id: line.id,
-      source: line.source,
-      target: line.target,
-      sourceHandle: line.sourceHandle,
-      targetHandle: line.targetHandle,
-      ...(line.condition ? { condition: line.condition } : {}),
-    })),
+    edges: (flow.lines ?? []).map((line) => lineToCanvasEdge(line)),
   }
 }
 
@@ -48,13 +42,6 @@ export function serviceToCanvas(service: ServiceState): { nodes: CanvasNode[]; e
         ? { proxySourceId: (node as { proxySourceId?: string }).proxySourceId }
         : {}),
     }))),
-    edges: (service.lines ?? []).map((line) => ({
-      id: line.id,
-      source: line.source,
-      target: line.target,
-      sourceHandle: line.sourceHandle,
-      targetHandle: line.targetHandle,
-      ...(line.condition ? { condition: line.condition } : {}),
-    })),
+    edges: (service.lines ?? []).map((line) => lineToCanvasEdge(line)),
   }
 }

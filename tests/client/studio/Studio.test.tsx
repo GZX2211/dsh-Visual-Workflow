@@ -37,6 +37,7 @@ afterEach(() => {
 function remoteStub(): RemoteFace & { calls: Array<{ endpoint: string; args: Record<string, unknown> }> } {
   const calls: Array<{ endpoint: string; args: Record<string, unknown> }> = []
   const remote: RemoteFace = {
+    stream: vi.fn(async () => undefined),
     call: vi.fn(async (endpoint: string, args?: Record<string, unknown>) => {
       calls.push({ endpoint, args: args ?? {} })
       if (endpoint === EP.EP_LIST_TEMPLATES && String(args?.kind ?? '') === 'role') {
@@ -464,6 +465,7 @@ describe('组合管理：Tag 筛选与工具开关', () => {
   async function openCombo(): Promise<{ calls: Array<{ endpoint: string; args: Record<string, unknown> }> }> {
     const calls: Array<{ endpoint: string; args: Record<string, unknown> }> = []
     const remote: RemoteFace = {
+      stream: vi.fn(async () => undefined),
       call: vi.fn(async (endpoint: string, args?: Record<string, unknown>) => {
         calls.push({ endpoint, args: args ?? {} })
         if (endpoint === EP.EP_PLUGIN_CATALOG) return CATALOG

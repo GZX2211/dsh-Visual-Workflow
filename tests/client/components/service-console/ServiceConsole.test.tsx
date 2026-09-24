@@ -4,15 +4,16 @@
 
 // tests/client/components/service-console/ServiceConsole.test.tsx
 //
-// 服务控制台（T-049）：状态/端口展示；启动/停止切换（crashed 可重启）；
-// 运行中调试输入 → serviceDebug SSE 流式预览（打字机增量渲染）；
-// 流中错误行 → [错误] 前缀输出；停止按钮中止请求。
+// 服务调试台（纯表现层，T-049）：仅运行中渲染；调试输入 → 注入的调试面
+// （网络与 SSE 归 useServiceDebugStream，其行为见 tests/client/hooks/useServiceDebugStream.test.tsx）；
+// 进行中显示停止按钮；输出为空时显示引导文案。
 
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import React from 'react'
 import { ServiceConsole } from '../../../../src/client/components/service-console/ServiceConsole.js'
+import type { ServiceDebugFace } from '../../../../src/client/hooks/useServiceDebugStream.js'
 import { zh } from '../../../../src/client/i18n.js'
 import type { ServiceState } from '../../../../src/host/shared/types.js'
 
@@ -25,11 +26,10 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  root?.unmount()
+  act(() => { root?.unmount() })
   root = null
   container?.remove()
   container = null
-  vi.unstubAllGlobals()
 })
 
 function makeService(status: ServiceState['status'], port?: number): ServiceState {
@@ -48,6 +48,10 @@ function makeService(status: ServiceState['status'], port?: number): ServiceStat
   } as ServiceState
 }
 
+function makeDebug(overrides: Partial<ServiceDebugFace> = {}): ServiceDebugFace {
+  return { output: '', streaming: false, send: vi.fn(), stop: vi.fn(), ...overrides }
+}
+
 function buttons(): string[] {
   return Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-service-console button')).map((item) => item.textContent ?? '')
 }
@@ -59,33 +63,15 @@ function setTextarea(input: HTMLTextAreaElement, value: string): void {
   input.dispatchEvent(new Event('input', { bubbles: true }))
 }
 
-/** 构造 SSE 响应（逐块下发）。 */
-function sseResponse(lines: string[]): Response {
-  const encoder = new TextEncoder()
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      for (const line of lines) controller.enqueue(encoder.encode(line))
-      controller.close()
-    },
-  })
-  return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
-}
-
-async function renderConsole(service: ServiceState): Promise<void> {
+async function renderConsole(service: ServiceState, debug: ServiceDebugFace = makeDebug(), busy = false): Promise<void> {
   await act(async () => {
+    root?.unmount()
     root = createRoot(container!)
-    root.render(
-      React.createElement(ServiceConsole, {
-        copy: zh,
-        service,
-        sessionId: 's-9',
-        busy: false,
-      }),
-    )
+    root.render(React.createElement(ServiceConsole, { copy: zh, service, busy, debug }))
   })
 }
 
-describe('服务控制台', () => {
+describe('服务控制台（表现层）', () => {
   it('停止/崩溃：不渲染调试台（状态指示与启停在画布控制栏）', async () => {
     await renderConsole(makeService('stopped'))
     expect(document.querySelector('.wf-service-console')).toBeNull()
@@ -95,71 +81,67 @@ describe('服务控制台', () => {
 
   it('运行中：仅渲染调试区（无状态/启停冗余控件）', async () => {
     await renderConsole(makeService('running', 7860))
-    expect(document.querySelector('.wf-service-console__debug')).toBeTruthy()
+    expect(document.querySelector('.wf-service-console__debug')).not.toBeNull()
     expect(buttons()).not.toContain(zh.startService)
     expect(buttons()).not.toContain(zh.stopService)
   })
 
-  it('调试发送：SSE 增量追加到输出（打字机），结束后按钮恢复', async () => {
-    // Bug 3：SSE 数据必须用后端 sseChunk 的真实形态（choices[0].delta.content）
-    const fetchMock = vi.fn(async () => sseResponse([
-      'data: {"choices":[{"index":0,"delta":{"content":"你"},"finish_reason":null}]}\n\n',
-      'data: {"choices":[{"index":0,"delta":{"content":"好"},"finish_reason":null}]}\n\n',
-      'data: [DONE]\n\n',
-    ]))
-    vi.stubGlobal('fetch', fetchMock)
-    await renderConsole(makeService('running', 7860))
-
-    const input = document.querySelector('.wf-service-console__input') as HTMLTextAreaElement
-    await act(async () => {
-      setTextarea(input, '测试问题')
-    })
-    await act(async () => {
-      Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-service-console button')).find((item) => item.textContent === zh.serviceDebugSend)?.click()
-    })
-
-    // fetch 端点与 body 正确
-    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
-    expect(url).toBe('/visual-workflow/serviceDebug')
-    expect(JSON.parse(String(init.body))).toEqual({
-      args: { serviceId: 'svc-1', sessionId: 's-9', prompt: '测试问题' },
-    })
-
-    // SSE 增量渲染完成（打字机追加）
+  it('空输出显示引导文案；有输出则显示流式内容', async () => {
+    await renderConsole(makeService('running'))
     const output = document.querySelector('.wf-service-console__output') as HTMLPreElement
-    expect(output.textContent).toBe('你好')
-    // 结束后恢复发送按钮
-    expect(buttons()).toContain(zh.serviceDebugSend)
+    expect(output.textContent).toBe(zh.serviceDebugEmpty)
+
+    await renderConsole(makeService('running'), makeDebug({ output: '你好' }))
+    expect((document.querySelector('.wf-service-console__output') as HTMLPreElement).textContent).toBe('你好')
   })
 
-  it('流中错误行：输出显示 [错误] 前缀', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => sseResponse([
-      'data: {"error":{"message":"服务超时"}}\n\n',
-      'data: [DONE]\n\n',
-    ])))
-    await renderConsole(makeService('running', 7860))
+  it('点击发送：把当前输入交给调试面（组件不自建网络调用）', async () => {
+    const debug = makeDebug()
+    await renderConsole(makeService('running'), debug)
     const input = document.querySelector('.wf-service-console__input') as HTMLTextAreaElement
+    await act(async () => { setTextarea(input, '测试问题') })
+
     await act(async () => {
-      setTextarea(input, 'hi')
+      Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-service-console button'))
+        .find((item) => item.textContent === zh.serviceDebugSend)?.click()
     })
-    await act(async () => {
-      Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-service-console button')).find((item) => item.textContent === zh.serviceDebugSend)?.click()
-    })
-    const output = document.querySelector('.wf-service-console__output') as HTMLPreElement
-    expect(output.textContent).toContain('[错误] 服务超时')
+
+    expect(debug.send).toHaveBeenCalledWith('测试问题')
   })
 
-  it('服务停止后：调试区消失（组件内部 effect 中止流）', async () => {
-    await renderConsole(makeService('running', 7860))
-    expect(document.querySelector('.wf-service-console__debug')).toBeTruthy()
+  it('Enter 发送、Shift+Enter 换行', async () => {
+    const debug = makeDebug()
+    await renderConsole(makeService('running'), debug)
+    const input = document.querySelector('.wf-service-console__input') as HTMLTextAreaElement
+    await act(async () => { setTextarea(input, '问题') })
 
-    // 模拟服务状态变化（组件内部 effect 中止流）
     await act(async () => {
-      root?.unmount()
-      root = createRoot(container!)
-      root.render(React.createElement(ServiceConsole, { copy: zh, service: makeService('stopped'), sessionId: 's-9', busy: false }))
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true }))
     })
-    expect(document.querySelector('.wf-service-console__debug')).toBeNull()
+    expect(debug.send).not.toHaveBeenCalled()
+
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    })
+    expect(debug.send).toHaveBeenCalledWith('问题')
+  })
+
+  it('进行中：显示停止按钮并调用调试面 stop', async () => {
+    const debug = makeDebug({ streaming: true })
+    await renderConsole(makeService('running'), debug)
+
+    expect(buttons()).toContain(zh.serviceDebugStop)
+    await act(async () => {
+      Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-service-console button'))
+        .find((item) => item.textContent === zh.serviceDebugStop)?.click()
+    })
+    expect(debug.stop).toHaveBeenCalled()
+  })
+
+  it('输入为空时发送按钮禁用', async () => {
+    await renderConsole(makeService('running'))
+    const send = Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-service-console button'))
+      .find((item) => item.textContent === zh.serviceDebugSend) as HTMLButtonElement
+    expect(send.disabled).toBe(true)
   })
 })
-

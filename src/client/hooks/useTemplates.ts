@@ -15,18 +15,18 @@ export type AnyTemplate = RoleTemplate | FileTemplate | DatabaseTemplate | Group
 export interface TemplatesFace {
   /** 全部模板分类并行加载；返回按 kind 聚合的结果（某类失败不影响其他类，Bug 9）。 */
   loadTemplates(): Promise<{ role: AnyTemplate[]; file: AnyTemplate[]; database: AnyTemplate[]; group: AnyTemplate[] }>
-  /** 新建本地草稿（id 正式格式；保存落库后 id 不变，画布引用不失效）。 */
-  createTemplateDraft(kind: TemplateKind): AnyTemplate
+  /** 新建本地草稿（id 正式格式；保存落库后 id 不变，画布引用不失效）。name 由调用方从词典注入。 */
+  createTemplateDraft(kind: TemplateKind, name: string): AnyTemplate
   saveTemplate(kind: TemplateKind, template: AnyTemplate): Promise<void>
   deleteTemplate(kind: TemplateKind, id: string): Promise<void>
 }
 
-function draftOf(kind: TemplateKind): AnyTemplate {
+function draftOf(kind: TemplateKind, name: string): AnyTemplate {
   const now = new Date().toISOString()
   const id = `${kind === 'role' ? 'role' : kind === 'file' ? 'file' : kind === 'group' ? 'group' : 'db'}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
   if (kind === 'role') {
     return {
-      id, kind: 'agent', name: '新角色模板', systemPrompt: '', provider: '', model: '',
+      id, kind: 'agent', name, systemPrompt: '', provider: '', model: '',
       presetId: null, retryLimit: 3, reactLimit: null, inputSchema: '', outputSchema: '',
       injectSystemPrompt: true, injectToolSections: true, promptFilePath: undefined, createdAt: now, updatedAt: now,
       // 草稿标记：前端 UI 状态，后端 putTemplate 经 stripClientMeta 剥除、绝不落盘
@@ -34,13 +34,13 @@ function draftOf(kind: TemplateKind): AnyTemplate {
     } as Drafted<RoleTemplate>
   }
   if (kind === 'file') {
-    return { id, kind: 'file', name: '新文件模板', fileKind: 'text', content: '', createdAt: now, updatedAt: now, _draft: true } as Drafted<FileTemplate>
+    return { id, kind: 'file', name, fileKind: 'text', content: '', createdAt: now, updatedAt: now, _draft: true } as Drafted<FileTemplate>
   }
   if (kind === 'group') {
-    return { id, name: '新协作组模板', collabPrompt: '', createdAt: now, updatedAt: now, _draft: true } as Drafted<GroupTemplate>
+    return { id, name, collabPrompt: '', createdAt: now, updatedAt: now, _draft: true } as Drafted<GroupTemplate>
   }
   return {
-    id, kind: 'database', name: '新数据库模板', description: '', dbType: 'local', dbKind: 'sqlite',
+    id, kind: 'database', name, description: '', dbType: 'local', dbKind: 'sqlite',
     vectorSource: 'embedding', createdAt: now, updatedAt: now, _draft: true,
   } as Drafted<DatabaseTemplate>
 }
@@ -67,8 +67,8 @@ export function useTemplates(dispatch: Dispatch<StudioAction>, remote: RemoteFac
     return aggregated
   }, [dispatch, remote])
 
-  const createTemplateDraft = useCallback((kind: TemplateKind): AnyTemplate => {
-    const template = draftOf(kind)
+  const createTemplateDraft = useCallback((kind: TemplateKind, name: string): AnyTemplate => {
+    const template = draftOf(kind, name)
     dispatch({ type: 'TEMPLATE_ADDED', kind, template })
     return template
   }, [dispatch])

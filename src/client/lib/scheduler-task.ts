@@ -94,5 +94,3 @@ export function formatIso(value: string | null | undefined): string {
   }
 }
 
-/** 星期标签（0=周日 … 6=周六）。 */
-export const WEEKDAY_LABELS = ['日', '一', '二', '三', '四', '五', '六'] as const

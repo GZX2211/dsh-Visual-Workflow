@@ -18,8 +18,9 @@
 
 import type { Dict } from '../../i18n.js'
 import type { CanvasNode } from '../../studio/studio-state.js'
-import { HANDLES } from '../../lib/graph-model.js'
+import { HANDLES } from '../../lib/graph-handles.js'
 import { nodeSizeOf } from '../../lib/card-geometry.js'
+import { statusLabelOf } from '../../lib/status-label.js'
 import { handleY } from './geometry.js'
 
 interface FlowNodeProps {
@@ -77,8 +78,8 @@ function metaLinesOf(node: CanvasNode, copy: Dict & { modeName(id: string | null
   }
   if (kind === 'parent' || kind === 'agent') {
     // 格式：模型：deepseek（换行）组合：（显示选择的模式或组合）
-    const modelLabel = String(copy.nodeMetaModel ?? '模型')
-    const presetLabel = String(copy.nodeMetaPreset ?? '组合')
+    const modelLabel = String(copy.nodeMetaModel)
+    const presetLabel = String(copy.nodeMetaPreset)
     out.push(`${modelLabel}：${String(data.model ?? '').trim() || '—'}`)
     out.push(`${presetLabel}：${copy.modeName((data.presetId as string | null) ?? null)}`)
   } else if (kind === 'file') {
@@ -96,8 +97,8 @@ function metaLinesOf(node: CanvasNode, copy: Dict & { modeName(id: string | null
       if (names.length > 0) out.push(clip(names.join('，'), 40))
     }
   } else if (kind === 'database') {
-    out.push(data.dbType === 'server' ? `${String(data.dbKind ?? 'mysql')} · ${String(copy.dbTypeServer ?? '服务器')}` : String(copy.dbLocalLabel ?? '本地库'))
-    if (data.vectorSource === 'bm25') out.push(String(copy.dbBm25Badge ?? '相似度检索（非语义）'))
+    out.push(data.dbType === 'server' ? `${String(data.dbKind ?? 'mysql')} · ${String(copy.dbTypeServer)}` : String(copy.dbLocalLabel))
+    if (data.vectorSource === 'bm25') out.push(String(copy.dbBm25Badge))
   }
   return out.filter((line) => String(line ?? '').trim())
 }
@@ -108,7 +109,7 @@ export function FlowNode({ node, copy, mode, selected, highlighted, dragging, ru
   // P4 闸门可视化：proxy.data.role='milestone' 时用里程碑样式 + 角标（label 已在名称行渲染）
   const isGate = isProxy && (node.data as { role?: unknown }).role === 'milestone'
   // 名称回退：label 为空（含空白）时显示节点种类名（避免虚拟节点显示为空白卡片）
-  const nodeLabel = String(node.data.label ?? '').trim() || String(copy.nodeKinds?.[isProxy ? 'agent' : kind] ?? '')
+  const nodeLabel = String(node.data.label ?? '').trim() || String(copy.nodeKinds[isProxy ? 'agent' : kind] ?? '')
   // 阶段节点（启动/结束/暂停）：单/双流程连接点，交换无意义且会产生死数据（审查 BUG-1），
   // 与协作组一致不渲染交换按钮。
   const isStage = kind === 'start' || kind === 'end' || kind === 'pause'
@@ -117,7 +118,7 @@ export function FlowNode({ node, copy, mode, selected, highlighted, dragging, ru
   const displayKind = isProxy ? 'agent' : kind
   const handles = nodeHandles(displayKind, mode, swapped)
   const status = runStatus?.status ?? null
-  const statusText = status ? String((copy.status as Record<string, string>)[status] ?? '') : ''
+  const statusText = statusLabelOf(copy, status)
   const metaLines = metaLinesOf(node, copy)
   // 每行独立元信息（角色卡「模型 / 组合」两行显示；CSS white-space:pre-wrap 生效）
   const metaText = metaLines.join('\n')
@@ -162,26 +163,26 @@ export function FlowNode({ node, copy, mode, selected, highlighted, dragging, ru
           <button
             type="button"
             className={`wf-node__swap${swapped ? ' is-active' : ''}`}
-            title={String(copy.swapPorts ?? '交换左右连接点')}
-            aria-label={String(copy.swapPorts ?? '交换左右连接点')}
+            title={String(copy.swapPorts)}
+            aria-label={String(copy.swapPorts)}
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => { event.stopPropagation(); onToggleSwap(node.id) }}
           >{swapped ? '⇆' : '⇄'}</button>
         ) : null}
         <div className="wf-node__kind">
-          <span>{String(copy.nodeKinds?.[displayKind] ?? displayKind)}</span>
+          <span>{String(copy.nodeKinds[displayKind] ?? displayKind)}</span>
           {statusText ? <span className={`wf-status-dot is-${status}`} /> : null}
           {statusText ? <span className="wf-hint">{statusText}</span> : null}
           {/* 运行中锁定角标（已完成/执行中流程不可修改、不可删除；仍可拖动移动） */}
           {locked ? <span className="wf-node__lock-badge" title={lockHint}>🔒</span> : null}
           {/* P4：最近一次父代理补丁改动的节点（帮助用户理解画布为何变了） */}
-          {agentPatched ? <span className="wf-node__agent-badge" title={String(copy.agentPatchedBadge ?? '')}>{String(copy.agentPatchedBadge ?? '')}</span> : null}
+          {agentPatched ? <span className="wf-node__agent-badge" title={String(copy.agentPatchedBadge)}>{String(copy.agentPatchedBadge)}</span> : null}
         </div>
         <div className="wf-node__label">
           {isProxy
             ? (isGate
-                ? <span className="wf-node__proxy-badge is-gate">{String(copy.proxyGateBadge ?? '🚩')}</span>
-                : <span className="wf-node__proxy-badge">↻ 引用</span>)
+                ? <span className="wf-node__proxy-badge is-gate">{String(copy.proxyGateBadge)}</span>
+                : <span className="wf-node__proxy-badge">{String(copy.proxyBadge)}</span>)
             : null}
           {nodeLabel}
         </div>

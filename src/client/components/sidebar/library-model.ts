@@ -142,7 +142,7 @@ export function buildLibraryModel(input: LibraryModelInput): LibraryModel {
       plus: false,
       cards: (workflows ?? []).map((item) => card(
         item.id, 'workflow', item.id, '▦', String(item.name ?? ''),
-        item.description ? truncate(item.description, 60) : `${item.nodes?.length ?? 0} ${t.nodes ?? ''}`,
+        item.description ? truncate(item.description, 60) : `${item.nodes?.length ?? 0} ${t.nodes}`,
         {
           label: String(item.name ?? ''),
           onClick: () => onSelectWorkflow(item.id),
@@ -160,7 +160,7 @@ export function buildLibraryModel(input: LibraryModelInput): LibraryModel {
       plusKind: 'flowTemplate',
       cards: (flowTemplates ?? []).map((item) => card(
         item.id, 'workflowTemplate', item.id, '▦', String(item.name ?? ''),
-        item.description ? truncate(item.description, 60) : `${item.nodes?.length ?? 0} ${t.nodes ?? ''}`,
+        item.description ? truncate(item.description, 60) : `${item.nodes?.length ?? 0} ${t.nodes}`,
         {
           label: String(item.name ?? ''),
           onClick: () => onSelectFlowTemplate(item.id),
@@ -235,7 +235,7 @@ export function buildLibraryModel(input: LibraryModelInput): LibraryModel {
       title: t.stages,
       plus: false,
       cards: (stageKinds ?? []).map((card0) => card(
-        card0.kind, 'stage', card0.kind, '⬢', String(card0.label), String(t.stagePinHint ?? ''), {
+        card0.kind, 'stage', card0.kind, '⬢', String(card0.label), String(t.stagePinHint), {
           label: String(card0.label),
           onClick: () => onSelectLib('stage', card0.kind),
           onDrop: (position) => onPlaceStage(card0.kind, position ?? { x: 120, y: 80 }),

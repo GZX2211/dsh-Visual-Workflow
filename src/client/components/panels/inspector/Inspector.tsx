@@ -6,9 +6,11 @@
 
 import type { Dict } from '../../../i18n.js'
 import type { EditorData } from '../../../studio/studio-state.js'
-import {
-  RoleForm, FileForm, DatabaseForm, StageForm, GroupForm, ProxyForm, LinePanel, WorkflowForm,
-} from './field-forms.js'
+import { RoleForm } from './role-form.js'
+import { FileForm } from './file-form.js'
+import { DatabaseForm } from './database-form.js'
+import { GroupForm, ProxyForm, StageForm } from './node-forms.js'
+import { LinePanel, WorkflowForm } from './flow-forms.js'
 
 export interface InspectorProps {
   copy: Dict
@@ -128,7 +130,7 @@ export function Inspector(props: InspectorProps) {
     if ((kind === 'workflow' || kind === 'service') && !editorData.template && onSaveAsTemplate) {
       footer.push(
         <button key="save-as-template" type="button" className="wf-btn" onClick={onSaveAsTemplate} disabled={importBusy}>
-          {String(t.saveAsTemplate ?? '')}
+          {String(t.saveAsTemplate)}
         </button>,
       )
     }

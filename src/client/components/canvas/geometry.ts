@@ -1,9 +1,10 @@
 // src/client/components/canvas/geometry.ts
 //
-// 画布几何原语（照搬旧项目 graph-canvas.js 的纯函数）：接点垂直位置、贝塞尔连线几何、
-// 元素命中/入组坐标换算。
+// 画布渲染几何原语（纯计算，不触 DOM）：接点垂直位置、贝塞尔连线几何、组内成员锚点。
 // 卡片尺寸常量与尺寸解析（nodeSizeOf / groupCardSizeOf）的本体在 lib/card-geometry.ts：
 // 渲染与布局共用同一本体，此处只按本模块职责消费，不转发、不重复定义。
+// DOM 命中检测（elementFromPoint / elementsFromPoint）归 lib/dom-hit-test.ts：
+// 该能力被组件与 hooks 共用，不属于渲染几何。
 
 import { GROUP_MEMBER_LIST_TOP, GROUP_MEMBER_ROW_H, nodeSizeOf } from '../../lib/card-geometry.js'
 import type { CanvasEdge, CanvasNode } from '../../studio/studio-state.js'
@@ -103,35 +104,4 @@ export function edgeGeometry(edge: CanvasEdge, byId: Map<string, CanvasNode>): E
     label: { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 },
     path: `M ${start.x} ${start.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${end.x} ${end.y}`,
   }
-}
-
-/** 命中检测：鼠标坐标下的节点 id（最近 data-wf-node-id 祖先）。 */
-export function connectionTargetAt(clientX: number, clientY: number): string | null {
-  const element = document.elementFromPoint(clientX, clientY)
-  return element?.closest?.('[data-wf-node-id]')?.getAttribute('data-wf-node-id') ?? null
-}
-
-/**
- * 协作组表面命中（入组判定，用户批注 §4.2.5.2 收紧：仅组卡片表面可入组）：
- *  - 跳过不在协作组内的元素（画布空白/连线 SVG/其他节点等装饰层）；
- *  - 跳过被拖拽本体节点（拖拽时节点被挪到鼠标下方，若不排除会遮蔽组表面命中）；
- *  - 命中 `.wf-graph__handle`（连接点）→ 返回 null：连接点**不具入组功能**。
- * 返回命中的协作组 id；否则 null。纯函数接收元素数组，便于 jsdom 单测。
- */
-export function groupSurfaceFromElements(elements: Element[], excludeNodeId?: string | null): string | null {
-  for (const el of elements) {
-    const groupEl = el.closest?.('.wf-group-node') as HTMLElement | null
-    if (!groupEl) continue
-    const hostNodeId = el.closest?.('[data-wf-node-id]')?.getAttribute('data-wf-node-id') ?? null
-    if (excludeNodeId && hostNodeId === excludeNodeId) continue
-    if (el.closest?.('.wf-graph__handle')) return null
-    return groupEl.getAttribute('data-wf-node-id')
-  }
-  return null
-}
-
-/** 鼠标坐标下的协作组表面（入组落点；封装 elementsFromPoint，供拖拽 onMove/onUp 共用）。 */
-export function groupSurfaceUnderPoint(clientX: number, clientY: number, excludeNodeId?: string | null): string | null {
-  if (typeof document.elementsFromPoint !== 'function') return null
-  return groupSurfaceFromElements(document.elementsFromPoint(clientX, clientY), excludeNodeId)
 }

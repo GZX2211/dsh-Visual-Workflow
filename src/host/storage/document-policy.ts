@@ -13,9 +13,11 @@
 // 与锁的关系：本文件只做**决策**，不做 IO；读改写必须在调用方的同一临界区内完成
 // （见 ./AGENTS.md「原子性与锁」）。
 
+// 稳定错误码本体在共享协议常量（Host 产出 / Client 消费，两端零漂移）
+import { ERR_REVISION_CONFLICT } from '../shared/protocol.js'
+
 /** 保存选项：陈旧快照冲突保护（旧项目 nextFlowRevision 语义保留）。 */
-export interface SaveOptions {
-  /** 客户端加载时的 revision；与当前不一致且非 force 时抛冲突。 */
+export interface SaveOptions {  /** 客户端加载时的 revision；与当前不一致且非 force 时抛冲突。 */
   expectedRevision?: number | null
   /** 强制覆盖（跳过冲突检查）。 */
   force?: boolean
@@ -29,7 +31,7 @@ export interface SaveOptions {
 
 /** revision 冲突错误：另一会话已保存更新的版本（架构文档 §4.1 原子性与锁一致）。 */
 export class FlowRevisionConflictError extends Error {
-  readonly code = 'FLOW_REVISION_CONFLICT'
+  readonly code = ERR_REVISION_CONFLICT
   constructor(
     readonly id: string,
     readonly expectedRevision: number | null,

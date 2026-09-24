@@ -4,24 +4,25 @@
 // 节点为绝对定位 HTML 卡片（左 db/ctx/flow 入点、右 ctx/flow/db 出点），连线为
 // SVG 贝塞尔曲线；支持拖拽、平移、缩放、连线、条件标签、运行态高亮、空画布引导。
 // 协作组卡片渲染成员迷你列表（组内成员节点以迷你形态叠加于组内）。
+//
+// 职责拆分（本文件 = 交互编排 + 组装）：
+//   - 视口（平移/缩放/适配/坐标换算）：./use-canvas-viewport.ts
+//   - 连线层渲染：./CanvasEdges.tsx
+//   - 节点卡片：./FlowNode.tsx、./GroupCard.tsx
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Dict } from '../../i18n.js'
 import type { CanvasEdge, CanvasNode } from '../../studio/studio-state.js'
 import { memberLabelOf } from '../../studio/studio-selectors.js'
-import { conditionLabel, lineColorClass } from '../../lib/graph-model.js'
-import { GRAPH_NODE_SIZE, nodeSizeOf } from '../../lib/card-geometry.js'
+import { nodeSizeOf } from '../../lib/card-geometry.js'
+import { connectionTargetAt, groupSurfaceUnderPoint } from '../../lib/dom-hit-test.js'
 import { FlowNode } from './FlowNode.js'
 import { GroupCard } from './GroupCard.js'
-import { connectionTargetAt, groupOfMember, groupSurfaceUnderPoint, swappedOf, edgeGeometry, GRAPH_MIN_ZOOM, GRAPH_MAX_ZOOM, clamp } from './geometry.js'
+import { CanvasEdges } from './CanvasEdges.js'
+import { useCanvasViewport } from './use-canvas-viewport.js'
+import { groupOfMember, swappedOf } from './geometry.js'
 
-export interface CanvasApi {
-  fitView(options?: { padding?: number; nodes?: CanvasNode[] }): void
-  focusNode(id: string, options?: { zoom?: number }): void
-  zoomIn(): void
-  zoomOut(): void
-  screenToWorld(clientX: number, clientY: number): { x: number; y: number }
-}
+export type { CanvasApi } from './use-canvas-viewport.js'
 
 export interface GraphCanvasProps {
   nodes: CanvasNode[]
@@ -40,7 +41,7 @@ export interface GraphCanvasProps {
   lockedEdgeIds?: ReadonlySet<string>
   /** P4：最近一次父代理补丁（origin='agent'）改动的节点 id → 显示「AI 调整」角标。 */
   agentPatchedNodeIds?: string[]
-  onInit(api: CanvasApi): void
+  onInit(api: import('./use-canvas-viewport.js').CanvasApi): void
   onNodeDragStart(): void
   onNodeMove(id: string, position: { x: number; y: number }): void
   /** 角色节点拖入协作组（需求 §4.2.5.2 规则 1）。 */
@@ -63,8 +64,6 @@ export interface GraphCanvasProps {
   workflowCaption?: string
 }
 
-interface Viewport { x: number; y: number; zoom: number }
-
 export function GraphCanvas(props: GraphCanvasProps) {
   const {
     nodes, edges, copy, mode, selectedNode, selectedEdge, runStatusByNode, highlightedNodeIds,
@@ -72,10 +71,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
     onConnect, onConnectionRejected, onGroupResize, onSwapPorts, dropTargetGroupId, fitLabel, zoomInLabel, zoomOutLabel, emptyHint, workflowCaption,
     lockedNodeIds, lockedEdgeIds, agentPatchedNodeIds,
   } = props
-  const rootRef = useRef<HTMLDivElement | null>(null)
-  const viewportRef = useRef<Viewport>({ x: 32, y: 32, zoom: 0.8 })
-  const [viewport, setViewport] = useState<Viewport>({ x: 32, y: 32, zoom: 0.8 })
-  const [panning, setPanning] = useState<{ startX: number; startY: number; originX: number; originY: number } | null>(null)
+  const { rootRef, viewport, viewportRef, fitView, panning, beginPan, zoomBy, screenToWorld } = useCanvasViewport(nodes, onInit)
   const [draggingNode, setDraggingNode] = useState<{ nodeId: string; startClientX: number; startClientY: number; originX: number; originY: number } | null>(null)
   /** 画布内节点拖拽时悬停的协作组 id（组卡片高亮 + 「放开以入组」提示）。 */
   const [dragHoverGroupId, setDragHoverGroupId] = useState<string | null>(null)
@@ -90,106 +86,8 @@ export function GraphCanvas(props: GraphCanvasProps) {
   const isLockedEdge = (id: string): boolean => lockedEdgeIds?.has(id) === true
   /** 节点锁悬停文案（已完成/执行中语义不同，取自词典）。 */
   const nodeLockHint = (id: string): string => (runStatusOf(id)?.status === 'running'
-    ? String(copy.lockedRunningNodeHint ?? '')
-    : String(copy.lockedCompletedNodeHint ?? ''))
-
-  const updateViewport = useCallback((value: Viewport | ((current: Viewport) => Viewport)): void => {
-    setViewport((current) => {
-      const next = typeof value === 'function' ? value(current) : value
-      viewportRef.current = next
-      return next
-    })
-  }, [])
-
-  const fitView = useCallback((options: { padding?: number; nodes?: CanvasNode[] } = {}): void => {
-    const root = rootRef.current
-    if (!root || nodes.length === 0) return
-    const rect = root.getBoundingClientRect()
-    if (!rect.width || !rect.height) return
-    const requestedIds = new Set((options.nodes ?? []).map((node) => typeof node === 'string' ? node : node.id).filter(Boolean))
-    const visibleNodes = requestedIds.size > 0 ? nodes.filter((node) => requestedIds.has(node.id)) : nodes
-    if (visibleNodes.length === 0) return
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-    for (const node of visibleNodes) {
-      const size = nodeSizeOf(node)
-      minX = Math.min(minX, node.position.x)
-      minY = Math.min(minY, node.position.y)
-      maxX = Math.max(maxX, node.position.x + size.w)
-      maxY = Math.max(maxY, node.position.y + size.h)
-    }
-    const padding = Math.max(36, Math.min(rect.width, rect.height) * Number(options.padding ?? 0.16))
-    const zoom = clamp(
-      Math.min((rect.width - padding * 2) / Math.max(1, maxX - minX), (rect.height - padding * 2) / Math.max(1, maxY - minY)),
-      GRAPH_MIN_ZOOM, 1.15,
-    )
-    updateViewport({
-      x: (rect.width - (maxX - minX) * zoom) / 2 - minX * zoom,
-      y: (rect.height - (maxY - minY) * zoom) / 2 - minY * zoom,
-      zoom,
-    })
-  }, [nodes, updateViewport])
-
-  const focusNode = useCallback((id: string, options: { zoom?: number } = {}): void => {
-    const root = rootRef.current
-    const node = nodes.find((candidate) => candidate.id === id)
-    if (!root || !node) return
-    const rect = root.getBoundingClientRect()
-    const zoom = clamp(Number(options.zoom ?? Math.max(viewportRef.current.zoom, 0.96)), GRAPH_MIN_ZOOM, 1.15)
-    updateViewport({
-      x: rect.width / 2 - (node.position.x + GRAPH_NODE_SIZE.w / 2) * zoom,
-      y: rect.height / 2 - (node.position.y + GRAPH_NODE_SIZE.h / 2) * zoom,
-      zoom,
-    })
-  }, [nodes, updateViewport])
-
-  const zoomBy = useCallback((factor: number): void => {
-    const root = rootRef.current
-    if (!root) return
-    const rect = root.getBoundingClientRect()
-    const cx = rect.width / 2
-    const cy = rect.height / 2
-    const current = viewportRef.current
-    const zoom = clamp(current.zoom * factor, GRAPH_MIN_ZOOM, GRAPH_MAX_ZOOM)
-    const ratio = zoom / current.zoom
-    updateViewport({ zoom, x: cx - (cx - current.x) * ratio, y: cy - (cy - current.y) * ratio })
-  }, [updateViewport])
-
-  const screenToWorld = useCallback((clientX: number, clientY: number): { x: number; y: number } => {
-    const rect = rootRef.current?.getBoundingClientRect()
-    if (!rect) return { x: 0, y: 0 }
-    return {
-      x: (clientX - rect.left - viewportRef.current.x) / viewportRef.current.zoom,
-      y: (clientY - rect.top - viewportRef.current.y) / viewportRef.current.zoom,
-    }
-  }, [])
-
-  useEffect(() => {
-    onInit({ fitView, focusNode, zoomIn: () => zoomBy(1.2), zoomOut: () => zoomBy(1 / 1.2), screenToWorld })
-  }, [onInit, fitView, focusNode, zoomBy, screenToWorld])
-
-  // ---- 画布平移 ----
-  const beginPan = useCallback((event: React.PointerEvent): void => {
-    if (event.button !== undefined && event.button !== 0) return
-    setPanning({ startX: event.clientX, startY: event.clientY, originX: viewportRef.current.x, originY: viewportRef.current.y })
-  }, [])
-
-  useEffect(() => {
-    if (!panning) return undefined
-    const onMove = (event: PointerEvent): void => {
-      updateViewport({
-        ...viewportRef.current,
-        x: panning.originX + (event.clientX - panning.startX),
-        y: panning.originY + (event.clientY - panning.startY),
-      })
-    }
-    const onUp = (): void => setPanning(null)
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-    return () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-    }
-  }, [panning, updateViewport])
+    ? String(copy.lockedRunningNodeHint)
+    : String(copy.lockedCompletedNodeHint))
 
   // ---- 节点拖拽 ----
   const beginNodeDrag = useCallback((event: React.PointerEvent, nodeId: string): void => {
@@ -249,7 +147,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
     }
-  }, [draggingNode, byId, onNodeMove, onNodeDropToGroup, setDragHoverGroupId])
+  }, [draggingNode, byId, onNodeMove, onNodeDropToGroup])
 
   // ---- 连线 ----
   const beginConnection = useCallback((event: React.PointerEvent, nodeId: string, handle: string): void => {
@@ -297,25 +195,6 @@ export function GraphCanvas(props: GraphCanvasProps) {
     }
   }, [connectionDraft, onConnect, onConnectionRejected])
 
-  // ---- 缩放（滚轮） ----
-  useEffect(() => {
-    const root = rootRef.current
-    if (!root) return undefined
-    const onWheel = (event: WheelEvent): void => {
-      event.preventDefault()
-      const current = viewportRef.current
-      const rect = root.getBoundingClientRect()
-      const mx = event.clientX - rect.left
-      const my = event.clientY - rect.top
-      const factor = Math.exp(-event.deltaY * 0.0012)
-      const zoom = clamp(current.zoom * factor, GRAPH_MIN_ZOOM, GRAPH_MAX_ZOOM)
-      const ratio = zoom / current.zoom
-      updateViewport({ zoom, x: mx - (mx - current.x) * ratio, y: my - (my - current.y) * ratio })
-    }
-    root.addEventListener('wheel', onWheel, { passive: false })
-    return () => root.removeEventListener('wheel', onWheel)
-  }, [updateViewport])
-
   // ---- 协作组拉伸 ----
   const [groupResize, setGroupResize] = useState<{ nodeId: string; startX: number; startY: number; startSize: { w: number; h: number } } | null>(null)
   const beginGroupResize = useCallback((event: React.PointerEvent, nodeId: string): void => {
@@ -358,52 +237,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
     }
   }, [groupResize, onGroupResize])
 
-  // ---- 连线渲染 ----
-  const edgeViews = nodes.length === 0 ? [] : edges.map((edge) => {
-    const geometry = edgeGeometry(edge, byId)
-    if (!geometry) return null
-    const isSelected = edge.id === selectedEdge
-    const isRunning = runStatusOf(edge.source)?.status === 'running'
-    // 运行中锁定连线：属于已完成流程或执行中节点的左入口 → 灰化虚线、点击不选中（属性栏不展开）
-    const isLocked = isLockedEdge(edge.id)
-    // 连线颜色 class 与 lib/graph-model.lineColorClass 同源（条件优先 + 通道回退）；
-    // 改动前此处是 edgeConditionClass/edgeChannelClass 两份本地实现，同为条件优先，
-    // 故渲染结果不变。
-    const lineType = lineColorClass(edge)
-    const label = conditionLabel(edge.condition)
-    // 流程通道有向（箭头）；上下文/数据库线无方向要求
-    const channel = lineType.startsWith('is-') ? lineType.slice(3) : ''
-    const directed = channel === '' || channel === 'pass' || channel === 'fail' || channel === 'content'
-    const markerEnd = directed ? `url(#wf-arrow-${channel === '' ? 'flow' : channel})` : undefined
-    const labelWidth = label ? Math.min(150, Math.max(34, label.length * 7 + 16)) : 0
-    return (
-      <g key={edge.id} className={isLocked ? 'is-locked' : undefined}>
-        {/* 被锁连线不可选中/编辑（用户裁决：锁定的内容不展开属性面板，故无需 toast） */}
-        {isLocked ? <title>{String(copy.lockedEdgeHint ?? '')}</title> : null}
-        <path
-          className={`wf-graph__edge-hit${isSelected ? ' is-selected' : ''}`}
-          d={geometry.path}
-          onPointerDown={(event) => {
-            event.stopPropagation()
-            if (isLocked) return
-            onEdgeSelect?.(edge.id)
-          }}
-        />
-        <path
-          className={`wf-graph__edge${isSelected ? ' is-selected' : ''}${lineType ? ` ${lineType}` : ''}${isRunning ? ' is-running' : ''}${isLocked ? ' is-locked' : ''}`}
-          d={geometry.path}
-          markerEnd={markerEnd}
-        />
-        {label ? (
-          <g className="wf-edge-label-group">
-            <rect className="wf-graph__label-bg" x={geometry.label.x - labelWidth / 2} y={geometry.label.y - 8} width={labelWidth} height={16} rx={8} />
-            <text className="wf-graph__label" x={geometry.label.x} y={geometry.label.y}>{label}</text>
-          </g>
-        ) : null}
-      </g>
-    )
-  })
-
+  // ---- 连线草稿路径（拖拽中） ----
   let draftPath: string | null = null
   if (connectionDraft) {
     const current = viewportRef.current
@@ -424,7 +258,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
   // 虚拟节点显示数据：label 从主节点取（不存独立配置，§4.2.3.2 规则 3）
   const renderedNodes: CanvasNode[] = nodes.map((node) => {
     if (node.kind !== 'proxy') return node
-    const sourceId = String((node as { proxySourceId?: unknown }).proxySourceId ?? '')
+    const sourceId = String(node.proxySourceId ?? '')
     const main = byId.get(sourceId)
     return main ? { ...node, data: { ...node.data, label: String((main.data as { label?: unknown }).label ?? '') } } : node
   })
@@ -460,25 +294,17 @@ export function GraphCanvas(props: GraphCanvasProps) {
         onClick={(event) => { if (event.target === event.currentTarget) onPaneClick?.() }}
       >
         <div className="wf-graph__stage" style={{ transform }}>
-          <svg className="wf-graph__edges" width="100%" height="100%" style={{ position: 'absolute', inset: 0, overflow: 'visible' }}>
-            {/* 有向线段箭头（流程通道：流程/通过/不通过/内容；上下文/数据库线无方向要求） */}
-            <defs>
-              <marker id="wf-arrow-flow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                <path d="M 0 1 L 9 5 L 0 9 z" className="wf-arrow-head" />
-              </marker>
-              <marker id="wf-arrow-pass" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                <path d="M 0 1 L 9 5 L 0 9 z" className="wf-arrow-head is-pass" />
-              </marker>
-              <marker id="wf-arrow-fail" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                <path d="M 0 1 L 9 5 L 0 9 z" className="wf-arrow-head is-fail" />
-              </marker>
-              <marker id="wf-arrow-content" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                <path d="M 0 1 L 9 5 L 0 9 z" className="wf-arrow-head is-content" />
-              </marker>
-            </defs>
-            {edgeViews}
-            {draftPath ? <path className="wf-graph__connection" d={draftPath} /> : null}
-          </svg>
+          <CanvasEdges
+            nodes={nodes}
+            edges={edges}
+            byId={byId}
+            selectedEdge={selectedEdge}
+            runStatusOf={runStatusOf}
+            isLockedEdge={isLockedEdge}
+            copy={copy}
+            onEdgeSelect={onEdgeSelect}
+            draftPath={draftPath}
+          />
           {groupNodes.map((node) => (
             <GroupCard
               key={node.id}

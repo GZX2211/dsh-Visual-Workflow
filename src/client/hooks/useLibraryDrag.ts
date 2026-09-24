@@ -7,7 +7,7 @@
 import { useCallback, useRef, useState } from 'react'
 import type { DragPayload } from '../components/sidebar/LeftPanel.js'
 import type { CanvasApi } from '../components/canvas/GraphCanvas.js'
-import { groupSurfaceUnderPoint } from '../components/canvas/geometry.js'
+import { groupSurfaceUnderPoint } from '../lib/dom-hit-test.js'
 
 export interface LibraryDragFace {
   beginLibraryDrag(event: React.PointerEvent, payload: DragPayload): void

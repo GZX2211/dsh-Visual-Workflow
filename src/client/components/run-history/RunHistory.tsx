@@ -7,6 +7,7 @@
 
 import type { Dict } from '../../i18n.js'
 import type { RunSnapshot } from '../../../host/shared/types.js'
+import { statusLabelOf } from '../../lib/status-label.js'
 
 export interface RunHistoryProps {
   history: RunSnapshot[]
@@ -18,8 +19,9 @@ export interface RunHistoryProps {
   canResume: boolean
 }
 
+/** 运行历史里的状态文案：词典缺失时回退状态码原文（便于识别新状态）。 */
 function statusLabel(status: string, copy: Dict): string {
-  return String((copy.status as Record<string, string>)[status] ?? status ?? '')
+  return statusLabelOf(copy, status) || String(status ?? '')
 }
 
 function formatTime(value: string | null | undefined): string {

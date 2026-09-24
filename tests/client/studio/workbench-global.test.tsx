@@ -70,6 +70,7 @@ function remoteStub(options: {
 } = {}) {
   const calls: Array<{ endpoint: string; args: Record<string, unknown> }> = []
   const remote: RemoteFace = {
+    stream: vi.fn(async () => undefined),
     call: vi.fn(async (endpoint: string, args?: Record<string, unknown>) => {
       calls.push({ endpoint, args: args ?? {} })
       if (endpoint === EP.EP_LIST_WORKFLOWS) return options.workflows ?? []

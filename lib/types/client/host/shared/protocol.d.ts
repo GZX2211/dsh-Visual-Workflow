@@ -241,3 +241,5 @@ export declare const EP_SCHEDULER_TASK_DELETE = "schedulerTaskDelete";
  * （`Intl` 解析出的任意 IANA 名），字面量联合会让 includes/unshift 需要窄化断言。
  */
 export declare const SCHEDULER_TIMEZONE_SUGGESTIONS: readonly string[];
+/** 乐观锁冲突：资源在客户端加载后已被别的写入修改（HTTP 409）。 */
+export declare const ERR_REVISION_CONFLICT = "FLOW_REVISION_CONFLICT";

@@ -1,27 +1,25 @@
 // src/client/components/scheduler/SchedulerManager.tsx
 //
-// 定时任务管理弹层（新功能本阶段；样式对齐组合管理 wf-combo 体系）：
-//   - 左侧：任务属性编辑栏（顶部工作流选择器 + 会话策略 + 时区 + 执行窗口
-//     （日期范围/星期/时间段）+ 触发策略（定点时刻/固定间隔）+ 运行时策略说明）；
-//   - 右侧：任务列表（新建/选中/删除）+ 运行态（状态/下次触发/最近结果）。
+// 定时任务管理弹层（容器/装配层）：装配任务数据面（hooks/useSchedulerTasks）与
+// 左右两块纯表现组件（SchedulerTaskForm / SchedulerTaskList），并持有表单草稿等
+// 界面状态、把结果翻译为 toast。
 // 数据流：remote(EP_SCHEDULER_*) ↔ 后端；表单草稿本地编辑，保存后整任务落盘
 // （configUpdate=immediate：无需等待次日，下一 tick 生效）。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Dict } from '../../i18n.js'
-import { EP } from '../../lib/remote.js'
-import type { RemoteFace } from '../../hooks/useRemote.js'
 import type { ScheduledTask, ScheduledTaskView, TimeRangeConfig } from '../../../host/shared/types.js'
 // 常用时区建议列表：共享协议常量的唯一本体（host/client 共用，禁止在本组件再维护一份）
 import { SCHEDULER_TIMEZONE_SUGGESTIONS } from '../../../host/shared/protocol.js'
-import { DateRangePicker, type DateRangeValue } from '../date-picker/DateRangePicker.js'
-import { TimeInput } from '../time-input/TimeInput.js'
+import type { RemoteFace } from '../../hooks/useRemote.js'
+import { useSchedulerTasks } from '../../hooks/useSchedulerTasks.js'
+import type { DateRangeValue } from '../date-picker/DateRangePicker.js'
 import {
-  createTaskDraft, detectLocalTimezone, formatIso, localDateOnly, newTaskId, shiftDateOnly,
-  taskFromView, validateTaskDraft, WEEKDAY_LABELS,
+  createTaskDraft, detectLocalTimezone, localDateOnly, shiftDateOnly,
+  taskFromView, validateTaskDraft,
 } from '../../lib/scheduler-task.js'
-
-interface TemplateItem { id: string; name?: string; description?: string; mode?: string }
+import { SchedulerTaskForm } from './SchedulerTaskForm.js'
+import { SchedulerTaskList } from './SchedulerTaskList.js'
 
 export interface SchedulerManagerProps {
   copy: Dict
@@ -31,87 +29,53 @@ export interface SchedulerManagerProps {
   onToast(kind: 'info' | 'success' | 'error', text: string): void
 }
 
-/** 表单行（标签 + 子元素）。 */
-function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
-  return (
-    <label className="wf-sched-field">
-      <span className="wf-sched-field__label">{label}</span>
-      {children}
-      {hint ? <span className="wf-sched-field__hint">{hint}</span> : null}
-    </label>
-  )
-}
-
 export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: SchedulerManagerProps) {
-  const [views, setViews] = useState<ScheduledTaskView[]>([])
-  const [templates, setTemplates] = useState<TemplateItem[]>([])
+  const tasks = useSchedulerTasks(remote)
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
   const [draft, setDraft] = useState<ScheduledTask | null>(null)
-  const [busy, setBusy] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [calendarOpen, setCalendarOpen] = useState(false)
   const loadedRef = useRef(false)
-  // 卸载后不得再写状态（异步返回的归属校验）：本弹层由 schedulerOpen 条件渲染，关闭即卸载，
-  // 而加载/保存请求可能仍在飞。
-  const mountedRef = useRef(true)
-  useEffect(() => {
-    mountedRef.current = true
-    return () => { mountedRef.current = false }
+  // 最近一次的选中任务 id（供加载后判定沿用/回退，避免在 setState updater 内产生副作用）
+  const activeTaskIdRef = useRef<string | null>(null)
+  activeTaskIdRef.current = activeTaskId
+
+  /** 加载完成后确定选中项：仍存在则沿用，否则回退首个任务。 */
+  const selectAfterLoad = useCallback((list: ScheduledTaskView[]) => {
+    const current = activeTaskIdRef.current
+    if (current && list.some((item) => item.task.taskId === current)) return
+    const first = list[0]
+    if (!first) return
+    setActiveTaskId(first.task.taskId)
+    setDraft(taskFromView(first))
   }, [])
 
-  const load = useCallback(async (): Promise<void> => {
-    try {
-      const [viewsData, templatesData] = await Promise.all([
-        remote.call(EP.EP_SCHEDULER_TASKS).catch(() => []),
-        remote.call(EP.EP_LIST_FLOW_TEMPLATES).catch(() => []),
-      ]) as [unknown, unknown]
-      const items = Array.isArray(viewsData) ? viewsData as ScheduledTaskView[] : []
-      const tpls = (Array.isArray(templatesData) ? templatesData : [])
-        .filter((item) => (item as TemplateItem).mode === 'mode1') as TemplateItem[]
-      if (!mountedRef.current) return
-      setViews(items)
-      setTemplates(tpls)
-      setActiveTaskId((current) => {
-        if (current && items.some((item) => item.task.taskId === current)) return current
-        const first = items[0]
-        if (first) {
-          setDraft(taskFromView(first))
-          return first.task.taskId
-        }
-        return current
-      })
-    } catch (error) {
-      if (!mountedRef.current) return
-      onToast('error', String((error as Error)?.message ?? error))
-    }
-  }, [remote, onToast])
-
+  const { load } = tasks
   useEffect(() => {
     if (loadedRef.current) return
     loadedRef.current = true
-    void load()
-  }, [load])
+    void (async () => {
+      try {
+        const { views } = await load()
+        selectAfterLoad(views)
+      } catch (error) {
+        onToast('error', String((error as Error)?.message ?? error))
+      }
+    })()
+  }, [load, onToast, selectAfterLoad])
 
   const activeView = useMemo(
-    () => views.find((item) => item.task.taskId === activeTaskId) ?? null,
-    [views, activeTaskId],
+    () => tasks.views.find((item) => item.task.taskId === activeTaskId) ?? null,
+    [tasks.views, activeTaskId],
   )
-
-  /** 任务列表项展示元信息（模板名 + 下次触发）。 */
-  const itemMeta = useCallback((view: ScheduledTaskView): string => {
-    const tpl = templates.find((item) => item.id === view.task.workflowTemplateId)
-    const parts = [tpl?.name ?? view.task.workflowTemplateId]
-    if (view.runtime.nextTriggerAt) parts.push(`${copy.schedulerNextRun} ${formatIso(view.runtime.nextTriggerAt)}`)
-    return parts.join(' · ')
-  }, [templates, copy.schedulerNextRun])
 
   const selectTask = useCallback((id: string): void => {
     setActiveTaskId(id)
     setConfirmDelete(false)
     setCalendarOpen(false)
-    const view = views.find((item) => item.task.taskId === id)
+    const view = tasks.views.find((item) => item.task.taskId === id)
     if (view) setDraft(taskFromView(view))
-  }, [views])
+  }, [tasks.views])
 
   const newTask = useCallback((): void => {
     const draftTask = createTaskDraft(sessionId)
@@ -133,23 +97,18 @@ export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: 
     if (!draft) return
     const validation = validateTaskDraft(draft)
     if (validation !== null) {
+      // 校验返回词典键名（唯一本体在 lib/scheduler-task），此处按词典投影文案
       onToast('error', String(copy[validation as keyof Dict] ?? validation))
       return
     }
-    setBusy(true)
     try {
-      const saved = await remote.call(EP.EP_SCHEDULER_TASK_PUT, { task: draft }) as ScheduledTask
-      await load()
-      if (!mountedRef.current) return
+      const saved = await tasks.saveTask(draft)
       setActiveTaskId(saved.taskId)
       onToast('success', copy.schedulerSaved)
     } catch (error) {
-      if (!mountedRef.current) return
       onToast('error', String((error as Error)?.message ?? error))
-    } finally {
-      if (mountedRef.current) setBusy(false)
     }
-  }, [copy, draft, load, onToast, remote])
+  }, [copy, draft, onToast, tasks])
 
   const deleteTask = useCallback(async (): Promise<void> => {
     if (!activeTaskId) return
@@ -158,22 +117,15 @@ export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: 
       return
     }
     setConfirmDelete(false)
-    setBusy(true)
     try {
-      await remote.call(EP.EP_SCHEDULER_TASK_DELETE, { taskId: activeTaskId })
-      if (!mountedRef.current) return
+      await tasks.deleteTask(activeTaskId)
       setActiveTaskId(null)
       setDraft(null)
-      await load()
-      if (!mountedRef.current) return
       onToast('success', copy.schedulerDeleted)
     } catch (error) {
-      if (!mountedRef.current) return
       onToast('error', String((error as Error)?.message ?? error))
-    } finally {
-      if (mountedRef.current) setBusy(false)
     }
-  }, [activeTaskId, confirmDelete, copy.schedulerDeleted, load, onToast, remote])
+  }, [activeTaskId, confirmDelete, copy.schedulerDeleted, onToast, tasks])
 
   /** 星期切换（0=周日 … 6=周六）。 */
   const toggleDay = useCallback((day: number): void => {
@@ -229,18 +181,9 @@ export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: 
     })
   }, [])
 
-  const timezones = useMemo(() => {
-    const list = [...SCHEDULER_TIMEZONE_SUGGESTIONS]
-    const local = detectLocalTimezone()
-    if (!list.includes(local)) list.unshift(local)
-    return list
-  }, [])
-
-  const tzOptions = useMemo(() => timezones.map((tz) => <option key={tz} value={tz}>{tz}</option>), [timezones])
-
   /** 日期不限开关：true = 忽略日期范围（仅 daysOfWeek + timeRanges）；关闭时补默认范围。 */
   const unbounded = draft?.window?.unbounded === true
-  const toggleUnbounded = useCallback(() => {
+  const toggleUnbounded = useCallback((): void => {
     setDraft((current) => {
       if (!current) return current
       const next = !(current.window.unbounded === true)
@@ -254,15 +197,20 @@ export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: 
     })
   }, [])
 
+  const timezones = useMemo(() => {
+    const list = [...SCHEDULER_TIMEZONE_SUGGESTIONS]
+    const local = detectLocalTimezone()
+    if (!list.includes(local)) list.unshift(local)
+    return list
+  }, [])
+
+  const timezoneOptions = useMemo(() => timezones.map((tz) => <option key={tz} value={tz}>{tz}</option>), [timezones])
+
   /** 日期范围（把空串视为"未定" → null，使日历能在"仅起点"状态下继续点选终点）。 */
-  const dateRangeValue: DateRangeValue = {
+  const dateRange: DateRangeValue = {
     start: draft?.window.startDate || null,
     end: draft?.window.endDate || null,
   }
-  const statusText = (key: string): string => String((copy.schedulerStatus as Record<string, string>)[key] ?? key ?? '')
-  const resultText = (key: string | null): string => key
-    ? String((copy.schedulerLastResult as Record<string, string>)[key] ?? key)
-    : '—'
 
   return (
     <div className="wf-combo-backdrop">
@@ -273,241 +221,45 @@ export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: 
           <button type="button" className="wf-btn wf-combo__close" onClick={onClose}>✕</button>
         </div>
         <div className="wf-combo__body">
-          {/* 左侧：任务属性编辑栏 */}
-          <div className="wf-sched__form">
-            <div className="wf-sched__form-scroll">
-              {/* 顶部：工作流选择器（模板列表，非实例） */}
-              <Field label={copy.schedulerTemplate}>
-                <select
-                  value={draft?.workflowTemplateId ?? ''}
-                  onChange={(event) => patch({ workflowTemplateId: event.target.value })}
-                  disabled={!draft}
-                >
-                  <option value="">{templates.length === 0 ? copy.schedulerTemplateEmpty : copy.schedulerTemplatePlaceholder}</option>
-                  {templates.map((item) => <option key={item.id} value={item.id}>{item.name ?? item.id}</option>)}
-                </select>
-              </Field>
-
-              <Field label={copy.schedulerName}>
-                <input
-                  value={draft?.name ?? ''}
-                  placeholder={copy.schedulerName}
-                  onChange={(event) => patch({ name: event.target.value })}
-                  disabled={!draft}
-                />
-              </Field>
-
-              <Field label={copy.schedulerSessionMode} hint={draft?.sessionMode === 'current-session' ? copy.schedulerSessionCurrentHint : copy.schedulerSessionNewHint}>
-                <div className="wf-sched-radios">
-                  <label className="wf-sched-radio">
-                    <input type="radio" name="sched-session" checked={draft?.sessionMode === 'new-session'} disabled={!draft}
-                      onChange={() => patch({ sessionMode: 'new-session' })} />
-                    <span>{copy.schedulerSessionNew}</span>
-                  </label>
-                  <label className="wf-sched-radio">
-                    <input type="radio" name="sched-session" checked={draft?.sessionMode === 'current-session'} disabled={!draft}
-                      onChange={() => patch({ sessionMode: 'current-session' })} />
-                    <span>{copy.schedulerSessionCurrent}</span>
-                  </label>
-                </div>
-                {/* 选择工作区：仅「新会话」模式显示（新会话 cwd = 沙箱工作区根；保存时校验存在） */}
-                {draft?.sessionMode === 'new-session'
-                  ? (
-                      <input
-                        type="text"
-                        className="wf-sched-workspace"
-                        value={String(draft.workspacePath ?? '')}
-                        placeholder={copy.workspacePlaceholder}
-                        title={copy.workspaceHint}
-                        onChange={(event) => patch({ workspacePath: event.target.value.trim() || undefined })}
-                        disabled={!draft}
-                      />
-                    )
-                  : null}
-              </Field>
-
-              <Field label={copy.schedulerTimezone}>
-                <select value={draft?.timezone ?? ''} onChange={(event) => patch({ timezone: event.target.value })} disabled={!draft}>
-                  {tzOptions}
-                </select>
-              </Field>
-
-              <section className="wf-sched-group">
-                <h5>{copy.schedulerWindow}</h5>
-                <span className="wf-sched-field__hint">{copy.schedulerWindowHint}</span>
-
-                <Field label={`${copy.schedulerWindowDates}（${copy.schedulerWindowDateStart} ~ ${copy.schedulerWindowDateEnd}）`}>
-                  <div className="wf-sched-dates">
-                    <input type="text" readOnly
-                      value={draft ? (unbounded ? copy.schedulerWindowUnbounded : `${draft.window.startDate || '…'} ~ ${draft.window.endDate || '…'}`) : ''}
-                      placeholder={copy.schedulerWindowDaysAll} />
-                    {/* 日期不限：左右月可独立切换、右月恒大于左月；点击后忽略日期范围 */}
-                    <button type="button" className={`wf-btn${unbounded ? ' is-primary' : ''}`}
-                      title={copy.schedulerWindowUnbounded}
-                      onClick={toggleUnbounded} disabled={!draft}>
-                      {copy.schedulerWindowUnbounded}
-                    </button>
-                    <button type="button" className="wf-btn" onClick={() => setCalendarOpen((open) => !open)} disabled={!draft || unbounded}>
-                      {calendarOpen ? '▾' : '📅'}
-                    </button>
-                  </div>
-                </Field>
-
-                {calendarOpen && draft && !unbounded ? (
-                  <div className="wf-cal-card">
-                    <DateRangePicker
-                      value={dateRangeValue}
-                      onChange={(value) => patchWindow({
-                        startDate: value.start ?? '',
-                        endDate: value.end ?? '',
-                      })}
-                    />
-                    <div className="wf-cal-card__foot">
-                      <button type="button" className="wf-btn is-primary" onClick={() => setCalendarOpen(false)}>{copy.inspectorSave}</button>
-                    </div>
-                  </div>
-                ) : null}
-
-                <Field label={copy.schedulerWindowDays}>
-                  <div className="wf-sched-days">
-                    {WEEKDAY_LABELS.map((label, day) => (
-                      <button key={label} type="button"
-                        className={`wf-sched-day${(draft?.window.daysOfWeek ?? []).includes(day) ? ' is-active' : ''}`}
-                        onClick={() => toggleDay(day)} disabled={!draft}>
-                        {label}
-                      </button>
-                    ))}
-                    {/* 「每天」= daysOfWeek 为空；与具体星期互斥（选了任一星期即取消「每天」） */}
-                    <button type="button"
-                      className={`wf-sched-day is-all${((draft?.window.daysOfWeek ?? []).length === 0) ? ' is-active' : ''}`}
-                      onClick={() => patchWindow({ daysOfWeek: [] })} disabled={!draft}>
-                      {copy.schedulerWindowDaysAll}
-                    </button>
-                  </div>
-                </Field>
-
-                <Field label={copy.schedulerWindowRanges} hint={copy.schedulerRangeCrossHint}>
-                  <div className="wf-sched-ranges">
-                    {(draft?.window.timeRanges ?? []).map((range, index) => (
-                      /* eslint-disable-next-line react/no-array-index-key -- 行级编辑按索引定位 */
-                      <div key={`${index}:${range.start}-${range.end}`} className="wf-sched-range-row">
-                        <TimeInput value={range.start} onChange={(value) => patchRange(index, { start: value })} ariaLabel={copy.schedulerRangeStart} />
-                        <span>~</span>
-                        <TimeInput value={range.end} onChange={(value) => patchRange(index, { end: value })} ariaLabel={copy.schedulerRangeEnd} />
-                        <button type="button" className="wf-btn wf-iconbtn" title={copy.inspectorDelete} onClick={() => removeRange(index)}>×</button>
-                      </div>
-                    ))}
-                    <button type="button" className="wf-btn is-ghost" onClick={addRange} disabled={!draft}>{`＋ ${copy.schedulerRangeAdd}`}</button>
-                  </div>
-                </Field>
-              </section>
-
-              <section className="wf-sched-group">
-                <h5>{copy.schedulerTrigger}</h5>
-                <div className="wf-sched-radios">
-                  <label className="wf-sched-radio">
-                    <input type="radio" name="sched-trigger" checked={draft?.triggerMode === 'daily_time'} disabled={!draft}
-                      onChange={() => patch({ triggerMode: 'daily_time' })} />
-                    <span>{copy.schedulerTriggerDaily}</span>
-                  </label>
-                  <label className="wf-sched-radio">
-                    <input type="radio" name="sched-trigger" checked={draft?.triggerMode === 'interval'} disabled={!draft}
-                      onChange={() => patch({ triggerMode: 'interval' })} />
-                    <span>{copy.schedulerTriggerInterval}</span>
-                  </label>
-                </div>
-
-                {draft?.triggerMode === 'daily_time' ? (
-                  <Field label={copy.schedulerTimePoints}>
-                    <div className="wf-sched-ranges">
-                      {(draft.dailyTimeConfig?.timePoints ?? []).map((point, index) => (
-                        /* eslint-disable-next-line react/no-array-index-key -- 行级编辑按索引定位 */
-                        <div key={`${index}:${point}`} className="wf-sched-range-row">
-                          <TimeInput value={point} onChange={(value) => patchTimePoint(index, value)} ariaLabel={copy.schedulerTimePoints} />
-                          <button type="button" className="wf-btn wf-iconbtn" title={copy.inspectorDelete} onClick={() => removeTimePoint(index)}>×</button>
-                        </div>
-                      ))}
-                      <button type="button" className="wf-btn is-ghost" onClick={addTimePoint} disabled={!draft}>{`＋ ${copy.schedulerTimePointAdd}`}</button>
-                    </div>
-                  </Field>
-                ) : (
-                  <div className="wf-sched-row2">
-                    <Field label={copy.schedulerInterval}>
-                      <input type="number" min={1} max={1439} step={1}
-                        value={draft?.intervalConfig?.intervalMinutes ?? 120}
-                        onChange={(event) => patch({ intervalConfig: { ...(draft?.intervalConfig ?? { intervalMinutes: 120, startFrom: '09:00' }), intervalMinutes: Number(event.target.value) || 120 } })}
-                        disabled={!draft} />
-                    </Field>
-                    <Field label={copy.schedulerIntervalStartFrom}>
-                      <TimeInput value={draft?.intervalConfig?.startFrom ?? '09:00'}
-                        onChange={(value) => patch({ intervalConfig: { ...(draft?.intervalConfig ?? { intervalMinutes: 120, startFrom: '09:00' }), startFrom: value } })}
-                        ariaLabel={copy.schedulerIntervalStartFrom} />
-                    </Field>
-                  </div>
-                )}
-                <span className="wf-sched-field__hint">{copy.schedulerIntervalHint}</span>
-              </section>
-
-              <section className="wf-sched-group">
-                <h5>{copy.schedulerPolicy}</h5>
-                <span className="wf-sched-field__hint">{copy.schedulerPolicyText}</span>
-              </section>
-
-              {/* 运行态摘要（只读） */}
-              <section className="wf-sched-group">
-                <h5>{copy.schedulerCurrentRun}</h5>
-                <div className="wf-sched-status-grid">
-                  <span className="wf-sched-status-cell">
-                    <span className={`wf-sched-dot is-${activeView?.runtime.status ?? 'idle'}`} />
-                    {statusText(activeView?.runtime.status ?? 'idle')}
-                  </span>
-                  <span className="wf-sched-status-cell">{`${copy.schedulerNextRun}：${formatIso(activeView?.runtime.nextTriggerAt ?? null)}`}</span>
-                  <span className="wf-sched-status-cell">{`${copy.schedulerLastOutcome}：${resultText(activeView?.runtime.lastResult ?? null)}`}</span>
-                  {activeView?.runtime.lastError ? <span className="wf-sched-status-cell is-error">{activeView.runtime.lastError}</span> : null}
-                </div>
-              </section>
-            </div>
-            <div className="wf-sched__form-foot">
-              <button type="button" className="wf-btn is-danger" onClick={() => { void deleteTask() }} disabled={!activeTaskId || busy}>
-                {confirmDelete ? copy.schedulerDeleteConfirm : copy.schedulerDelete}
-              </button>
-              <button type="button" className="wf-btn is-primary" onClick={() => { void saveTask() }} disabled={!draft || busy}>{copy.inspectorSave}</button>
-            </div>
-          </div>
-
-          {/* 右侧：任务列表（复用组合管理列表样式） */}
-          <div className="wf-combo__side">
-            <div className="wf-combo__side-head">
-              <h4>{copy.scheduler}</h4>
-              <button type="button" className="wf-btn" onClick={newTask} disabled={busy}>{`＋ ${copy.schedulerNew}`}</button>
-            </div>
-            <div className="wf-combo__side-list">
-              {views.length === 0
-                ? <div className="wf-hint">{copy.schedulerEmpty}</div>
-                : views.map((view) => (
-                    <button
-                      key={view.task.taskId}
-                      type="button"
-                      className={`wf-combo-item${view.task.taskId === activeTaskId ? ' is-active' : ''}`}
-                      onClick={() => selectTask(view.task.taskId)}
-                    >
-                      <span className="wf-combo-item__label">{view.task.name}</span>
-                      <span className="wf-sched-list-meta">
-                        <span className={`wf-sched-dot is-${view.runtime.status}`} title={statusText(view.runtime.status)} />
-                        {itemMeta(view)}
-                      </span>
-                    </button>
-                  ))}
-            </div>
-            <div className="wf-combo-hint">
-              {copy.schedulerDeleteHint}
-            </div>
-            <label className="wf-sched-enabled">
-              <input type="checkbox" checked={draft?.enabled === true} disabled={!draft}
-                onChange={(event) => patch({ enabled: event.target.checked })} />
-              <span>{copy.schedulerEnabled}</span>
-            </label>
-          </div>
+          <SchedulerTaskForm
+            copy={copy}
+            draft={draft}
+            templates={tasks.templates}
+            timezoneOptions={timezoneOptions}
+            unbounded={unbounded}
+            calendarOpen={calendarOpen}
+            dateRange={dateRange}
+            activeView={activeView}
+            busy={tasks.busy}
+            confirmDelete={confirmDelete}
+            onPatch={patch}
+            onPatchWindow={patchWindow}
+            onToggleUnbounded={toggleUnbounded}
+            onToggleCalendar={() => setCalendarOpen((open) => !open)}
+            onCloseCalendar={() => setCalendarOpen(false)}
+            onSetDaysAll={() => patchWindow({ daysOfWeek: [] })}
+            onToggleDay={toggleDay}
+            onPatchRange={patchRange}
+            onAddRange={addRange}
+            onRemoveRange={removeRange}
+            onPatchTimePoint={patchTimePoint}
+            onAddTimePoint={addTimePoint}
+            onRemoveTimePoint={removeTimePoint}
+            onSave={() => { void saveTask() }}
+            onDelete={() => { void deleteTask() }}
+          />
+          <SchedulerTaskList
+            copy={copy}
+            views={tasks.views}
+            templates={tasks.templates}
+            activeTaskId={activeTaskId}
+            draftEnabled={draft?.enabled === true}
+            hasDraft={draft !== null}
+            busy={tasks.busy}
+            onSelect={selectTask}
+            onNew={newTask}
+            onToggleEnabled={(enabled) => patch({ enabled })}
+          />
         </div>
       </div>
     </div>

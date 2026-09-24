@@ -18,7 +18,6 @@ export const styles = `
 .wf-titlebar__spacer{margin-left:auto;flex:1}
 .wf-titlebar__mode{position:relative;flex:none}
 .wf-titlebar__caret{margin-left:4px;font-size:9px;color:var(--wf-ink-2)}
-.wf-titlebar__close{margin-left:2px}
 .wf-mode-menu{position:absolute;z-index:60;right:0;top:calc(100% + 6px);min-width:170px;padding:6px;border:1px solid var(--wf-border-strong);border-radius:10px;background:var(--wf-layer);box-shadow:0 14px 34px color-mix(in srgb,var(--wf-ink) 22%,transparent);display:flex;flex-direction:column;gap:4px}
 .wf-mode-menu__item{text-align:left;border:0;border-radius:7px;background:transparent;color:var(--wf-ink);padding:7px 10px;font-size:12px}
 .wf-mode-menu__item:hover{background:color-mix(in srgb,var(--wf-brand) 10%,var(--wf-layer));color:var(--wf-brand)}
@@ -205,6 +204,19 @@ g.is-locked .wf-graph__edge-hit{cursor:not-allowed}
 .wf-inspector__footer .wf-btn{font-size:11px;padding:5px 11px}
 .wf-inspector .wf-empty{color:var(--wf-ink-2);font-size:12px}
 .wf-field{display:flex;flex-direction:column;gap:4px}
+/* 字段与表单行布局（属性栏表单共用；此前散落在各表单的内联 style） */
+.wf-field--gap6{gap:6px}
+.wf-form-stack{display:flex;flex-direction:column;gap:6px}
+.wf-form-row{display:flex;align-items:center;gap:6px}
+.wf-form-grid-1{display:grid;gap:8px}
+.wf-form-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.wf-form-grid-wide{display:grid;grid-template-columns:2fr 1fr;gap:8px}
+.wf-form-preline{white-space:pre-line}
+.wf-form-check{display:flex;align-items:center;gap:6px;justify-content:flex-start}
+/* 复选框需覆盖 .wf-inspector input{width:100%}（否则被撑成大方框、不贴边） */
+.wf-inspector .wf-form-check__box{width:auto;flex:0 0 auto;padding:0;margin:0;min-width:0;accent-color:var(--wf-brand)}
+.wf-check-list__row{justify-content:space-between}
+.wf-btn--xs{font-size:9px;padding:2px 6px}
 .wf-check-list{max-height:190px;overflow:auto;display:flex;flex-direction:column;gap:4px;padding:6px;border:1px solid var(--wf-border);border-radius:8px;background:var(--wf-layer-2);scrollbar-width:thin}
 .wf-check-list label{display:flex;align-items:center;gap:7px;color:var(--wf-ink);font-size:11px}
 .wf-hint{color:var(--wf-ink-2);font-size:11px}
@@ -255,7 +267,6 @@ g.is-locked .wf-graph__edge-hit{cursor:not-allowed}
 .wf-toast.is-error .wf-toast__dot{background:var(--wf-err)}
 .wf-toast.is-info .wf-toast__dot{background:var(--wf-brand)}
 @keyframes wf-toast-in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
-.wf-message{position:absolute;z-index:25;left:50%;bottom:18px;transform:translateX(-50%);max-width:70%;padding:8px 14px;border:1px solid var(--wf-border-strong);border-radius:10px;background:var(--wf-layer);color:var(--wf-ink-2);font-size:12px;box-shadow:0 10px 26px color-mix(in srgb,var(--wf-ink) 14%,transparent)}
 /* ── 工作台 × 官方右侧 Sidebar 标签页（0.1.5-rc.1 迁移） ─────────────────────
    工作台内容由插件自持的常驻容器承载（Studio 永不卸载），标签页激活时该容器被搬进下面这个
    挂载点；未持有容器时（多标签页 body 并存）显示占位提示，避免出现空白面板。
@@ -296,6 +307,12 @@ g.is-locked .wf-graph__edge-hit{cursor:not-allowed}
 .wf-combo-card.is-disabled{opacity:.55;cursor:default;border-style:dashed}
 .wf-combo-card.is-disabled .wf-combo-card__name{color:var(--wf-ink-2)}
 .wf-combo-card input{flex:none;margin-top:2px;accent-color:var(--wf-brand)}
+/* 卡片主区（点击勾选）与右下角操作区：此前为内联 style，现按语义类名表达 */
+.wf-combo-card{position:relative}
+.wf-combo-card__main{display:flex;gap:9px;align-items:flex-start;text-align:left;border:0;background:transparent;padding:0 88px 30px 0;flex:1;cursor:pointer}
+.wf-combo-card__main:disabled{cursor:default}
+.wf-combo-card__actions{display:flex;gap:4px;position:absolute;right:8px;bottom:8px}
+.wf-combo__grid-empty{grid-column:1 / -1;padding:14px}
 .wf-combo-card__body{min-width:0;display:flex;flex-direction:column;gap:3px}
 .wf-combo-card__name{font-size:12px;font-weight:650;color:var(--wf-ink);word-break:break-all}
 .wf-combo-card__desc{font-size:10px;line-height:1.45;color:var(--wf-ink-2);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
@@ -325,11 +342,18 @@ g.is-locked .wf-graph__edge-hit{cursor:not-allowed}
 .wf-mcp-form input:focus{border-color:var(--wf-brand)}
 .wf-mcp-form__row{display:flex;gap:6px}
 .wf-mcp-form__row .wf-btn{flex:1;font-size:11px;padding:6px 10px}
+/* MCP 表单内联行 / 堆叠区（此前为内联 style） */
+.wf-mcp-form__inline{display:flex;gap:8px;padding:0 14px 12px}
+.wf-mcp-form__grow{flex:1}
+.wf-mcp-form__stack{display:grid;gap:8px;padding:0 14px 12px}
+.wf-mcp-form__note{align-self:center;flex:1}
+.wf-combo__head--sub{border-top:1px solid var(--wf-border);padding:8px 14px}
+.wf-mcp-import__body{padding:0 14px 12px;display:grid;gap:8px}
+.wf-mcp-import__text{min-height:150px;padding:8px;border-radius:8px;border:1px solid var(--wf-border-strong);background:var(--wf-layer-2);color:var(--wf-ink);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.wf-combo--dialog{max-width:560px;height:auto;max-height:82%}
+.wf-hint--block{font-size:10px;line-height:1.5;color:var(--wf-ink-2)}
 .wf-combo-hint{flex:none;padding:8px 14px;border-top:1px solid var(--wf-border);font-size:10px;color:var(--wf-ink-2);line-height:1.5}
 .wf-service-console{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:8px 12px;border-bottom:1px solid var(--wf-border);background:var(--wf-layer)}
-.wf-service-console__head{display:flex;align-items:center;gap:8px;min-width:0;flex:1}
-.wf-service-console__head strong{font-size:12px;color:var(--wf-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px}
-.wf-service-console__actions{display:flex;gap:7px;margin-left:auto}
 .wf-service-console__debug{flex-basis:100%;display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--wf-border);padding-top:7px}
 .wf-service-console__debug-head{display:flex;align-items:center;gap:8px}
 .wf-service-console__debug-title{font-size:11px;font-weight:600;color:var(--wf-ink)}
@@ -338,10 +362,6 @@ g.is-locked .wf-graph__edge-hit{cursor:not-allowed}
 .wf-service-console__debug-actions{display:flex;gap:7px}
 .wf-service-console__debug-actions .wf-btn{font-size:11px;padding:4px 10px}
 .wf-service-console__output{flex:none;min-height:56px;max-height:200px;overflow:auto;white-space:pre-wrap;word-break:break-word;margin:0;padding:8px;border:1px solid var(--wf-border);border-radius:7px;background:var(--wf-layer-2);color:var(--wf-ink);font:inherit;font-size:12px;line-height:1.6;box-sizing:border-box}
-.wf-service-dot{width:9px;height:9px;border-radius:50%;flex:none}
-.wf-service-dot.is-running{background:var(--wf-ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--wf-ok) 18%,transparent)}
-.wf-service-dot.is-stopped{background:var(--wf-ink-2)}
-.wf-service-dot.is-crashed{background:var(--wf-err)}
 /* ---- 官方侧边栏入口按钮（sidebar.footer.action 插槽） ----
    迁移（0.1.5-rc.1）：入口按钮不再由 MutationObserver 注入到官方「设置」按钮上方，而是注册进
    官方 sidebar.footer.action 插槽。官方 DOM 结构（dsh-client-ui-sidebar 取证）：

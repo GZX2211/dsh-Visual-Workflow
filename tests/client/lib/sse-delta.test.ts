@@ -1,12 +1,10 @@
-// @vitest-environment jsdom
-
-// tests/client/components/service-console/parseSseDelta.test.ts
+// tests/client/lib/sse-delta.test.ts
 //
 // Bug 3 回归：调试台 SSE 增量解析必须走后端 sseChunk 的正文路径
 // choices[0].delta.content（旧实现解析 parsed.delta?.content 取不到）。
 
 import { describe, expect, it } from 'vitest'
-import { parseSseDelta } from '../../../../src/client/components/service-console/ServiceConsole.js'
+import { parseSseDelta } from '../../../src/client/lib/sse-delta.js'
 
 describe('parseSseDelta（Bug 3 回归）', () => {
   it('解析后端 sseChunk 形态：choices[0].delta.content', () => {

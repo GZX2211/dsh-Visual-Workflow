@@ -26,8 +26,9 @@ export interface WorkflowsFace {
   /**
    * 模板 → 实例：深拷贝模板内容创建实例草图（绑定目标会话；不落盘，由调用方
    * saveWorkflow）。「开启新会话/工作区」为一次性临时选项，不继承到实例文档。
+   * fallbackName：模板无名称时的默认名（调用方从词典注入）。
    */
-  instantiateFromTemplate(template: WorkflowTemplate, targetSessionId: string): WorkflowDocument
+  instantiateFromTemplate(template: WorkflowTemplate, targetSessionId: string, fallbackName: string): WorkflowDocument
   deleteWorkflow(flow: WorkflowDocument): Promise<void>
   openFlow(flow: WorkflowDocument): void
 }
@@ -111,15 +112,15 @@ export function useWorkflows(
   /**
    * 模板 → 实例：深拷贝模板（节点/连线全量内联，与模板完全断引用——§4.2.1 解耦语义）。
    * 目标会话由调用方决定（当前主会话 / 新建主会话）；不继承 startNewSession/workspacePath
-   * （一次性临时选项，字段已退役）。
+   * （一次性临时选项，字段已退役）。fallbackName 由调用方从词典注入（模板无名称时使用）。
    */
-  const instantiateFromTemplate = useCallback((template: WorkflowTemplate, targetSessionId: string): WorkflowDocument => {
+  const instantiateFromTemplate = useCallback((template: WorkflowTemplate, targetSessionId: string, fallbackName: string): WorkflowDocument => {
     const now = new Date().toISOString()
     const draft = {
       id: `wf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
       sessionId: targetSessionId,
       mode: template.mode,
-      name: template.name ?? '未命名工作流',
+      name: template.name ?? fallbackName,
       description: template.description ?? '',
       revision: 0,
       nodes: JSON.parse(JSON.stringify(template.nodes ?? [])) as WorkflowDocument['nodes'],

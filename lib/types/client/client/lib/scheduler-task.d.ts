@@ -15,5 +15,3 @@ export declare function taskFromView(view: ScheduledTaskView): ScheduledTask;
 export declare function validateTaskDraft(task: ScheduledTask): string | null;
 /** 显示格式化：ISO → 本地可读（含时区标识）。 */
 export declare function formatIso(value: string | null | undefined): string;
-/** 星期标签（0=周日 … 6=周六）。 */
-export declare const WEEKDAY_LABELS: readonly ["日", "一", "二", "三", "四", "五", "六"];

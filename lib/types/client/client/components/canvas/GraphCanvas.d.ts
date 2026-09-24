@@ -1,20 +1,6 @@
 import type { Dict } from '../../i18n.js';
 import type { CanvasEdge, CanvasNode } from '../../studio/studio-state.js';
-export interface CanvasApi {
-    fitView(options?: {
-        padding?: number;
-        nodes?: CanvasNode[];
-    }): void;
-    focusNode(id: string, options?: {
-        zoom?: number;
-    }): void;
-    zoomIn(): void;
-    zoomOut(): void;
-    screenToWorld(clientX: number, clientY: number): {
-        x: number;
-        y: number;
-    };
-}
+export type { CanvasApi } from './use-canvas-viewport.js';
 export interface GraphCanvasProps {
     nodes: CanvasNode[];
     edges: CanvasEdge[];
@@ -38,7 +24,7 @@ export interface GraphCanvasProps {
     lockedEdgeIds?: ReadonlySet<string>;
     /** P4：最近一次父代理补丁（origin='agent'）改动的节点 id → 显示「AI 调整」角标。 */
     agentPatchedNodeIds?: string[];
-    onInit(api: CanvasApi): void;
+    onInit(api: import('./use-canvas-viewport.js').CanvasApi): void;
     onNodeDragStart(): void;
     onNodeMove(id: string, position: {
         x: number;

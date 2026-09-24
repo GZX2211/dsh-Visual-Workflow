@@ -12,8 +12,9 @@ export interface WorkflowsFace {
     /**
      * 模板 → 实例：深拷贝模板内容创建实例草图（绑定目标会话；不落盘，由调用方
      * saveWorkflow）。「开启新会话/工作区」为一次性临时选项，不继承到实例文档。
+     * fallbackName：模板无名称时的默认名（调用方从词典注入）。
      */
-    instantiateFromTemplate(template: WorkflowTemplate, targetSessionId: string): WorkflowDocument;
+    instantiateFromTemplate(template: WorkflowTemplate, targetSessionId: string, fallbackName: string): WorkflowDocument;
     deleteWorkflow(flow: WorkflowDocument): Promise<void>;
     openFlow(flow: WorkflowDocument): void;
 }

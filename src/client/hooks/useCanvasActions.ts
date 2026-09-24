@@ -19,10 +19,11 @@ import type { ToastFace } from './useToast.js'
 import type { SaveCanvasOptions } from './useDocumentActions.js'
 import type { RunLockSet } from '../lib/run-locks.js'
 import type { Dict } from '../i18n.js'
-import {
-  connectionProblem, connectionProblemMessage, consolidateGroups, dropNodeFlowLines, flowToCanvasLines,
-  layoutNodes, joinNodeToGroup, stageTemplateKinds, templateToNodeData, type CanvasLine,
-} from '../lib/graph-model.js'
+import { connectionProblem, connectionProblemMessage } from '../lib/connection-rules.js'
+import { consolidateGroups, dropNodeFlowLines, joinNodeToGroup } from '../lib/group-members.js'
+import { layoutNodes } from '../lib/layout-fit.js'
+import { stageTemplateKinds } from '../lib/graph-handles.js'
+import { templateToNodeData } from '../lib/template-to-node.js'
 
 /** 几何拖动（节点拖动 / 组卡片缩放）自动保存的防抖窗口（毫秒）。 */
 export const GEOMETRY_AUTOSAVE_DEBOUNCE_MS = 400
@@ -123,11 +124,7 @@ export function useCanvasActions(
       notify('error', t.invalidConnection)
       return
     }
-    const problem = connectionProblem(
-      state.canvas.nodes as unknown as import('../../host/shared/graph-model.js').GraphNode[],
-      state.canvas.edges as unknown as CanvasLine[],
-      connection,
-    )
+    const problem = connectionProblem(state.canvas.nodes, state.canvas.edges, connection)
     if (!problem.valid) {
       notify('error', connectionProblemMessage(problem as { valid: boolean; code: string }, t as unknown as Record<string, string>))
       return
@@ -151,7 +148,7 @@ export function useCanvasActions(
     history.remember()
     // 布局统一走 lib/graph-model 的 layoutNodes（Bug 25：删除了 Studio.tsx 内
     // 重复实现的 flowLayout，避免两份布局算法漂移）。
-    const next = layoutNodes(state.canvas.nodes, flowToCanvasLines(state.canvas.edges))
+    const next = layoutNodes(state.canvas.nodes, state.canvas.edges)
     dispatch({ type: 'GRAPH_REPLACED', nodes: next, edges: state.canvas.edges, dirty: true })
     // 整理布局 = 批量坐标改动（纯几何）：同样防抖自动保存（不构成编排变更）
     scheduleGeometryAutoSave()
@@ -285,7 +282,7 @@ export function useCanvasActions(
       id: `group-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
       kind: 'group',
       position,
-      data: { label: String(t.groupDefaultName ?? '协作组'), collabPrompt: '', memberIds: [], size: { w: 300, h: 220 } },
+      data: { label: String(t.groupDefaultName), collabPrompt: '', memberIds: [], size: { w: 300, h: 220 } },
     }
     history.remember()
     dispatch({ type: 'NODE_ADDED', node })
@@ -304,7 +301,7 @@ export function useCanvasActions(
           memberIds: [],
           size: { w: 300, h: 220 },
         }
-      : { label: String(t.groupDefaultName ?? '协作组'), collabPrompt: '', memberIds: [], size: { w: 300, h: 220 } }
+      : { label: String(t.groupDefaultName), collabPrompt: '', memberIds: [], size: { w: 300, h: 220 } }
     const node: CanvasNode = {
       id: `group-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
       kind: 'group',

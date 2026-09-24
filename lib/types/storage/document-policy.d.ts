@@ -1,6 +1,5 @@
 /** 保存选项：陈旧快照冲突保护（旧项目 nextFlowRevision 语义保留）。 */
 export interface SaveOptions {
-    /** 客户端加载时的 revision；与当前不一致且非 force 时抛冲突。 */
     expectedRevision?: number | null;
     /** 强制覆盖（跳过冲突检查）。 */
     force?: boolean;

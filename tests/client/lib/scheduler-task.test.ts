@@ -9,7 +9,6 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  WEEKDAY_LABELS,
   createTaskDraft,
   detectLocalTimezone,
   formatIso,
@@ -130,11 +129,5 @@ describe('formatIso：ISO → 本地可读', () => {
     }).format(new Date(iso))
     expect(formatIso(iso)).toBe(expected)
     expect(formatIso(iso)).toContain('2026')
-  })
-})
-
-describe('WEEKDAY_LABELS：星期标签', () => {
-  it('0=周日 … 6=周六', () => {
-    expect([...WEEKDAY_LABELS]).toEqual(['日', '一', '二', '三', '四', '五', '六'])
   })
 })

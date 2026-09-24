@@ -2,14 +2,10 @@ export declare const zh: {
     studio: string;
     badge: string;
     note: string;
-    windowTitle: string;
     currentSession: string;
-    currentSessionUnavailable: string;
     workbenchInUse: string;
     mode1: string;
     mode2: string;
-    modeLabel1: string;
-    modeLabel2: string;
     workflows: string;
     services: string;
     libTab: {
@@ -22,19 +18,17 @@ export declare const zh: {
     flowTemplates: string;
     instanceRunning: string;
     parentAgent: string;
-    parentAgentHint: string;
+    builtinParentPrompt: string;
     roleTemplates: string;
     files: string;
     databases: string;
     stages: string;
     groupTemplates: string;
-    groupHint: string;
     groupMemberLimitHint: string;
     toastGroupMemberAdded: string;
     stagePinHint: string;
     newTemplate: string;
     libEmptyTemplates: string;
-    libEmptyInstances: string;
     nodes: string;
     undo: string;
     redo: string;
@@ -52,28 +46,26 @@ export declare const zh: {
     stop: string;
     startService: string;
     stopService: string;
-    restartService: string;
     serviceRunning: string;
     serviceStarting: string;
     serviceStopped: string;
     serviceCrashed: string;
-    serviceConsole: string;
-    serviceHint: string;
     serviceDebugTitle: string;
     serviceDebugPlaceholder: string;
     serviceDebugSend: string;
     serviceDebugStop: string;
     serviceDebugEmpty: string;
     serviceDebugHint: string;
+    serviceDebugErrorPrefix: string;
     history: string;
-    toolbarHint: string;
     saveAsTemplate: string;
     toastSavedAsTemplate: string;
     toastCreatedInstance: string;
-    toastExternalModified: string;
-    flowFileChanged: string;
-    refresh: string;
+    workflowFileExternalChange: string;
+    serviceFileExternalChange: string;
     emptyHint: string;
+    canvasCaptionTemplate: string;
+    canvasCaptionInstance: string;
     canvasOverlapHint: string;
     fitView: string;
     zoomIn: string;
@@ -106,15 +98,9 @@ export declare const zh: {
     injectSystemPromptLabel: string;
     injectSystemPromptInjected: string;
     injectSystemPromptNotInjected: string;
-    injectSystemPromptOn: string;
-    injectSystemPromptOff: string;
-    injectSystemPromptHint: string;
     injectToolSectionsLabel: string;
     injectToolSectionsInjected: string;
     injectToolSectionsNotInjected: string;
-    injectToolSectionsOn: string;
-    injectToolSectionsOff: string;
-    injectToolSectionsHint: string;
     promptFilePath: string;
     promptFilePathPlaceholder: string;
     promptFilePathHint: string;
@@ -124,7 +110,6 @@ export declare const zh: {
     model: string;
     modeLabel: string;
     thinking: string;
-    thinkingHint: string;
     thinkingUnsupportedHint: string;
     modeNames: {
         standard: string;
@@ -141,10 +126,8 @@ export declare const zh: {
     outputSchema: string;
     fileKind: string;
     fileContent: string;
-    selectedFile: string;
     fileUnset: string;
     /** 文件多选提示（已选文件列表显示在按钮下方，用户验收标注）。 */
-    filePickHint: string;
     /** 协作组拖拽悬停提示（用户验收标注：放开以入组）。 */
     groupDropHint: string;
     /** 角色卡元信息「模型」前缀。 */
@@ -217,6 +200,10 @@ export declare const zh: {
         database: string;
         group: string;
     };
+    untitledWorkflow: string;
+    untitledService: string;
+    untitledFlowTemplate: string;
+    untitledServiceTemplate: string;
     confirmDelete: string;
     /** 运行中保存实例的二次确认（需求：保存后会更改父代理后续编排流程）。 */
     saveRunningTitle: string;
@@ -243,6 +230,8 @@ export declare const zh: {
     toastRunning: string;
     toastStopped: string;
     toastSaved: string;
+    revisionConflictRetry: string;
+    sessionCreateFailed: string;
     toastDeleted: string;
     toastNodeAdded: string;
     toastTidy: string;
@@ -312,7 +301,6 @@ export declare const zh: {
     comboTagBulkHint: string;
     toolSwitchBatchEnabled: string;
     toolSwitchBatchDisabled: string;
-    loadedPluginsLabel: string;
     mcpNew: string;
     mcpEdit: string;
     mcpName: string;
@@ -320,7 +308,6 @@ export declare const zh: {
     mcpTransportStdio: string;
     mcpTransportHttp: string;
     mcpCommand: string;
-    mcpArgs: string;
     mcpEnv: string;
     mcpHeaders: string;
     mcpCommandHint: string;
@@ -328,17 +315,18 @@ export declare const zh: {
     mcpImportApply: string;
     mcpImportHint: string;
     mcpImported: string;
+    mcpDisabledBadge: string;
+    mcpEnvInvalid: string;
+    mcpImportEmptyInput: string;
+    mcpImportServersEmpty: string;
     mcpUrl: string;
     mcpSave: string;
     mcpDelete: string;
-    mcpEnable: string;
-    mcpDisable: string;
     mcpEnabled: string;
     mcpDisabled: string;
     mcpSaved: string;
     mcpDeleted: string;
     mcpRestartHint: string;
-    presetCustom: string;
     comboDeleteConfirm: string;
     toolEnable: string;
     toolDisable: string;
@@ -366,6 +354,7 @@ export declare const zh: {
     schedulerWindowUnbounded: string;
     schedulerWindowDays: string;
     schedulerWindowDaysAll: string;
+    schedulerWeekdays: string[];
     schedulerWindowRanges: string;
     schedulerRangeStart: string;
     schedulerRangeEnd: string;
@@ -404,11 +393,8 @@ export declare const zh: {
     schedulerDeleteHint: string;
     schedulerSaved: string;
     schedulerDeleted: string;
-    schedulerSaveFirst: string;
     schedulerNeedName: string;
     schedulerNeedTemplate: string;
-    schedulerDraftUnsaved: string;
-    schedulerError: string;
 };
 export type Dict = typeof zh;
 export declare const en: Dict;
