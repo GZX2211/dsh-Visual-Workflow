@@ -46,4 +46,8 @@ jobs:
         run: pnpm check
 
       - name: 构建产物与源码同步（lib/ 必须随源码一起提交）
-        run: git diff --exit-code --stat -- lib
+        # 失败时补打印完整 diff：--stat 只说「哪个文件差一行」，看不到差异内容。
+        # 曾经因此把「产物里固化了构建机绝对路径」误判为行尾问题。
+        run: |
+          git diff --exit-code --stat -- lib
+          if ($LASTEXITCODE -ne 0) { git diff -- lib; exit 1 }

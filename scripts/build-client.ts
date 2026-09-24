@@ -19,7 +19,7 @@
 // （--config-loader native）进程内加载，不得使用 tsx/unrun 等会 spawn 子进程的 loader。
 import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { basename, dirname, resolve as resolvePath, sep } from 'node:path'
+import { basename, dirname, relative as relativePath, resolve as resolvePath, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { UserConfig } from 'tsdown'
 import { transform } from 'lightningcss'
@@ -44,6 +44,24 @@ const PLATFORM_MODULES: readonly string[] = [
 
 // 项目根目录（package.json 所在目录）。
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
+
+/**
+ * 把磁盘绝对路径编码成「相对仓库根 + 正斜杠」的虚拟 id 片段。
+ *
+ * 为什么虚拟 id 里不能出现绝对路径：rolldown 会把模块 id 原样写进产物注释
+ * （`//#region <id>`）——真实源码模块的 id 本就是相对的（`//#region src/client/entry.ts`），
+ * 只有这里手工拼的虚拟 id 会是绝对的。绝对路径会把构建机的目录结构固化进受版本控制的
+ * lib/client.js，使 CI 上重建的产物必然与提交产物逐字节不同，触发 workflow 的
+ * 「构建产物与源码同步」门禁（git diff --exit-code -- lib）——本地永远绿、CI 永远红。
+ */
+function encodeVirtualPath(absPath: string): string {
+  return relativePath(ROOT, absPath).split(sep).join('/')
+}
+
+/** 把虚拟 id 中的相对路径片段解回磁盘绝对路径（encodeVirtualPath 的逆运算）。 */
+function decodeVirtualPath(encodedPath: string): string {
+  return resolvePath(ROOT, encodedPath)
+}
 
 // 虚拟 id 包装：把 CSS 模块隔离在 tsdown 自身的 css pipeline（需 @tsdown/css）之外。
 // 后缀必须不以 .css 结尾（tsdown 的 guard 只匹配 `.css` 结尾的 id）。
@@ -144,12 +162,12 @@ function clientConfig(): UserConfig {
         name: 'dsh-css-modules-inline',
         resolveId(source: string, importer: string | undefined) {
           if (!source.endsWith('.module.css')) return null
-          const abs = importer !== undefined ? sourceAssetPath(source, importer) : source
-          return CSS_VIRTUAL_PREFIX + abs + CSS_VIRTUAL_SUFFIX
+          const abs = importer !== undefined ? sourceAssetPath(source, importer) : resolvePath(ROOT, source)
+          return CSS_VIRTUAL_PREFIX + encodeVirtualPath(abs) + CSS_VIRTUAL_SUFFIX
         },
         async load(virtualId: string) {
           if (!virtualId.startsWith(CSS_VIRTUAL_PREFIX)) return null
-          const fileId = virtualId.slice(CSS_VIRTUAL_PREFIX.length, -CSS_VIRTUAL_SUFFIX.length)
+          const fileId = decodeVirtualPath(virtualId.slice(CSS_VIRTUAL_PREFIX.length, -CSS_VIRTUAL_SUFFIX.length))
           this.addWatchFile(fileId)
           const source = await readFile(fileId)
           const { code, exports: cssExports } = transform({
@@ -172,12 +190,12 @@ function clientConfig(): UserConfig {
         resolveId(source: string, importer: string | undefined) {
           if (!source.endsWith(`.css${INLINE_CSS_QUERY}`)) return null
           const stylesheet = source.slice(0, -INLINE_CSS_QUERY.length)
-          const abs = importer !== undefined ? sourceAssetPath(stylesheet, importer) : stylesheet
-          return INLINE_CSS_VIRTUAL_PREFIX + abs + CSS_VIRTUAL_SUFFIX
+          const abs = importer !== undefined ? sourceAssetPath(stylesheet, importer) : resolvePath(ROOT, stylesheet)
+          return INLINE_CSS_VIRTUAL_PREFIX + encodeVirtualPath(abs) + CSS_VIRTUAL_SUFFIX
         },
         async load(virtualId: string) {
           if (!virtualId.startsWith(INLINE_CSS_VIRTUAL_PREFIX)) return null
-          const fileId = virtualId.slice(INLINE_CSS_VIRTUAL_PREFIX.length, -CSS_VIRTUAL_SUFFIX.length)
+          const fileId = decodeVirtualPath(virtualId.slice(INLINE_CSS_VIRTUAL_PREFIX.length, -CSS_VIRTUAL_SUFFIX.length))
           this.addWatchFile(fileId)
           const source = await readFile(fileId)
           const { code } = transform({ filename: fileId, code: source, minify: true })
@@ -189,12 +207,12 @@ function clientConfig(): UserConfig {
         name: 'dsh-css-global-inline',
         resolveId(source: string, importer: string | undefined) {
           if (!source.endsWith('.css') || source.endsWith('.module.css')) return null
-          const abs = importer !== undefined ? sourceAssetPath(source, importer) : source
-          return GLOBAL_CSS_VIRTUAL_PREFIX + abs + CSS_VIRTUAL_SUFFIX
+          const abs = importer !== undefined ? sourceAssetPath(source, importer) : resolvePath(ROOT, source)
+          return GLOBAL_CSS_VIRTUAL_PREFIX + encodeVirtualPath(abs) + CSS_VIRTUAL_SUFFIX
         },
         async load(virtualId: string) {
           if (!virtualId.startsWith(GLOBAL_CSS_VIRTUAL_PREFIX)) return null
-          const fileId = virtualId.slice(GLOBAL_CSS_VIRTUAL_PREFIX.length, -CSS_VIRTUAL_SUFFIX.length)
+          const fileId = decodeVirtualPath(virtualId.slice(GLOBAL_CSS_VIRTUAL_PREFIX.length, -CSS_VIRTUAL_SUFFIX.length))
           this.addWatchFile(fileId)
           const source = await readFile(fileId)
           const { code } = transform({ filename: fileId, code: source, minify: true })
