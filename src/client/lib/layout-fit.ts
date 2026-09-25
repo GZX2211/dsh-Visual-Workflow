@@ -2,15 +2,15 @@
 //
 // 自动布局判定与重叠检测（自主编排方案 §7.3 / 决策 D-15、P0-A2）：
 //   - needsAutoLayout：节点缺坐标或坐标为哨兵 {0,0} → 需要自动布局一次；
-//   - layoutBoxesOf：**实际渲染盒子**清单——组卡片 + 独立节点（组内成员与虚拟节点
-//     不独立渲染、不参与重叠判定，见 layout.ts 头部说明）；
+//   - layoutBoxesOf：**实际渲染盒子**清单——组卡片 + 独立节点（组内成员不独立渲染、
+//     不参与重叠判定，见 layout.ts 头部说明；虚拟节点已独立占位，仍参与判定）；
 //   - findLayoutOverlaps：盒子两两相交检测（非阻断提示「建议整理布局」）；
 //   - boxesOverlap / applyLayout：几何工具与「把坐标写回节点」的纯函数。
 // 全部纯函数：不读时钟/随机源，同输入同输出。
 
 import { layoutGraph as rawLayoutGraph, toLayoutInputs } from './layout.js'
 import { isSentinelPosition } from './layout-types.js'
-import type { LayoutResult } from './layout-types.js'
+import type { LayoutOptions, LayoutResult } from './layout-types.js'
 import { groupCardSizeOf } from './card-geometry.js'
 
 /** 画布节点最小形状（只读 id/kind/position/data；不绑定 studio 状态类型）。 */
@@ -51,20 +51,20 @@ export function groupMemberIdsOf(nodes: LayoutBoxNode[] | null | undefined): Set
 }
 
 /**
- * 实际渲染盒子清单：组卡片 + 独立节点（排除组内成员与虚拟节点）。
- * 为什么排除它们：GraphCanvas 只渲染组卡片与独立节点（组内成员以迷你卡渲染在卡片内、
- * 虚拟节点与主节点同坐标），对它们做重叠判定会产生「永远重叠」的假告警（P0-A5）。
+ * 实际渲染盒子清单：组卡片 + 独立节点（组内成员不独立渲染；虚拟节点独立占位，参与判定）。
+ * 为什么排除组内成员：GraphCanvas 只渲染组卡片与独立节点（组内成员以迷你卡渲染在卡片内），
+ * 对它们做重叠判定会产生「永远重叠」的假告警（P0-A5）。
  */
 export function layoutBoxesOf(
   nodes: LayoutBoxNode[] | null | undefined,
   sizeOf: (node: LayoutBoxNode) => { w: number; h: number },
-  /** 额外排除的节点 id（布局输入已折叠的组员与虚拟节点；缺省只按 data 推导）。 */
+  /** 额外排除的节点 id（布局输入已折叠的组员；缺省只按 data 推导）。 */
   excludedIds: Iterable<string> = [],
 ): LayoutBox[] {
   const members = groupMemberIdsOf(nodes)
   for (const id of excludedIds) members.add(id)
   return (nodes ?? [])
-    .filter((node) => node.kind !== 'proxy' && !members.has(node.id))
+    .filter((node) => !members.has(node.id))
     .map((node) => {
       const size = sizeOf(node)
       return { id: node.id, x: Number(node.position?.x) || 0, y: Number(node.position?.y) || 0, w: Number(size.w) || 0, h: Number(size.h) || 0 }
@@ -93,14 +93,11 @@ export function findLayoutOverlaps(boxes: LayoutBox[] | null | undefined): Array
 }
 
 /**
- * 布局中被折叠（不占位置槽）的节点 id 集合：协作组成员 + 虚拟节点（含悬空引用）。
- * 与 layout.ts 的折叠规则同源：这里只做「清单推导」，供重叠判定与 UI 使用。
+ * 布局中被折叠（不占位置槽）的节点 id 集合：仅协作组成员。
+ * 与 layout.ts 的折叠规则同源（虚拟节点独立占位，不再折叠到主节点）；供重叠判定与 UI 使用。
  */
 export function collapsedIdsOf(inputs: Array<{ id: string; kind: string; sourceId?: string; memberIds?: string[] }>): Set<string> {
   const collapsed = new Set<string>()
-  for (const input of inputs ?? []) {
-    if (input.kind === 'proxy') collapsed.add(input.id)
-  }
   const known = new Set((inputs ?? []).map((input) => input.id))
   for (const input of inputs ?? []) {
     if (input.kind !== 'group') continue
@@ -121,7 +118,7 @@ export function collapsedIdsOf(inputs: Array<{ id: string; kind: string; sourceI
 export function tidyNodes<T extends LayoutBoxNode>(
   nodes: T[],
   lines: Array<{ source: string; target: string; sourceHandle?: string; targetHandle?: string }>,
-  options: { sizeOf: (node: T) => { w: number; h: number }; layout?: { gutterX?: number; gutterY?: number; maxOrderRounds?: number; originX?: number; originY?: number } } = { sizeOf: (() => ({ w: 0, h: 0 })) as never },
+  options: { sizeOf: (node: T) => { w: number; h: number }; layout?: LayoutOptions } = { sizeOf: (() => ({ w: 0, h: 0 })) as never },
 ): { nodes: T[]; result: LayoutResult } {
   const inputs = toLayoutInputs(
     nodes as unknown as Array<{ id: string; kind: string; data?: Record<string, unknown> }>,

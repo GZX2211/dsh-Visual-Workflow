@@ -1,4 +1,4 @@
-import type { LayoutResult } from './layout-types.js';
+import type { LayoutOptions, LayoutResult } from './layout-types.js';
 /** 画布节点最小形状（只读 id/kind/position/data；不绑定 studio 状态类型）。 */
 export interface LayoutBoxNode {
     id: string;
@@ -25,23 +25,23 @@ export declare function needsAutoLayout(nodes: LayoutBoxNode[] | null | undefine
 /** 协作组成员的 id 集合（以组的 memberIds 为准；用于排除重复渲染节点）。 */
 export declare function groupMemberIdsOf(nodes: LayoutBoxNode[] | null | undefined): Set<string>;
 /**
- * 实际渲染盒子清单：组卡片 + 独立节点（排除组内成员与虚拟节点）。
- * 为什么排除它们：GraphCanvas 只渲染组卡片与独立节点（组内成员以迷你卡渲染在卡片内、
- * 虚拟节点与主节点同坐标），对它们做重叠判定会产生「永远重叠」的假告警（P0-A5）。
+ * 实际渲染盒子清单：组卡片 + 独立节点（组内成员不独立渲染；虚拟节点独立占位，参与判定）。
+ * 为什么排除组内成员：GraphCanvas 只渲染组卡片与独立节点（组内成员以迷你卡渲染在卡片内），
+ * 对它们做重叠判定会产生「永远重叠」的假告警（P0-A5）。
  */
 export declare function layoutBoxesOf(nodes: LayoutBoxNode[] | null | undefined, sizeOf: (node: LayoutBoxNode) => {
     w: number;
     h: number;
 }, 
-/** 额外排除的节点 id（布局输入已折叠的组员与虚拟节点；缺省只按 data 推导）。 */
+/** 额外排除的节点 id（布局输入已折叠的组员；缺省只按 data 推导）。 */
 excludedIds?: Iterable<string>): LayoutBox[];
 /** 两盒子是否相交（边贴边不算相交；零面积盒子不参与）。 */
 export declare function boxesOverlap(a: LayoutBox, b: LayoutBox): boolean;
 /** 全部重叠对（id 对按字典序归一，便于断言与去重）。 */
 export declare function findLayoutOverlaps(boxes: LayoutBox[] | null | undefined): Array<[string, string]>;
 /**
- * 布局中被折叠（不占位置槽）的节点 id 集合：协作组成员 + 虚拟节点（含悬空引用）。
- * 与 layout.ts 的折叠规则同源：这里只做「清单推导」，供重叠判定与 UI 使用。
+ * 布局中被折叠（不占位置槽）的节点 id 集合：仅协作组成员。
+ * 与 layout.ts 的折叠规则同源（虚拟节点独立占位，不再折叠到主节点）；供重叠判定与 UI 使用。
  */
 export declare function collapsedIdsOf(inputs: Array<{
     id: string;
@@ -65,13 +65,7 @@ export declare function tidyNodes<T extends LayoutBoxNode>(nodes: T[], lines: Ar
         w: number;
         h: number;
     };
-    layout?: {
-        gutterX?: number;
-        gutterY?: number;
-        maxOrderRounds?: number;
-        originX?: number;
-        originY?: number;
-    };
+    layout?: LayoutOptions;
 }): {
     nodes: T[];
     result: LayoutResult;

@@ -99,7 +99,7 @@ const COPY_BASELINE: ReadonlyArray<{ readonly file: string; readonly reason: str
     reason: '布局诊断文本（LayoutResult.warnings）：当前只被测试断言、未在界面展示，是否改结构化待定',
     copies: [
       '协作组「${}」卡片高度不足，建议加高到 ${}px 以容纳 ${} 名成员',
-      '虚拟节点「${}」引用的主节点不在画布上，已放在末尾列',
+      '数据节点「${}」未关联任何角色节点，已放到流程最右侧的独立列',
     ],
   },
   {

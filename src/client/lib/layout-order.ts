@@ -41,7 +41,9 @@ function sweep(targetLayer: string[], referenceIndexOf: Map<string, number>, nei
   const decorated = targetLayer.map((id) => {
     const center = barycenter(id, neighboursOf(id), referenceIndexOf)
     // 无邻居单元用「当前位置」当重心：既不打乱它，也不让它抢到最前（稳定）
-    return { id, center: center ?? currentIndex.get(id) ?? 0, original: currentIndex.get(id) ?? 0 }
+    const raw = center ?? currentIndex.get(id) ?? 0
+    // 重心按 1e-3 量化后再比大小：浮点误差不得打乱「重心相同即保持原序」的稳定契约
+    return { id, center: Math.round(raw * 1000) / 1000, original: currentIndex.get(id) ?? 0 }
   })
   decorated.sort((a, b) => (a.center !== b.center ? a.center - b.center : a.original - b.original))
   return decorated.map((item) => item.id)

@@ -181,12 +181,12 @@ describe('布局不变量：几何', () => {
 // ---------------------------------------------------------------------------
 
 describe('布局不变量：虚拟节点 / 协作组 / 孤立节点', () => {
-  it('⑤ proxy 不推主节点：主节点列号不被其虚拟节点影响（回归 §7.1 缺陷 1）', () => {
+  it('⑤ proxy 独立占位：主节点列号只由自身拓扑决定，虚拟节点不推主节点、不再与主节点重叠（回归 §7.1 缺陷 1）', () => {
     const base = [node('s', 'start'), node('m', 'agent'), node('n', 'agent'), node('e', 'end')]
     // 无 proxy：s → m → n → e
     const chain = [flowLine('l1', 's', 'm'), flowLine('l2', 'm', 'n'), flowLine('l3', 'n', 'e')]
     const withoutProxy = layoutGraph(base, chain)
-    // 有 proxy：s → x(引用 m) → n → e，且 m 自身不被流程线驱动
+    // 有 proxy：s → x(引用 m) → n → e，且 m 自身不被任何流程线驱动
     const withProxy = [
       node('s', 'start'),
       node('m', 'agent'),
@@ -199,19 +199,22 @@ describe('布局不变量：虚拟节点 / 协作组 / 孤立节点', () => {
     // 无 proxy 图：m 在第 1 列（s → m → n → e）
     expect(withoutProxy.colOf.get('m')).toBe(1)
     expect(withoutProxy.colOf.get('n')).toBe(2)
-    // 有 proxy 图：虚拟节点 x 折叠到主节点 m 同一单元 → 两者列号一致（列号均为 1，n 被推到第 2 列）
+    // 有 proxy 图：虚拟节点 x 作为独立主干节点按自身流程边落在第 1 列（s → x → n → e）
     expect(withProxyResult.colOf.get('x')).toBe(1)
-    expect(withProxyResult.colOf.get('m')).toBe(1)
     expect(withProxyResult.colOf.get('n')).toBe(2)
-    // 回归要点：主节点 m 的列号不被「谁引用它」影响——无 proxy 与有 proxy 两种拓扑下都是第 1 列
+    // 回归要点（proxy 不推主节点）：m 始终在自己该在的列，不被虚拟节点推到引用方之后
+    expect(withoutProxy.colOf.get('m')).toBe(1)
+    expect(withProxyResult.colOf.get('m')).toBe(withProxyResult.orphanCol)
     expect(withoutProxy.colOf.get('n')).toBe(withProxyResult.colOf.get('n'))
-    // 虚拟节点与主节点共享坐标（不占位置槽：二者重叠即预期行为，不参与重叠判定）
-    expect(withProxyResult.positions.get('x')).toEqual(withProxyResult.positions.get('m'))
+    // 虚拟节点独立占位：不再与主节点共享坐标（画布上二者是两张不同位置的卡片）
+    expect(withProxyResult.positions.get('x')).not.toEqual(withProxyResult.positions.get('m'))
     const boxes = layoutBoxesOf(
       withProxy.map((item) => ({ id: item.id, kind: item.kind, position: withProxyResult.positions.get(item.id)!, data: {} })),
-      (item) => (item.kind === 'proxy' ? { w: 0, h: 0 } : { w: GRAPH_NODE_WIDTH, h: GRAPH_NODE_HEIGHT }),
+      () => ({ w: GRAPH_NODE_WIDTH, h: GRAPH_NODE_HEIGHT }),
     )
-    expect(boxes.map((box) => box.id)).not.toContain('x')
+    // 虚拟节点是实际渲染的卡片（带「引用」角标），参与重叠判定
+    expect(boxes.map((box) => box.id)).toContain('x')
+    expect(findLayoutOverlaps(boxes)).toEqual([])
   })
 
   it('⑥ 协作组卡片包住成员：成员坐标落在组卡片矩形内（顺序 = memberIds）', () => {
@@ -322,7 +325,7 @@ describe('自动布局判定与统一入口', () => {
     expect(findLayoutOverlaps([{ id: 'a', x: 0, y: 0, w: 10, h: 10 }])).toEqual([])
   })
 
-  it('layoutBoxesOf：排除组内成员与虚拟节点（避免「永远重叠」的假告警）', () => {
+  it('layoutBoxesOf：排除组内成员（组员不独立渲染，避免「永远重叠」的假告警），虚拟节点参与判定', () => {
     const nodes = [
       { id: 'g1', kind: 'group', position: { x: 0, y: 0 }, data: { memberIds: ['a1'] } },
       { id: 'a1', kind: 'agent', position: { x: 10, y: 88 }, data: { groupId: 'g1' } },
@@ -330,7 +333,8 @@ describe('自动布局判定与统一入口', () => {
       { id: 'a2', kind: 'agent', position: { x: 300, y: 0 }, data: {} },
     ]
     const boxes = layoutBoxesOf(nodes, () => ({ w: 100, h: 50 }))
-    expect(boxes.map((box) => box.id).sort()).toEqual(['a2', 'g1'])
+    // 组员 a1 被排除；虚拟节点 x 是实际渲染的卡片（独立占位后可能与其他节点重叠，必须参与判定）
+    expect(boxes.map((box) => box.id).sort()).toEqual(['a2', 'g1', 'x'])
   })
 
   it('tidyNodes：统一入口（整理布局与自动布局共用）— 坐标写回且其余字段保持', () => {
