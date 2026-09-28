@@ -47,6 +47,12 @@ describe('写图契约（graph-op-contract）', () => {
     expect(ROLE_NODE_DATA_CONTRACT).toContain('injectToolSections')
   })
 
+  it('角色 data 契约写明 provider/model 必须成对取值（model 里的「组织/」前缀属 model 本身）', () => {
+    expect(ROLE_NODE_DATA_CONTRACT).toContain('成对复制模型清单的两列')
+    expect(ROLE_NODE_DATA_CONTRACT).toContain('不是 provider')
+    expect(ROLE_NODE_DATA_CONTRACT).toContain('会被补丁拒绝')
+  })
+
   it('闸门标记语义独立成段并写明只对当前闸门有效', () => {
     expect(GATE_MARKING_SEMANTICS).toContain('mark_node')
     expect(GATE_MARKING_SEMANTICS).toContain('milestone')

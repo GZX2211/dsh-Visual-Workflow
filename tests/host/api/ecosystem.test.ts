@@ -59,14 +59,17 @@ describe('生态端点', () => {
     ])
   })
 
-  it('models：思考强度档位随适配器公布透传；未公布时省略该字段', async () => {
+  it('models：思考强度档位经 resolveModelInfo 透传；未公布时省略该字段', async () => {
     const h = await makeHarness()
     h.ctx.services.set('llm', {
       listProviders: () => ['p1'],
-      listModels: async () => [
-        { id: 'm-effort', efforts: [{ id: 'high', name: '高' }, { id: '', name: '空' }] },
-        { id: 'm-plain' },
-      ],
+      // 官方 LlmModelInfo 不含档位（实机取证 2026.09）：档位只在 resolveModelInfo 的结果上
+      listModels: async () => [{ id: 'm-effort' }, { id: 'm-plain' }],
+      resolveModelInfo: async (_provider: string, model: string) => (
+        model === 'm-effort'
+          ? { reasoning: { efforts: [{ id: 'high', name: '高' }, { id: '', name: '空' }] } }
+          : { provider: 'p1', id: model }
+      ),
     })
     const models = (await h.api.handle('models', {})) as Array<{ model?: string; efforts?: Array<{ id: string; name: string }> }>
     expect(models).toEqual([

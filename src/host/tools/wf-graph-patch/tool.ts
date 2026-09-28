@@ -4,7 +4,8 @@
 //
 // 两组（同一工具、两条零共享代码路径）：
 //   1. 图结构变更（create_node/remove_node/update_node_data/connect/disconnect/create_group/
-//      set_group_members）→ 检查器校验 + 元参数硬护栏 + 原子落盘；
+//      set_group_members）→ 取值存在性校验（presetId / provider / model / reasoning）+
+//      检查器校验 + 元参数硬护栏 + 原子落盘；
 //   2. 运行状态标记（mark_node）→ 闸门状态推进（闸门身份与次数预算按运行事实判定）。
 //   同一补丁混用不同组 → WF_PATCH_MIXED_GROUPS（参数层拒绝，错误文本写明分组原因）。
 // 元参数（组织预算）**不是**一组操作：它是约束改图方的硬护栏，被约束方不得自行调整，
@@ -39,6 +40,7 @@ import {
   type GraphIssue,
 } from '../../graph/index.js'
 import { applyGraphOpsTolerant, applyMarkOp } from './apply.js'
+import { knownModelsOf, modelSelectionFailures, writtenModelSelectionsOf, type ModelCatalogEntry } from './policy.js'
 import { PATCH_CONTRACT_POINTER } from '../infrastructure/graph-op-contract.js'
 import {
   GROUP_HINTS,
@@ -77,6 +79,11 @@ export interface GraphPatchHost {
    * 属 best-effort 生态缝：缺失或枚举失败时该来源不参与存在性判定。
    */
   listPresets?: () => Promise<Array<{ id?: unknown }>>
+  /**
+   * 模型清单（provider/model 配对的**唯一取值来源**，reasoning 档位的来源）。
+   * 与 listPresets 同为 best-effort 生态缝：缺失或枚举失败时本批取值不参与存在性判定。
+   */
+  listModels?: () => Promise<unknown[]>
   /** 编排运行时能力（mark_node 路径 + 事实源刷新 + 空闲基准）。 */
   orchestrator: {
     activeRunForSession(sessionId: string): RunEntry | null
@@ -306,6 +313,7 @@ async function runGraphGroup(
   const failures = [
     ...applied.errors,
     ...await presetIdFailuresOf(host, ops, applied.result.doc as unknown as WorkflowDocument),
+    ...await modelSelectionFailuresOf(host, ops, applied.result.doc as unknown as WorkflowDocument),
   ]
   if (failures.length > 0) throwPatchErrors(failures)
   const result = applied.result
@@ -431,6 +439,34 @@ function writtenPresetIdsOf(
 /** 显式写入的 presetId（null/undefined/空白 = 未写入，不算错误）。 */
 function explicitPresetId(raw: unknown): string {
   return raw === undefined || raw === null ? '' : String(raw).trim()
+}
+
+/**
+ * 本批 ops **显式写入**的 provider/model/reasoning 的存在性校验结果。
+ *
+ * 与 presetId 存在性校验同口径：只校验本批写入值（历史脏值不阻断只改标签的补丁），
+ * 模型清单枚举不到即放弃判定。
+ * 为什么必须校验：ops 是自由对象，写错的配对不会被图检查器拦住，一路落盘到运行期
+ * LLM 调用处才失败；画布下拉只列清单内的值，清单外的值在面板上退化成显示 (default)——
+ * 用户看到的是「工具传了、界面却不回显」（实机取证见 policy.ts 文件头）。
+ */
+async function modelSelectionFailuresOf(
+  host: GraphPatchHost,
+  ops: PatchOp[],
+  applied: WorkflowDocument,
+): Promise<PatchOpFailure[]> {
+  const written = writtenModelSelectionsOf(ops, applied)
+  if (written.length === 0) return []
+  const known = await knownModelEntriesOf(host)
+  if (!known) return []
+  return modelSelectionFailures(known, written)
+}
+
+/** 可用模型清单（缝缺失或枚举失败返回 null = 放弃存在性判定）。 */
+async function knownModelEntriesOf(host: GraphPatchHost): Promise<ModelCatalogEntry[] | null> {
+  if (!host.listModels) return null
+  const rows = await host.listModels().catch(() => [] as unknown[])
+  return knownModelsOf(rows ?? [])
 }
 
 /**

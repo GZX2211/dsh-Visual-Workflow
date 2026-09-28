@@ -12,6 +12,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { executeOrgCatalog, registerWfOrgCatalog } from '../../../../src/host/tools/wf-org-catalog/tool.js'
+import { listEcosystemModels } from '../../../../src/host/ecosystem-directory.js'
 import { CATALOG_LIMITS } from '../../../../src/host/tools/wf-org-catalog/types.js'
 import { WfError } from '../../../../src/host/orchestrator/index.js'
 import { makeCatalogHost } from './fixtures.js'
@@ -261,6 +262,24 @@ describe('executeOrgCatalog：索引 / 详情分派', () => {
     const out = await executeOrgCatalog(host, {}) as CatalogIndex
     expect(out.presets).toEqual([])
     expect(out.models).toEqual([])
+  })
+
+  it('模型档位经生态枚举进入索引 models[]（官方只经 resolveModelInfo 公布档位）', async () => {
+    // 链路闭合：官方 llm 服务 → listEcosystemModels（逐模型扇出 resolveModelInfo）→ 索引 models[].efforts。
+    // 旧实现在目录项上读 efforts（官方 LlmModelInfo 不含该字段）→ 索引与召回里的档位恒为空。
+    const models = await listEcosystemModels({
+      get: (name: string) => (name === 'llm'
+        ? {
+            listProviders: () => ['deepseek-official'],
+            listModels: async () => [{ id: 'deepseek-flash' }],
+            resolveModelInfo: async () => ({ reasoning: { efforts: [{ id: 'off', name: 'Off' }, { id: 'high', name: 'High' }] } }),
+          }
+        : undefined),
+    })
+    const out = await executeOrgCatalog(makeCatalogHost({ listModels: async () => models }).host, {}) as CatalogIndex
+    expect(out.models).toEqual([
+      { provider: 'deepseek-official', model: 'deepseek-flash', efforts: [{ id: 'off', name: 'Off' }, { id: 'high', name: 'High' }] },
+    ])
   })
 })
 

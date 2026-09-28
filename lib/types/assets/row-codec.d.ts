@@ -97,6 +97,10 @@ export declare function sameRoleFields(left: RoleContentFields, right: RoleConte
  * 三个「文本必填」列（reasoning / preset_id / system_prompt）在 DDL 里声明为 NOT NULL
  * 且有默认空串：节点可选字段缺省时必须写成空串而非 null，否则会撞 NOT NULL 约束；
  * 读回时统一还原成 null（见 toNullableText），可选语义由往返保证，不由存储细节泄漏。
+ *
+ * input_schema / output_schema 是**可空自由文本**列（交接契约说明，不做结构校验）：
+ * 缺省与空白一律落 NULL，与读侧 toNullableText 同口径（再走一遍 toOptionalText 是写入边界的兜底，
+ * 防止绕过 roleFieldsFrom* 的调用方把空串直接写进列）。
  */
 export declare function roleRowValues(assetId: string, versionId: number, fields: RoleContentFields, options: {
     rowId: string;

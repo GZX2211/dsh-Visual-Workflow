@@ -10,7 +10,11 @@ export interface AgentPresetEntry {
      */
     trust: unknown;
 }
-/** 官方模型条目的稳定投影（efforts 为思考强度档位；官方未公布时省略）。 */
+/**
+ * 官方模型条目的稳定投影。
+ * efforts 为该路由公布的思考强度档位（经 resolveModelInfo 取得）；未公布时省略该字段
+ * ——「未公布」与「明确不支持」由消费方各自按语义处理。
+ */
 export interface ModelEntry {
     provider: string;
     model: string;

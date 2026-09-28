@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 /** 库文件路径：固定 `<root>/assets.db`（root = 插件 dataDir）。 */
 export declare function assetDbPath(root: string): string;
-/** 打开（必要时创建）资产库：建父目录、设 PRAGMA、幂等建表。 */
+/** 打开（必要时创建）资产库：建父目录、设 PRAGMA、幂等建表（含形状迁移）。 */
 export declare function openAssetDatabase(root: string): DatabaseSync;
 /** 行值：node:sqlite 返回 null 原型对象，凡向外传递前都必须转成普通对象。 */
 export type DbRow = Record<string, unknown>;

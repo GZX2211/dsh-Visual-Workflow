@@ -98,16 +98,67 @@ describe('listEcosystemModels', () => {
     expect(await listEcosystemModels(throwing)).toEqual([])
   })
 
-  it('思考强度按适配器公布透传并过滤空 id；未公布时省略该字段', async () => {
+  it('思考强度档位经 resolveModelInfo.reasoning.efforts 透传并过滤空 id；未公布时省略该字段', async () => {
+    // 官方 LlmModelInfo 不含档位：档位只在 resolveModelInfo 的结果上（旧实现在目录项上读 efforts，
+    // 因此恒为空——实机取证 2026.09）。
     const models = await listEcosystemModels(ctxOf({
       llm: {
         listProviders: () => ['p1'],
-        listModels: async () => [{ id: 'm1', efforts: [{ id: 'high', name: '高' }, { id: '' }] }, { id: 'm2' }],
+        listModels: async () => [{ id: 'm1' }, { id: 'm2' }, { id: 'm3' }],
+        resolveModelInfo: async (_provider: string, model: string) => {
+          if (model === 'm1') return { reasoning: { efforts: [{ id: 'high', name: '高' }, { id: '' }] } }
+          if (model === 'm3') return { reasoning: { efforts: [] } }
+          return { provider: 'p1', id: 'm2' }
+        },
       },
     }))
     expect(models).toEqual([
       { provider: 'p1', model: 'm1', efforts: [{ id: 'high', name: '高' }] },
       { provider: 'p1', model: 'm2' },
+      { provider: 'p1', model: 'm3' },
+    ])
+  })
+
+  it('档位缺 name 时回退 id；reasoning 形状不符（非对象/非数组）按未公布处理', async () => {
+    const models = await listEcosystemModels(ctxOf({
+      llm: {
+        listProviders: () => ['p1'],
+        listModels: async () => [{ id: 'm1' }, { id: 'm2' }, { id: 'm3' }],
+        resolveModelInfo: async (_provider: string, model: string) => {
+          if (model === 'm1') return { reasoning: { efforts: [{ id: 'low' }] } }
+          if (model === 'm2') return { reasoning: { efforts: 'off' } }
+          return { reasoning: null }
+        },
+      },
+    }))
+    expect(models).toEqual([
+      { provider: 'p1', model: 'm1', efforts: [{ id: 'low', name: 'low' }] },
+      { provider: 'p1', model: 'm2' },
+      { provider: 'p1', model: 'm3' },
+    ])
+  })
+
+  it('resolveModelInfo 缝缺失（旧运行时）→ 不取档位，模型清单照常返回', async () => {
+    const models = await listEcosystemModels(ctxOf({
+      llm: { listProviders: () => ['p1'], listModels: async () => [{ id: 'm1' }] },
+    }))
+    expect(models).toEqual([{ provider: 'p1', model: 'm1' }])
+  })
+
+  it('单条模型解析失败只让该模型不带档位，其余模型照常透传', async () => {
+    const models = await listEcosystemModels(ctxOf({
+      llm: {
+        listProviders: () => ['p1'],
+        listModels: async () => [{ id: 'bad' }, { id: 'good' }],
+        resolveModelInfo: async (_provider: string, model: string) => {
+          if (model === 'bad') throw new Error('adapter 解析失败')
+          return { reasoning: { efforts: [{ id: 'off', name: 'Off' }] } }
+        },
+      },
+    }))
+    expect(models).toEqual([
+      { provider: 'p1', model: 'bad' },
+      { provider: 'p1', model: 'good', efforts: [{ id: 'off', name: 'Off' }] },
     ])
   })
 })

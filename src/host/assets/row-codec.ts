@@ -10,7 +10,7 @@ import type { GraphNode, RoleNode } from '../shared/graph-model.js'
 import type { RoleTemplate } from '../shared/template-types.js'
 import type { RoleAssetKind, RoleAssetType } from '../shared/asset-types.js'
 import type { DbRow } from './db.js'
-import { toInteger, toJsonText, toNullableInteger, toNullableText, toText } from './role-check.js'
+import { toInteger, toJsonText, toNullableInteger, toNullableText, toOptionalText, toText } from './role-check.js'
 
 /** 角色资产版本行的内容字段（不含统计缓存与审计列，便于整组比较）。 */
 export interface RoleContentFields {
@@ -114,8 +114,8 @@ export function roleFieldsFromTemplate(role: RoleTemplate): RoleContentFields {
     presetId: role.presetId ?? null,
     retryLimit: role.retryLimit,
     reactLimit: role.reactLimit ?? null,
-    inputSchema: role.inputSchema ?? null,
-    outputSchema: role.outputSchema ?? null,
+    inputSchema: toOptionalText(role.inputSchema),
+    outputSchema: toOptionalText(role.outputSchema),
     systemPromptSource: role.systemPromptSource ?? null,
     injectSystemPrompt: role.injectSystemPrompt !== false,
     injectToolSections: role.injectToolSections !== false,
@@ -135,8 +135,8 @@ export function roleFieldsFromNode(node: RoleNode): RoleContentFields {
     presetId: node.data.presetId ?? null,
     retryLimit: node.data.retryLimit,
     reactLimit: node.data.reactLimit ?? null,
-    inputSchema: node.data.inputSchema ?? null,
-    outputSchema: node.data.outputSchema ?? null,
+    inputSchema: toOptionalText(node.data.inputSchema),
+    outputSchema: toOptionalText(node.data.outputSchema),
     systemPromptSource: node.data.systemPromptSource ?? null,
     injectSystemPrompt: node.data.injectSystemPrompt !== false,
     injectToolSections: node.data.injectToolSections !== false,
@@ -175,6 +175,10 @@ export function sameRoleFields(left: RoleContentFields, right: RoleContentFields
  * 三个「文本必填」列（reasoning / preset_id / system_prompt）在 DDL 里声明为 NOT NULL
  * 且有默认空串：节点可选字段缺省时必须写成空串而非 null，否则会撞 NOT NULL 约束；
  * 读回时统一还原成 null（见 toNullableText），可选语义由往返保证，不由存储细节泄漏。
+ *
+ * input_schema / output_schema 是**可空自由文本**列（交接契约说明，不做结构校验）：
+ * 缺省与空白一律落 NULL，与读侧 toNullableText 同口径（再走一遍 toOptionalText 是写入边界的兜底，
+ * 防止绕过 roleFieldsFrom* 的调用方把空串直接写进列）。
  */
 export function roleRowValues(
   assetId: string,
@@ -203,8 +207,8 @@ export function roleRowValues(
     presetId: fields.presetId ?? '',
     retryLimit: Math.max(0, fields.retryLimit),
     reactLimit: fields.reactLimit,
-    inputSchema: fields.inputSchema,
-    outputSchema: fields.outputSchema,
+    inputSchema: toOptionalText(fields.inputSchema),
+    outputSchema: toOptionalText(fields.outputSchema),
     systemPromptSource: fields.systemPromptSource,
     injectSystemPrompt: fields.injectSystemPrompt ? 1 : 0,
     injectToolSections: fields.injectToolSections ? 1 : 0,

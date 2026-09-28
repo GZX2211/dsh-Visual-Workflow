@@ -36,6 +36,8 @@ interface FakeStoreState {
   combos: string[]
   /** 官方 preset id 清单（best-effort 生态缝；空清单 = 枚举不可用，放弃判定）。 */
   presets: string[]
+  /** 模型清单（provider/model/reasoning 存在性校验的数据源；空清单 = 枚举不可用，放弃判定）。 */
+  models: Array<{ provider: string; model: string; efforts?: string[] }>
 }
 
 function makeStore(state: FakeStoreState) {
@@ -113,6 +115,11 @@ function makeHost(overrides: Partial<GraphPatchHost> = {}, state?: FakeStoreStat
     conflictOnce: false,
     combos: ['combo-1'],
     presets: ['preset-1'],
+    models: [
+      { provider: 'commandcode', model: 'inclusionai/ling-3.0-flash-sante:free' },
+      { provider: 'commandcode', model: 'deepseek/deepseek-v4.1-flash' },
+      { provider: 'deepseek-official', model: 'deepseek-flash', efforts: ['off', 'low', 'high', 'max'] },
+    ],
   }
   const touched: string[] = []
   const refreshed: string[] = []
@@ -120,6 +127,7 @@ function makeHost(overrides: Partial<GraphPatchHost> = {}, state?: FakeStoreStat
   const host: GraphPatchHost = {
     store: makeStore(storeState) as GraphPatchHost['store'],
     listPresets: async () => storeState.presets.map((id) => ({ id })),
+    listModels: async () => storeState.models,
     orchestrator: {
       activeRunForSession: (sessionId: string) => entries.get(sessionId) ?? null,
       flowLockInfo: () => null,
@@ -562,6 +570,7 @@ describe('wf_graph_patch · 参数层校验', () => {
       conflictOnce: true,
       combos: ['combo-1'],
       presets: ['preset-1'],
+      models: [{ provider: 'commandcode', model: 'inclusionai/ling-3.0-flash-sante:free' }],
     }
     const { host } = makeHost({}, state)
     await expectWfError(() => executeGraphPatch(host, 'session-1', {
@@ -761,6 +770,7 @@ describe('wf_graph_patch · presetId 存在性校验', () => {
       conflictOnce: false,
       combos: [],
       presets: [],
+      models: [{ provider: 'commandcode', model: 'inclusionai/ling-3.0-flash-sante:free' }],
     }
     const { host } = makeHost({}, state)
     const result = await executeGraphPatch(host, 'session-1', {
@@ -774,6 +784,173 @@ describe('wf_graph_patch · presetId 存在性校验', () => {
       ],
     })
     expect(result.ok).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// provider/model/reasoning 存在性校验（只校验本批写入值；模型清单是 best-effort 生态缝）
+// ---------------------------------------------------------------------------
+// 实机背景（2026.09）：清单里是 provider=commandcode / model=inclusionai/ling-3.0-flash-sante:free，
+// 父代理把 model 的「组织/」前缀当成 provider，写进去的配对静默落盘；画布下拉只列清单内的值，
+// 清单外的值在面板上退化成显示 (default)，表现为「工具传了、界面不回显」。
+
+describe('wf_graph_patch · provider/model/reasoning 存在性校验', () => {
+  /** 把 a1 的现值换成一组「历史脏」配对（用于验证只校验本批写入值）。 */
+  function makeFlowWithNodeData(data: Record<string, unknown>): WorkflowDocument {
+    const node = roleNode('a1', '旧节点')
+    node.data = { ...node.data, ...data } as typeof node.data
+    return makeFlow('wf-1', { nodes: [stageNode('s', 'start'), node, stageNode('e', 'end')] })
+  }
+
+  it('实机复现：provider 与 model 写反 → WF_BAD_ARGS，错误文本给出正确配对且磁盘零变更', async () => {
+    const { host, storeState } = makeHost()
+    storeState.workflows.set('wf-1', makeFlow())
+    const error = await expectWfError(() => executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [{
+        op: 'update_node_data',
+        nodeId: 'a1',
+        data: { provider: 'inclusionai', model: 'ling-3.0-flash-sante:free' },
+      }],
+    }), 'WF_BAD_ARGS')
+    expect(error.message).toContain('provider「inclusionai」不在模型清单中')
+    expect(error.message).toContain('应写 provider="commandcode"、model="inclusionai/ling-3.0-flash-sante:free"')
+    // 整批不落盘：revision 未递增、节点现值未被改写
+    const saved = storeState.workflows.get('wf-1')
+    expect(saved?.revision).toBe(3)
+    expect((saved?.nodes.find((node) => node.id === 'a1')?.data as { provider?: string } | undefined)?.provider).toBe('')
+  })
+
+  it('合法配对通过：model 里的「组织/」前缀原样保留', async () => {
+    const { host, storeState } = makeHost()
+    storeState.workflows.set('wf-1', makeFlow())
+    const result = await executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [{
+        op: 'update_node_data',
+        nodeId: 'a1',
+        data: { provider: 'commandcode', model: 'inclusionai/ling-3.0-flash-sante:free' },
+      }],
+    })
+    expect(result.ok).toBe(true)
+    const data = storeState.workflows.get('wf-1')?.nodes.find((node) => node.id === 'a1')?.data as { provider?: string; model?: string }
+    expect(data).toMatchObject({ provider: 'commandcode', model: 'inclusionai/ling-3.0-flash-sante:free' })
+  })
+
+  it('provider 合法但 model 不属于该 provider → 拒绝并列出该 provider 的可用模型', async () => {
+    const { host, storeState } = makeHost()
+    storeState.workflows.set('wf-1', makeFlow())
+    const error = await expectWfError(() => executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [{ op: 'update_node_data', nodeId: 'a1', data: { provider: 'commandcode', model: 'deepseek-flash' } }],
+    }), 'WF_BAD_ARGS')
+    expect(error.message).toContain('不在 provider「commandcode」的模型清单中')
+    expect(error.message).toContain('deepseek/deepseek-v4.1-flash')
+  })
+
+  it('create_node 通路同样校验：新建节点带清单外的 provider → 整批拒绝且不落盘', async () => {
+    const { host, storeState } = makeHost()
+    storeState.workflows.set('wf-1', makeFlow())
+    const error = await expectWfError(() => executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [
+        { op: 'create_node', node: { id: 'a2', kind: 'agent', data: { label: '分析', provider: 'inclusionai', model: 'ling-3.0-flash-sante:free' } } },
+        { op: 'connect', source: 'a1', target: 'a2', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+        { op: 'connect', source: 'a2', target: 'e', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+        { op: 'disconnect', lineId: 'l2' },
+      ],
+    }), 'WF_BAD_ARGS')
+    expect(error.message).toContain('#1 create_node')
+    expect(error.message).toContain('provider「inclusionai」不在模型清单中')
+    expect(storeState.workflows.get('wf-1')?.nodes.map((node) => node.id)).toEqual(['s', 'a1', 'e'])
+  })
+
+  it('与 presetId 校验同批聚合：一次列出全部取值错误（同一个 WF_BAD_ARGS 批次）', async () => {
+    const { host, storeState } = makeHost()
+    storeState.workflows.set('wf-1', makeFlow())
+    const error = await expectWfError(() => executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [{
+        op: 'update_node_data',
+        nodeId: 'a1',
+        data: { presetId: 'combo-typo', provider: 'inclusionai', model: 'ling-3.0-flash-sante:free' },
+      }],
+    }), 'WF_BAD_ARGS')
+    expect(error.message).toContain('presetId「combo-typo」')
+    expect(error.message).toContain('provider「inclusionai」不在模型清单中')
+  })
+
+  it('只校验本批写入值：节点上的历史脏配对不阻断只改标签的补丁', async () => {
+    const { host, storeState } = makeHost()
+    storeState.workflows.set('wf-1', makeFlowWithNodeData({ provider: 'inclusionai', model: 'ling-3.0-flash-sante:free' }))
+    const result = await executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [{ op: 'update_node_data', nodeId: 'a1', data: { label: '新标签' } }],
+    })
+    expect(result.ok).toBe(true)
+    const data = storeState.workflows.get('wf-1')?.nodes.find((node) => node.id === 'a1')?.data as { label?: string; provider?: string }
+    expect(data).toMatchObject({ label: '新标签', provider: 'inclusionai' })
+  })
+
+  it('模型清单枚举为空时放弃判定，不误杀合法引用', async () => {
+    const state: FakeStoreState = {
+      workflows: new Map([['wf-1', makeFlow()]]),
+      templates: new Map(),
+      services: new Map(),
+      conflictOnce: false,
+      combos: ['combo-1'],
+      presets: ['preset-1'],
+      models: [],
+    }
+    const { host } = makeHost({}, state)
+    const result = await executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [{ op: 'update_node_data', nodeId: 'a1', data: { provider: 'inclusionai', model: 'ling-3.0-flash-sante:free' } }],
+    })
+    expect(result.ok).toBe(true)
+  })
+
+  it('模型清单缝整体缺失（未注入 listModels）时同样放弃判定', async () => {
+    const { host, storeState } = makeHost({ listModels: undefined })
+    storeState.workflows.set('wf-1', makeFlow())
+    const result = await executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [{ op: 'update_node_data', nodeId: 'a1', data: { provider: 'inclusionai', model: 'ling-3.0-flash-sante:free' } }],
+    })
+    expect(result.ok).toBe(true)
+  })
+
+  it('reasoning：模型公布了档位时写入清单外档位被拒（错误文本列出可用档位）', async () => {
+    const { host, storeState } = makeHost()
+    storeState.workflows.set('wf-1', makeFlowWithNodeData({ provider: 'deepseek-official', model: 'deepseek-flash' }))
+    const error = await expectWfError(() => executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [{ op: 'update_node_data', nodeId: 'a1', data: { reasoning: 'medium' } }],
+    }), 'WF_BAD_ARGS')
+    expect(error.message).toContain('reasoning「medium」')
+    expect(error.message).toContain('可用：off/low/high/max')
+  })
+
+  it('reasoning：模型未公布档位（实机 ling-3.0）时任意档位不判定，保留模型默认行为', async () => {
+    const { host, storeState } = makeHost()
+    storeState.workflows.set('wf-1', makeFlowWithNodeData({ provider: 'commandcode', model: 'inclusionai/ling-3.0-flash-sante:free' }))
+    const result = await executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [{ op: 'update_node_data', nodeId: 'a1', data: { reasoning: 'medium' } }],
+    })
+    expect(result.ok).toBe(true)
+    const data = storeState.workflows.get('wf-1')?.nodes.find((node) => node.id === 'a1')?.data as { reasoning?: string }
+    expect(data.reasoning).toBe('medium')
   })
 })
 

@@ -34,6 +34,11 @@ export interface GraphPatchHost {
     listPresets?: () => Promise<Array<{
         id?: unknown;
     }>>;
+    /**
+     * 模型清单（provider/model 配对的**唯一取值来源**，reasoning 档位的来源）。
+     * 与 listPresets 同为 best-effort 生态缝：缺失或枚举失败时本批取值不参与存在性判定。
+     */
+    listModels?: () => Promise<unknown[]>;
     /** 编排运行时能力（mark_node 路径 + 事实源刷新 + 空闲基准）。 */
     orchestrator: {
         activeRunForSession(sessionId: string): RunEntry | null;

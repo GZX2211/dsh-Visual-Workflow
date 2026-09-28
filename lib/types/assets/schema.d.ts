@@ -5,8 +5,14 @@ export declare const ASSET_DB_FILE = "assets.db";
  * 为什么 reference_status 是独立列而不是从 reference_workflow_ids 推导：
  * idx_role_history_status 需要可索引的等值列做「已引用」过滤，JSON 数组长度判断
  * 无法走索引；该列由引用统计在写入时同步刷新，与数组长度恒一致（不变量）。
+ *
+ * input_schema / output_schema 不带 json_valid 约束：这两列承载的是「交接契约」说明文本
+ * （见 shared/graph-model.ts 的 RoleNode.data），语义为**柔性文本、不做结构校验**，
+ * 空值即未配置。若按 JSON 校验，节点默认空串与自由文本表述（如「上游结论；产出文件路径」）
+ * 都会被拒绝，入库整体失败。
  */
-export declare const ROLE_ASSET_HISTORY_DDL = "\nCREATE TABLE IF NOT EXISTS role_asset_history (\n  id TEXT PRIMARY KEY,\n  version_id INTEGER NOT NULL,\n  asset_id TEXT NOT NULL,\n  kind TEXT NOT NULL CHECK (kind IN ('parent','agent')),\n  name TEXT NOT NULL,\n  system_prompt TEXT NOT NULL,\n  provider TEXT NOT NULL DEFAULT '',\n  model TEXT NOT NULL DEFAULT '',\n  reasoning TEXT NOT NULL DEFAULT '',\n  preset_id TEXT NOT NULL DEFAULT '',\n  retry_limit INTEGER NOT NULL DEFAULT 0 CHECK (retry_limit >= 0),\n  react_limit INTEGER CHECK (react_limit IS NULL OR react_limit >= 0),\n  input_schema TEXT CHECK (input_schema IS NULL OR json_valid(input_schema)),\n  output_schema TEXT CHECK (output_schema IS NULL OR json_valid(output_schema)),\n  system_prompt_source TEXT,\n  inject_system_prompt INTEGER NOT NULL DEFAULT 1 CHECK (inject_system_prompt IN (0,1)),\n  inject_tool_sections INTEGER NOT NULL DEFAULT 1 CHECK (inject_tool_sections IN (0,1)),\n  prompt_file_path TEXT,\n  retrieval_context TEXT,\n  role_asset_type TEXT NOT NULL CHECK (role_asset_type IN ('standalone','inline','shared')),\n  reference_status TEXT NOT NULL DEFAULT 'unused' CHECK (reference_status IN ('unused','used')),\n  reference_workflow_ids TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(reference_workflow_ids)),\n  source TEXT NOT NULL CHECK (source IN ('human','agent')),\n  source_template_id TEXT,\n  source_fingerprint TEXT,\n  created_at INTEGER NOT NULL,\n  updated_at INTEGER NOT NULL,\n  UNIQUE(asset_id, version_id)\n)";
+export declare function roleAssetHistoryDdl(tableName: string): string;
+export declare const ROLE_ASSET_HISTORY_DDL: string;
 export declare const ROLE_ASSET_HISTORY_INDEXES_DDL: string[];
 /**
  * 为什么 role_version_ids 存对象数组而非扁平 id 数组：工作流图重建必须知道

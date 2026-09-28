@@ -51,6 +51,51 @@ describe('工作流模版晋升（算法 E）', () => {
     expect(detail?.lines).toEqual([flowLine('l1', 's1', 'n1', 'flow-out', 'flow-in')])
   })
 
+  it('test_晋升_角色节点结构字段为缺省空串与自由文本_均入库成功且按资产重建', async () => {
+    /** 角色节点 data 的必填部分（结构字段按用例叠加）。 */
+    const nodeData = (
+      label: string,
+      systemPrompt: string,
+      schemas: { inputSchema?: string; outputSchema?: string },
+    ): RoleNode['data'] => ({ label, systemPrompt, provider: 'deepseek', model: 'deepseek-chat', retryLimit: 2, ...schemas })
+
+    const flow = await store.promoteWorkflow({
+      templateId: 'tpl-flow-1',
+      fingerprint: 'fp-flow-1',
+      mode: 'mode1',
+      name: '工作流A',
+      description: '说明A',
+      nodes: [
+        // 客户端新建的节点默认把两个结构字段写成空串（存量模版数据同形）
+        roleNode({ id: 'n1', data: nodeData('研究员', '你是研究员。', { inputSchema: '', outputSchema: '' }) }),
+        // 交接契约说明是自由文本，不是 JSON
+        roleNode({
+          id: 'n2',
+          data: nodeData('审查员', '你是审查员。', {
+            inputSchema: '上游结论；产出文件路径列表',
+            outputSchema: '复核结论：{verdict: pass|fail, reasons: string[]}',
+          }),
+        }),
+      ],
+      lines: [flowLine('l1', 'n1', 'n2', 'ctx-out', 'ctx-in')],
+      source: 'human',
+    })
+
+    expect(flow).toMatchObject({ versionId: 1, unchanged: false })
+
+    const detail = await store.getWorkflowAsset(flow.assetId)
+    expect(detail?.roleVersionIds).toHaveLength(2)
+    // 重建后的节点：未配置的结构字段读回 undefined（NULL 往返），自由文本原样往返
+    const rebuilt = (detail?.nodes ?? []).filter((node): node is RoleNode => node.kind === 'agent')
+    expect(rebuilt).toHaveLength(2)
+    expect(rebuilt[0].data.inputSchema).toBeUndefined()
+    expect(rebuilt[0].data.outputSchema).toBeUndefined()
+    expect(rebuilt[1].data).toMatchObject({
+      inputSchema: '上游结论；产出文件路径列表',
+      outputSchema: '复核结论：{verdict: pass|fail, reasons: string[]}',
+    })
+  })
+
   it('test_晋升_同模版二次晋升内容已改_同资产新版本且Active指向新版本', async () => {
     const first = await store.promoteWorkflow({
       templateId: 'tpl-flow-1',

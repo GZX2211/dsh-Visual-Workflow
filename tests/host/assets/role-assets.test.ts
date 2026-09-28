@@ -4,9 +4,10 @@
 // 资产态保存、回滚、退役、引用统计单调递增。
 // 断言依据：算法 B/C/D/F/G 与「历史不可变、Active 即指针」的不变量。
 
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ERR_ASSET_DUPLICATE, ERR_ASSET_NOT_FOUND, ERR_ASSET_VERSION_NOT_FOUND } from '../../../src/host/shared/protocol.js'
-import { AssetStore, type AssetError } from '../../../src/host/assets/index.js'
+import { ASSET_DB_FILE, AssetStore, type AssetError } from '../../../src/host/assets/index.js'
 import { flowLine, makeStore, removeTempRoot, roleNode, roleTemplate } from './fixtures/asset-fixture.js'
 
 let store: AssetStore
@@ -458,5 +459,56 @@ describe('目录消费面：索引摘要与按钉住版本回溯', () => {
 
     // 退役即退出召回面：钉住行仍在历史里，但不再被标注为可召回资产
     expect(await store.getRoleAssetVersion(created.rowId)).toBeNull()
+  })
+})
+
+describe('交接契约文本列（input_schema / output_schema）', () => {
+  it('test_晋升_结构字段为空串_落库为NULL且二次晋升判定未变更', async () => {
+    const first = await store.promoteRole({
+      templateId: 'tpl-role-1',
+      fingerprint: 'fp-1',
+      // 客户端模版草稿与节点默认值给的就是空串，不是缺字段
+      role: roleTemplate({ inputSchema: '', outputSchema: '   ' }),
+      source: 'human',
+    })
+
+    // 缺省空串必须落 NULL：写空串会让「未配置」与「配置了空文本」两种事实撞上约束
+    const { DatabaseSync } = await import('node:sqlite')
+    const db = new DatabaseSync(join(root, ASSET_DB_FILE))
+    try {
+      const row = db
+        .prepare('SELECT typeof(input_schema) AS input_type, typeof(output_schema) AS output_type FROM role_asset_history')
+        .get() as Record<string, unknown>
+      expect(row).toMatchObject({ input_type: 'null', output_type: 'null' })
+    } finally {
+      db.close()
+    }
+
+    // 读侧把 NULL 还原为 undefined：再晋升一次必须判定「未变更」，不能凭空新增版本
+    const second = await store.promoteRole({
+      templateId: 'tpl-role-1',
+      fingerprint: 'fp-1',
+      role: roleTemplate({ inputSchema: undefined, outputSchema: undefined }),
+      source: 'human',
+    })
+
+    expect(second).toMatchObject({ assetId: first.assetId, versionId: 1, unchanged: true })
+    expect(await store.listRoleVersions(first.assetId)).toHaveLength(1)
+  })
+
+  it('test_晋升_结构字段为自由文本_原样落库并按版本行读回', async () => {
+    const input = '上游结论；产出文件路径列表；关键决策'
+    const output = '复核结论：{verdict: pass|fail, reasons: string[]}'
+
+    const created = await store.promoteRole({
+      templateId: 'tpl-role-1',
+      fingerprint: 'fp-1',
+      role: roleTemplate({ inputSchema: input, outputSchema: output }),
+      source: 'human',
+    })
+
+    // 字段语义是柔性交接契约说明（不做结构校验），非 JSON 文本也必须可持久化
+    const detail = await store.getRoleAsset(created.assetId)
+    expect(detail).toMatchObject({ inputSchema: input, outputSchema: output })
   })
 })
