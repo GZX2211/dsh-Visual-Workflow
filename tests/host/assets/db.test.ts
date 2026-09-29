@@ -1,7 +1,8 @@
 // tests/host/assets/db.test.ts
 //
 // 资产库初始化契约：库文件位置、建表幂等、跨连接可见（重开不丢数据）、关闭后的行为，
-// 以及存量库的形状迁移（退役 input_schema / output_schema 的 json_valid 约束）。
+// 以及存量库的形状迁移（退役 input_schema / output_schema 的 json_valid 约束、
+// 为经验表补 is_active 状态列）。
 
 import { existsSync } from 'node:fs'
 import { mkdtemp } from 'node:fs/promises'
@@ -90,6 +91,44 @@ async function makeLegacyStore(): Promise<string> {
   try {
     db.exec(LEGACY_ROLE_HISTORY_DDL)
     for (const statement of LEGACY_SUPPORT_DDL) db.exec(statement)
+  } finally {
+    db.close()
+  }
+  return root
+}
+
+/**
+ * 迁移前的经验表形状（冻结副本：早期版本没有 is_active 列，直接查该列会报 no such column）。
+ * 同样固定旧 DDL，避免「旧库能否升级」随源码漂移成恒真。
+ */
+const LEGACY_EXPERIENCES_DDL = `
+CREATE TABLE experiences (
+  id TEXT PRIMARY KEY,
+  source_run_id TEXT,
+  reflection_prompt_version TEXT NOT NULL DEFAULT '1',
+  task_type TEXT NOT NULL,
+  task_context TEXT NOT NULL,
+  insight TEXT NOT NULL,
+  evidence TEXT,
+  review_feedback TEXT,
+  reviewed_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+)`
+
+const LEGACY_EXPERIENCE_ROW = `INSERT INTO experiences (
+    id, source_run_id, reflection_prompt_version, task_type, task_context, insight, evidence,
+    review_feedback, reviewed_at, created_at, updated_at
+  ) VALUES ('ex-legacy1', NULL, '1', '软件开发', '旧的上下文', '旧的经验', '旧证据', NULL, 1000, 1000, 1000)`
+
+/** 建一个旧形状的经验库（只有旧 experiences 表；其余表由 init 幂等补齐）。 */
+async function makeLegacyExperienceStore(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-assets-legacy-exp-'))
+  const { DatabaseSync } = await import('node:sqlite')
+  const db = new DatabaseSync(join(root, ASSET_DB_FILE))
+  try {
+    db.exec(LEGACY_EXPERIENCES_DDL)
+    db.exec(LEGACY_EXPERIENCE_ROW)
   } finally {
     db.close()
   }
@@ -234,5 +273,57 @@ describe('存量库形状迁移（交接契约列的 JSON 约束退役）', () =
     } finally {
       raw.close()
     }
+  })
+})
+
+describe('存量库形状迁移（经验表补 is_active 状态列）', () => {
+  it('test_初始化_旧经验表无is_active_补列且旧数据读为活跃并可归档', async () => {
+    const legacyRoot = await makeLegacyExperienceStore()
+    const migrated = new AssetStore(legacyRoot, { now: fakeClock(), ids: fakeIds() })
+    try {
+      await migrated.init()
+
+      const { DatabaseSync } = await import('node:sqlite')
+      const raw = new DatabaseSync(join(legacyRoot, ASSET_DB_FILE))
+      let columns: string[] = []
+      let indexNames: string[] = []
+      try {
+        columns = (raw.prepare('PRAGMA table_info(experiences)').all() as Record<string, unknown>[]).map((row) => String(row.name))
+        indexNames = (raw
+          .prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='experiences'")
+          .all() as Record<string, unknown>[]).map((row) => String(row.name))
+      } finally {
+        raw.close()
+      }
+
+      expect(columns).toContain('is_active')
+      expect(indexNames).toContain('idx_experiences_active')
+
+      // 旧数据按「入库即生效」读成活跃：召回面与界面列表都能看到它
+      const [entry] = await migrated.listExperiences(10)
+      expect(entry).toMatchObject({ id: 'ex-legacy1', active: true, insight: '旧的经验', evidence: '旧证据' })
+      expect((await migrated.listExperienceIndex(10)).map((item) => item.id)).toEqual(['ex-legacy1'])
+
+      // 补列之后状态切换可用（这是旧库升级后新增的能力）
+      const retired = await migrated.setExperienceActive('ex-legacy1', false)
+      expect(retired.active).toBe(false)
+      expect(await migrated.listExperienceIndex(10)).toEqual([])
+      expect(await migrated.getExperiences(['ex-legacy1'])).toEqual([])
+    } finally {
+      migrated.close()
+      await removeTempRoot(legacyRoot)
+    }
+  })
+
+  it('test_初始化_已是新形状经验表_重复初始化幂等且数据不丢', async () => {
+    const inserted = await store.insertExperiences([{ taskType: '软件开发', taskContext: '上下文', insight: '经验' }], 1)
+    await store.setExperienceActive(inserted.inserted[0].id, false)
+
+    await store.init()
+    await store.init()
+
+    const [entry] = await store.listExperiences(10)
+    expect(entry.id).toBe(inserted.inserted[0].id)
+    expect(entry.active).toBe(false)
   })
 })

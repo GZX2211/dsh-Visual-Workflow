@@ -10,6 +10,7 @@ import type { ToastFace } from './useToast.js';
 import type { DocumentActionsFace } from './useDocumentActions.js';
 import type { CanvasActionsFace } from './useCanvasActions.js';
 import type { AssetsFace } from './useAssets.js';
+import type { ExperiencesFace } from './useExperiences.js';
 import type { RunLockSet } from '../lib/run-locks.js';
 import type { Dict } from '../i18n.js';
 export interface EditorActionsFace {
@@ -56,4 +57,4 @@ export declare function isPromoteLocked(summaries: ReadonlyArray<Pick<WorkflowAs
 /** 当前模版态的入库锁定（无入库目标 → 未锁定）。 */
 export declare function promoteLockedOf(state: StudioState): boolean;
 /** 编辑器面（保存/删除失败 toast；节点/连线删除复用画布面）。 */
-export declare function useEditorActions(state: StudioState, dispatch: Dispatch<StudioAction>, notify: ToastFace['toast'], toastError: ToastFace['toastError'], t: Dict, workflows: WorkflowsFace, flowTemplates: FlowTemplatesFace, templates: TemplatesFace, assets: AssetsFace, selection: SelectionFace, remote: RemoteFace, saveCanvas: DocumentActionsFace['saveCanvas'], removeSelected: CanvasActionsFace['removeSelected'], removeLine: CanvasActionsFace['removeLine'], selectWorkflow: DocumentActionsFace['selectWorkflow'], selectFlowTemplate: DocumentActionsFace['selectFlowTemplate'], options: EditorActionsOptions): EditorActionsFace;
+export declare function useEditorActions(state: StudioState, dispatch: Dispatch<StudioAction>, notify: ToastFace['toast'], toastError: ToastFace['toastError'], t: Dict, workflows: WorkflowsFace, flowTemplates: FlowTemplatesFace, templates: TemplatesFace, assets: AssetsFace, experiences: ExperiencesFace, selection: SelectionFace, remote: RemoteFace, saveCanvas: DocumentActionsFace['saveCanvas'], removeSelected: CanvasActionsFace['removeSelected'], removeLine: CanvasActionsFace['removeLine'], selectWorkflow: DocumentActionsFace['selectWorkflow'], selectFlowTemplate: DocumentActionsFace['selectFlowTemplate'], options: EditorActionsOptions): EditorActionsFace;

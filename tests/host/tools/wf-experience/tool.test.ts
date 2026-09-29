@@ -51,6 +51,8 @@ class FakeAssets {
       const extras = draft as ExperienceDraft & { reviewFeedback?: string }
       inserted.push({
         id: `ex-${this.seq}`,
+        // 入库即活跃：经验没有版本控制，状态只有「活跃 / 已归档」两态
+        active: true,
         reflectionPromptVersion: '1',
         taskType: draft.taskType,
         taskContext: draft.taskContext,

@@ -322,6 +322,56 @@ describe('回滚与退役（算法 F/G）', () => {
     expect(await store.getRoleAsset(promoted.assetId)).toMatchObject({ versionId: 1 })
   })
 
+  it('test_恢复_归档资产_取最新版本行重建Active指针', async () => {
+    // 恢复是状态转换的唯一入口（用户裁决）：回滚管版本与指针，恢复只回到活跃面。
+    const promoted = await store.promoteRole({
+      templateId: 'tpl-role-1',
+      fingerprint: 'fp-1',
+      role: roleTemplate(),
+      source: 'human',
+    })
+    await store.saveRoleVersion({
+      assetId: promoted.assetId,
+      role: roleTemplate({ name: '研究员二版', systemPrompt: '你是资深研究员。' }),
+      source: 'human',
+    })
+    await store.retireRoleAsset(promoted.assetId)
+
+    const restored = await store.restoreRoleAsset(promoted.assetId)
+
+    // 恢复取最新版本（v2），不是归档前活跃的版本：需要旧版本时恢复后再回滚
+    expect(restored).toMatchObject({ assetId: promoted.assetId, versionId: 2, name: '研究员二版' })
+    expect(restored.retired).toBeUndefined()
+    expect(await store.listRetiredRoleAssets()).toEqual([])
+    expect((await store.listRoleAssets()).map((item) => item.assetId)).toEqual([promoted.assetId])
+  })
+
+  it('test_恢复_已活跃资产_幂等无操作且不移动指针', async () => {
+    const promoted = await store.promoteRole({
+      templateId: 'tpl-role-1',
+      fingerprint: 'fp-1',
+      role: roleTemplate(),
+      source: 'human',
+    })
+    await store.saveRoleVersion({
+      assetId: promoted.assetId,
+      role: roleTemplate({ name: '研究员二版', systemPrompt: '你是资深研究员。' }),
+      source: 'human',
+    })
+    await store.rollbackRoleAsset(promoted.assetId, 1)
+
+    const restored = await store.restoreRoleAsset(promoted.assetId)
+
+    // 已活跃资产的恢复不改 Active 指针（重复点击恢复不该改变状态）
+    expect(restored).toMatchObject({ versionId: 1, name: '研究员' })
+    expect((await store.getRoleAsset(promoted.assetId))?.versionId).toBe(1)
+  })
+
+  it('test_恢复_完全不存在的资产_抛资产不存在错误', async () => {
+    const error = await store.restoreRoleAsset('role-missing').catch((caught: AssetError) => caught)
+    expect((error as AssetError).code).toBe(ERR_ASSET_NOT_FOUND)
+  })
+
   it('test_归档_移出活跃列表但详情与版本列表仍可读', async () => {
     // 行为变化（用户裁决）：归档不等于「资产不可用」。
     // 旧行为：get 返回 null、listRoleVersions 抛 ERR_ASSET_NOT_FOUND；

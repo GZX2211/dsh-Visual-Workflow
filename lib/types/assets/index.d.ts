@@ -1,4 +1,4 @@
-import type { AssetVersionEntry, AssetVersionSource, ExperienceDraft, ExperienceEntry, ExperienceIndexEntry, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, RoleAssetType, WorkflowAssetDetail, WorkflowAssetSummary } from '../shared/asset-types.js';
+import type { AssetVersionEntry, AssetVersionSource, ExperienceDraft, ExperienceEntry, ExperienceIndexEntry, ExperiencePatch, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, RoleAssetType, WorkflowAssetDetail, WorkflowAssetSummary } from '../shared/asset-types.js';
 import type { GraphNode, Line, WorkflowMode } from '../shared/graph-model.js';
 import type { OrgMeta } from '../shared/org-meta.js';
 import type { RoleTemplate } from '../shared/template-types.js';
@@ -114,6 +114,8 @@ export declare class AssetStore {
     listRoleVersions(assetId: string): Promise<AssetVersionEntry[]>;
     /** 回滚角色资产到指定版本（活跃资产挪 Active 指针；归档资产即重新启用）。 */
     rollbackRoleAsset(assetId: string, versionId: number): Promise<RoleAssetDetail>;
+    /** 恢复已归档角色资产（取最新版本行重建 Active 指针；已活跃时为幂等无操作）。 */
+    restoreRoleAsset(assetId: string): Promise<RoleAssetDetail>;
     /** 归档角色资产（删 Active 行；历史、引用统计与版本内容全部保留）。 */
     retireRoleAsset(assetId: string): Promise<void>;
     /** 角色模版晋升为资产（算法 C）。 */
@@ -130,6 +132,8 @@ export declare class AssetStore {
     listWorkflowVersions(assetId: string): Promise<AssetVersionEntry[]>;
     /** 回滚工作流资产到指定版本（活跃资产挪 Active 指针；归档资产即重新启用）。 */
     rollbackWorkflowAsset(assetId: string, versionId: number): Promise<WorkflowAssetDetail>;
+    /** 恢复已归档工作流资产（取最新版本行重建 Active 指针；已活跃时为幂等无操作）。 */
+    restoreWorkflowAsset(assetId: string): Promise<WorkflowAssetDetail>;
     /** 归档工作流资产（删 Active 行；历史行与其内联角色资产全部保留）。 */
     retireWorkflowAsset(assetId: string): Promise<void>;
     /**
@@ -147,10 +151,19 @@ export declare class AssetStore {
      * 名称/描述/mode/meta + 节点内容（忽略坐标）+ 连线全等即视为未变化、不新增版本。
      */
     saveWorkflowVersion(input: WorkflowSaveInput): Promise<AssetPromoteResult>;
-    /** 经验索引（按 created_at 倒序，limit 条）。 */
+    /** 经验索引（**召回面**：只含活跃经验；按 created_at 倒序，limit 条）。 */
     listExperienceIndex(limit: number): Promise<ExperienceIndexEntry[]>;
-    /** 经验详情（保持入参顺序，命中不到的略过）。 */
+    /** 经验列表（界面数据源：活跃与已归档一并返回；条目自带 active 标记）。 */
+    listExperiences(limit: number): Promise<ExperienceEntry[]>;
+    /**
+     * 经验详情（**召回面**：已归档经验一律查不到）。
+     * 消费方是父代理的目录召回，归档即不可召回必须在读取处生效，而不是靠调用方自觉过滤。
+     */
     getExperiences(ids: string[]): Promise<ExperienceEntry[]>;
+    /** 保存经验（就地更新可编辑字段；无版本语义，不产生历史行）。 */
+    saveExperience(id: string, patch: ExperiencePatch): Promise<ExperienceEntry>;
+    /** 经验归档 / 恢复（状态切换的唯一入口；内容与历史一概不动）。 */
+    setExperienceActive(id: string, active: boolean): Promise<ExperienceEntry>;
     /**
      * 批量插入经验：空字段与重复 insight 跳过并回传原因，其余入库。
      * 整批在一笔事务内完成，任一条插入失败则整批回滚（不留下半批经验）。

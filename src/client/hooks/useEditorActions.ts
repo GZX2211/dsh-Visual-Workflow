@@ -7,11 +7,15 @@
 //   - 入库：先保存模版（工作流模版走画布保存、角色模版走模板库保存），保存未落库即中止；
 //   - 保存：先做影响面预览（Host 判定），有牵连即二次确认后登记资产新版本（永不改写历史版本）；
 //   - 回滚：归档资产的回滚即重新启用；画布角色节点回滚后同步刷新其角色字段；
-//   - 归档：二次确认后移出活跃复用面（历史与版本内容全保留，绝无删除语义）。
+//   - 归档 / 恢复：二次确认后移出活跃复用面（历史与版本内容全保留，绝无删除语义），
+//     历史资产经「恢复」回到活跃面（取最新版本行，不再经回滚）。
+//
+// 经验的编排同样在本面：保存（就地更新，无版本语义）与归档 / 恢复（状态切换），
+// 载荷投影由 useExperiences 的 experiencePatchOf 唯一提供。
 
 import { useCallback, useMemo, useRef } from 'react'
 import type { Dispatch } from 'react'
-import type { AssetKind, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../../host/shared/asset-types.js'
+import type { AssetKind, ExperienceEntry, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../../host/shared/asset-types.js'
 import type { LibSelKind, StudioAction, StudioState } from '../studio/studio-state.js'
 import { currentFlowOf, currentServiceOf } from '../studio/studio-state.js'
 import type { WorkflowsFace } from './useWorkflows.js'
@@ -24,6 +28,7 @@ import type { ToastFace } from './useToast.js'
 import type { DocumentActionsFace } from './useDocumentActions.js'
 import type { CanvasActionsFace } from './useCanvasActions.js'
 import type { AssetsFace } from './useAssets.js'
+import type { ExperiencesFace } from './useExperiences.js'
 import type { RunLockSet } from '../lib/run-locks.js'
 import type { Dict } from '../i18n.js'
 import { isRoleAssetDetail, roleAssetContentOf } from '../lib/asset-to-node.js'
@@ -176,6 +181,7 @@ export function useEditorActions(
   flowTemplates: FlowTemplatesFace,
   templates: TemplatesFace,
   assets: AssetsFace,
+  experiences: ExperiencesFace,
   selection: SelectionFace,
   remote: RemoteFace,
   saveCanvas: DocumentActionsFace['saveCanvas'],
@@ -217,6 +223,12 @@ export function useEditorActions(
       selectFlowTemplate(id)
       return
     }
+    if (kind === 'experience') {
+      // 经验详情取自已装载列表（无版本、无画布投影），不需要额外请求
+      selection.selectLib(kind, id)
+      experiences.open(id)
+      return
+    }
     selection.selectLib(kind, id)
     if (kind === 'parentTemplate') {
       // 父代理模板点击：具备属性（属性栏显示模板内容），应展开右侧属性栏。
@@ -237,7 +249,7 @@ export function useEditorActions(
     const editorKindMap: Record<string, 'role' | 'file' | 'database'> = { role: 'role', file: 'file', database: 'database' }
     const editorKind = editorKindMap[kind]
     if (editorKind) selection.selectEditor({ source: 'template', kind: editorKind, id })
-  }, [selectWorkflow, selectFlowTemplate, selection])
+  }, [experiences, selectFlowTemplate, selectWorkflow, selection])
 
   // ---------- 编辑器 patch ----------
   const patchEditor = useCallback((patch: Record<string, unknown>) => {
@@ -263,6 +275,12 @@ export function useEditorActions(
       if (normalized.name === undefined && normalized.label !== undefined) normalized.name = normalized.label
       delete normalized.label
       dispatch({ type: 'ROLE_ASSET_PATCH', patch: normalized })
+      return
+    }
+    if (editor.source === 'experience') {
+      // 经验表单只下发可编辑字段（任务类型/上下文/经验/证据/审核意见）：直接落详情槽，
+      // 保存时再由 experiencePatchOf 做一次投影——此处不复制字段清单，避免两处漂移。
+      dispatch({ type: 'EXPERIENCE_PATCH', patch })
       return
     }
     if (editor.source === 'node') {
@@ -389,8 +407,14 @@ export function useEditorActions(
       if (pending) return null
       return await doSave()
     }
+    if (editor.source === 'experience') {
+      // 经验保存 = 就地更新（无版本、无级联：经验不被任何工作流引用，没有影响面可告知）
+      const entry: ExperienceEntry | null = state.experienceDoc
+      if (!entry || entry.id !== editor.id) return null
+      return await experiences.save(entry)
+    }
     return null
-  }, [assets, dispatch, needsCascadeConfirm, notify, saveCanvas, state, t.assetCascadeRoleMessage, t.assetCascadeWorkflowMessage, t.toastSaved, templates, toastError])
+  }, [assets, dispatch, experiences, needsCascadeConfirm, notify, saveCanvas, state, t.assetCascadeRoleMessage, t.assetCascadeWorkflowMessage, t.toastSaved, templates, toastError])
 
   const promoteEditor = useCallback(async () => {
     const target = promoteTargetOf(state)
@@ -543,14 +567,43 @@ export function useEditorActions(
       })
       return
     }
+    if (editor.source === 'experience') {
+      const entry = state.experienceDoc
+      if (!entry || entry.id !== editor.id) return
+      // 恢复不需要二次确认：它是「回到活跃面」，不改变召回内容的正确性
+      if (!entry.active) {
+        void experiences.setActive(entry.id, true)
+        return
+      }
+      // 归档要二次确认：父代理从此不再召回该经验，用户须明确知道自己移除了什么
+      dispatch({
+        type: 'CONFIRM_SET',
+        confirm: {
+          kind: 'confirmText',
+          title: t.experienceRetireTitle,
+          message: t.experienceRetireMessage,
+          confirmLabel: t.experienceRetireConfirm,
+          onConfirm: () => {
+            // 归档成功与否由经验面自身按稳定错误码提示；本面只收起确认框，保持现场可重试
+            void experiences.setActive(entry.id, false).then(() => {
+              dispatch({ type: 'CONFIRM_SET', confirm: null })
+            })
+          },
+        },
+      })
+      return
+    }
     if (editor.source === 'flowAsset' || editor.source === 'roleAsset') {
       // 资产态「归档」（Active 移除、历史与版本内容全保留）：必须二次确认。
       // 角色资产被其他工作流资产引用时，归档会改变父代理的召回面，故须显式告知影响面。
       const kind: AssetKind = editor.source === 'flowAsset' ? 'workflow' : 'role'
       const assetId = editor.id
       const roleDetail = kind === 'role' ? state.assetRoleDoc : null
-      // 已归档资产不再重复归档（按钮已置灰，这里再兜一层防快捷键/回调旁路）
-      if (roleDetail?.retired === true || (kind === 'workflow' && state.assetDoc?.retired === true)) return
+      // 历史（已归档）资产在此走「恢复」：状态转换只经恢复入口，回滚只管版本与指针
+      if (roleDetail?.retired === true || (kind === 'workflow' && state.assetDoc?.retired === true)) {
+        void assets.restore(kind, assetId)
+        return
+      }
       /**
        * 影响面取**资产级**引用聚合（referencingWorkflowAssets），不取单版本行的
        * referenceWorkflowIds：后者按版本行记录、新版本行从零开始，会给出「shared 资产被
@@ -591,7 +644,7 @@ export function useEditorActions(
     if (editor.source === 'edge') {
       removeLine(editor.id)
     }
-  }, [assets, clearCanvasIfOwned, dispatch, notify, removeLine, removeSelected, state, t.assetRetireConfirm, t.assetRetireMessage, t.assetRetireSharedMessage, t.assetRetireTitle, t.confirmDelete, t.deleteFlow, t.toastDeleted, templates, flowTemplates, toastError, workflows])
+  }, [assets, clearCanvasIfOwned, dispatch, experiences, notify, removeLine, removeSelected, state, t.assetRetireConfirm, t.assetRetireMessage, t.assetRetireSharedMessage, t.assetRetireTitle, t.confirmDelete, t.deleteFlow, t.experienceRetireConfirm, t.experienceRetireMessage, t.experienceRetireTitle, t.toastDeleted, templates, flowTemplates, toastError, workflows])
 
   return {
     selectLibraryCard, patchEditor, saveEditor, deleteEditor,

@@ -3,8 +3,14 @@
 // 右侧属性面板（照搬旧项目 inspector.js，TSX 化）：
 // 所见即所操作——点击模板编辑模板、点击画布节点编辑节点实例、点击连线编辑连线；
 // 底部保存/删除作用于当前选中对象；阶段无保存（只读）；虚拟节点只读。
-// 底部按钮分录（用户裁决）：模版态 = 保存/删除/入库；资产态 = 保存/删除/回滚；
+// 底部按钮分录（用户裁决）：模版态 = 保存/删除/入库；资产态 = 保存/归档（历史资产为
+// 「恢复」）/回滚；经验 = 保存/归档（已归档为「恢复」），**没有回滚**（经验无版本控制）；
 // 其余（实例/服务/节点/连线）= 保存/删除（+ 角色节点的复制、实例的另存为模板）。
+//
+// 按钮职责（用户批注，本文件是唯一判定点）：
+//   - 「归档 / 恢复」管**状态转换**（资产与经验同口径）：活跃 → 归档、已归档 → 恢复；
+//   - 「回滚」只管**版本与 Active 指针**：因此只对活跃资产（与绑定来源资产的画布角色节点）
+//     显示；历史资产不再提供回滚入口（恢复后再回滚），经验无版本故永不显示。
 
 import { useState } from 'react'
 import type { Dict } from '../../../i18n.js'
@@ -15,6 +21,7 @@ import { DatabaseForm } from './database-form.js'
 import { GroupForm, ProxyForm, StageForm } from './node-forms.js'
 import { LinePanel, WorkflowForm } from './flow-forms.js'
 import { AssetVersions } from './asset-versions.js'
+import { ExperienceForm } from './experience-form.js'
 
 export interface InspectorProps {
   copy: Dict
@@ -112,6 +119,9 @@ export function Inspector(props: InspectorProps) {
       case 'edge':
         content = <LinePanel data={data} copy={t} onPatch={onPatch} />
         break
+      case 'experience':
+        content = <ExperienceForm data={data} copy={t} onPatch={onPatch} />
+        break
       default:
         content = <div className="wf-empty">{t.inspectorEmpty}</div>
     }
@@ -126,23 +136,27 @@ export function Inspector(props: InspectorProps) {
    */
   const nodeSourceAssetId = editorData?.sourceAssetId ?? ''
   const rollbackAssetId = (editorData?.assetId ?? '') !== '' ? editorData!.assetId! : nodeSourceAssetId
+  /** 经验编辑对象：经验没有版本控制，一切与版本相关的按钮（回滚 / 版本列表）都不出现。 */
+  const isExperienceEditor = editorData?.experience === true
+  /** 已归档（历史资产 / 非活跃经验）：状态按钮翻转为「恢复」，版本列表一律收起。 */
+  const isRetiredEditor = editorData?.retired === true
 
   const footer: React.ReactNode[] = []
   if (editorData) {
     const kind = editorData.kind
     const isStage = kind === 'stage'
-    // 资产态（工作流资产 / 角色资产）：保存 = 登记新版本、归档 = 移出活跃复用面、回滚 = 版本列表
+    // 资产态（工作流资产 / 角色资产）：保存 = 登记新版本；经验：保存 = 就地更新（无版本）
     const isAsset = editorData.asset === true || editorData.roleAsset === true
-    const assetId = editorData.assetId ?? ''
-    const canRollback = rollbackAssetId !== ''
+    // 归档 / 恢复只管状态转换，回滚只管版本与指针：历史资产与经验都不给回滚入口
+    const canRollback = !isExperienceEditor && !isRetiredEditor && rollbackAssetId !== ''
       && (isAsset || (kind === 'role' && editorData.template !== true && nodeSourceAssetId !== ''))
     // 展开态只在「仍编辑着同一个回滚对象」时成立（编辑器切换即自动收起）
     const versionsOpen = versionsAssetId !== null && versionsAssetId === rollbackAssetId
     // 复制按钮：画布角色节点（含父代理节点，§4.2.3.1 规则 3 可创建虚拟节点）；
-    // 模板与父代理模板不可复制，角色资产（不在画布上）同样不可复制
+    // 模板与父代理模板不可复制，角色资产与经验（都不在画布上）同样不可复制
     const canCopyProxy = kind === 'role' && !editorData.template && !isAsset
-    // 入库：仅工作流模版与角色模版（文件/数据库/协作组模板不显示；资产态隐藏）
-    const canPromote = !isAsset && editorData.template === true && (kind === 'workflow' || kind === 'role') && onPromote !== undefined
+    // 入库：仅工作流模版与角色模版（文件/数据库/协作组模板不显示；资产态与经验不显示）
+    const canPromote = !isAsset && !isExperienceEditor && editorData.template === true && (kind === 'workflow' || kind === 'role') && onPromote !== undefined
     if (!isStage) {
       footer.push(
         <button key="save" type="button" className="wf-btn is-primary" onClick={onSave} disabled={importBusy || saveDisabled}>
@@ -150,20 +164,29 @@ export function Inspector(props: InspectorProps) {
         </button>,
       )
     }
-    footer.push(
-      // 资产态的删除按钮语义是「归档」（Active 移除、历史与版本内容全保留，绝不删除版本行）；
-      // 历史（已归档）资产的归档按钮置灰：归档只能生效一次，且不提供任何删除入口
-      <button
-        key="delete"
-        type="button"
-        className="wf-btn is-danger"
-        onClick={onDelete}
-        disabled={importBusy || (isAsset && editorData.retired === true)}
-        title={isAsset ? t.assetArchiveHint : undefined}
-      >
-        {isAsset ? t.assetArchive : t.inspectorDelete}
-      </button>,
-    )
+    if (isAsset || isExperienceEditor) {
+      // 状态转换按钮（唯一入口）：活跃 → 归档；已归档 → 恢复。两种状态都可点，不再置灰。
+      footer.push(
+        <button
+          key="retire"
+          type="button"
+          className={`wf-btn${isRetiredEditor ? '' : ' is-danger'}`}
+          onClick={onDelete}
+          disabled={importBusy}
+          title={isExperienceEditor
+            ? (isRetiredEditor ? t.experienceRestoreHint : t.experienceArchiveHint)
+            : (isRetiredEditor ? t.assetRestoreHint : t.assetArchiveHint)}
+        >
+          {isRetiredEditor ? t.assetRestore : t.assetArchive}
+        </button>,
+      )
+    } else {
+      footer.push(
+        <button key="delete" type="button" className="wf-btn is-danger" onClick={onDelete} disabled={importBusy}>
+          {t.inspectorDelete}
+        </button>,
+      )
+    }
     if (canPromote) {
       footer.push(
         <button
@@ -178,7 +201,7 @@ export function Inspector(props: InspectorProps) {
         </button>,
       )
     }
-    // 回滚（展开版本列表）：资产态与「绑定来源资产的画布角色节点」都显示；模版态不显示
+    // 回滚（展开版本列表）：活跃资产与「绑定来源资产的画布角色节点」显示；历史资产、经验、模版态不显示
     if (canRollback && onOpenVersions) {
       footer.push(
         <button
@@ -195,6 +218,7 @@ export function Inspector(props: InspectorProps) {
             onOpenVersions()
           }}
           disabled={importBusy}
+          title={t.assetRollbackHint}
         >
           {t.assetRollback}
         </button>,
@@ -218,7 +242,10 @@ export function Inspector(props: InspectorProps) {
     }
   }
 
-  const showVersions = versionsAssetId !== null && rollbackAssetId !== '' && versionsAssetId === rollbackAssetId
+  // 版本列表只在「活跃资产 / 绑定来源资产的画布角色节点」上出现：经验无版本，
+  // 已归档对象的状态转换走「恢复」，两者都不在此列出（与回滚按钮同判据）。
+  const showVersions = !isExperienceEditor && !isRetiredEditor
+    && versionsAssetId !== null && rollbackAssetId !== '' && versionsAssetId === rollbackAssetId
     && (editorData?.asset === true || editorData?.roleAsset === true || editorData?.sourceAssetId !== undefined)
 
   return (

@@ -139,12 +139,10 @@ describe('资产态分区（活跃资产 / 历史资产）', () => {
     expect(model.sections[0].cards.map((card) => card.name)).toEqual(['独立角色', '共享角色'])
   })
 
-  it('数据 / 其他 Tag：无分区 + 整页空态提示（V1 资产只含工作流与角色）', () => {
-    for (const libTab of ['data', 'other'] as const) {
-      const model = buildLibraryModel(makeInput({ librarySource: 'asset', libTab }))
-      expect(model.sections).toEqual([])
-      expect(model.emptyHint).toBe(zh.assetListNotSupported)
-    }
+  it('其他 Tag：无分区 + 整页空态提示（资产分类只含工作流 / 角色 / 经验）', () => {
+    const model = buildLibraryModel(makeInput({ librarySource: 'asset', libTab: 'other' }))
+    expect(model.sections).toEqual([])
+    expect(model.emptyHint).toBe(zh.assetListNotSupported)
   })
 
   it('资产为空：活跃分区保留但卡片为空，空态文案为「资产只能由模版入库晋升」', () => {
@@ -163,6 +161,108 @@ describe('资产态分区（活跃资产 / 历史资产）', () => {
       assets: assetLists({ workflows: [workflowAsset('a-1', '资产一')] }),
     }))
     expect(model.sections.map((section) => section.key)).toEqual(['instances', 'flowTemplates'])
+  })
+})
+
+describe('资产态「数据」Tag 以「经验」呈现（用户批注）', () => {
+  /** 经验条目（只给被测字段，其余为契约最小缺省）。 */
+  function experience(
+    id: string,
+    taskContext: string,
+    insight: string,
+    active = true,
+    taskType = '软件开发',
+  ): NonNullable<LibraryModelInput['experiences']>[number] {
+    return {
+      id,
+      active,
+      reflectionPromptVersion: '1',
+      taskType,
+      taskContext,
+      insight,
+      createdAt: 1,
+      updatedAt: 1,
+    }
+  }
+
+  it('Tab 标签随库来源切换：资产态为「经验」，模版态仍是「数据」', () => {
+    const assetTabs = buildLibraryModel(makeInput({ librarySource: 'asset', libTab: 'data' })).tabs
+    const templateTabs = buildLibraryModel(makeInput({ librarySource: 'template', libTab: 'data' })).tabs
+    expect(assetTabs.map((tab) => tab.label)).toEqual(['工作流', '角色', zh.libTabExperience, '其他'])
+    expect(templateTabs.map((tab) => tab.label)).toEqual(['工作流', '角色', '数据', '其他'])
+    // Tab key 不变：两态共用同一 key，只有标签与内容随来源切换
+    expect(assetTabs.map((tab) => tab.key)).toEqual(['workflow', 'role', 'data', 'other'])
+  })
+
+  it('经验分栏：活跃 / 历史两栏，主行取任务上下文、副行取经验摘要', () => {
+    const model = buildLibraryModel(makeInput({
+      librarySource: 'asset',
+      libTab: 'data',
+      experiences: [
+        experience('ex-1', '重构旧模块', '先补测试再重构', true),
+        experience('ex-2', '归档的上下文', '已归档的经验', false),
+      ],
+    }))
+    expect(model.sections.map((section) => section.key)).toEqual(['assetExperiences', ASSET_HISTORY_SECTIONS.experience])
+    expect(model.sections[0].title).toBe(zh.experienceActiveSection)
+    expect(model.sections[0].plus).toBe(false)
+    expect(model.sections[0].cards.map((card) => card.name)).toEqual(['重构旧模块'])
+    expect(model.sections[0].cards[0].kind).toBe('experience')
+    expect(model.sections[0].cards[0].sub).toBe('先补测试再重构')
+    expect(model.sections[1].title).toBe(zh.experienceHistorySection)
+    expect(model.sections[1].cards.map((card) => card.name)).toEqual(['归档的上下文'])
+    expect(model.emptyHint).toBeNull()
+  })
+
+  it('经验没有画布形态：卡片无拖入回调，点击进属性栏', () => {
+    const onOpenExperience = vi.fn()
+    const model = buildLibraryModel(makeInput({
+      librarySource: 'asset',
+      libTab: 'data',
+      experiences: [experience('ex-1', '上下文一', '经验一')],
+      onOpenExperience,
+    }))
+    const payload = model.sections[0].cards[0].payload
+    expect(payload.onDrop).toBeUndefined()
+    expect(payload.onDropIntoGroup).toBeUndefined()
+    payload.onClick()
+    expect(onOpenExperience).toHaveBeenCalledWith('ex-1')
+  })
+
+  it('经验为空：两栏均保留并给出经验专属空态文案', () => {
+    const model = buildLibraryModel(makeInput({ librarySource: 'asset', libTab: 'data' }))
+    expect(model.sections[0].emptyText).toBe(zh.experienceEmptyHint)
+    expect(model.sections[1].emptyText).toBe(zh.experienceHistoryEmpty)
+    expect(model.emptyHint).toBeNull()
+  })
+
+  it('经验搜索：命中任务类型 / 上下文 / 经验本体 / 证据（大小写不敏感）', () => {
+    const base = {
+      librarySource: 'asset' as const,
+      libTab: 'data' as const,
+      experiences: [
+        { ...experience('ex-1', '重构旧模块', '先补测试再重构', true, '软件开发'), evidence: '缺陷率下降' },
+        experience('ex-2', '撰写文档', '先列提纲', true, '写作'),
+      ],
+    }
+    expect(buildLibraryModel(makeInput({ ...base, libSearch: '写作' })).sections[0].cards.map((card) => card.id)).toEqual(['ex-2'])
+    expect(buildLibraryModel(makeInput({ ...base, libSearch: '缺陷率' })).sections[0].cards.map((card) => card.id)).toEqual(['ex-1'])
+    expect(buildLibraryModel(makeInput({ ...base, libSearch: '先补测试' })).sections[0].cards.map((card) => card.id)).toEqual(['ex-1'])
+    expect(buildLibraryModel(makeInput({ ...base, libSearch: '软件开发' })).sections[0].cards.map((card) => card.id)).toEqual(['ex-1'])
+    // 无命中：整页空态（分区被过滤掉）
+    const empty = buildLibraryModel(makeInput({ ...base, libSearch: '不存在的关键词' }))
+    expect(empty.sections).toEqual([])
+    expect(empty.emptyHint).toBe(zh.searchNoResult)
+  })
+
+  it('模版态数据 Tag 仍是文件 + 数据库（经验不参与）', () => {
+    const model = buildLibraryModel(makeInput({
+      librarySource: 'template',
+      libTab: 'data',
+      experiences: [experience('ex-1', '上下文一', '经验一')],
+    }))
+    expect(model.sections.map((section) => section.key)).toEqual(['files', 'databases'])
+    expect(model.emptyHint).toBeNull()
   })
 })
 

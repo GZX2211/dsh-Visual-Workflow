@@ -294,6 +294,22 @@ describe('资产版本、回滚与退役端点', () => {
     expect(detail).toMatchObject({ assetId: 'a-flow', retired: true })
     expect(await h.api.handle('listAssetVersions', { kind: 'workflow', assetId: 'a-flow' })).toHaveLength(1)
   })
+
+  it('restoreAsset 恢复历史资产：按 kind 转交并返回去 retired 的详情', async () => {
+    const { h, assets } = await makeAssetHarness()
+    assets.seedWorkflow({ assetId: 'a-flow', name: '流程' })
+    assets.seedRole({ assetId: 'a-role', name: '角色' })
+    await h.api.handle('retireAsset', { kind: 'workflow', assetId: 'a-flow' })
+    await h.api.handle('retireAsset', { kind: 'role', assetId: 'a-role' })
+
+    const workflow = (await h.api.handle('restoreAsset', { kind: 'workflow', assetId: 'a-flow' })) as Record<string, unknown>
+    expect(workflow).toMatchObject({ assetId: 'a-flow' })
+    expect(workflow.retired).toBeUndefined()
+    const role = (await h.api.handle('restoreAsset', { kind: 'role', assetId: 'a-role' })) as Record<string, unknown>
+    expect(role).toMatchObject({ assetId: 'a-role' })
+    expect(role.retired).toBeUndefined()
+    expect(assets.calls.restored).toEqual(['workflow:a-flow', 'role:a-role'])
+  })
 })
 
 describe('资产影响面预览端点', () => {
@@ -355,6 +371,8 @@ describe('资产端点参数校验与能力缝', () => {
       ['listAssetVersions', { kind: 'role', assetId: '   ' }],
       ['rollbackAsset', { kind: 'role', assetId: 'a-role' }],
       ['retireAsset', { kind: 'role' }],
+      ['restoreAsset', { kind: 'role' }],
+      ['restoreAsset', { assetId: 'a-role' }],
       ['previewAssetCascade', { kind: 'workflow' }],
       ['previewAssetCascade', { kind: 'role', assetId: 'a-role' }],
     ]
@@ -376,6 +394,7 @@ describe('资产端点参数校验与能力缝', () => {
       ['listAssetVersions', { kind: 'role', assetId: 'a' }],
       ['rollbackAsset', { kind: 'role', assetId: 'a', versionId: 1 }],
       ['retireAsset', { kind: 'role', assetId: 'a' }],
+      ['restoreAsset', { kind: 'role', assetId: 'a' }],
       ['previewAssetCascade', { kind: 'workflow', payload: { nodes: [] } }],
     ]
     for (const [endpoint, args] of cases) {

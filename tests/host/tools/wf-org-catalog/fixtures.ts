@@ -160,10 +160,11 @@ export function experienceIndexFixture(overrides: Partial<ExperienceIndexEntry> 
   return { id: 'ex-1', taskContext: '重构一个 TypeScript 插件的存储层', ...overrides }
 }
 
-/** 经验条目（完整内容）。 */
+/** 经验条目（完整内容；缺省活跃——入库即进入召回面）。 */
 export function experienceFixture(overrides: Partial<ExperienceEntry> = {}): ExperienceEntry {
   return {
     id: 'ex-1',
+    active: true,
     sourceRunId: 'run-1',
     reflectionPromptVersion: '1',
     taskType: '软件开发',

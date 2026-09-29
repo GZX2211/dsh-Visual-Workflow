@@ -441,6 +441,12 @@ function assetRemoteStub(): RemoteFace & { calls: Array<{ endpoint: string; args
         }
       }
       if (endpoint === EP.EP_GET_ASSET) return args?.kind === 'role' ? roleDetail : workflowDetail
+      if (endpoint === EP.EP_LIST_EXPERIENCES) {
+        return [
+          { id: 'ex-1', active: true, reflectionPromptVersion: '1', taskType: '软件开发', taskContext: '重构旧模块', insight: '先补测试再重构', createdAt: 2, updatedAt: 2 },
+          { id: 'ex-2', active: false, reflectionPromptVersion: '1', taskType: '软件开发', taskContext: '归档上下文', insight: '归档经验', createdAt: 1, updatedAt: 1 },
+        ]
+      }
       if (endpoint === EP.EP_LIST_TEMPLATES && String(args?.kind ?? '') === 'role') {
         return [{ id: 'r-1', kind: 'agent', name: '研究员', systemPrompt: '' }]
       }
@@ -485,7 +491,26 @@ describe('资产态：库来源切换与搜索', () => {
     await act(async () => { libTab(zh.libTab.role)?.click() })
     expect(textOf('.wf-docgroup')).toEqual([zh.assetActiveSection, zh.assetHistorySection])
     expect(textOf('.wf-docitem__label')).toEqual(['资产角色'])
-    await act(async () => { libTab(zh.libTab.data)?.click() })
+  })
+
+  it('资产态「数据」Tag 以「经验」呈现（活跃 / 历史两栏 + 经验卡片）', async () => {
+    await renderStudioWith(assetRemoteStub())
+    await switchLibrarySource(zh.libSourceAsset)
+    // 资产态下该 Tag 的文案已是「经验」：按新文案点击（模版态仍是「数据」）
+    await act(async () => { libTab(zh.libTabExperience)?.click() })
+    // Tag 文案随库来源切换为「经验」，内容改为经验库的两分栏
+    expect(textOf('.wf-lib-tab')).toContain(zh.libTabExperience)
+    // 历史分栏默认折叠，标题文本后带命中数徽标（1 条归档经验）
+    const groups = textOf('.wf-docgroup')
+    expect(groups[0]).toBe(zh.experienceActiveSection)
+    expect(groups[1]).toContain(zh.experienceHistorySection)
+    expect(textOf('.wf-docitem__label')).toEqual(['重构旧模块'])
+  })
+
+  it('资产态「其他」Tag：无分区 + 整页空态提示', async () => {
+    await renderStudioWith(assetRemoteStub())
+    await switchLibrarySource(zh.libSourceAsset)
+    await act(async () => { libTab(zh.libTab.other)?.click() })
     expect(textOf('.wf-docgroup')).toEqual([])
     expect(document.querySelector('.wf-hint')?.textContent).toBe(zh.assetListNotSupported)
   })

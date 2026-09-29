@@ -8,6 +8,8 @@ import {
   ERR_ASSET_DUPLICATE,
   ERR_ASSET_NOT_FOUND,
   ERR_ASSET_VERSION_NOT_FOUND,
+  ERR_EXPERIENCE_BAD_ARGS,
+  ERR_EXPERIENCE_NOT_FOUND,
 } from '../shared/protocol.js'
 
 /** 资产库稳定错误码（与共享协议常量同域；此处只做类型收窄，不新增取值）。 */
@@ -16,6 +18,8 @@ export type AssetErrorCode =
   | typeof ERR_ASSET_VERSION_NOT_FOUND
   | typeof ERR_ASSET_DUPLICATE
   | typeof ERR_ASSET_BAD_ARGS
+  | typeof ERR_EXPERIENCE_NOT_FOUND
+  | typeof ERR_EXPERIENCE_BAD_ARGS
 
 /**
  * 资产库错误：API 边界按 code 翻译 HTTP 状态（404 / 409 / 400），
@@ -47,4 +51,14 @@ export function assetVersionNotFound(assetId: string, versionId: number): AssetE
 /** 入参形状非法（缺失必填字段 / 类型不符）。 */
 export function assetBadArgs(message: string): AssetError {
   return new AssetError(message, ERR_ASSET_BAD_ARGS)
+}
+
+/** 经验不存在（经验表无该 id）。 */
+export function experienceNotFound(experienceId: string): AssetError {
+  return new AssetError(`经验 ${experienceId} 不存在：请刷新经验列表后重试`, ERR_EXPERIENCE_NOT_FOUND)
+}
+
+/** 经验入参非法（id 缺失 / 必填字段被清空 / 载荷形状不符）。 */
+export function experienceBadArgs(message: string): AssetError {
+  return new AssetError(message, ERR_EXPERIENCE_BAD_ARGS)
 }

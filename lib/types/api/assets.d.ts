@@ -65,5 +65,15 @@ export declare class AssetEndpoints extends VisualWorkflowApiBase {
         assetId: string;
         retired: true;
     }>;
+    /**
+     * 恢复历史（已归档）资产：取**最新版本行**重建 Active 指针。
+     *
+     * 与回滚的职责分工（用户裁决）：本端点只管状态转换（归档 → 活跃），回滚只管版本与
+     * Active 指针；恢复不接版本号，需要旧版本时恢复后再回滚。
+     */
+    restoreAsset(args: {
+        kind?: unknown;
+        assetId?: unknown;
+    }): Promise<WorkflowAssetDetail | RoleAssetDetail>;
 }
 export {};

@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import React from 'react'
-import { LeftPanel, type LeftPanelProps } from '../../../../src/client/components/sidebar/LeftPanel.js'
+import { LeftPanel, type DragPayload, type LeftPanelProps } from '../../../../src/client/components/sidebar/LeftPanel.js'
 import { zh } from '../../../../src/client/i18n.js'
 
 let container: HTMLDivElement | null = null
@@ -60,6 +60,7 @@ function makeProps(partial: Partial<LeftPanelProps> = {}): LeftPanelProps {
     currentSessionId: 's-1',
     flowTemplates: [],
     assets: assetLists(),
+    experiences: [],
     parentTemplate: null,
     roleTemplates: [],
     fileTemplates: [],
@@ -73,6 +74,7 @@ function makeProps(partial: Partial<LeftPanelProps> = {}): LeftPanelProps {
     onSelectFlowAsset: () => {},
     onOpenRoleAsset: () => {},
     onPlaceRoleAsset: () => {},
+    onOpenExperience: () => {},
     onSelectLib: () => {},
     onPlaceTemplate: () => {},
     onPlaceTemplateIntoGroup: () => {},
@@ -167,10 +169,13 @@ describe('左栏底部「模版 / 资产」切换', () => {
 })
 
 describe('资产态与搜索空态（词典文案）', () => {
-  it('资产态数据 Tab：整页空态提示「该分类暂无资产」（非中文硬编码）', async () => {
+  it('资产态「数据」Tag：标签显示为「经验」，列表为空时给出经验专属空态', async () => {
     await renderPanel(makeProps({ librarySource: 'asset', libTab: 'data' }))
-    expect(document.querySelector('.wf-hint')?.textContent).toBe(zh.assetListNotSupported)
-    expect(document.querySelectorAll('.wf-docgroup')).toHaveLength(0)
+    // 第四个 Tag 的位置与 key 不变，只有文案随库来源切换（模版态仍是「数据」）
+    expect(Array.from(document.querySelectorAll('.wf-lib-tab')).map((tab) => tab.textContent))
+      .toEqual(['工作流', '角色', zh.libTabExperience, '其他'])
+    expect(document.querySelector('.wf-docgroup')?.textContent).toContain(zh.experienceActiveSection)
+    expect(document.querySelector('.wf-hint')?.textContent).toBe(zh.experienceEmptyHint)
   })
 
   it('搜索无结果：整页空态提示，且不渲染任何分区标题', async () => {
@@ -183,6 +188,72 @@ describe('资产态与搜索空态（词典文案）', () => {
     await renderPanel(makeProps({ librarySource: 'asset', libTab: 'workflow' }))
     expect(document.querySelector('.wf-docgroup')?.textContent).toContain(zh.assetActiveSection)
     expect(document.querySelector('.wf-hint')?.textContent).toBe(zh.assetEmptyHint)
+  })
+})
+
+describe('资产态「经验」列表（左栏）', () => {
+  /** 经验条目（只给被测字段，其余为契约最小缺省）。 */
+  function experienceEntry(id: string, taskContext: string, insight: string, active = true): LeftPanelProps['experiences'][number] {
+    return { id, active, reflectionPromptVersion: '1', taskType: '软件开发', taskContext, insight, createdAt: 1, updatedAt: 1 }
+  }
+
+  it('活跃 / 历史两栏；卡片主行为任务上下文、副行为经验摘要', async () => {
+    await renderPanel(makeProps({
+      librarySource: 'asset',
+      libTab: 'data',
+      experiences: [
+        experienceEntry('ex-1', '重构旧模块', '先补测试再重构'),
+        experienceEntry('ex-2', '已归档上下文', '已归档经验', false),
+      ],
+    }))
+    const groups = Array.from(document.querySelectorAll('.wf-docgroup')).map((group) => group.textContent)
+    expect(groups[0]).toContain(zh.experienceActiveSection)
+    expect(groups[1]).toContain(zh.experienceHistorySection)
+    const card = document.querySelector('.wf-docitem')!
+    expect(card.querySelector('.wf-docitem__label')?.textContent).toBe('重构旧模块')
+    expect(card.querySelector('.wf-docitem__path')?.textContent).toBe('先补测试再重构')
+  })
+
+  it('经验卡片：pointerdown 挂载的 payload 无拖入回调，点击只打开属性栏', async () => {
+    const onOpenExperience = vi.fn()
+    const onBeginDrag = vi.fn()
+    await renderPanel(makeProps({
+      librarySource: 'asset',
+      libTab: 'data',
+      experiences: [experienceEntry('ex-1', '上下文一', '经验一')],
+      onOpenExperience,
+      onBeginDrag,
+    }))
+    const card = document.querySelector('.wf-docitem') as HTMLButtonElement
+    await act(async () => {
+      card.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 5, clientY: 5, button: 0 }))
+    })
+    expect(onBeginDrag).toHaveBeenCalledTimes(1)
+    const payload = onBeginDrag.mock.calls[0]![1] as DragPayload
+    expect(payload.label).toBe('上下文一')
+    // 经验没有画布形态：payload 不提供任何落点回调（点击才是唯一入口）
+    expect(payload.onDrop).toBeUndefined()
+    await act(async () => { payload.onClick() })
+    expect(onOpenExperience).toHaveBeenCalledWith('ex-1')
+  })
+})
+
+describe('分栏标题排版（折叠箭头右置，用户批注）', () => {
+  it('历史分栏：标题在前、箭头在后（标题左边缘与不可折叠分栏对齐）', async () => {
+    await renderPanel(makeProps({
+      librarySource: 'asset',
+      libTab: 'workflow',
+      assets: assetLists(
+        { workflows: [{ assetId: 'a-1', versionId: 1, name: '活跃资产', description: '', updatedAt: 1 }] },
+        { retiredWorkflows: [{ assetId: 'a-old', versionId: 1, name: '归档资产', description: '', updatedAt: 1 }] },
+      ),
+    }))
+    const group = document.querySelectorAll('.wf-docgroup')[1]
+    const toggle = group.querySelector('.wf-docgroup__toggle')!
+    // DOM 顺序即视觉顺序：标题是首个元素、箭头是末个元素（CSS 再把箭头推到最右）
+    expect(toggle.firstElementChild?.className).toBe('wf-docgroup__title')
+    expect(toggle.lastElementChild?.className).toBe('wf-docgroup__caret')
+    expect(toggle.firstElementChild?.textContent).toBe(zh.assetHistorySection)
   })
 })
 

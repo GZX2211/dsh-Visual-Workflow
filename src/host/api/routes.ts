@@ -16,6 +16,7 @@ import { mixInEndpointGroups, VisualWorkflowApiBase, type ApiHost } from './boun
 import { WorkflowEndpoints } from './workflows.js'
 import { TemplateEndpoints } from './templates.js'
 import { AssetEndpoints } from './assets.js'
+import { ExperienceEndpoints } from './experiences.js'
 import { EcosystemEndpoints } from './ecosystem.js'
 import { CatalogEndpoints } from './catalog.js'
 import { RunEndpoints } from './runs.js'
@@ -28,6 +29,7 @@ mixInEndpointGroups(VisualWorkflowApi, [
   WorkflowEndpoints,
   TemplateEndpoints,
   AssetEndpoints,
+  ExperienceEndpoints,
   EcosystemEndpoints,
   CatalogEndpoints,
   RunEndpoints,
@@ -53,6 +55,8 @@ const ERROR_STATUS: Record<string, number> = {
   [EP.ERR_ASSET_NOT_FOUND]: 404,
   [EP.ERR_ASSET_VERSION_NOT_FOUND]: 404,
   [EP.ERR_ASSET_DUPLICATE]: 409,
+  [EP.ERR_EXPERIENCE_NOT_FOUND]: 404,
+  [EP.ERR_EXPERIENCE_BAD_ARGS]: 400,
 }
 
 /** 响应状态：传输层错误自带 status 优先；否则按稳定 code 表；无法识别为 500。 */

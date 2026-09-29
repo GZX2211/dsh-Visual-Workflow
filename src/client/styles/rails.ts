@@ -339,8 +339,11 @@ export const railsStyles = `
   color: var(--wf-brand);
 }
 
-/* 可折叠分栏的标题按钮（历史资产分栏）：与普通标题同排版，只是整体可点 */
+/* 可折叠分栏的标题按钮（历史资产 / 历史经验分栏）：与普通标题同排版，只是整体可点。
+   撑满整行 + 箭头 margin-left:auto：标题贴左、箭头贴右，标题左边缘与不可折叠分栏对齐。 */
 .wf-docgroup__toggle {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -358,7 +361,15 @@ export const railsStyles = `
   color: var(--wf-ink);
 }
 
+.wf-docgroup__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .wf-docgroup__caret {
+  /* 箭头定位在分栏标题行右端（用户批注：箭头移右，让文字对齐上面） */
+  margin-left: auto;
   font-size: 9px;
   line-height: 1;
 }

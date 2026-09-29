@@ -2,7 +2,7 @@ import type { Dict } from '../../i18n.js';
 import type { LibTab, LibSelKind, LibrarySource } from '../../studio/studio-state.js';
 import type { RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate } from '../../../host/shared/types.js';
 import type { WorkflowTemplate } from '../../../host/shared/graph-model.js';
-import type { RoleAssetSummary, WorkflowAssetSummary } from '../../../host/shared/asset-types.js';
+import type { ExperienceEntry, RoleAssetSummary, WorkflowAssetSummary } from '../../../host/shared/asset-types.js';
 import type { DragPayload, LibSelectionInfo } from './LeftPanel.js';
 /** 单张卡片模型（拖拽 payload + 展示字段；底栏只取 name，左栏取全部）。 */
 export interface LibraryCardModel {
@@ -18,10 +18,12 @@ export interface LibraryCardModel {
     active: boolean;
     payload: DragPayload;
 }
-/** 资产态「历史资产」分栏 key（左侧栏的折叠状态以这两个 key 为准；底栏不折叠）。 */
+/** 资产态「历史」分栏 key（左侧栏的折叠状态以这几个 key 为准；底栏不折叠）。
+ *  经验与资产同属资产态：归档后的条目同样落入默认折叠的历史分栏。 */
 export declare const ASSET_HISTORY_SECTIONS: {
     readonly workflow: "assetWorkflowHistory";
     readonly role: "assetRoleHistory";
+    readonly experience: "assetExperienceHistory";
 };
 /** 分区模型（标题 + 是否显示「＋」新建 + 卡片列表 + 空态文案 + 可折叠性）。 */
 export interface LibrarySectionModel {
@@ -78,6 +80,8 @@ export interface LibraryModelInput {
         retiredWorkflows?: WorkflowAssetSummary[];
         retiredRoles?: RoleAssetSummary[];
     };
+    /** 经验列表（资产态「数据」Tab 以「经验」呈现；活跃与已归档一并传入）。 */
+    experiences?: ExperienceEntry[];
     parentTemplate: RoleTemplate | null;
     roleTemplates: RoleTemplate[];
     fileTemplates: FileTemplate[];
@@ -100,6 +104,8 @@ export interface LibraryModelInput {
         x: number;
         y: number;
     }): void;
+    /** 打开经验（资产态属性栏编辑；经验没有画布形态，故无拖入入口）。 */
+    onOpenExperience?(id: string): void;
     onSelectLib(kind: LibSelectionInfo['kind'], id: string): void;
     onPlaceTemplate(kind: 'role' | 'file' | 'database', id: string, position: {
         x: number;

@@ -8,19 +8,23 @@
 //
 // 资产态改造（用户裁决）：四个 Tag 之下常驻搜索栏；列表之后（左栏底部）新增
 // 「模版 / 资产」来源切换——切换同时切左侧库来源与画布文档类型。
+// 资产态下「数据」Tag 以「经验」呈现（用户批注）：列表结构与内容随库来源切换。
+//
+// 分栏标题排版（用户批注）：折叠箭头置于标题**右侧**，使「历史资产」与上方
+// 「活跃资产」的文字左边缘对齐；工作流 / 角色（以及经验）的分栏一视同仁。
 
 import { useState } from 'react'
 import type { Dict } from '../../i18n.js'
 import type { LibTab, LibrarySource } from '../../studio/studio-state.js'
 import type { RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate } from '../../../host/shared/types.js'
 import type { WorkflowTemplate } from '../../../host/shared/graph-model.js'
-import type { RoleAssetSummary, WorkflowAssetSummary } from '../../../host/shared/asset-types.js'
+import type { ExperienceEntry, RoleAssetSummary, WorkflowAssetSummary } from '../../../host/shared/asset-types.js'
 import { statusLabelOf } from '../../lib/status-label.js'
 import { ASSET_HISTORY_SECTIONS, buildLibraryModel } from './library-model.js'
 
 // 以下类型由本文件导出（供 useLibraryDrag/library-model 等消费，保持既有导入路径不变）。
 export interface LibSelectionInfo {
-  kind: 'workflow' | 'workflowTemplate' | 'flowAsset' | 'roleAsset' | 'role' | 'file' | 'database' | 'parentTemplate' | 'stage' | 'groupTemplate' | 'service'
+  kind: 'workflow' | 'workflowTemplate' | 'flowAsset' | 'roleAsset' | 'experience' | 'role' | 'file' | 'database' | 'parentTemplate' | 'stage' | 'groupTemplate' | 'service'
   id: string
 }
 
@@ -63,6 +67,8 @@ export interface LeftPanelProps {
     retiredWorkflows: WorkflowAssetSummary[]
     retiredRoles: RoleAssetSummary[]
   }
+  /** 经验列表（资产态「数据」Tag 以「经验」呈现；活跃与已归档一并传入）。 */
+  experiences: ExperienceEntry[]
   parentTemplate: RoleTemplate | null
   roleTemplates: RoleTemplate[]
   fileTemplates: FileTemplate[]
@@ -80,6 +86,8 @@ export interface LeftPanelProps {
   onOpenRoleAsset(id: string): void
   /** 角色资产拖入画布。 */
   onPlaceRoleAsset(id: string, position: { x: number; y: number }): void
+  /** 打开经验（资产态属性栏编辑；经验没有画布形态，故无拖入入口）。 */
+  onOpenExperience(id: string): void
   onSelectLib(kind: LibSelectionInfo['kind'], id: string): void
   onPlaceTemplate(kind: 'role' | 'file' | 'database', id: string, position: { x: number; y: number }): void
   /** 角色模板拖入协作组：生成节点并直接入组。 */
@@ -106,12 +114,13 @@ export function LeftPanel(props: LeftPanelProps) {
   } = props
 
   /**
-   * 分栏折叠态（纯渲染态，属组件本地状态）：历史资产分栏默认折叠，用户可手动展开。
+   * 分栏折叠态（纯渲染态，属组件本地状态）：历史分栏默认折叠，用户可手动展开。
    * 不做持久化——折叠是「这次的查看方式」，把它写进业务状态会让状态机承担界面呈现细节。
    */
   const [collapsedSections, setCollapsedSections] = useState<readonly string[]>(() => [
     ASSET_HISTORY_SECTIONS.workflow,
     ASSET_HISTORY_SECTIONS.role,
+    ASSET_HISTORY_SECTIONS.experience,
   ])
   const toggleSection = (key: string): void => {
     setCollapsedSections((previous) => (previous.includes(key) ? previous.filter((item) => item !== key) : [...previous, key]))
@@ -161,12 +170,13 @@ export function LeftPanel(props: LeftPanelProps) {
                       title={section.collapsed ? t.libSectionExpand : t.libSectionCollapse}
                       onClick={() => toggleSection(section.key)}
                     >
-                      <span className="wf-docgroup__caret" aria-hidden="true" />
-                      <span>{section.title}</span>
+                      {/* 箭头在标题之后（右端）：标题左边缘与不可折叠分栏对齐（用户批注） */}
+                      <span className="wf-docgroup__title">{section.title}</span>
                       {/* 折叠时给出命中数：搜索过滤照常生效，用户据此知道要不要展开 */}
                       {section.collapsed === true && section.cards.length > 0
                         ? <span className="wf-docgroup__count">{section.cards.length}</span>
                         : null}
+                      <span className="wf-docgroup__caret" aria-hidden="true" />
                     </button>
                   )
                 : <span>{section.title}</span>}

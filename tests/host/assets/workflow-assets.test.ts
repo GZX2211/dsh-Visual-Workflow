@@ -787,6 +787,60 @@ describe('归档资产的读写（历史资产）', () => {
     expect(await store.listRetiredWorkflowAssets()).toEqual([])
     expect((await store.listWorkflowAssets()).map((item) => item.assetId)).toEqual([assetId])
   })
+
+  it('test_恢复_归档资产_取最新版本行重建Active指针', async () => {
+    const assetId = await archivedAsset()
+    await store.saveWorkflowVersion({
+      assetId,
+      mode: 'mode1',
+      name: '工作流A',
+      description: '说明B',
+      nodes: [],
+      lines: [],
+      source: 'human',
+    })
+
+    const restored = await store.restoreWorkflowAsset(assetId)
+
+    // 恢复取最新版本（v2）：需要旧版本时恢复后再回滚
+    expect(restored).toMatchObject({ assetId, versionId: 2, description: '说明B' })
+    expect(restored.retired).toBeUndefined()
+    expect(await store.listRetiredWorkflowAssets()).toEqual([])
+    expect((await store.listWorkflowAssets()).map((item) => item.assetId)).toEqual([assetId])
+  })
+
+  it('test_恢复_已活跃资产_幂等无操作且不移动指针', async () => {
+    const promoted = await store.promoteWorkflow({
+      templateId: 'tpl-flow-1',
+      fingerprint: 'fp-1',
+      mode: 'mode1',
+      name: '工作流A',
+      description: '说明A',
+      nodes: [],
+      lines: [],
+      source: 'human',
+    })
+    await store.saveWorkflowVersion({
+      assetId: promoted.assetId,
+      mode: 'mode1',
+      name: '工作流A',
+      description: '说明B',
+      nodes: [],
+      lines: [],
+      source: 'human',
+    })
+    await store.rollbackWorkflowAsset(promoted.assetId, 1)
+
+    const restored = await store.restoreWorkflowAsset(promoted.assetId)
+
+    expect(restored).toMatchObject({ versionId: 1, description: '说明A' })
+    expect((await store.getWorkflowAsset(promoted.assetId))?.versionId).toBe(1)
+  })
+
+  it('test_恢复_完全不存在的资产_抛资产不存在错误', async () => {
+    const error = await store.restoreWorkflowAsset('flow-missing').catch((caught: AssetError) => caught)
+    expect((error as AssetError).code).toBe(ERR_ASSET_NOT_FOUND)
+  })
 })
 
 // ---------------------------------------------------------------------------

@@ -21,7 +21,7 @@ import {
   type StudioState,
   type CanvasNode,
 } from '../../../src/client/studio/studio-state.js'
-import type { RoleAssetDetail, WorkflowAssetDetail } from '../../../src/host/shared/asset-types.js'
+import type { ExperienceEntry, RoleAssetDetail, WorkflowAssetDetail } from '../../../src/host/shared/asset-types.js'
 
 function baseState(): StudioState {
   return createInitialState('s-1')
@@ -363,6 +363,21 @@ const roleAssetDetail: RoleAssetDetail = {
   createdAt: 1,
 }
 
+/** 经验条目构造器（无版本控制：只有 active 两态，缺省活跃）。 */
+function experienceEntry(overrides: Partial<ExperienceEntry> = {}): ExperienceEntry {
+  return {
+    id: 'ex-1',
+    active: true,
+    reflectionPromptVersion: '1',
+    taskType: '软件开发',
+    taskContext: '重构旧模块',
+    insight: '先补测试再重构',
+    createdAt: 10,
+    updatedAt: 10,
+    ...overrides,
+  }
+}
+
 describe('资产态状态机', () => {
   it('初始状态：库来源默认模版、搜索为空、资产列表/详情/版本为空', () => {
     const state = baseState()
@@ -483,6 +498,46 @@ describe('资产态状态机', () => {
     expect(state.selection).toEqual({ nodeId: null, edgeId: null, lib: null })
     expect(state.currentKind).toBeNull()
   })
+
+  it('EXPERIENCES_LOADED / EXPERIENCE_LOADED：列表写入，详情装载同步列表项', () => {
+    const items = [experienceEntry(), experienceEntry({ id: 'ex-2', active: false })]
+    let state = studioReducer(baseState(), { type: 'EXPERIENCES_LOADED', items })
+    expect(state.experiences).toEqual(items)
+
+    const updated = experienceEntry({ insight: '改写后的经验', updatedAt: 20 })
+    state = studioReducer(state, { type: 'EXPERIENCE_LOADED', entry: updated })
+    expect(state.experienceDoc).toEqual(updated)
+    // 列表与详情同源：装载详情时同步列表里对应条目，避免两处各留一份旧内容
+    expect(state.experiences.find((item) => item.id === 'ex-1')).toEqual(updated)
+    expect(state.experiences.find((item) => item.id === 'ex-2')?.active).toBe(false)
+  })
+
+  it('EXPERIENCE_LOADED：列表里没有该条目时不新增列表项（只更新详情槽）', () => {
+    const state = studioReducer(baseState(), { type: 'EXPERIENCE_LOADED', entry: experienceEntry({ id: 'ex-新' }) })
+
+    expect(state.experiences).toEqual([])
+    expect(state.experienceDoc?.id).toBe('ex-新')
+  })
+
+  it('OPEN_EXPERIENCE：属性栏编辑经验（选中 + 编辑器引用）', () => {
+    let state = studioReducer(baseState(), { type: 'EXPERIENCES_LOADED', items: [experienceEntry()] })
+    state = studioReducer(state, { type: 'OPEN_EXPERIENCE', experienceId: 'ex-1' })
+
+    expect(state.editor).toEqual({ source: 'experience', id: 'ex-1' })
+    expect(state.selection.lib).toEqual({ kind: 'experience', id: 'ex-1' })
+  })
+
+  it('EXPERIENCE_PATCH：属性栏字段写回 experienceDoc；未装载详情时不改状态', () => {
+    let state = studioReducer(baseState(), { type: 'EXPERIENCE_LOADED', entry: experienceEntry() })
+    state = studioReducer(state, { type: 'EXPERIENCE_PATCH', patch: { insight: '改写后的经验', evidence: '新证据' } })
+
+    expect(state.experienceDoc?.insight).toBe('改写后的经验')
+    expect(state.experienceDoc?.evidence).toBe('新证据')
+    expect(state.experienceDoc?.taskType).toBe('软件开发')
+
+    const untouched = studioReducer(baseState(), { type: 'EXPERIENCE_PATCH', patch: { insight: '改写后的经验' } })
+    expect(untouched.experienceDoc).toBeNull()
+  })
 })
 
 describe('资产态选择器（editorDataOf / currentFlowAssetOf / isInstanceSourceKind）', () => {
@@ -511,6 +566,31 @@ describe('资产态选择器（editorDataOf / currentFlowAssetOf / isInstanceSou
 
   it('editorDataOf：详情未装载 / 引用不匹配 → null（不渲染空表单）', () => {
     const state = studioReducer(baseState(), { type: 'OPEN_ROLE_ASSET', assetId: 'a-r1' })
+    expect(editorDataOf(state)).toBeNull()
+    expect(inspectorOpenOf(state)).toBe(false)
+  })
+
+  it('editorDataOf：experience → 经验表单数据（条目投影）+ 经验标记与状态', () => {
+    let state = studioReducer(baseState(), { type: 'EXPERIENCE_LOADED', entry: experienceEntry() })
+    state = studioReducer(state, { type: 'OPEN_EXPERIENCE', experienceId: 'ex-1' })
+    const active = editorDataOf(state)
+    expect(active?.kind).toBe('experience')
+    expect(active?.name).toBe('重构旧模块')
+    expect((active?.data as { insight?: string }).insight).toBe('先补测试再重构')
+    expect(active?.experience).toBe(true)
+    expect(active?.experienceId).toBe('ex-1')
+    expect(active?.retired).toBeUndefined()
+    expect(inspectorOpenOf(state)).toBe(true)
+    // 归档经验：同一投影带上 retired（属性栏据此把「归档」换成「恢复」）
+    const retiredState = studioReducer(
+      studioReducer(baseState(), { type: 'EXPERIENCE_LOADED', entry: experienceEntry({ active: false }) }),
+      { type: 'OPEN_EXPERIENCE', experienceId: 'ex-1' },
+    )
+    expect(editorDataOf(retiredState)?.retired).toBe(true)
+  })
+
+  it('editorDataOf：经验详情未装载 / 引用不匹配 → null（不渲染空表单）', () => {
+    const state = studioReducer(baseState(), { type: 'OPEN_EXPERIENCE', experienceId: 'ex-1' })
     expect(editorDataOf(state)).toBeNull()
     expect(inspectorOpenOf(state)).toBe(false)
   })

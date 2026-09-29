@@ -29,8 +29,15 @@ export declare const ROLE_ASSET_ACTIVE_DDL = "\nCREATE TABLE IF NOT EXISTS role_
 export declare const ROLE_ASSET_ACTIVE_INDEXES_DDL: string[];
 export declare const WORKFLOW_ASSET_ACTIVE_DDL = "\nCREATE TABLE IF NOT EXISTS workflow_asset_active (\n  asset_id TEXT PRIMARY KEY,\n  version_id INTEGER NOT NULL,\n  name TEXT NOT NULL,\n  retrieval_context TEXT NOT NULL,\n  embedding BLOB,\n  embedding_dimension INTEGER,\n  embedding_source TEXT,\n  embedding_model TEXT,\n  source_template_id TEXT,\n  source_fingerprint TEXT,\n  updated_at INTEGER NOT NULL,\n  FOREIGN KEY (asset_id, version_id) REFERENCES workflow_asset_history(asset_id, version_id)\n)";
 export declare const WORKFLOW_ASSET_ACTIVE_INDEXES_DDL: string[];
-export declare const EXPERIENCES_DDL = "\nCREATE TABLE IF NOT EXISTS experiences (\n  id TEXT PRIMARY KEY,\n  source_run_id TEXT,\n  reflection_prompt_version TEXT NOT NULL DEFAULT '1',\n  task_type TEXT NOT NULL,\n  task_context TEXT NOT NULL,\n  insight TEXT NOT NULL,\n  evidence TEXT,\n  review_feedback TEXT,\n  reviewed_at INTEGER,\n  created_at INTEGER NOT NULL,\n  updated_at INTEGER NOT NULL\n)";
+/**
+ * 经验表：没有版本控制（无历史表、也没有 Active 指针表），状态只有 is_active 两态。
+ * 为什么状态放在行上而不是像资产那样用 Active 表：经验没有版本，"活跃" 只是
+ * 「是否进入父代理召回面」这一个布尔事实，另建一张表等于给单布尔事实造第二处写入边界。
+ */
+export declare const EXPERIENCES_DDL = "\nCREATE TABLE IF NOT EXISTS experiences (\n  id TEXT PRIMARY KEY,\n  source_run_id TEXT,\n  reflection_prompt_version TEXT NOT NULL DEFAULT '1',\n  task_type TEXT NOT NULL,\n  task_context TEXT NOT NULL,\n  insight TEXT NOT NULL,\n  evidence TEXT,\n  review_feedback TEXT,\n  reviewed_at INTEGER,\n  is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),\n  created_at INTEGER NOT NULL,\n  updated_at INTEGER NOT NULL\n)";
 export declare const EXPERIENCES_INDEXES_DDL: string[];
+/** 经验活跃态索引（召回面过滤按 is_active 等值走索引）。 */
+export declare const EXPERIENCES_ACTIVE_INDEX_DDL = "CREATE INDEX IF NOT EXISTS idx_experiences_active ON experiences(is_active)";
 /** 全部建表语句（顺序即依赖顺序：先历史后 Active，外键才可解析）。 */
 export declare const SCHEMA_STATEMENTS: string[];
 /** 幂等建表：全部 `IF NOT EXISTS`，重复调用不改变既有库。 */

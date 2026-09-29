@@ -4,7 +4,7 @@ import type { OrchestratorRuntime } from '../orchestrator/index.js';
 import type { EmbeddingEngine } from '../embedding/engine.js';
 import type { SchedulerEngine, SchedulerTaskStore } from '../scheduler/index.js';
 import type { ToolSwitchStore } from '../tools/index.js';
-import type { AssetVersionEntry, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../shared/asset-types.js';
+import type { AssetVersionEntry, ExperienceEntry, ExperiencePatch, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../shared/asset-types.js';
 import type { RoleTemplate } from '../shared/template-types.js';
 import type { GraphNode, Line, WorkflowMode } from '../shared/graph-model.js';
 import type { OrgMeta } from '../shared/org-meta.js';
@@ -25,14 +25,19 @@ interface AssetStoreLike {
     getRoleAsset(assetId: string): Promise<RoleAssetDetail | null>;
     listRoleVersions(assetId: string): Promise<AssetVersionEntry[]>;
     rollbackRoleAsset(assetId: string, versionId: number): Promise<RoleAssetDetail>;
+    restoreRoleAsset(assetId: string): Promise<RoleAssetDetail>;
     retireRoleAsset(assetId: string): Promise<void>;
     listWorkflowAssets(): Promise<WorkflowAssetSummary[]>;
     listRetiredWorkflowAssets(): Promise<WorkflowAssetSummary[]>;
     getWorkflowAsset(assetId: string): Promise<WorkflowAssetDetail | null>;
     listWorkflowVersions(assetId: string): Promise<AssetVersionEntry[]>;
     rollbackWorkflowAsset(assetId: string, versionId: number): Promise<WorkflowAssetDetail>;
+    restoreWorkflowAsset(assetId: string): Promise<WorkflowAssetDetail>;
     retireWorkflowAsset(assetId: string): Promise<void>;
     previewAssetCascade(input: AssetCascadePreviewInput): Promise<RoleAssetReference[]>;
+    listExperiences(limit: number): Promise<ExperienceEntry[]>;
+    saveExperience(id: string, patch: ExperiencePatch): Promise<ExperienceEntry>;
+    setExperienceActive(id: string, active: boolean): Promise<ExperienceEntry>;
     promoteRole(input: {
         templateId: string;
         fingerprint: string;
@@ -99,6 +104,11 @@ export interface ApiHost {
     /** 资产库能力缝（宿主注入 assets 模块的 AssetStore；缺失时资产端点返回 501）。 */
     assets?: AssetStoreLike;
 }
+/**
+ * 取资产库能力缝。未装配时明确 501——静默降级为「空资产库」会让用户看到
+ * 「库里什么都没有」这种与事实不符的界面；资产端点与经验端点共用同一份判据。
+ */
+export declare function requireAssets(host: ApiHost): NonNullable<ApiHost['assets']>;
 /**
  * GUI API 分发基座：按端点名分发（白名单禁止命中原型链方法）。
  * 所有方法为 async (args) => value；参数缺失抛 HttpError(400)。

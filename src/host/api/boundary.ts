@@ -19,6 +19,8 @@ import type { SchedulerEngine, SchedulerTaskStore } from '../scheduler/index.js'
 import type { ToolSwitchStore } from '../tools/index.js'
 import type {
   AssetVersionEntry,
+  ExperienceEntry,
+  ExperiencePatch,
   RoleAssetDetail,
   RoleAssetReference,
   RoleAssetSummary,
@@ -51,14 +53,19 @@ interface AssetStoreLike {
   getRoleAsset(assetId: string): Promise<RoleAssetDetail | null>
   listRoleVersions(assetId: string): Promise<AssetVersionEntry[]>
   rollbackRoleAsset(assetId: string, versionId: number): Promise<RoleAssetDetail>
+  restoreRoleAsset(assetId: string): Promise<RoleAssetDetail>
   retireRoleAsset(assetId: string): Promise<void>
   listWorkflowAssets(): Promise<WorkflowAssetSummary[]>
   listRetiredWorkflowAssets(): Promise<WorkflowAssetSummary[]>
   getWorkflowAsset(assetId: string): Promise<WorkflowAssetDetail | null>
   listWorkflowVersions(assetId: string): Promise<AssetVersionEntry[]>
   rollbackWorkflowAsset(assetId: string, versionId: number): Promise<WorkflowAssetDetail>
+  restoreWorkflowAsset(assetId: string): Promise<WorkflowAssetDetail>
   retireWorkflowAsset(assetId: string): Promise<void>
   previewAssetCascade(input: AssetCascadePreviewInput): Promise<RoleAssetReference[]>
+  listExperiences(limit: number): Promise<ExperienceEntry[]>
+  saveExperience(id: string, patch: ExperiencePatch): Promise<ExperienceEntry>
+  setExperienceActive(id: string, active: boolean): Promise<ExperienceEntry>
   promoteRole(input: { templateId: string; fingerprint: string; role: RoleTemplate; source: 'human' | 'agent' }): Promise<PromoteResult>
   promoteWorkflow(input: {
     templateId: string
@@ -119,6 +126,16 @@ export interface ApiHost {
 type AssertAssetStoreFits = AssetStore extends AssetStoreLike ? true : never
 const assetStoreFits: AssertAssetStoreFits = true
 void assetStoreFits
+
+/**
+ * 取资产库能力缝。未装配时明确 501——静默降级为「空资产库」会让用户看到
+ * 「库里什么都没有」这种与事实不符的界面；资产端点与经验端点共用同一份判据。
+ */
+export function requireAssets(host: ApiHost): NonNullable<ApiHost['assets']> {
+  const assets = host.assets
+  if (!assets) throw httpError(501, '资产库尚未装配（asset store unavailable）')
+  return assets
+}
 
 /**
  * GUI API 分发基座：按端点名分发（白名单禁止命中原型链方法）。

@@ -137,6 +137,11 @@ export const WORKFLOW_ASSET_ACTIVE_INDEXES_DDL = [
   'CREATE INDEX IF NOT EXISTS idx_workflow_active_version ON workflow_asset_active(asset_id, version_id)',
 ]
 
+/**
+ * 经验表：没有版本控制（无历史表、也没有 Active 指针表），状态只有 is_active 两态。
+ * 为什么状态放在行上而不是像资产那样用 Active 表：经验没有版本，"活跃" 只是
+ * 「是否进入父代理召回面」这一个布尔事实，另建一张表等于给单布尔事实造第二处写入边界。
+ */
 export const EXPERIENCES_DDL = `
 CREATE TABLE IF NOT EXISTS experiences (
   id TEXT PRIMARY KEY,
@@ -148,6 +153,7 @@ CREATE TABLE IF NOT EXISTS experiences (
   evidence TEXT,
   review_feedback TEXT,
   reviewed_at INTEGER,
+  is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 )`
@@ -157,6 +163,9 @@ export const EXPERIENCES_INDEXES_DDL = [
   'CREATE INDEX IF NOT EXISTS idx_experiences_source_run_id ON experiences(source_run_id)',
   'CREATE INDEX IF NOT EXISTS idx_experiences_created_at ON experiences(created_at)',
 ]
+
+/** 经验活跃态索引（召回面过滤按 is_active 等值走索引）。 */
+export const EXPERIENCES_ACTIVE_INDEX_DDL = 'CREATE INDEX IF NOT EXISTS idx_experiences_active ON experiences(is_active)'
 
 /** 全部建表语句（顺序即依赖顺序：先历史后 Active，外键才可解析）。 */
 export const SCHEMA_STATEMENTS: string[] = [
@@ -175,6 +184,7 @@ export const SCHEMA_STATEMENTS: string[] = [
 /** 幂等建表：全部 `IF NOT EXISTS`，重复调用不改变既有库。 */
 export function initSchema(db: DatabaseSync): void {
   for (const statement of SCHEMA_STATEMENTS) db.exec(statement)
+  ensureExperienceActiveColumn(db)
   retireJsonSchemaCheck(db)
 }
 
@@ -192,6 +202,21 @@ const RETIRED_INPUT_SCHEMA_CHECK = 'json_valid(input_schema)'
 function tableColumns(db: DatabaseSync, table: string): string[] {
   const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Record<string, unknown>[]
   return rows.map((row) => String(row.name))
+}
+
+/**
+ * 经验状态列（is_active）的幂等补齐：存量库由早期版本建立、没有该列，直接查询会报
+ * `no such column`。ALTER TABLE ADD COLUMN 是 SQLite 上唯一不重建表的加列方式，
+ * 已有该列时跳过（新建库由 EXPERIENCES_DDL 直接带上，此处为无操作）。
+ *
+ * 为什么默认 1（活跃）：历史数据全部是「入库即生效」的经验，按活跃读取与旧行为一致。
+ * 索引必须在本函数内建：放在 SCHEMA_STATEMENTS 里会在存量库上引用尚不存在的列而失败。
+ */
+function ensureExperienceActiveColumn(db: DatabaseSync): void {
+  if (!tableColumns(db, 'experiences').includes('is_active')) {
+    db.exec('ALTER TABLE experiences ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1))')
+  }
+  db.exec(EXPERIENCES_ACTIVE_INDEX_DDL)
 }
 
 /**

@@ -26,13 +26,15 @@ import type { DatabaseNode, RoleNode, StageNode, WorkflowDocument } from '../../
 import type { EmbeddingEngine } from '../../../../src/host/embedding/engine.js'
 import type {
   AssetVersionEntry,
+  ExperienceEntry,
+  ExperiencePatch,
   RoleAssetDetail,
   RoleAssetReference,
   RoleAssetSummary,
   WorkflowAssetDetail,
   WorkflowAssetSummary,
 } from '../../../../src/host/shared/asset-types.js'
-import { ERR_ASSET_NOT_FOUND, ERR_ASSET_VERSION_NOT_FOUND } from '../../../../src/host/shared/protocol.js'
+import { ERR_ASSET_NOT_FOUND, ERR_ASSET_VERSION_NOT_FOUND, ERR_EXPERIENCE_NOT_FOUND } from '../../../../src/host/shared/protocol.js'
 
 /** 资产库能力缝（从宿主能力缝派生，避免测试夹具自建第二份资产契约）。 */
 export type FakeAssets = NonNullable<ApiHost['assets']>
@@ -209,13 +211,14 @@ export interface WorkflowSeed {
  */
 export class FakeAssetStore implements FakeAssets {
   /** 调用痕迹（断言「边界传了什么」用）。 */
-  calls: { promoteRole: unknown[]; promoteWorkflow: unknown[]; saveRole: unknown[]; saveWorkflow: unknown[]; rollback: unknown[]; retired: string[]; preview: unknown[] } = {
+  calls: { promoteRole: unknown[]; promoteWorkflow: unknown[]; saveRole: unknown[]; saveWorkflow: unknown[]; rollback: unknown[]; retired: string[]; restored: string[]; preview: unknown[] } = {
     promoteRole: [],
     promoteWorkflow: [],
     saveRole: [],
     saveWorkflow: [],
     rollback: [],
     retired: [],
+    restored: [],
     preview: [],
   }
   /** 下一次入库/保存抛出的领域错误（重复入库 409 路径用）。 */
@@ -232,6 +235,59 @@ export class FakeAssetStore implements FakeAssets {
   /** 入库时记录的来源指纹（索引条目回填用；真实实现由 SQLite 索引行承载）。 */
   roleFingerprints = new Map<string, string>()
   workflowFingerprints = new Map<string, string>()
+  /** 经验表（无版本：id → 条目；状态由条目 active 表达）。 */
+  experiences = new Map<string, ExperienceEntry>()
+  /** 经验端点调用痕迹（断言边界传了什么）。 */
+  experienceCalls: { saved: Array<{ id: string; patch: ExperiencePatch }>; active: Array<{ id: string; active: boolean }> } = {
+    saved: [],
+    active: [],
+  }
+
+  /** 登记一条经验（缺省活跃；用例按需覆盖状态与字段）。 */
+  seedExperience(entry: Partial<ExperienceEntry> & { id: string }): ExperienceEntry {
+    const full: ExperienceEntry = {
+      active: true,
+      reflectionPromptVersion: '1',
+      taskType: '软件开发',
+      taskContext: `上下文：${entry.id}`,
+      insight: `经验：${entry.id}`,
+      createdAt: 1_700_000_000_000,
+      updatedAt: 1_700_000_000_000,
+      ...entry,
+    }
+    this.experiences.set(full.id, full)
+    return full
+  }
+
+  async listExperiences(limit: number): Promise<ExperienceEntry[]> {
+    return [...this.experiences.values()].slice(0, Math.max(limit, 0))
+  }
+
+  async saveExperience(id: string, patch: ExperiencePatch): Promise<ExperienceEntry> {
+    this.experienceCalls.saved.push({ id, patch })
+    const current = this.experiences.get(id)
+    if (!current) throw this.experienceNotFound(id)
+    const updated: ExperienceEntry = {
+      ...current,
+      ...(patch.taskType === undefined ? {} : { taskType: patch.taskType }),
+      ...(patch.taskContext === undefined ? {} : { taskContext: patch.taskContext }),
+      ...(patch.insight === undefined ? {} : { insight: patch.insight }),
+      ...(patch.evidence === undefined ? {} : { evidence: patch.evidence ?? undefined }),
+      ...(patch.reviewFeedback === undefined ? {} : { reviewFeedback: patch.reviewFeedback ?? undefined }),
+      updatedAt: current.updatedAt + 1,
+    }
+    this.experiences.set(id, updated)
+    return updated
+  }
+
+  async setExperienceActive(id: string, active: boolean): Promise<ExperienceEntry> {
+    this.experienceCalls.active.push({ id, active })
+    const current = this.experiences.get(id)
+    if (!current) throw this.experienceNotFound(id)
+    const updated: ExperienceEntry = { ...current, active, updatedAt: current.updatedAt + 1 }
+    this.experiences.set(id, updated)
+    return updated
+  }
 
   /** 登记一个角色资产（Active 版本 v1；内容最简，测试按需覆盖）。 */
   seedRole(seed: RoleSeed): RoleAssetDetail {
@@ -375,6 +431,23 @@ export class FakeAssetStore implements FakeAssets {
     this.retiredRoleAssets.set(assetId, { ...detail, retired: true })
   }
 
+  /** 恢复：取最新版本条目重建 Active 行（与真实实现同语义：只回到活跃面，不接版本号）。 */
+  async restoreRoleAsset(assetId: string): Promise<RoleAssetDetail> {
+    this.calls.restored.push(`role:${assetId}`)
+    const retired = this.retiredRoleAssets.get(assetId)
+    if (!retired) {
+      const live = this.roleAssets.get(assetId)
+      if (!live) throw this.assetNotFound(assetId)
+      return live
+    }
+    const latest = [...(this.roleVersions.get(assetId) ?? [])].sort((a, b) => b.versionId - a.versionId)[0]
+    const restored: RoleAssetDetail = { ...retired, versionId: latest?.versionId ?? retired.versionId, rowId: latest?.rowId ?? retired.rowId }
+    delete restored.retired
+    this.retiredRoleAssets.delete(assetId)
+    this.roleAssets.set(assetId, restored)
+    return restored
+  }
+
   async listWorkflowAssets(): Promise<WorkflowAssetSummary[]> {
     return [...this.workflowAssets.values()].map((detail) => this.workflowSummaryOf(detail, this.workflowFingerprints.get(detail.assetId)))
   }
@@ -410,6 +483,23 @@ export class FakeAssetStore implements FakeAssets {
     if (!detail) return
     this.workflowAssets.delete(assetId)
     this.retiredWorkflowAssets.set(assetId, { ...detail, retired: true })
+  }
+
+  /** 恢复：取最新版本条目重建 Active 行（语义同 restoreRoleAsset）。 */
+  async restoreWorkflowAsset(assetId: string): Promise<WorkflowAssetDetail> {
+    this.calls.restored.push(`workflow:${assetId}`)
+    const retired = this.retiredWorkflowAssets.get(assetId)
+    if (!retired) {
+      const live = this.workflowAssets.get(assetId)
+      if (!live) throw this.assetNotFound(assetId)
+      return live
+    }
+    const latest = [...(this.workflowVersions.get(assetId) ?? [])].sort((a, b) => b.versionId - a.versionId)[0]
+    const restored: WorkflowAssetDetail = { ...retired, versionId: latest?.versionId ?? retired.versionId, rowId: latest?.rowId ?? retired.rowId }
+    delete restored.retired
+    this.retiredWorkflowAssets.delete(assetId)
+    this.workflowAssets.set(assetId, restored)
+    return restored
   }
 
   async previewAssetCascade(input: Parameters<FakeAssets['previewAssetCascade']>[0]): Promise<RoleAssetReference[]> {
@@ -541,6 +631,10 @@ export class FakeAssetStore implements FakeAssets {
 
   private versionNotFound(assetId: string, versionId: number): Error {
     return this.errorLike(`资产 ${assetId} 的版本 v${versionId} 不存在`, ERR_ASSET_VERSION_NOT_FOUND)
+  }
+
+  private experienceNotFound(id: string): Error {
+    return this.errorLike(`经验 ${id} 不存在`, ERR_EXPERIENCE_NOT_FOUND)
   }
 
   /** 伪造领域错误形状（只带稳定 code；HTTP 状态映射是边界职责，不在此实现）。 */

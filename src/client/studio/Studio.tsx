@@ -30,6 +30,7 @@ import { useModeSwitch } from '../hooks/useModeSwitch.js'
 import { usePanelLayout } from '../hooks/usePanelLayout.js'
 import { useDocumentActions } from '../hooks/useDocumentActions.js'
 import { useAssets } from '../hooks/useAssets.js'
+import { useExperiences } from '../hooks/useExperiences.js'
 import { useCanvasActions } from '../hooks/useCanvasActions.js'
 import { useEditorActions } from '../hooks/useEditorActions.js'
 import { useRunActions } from '../hooks/useRunActions.js'
@@ -189,17 +190,20 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
   // 资产面（模版晋升而来的可复用资料）：列表/详情/入库/版本/回滚/退役 + 资产态画布打开。
   // 先于 editor 装配：属性栏的入库/回滚/资产态保存由 useEditorActions 经此面编排。
   const assets = useAssets(remote, dispatch, notify, toastError, t, state)
+  // 经验面（资产态「经验」Tab）：列表 / 保存 / 归档 / 恢复；同样先于 editor 装配。
+  const experiences = useExperiences(remote, dispatch, notify, toastError, t, state)
   const canvas = useCanvasActions(state, dispatch, notify, history, t, { locks: runLocks, saveCanvas: doc.saveCanvas })
-  const editor = useEditorActions(state, dispatch, notify, toastError, t, workflows, flowTemplates, templates, assets, selection, remote, doc.saveCanvas, canvas.removeSelected, canvas.removeLine, doc.selectWorkflow, doc.selectFlowTemplate, { locks: runLocks })
+  const editor = useEditorActions(state, dispatch, notify, toastError, t, workflows, flowTemplates, templates, assets, experiences, selection, remote, doc.saveCanvas, canvas.removeSelected, canvas.removeLine, doc.selectWorkflow, doc.selectFlowTemplate, { locks: runLocks })
   const run = useRunActions(state, dispatch, notify, toastError, t, remote, runControl, serviceControl, doc.saveCanvas, doc.createInstanceFromCanvas)
   const transfer = useStudioTransfer(state, dispatch, notify, toastError, t, remote, templates, flowTemplates, workflows, editor.patchEditor, editorData, personaInputRef, groupMdInputRef)
   const { beginLibraryDrag, dragPreview, dropGroupId } = useLibraryDrag(canvasShellRef, canvasApiRef)
   useKeyShortcuts(state, dispatch, selection, history, canvas.removeLine, canvas.removeSelected)
 
-  // ---------- 资产列表装载（工作台挂载时一次；写入/退役/回滚后由 assets 自身刷新） ----------
+  // ---------- 资产与经验列表装载（工作台挂载时一次；写入/归档/恢复后由各自的面刷新） ----------
   useEffect(() => {
     void assets.refresh()
-  }, [assets.refresh])
+    void experiences.refresh()
+  }, [assets.refresh, experiences.refresh])
 
   // ---------- 库来源切换（模版 / 资产） ----------
   // 同时切「左侧库来源」与「画布文档类型」：画布上的旧类型文档经未保存守卫后清空

@@ -114,9 +114,16 @@ export declare function readWorkflowVersionRow(ctx: AssetTxContext, assetId: str
  * 不新增版本、不改历史行。
  *
  * 归档资产（无 Active 行）的回滚即「重新启用」：按目标版本重建 Active 行。
- * 这也是归档资产恢复活跃的唯一入口（保存只做版本迭代，不改变归档状态）。
+ * TODO(职责分离-遗留)：这一分支让回滚同时承担了「状态转换」，与「回滚只管版本与指针」
+ * 的目标职责不符。界面已改为归档资产只显示「恢复」（不再给回滚入口），领域侧按用户裁决
+ * 暂留旧行为待定案——需要收紧时以本标记为准（恢复入口见 restoreWorkflowAssetTo）。
  */
 export declare function rollbackWorkflowAssetTo(ctx: RolePortContext, assetId: string, versionId: number): WorkflowAssetDetail;
+/**
+ * 恢复：把已归档工作流资产恢复为活跃——取**最新版本行**重建 Active 指针。
+ * 与回滚的分工、幂等语义与角色资产一致（见 role-assets.ts 的 restoreRoleAssetTo）。
+ */
+export declare function restoreWorkflowAssetTo(ctx: RolePortContext, assetId: string): WorkflowAssetDetail;
 /** 归档：删除 Active 行；历史行与角色资产全部保留（流程归档不触发角色归档）。 */
 export declare function retireWorkflowAssetRow(tx: AssetTxContext, assetId: string): void;
 /** 工作流检索上下文 = id + name + description。 */

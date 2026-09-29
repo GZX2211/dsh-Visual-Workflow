@@ -1,11 +1,13 @@
 // src/client/hooks/useAssets.ts
 //
 // 资产面（模版晋升而来的可复用资料）：列表加载 / 详情装载 / 入库晋升 /
-// 登记新版本 / 版本列表 / 回滚（含归档资产重新启用）/ 归档 / 影响面预览。
+// 登记新版本 / 版本列表 / 回滚 / 归档 / 恢复 / 影响面预览。
 //
 // 语义边界（用户裁决）：模版 = 可随意修改的草稿；资产 = 带版本控制与回滚，
-// 版本历史永不被改写（回滚只改 Active 指针）；归档 = 移出活跃复用面，历史与引用统计全保留，
-// 回滚任一版本即重新启用。
+// 版本历史永不被改写（回滚只改 Active 指针）；归档 = 移出活跃复用面，历史与引用统计全保留；
+// 恢复（取最新版本行重建 Active 指针）才是重新进入活跃面的界面入口。
+// 后端仍保留「归档资产回滚即重新启用」的旧行为（见 assets 模块的职责分离遗留标记），
+// 界面侧据此不再向历史资产提供回滚按钮——避免同一状态转换有两条入口。
 //
 // 职责边界：本 hook 只做「远端调用 + 状态写入 + 失败语义 + toast」；
 // 资产态的画布投影与文档生命周期在 studio 状态机与 useDocumentActions 中完成。
@@ -74,6 +76,11 @@ export interface AssetsFace {
    * @returns 是否成功（语义同 rollback）。
    */
   retire(kind: AssetKind, assetId: string): Promise<boolean>
+  /**
+   * 恢复历史（已归档）资产：取最新版本行重建 Active 指针（状态转换的唯一入口）。
+   * @returns 恢复后的详情（失败返回 null；调用方据此刷新界面）。
+   */
+  restore(kind: AssetKind, assetId: string): Promise<AssetDetail | null>
   /** 打开工作流资产文档：装载详情后把画布切到该资产（资产态画布文档）。 */
   openFlowAsset(assetId: string): Promise<void>
   /** 打开角色资产：装载详情后在属性栏编辑。 */
@@ -304,6 +311,31 @@ export function useAssets(
     }
   }, [handleAssetFailure, notify, refresh, remote, t.toastAssetRetired, toastError])
 
+  /**
+   * 恢复历史（已归档）资产：取最新版本行重建 Active 指针；返回值 = 恢复后的详情（失败 null）。
+   * 与回滚的分工见共享协议：恢复管状态转换，回滚管版本与 Active 指针。
+   */
+  const restore = useCallback(async (kind: AssetKind, assetId: string): Promise<AssetDetail | null> => {
+    try {
+      await remote.call(EP.EP_RESTORE_ASSET, { kind, assetId })
+      if (!mounted.current) return null
+      notify('success', t.toastAssetRestored)
+      // 重新装载 Active 详情；若该工作流资产正开在画布上，同步重投影画布
+      const detail = await loadAsset(kind, assetId)
+      if (!mounted.current) return null
+      const current = stateRef.current
+      if (kind === 'workflow' && current.currentKind === 'flowAsset' && current.currentId === assetId) {
+        dispatch({ type: 'OPEN_FLOW_ASSET', assetId })
+      }
+      await refresh()
+      return detail
+    } catch (error) {
+      if (await handleAssetFailure(error, true)) return null
+      toastError(error)
+      return null
+    }
+  }, [dispatch, handleAssetFailure, loadAsset, notify, refresh, remote, t.toastAssetRestored, toastError])
+
   const openFlowAsset = useCallback(async (assetId: string): Promise<void> => {
     const detail = await loadAsset('workflow', assetId) as WorkflowAssetDetail | null
     if (!detail || !mounted.current) return
@@ -320,7 +352,7 @@ export function useAssets(
     assets: state.assets,
     assetDoc: state.assetDoc,
     assetVersions: state.assetVersions,
-    refresh, loadAsset, promote, saveVersion, previewCascade, openVersions, closeVersions, rollback, retire,
+    refresh, loadAsset, promote, saveVersion, previewCascade, openVersions, closeVersions, rollback, retire, restore,
     openFlowAsset, openRoleAsset,
   }
 }

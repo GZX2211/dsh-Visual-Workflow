@@ -128,6 +128,19 @@ export function editorDataOf(state: StudioState): EditorData | null {
       ...(detail.retired === true ? { retired: true } : {}),
     }
   }
+  if (editor.source === 'experience') {
+    const entry = state.experienceDoc
+    if (!entry || entry.id !== editor.id) return null
+    // 经验字段域与属性栏表单一一对应：直接作为表单数据源投影；非活跃 = 已归档（显示「恢复」）
+    return {
+      kind: 'experience',
+      data: entry as unknown as Record<string, unknown>,
+      name: entry.taskContext,
+      experience: true,
+      experienceId: entry.id,
+      ...(entry.active ? {} : { retired: true }),
+    }
+  }
   if (editor.source === 'service') {
     const service = state.services.find((item) => item.id === editor.id)
     return service

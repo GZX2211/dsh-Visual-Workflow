@@ -13,7 +13,7 @@ import type {
   ServiceState, RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate, ToolCombo, RunSnapshot,
 } from '../../host/shared/types.js'
 import type {
-  AssetKind, AssetVersionEntry, RoleAssetDetail, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary,
+  AssetKind, AssetVersionEntry, ExperienceEntry, RoleAssetDetail, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary,
 } from '../../host/shared/asset-types.js'
 
 export type StudioAction =
@@ -30,6 +30,14 @@ export type StudioAction =
   | { type: 'ASSET_DOC_LOADED'; detail: WorkflowAssetDetail }
   /** 角色资产详情装载（属性栏编辑数据源）。 */
   | { type: 'ROLE_ASSET_LOADED'; detail: RoleAssetDetail }
+  /** 经验列表装载（资产态「经验」Tab 数据源；活跃与已归档一并返回）。 */
+  | { type: 'EXPERIENCES_LOADED'; items: ExperienceEntry[] }
+  /** 经验详情装载（属性栏编辑数据源；保存/归档/恢复后按领域返回值刷新）。 */
+  | { type: 'EXPERIENCE_LOADED'; entry: ExperienceEntry }
+  /** 打开经验（属性栏编辑）。 */
+  | { type: 'OPEN_EXPERIENCE'; experienceId: string }
+  /** 经验属性栏字段编辑（就地写回 experienceDoc；保存时整体投影上报）。 */
+  | { type: 'EXPERIENCE_PATCH'; patch: Record<string, unknown> }
   /** 打开工作流资产文档（画布节点/连线取自已装载的 assetDoc）。 */
   | { type: 'OPEN_FLOW_ASSET'; assetId: string }
   /** 打开角色资产（属性栏编辑）。 */

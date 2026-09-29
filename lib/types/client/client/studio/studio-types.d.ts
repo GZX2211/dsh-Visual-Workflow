@@ -1,13 +1,14 @@
 import type { WorkflowDocument, WorkflowTemplate } from '../../host/shared/graph-model.js';
 import type { ServiceState, RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate, ToolCombo, RunSnapshot } from '../../host/shared/types.js';
-import type { AssetKind, AssetVersionEntry, RoleAssetDetail, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../../host/shared/asset-types.js';
+import type { AssetKind, AssetVersionEntry, ExperienceEntry, RoleAssetDetail, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../../host/shared/asset-types.js';
 import type { CanvasEdge, CanvasNode } from '../lib/canvas-model.js';
-/** 左侧栏 Tab（需求 §4.5.4：工作流 / 角色 / 数据（文件+数据库）/ 其他（阶段+协作组））。 */
+/** 左侧栏 Tab（需求 §4.5.4：工作流 / 角色 / 数据（文件+数据库）/ 其他（阶段+协作组））。
+ *  资产态下「数据」以「经验」呈现（同一 Tab key，语义与内容随库来源切换）。 */
 export type LibTab = 'workflow' | 'role' | 'data' | 'other';
 /** 左侧库来源：模版（可随意修改的草稿）/ 资产（带版本控制的晋升形态）。 */
 export type LibrarySource = 'template' | 'asset';
-/** 左侧库选中种类（模板 kind + 固定卡片 + 工作流模板 + 资产）。 */
-export type LibSelKind = 'workflow' | 'service' | 'workflowTemplate' | 'role' | 'file' | 'database' | 'parentTemplate' | 'stage' | 'groupTemplate' | 'flowAsset' | 'roleAsset';
+/** 左侧库选中种类（模板 kind + 固定卡片 + 工作流模板 + 资产 + 经验）。 */
+export type LibSelKind = 'workflow' | 'service' | 'workflowTemplate' | 'role' | 'file' | 'database' | 'parentTemplate' | 'stage' | 'groupTemplate' | 'flowAsset' | 'roleAsset' | 'experience';
 /** 模板种类（与后端 listTemplates 契约一致；group 为协作组模板，需求 §4.2.5.2）。 */
 export type TemplateKind = 'role' | 'file' | 'database' | 'group';
 /**
@@ -66,6 +67,9 @@ export type EditorRef = {
     id: string;
 } | {
     source: 'roleAsset';
+    id: string;
+} | {
+    source: 'experience';
     id: string;
 } | {
     source: 'template';
@@ -143,6 +147,13 @@ export interface StudioState {
     assetDoc: WorkflowAssetDetail | null;
     /** 资产态属性栏编辑的角色资产详情（打开/拖入角色资产时装载）。 */
     assetRoleDoc: RoleAssetDetail | null;
+    /**
+     * 经验列表（资产态「经验」Tab 的数据源）：活跃与已归档一并持有，条目自带 active 标记。
+     * 与资产拆两份列表不同——经验的召回面是 catalog 索引（另一条查询），此处只服务人工管理。
+     */
+    experiences: ExperienceEntry[];
+    /** 属性栏编辑的经验详情（点击经验卡片时装载；未打开为 null）。 */
+    experienceDoc: ExperienceEntry | null;
     /** 回滚上拉列表数据（打开时装载，关闭置空）。 */
     assetVersions: {
         kind: AssetKind;
@@ -220,7 +231,7 @@ export interface StudioState {
 }
 /** 编辑器数据（右侧面板渲染源；Inspector 按 kind 分发表单）。 */
 export interface EditorData {
-    kind: 'workflow' | 'service' | 'role' | 'file' | 'database' | 'group' | 'stage' | 'proxy' | 'edge';
+    kind: 'workflow' | 'service' | 'role' | 'file' | 'database' | 'group' | 'stage' | 'proxy' | 'edge' | 'experience';
     data: Record<string, unknown>;
     name: string;
     template?: boolean;
@@ -231,9 +242,13 @@ export interface EditorData {
     asset?: boolean;
     /** 角色资产来源标记（同上）。 */
     roleAsset?: boolean;
-    /** 资产 id（保存新版本 / 回滚 / 归档按此定位；与当前画布 currentId 同源）。 */
+    /** 经验来源标记（属性栏按经验语义渲染：只有保存与归档/恢复，**无回滚**）。 */
+    experience?: boolean;
+    /** 资产 id（保存新版本 / 回滚 / 归档 / 恢复按此定位；与当前画布 currentId 同源）。 */
     assetId?: string;
-    /** 已归档（历史资产）：属性栏的「归档」按钮据此置灰。 */
+    /** 经验 id（保存 / 归档 / 恢复按此定位）。 */
+    experienceId?: string;
+    /** 已归档（历史资产 / 非活跃经验）：属性栏据此把「归档」换成「恢复」。 */
     retired?: boolean;
     /** 画布角色节点绑定的来源角色资产 id（拖入角色资产时写入；无回滚按钮的判据）。 */
     sourceAssetId?: string;

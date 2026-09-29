@@ -183,6 +183,8 @@ export function StudioLayout(props: StudioLayoutProps) {
     flowTemplates: (state.flowTemplates ?? []).filter((item) => item.mode === state.mode),
     // 资产列表（Active 索引）：资产态左栏数据源（模版态不消费）
     assets: state.assets,
+    // 经验列表：资产态「数据」Tag 以「经验」呈现时的数据源（活跃 + 已归档）
+    experiences: state.experiences,
     parentTemplate,
     roleTemplates,
     fileTemplates: state.templates.file as import('../../host/shared/types.js').FileTemplate[],
@@ -197,6 +199,8 @@ export function StudioLayout(props: StudioLayoutProps) {
     onSelectFlowAsset,
     onOpenRoleAsset: (id: string) => { void assets.openRoleAsset(id) },
     onPlaceRoleAsset,
+    // 经验卡片：经验没有画布形态，只能打开到属性栏编辑（无拖入入口）
+    onOpenExperience: (id: string) => editor.selectLibraryCard('experience', id),
     onSelectLib: editor.selectLibraryCard,
     onPlaceTemplate: canvas.placeTemplateNode,
     onPlaceTemplateIntoGroup: canvas.placeTemplateIntoGroup,

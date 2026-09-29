@@ -194,6 +194,12 @@ export interface ExperienceIndexEntry {
 /** 经验条目（catalog 第二层召回：完整内容）。 */
 export interface ExperienceEntry {
   id: string
+  /**
+   * 是否活跃（磁盘列 `experiences.is_active`；持久化列名由资产库记账，契约侧只表达两态）。
+   * 经验没有版本控制，状态即「活跃 / 已归档」两态：归档 = 退出父代理召回面，
+   * 内容全部保留；置回活跃即重新进入召回面。缺省即活跃（旧数据无该列时按活跃读）。
+   */
+  active: boolean
   /** 产生该经验的那次工作流运行 id（可空）。 */
   sourceRunId?: string
   /** 生成该经验时使用的复盘提示词版本号（V1 固定 '1'）。 */
@@ -212,6 +218,21 @@ export interface ExperienceEntry {
   reviewedAt?: number
   createdAt: number
   updatedAt: number
+}
+
+/**
+ * 经验可编辑字段补丁（属性栏「保存」载荷）。
+ *
+ * 字段域是 ExperienceEntry 的可编辑子集：任务类型 / 任务上下文 / 经验本体 / 证据 / 审核意见。
+ * 可空字段用 `null` 表达「清空」，缺省（undefined）表达「本次不改」——两者语义不同，
+ * 因此不能把 undefined 当作清空。
+ */
+export interface ExperiencePatch {
+  taskType?: string
+  taskContext?: string
+  insight?: string
+  evidence?: string | null
+  reviewFeedback?: string | null
 }
 
 /** 经验候选（复盘后由父代理提交给入库工具；用户确认前不落库）。 */

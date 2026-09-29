@@ -49,6 +49,11 @@ export interface AssetsFace {
      * @returns 是否成功（语义同 rollback）。
      */
     retire(kind: AssetKind, assetId: string): Promise<boolean>;
+    /**
+     * 恢复历史（已归档）资产：取最新版本行重建 Active 指针（状态转换的唯一入口）。
+     * @returns 恢复后的详情（失败返回 null；调用方据此刷新界面）。
+     */
+    restore(kind: AssetKind, assetId: string): Promise<AssetDetail | null>;
     /** 打开工作流资产文档：装载详情后把画布切到该资产（资产态画布文档）。 */
     openFlowAsset(assetId: string): Promise<void>;
     /** 打开角色资产：装载详情后在属性栏编辑。 */

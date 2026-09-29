@@ -128,6 +128,21 @@ export declare const EP_RETIRE_ASSET = "retireAsset";
  * 都是 Host 的事实，客户端复制一份必然漂移。
  */
 export declare const EP_PREVIEW_ASSET_CASCADE = "previewAssetCascade";
+/**
+ * 资产恢复端点名（历史资产 → 活跃资产）。
+ *
+ * 与回滚的职责分工（用户裁决）：`restore` 管**状态转换**（把归档资产恢复为活跃），
+ * `rollback` 只管**版本与 Active 指针**。恢复取该资产的最新版本行重建 Active 指针。
+ */
+export declare const EP_RESTORE_ASSET = "restoreAsset";
+/** 列出经验端点名（活跃 + 已归档，一次返回；条目自带 active 标记）。 */
+export declare const EP_LIST_EXPERIENCES = "listExperiences";
+/** 保存经验端点名（就地改写可编辑字段；无版本语义，不产生历史行）。 */
+export declare const EP_SAVE_EXPERIENCE = "saveExperience";
+/** 归档经验端点名（置为非活跃：退出父代理召回面，内容全部保留）。 */
+export declare const EP_RETIRE_EXPERIENCE = "retireExperience";
+/** 恢复经验端点名（置为活跃：重新进入父代理召回面）。 */
+export declare const EP_RESTORE_EXPERIENCE = "restoreExperience";
 /** 启动节点子代理工具名（父代理；模式一编排执行：异步非阻塞启动，暂停门三语义）。 */
 export declare const WF_RUN_NODE = "wf_run_node";
 /** 启动节点子代理工具名（父代理；模式二后台服务：阻塞等待节点完成，暂停门仍立即返回）。 */
@@ -334,3 +349,10 @@ export declare const ERR_ASSET_VERSION_NOT_FOUND = "WF_ASSET_VERSION_NOT_FOUND";
 export declare const ERR_ASSET_DUPLICATE = "WF_ASSET_DUPLICATE";
 /** 资产入参非法（kind/assetId/版本号/载荷形状），HTTP 400。 */
 export declare const ERR_ASSET_BAD_ARGS = "WF_ASSET_BAD_ARGS";
+/**
+ * 经验不存在（经验 id 在经验表里查不到），HTTP 404。
+ * 消费方语义：客户端提示「经验不存在或已被清理」并刷新经验列表。
+ */
+export declare const ERR_EXPERIENCE_NOT_FOUND = "WF_EXPERIENCE_NOT_FOUND";
+/** 经验入参非法（id / 载荷形状 / 可编辑字段类型），HTTP 400。 */
+export declare const ERR_EXPERIENCE_BAD_ARGS = "WF_EXPERIENCE_BAD_ARGS";

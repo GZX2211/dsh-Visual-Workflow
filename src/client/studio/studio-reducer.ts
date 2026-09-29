@@ -57,6 +57,24 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       return { ...state, assetDoc: action.detail }
     case 'ROLE_ASSET_LOADED':
       return { ...state, assetRoleDoc: action.detail }
+    case 'EXPERIENCES_LOADED':
+      return { ...state, experiences: action.items }
+    case 'EXPERIENCE_LOADED': {
+      // 列表与详情同源：装载详情时一并把列表里对应条目换成新值，避免两处各留一份旧内容
+      const items = state.experiences.some((item) => item.id === action.entry.id)
+        ? state.experiences.map((item) => (item.id === action.entry.id ? action.entry : item))
+        : state.experiences
+      return { ...state, experiences: items, experienceDoc: action.entry }
+    }
+    case 'OPEN_EXPERIENCE':
+      return {
+        ...state,
+        selection: { nodeId: null, edgeId: null, lib: { kind: 'experience', id: action.experienceId } },
+        editor: { source: 'experience', id: action.experienceId },
+      }
+    case 'EXPERIENCE_PATCH':
+      // 属性栏表单实时编辑：字段落 experienceDoc（保存时由保存路径整体投影上报）
+      return state.experienceDoc ? { ...state, experienceDoc: { ...state.experienceDoc, ...action.patch } } : state
     case 'OPEN_FLOW_ASSET': {
       // 画布 = assetDoc 的纯投影（与 OPEN_FLOW_TEMPLATE 同口径：打开即重置
       // 选中/编辑器/已保存快照）；assetId 不匹配视为陈旧装载，保持原状态。

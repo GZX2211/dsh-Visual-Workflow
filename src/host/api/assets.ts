@@ -11,7 +11,7 @@ import type { RoleTemplate } from '../shared/template-types.js'
 import type { GraphNode, Line } from '../shared/graph-model.js'
 import type { OrgMeta } from '../shared/org-meta.js'
 import { httpError } from './http.js'
-import { VisualWorkflowApiBase, type ApiHost } from './boundary.js'
+import { requireAssets, VisualWorkflowApiBase, type ApiHost } from './boundary.js'
 
 /** 资产库能力缝（形状由 boundary 的宿主能力缝定义，本模块不自建第二份）。 */
 type Assets = NonNullable<ApiHost['assets']>
@@ -41,11 +41,7 @@ function requireString(payload: Record<string, unknown>, field: string, subject:
 }
 
 /** 取资产库能力缝；未装配时明确 501（不静默降级为「空资产库」）。 */
-function assetsOf(host: ApiHost): Assets {
-  const assets = host.assets
-  if (!assets) throw httpError(501, '资产库尚未装配（asset store unavailable）')
-  return assets
-}
+const assetsOf = (host: ApiHost): Assets => requireAssets(host)
 
 /** 校验并归一化资产种类（必填，取值域闭集）。 */
 function requireKind(args: { kind?: unknown }): AssetKind {
@@ -280,5 +276,18 @@ export class AssetEndpoints extends VisualWorkflowApiBase {
     if (kind === 'role') await assets.retireRoleAsset(assetId)
     else await assets.retireWorkflowAsset(assetId)
     return { kind, assetId, retired: true }
+  }
+
+  /**
+   * 恢复历史（已归档）资产：取**最新版本行**重建 Active 指针。
+   *
+   * 与回滚的职责分工（用户裁决）：本端点只管状态转换（归档 → 活跃），回滚只管版本与
+   * Active 指针；恢复不接版本号，需要旧版本时恢复后再回滚。
+   */
+  async restoreAsset(args: { kind?: unknown; assetId?: unknown }): Promise<WorkflowAssetDetail | RoleAssetDetail> {
+    const kind = requireKind(args)
+    const assetId = requireAssetId(args)
+    const assets = assetsOf(this.host)
+    return kind === 'role' ? assets.restoreRoleAsset(assetId) : assets.restoreWorkflowAsset(assetId)
   }
 }

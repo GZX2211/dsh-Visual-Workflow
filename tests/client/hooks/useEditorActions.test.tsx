@@ -23,6 +23,7 @@ import {
   useEditorActions, isPromoteLocked, promoteLockedOf, promoteTargetOf, type EditorActionsFace,
 } from '../../../src/client/hooks/useEditorActions.js'
 import { useAssets, type AssetsFace } from '../../../src/client/hooks/useAssets.js'
+import { useExperiences } from '../../../src/client/hooks/useExperiences.js'
 import { useUnsavedGuard, type UnsavedGuardFace } from '../../../src/client/hooks/useUnsavedGuard.js'
 import { createInitialState } from '../../../src/client/studio/studio-initial.js'
 import { studioReducer } from '../../../src/client/studio/studio-reducer.js'
@@ -71,6 +72,7 @@ async function renderFace(state: StudioState, deps: {
   flowTemplates?: unknown
   templates?: unknown
   assets?: unknown
+  experiences?: unknown
   selection?: unknown
   remote?: unknown
   saveCanvas?: unknown
@@ -94,6 +96,7 @@ async function renderFace(state: StudioState, deps: {
       (deps.flowTemplates ?? {}) as never,
       (deps.templates ?? {}) as never,
       (deps.assets ?? {}) as never,
+      (deps.experiences ?? {}) as never,
       (deps.selection ?? {}) as never,
       (deps.remote ?? {}) as never,
       (deps.saveCanvas ?? (async () => null)) as never,
@@ -381,6 +384,7 @@ async function renderAssetHarness(state: StudioState, deps: {
     const notify = ((kind: 'info' | 'success' | 'error', text: string) => { toasts.push({ kind, text }) }) as never
     const toastError = ((error: unknown) => { errors.push(error) }) as never
     const a = useAssets(deps.remote, dispatch, notify, toastError, zh, current)
+    const x = useExperiences(deps.remote, dispatch, notify, toastError, zh, current)
     const g = useUnsavedGuard(current, dispatch)
     const e = useEditorActions(
       current, dispatch, notify, toastError, zh,
@@ -388,6 +392,7 @@ async function renderAssetHarness(state: StudioState, deps: {
       (deps.flowTemplates ?? {}) as never,
       (deps.templates ?? {}) as never,
       a,
+      x,
       {} as never,
       deps.remote,
       (deps.saveCanvas ?? (async () => null)) as never,
@@ -1027,7 +1032,7 @@ describe('资产退役（二次确认 + 级联提示）', () => {
     expect(confirm?.message).toBe(zh.assetRetireMessage)
   })
 
-  it('已归档资产：归档动作直接返回（按钮已置灰，此处是第二道防线）', async () => {
+  it('历史（已归档）资产：状态按钮走「恢复」端点（取最新版本重建 Active 指针，不再重复归档）', async () => {
     const { remote, calls } = makeRemote(() => ({ workflows: [], roles: [] }))
     const harness = await renderAssetHarness(flowAssetState({
       assetDoc: { ...WORKFLOW_DETAIL, retired: true } as never,
@@ -1035,8 +1040,11 @@ describe('资产退役（二次确认 + 级联提示）', () => {
 
     await act(async () => { await harness.editor.deleteEditor() })
 
-    expect(calls).toEqual([])
-    expect(harness.dispatched).toEqual([])
+    // 归档已生效过一次：再来一次就是状态转换的反向操作，而不是报错或静默返回
+    expect(calls[0]).toEqual({ endpoint: EP.EP_RESTORE_ASSET, args: { kind: 'workflow', assetId: 'a-1' } })
+    expect(calls.some((call) => call.endpoint === EP.EP_RETIRE_ASSET)).toBe(false)
+    // 恢复不需要二次确认：直接执行
+    expect(harness.dispatched.some((action) => action.type === 'CONFIRM_SET' && (action as { confirm?: unknown }).confirm !== null)).toBe(false)
   })
 })
 
@@ -1071,9 +1079,10 @@ describe('资产态保存与状态机联动（真实 reducer）', () => {
       const [state, dispatch] = React.useReducer(studioReducer, initial)
       live = state
       const assets = useAssets(remote, dispatch as never, noop as never, noop as never, zh, state)
+      const experiences = useExperiences(remote, dispatch as never, noop as never, noop as never, zh, state)
       const e = useEditorActions(
         state, dispatch as never, noop as never, noop as never, zh,
-        {} as never, {} as never, {} as never, assets, {} as never, remote,
+        {} as never, {} as never, {} as never, assets, experiences, {} as never, remote,
         (async () => null) as never,
         noop, noop, noop, noop,
         unlocked,

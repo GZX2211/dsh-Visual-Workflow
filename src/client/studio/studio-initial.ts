@@ -25,6 +25,8 @@ export function createInitialState(sessionId: string): StudioState {
     assets: { workflows: [], roles: [], retiredWorkflows: [], retiredRoles: [] },
     assetDoc: null,
     assetRoleDoc: null,
+    experiences: [],
+    experienceDoc: null,
     assetVersions: null,
     mode: 'mode1',
     workflows: [],

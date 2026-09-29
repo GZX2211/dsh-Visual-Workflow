@@ -12,6 +12,7 @@ import type {
   ExperienceDraft,
   ExperienceEntry,
   ExperienceIndexEntry,
+  ExperiencePatch,
   RoleAssetDetail,
   RoleAssetReference,
   RoleAssetSummary,
@@ -27,7 +28,10 @@ import { assetNotFound, AssetError } from './errors.js'
 import {
   insertExperienceDrafts,
   listExperienceIndexRows,
+  listExperienceRows,
   readExperiencesByIds,
+  setExperienceActiveRow,
+  updateExperienceRow,
   type ExperienceInsertResult,
 } from './experiences.js'
 import { newRoleAssetId, newWorkflowAssetId, type IdGeneratorDeps } from './ids.js'
@@ -39,6 +43,7 @@ import {
   previewRoleAssetCascade,
   promoteRoleVersion,
   readRoleVersionEntries,
+  restoreRoleAssetTo,
   retireRoleAssetRow,
   rollbackRoleAssetTo,
   saveRoleAssetVersion,
@@ -54,6 +59,7 @@ import {
   readWorkflowActive,
   readWorkflowVersionEntries,
   registerWorkflowVersion,
+  restoreWorkflowAssetTo,
   retireWorkflowAssetRow,
   rollbackWorkflowAssetTo,
 } from './workflow-assets.js'
@@ -223,6 +229,11 @@ export class AssetStore {
     return this.db.withTx((tx) => rollbackRoleAssetTo({ tx, now: this.now }, assetId, versionId))
   }
 
+  /** 恢复已归档角色资产（取最新版本行重建 Active 指针；已活跃时为幂等无操作）。 */
+  restoreRoleAsset(assetId: string): Promise<RoleAssetDetail> {
+    return this.db.withTx((tx) => restoreRoleAssetTo({ tx, now: this.now }, assetId))
+  }
+
   /** 归档角色资产（删 Active 行；历史、引用统计与版本内容全部保留）。 */
   async retireRoleAsset(assetId: string): Promise<void> {
     await this.db.withTx((tx) => retireRoleAssetRow(tx, assetId))
@@ -300,6 +311,11 @@ export class AssetStore {
   /** 回滚工作流资产到指定版本（活跃资产挪 Active 指针；归档资产即重新启用）。 */
   rollbackWorkflowAsset(assetId: string, versionId: number): Promise<WorkflowAssetDetail> {
     return this.db.withTx((tx) => rollbackWorkflowAssetTo({ tx, now: this.now }, assetId, versionId))
+  }
+
+  /** 恢复已归档工作流资产（取最新版本行重建 Active 指针；已活跃时为幂等无操作）。 */
+  restoreWorkflowAsset(assetId: string): Promise<WorkflowAssetDetail> {
+    return this.db.withTx((tx) => restoreWorkflowAssetTo({ tx, now: this.now }, assetId))
   }
 
   /** 归档工作流资产（删 Active 行；历史行与其内联角色资产全部保留）。 */
@@ -394,14 +410,32 @@ export class AssetStore {
   // 经验
   // -------------------------------------------------------------------------
 
-  /** 经验索引（按 created_at 倒序，limit 条）。 */
+  /** 经验索引（**召回面**：只含活跃经验；按 created_at 倒序，limit 条）。 */
   listExperienceIndex(limit: number): Promise<ExperienceIndexEntry[]> {
     return this.db.withTx((tx) => listExperienceIndexRows(tx, limit))
   }
 
-  /** 经验详情（保持入参顺序，命中不到的略过）。 */
+  /** 经验列表（界面数据源：活跃与已归档一并返回；条目自带 active 标记）。 */
+  listExperiences(limit: number): Promise<ExperienceEntry[]> {
+    return this.db.withTx((tx) => listExperienceRows(tx, limit))
+  }
+
+  /**
+   * 经验详情（**召回面**：已归档经验一律查不到）。
+   * 消费方是父代理的目录召回，归档即不可召回必须在读取处生效，而不是靠调用方自觉过滤。
+   */
   getExperiences(ids: string[]): Promise<ExperienceEntry[]> {
-    return this.db.withTx((tx) => readExperiencesByIds(tx, ids))
+    return this.db.withTx((tx) => readExperiencesByIds(tx, ids, { activeOnly: true }))
+  }
+
+  /** 保存经验（就地更新可编辑字段；无版本语义，不产生历史行）。 */
+  saveExperience(id: string, patch: ExperiencePatch): Promise<ExperienceEntry> {
+    return this.db.withTx((tx) => updateExperienceRow({ tx, now: this.now, ids: this.ids }, id, patch))
+  }
+
+  /** 经验归档 / 恢复（状态切换的唯一入口；内容与历史一概不动）。 */
+  setExperienceActive(id: string, active: boolean): Promise<ExperienceEntry> {
+    return this.db.withTx((tx) => setExperienceActiveRow({ tx, now: this.now, ids: this.ids }, id, active))
   }
 
   /**

@@ -1,9 +1,9 @@
 {
   "name": "dsh-visual-workflow",
-  "version": "0.1.0",
+  "version": "0.10.0",
   "private": true,
   "type": "module",
-  "description": "DSH host + client 双面可视化多 Agent 工作流设计器插件（模式一编排执行 / 模式二后台服务）",
+  "description": "DSH 可视化 Agent 编排平台",
   "license": "MIT",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",

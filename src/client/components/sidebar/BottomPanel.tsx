@@ -16,7 +16,7 @@ import type { Dict } from '../../i18n.js'
 import type { LibTab, LibrarySource } from '../../studio/studio-state.js'
 import type { RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate } from '../../../host/shared/types.js'
 import type { WorkflowTemplate } from '../../../host/shared/graph-model.js'
-import type { RoleAssetSummary, WorkflowAssetSummary } from '../../../host/shared/asset-types.js'
+import type { ExperienceEntry, RoleAssetSummary, WorkflowAssetSummary } from '../../../host/shared/asset-types.js'
 import { buildLibraryModel } from './library-model.js'
 import type { DragPayload, LibSelectionInfo } from './LeftPanel.js'
 
@@ -41,6 +41,8 @@ export interface BottomPanelProps {
     retiredWorkflows: WorkflowAssetSummary[]
     retiredRoles: RoleAssetSummary[]
   }
+  /** 经验列表（资产态「数据」Tag 以「经验」呈现；活跃与已归档一并传入）。 */
+  experiences: ExperienceEntry[]
   parentTemplate: RoleTemplate | null
   roleTemplates: RoleTemplate[]
   fileTemplates: FileTemplate[]
@@ -53,6 +55,8 @@ export interface BottomPanelProps {
   onSelectFlowTemplate(id: string): void
   onSelectFlowAsset(id: string): void
   onOpenRoleAsset(id: string): void
+  /** 打开经验（资产态属性栏编辑；经验没有画布形态，故无拖入入口）。 */
+  onOpenExperience(id: string): void
   onPlaceRoleAsset(id: string, position: { x: number; y: number }): void
   onSelectLib(kind: LibSelectionInfo['kind'], id: string): void
   onPlaceTemplate(kind: 'role' | 'file' | 'database', id: string, position: { x: number; y: number }): void

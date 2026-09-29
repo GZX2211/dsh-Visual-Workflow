@@ -10,21 +10,24 @@
 //
 // 来源语义（用户裁决）：
 //   - 模版态：实例列表 + 工作流模板 / 父代理 + 角色模板 / 文件 + 数据库 / 阶段 + 协作组；
-//   - 资产态：工作流资产 / 角色资产，各自再分「活跃资产」与「历史资产（已归档）」两栏，
-//     数据与其他 Tag 显示空态提示（V1 资产只含工作流与角色）。
+//   - 资产态：工作流资产 / 角色资产，各自再分「活跃资产」与「历史资产（已归档）」两栏；
+//     数据 Tag 在此态以「经验」呈现（用户批注：只在资产标签下改名并改变列表结构，
+//     模版界面仍是原本的文件 + 数据库），内容为经验库的「活跃经验 / 历史经验（已归档）」
+//     两分栏；其他 Tag 显示空态提示（资产分类不含它们）。
 //   - 角色资产的活跃栏**不含内联资产**：内联角色的编辑入口在画布节点上，左栏并排显示
 //     会与画布形成两份互相看不出同步关系的视图（用户批注：信息不同步且冗余）；
 //     内联资产一旦被多个工作流引用升为共享资产，就会出现在活跃栏。
 // 搜索（两态常驻、共用同一关键词）：过滤当前 Tag 下**全部分区**卡片，
-// 字段 = 名称 + 描述/角色提示词，大小写不敏感、首尾 trim。
-// 折叠：历史资产分栏默认折叠（`collapsedSections` 由视图层持有）；搜索只做过滤，
+// 字段 = 名称 + 描述/角色提示词；经验取任务类型 / 任务上下文 / 经验本体 / 证据。
+// 大小写不敏感、首尾 trim。
+// 折叠：历史分栏默认折叠（`collapsedSections` 由视图层持有）；搜索只做过滤，
 // 不因命中而自动展开——折叠是一种显式隐藏行为。
 
 import type { Dict } from '../../i18n.js'
 import type { LibTab, LibSelKind, LibrarySource } from '../../studio/studio-state.js'
 import type { RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate } from '../../../host/shared/types.js'
 import type { WorkflowTemplate } from '../../../host/shared/graph-model.js'
-import type { RoleAssetSummary, WorkflowAssetSummary } from '../../../host/shared/asset-types.js'
+import type { ExperienceEntry, RoleAssetSummary, WorkflowAssetSummary } from '../../../host/shared/asset-types.js'
 import type { DragPayload, LibSelectionInfo } from './LeftPanel.js'
 
 /** 单张卡片模型（拖拽 payload + 展示字段；底栏只取 name，左栏取全部）。 */
@@ -42,10 +45,12 @@ export interface LibraryCardModel {
   payload: DragPayload
 }
 
-/** 资产态「历史资产」分栏 key（左侧栏的折叠状态以这两个 key 为准；底栏不折叠）。 */
+/** 资产态「历史」分栏 key（左侧栏的折叠状态以这几个 key 为准；底栏不折叠）。
+ *  经验与资产同属资产态：归档后的条目同样落入默认折叠的历史分栏。 */
 export const ASSET_HISTORY_SECTIONS = {
   workflow: 'assetWorkflowHistory',
   role: 'assetRoleHistory',
+  experience: 'assetExperienceHistory',
 } as const
 
 /** 分区模型（标题 + 是否显示「＋」新建 + 卡片列表 + 空态文案 + 可折叠性）。 */
@@ -99,6 +104,8 @@ export interface LibraryModelInput {
     retiredWorkflows?: WorkflowAssetSummary[]
     retiredRoles?: RoleAssetSummary[]
   }
+  /** 经验列表（资产态「数据」Tab 以「经验」呈现；活跃与已归档一并传入）。 */
+  experiences?: ExperienceEntry[]
   parentTemplate: RoleTemplate | null
   roleTemplates: RoleTemplate[]
   fileTemplates: FileTemplate[]
@@ -115,6 +122,8 @@ export interface LibraryModelInput {
   onOpenRoleAsset?(id: string): void
   /** 角色资产拖入画布（生成角色节点并写入来源资产 id）。 */
   onPlaceRoleAsset?(id: string, position: { x: number; y: number }): void
+  /** 打开经验（资产态属性栏编辑；经验没有画布形态，故无拖入入口）。 */
+  onOpenExperience?(id: string): void
   onSelectLib(kind: LibSelectionInfo['kind'], id: string): void
   onPlaceTemplate(kind: 'role' | 'file' | 'database', id: string, position: { x: number; y: number }): void
   onPlaceTemplateIntoGroup(kind: 'role', id: string, groupId: string, position: { x: number; y: number }): void
@@ -163,13 +172,14 @@ export function buildLibraryModel(input: LibraryModelInput): LibraryModel {
   const {
     copy: t, libTab, workflows, currentSessionId, flowTemplates, parentTemplate,
     roleTemplates, fileTemplates, databaseTemplates, groupTemplates, stageKinds, libSelection,
-    onSelectWorkflow, onSelectFlowTemplate, onSelectFlowAsset, onOpenRoleAsset, onPlaceRoleAsset,
+    onSelectWorkflow, onSelectFlowTemplate, onSelectFlowAsset, onOpenRoleAsset, onPlaceRoleAsset, onOpenExperience,
     onSelectLib, onPlaceTemplate, onPlaceTemplateIntoGroup, onPlaceStage, onPlaceGroupFromTemplate,
     onPlaceParent, onCreateNew,
   } = input
 
   const librarySource: LibrarySource = input.librarySource === 'asset' ? 'asset' : 'template'
   const assets = input.assets ?? { workflows: [], roles: [] }
+  const experiences = input.experiences ?? []
   const collapsedSections = input.collapsedSections ?? []
   const query = String(input.libSearch ?? '').trim().toLowerCase()
   const searching = query !== ''
@@ -278,6 +288,32 @@ export function buildLibraryModel(input: LibraryModelInput): LibraryModel {
               onClick: () => onOpenRoleAsset?.(item.assetId),
             },
           )),
+      ))
+    } else if (libTab === 'data') {
+      // 资产态的数据 Tag 以「经验」呈现（用户批注）：同一 Tag key，语义与列表结构随库来源切换。
+      // 子栏沿用资产的「活跃 / 历史（已归档）」两分栏与折叠行为；经验**没有版本控制**，
+      // 因此卡片没有回滚入口，属性栏也只有保存与归档 / 恢复（见 Inspector）。
+      const active = experiences.filter((item) => item.active)
+      const retired = experiences.filter((item) => !item.active)
+      const experienceCard = (item: ExperienceEntry): LibraryCardModel => card(
+        item.id, 'experience', item.id, '✦',
+        // 主行取任务上下文（召回检索锚点），副行取经验本体的摘要
+        String(item.taskContext ?? ''), truncate(String(item.insight ?? ''), 60),
+        {
+          label: String(item.taskContext ?? ''),
+          onClick: () => onOpenExperience?.(item.id),
+        },
+      )
+      sections.push({
+        key: 'assetExperiences',
+        title: t.experienceActiveSection,
+        plus: false,
+        emptyText: t.experienceEmptyHint,
+        cards: active.filter((item) => hit(item.taskContext, item.taskType, item.insight, item.evidence)).map(experienceCard),
+      })
+      sections.push(historySection(
+        ASSET_HISTORY_SECTIONS.experience, t.experienceHistorySection, t.experienceHistoryEmpty,
+        retired.filter((item) => hit(item.taskContext, item.taskType, item.insight, item.evidence)).map(experienceCard),
       ))
     }
   } else if (libTab === 'workflow') {
@@ -428,19 +464,26 @@ export function buildLibraryModel(input: LibraryModelInput): LibraryModel {
   }
 
   // 整页空态判定（顺序即优先级）：
-  //   ① 资产态的数据/其他 Tag 无资产分类 → 「该分类暂无资产」；
+  //   ① 资产态的「其他」Tag 无资产分类 → 「该分类暂无资产」（工作流/角色/经验各有分栏）；
   //   ② 搜索无命中 → 「没有匹配的条目」；
   //   ③ 其余情况由分区自身的 emptyText 表达。
   let emptyHint: string | null = null
-  if (librarySource === 'asset' && (libTab === 'data' || libTab === 'other')) emptyHint = t.assetListNotSupported
+  if (librarySource === 'asset' && libTab === 'other') emptyHint = t.assetListNotSupported
   const matched = sections.some((section) => section.cards.length > 0)
   if (emptyHint === null && searching && !matched) emptyHint = t.searchNoResult
 
   // 搜索是「过滤」语义：无命中的分区不显示（避免出现「暂无模板，点击 + 新建」的误导空态）
   const visible = searching ? sections.filter((section) => section.cards.length > 0) : sections
 
-  // 动态 tab 标签（模式二「其他」无暂停阶段等虽由 stageKinds 体现，但 tab 文案固定四类）
-  const tabs: LibraryTabModel[] = TAB_DEFS.map((def) => ({ ...def, label: (t.libTab as Record<string, string>)[def.key] ?? def.label }))
+  // 动态 tab 标签（模式二「其他」无暂停阶段等虽由 stageKinds 体现，但 tab 文案固定四类）。
+  // 资产态的「数据」Tag 呈现经验库（用户批注：只在资产标签下显示为「经验」，界面结构随之改变；
+  // 模版态仍是原本的「数据」（文件 + 数据库））——两态共用同一 Tab key。
+  const tabs: LibraryTabModel[] = TAB_DEFS.map((def) => ({
+    ...def,
+    label: librarySource === 'asset' && def.key === 'data'
+      ? t.libTabExperience
+      : ((t.libTab as Record<string, string>)[def.key] ?? def.label),
+  }))
 
   return { tabs, sections: visible, emptyHint }
 }

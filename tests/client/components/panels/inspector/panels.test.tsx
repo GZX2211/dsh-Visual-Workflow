@@ -172,7 +172,7 @@ describe('Inspector 底部按钮分录（模版态 / 资产态）', () => {
     expect(footerLabels()).toEqual([zh.inspectorSave, zh.assetArchive, zh.assetRollback])
   })
 
-  it('历史（已归档）资产：归档按钮置灰且带语义说明（不提供任何删除入口）', async () => {
+  it('历史（已归档）资产：状态按钮变为可点的「恢复」，且不再提供回滚入口', async () => {
     for (const editorData of [
       { kind: 'workflow', data: { name: '归档流程' }, name: '归档流程', asset: true, assetId: 'a-old', retired: true },
       { kind: 'role', data: { name: '归档角色' }, name: '归档角色', roleAsset: true, assetId: 'a-rold', retired: true },
@@ -181,12 +181,67 @@ describe('Inspector 底部按钮分录（模版态 / 资产态）', () => {
         ...common,
         editorData: editorData as never,
       } as never))
-      const archive = footerButton(zh.assetArchive)
-      expect(archive?.disabled).toBe(true)
-      expect(archive?.getAttribute('title')).toBe(zh.assetArchiveHint)
-      // 归档资产仍可回滚（重新启用的唯一入口）
-      expect(footerLabels()).toContain(zh.assetRollback)
+      // 归档只生效一次：历史资产的状态按钮翻转为「恢复」（可点、非危险色、带恢复语义说明）
+      const restore = footerButton(zh.assetRestore)
+      expect(restore?.disabled).toBe(false)
+      expect(restore?.getAttribute('title')).toBe(zh.assetRestoreHint)
+      expect(restore?.classList.contains('is-danger')).toBe(false)
+      // 恢复后再回滚：历史资产本身不给回滚入口（职责分离）
+      expect(footerLabels()).toEqual([zh.inspectorSave, zh.assetRestore])
     }
+  })
+
+  it('经验（活跃 / 已归档）：只有保存 + 归档（或恢复），没有回滚与入库', async () => {
+    const entry = { id: 'ex-1', active: true, taskType: '软件开发', taskContext: '上下文', insight: '经验一', createdAt: 1, updatedAt: 1 }
+    await render(React.createElement(Inspector, {
+      ...common,
+      editorData: { kind: 'experience', data: entry, name: entry.taskContext, experience: true, experienceId: 'ex-1' } as never,
+    } as never))
+    expect(footerLabels()).toEqual([zh.inspectorSave, zh.assetArchive])
+    expect(footerButton(zh.assetArchive)?.getAttribute('title')).toBe(zh.experienceArchiveHint)
+    expect(footerLabels()).not.toContain(zh.assetRollback)
+
+    await render(React.createElement(Inspector, {
+      ...common,
+      editorData: {
+        kind: 'experience',
+        data: { ...entry, active: false },
+        name: entry.taskContext,
+        experience: true,
+        experienceId: 'ex-1',
+        retired: true,
+      } as never,
+    } as never))
+    expect(footerLabels()).toEqual([zh.inspectorSave, zh.assetRestore])
+    expect(footerButton(zh.assetRestore)?.getAttribute('title')).toBe(zh.experienceRestoreHint)
+  })
+
+  it('经验表单：五个可编辑字段自上而下 + 只读元信息', async () => {
+    const entry = {
+      id: 'ex-1',
+      active: true,
+      sourceRunId: 'run-9',
+      taskType: '软件开发',
+      taskContext: '上下文一',
+      insight: '经验一',
+      evidence: '证据一',
+      reviewFeedback: '审核意见一',
+      createdAt: 1700000000000,
+      updatedAt: 1700000000000,
+    }
+    await render(React.createElement(Inspector, {
+      ...common,
+      editorData: { kind: 'experience', data: entry, name: entry.taskContext, experience: true, experienceId: 'ex-1' } as never,
+    } as never))
+    const labels = Array.from(document.querySelectorAll('.wf-field .wf-hint')).map((node) => node.textContent)
+    expect(labels.slice(0, 5)).toEqual([
+      zh.experienceTaskType, zh.experienceTaskContext, zh.experienceInsight, zh.experienceEvidence, zh.experienceReviewFeedback,
+    ])
+    const readonlyText = Array.from(document.querySelectorAll('.wf-form-stack .wf-hint')).map((node) => node.textContent).join('\n')
+    expect(readonlyText).toContain(`${zh.experienceIdLabel}：ex-1`)
+    expect(readonlyText).toContain(`${zh.experienceSourceRun}：run-9`)
+    expect(readonlyText).toContain(zh.experienceCreatedAt)
+    expect(readonlyText).toContain(zh.experienceUpdatedAt)
   })
 
   it('画布角色节点：绑定来源资产时多出回滚按钮（与左侧栏角色资产一致）', async () => {
