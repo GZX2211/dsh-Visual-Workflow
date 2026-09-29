@@ -5,13 +5,13 @@
 //
 // 资产态（模版晋升形态）的编排也在本面：
 //   - 入库：先保存模版（工作流模版走画布保存、角色模版走模板库保存），保存未落库即中止；
-//   - 保存：登记资产新版本（永不改写历史版本）；
-//   - 回滚：只改 Active 指针（版本列表由上拉列表组件消费）；
-//   - 删除：二次确认后退役（共享角色资产额外告知级联影响）。
+//   - 保存：先做影响面预览（Host 判定），有牵连即二次确认后登记资产新版本（永不改写历史版本）；
+//   - 回滚：归档资产的回滚即重新启用；画布角色节点回滚后同步刷新其角色字段；
+//   - 归档：二次确认后移出活跃复用面（历史与版本内容全保留，绝无删除语义）。
 
 import { useCallback, useMemo, useRef } from 'react'
 import type { Dispatch } from 'react'
-import type { AssetKind, RoleAssetDetail, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../../host/shared/asset-types.js'
+import type { AssetKind, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../../host/shared/asset-types.js'
 import type { LibSelKind, StudioAction, StudioState } from '../studio/studio-state.js'
 import { currentFlowOf, currentServiceOf } from '../studio/studio-state.js'
 import type { WorkflowsFace } from './useWorkflows.js'
@@ -26,6 +26,7 @@ import type { CanvasActionsFace } from './useCanvasActions.js'
 import type { AssetsFace } from './useAssets.js'
 import type { RunLockSet } from '../lib/run-locks.js'
 import type { Dict } from '../i18n.js'
+import { isRoleAssetDetail, roleAssetContentOf } from '../lib/asset-to-node.js'
 import { EP } from '../lib/remote.js'
 
 export interface EditorActionsFace {
@@ -89,13 +90,29 @@ export function promoteLockedOf(state: StudioState): boolean {
   return isPromoteLocked(target.kind === 'workflow' ? state.assets.workflows : state.assets.roles, target.templateId)
 }
 
-/** 当前编辑器指向的资产（资产态保存 / 回滚 / 退役的定位依据）。 */
-function assetTargetOf(state: StudioState): { kind: AssetKind; assetId: string } | null {
+/**
+ * 当前编辑器指向的可回滚资产（资产态保存 / 回滚 / 归档的定位依据）。
+ *
+ * 除「属性栏编辑的资产」外，画布角色节点也算：节点绑定的 data.sourceAssetId 就是它的
+ * 来源资产（批注：画布中的角色节点要与左侧栏角色资产具备同样的回滚能力）。
+ * 返回值带 nodeId：回滚成功后要把结果刷新回该节点的角色字段。
+ */
+function assetTargetOf(state: StudioState): { kind: AssetKind; assetId: string; nodeId?: string } | null {
   const editor = state.editor
   if (!editor) return null
   if (editor.source === 'flowAsset') return { kind: 'workflow', assetId: editor.id }
   if (editor.source === 'roleAsset') return { kind: 'role', assetId: editor.id }
+  if (editor.source === 'node') {
+    const node = state.canvas.nodes.find((item) => item.id === editor.id)
+    const sourceAssetId = typeof node?.data?.sourceAssetId === 'string' ? node.data.sourceAssetId : ''
+    if (sourceAssetId !== '') return { kind: 'role', assetId: sourceAssetId, nodeId: editor.id }
+  }
   return null
+}
+
+/** 牵连资产清单的可读名称串（确认框文案；名称缺失时回退 assetId）。 */
+function affectedNamesOf(affected: readonly RoleAssetReference[]): string {
+  return affected.map((item) => (item.name !== '' ? item.name : item.assetId)).join('、')
 }
 
 /**
@@ -267,6 +284,38 @@ export function useEditorActions(
   }, [dispatch, locks, state.canvas.nodes, state.editor, state.templates])
 
   // ---------- 保存 / 入库 / 回滚编辑器对象 ----------
+
+  /**
+   * 资产保存前的级联二次确认（用户裁决 A：只做「影响面告知」，不做真级联）。
+   *
+   * 为什么先问 Host 再弹框：哪些角色资产会被登记新版本、谁还引用着它们，全部是 Host 的
+   * 事实（预览端点与登记路径共用同一判据）；客户端自行推演会在「预览说没事、保存却牵连」
+   * 时分叉。内容未变更时预览返回空列表 → 不打扰用户。
+   *
+   * @returns true = 已弹确认框（本次调用不落库），用户确认后经 onConfirm 继续真实保存
+   */
+  const needsCascadeConfirm = useCallback(async (
+    kind: AssetKind,
+    assetId: string,
+    payload: unknown,
+    messageOf: (names: string) => string,
+    proceed: () => void,
+  ): Promise<boolean> => {
+    const affected = await assets.previewCascade(kind, assetId, payload)
+    if (affected.length === 0) return false
+    dispatch({
+      type: 'CONFIRM_SET',
+      confirm: {
+        kind: 'confirmText',
+        title: t.assetCascadeTitle,
+        message: messageOf(affectedNamesOf(affected)),
+        confirmLabel: t.assetCascadeConfirm,
+        onConfirm: proceed,
+      },
+    })
+    return true
+  }, [assets, dispatch, t.assetCascadeConfirm, t.assetCascadeTitle])
+
   const saveEditor = useCallback(async (options?: { onSaved?: () => void }): Promise<unknown> => {
     const editor = state.editor
     if (!editor) return null
@@ -294,29 +343,54 @@ export function useEditorActions(
       // 资产态保存 = 登记该资产的新版本（历史版本内容永不被改写）
       const detail = state.assetDoc
       if (!detail || detail.assetId !== editor.id) return null
-      const result = await assets.saveVersion('workflow', detail.assetId, workflowAssetPayload(state, detail))
-      if (!result) return null
-      if (state.currentKind === 'flowAsset' && state.currentId === detail.assetId) {
-        // 画布正打开该资产：重装载详情并重投影画布（清除 dirty + 更新已保存快照，
-        // 对齐实例态保存语义）。装载失败则保留画布现状（未落库的编辑不丢）。
-        const reloaded = await assets.loadAsset('workflow', detail.assetId)
-        if (reloaded) dispatch({ type: 'OPEN_FLOW_ASSET', assetId: detail.assetId })
+      const payload = workflowAssetPayload(state, detail)
+      const doSave = async (): Promise<unknown> => {
+        const result = await assets.saveVersion('workflow', detail.assetId, payload)
+        if (!result) return null
+        if (state.currentKind === 'flowAsset' && state.currentId === detail.assetId) {
+          // 画布正打开该资产：重装载详情并重投影画布（清除 dirty + 更新已保存快照，
+          // 对齐实例态保存语义）。装载失败则保留画布现状（未落库的编辑不丢）。
+          const reloaded = await assets.loadAsset('workflow', detail.assetId)
+          if (reloaded) dispatch({ type: 'OPEN_FLOW_ASSET', assetId: detail.assetId })
+        }
+        onSaved?.()
+        return result
       }
-      onSaved?.()
-      return result
+      // 无未保存改动时内容与已入库版本全等：保存只会被后端判为「内容未变化」，
+      // 不可能为任何角色资产登记新版本，也就没有影响面可告知——省掉一次预览往返
+      // （重复点击保存是「无改动保存」的最常见来源）。
+      const pending = state.dirty
+        ? await needsCascadeConfirm(
+          'workflow', detail.assetId, payload,
+          (names) => t.assetCascadeWorkflowMessage.replace('{names}', names),
+          () => { void doSave() },
+        )
+        : false
+      if (pending) return null
+      return await doSave()
     }
     if (editor.source === 'roleAsset') {
       const detail = state.assetRoleDoc
       if (!detail || detail.assetId !== editor.id) return null
-      const result = await assets.saveVersion('role', detail.assetId, roleAssetPayload(detail))
-      if (!result) return null
-      // 重装载 Active 详情：属性栏数据源与新版本号/行 id 保持同源
-      await assets.loadAsset('role', detail.assetId)
-      onSaved?.()
-      return result
+      const payload = roleAssetPayload(detail)
+      const doSave = async (): Promise<unknown> => {
+        const result = await assets.saveVersion('role', detail.assetId, payload)
+        if (!result) return null
+        // 重装载 Active 详情：属性栏数据源与新版本号/行 id 保持同源
+        await assets.loadAsset('role', detail.assetId)
+        onSaved?.()
+        return result
+      }
+      const pending = await needsCascadeConfirm(
+        'role', detail.assetId, payload,
+        (names) => t.assetCascadeRoleMessage.replace('{names}', names),
+        () => { void doSave() },
+      )
+      if (pending) return null
+      return await doSave()
     }
     return null
-  }, [assets, dispatch, notify, saveCanvas, state, t.toastSaved, templates, toastError])
+  }, [assets, dispatch, needsCascadeConfirm, notify, saveCanvas, state, t.assetCascadeRoleMessage, t.assetCascadeWorkflowMessage, t.toastSaved, templates, toastError])
 
   const promoteEditor = useCallback(async () => {
     const target = promoteTargetOf(state)
@@ -350,10 +424,16 @@ export function useEditorActions(
   const rollbackAssetVersion = useCallback(async (versionId: number) => {
     const target = assetTargetOf(state)
     if (!target) return
-    const rolledBack = await assets.rollback(target.kind, target.assetId, versionId)
+    const detail = await assets.rollback(target.kind, target.assetId, versionId)
     // 只有回滚真正生效才收起列表：失败时保留列表，用户可直接改选另一个版本重试
-    if (rolledBack) assets.closeVersions()
-  }, [assets, state])
+    if (!detail) return
+    assets.closeVersions()
+    // 画布角色节点是该资产的画布内联副本：回滚要把节点角色字段刷新为所选版本内容。
+    // 归属（groupId）与绑定（sourceAssetId）不在刷新字段集内——它们属于画布，不属于资产内容。
+    if (target.nodeId !== undefined && isRoleAssetDetail(detail)) {
+      dispatch({ type: 'NODE_DATA_PATCH', id: target.nodeId, patch: roleAssetContentOf(detail) })
+    }
+  }, [assets, dispatch, state])
 
   const promoteLocked = useMemo(() => promoteLockedOf(state), [state])
 
@@ -464,13 +544,23 @@ export function useEditorActions(
       return
     }
     if (editor.source === 'flowAsset' || editor.source === 'roleAsset') {
-      // 资产态删除 = 退役（Active 移除、历史版本保留）：必须二次确认。
-      // 共享角色资产被多个工作流资产版本引用，退役会改变父代理的召回面，故须显式告知级联影响。
+      // 资产态「归档」（Active 移除、历史与版本内容全保留）：必须二次确认。
+      // 角色资产被其他工作流资产引用时，归档会改变父代理的召回面，故须显式告知影响面。
       const kind: AssetKind = editor.source === 'flowAsset' ? 'workflow' : 'role'
       const assetId = editor.id
       const roleDetail = kind === 'role' ? state.assetRoleDoc : null
-      const message = roleDetail?.roleAssetType === 'shared'
-        ? t.assetRetireSharedMessage.replace('{count}', String(roleDetail.referenceWorkflowIds.length))
+      // 已归档资产不再重复归档（按钮已置灰，这里再兜一层防快捷键/回调旁路）
+      if (roleDetail?.retired === true || (kind === 'workflow' && state.assetDoc?.retired === true)) return
+      /**
+       * 影响面取**资产级**引用聚合（referencingWorkflowAssets），不取单版本行的
+       * referenceWorkflowIds：后者按版本行记录、新版本行从零开始，会给出「shared 资产被
+       * 0 个工作流引用」这种与类型定义矛盾、且误导用户确认操作的读数。
+       */
+      const references = roleDetail?.referencingWorkflowAssets ?? []
+      const message = references.length > 0
+        ? t.assetRetireSharedMessage
+          .replace('{count}', String(references.length))
+          .replace('{names}', affectedNamesOf(references))
         : t.assetRetireMessage
       dispatch({
         type: 'CONFIRM_SET',
@@ -480,8 +570,8 @@ export function useEditorActions(
           message,
           confirmLabel: t.assetRetireConfirm,
           onConfirm: () => {
-            // retire 面自身按稳定错误码提示（失败已 toast）；本面只在**退役成功**时收起
-            // 已退役资产的界面残留——失败时保持现场（确认框收起、资产卡仍在列表里可重试）
+            // retire 面自身按稳定错误码提示（失败已 toast）；本面只在**归档成功**时收起
+            // 已归档资产的界面残留——失败时保持现场（确认框收起、资产卡仍在列表里可重试）
             void assets.retire(kind, assetId).then((retired) => {
               if (retired) dispatch({ type: 'ASSET_CLOSED', assetId })
               else dispatch({ type: 'CONFIRM_SET', confirm: null })

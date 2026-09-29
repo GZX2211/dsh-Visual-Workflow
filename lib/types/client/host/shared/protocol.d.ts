@@ -118,8 +118,16 @@ export declare const EP_SAVE_ASSET_VERSION = "saveAssetVersion";
 export declare const EP_LIST_ASSET_VERSIONS = "listAssetVersions";
 /** 资产回滚端点名（改 Active 指针指向历史版本；不新增版本）。 */
 export declare const EP_ROLLBACK_ASSET = "rollbackAsset";
-/** 资产退役端点名（Active 移除、历史版本保留；UI 侧二次确认）。 */
+/** 资产退役（归档）端点名（Active 移除、历史版本保留；UI 侧二次确认；不删除任何版本行）。 */
 export declare const EP_RETIRE_ASSET = "retireAsset";
+/**
+ * 资产级联影响预览端点名（保存前的影响面告知）。
+ *
+ * 只读：按「本次要保存的内容」推演哪些**其他**工作流资产会受牵连（共享角色资产将被登记
+ * 新版本），不落库、不改 Active 指针。为什么不由客户端自行推演：角色字段映射与共享判定
+ * 都是 Host 的事实，客户端复制一份必然漂移。
+ */
+export declare const EP_PREVIEW_ASSET_CASCADE = "previewAssetCascade";
 /** 启动节点子代理工具名（父代理；模式一编排执行：异步非阻塞启动，暂停门三语义）。 */
 export declare const WF_RUN_NODE = "wf_run_node";
 /** 启动节点子代理工具名（父代理；模式二后台服务：阻塞等待节点完成，暂停门仍立即返回）。 */

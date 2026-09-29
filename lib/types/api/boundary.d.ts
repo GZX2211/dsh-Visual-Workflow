@@ -1,18 +1,19 @@
-import type { AssetPromoteResult } from '../assets/index.js';
+import type { AssetCascadePreviewInput, AssetPromoteResult } from '../assets/index.js';
 import type { FlowStore } from '../storage/flow-store.js';
 import type { OrchestratorRuntime } from '../orchestrator/index.js';
 import type { EmbeddingEngine } from '../embedding/engine.js';
 import type { SchedulerEngine, SchedulerTaskStore } from '../scheduler/index.js';
 import type { ToolSwitchStore } from '../tools/index.js';
-import type { AssetVersionEntry, RoleAssetDetail, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../shared/asset-types.js';
+import type { AssetVersionEntry, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../shared/asset-types.js';
 import type { RoleTemplate } from '../shared/template-types.js';
 import type { GraphNode, Line, WorkflowMode } from '../shared/graph-model.js';
 import type { OrgMeta } from '../shared/org-meta.js';
 /**
- * 入库/保存结果的能力缝形状：字段仍取自资产库的 AssetPromoteResult，只是不要求
- * sharedRoleAssetIds（资产库内部合并明细，且工作流路径不返回）——边界不消费该字段。
+ * 入库/保存结果的能力缝形状：字段取自资产库的 AssetPromoteResult。
+ * `sharedRoleAssetIds` / `archivedRoleAssetIds` 是写路径的副作用明细（本次合并为共享的角色
+ * 资产、本次因失去全部引用而自动归档的角色资产），边界只透传给 GUI 做提示，不做业务判断。
  */
-type PromoteResult = Pick<AssetPromoteResult, 'assetId' | 'versionId' | 'rowId' | 'unchanged' | 'roleAssetType'>;
+type PromoteResult = Pick<AssetPromoteResult, 'assetId' | 'versionId' | 'rowId' | 'unchanged' | 'roleAssetType' | 'sharedRoleAssetIds' | 'archivedRoleAssetIds'>;
 /**
  * 资产库能力缝（api 边界消费的最小结构，字段类型全部取自共享资产契约）。
  * 为什么本层声明而不是直接把字段写成 AssetStore：能力缝表达的是「边界需要什么」，
@@ -20,15 +21,18 @@ type PromoteResult = Pick<AssetPromoteResult, 'assetId' | 'versionId' | 'rowId' 
  */
 interface AssetStoreLike {
     listRoleAssets(): Promise<RoleAssetSummary[]>;
+    listRetiredRoleAssets(): Promise<RoleAssetSummary[]>;
     getRoleAsset(assetId: string): Promise<RoleAssetDetail | null>;
     listRoleVersions(assetId: string): Promise<AssetVersionEntry[]>;
     rollbackRoleAsset(assetId: string, versionId: number): Promise<RoleAssetDetail>;
     retireRoleAsset(assetId: string): Promise<void>;
     listWorkflowAssets(): Promise<WorkflowAssetSummary[]>;
+    listRetiredWorkflowAssets(): Promise<WorkflowAssetSummary[]>;
     getWorkflowAsset(assetId: string): Promise<WorkflowAssetDetail | null>;
     listWorkflowVersions(assetId: string): Promise<AssetVersionEntry[]>;
     rollbackWorkflowAsset(assetId: string, versionId: number): Promise<WorkflowAssetDetail>;
     retireWorkflowAsset(assetId: string): Promise<void>;
+    previewAssetCascade(input: AssetCascadePreviewInput): Promise<RoleAssetReference[]>;
     promoteRole(input: {
         templateId: string;
         fingerprint: string;

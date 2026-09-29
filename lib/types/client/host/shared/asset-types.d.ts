@@ -28,7 +28,7 @@ export interface AssetVersionEntry {
     /** 是否为当前 Active 版本。 */
     active: boolean;
 }
-/** 工作流资产索引条目（Active 版本投影）。 */
+/** 工作流资产索引条目（Active 版本投影；归档资产取最新版本行投影）。 */
 export interface WorkflowAssetSummary {
     assetId: string;
     versionId: number;
@@ -47,7 +47,22 @@ export interface WorkflowAssetSummary {
     /** Active 索引最后更新时间（epoch 毫秒）。 */
     updatedAt: number;
 }
-/** 角色资产索引条目（Active 版本投影）。 */
+/**
+ * 引用某个角色资产的工作流资产（按资产聚合去重后的引用事实）。
+ *
+ * 为什么必须按资产聚合：reference_workflow_ids 记的是工作流**版本行** id，且新版本行
+ * 的引用从零开始计数——直接读 Active 版本行的数组长度会得出「shared 资产被 0 个工作流引用」
+ * 这种自相矛盾的结论。语义上「谁在引用这个角色资产」是资产级事实。
+ */
+export interface RoleAssetReference {
+    /** 引用方工作流资产 id。 */
+    assetId: string;
+    /** 该工作流资产的当前名称（取最新版本行；行缺失时回退 assetId）。 */
+    name: string;
+    /** 该工作流资产引用本角色资产的版本行数量（同一资产的多版本只聚合为一条）。 */
+    versionCount: number;
+}
+/** 角色资产索引条目（Active 版本投影；归档资产取最新版本行投影）。 */
 export interface RoleAssetSummary {
     assetId: string;
     versionId: number;
@@ -96,6 +111,16 @@ export interface RoleAssetDetail {
     promptFilePath?: string;
     /** 引用过该角色版本的工作流资产版本行 id 列表（统计缓存；单调递增）。 */
     referenceWorkflowIds: string[];
+    /**
+     * 已归档标记（Active 行已移除）。缺省即活跃。
+     * 归档资产没有 Active 指针，其详情与版本列表一律以**最新版本行**为准。
+     */
+    retired?: boolean;
+    /**
+     * 引用了本角色资产**任一版本**的工作流资产（已按资产聚合去重；仅详情读填充）。
+     * 保存前的影响面告知与归档确认框都消费它，因此必须是资产级事实而非单版本行事实。
+     */
+    referencingWorkflowAssets?: RoleAssetReference[];
     /** 晋升来源模版 id（非模版晋升时省略）。 */
     sourceTemplateId?: string;
     /** 该版本创建时间（epoch 毫秒）。 */
@@ -121,6 +146,11 @@ export interface WorkflowAssetDetail {
     meta?: OrgMeta;
     /** 角色节点 → 角色版本行 id（与 nodes 中的角色节点一一对应）。 */
     roleVersionIds: WorkflowAssetRoleRef[];
+    /**
+     * 已归档标记（Active 行已移除）。缺省即活跃。
+     * 归档资产没有 Active 指针，其详情与版本列表一律以**最新版本行**为准。
+     */
+    retired?: boolean;
     /** 晋升来源模版 id（非模版晋升时省略）。 */
     sourceTemplateId?: string;
     /** 该版本创建时间（epoch 毫秒）。 */

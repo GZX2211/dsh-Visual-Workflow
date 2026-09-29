@@ -156,20 +156,55 @@ describe('Inspector 底部按钮分录（模版态 / 资产态）', () => {
     }
   })
 
-  it('工作流资产（flowAsset）：保存 + 删除 + 回滚（无入库、无另存为模板）', async () => {
+  it('工作流资产（flowAsset）：保存 + 归档 + 回滚（无入库、无另存为模板）', async () => {
     await render(React.createElement(Inspector, {
       ...common,
       editorData: { kind: 'workflow', data: { name: '资产一' }, name: '资产一', asset: true, assetId: 'a-1' } as never,
     } as never))
-    expect(footerLabels()).toEqual([zh.inspectorSave, zh.inspectorDelete, zh.assetRollback])
+    expect(footerLabels()).toEqual([zh.inspectorSave, zh.assetArchive, zh.assetRollback])
   })
 
-  it('角色资产（roleAsset）：保存 + 删除 + 回滚（无复制按钮）', async () => {
+  it('角色资产（roleAsset）：保存 + 归档 + 回滚（无复制按钮）', async () => {
     await render(React.createElement(Inspector, {
       ...common,
       editorData: { kind: 'role', data: { name: '资产角色' }, name: '资产角色', roleAsset: true, assetId: 'a-r1' } as never,
     } as never))
-    expect(footerLabels()).toEqual([zh.inspectorSave, zh.inspectorDelete, zh.assetRollback])
+    expect(footerLabels()).toEqual([zh.inspectorSave, zh.assetArchive, zh.assetRollback])
+  })
+
+  it('历史（已归档）资产：归档按钮置灰且带语义说明（不提供任何删除入口）', async () => {
+    for (const editorData of [
+      { kind: 'workflow', data: { name: '归档流程' }, name: '归档流程', asset: true, assetId: 'a-old', retired: true },
+      { kind: 'role', data: { name: '归档角色' }, name: '归档角色', roleAsset: true, assetId: 'a-rold', retired: true },
+    ] as const) {
+      await render(React.createElement(Inspector, {
+        ...common,
+        editorData: editorData as never,
+      } as never))
+      const archive = footerButton(zh.assetArchive)
+      expect(archive?.disabled).toBe(true)
+      expect(archive?.getAttribute('title')).toBe(zh.assetArchiveHint)
+      // 归档资产仍可回滚（重新启用的唯一入口）
+      expect(footerLabels()).toContain(zh.assetRollback)
+    }
+  })
+
+  it('画布角色节点：绑定来源资产时多出回滚按钮（与左侧栏角色资产一致）', async () => {
+    await render(React.createElement(Inspector, {
+      ...common,
+      editorData: {
+        kind: 'role', data: { label: '子代理' }, name: '子代理', nodeId: 'n-1', sourceAssetId: 'a-r1',
+      } as never,
+    } as never))
+    expect(footerLabels()).toEqual([zh.inspectorSave, zh.inspectorDelete, zh.assetRollback, zh.inspectorCopy])
+  })
+
+  it('画布角色节点：未绑定来源资产（从模版/实例拖入）不显示回滚按钮', async () => {
+    await render(React.createElement(Inspector, {
+      ...common,
+      editorData: { kind: 'role', data: { label: '子代理' }, name: '子代理', nodeId: 'n-1' } as never,
+    } as never))
+    expect(footerLabels()).toEqual([zh.inspectorSave, zh.inspectorDelete, zh.inspectorCopy])
   })
 
   it('入库锁定：按钮禁用且 title 说明「已入库，模版未再修改」', async () => {

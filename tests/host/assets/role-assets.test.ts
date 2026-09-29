@@ -230,7 +230,9 @@ describe('资产态保存（算法 D）', () => {
     expect((error as AssetError).code).toBe(ERR_ASSET_NOT_FOUND)
   })
 
-  it('test_保存_资产已退役_抛资产不存在错误', async () => {
+  it('test_保存_资产已归档_登记新版本且保持归档状态', async () => {
+    // 行为变化（用户裁决）：归档资产的「保存」= 历史资产版本迭代——旧行为是抛
+    // ERR_ASSET_NOT_FOUND；新行为允许保存，但**不**重建 Active 行（重新启用只能经回滚）。
     const promoted = await store.promoteRole({
       templateId: 'tpl-role-1',
       fingerprint: 'fp-1',
@@ -239,11 +241,18 @@ describe('资产态保存（算法 D）', () => {
     })
     await store.retireRoleAsset(promoted.assetId)
 
-    const error = await store
-      .saveRoleVersion({ assetId: promoted.assetId, role: roleTemplate({ name: '改名' }), source: 'human' })
-      .catch((caught: AssetError) => caught)
+    const saved = await store.saveRoleVersion({
+      assetId: promoted.assetId,
+      role: roleTemplate({ name: '改名' }),
+      source: 'human',
+    })
 
-    expect((error as AssetError).code).toBe(ERR_ASSET_NOT_FOUND)
+    expect(saved).toMatchObject({ unchanged: false, versionId: 2 })
+    expect(await store.listRoleAssets()).toEqual([])
+    const retired = (await store.listRetiredRoleAssets()).map((item) => item.assetId)
+    expect(retired).toEqual([promoted.assetId])
+    const detail = await store.getRoleAsset(promoted.assetId)
+    expect(detail).toMatchObject({ retired: true, versionId: 2, name: '改名' })
   })
 })
 
@@ -288,20 +297,35 @@ describe('回滚与退役（算法 F/G）', () => {
     expect((await store.getRoleAsset(promoted.assetId))?.versionId).toBe(1)
   })
 
-  it('test_回滚_资产已退役_抛资产不存在错误', async () => {
+  it('test_回滚_资产已归档_重建Active行并重新启用', async () => {
+    // 行为变化（用户裁决）：归档资产的回滚即「重新启用」——旧行为是抛 ERR_ASSET_NOT_FOUND。
     const promoted = await store.promoteRole({
       templateId: 'tpl-role-1',
       fingerprint: 'fp-1',
       role: roleTemplate(),
       source: 'human',
     })
+    await store.saveRoleVersion({
+      assetId: promoted.assetId,
+      role: roleTemplate({ name: '研究员二版', systemPrompt: '你是资深研究员。' }),
+      source: 'human',
+    })
     await store.retireRoleAsset(promoted.assetId)
+    expect(await store.getRoleAsset(promoted.assetId)).toMatchObject({ retired: true, versionId: 2 })
 
-    const error = await store.rollbackRoleAsset(promoted.assetId, 1).catch((caught: AssetError) => caught)
-    expect((error as AssetError).code).toBe(ERR_ASSET_NOT_FOUND)
+    const rolledBack = await store.rollbackRoleAsset(promoted.assetId, 1)
+
+    expect(rolledBack).toMatchObject({ versionId: 1, name: '研究员' })
+    expect(rolledBack.retired).toBeUndefined()
+    expect(await store.listRetiredRoleAssets()).toEqual([])
+    expect((await store.listRoleAssets()).map((item) => item.assetId)).toEqual([promoted.assetId])
+    expect(await store.getRoleAsset(promoted.assetId)).toMatchObject({ versionId: 1 })
   })
 
-  it('test_退役_get与list均不可见但历史版本仍可查询', async () => {
+  it('test_归档_移出活跃列表但详情与版本列表仍可读', async () => {
+    // 行为变化（用户裁决）：归档不等于「资产不可用」。
+    // 旧行为：get 返回 null、listRoleVersions 抛 ERR_ASSET_NOT_FOUND；
+    // 新行为：get 以最新版本行返回并标 retired，版本列表可读（重新启用入口）。
     const promoted = await store.promoteRole({
       templateId: 'tpl-role-1',
       fingerprint: 'fp-1',
@@ -311,10 +335,19 @@ describe('回滚与退役（算法 F/G）', () => {
 
     await store.retireRoleAsset(promoted.assetId)
 
-    expect(await store.getRoleAsset(promoted.assetId)).toBeNull()
     expect(await store.listRoleAssets()).toEqual([])
-    // 历史保留：已退役资产的版本列表属于不可用资产，读接口报「资产不存在」
-    const error = await store.listRoleVersions(promoted.assetId).catch((caught: AssetError) => caught)
+    const detail = await store.getRoleAsset(promoted.assetId)
+    expect(detail).toMatchObject({ assetId: promoted.assetId, retired: true, versionId: 1 })
+    // 归档资产不进父代理召回面：按版本行回溯仍返回 null（钉住行还在，但不标为可召回资产）
+    expect(await store.getRoleAssetVersion(`${promoted.assetId}@1`)).toBeNull()
+    const versions = await store.listRoleVersions(promoted.assetId)
+    expect(versions).toEqual([
+      expect.objectContaining({ versionId: 1, active: false }),
+    ])
+  })
+
+  it('test_归档_完全不存在的资产_版本列表抛资产不存在错误', async () => {
+    const error = await store.listRoleVersions('role-missing').catch((caught: AssetError) => caught)
     expect((error as AssetError).code).toBe(ERR_ASSET_NOT_FOUND)
   })
 
@@ -510,5 +543,121 @@ describe('交接契约文本列（input_schema / output_schema）', () => {
     // 字段语义是柔性交接契约说明（不做结构校验），非 JSON 文本也必须可持久化
     const detail = await store.getRoleAsset(created.assetId)
     expect(detail).toMatchObject({ inputSchema: input, outputSchema: output })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 引用方聚合（bug 修复：单看 Active 版本行的 referenceWorkflowIds 会得出
+// 「shared 资产被 0 个工作流引用」这种与类型定义矛盾、且误导用户确认操作的读数）
+// ---------------------------------------------------------------------------
+
+describe('引用方聚合（referencingWorkflowAssets）', () => {
+  /** 让工作流资产以「引用已有角色资产」的方式登记。 */
+  async function promoteReferencingFlow(
+    templateId: string,
+    name: string,
+    assetId: string,
+    fingerprint: string,
+  ): Promise<{ assetId: string; versionId: number }> {
+    return store.promoteWorkflow({
+      templateId,
+      fingerprint,
+      mode: 'mode1',
+      name,
+      description: `说明${name}`,
+      nodes: [
+        roleNode({
+          id: 'n1',
+          data: {
+            label: '研究员',
+            systemPrompt: '你是研究员。',
+            provider: 'deepseek',
+            model: 'deepseek-chat',
+            retryLimit: 2,
+            sourceAssetId: assetId,
+          },
+        }),
+      ],
+      lines: [],
+      source: 'human',
+    })
+  }
+
+  it('test_引用聚合_Active版本无引用_仍按资产级统计出引用方', async () => {
+    const promoted = await store.promoteRole({
+      templateId: 'tpl-role-1',
+      fingerprint: 'fp-1',
+      role: roleTemplate(),
+      source: 'human',
+    })
+    const flow = await promoteReferencingFlow('tpl-flow-1', '工作流A', promoted.assetId, 'fp-flow-1')
+    // 角色资产升版：Active 行换成新版本，其引用数组从零开始（旧口径会读出 0）
+    await store.saveRoleVersion({
+      assetId: promoted.assetId,
+      role: roleTemplate({ systemPrompt: '改过的提示词' }),
+      source: 'human',
+    })
+
+    const detail = await store.getRoleAsset(promoted.assetId)
+    expect(detail?.versionId).toBe(2)
+    expect(detail?.referenceWorkflowIds).toEqual([])
+    expect(detail?.referencingWorkflowAssets).toEqual([
+      { assetId: flow.assetId, name: '工作流A', versionCount: 1 },
+    ])
+  })
+
+  it('test_引用聚合_同一工作流的多个版本_合并为一条并计数版本行', async () => {
+    const promoted = await store.promoteRole({
+      templateId: 'tpl-role-1',
+      fingerprint: 'fp-1',
+      role: roleTemplate(),
+      source: 'human',
+    })
+    const flow = await promoteReferencingFlow('tpl-flow-1', '工作流A', promoted.assetId, 'fp-flow-1')
+    // 第二次保存仍引用同一角色版本行：只是给该行再加一条引用记录
+    await store.saveWorkflowVersion({
+      assetId: flow.assetId,
+      mode: 'mode1',
+      name: '工作流A',
+      description: '说明A（改）',
+      nodes: [
+        roleNode({
+          id: 'n1',
+          data: {
+            label: '研究员',
+            systemPrompt: '你是研究员。',
+            provider: 'deepseek',
+            model: 'deepseek-chat',
+            retryLimit: 2,
+            sourceAssetId: promoted.assetId,
+          },
+        }),
+      ],
+      lines: [],
+      source: 'human',
+    })
+
+    const detail = await store.getRoleAsset(promoted.assetId)
+    expect(detail?.referencingWorkflowAssets).toEqual([
+      { assetId: flow.assetId, name: '工作流A', versionCount: 2 },
+    ])
+  })
+
+  it('test_引用聚合_两个工作流引用_按资产去重且名称取最新版本行', async () => {
+    const promoted = await store.promoteRole({
+      templateId: 'tpl-role-1',
+      fingerprint: 'fp-1',
+      role: roleTemplate(),
+      source: 'human',
+    })
+    const flowA = await promoteReferencingFlow('tpl-flow-1', '工作流A', promoted.assetId, 'fp-flow-1')
+    const flowB = await promoteReferencingFlow('tpl-flow-2', '工作流B', promoted.assetId, 'fp-flow-2')
+
+    const detail = await store.getRoleAsset(promoted.assetId)
+    expect(detail?.roleAssetType).toBe('shared')
+    expect(detail?.referencingWorkflowAssets).toEqual([
+      { assetId: flowA.assetId, name: '工作流A', versionCount: 1 },
+      { assetId: flowB.assetId, name: '工作流B', versionCount: 1 },
+    ])
   })
 })

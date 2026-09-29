@@ -339,6 +339,49 @@ export const railsStyles = `
   color: var(--wf-brand);
 }
 
+/* 可折叠分栏的标题按钮（历史资产分栏）：与普通标题同排版，只是整体可点 */
+.wf-docgroup__toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+
+.wf-docgroup__toggle:hover {
+  color: var(--wf-ink);
+}
+
+.wf-docgroup__caret {
+  font-size: 9px;
+  line-height: 1;
+}
+
+/* 折叠箭头由类名切换伪元素内容：DOM 文本只保留分栏标题，读屏与文本断言都不受箭头干扰 */
+.wf-docgroup__caret::before {
+  content: '▾';
+}
+
+.wf-docgroup__toggle.is-collapsed .wf-docgroup__caret::before {
+  content: '▸';
+}
+
+.wf-docgroup__count {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 6px;
+  background: var(--wf-layer-2);
+  color: var(--wf-ink-2);
+  font-size: 9px;
+  text-align: center;
+}
+
 .wf-docitem {
   width: 100%;
   display: grid;

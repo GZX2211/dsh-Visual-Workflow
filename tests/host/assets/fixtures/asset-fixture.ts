@@ -65,8 +65,14 @@ export function roleTemplate(overrides: Partial<RoleTemplate> = {}): RoleTemplat
   }
 }
 
-/** 角色节点构造器（content 部分显式给出，便于等价性断言）。 */
-export function roleNode(overrides: Partial<RoleNode> & { id: string }): RoleNode {
+/**
+ * 角色节点构造器。
+ * data 允许只覆盖需要变化的字段（未给出的字段用默认值补齐）：用例常只改 systemPrompt
+ * 或只加 sourceAssetId，要求每次写全 data 会让用例噪声盖过意图。
+ */
+export function roleNode(
+  overrides: Partial<Omit<RoleNode, 'data'>> & { id: string; data?: Partial<RoleNode['data']> },
+): RoleNode {
   return {
     id: overrides.id,
     kind: overrides.kind ?? 'agent',

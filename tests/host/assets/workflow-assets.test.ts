@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ERR_ASSET_NOT_FOUND, ERR_ASSET_VERSION_NOT_FOUND } from '../../../src/host/shared/protocol.js'
 import type { RoleNode } from '../../../src/host/shared/graph-model.js'
 import { AssetStore, type AssetError } from '../../../src/host/assets/index.js'
-import { flowLine, makeStore, orgMeta, removeTempRoot, roleNode, stageNode } from './fixtures/asset-fixture.js'
+import { flowLine, makeStore, orgMeta, removeTempRoot, roleNode, roleTemplate, stageNode } from './fixtures/asset-fixture.js'
 
 let store: AssetStore
 let root: string
@@ -355,7 +355,9 @@ describe('工作流资产回滚与退役', () => {
     expect((error as AssetError).code).toBe(ERR_ASSET_VERSION_NOT_FOUND)
   })
 
-  it('test_退役_get与list不可见但角色引用统计保留', async () => {
+  it('test_归档_移出活跃列表且角色引用统计保留', async () => {
+    // 行为变化（用户裁决）：工作流资产归档后详情仍可读（历史资产需能打开做版本迭代与
+    // 重新启用），旧行为是 getWorkflowAsset 返回 null；且归档不触发角色资产归档（流程与角色解耦）。
     const promoted = await store.promoteRole({
       templateId: 'tpl-role-1',
       fingerprint: 'fp-1',
@@ -395,9 +397,12 @@ describe('工作流资产回滚与退役', () => {
 
     await store.retireWorkflowAsset(flow.assetId)
 
-    expect(await store.getWorkflowAsset(flow.assetId)).toBeNull()
     expect(await store.listWorkflowAssets()).toEqual([])
+    expect((await store.listRetiredWorkflowAssets()).map((item) => item.assetId)).toEqual([flow.assetId])
+    expect(await store.getWorkflowAsset(flow.assetId)).toMatchObject({ assetId: flow.assetId, retired: true })
+    // 流程归档不触发角色归档：内联/被引用的角色资产仍是活跃资产
     const roleDetail = await store.getRoleAsset(promoted.assetId)
+    expect(roleDetail?.retired).toBeUndefined()
     expect(roleDetail?.referenceWorkflowIds).toEqual([`${flow.assetId}@${flow.versionId}`])
   })
 
@@ -617,5 +622,404 @@ describe('资产态保存工作流', () => {
       .catch((caught: AssetError) => caught)
 
     expect((error as AssetError).code).toBe(ERR_ASSET_NOT_FOUND)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 保存内容查重（bug 修复：工作流资产原先没有查重，重复保存与纯坐标拖动都会堆版本）
+// ---------------------------------------------------------------------------
+
+describe('保存内容查重（忽略节点坐标）', () => {
+  /** 晋升一个最小工作流资产（一个阶段节点 + 一个角色节点）。 */
+  async function promoteMinimal(): Promise<string> {
+    const promoted = await store.promoteWorkflow({
+      templateId: 'tpl-flow-1',
+      fingerprint: 'fp-1',
+      mode: 'mode1',
+      name: '工作流A',
+      description: '说明A',
+      nodes: [stageNode('s1'), roleNode({ id: 'n1', position: { x: 10, y: 20 } })],
+      lines: [],
+      source: 'human',
+    })
+    return promoted.assetId
+  }
+
+  it('test_保存_仅节点坐标变动_不新增版本', async () => {
+    const assetId = await promoteMinimal()
+
+    const saved = await store.saveWorkflowVersion({
+      assetId,
+      mode: 'mode1',
+      name: '工作流A',
+      description: '说明A',
+      nodes: [stageNode('s1'), roleNode({ id: 'n1', position: { x: 900, y: 800 } })],
+      lines: [],
+      source: 'human',
+    })
+
+    expect(saved).toMatchObject({ unchanged: true, versionId: 1 })
+    expect(await store.listWorkflowVersions(assetId)).toHaveLength(1)
+    expect(await store.listRoleAssets()).toHaveLength(1)
+  })
+
+  it('test_保存_内容与Active全等_重复点击保存不新增版本', async () => {
+    const assetId = await promoteMinimal()
+    const nodes = [stageNode('s1'), roleNode({ id: 'n1' })]
+
+    const first = await store.saveWorkflowVersion({ assetId, mode: 'mode1', name: '工作流A', description: '说明A', nodes, lines: [], source: 'human' })
+    const second = await store.saveWorkflowVersion({ assetId, mode: 'mode1', name: '工作流A', description: '说明A', nodes, lines: [], source: 'human' })
+
+    expect(first).toMatchObject({ assetId })
+    expect(second).toMatchObject({ unchanged: true, versionId: 1 })
+    expect(await store.listWorkflowVersions(assetId)).toHaveLength(1)
+  })
+
+  it('test_保存_角色提示词变动_新增版本', async () => {
+    const assetId = await promoteMinimal()
+
+    const saved = await store.saveWorkflowVersion({
+      assetId,
+      mode: 'mode1',
+      name: '工作流A',
+      description: '说明A',
+      nodes: [stageNode('s1'), roleNode({ id: 'n1', data: { systemPrompt: '你是资深研究员。' } })],
+      lines: [],
+      source: 'human',
+    })
+
+    expect(saved).toMatchObject({ unchanged: false, versionId: 2 })
+  })
+
+  it('test_保存_连线条件变动_新增版本', async () => {
+    const assetId = await promoteMinimal()
+
+    const saved = await store.saveWorkflowVersion({
+      assetId,
+      mode: 'mode1',
+      name: '工作流A',
+      description: '说明A',
+      nodes: [stageNode('s1'), roleNode({ id: 'n1' })],
+      lines: [{ ...flowLine('l1', 's1', 'n1', 'ctx-out', 'ctx-in'), condition: { type: 'fail' } }],
+      source: 'human',
+    })
+
+    expect(saved).toMatchObject({ unchanged: false, versionId: 2 })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 归档资产的读写（历史资产：保存只迭代版本，回滚即重新启用）
+// ---------------------------------------------------------------------------
+
+describe('归档资产的读写（历史资产）', () => {
+  async function archivedAsset(): Promise<string> {
+    const promoted = await store.promoteWorkflow({
+      templateId: 'tpl-flow-1',
+      fingerprint: 'fp-1',
+      mode: 'mode1',
+      name: '工作流A',
+      description: '说明A',
+      nodes: [],
+      lines: [],
+      source: 'human',
+    })
+    await store.retireWorkflowAsset(promoted.assetId)
+    return promoted.assetId
+  }
+
+  it('test_归档_详情取最新版本行且带retired标记', async () => {
+    const assetId = await archivedAsset()
+    expect(await store.getWorkflowAsset(assetId)).toMatchObject({ assetId, versionId: 1, retired: true })
+  })
+
+  it('test_归档_保存_在最新版本上续版且保持归档状态', async () => {
+    const assetId = await archivedAsset()
+
+    const saved = await store.saveWorkflowVersion({
+      assetId,
+      mode: 'mode1',
+      name: '工作流A',
+      description: '说明B',
+      nodes: [],
+      lines: [],
+      source: 'human',
+    })
+
+    expect(saved).toMatchObject({ unchanged: false, versionId: 2 })
+    expect(await store.listWorkflowAssets()).toEqual([])
+    expect((await store.listRetiredWorkflowAssets()).map((item) => item.assetId)).toEqual([assetId])
+    expect(await store.getWorkflowAsset(assetId)).toMatchObject({ versionId: 2, description: '说明B', retired: true })
+  })
+
+  it('test_归档_保存内容全等_不新增版本', async () => {
+    const assetId = await archivedAsset()
+
+    const saved = await store.saveWorkflowVersion({
+      assetId,
+      mode: 'mode1',
+      name: '工作流A',
+      description: '说明A',
+      nodes: [],
+      lines: [],
+      source: 'human',
+    })
+
+    expect(saved).toMatchObject({ unchanged: true, versionId: 1 })
+  })
+
+  it('test_归档_回滚任一版本_重新启用并移回活跃列表', async () => {
+    const assetId = await archivedAsset()
+    await store.saveWorkflowVersion({
+      assetId,
+      mode: 'mode1',
+      name: '工作流A',
+      description: '说明B',
+      nodes: [],
+      lines: [],
+      source: 'human',
+    })
+
+    const rolled = await store.rollbackWorkflowAsset(assetId, 1)
+
+    expect(rolled).toMatchObject({ versionId: 1, description: '说明A' })
+    expect(rolled.retired).toBeUndefined()
+    expect(await store.listRetiredWorkflowAssets()).toEqual([])
+    expect((await store.listWorkflowAssets()).map((item) => item.assetId)).toEqual([assetId])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 引用解除与角色资产自动归档（内联资产的「退役：当前工作流不再使用」结算）
+// ---------------------------------------------------------------------------
+
+describe('引用解除与角色资产自动归档', () => {
+  it('test_保存_删除唯一引用的角色节点_角色资产自动归档并降级为独立资产', async () => {
+    const flow = await store.promoteWorkflow({
+      templateId: 'tpl-flow-1',
+      fingerprint: 'fp-1',
+      mode: 'mode1',
+      name: '工作流A',
+      description: '说明A',
+      nodes: [stageNode('s1'), roleNode({ id: 'n1' })],
+      lines: [],
+      source: 'human',
+    })
+    const inlineAssetId = (await store.listRoleAssets())[0].assetId
+    expect((await store.listRoleAssets())[0].roleAssetType).toBe('inline')
+
+    // 画布上删除角色节点后保存：本工作流的引用解除，且已无任何工作流引用它
+    const saved = await store.saveWorkflowVersion({
+      assetId: flow.assetId,
+      mode: 'mode1',
+      name: '工作流A',
+      description: '说明A',
+      nodes: [stageNode('s1')],
+      lines: [],
+      source: 'human',
+    })
+
+    expect(saved.archivedRoleAssetIds).toEqual([inlineAssetId])
+    expect(await store.listRoleAssets()).toEqual([])
+    expect(await store.listRetiredRoleAssets()).toEqual([
+      expect.objectContaining({ assetId: inlineAssetId, roleAssetType: 'standalone' }),
+    ])
+    // 归档不是删除：历史版本行仍可查（重新启用入口）
+    expect(await store.listRoleVersions(inlineAssetId)).toHaveLength(1)
+  })
+
+  it('test_保存_共享角色资产仍被其他工作流引用_只解除本工作流引用不归档', async () => {
+    const role = roleNode({ id: 'n1' })
+    const flowA = await store.promoteWorkflow({
+      templateId: 'tpl-flow-1',
+      fingerprint: 'fp-1',
+      mode: 'mode1',
+      name: '工作流A',
+      description: '说明A',
+      nodes: [role],
+      lines: [],
+      source: 'human',
+    })
+    const sharedAssetId = (await store.listRoleAssets())[0].assetId
+    // 第二个工作流以相同内容引用同一角色资产 → 升 shared
+    const flowB = await store.promoteWorkflow({
+      templateId: 'tpl-flow-2',
+      fingerprint: 'fp-2',
+      mode: 'mode1',
+      name: '工作流B',
+      description: '说明B',
+      nodes: [roleNode({ id: 'm1' })],
+      lines: [],
+      source: 'human',
+    })
+
+    const releasedByA = await store.saveWorkflowVersion({
+      assetId: flowA.assetId,
+      mode: 'mode1',
+      name: '工作流A',
+      description: '说明A',
+      nodes: [],
+      lines: [],
+      source: 'human',
+    })
+
+    expect(releasedByA.archivedRoleAssetIds).toEqual([])
+    const detail = await store.getRoleAsset(sharedAssetId)
+    expect(detail?.referenceWorkflowIds).toEqual([`${flowB.assetId}@1`])
+    expect(detail?.roleAssetType).toBe('shared')
+
+    // 第二个工作流也移除引用 → 完全无引用关系时归档 + 降级
+    const releasedByB = await store.saveWorkflowVersion({
+      assetId: flowB.assetId,
+      mode: 'mode1',
+      name: '工作流B',
+      description: '说明B',
+      nodes: [],
+      lines: [],
+      source: 'human',
+    })
+
+    expect(releasedByB.archivedRoleAssetIds).toEqual([sharedAssetId])
+    expect(await store.listRetiredRoleAssets()).toEqual([
+      expect.objectContaining({ assetId: sharedAssetId, roleAssetType: 'standalone' }),
+    ])
+  })
+
+  it('test_保存_独立资产被移除引用_不自动归档（由用户在左侧栏管理）', async () => {
+    const promoted = await store.promoteRole({
+      templateId: 'tpl-role-1',
+      fingerprint: 'fp-1',
+      role: {
+        id: 'tpl-role-1',
+        kind: 'agent',
+        name: '研究员',
+        systemPrompt: '你是研究员。',
+        provider: 'deepseek',
+        model: 'deepseek-chat',
+        retryLimit: 2,
+      },
+      source: 'human',
+    })
+    const flow = await store.promoteWorkflow({
+      templateId: 'tpl-flow-1',
+      fingerprint: 'fp-1',
+      mode: 'mode1',
+      name: '工作流A',
+      description: '说明A',
+      nodes: [
+        roleNode({
+          id: 'n1',
+          data: {
+            label: '研究员',
+            systemPrompt: '你是研究员。',
+            provider: 'deepseek',
+            model: 'deepseek-chat',
+            retryLimit: 2,
+            sourceAssetId: promoted.assetId,
+          },
+        }),
+      ],
+      lines: [],
+      source: 'human',
+    })
+
+    const saved = await store.saveWorkflowVersion({
+      assetId: flow.assetId,
+      mode: 'mode1',
+      name: '工作流A',
+      description: '说明A',
+      nodes: [],
+      lines: [],
+      source: 'human',
+    })
+
+    expect(saved.archivedRoleAssetIds).toEqual([])
+    expect((await store.listRoleAssets()).map((item) => item.assetId)).toEqual([promoted.assetId])
+    expect((await store.getRoleAsset(promoted.assetId))?.referenceWorkflowIds).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 影响面预览（保存前的级联告知；只读，与登记路径同判据）
+// ---------------------------------------------------------------------------
+
+describe('影响面预览', () => {
+  /** 造出「角色资产被工作流A与B共同引用」的局面，返回共享角色资产与两个工作流资产 id。 */
+  async function sharedSetup(): Promise<{ roleAssetId: string; workflowAId: string; otherWorkflowId: string }> {
+    const role = roleNode({ id: 'n1' })
+    const flowA = await store.promoteWorkflow({
+      templateId: 'tpl-flow-1',
+      fingerprint: 'fp-1',
+      mode: 'mode1',
+      name: '工作流A',
+      description: '说明A',
+      nodes: [role],
+      lines: [],
+      source: 'human',
+    })
+    const roleAssetId = (await store.listRoleAssets())[0].assetId
+    const flowB = await store.promoteWorkflow({
+      templateId: 'tpl-flow-2',
+      fingerprint: 'fp-2',
+      mode: 'mode1',
+      name: '工作流B',
+      description: '说明B',
+      nodes: [roleNode({ id: 'm1' })],
+      lines: [],
+      source: 'human',
+    })
+    return { roleAssetId, workflowAId: flowA.assetId, otherWorkflowId: flowB.assetId }
+  }
+
+  it('test_预览_节点内容已改且源资产被其他工作流引用_列出牵连方并排除自己', async () => {
+    const { roleAssetId, workflowAId, otherWorkflowId } = await sharedSetup()
+
+    const affected = await store.previewAssetCascade({
+      kind: 'workflow',
+      workflowAssetId: workflowAId,
+      nodes: [
+        roleNode({
+          id: 'n1',
+          data: {
+            label: '研究员',
+            systemPrompt: '你是资深研究员。',
+            sourceAssetId: roleAssetId,
+          },
+        }),
+      ],
+    })
+
+    expect(affected).toEqual([{ assetId: otherWorkflowId, name: '工作流B', versionCount: 1 }])
+  })
+
+  it('test_预览_节点内容与源资产Active全等_不触发牵连', async () => {
+    const { roleAssetId } = await sharedSetup()
+
+    const affected = await store.previewAssetCascade({
+      kind: 'workflow',
+      workflowAssetId: null,
+      nodes: [roleNode({ id: 'n1', data: { sourceAssetId: roleAssetId } })],
+    })
+
+    expect(affected).toEqual([])
+  })
+
+  it('test_预览_角色资产内容已改_返回引用它的全部工作流资产', async () => {
+    const { roleAssetId, workflowAId, otherWorkflowId } = await sharedSetup()
+
+    const affected = await store.previewAssetCascade({
+      kind: 'role',
+      assetId: roleAssetId,
+      role: roleTemplate({ systemPrompt: '改过的提示词' }),
+    })
+
+    // 角色资产自身的保存没有「排除自己」的概念：引用它的工作流资产全部受影响
+    expect(affected).toEqual([
+      { assetId: workflowAId, name: '工作流A', versionCount: 1 },
+      { assetId: otherWorkflowId, name: '工作流B', versionCount: 1 },
+    ])
+
+    const unchanged = await store.previewAssetCascade({ kind: 'role', assetId: roleAssetId, role: roleTemplate() })
+    expect(unchanged).toEqual([])
   })
 })

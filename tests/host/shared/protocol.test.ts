@@ -77,8 +77,9 @@ const EXPECTED_ENDPOINTS: string[] = [
   'exportWorkflow', 'importWorkflow', 'exportAgentTemplate', 'importAgentTemplate',
   // 定时任务（新功能本阶段；需求见 prompt/定时任务开发.md）
   'schedulerTasks', 'schedulerTaskPut', 'schedulerTaskDelete',
-  // 资产（模版的晋升形态：入库 / 资产态保存 / 版本 / 回滚 / 退役）
+  // 资产（模版的晋升形态：入库 / 资产态保存 / 版本 / 回滚 / 归档 / 影响面预览）
   'listAssets', 'getAsset', 'promoteAsset', 'saveAssetVersion', 'listAssetVersions', 'rollbackAsset', 'retireAsset',
+  'previewAssetCascade',
 ]
 
 /**
@@ -96,10 +97,10 @@ function readProtocolEndpoints(): string[] {
 }
 
 describe('shared/protocol 端点清单', () => {
-  it('端点常量定义 59 个且无重复', () => {
+  it('端点常量定义 60 个且无重复', () => {
     const eps = readProtocolEndpoints()
-    expect(eps).toHaveLength(59)
-    expect(new Set(eps).size).toBe(59) // 59 端点名全部唯一（无重复常量）
+    expect(eps).toHaveLength(60)
+    expect(new Set(eps).size).toBe(60) // 60 端点名全部唯一（无重复常量）
   })
 
   it('端点名逐字覆盖 §4.6 清单（正反向双向一致）', () => {

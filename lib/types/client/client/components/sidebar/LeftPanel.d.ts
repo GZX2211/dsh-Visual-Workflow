@@ -10,7 +10,11 @@ export interface LibSelectionInfo {
 export interface DragPayload {
     label: string;
     onClick(): void;
-    onDrop(position?: {
+    /**
+     * 拖入画布落点回调。缺省 = 该卡片不可拖入画布（历史（已归档）资产：拖入等于让
+     * 归档资产重新进入编排，必须先经属性栏「回滚」显式启用）。
+     */
+    onDrop?(position?: {
         x: number;
         y: number;
     }): void;
@@ -47,10 +51,12 @@ export interface LeftPanelProps {
     currentSessionId: string;
     /** 工作流模板列表（全局共享；按当前 mode 过滤后传入；图2 交互改造）。 */
     flowTemplates: WorkflowTemplate[];
-    /** 资产列表（Active 版本索引；资产态左栏数据源）。 */
+    /** 资产列表（活跃 + 历史（已归档）；资产态左栏数据源）。 */
     assets: {
         workflows: WorkflowAssetSummary[];
         roles: RoleAssetSummary[];
+        retiredWorkflows: WorkflowAssetSummary[];
+        retiredRoles: RoleAssetSummary[];
     };
     parentTemplate: RoleTemplate | null;
     roleTemplates: RoleTemplate[];

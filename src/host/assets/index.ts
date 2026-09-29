@@ -13,6 +13,7 @@ import type {
   ExperienceEntry,
   ExperienceIndexEntry,
   RoleAssetDetail,
+  RoleAssetReference,
   RoleAssetSummary,
   RoleAssetType,
   WorkflowAssetDetail,
@@ -33,7 +34,9 @@ import { newRoleAssetId, newWorkflowAssetId, type IdGeneratorDeps } from './ids.
 import {
   getRoleAssetDetail,
   getRoleAssetVersionDetail,
+  listRetiredRoleAssets,
   listRoleAssets,
+  previewRoleAssetCascade,
   promoteRoleVersion,
   readRoleVersionEntries,
   retireRoleAssetRow,
@@ -44,7 +47,10 @@ import {
   createWorkflowAsset,
   findWorkflowAssetByTemplate,
   getWorkflowAssetDetail,
+  listRetiredWorkflowAssets,
   listWorkflowAssets,
+  latestWorkflowVersionRow,
+  previewWorkflowAssetCascade,
   readWorkflowActive,
   readWorkflowVersionEntries,
   registerWorkflowVersion,
@@ -118,6 +124,15 @@ export interface WorkflowSaveInput {
   source: AssetVersionSource
 }
 
+/**
+ * 影响面预览入参（只读 discriminated union）：
+ *   - role：内容确实变更时返回引用了该角色资产的其它工作流资产；
+ *   - workflow：本次节点集会为哪些角色资产登记新版本，进而牵连哪些其它工作流资产。
+ */
+export type AssetCascadePreviewInput =
+  | { kind: 'role'; assetId: string; role: RoleTemplate }
+  | { kind: 'workflow'; workflowAssetId: string | null; nodes: GraphNode[] }
+
 /** 晋升/保存结果。 */
 export interface AssetPromoteResult {
   assetId: string
@@ -129,6 +144,8 @@ export interface AssetPromoteResult {
   roleAssetType?: RoleAssetType
   /** 本次操作中被合并为 shared 的角色资产 id（去重）。 */
   sharedRoleAssetIds: string[]
+  /** 本次登记使「已无任何工作流引用」而自动归档的角色资产 id（去重）。 */
+  archivedRoleAssetIds: string[]
 }
 
 /**
@@ -172,12 +189,17 @@ export class AssetStore {
   // 角色资产
   // -------------------------------------------------------------------------
 
-  /** 角色资产列表（Active 版本投影；currentTemplateFingerprint 由 API 边界填充）。 */
+  /** 角色资产列表（活跃；Active 版本投影；currentTemplateFingerprint 由 API 边界填充）。 */
   listRoleAssets(): Promise<RoleAssetSummary[]> {
     return this.db.withTx((tx) => listRoleAssets(tx))
   }
 
-  /** 角色资产详情（Active 版本）；不存在或已退役返回 null。 */
+  /** 历史（已归档）角色资产列表（最新版本行投影；不进父代理召回面）。 */
+  listRetiredRoleAssets(): Promise<RoleAssetSummary[]> {
+    return this.db.withTx((tx) => listRetiredRoleAssets(tx))
+  }
+
+  /** 角色资产详情（活跃取 Active 版本、归档取最新版本行，归档时带 retired 标记）。 */
   getRoleAsset(assetId: string): Promise<RoleAssetDetail | null> {
     return this.db.withTx((tx) => getRoleAssetDetail(tx, assetId))
   }
@@ -191,17 +213,17 @@ export class AssetStore {
     return this.db.withTx((tx) => getRoleAssetVersionDetail(tx, roleRowId))
   }
 
-  /** 角色资产版本列表（版本号倒序）。 */
+  /** 角色资产版本列表（版本号倒序；归档资产同样可列，用于重新启用）。 */
   listRoleVersions(assetId: string): Promise<AssetVersionEntry[]> {
     return this.db.withTx((tx) => readRoleVersionEntries(tx, assetId))
   }
 
-  /** 回滚角色资产到指定版本（只改 Active 指针，不新增版本）。 */
+  /** 回滚角色资产到指定版本（活跃资产挪 Active 指针；归档资产即重新启用）。 */
   rollbackRoleAsset(assetId: string, versionId: number): Promise<RoleAssetDetail> {
     return this.db.withTx((tx) => rollbackRoleAssetTo({ tx, now: this.now }, assetId, versionId))
   }
 
-  /** 退役角色资产（删 Active 行；历史保留）。 */
+  /** 归档角色资产（删 Active 行；历史、引用统计与版本内容全部保留）。 */
   async retireRoleAsset(assetId: string): Promise<void> {
     await this.db.withTx((tx) => retireRoleAssetRow(tx, assetId))
   }
@@ -226,11 +248,12 @@ export class AssetStore {
         unchanged: result.unchanged,
         roleAssetType: result.roleAssetType,
         sharedRoleAssetIds: result.sharedRoleAssetIds,
+        archivedRoleAssetIds: [],
       }
     })
   }
 
-  /** 资产态保存角色（算法 D：登记新版本）。 */
+  /** 资产态保存角色（算法 D：登记新版本；归档资产的保存只迭代版本、不重建 Active 行）。 */
   saveRoleVersion(input: RoleSaveInput): Promise<AssetPromoteResult> {
     return this.db.withTx((tx) => {
       const result = saveRoleAssetVersion({ tx, now: this.now }, {
@@ -245,6 +268,7 @@ export class AssetStore {
         unchanged: result.unchanged,
         roleAssetType: result.roleAssetType,
         sharedRoleAssetIds: result.sharedRoleAssetIds,
+        archivedRoleAssetIds: [],
       }
     })
   }
@@ -253,29 +277,45 @@ export class AssetStore {
   // 工作流资产
   // -------------------------------------------------------------------------
 
-  /** 工作流资产列表（Active 版本投影；currentTemplateFingerprint 由 API 边界填充）。 */
+  /** 工作流资产列表（活跃；Active 版本投影；currentTemplateFingerprint 由 API 边界填充）。 */
   listWorkflowAssets(): Promise<WorkflowAssetSummary[]> {
     return this.db.withTx((tx) => listWorkflowAssets(tx))
   }
 
-  /** 工作流资产详情（Active 版本；角色节点已 join 回角色版本字段）。 */
+  /** 历史（已归档）工作流资产列表（最新版本行投影；不进父代理召回面）。 */
+  listRetiredWorkflowAssets(): Promise<WorkflowAssetSummary[]> {
+    return this.db.withTx((tx) => listRetiredWorkflowAssets(tx))
+  }
+
+  /** 工作流资产详情（活跃取 Active 版本、归档取最新版本行，归档时带 retired 标记）。 */
   getWorkflowAsset(assetId: string): Promise<WorkflowAssetDetail | null> {
     return this.db.withTx((tx) => getWorkflowAssetDetail(tx, assetId))
   }
 
-  /** 工作流资产版本列表（版本号倒序）。 */
+  /** 工作流资产版本列表（版本号倒序；归档资产同样可列，用于重新启用）。 */
   listWorkflowVersions(assetId: string): Promise<AssetVersionEntry[]> {
     return this.db.withTx((tx) => readWorkflowVersionEntries(tx, assetId))
   }
 
-  /** 回滚工作流资产到指定版本（只改 Active 指针，不新增版本）。 */
+  /** 回滚工作流资产到指定版本（活跃资产挪 Active 指针；归档资产即重新启用）。 */
   rollbackWorkflowAsset(assetId: string, versionId: number): Promise<WorkflowAssetDetail> {
     return this.db.withTx((tx) => rollbackWorkflowAssetTo({ tx, now: this.now }, assetId, versionId))
   }
 
-  /** 退役工作流资产（删 Active 行；历史保留）。 */
+  /** 归档工作流资产（删 Active 行；历史行与其内联角色资产全部保留）。 */
   async retireWorkflowAsset(assetId: string): Promise<void> {
     await this.db.withTx((tx) => retireWorkflowAssetRow(tx, assetId))
+  }
+
+  /**
+   * 保存前的影响面预览（只读）：本次内容会牵连哪些**其他**工作流资产。
+   * 判据与登记路径同源，因此预览结论与真实保存不会分叉。
+   */
+  previewAssetCascade(input: AssetCascadePreviewInput): Promise<RoleAssetReference[]> {
+    return this.db.withTx((tx) => {
+      if (input.kind === 'role') return previewRoleAssetCascade({ tx, now: this.now }, input.assetId, input.role)
+      return previewWorkflowAssetCascade(tx, { workflowAssetId: input.workflowAssetId, nodes: input.nodes })
+    })
   }
 
   /** 工作流模版晋升为资产（算法 E）。 */
@@ -305,19 +345,27 @@ export class AssetStore {
         rowId: result.rowId,
         unchanged: result.unchanged,
         sharedRoleAssetIds: result.sharedRoleAssetIds,
+        archivedRoleAssetIds: result.archivedRoleAssetIds,
       }
     })
   }
 
-  /** 资产态保存工作流（算法 E：登记新版本，来源绑定继承自被保存版本）。 */
+  /**
+   * 资产态保存工作流（算法 E：内容查重后登记新版本，来源绑定继承自被保存版本）。
+   *
+   * 与晋升路径的差异（用户裁决）：资产态保存**不做指纹短路**（入参无指纹，保留被保存版本
+   * 的来源绑定，使「入库按钮锁定」判据不会被一次保存静默解锁），但同样走内容查重——
+   * 名称/描述/mode/meta + 节点内容（忽略坐标）+ 连线全等即视为未变化、不新增版本。
+   */
   saveWorkflowVersion(input: WorkflowSaveInput): Promise<AssetPromoteResult> {
     return this.db.withTx((tx) => {
       const ctx = { tx, now: this.now }
       const active = readWorkflowActive(tx, input.assetId)
-      if (!active) throw assetNotFound(input.assetId)
-      // 资产态保存不改写来源绑定：入参无指纹，保留被保存 Active 行的来源模版与指纹，
-      // 使「入库按钮锁定」判据不会被一次保存静默解锁；下一次晋升才刷新绑定
-      return registerWorkflowVersion(ctx, {
+      // 归档资产没有 Active 行：来源绑定改从最新版本行继承（与角色资产的保存口径一致），
+      // 使一次归档后的保存不会静默清空绑定、也不重建 Active 行。
+      const binding = active ?? latestWorkflowVersionRow(tx, input.assetId)
+      if (!binding) throw assetNotFound(input.assetId)
+      const result = registerWorkflowVersion(ctx, {
         assetId: input.assetId,
         mode: input.mode,
         name: input.name,
@@ -326,11 +374,19 @@ export class AssetStore {
         lines: input.lines,
         meta: input.meta ?? null,
         source: input.source,
-        sourceTemplateId: active.sourceTemplateId,
-        fingerprint: active.sourceFingerprint,
+        sourceTemplateId: binding.sourceTemplateId,
+        fingerprint: binding.sourceFingerprint,
         shortCircuitFingerprint: null,
         nextRoleAssetId: () => newRoleAssetId(this.ids),
       })
+      return {
+        assetId: result.assetId,
+        versionId: result.versionId,
+        rowId: result.rowId,
+        unchanged: result.unchanged,
+        sharedRoleAssetIds: result.sharedRoleAssetIds,
+        archivedRoleAssetIds: result.archivedRoleAssetIds,
+      }
     })
   }
 

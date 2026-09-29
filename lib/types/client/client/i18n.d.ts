@@ -33,8 +33,11 @@ export declare const zh: {
     libSearchAria: string;
     libSearchPlaceholder: string;
     searchNoResult: string;
-    assetWorkflows: string;
-    assetRoles: string;
+    assetActiveSection: string;
+    assetHistorySection: string;
+    assetHistoryEmpty: string;
+    libSectionExpand: string;
+    libSectionCollapse: string;
     assetEmptyHint: string;
     assetListNotSupported: string;
     roleAssetType: {
@@ -47,6 +50,7 @@ export declare const zh: {
     toastAssetVersionSaved: string;
     toastAssetRolledBack: string;
     toastAssetRetired: string;
+    assetAutoArchived: string;
     assetDuplicateCancelled: string;
     assetNotFound: string;
     assetPromote: string;
@@ -54,6 +58,12 @@ export declare const zh: {
     assetPromoteLockedHint: string;
     assetPromoteUnchanged: string;
     assetRollback: string;
+    assetArchive: string;
+    assetArchiveHint: string;
+    assetCascadeTitle: string;
+    assetCascadeRoleMessage: string;
+    assetCascadeWorkflowMessage: string;
+    assetCascadeConfirm: string;
     assetVersionsTitle: string;
     assetVersionsLoading: string;
     assetVersionsEmpty: string;

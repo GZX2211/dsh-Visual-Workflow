@@ -9,13 +9,14 @@
 // 资产态改造（用户裁决）：四个 Tag 之下常驻搜索栏；列表之后（左栏底部）新增
 // 「模版 / 资产」来源切换——切换同时切左侧库来源与画布文档类型。
 
+import { useState } from 'react'
 import type { Dict } from '../../i18n.js'
 import type { LibTab, LibrarySource } from '../../studio/studio-state.js'
 import type { RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate } from '../../../host/shared/types.js'
 import type { WorkflowTemplate } from '../../../host/shared/graph-model.js'
 import type { RoleAssetSummary, WorkflowAssetSummary } from '../../../host/shared/asset-types.js'
 import { statusLabelOf } from '../../lib/status-label.js'
-import { buildLibraryModel } from './library-model.js'
+import { ASSET_HISTORY_SECTIONS, buildLibraryModel } from './library-model.js'
 
 // 以下类型由本文件导出（供 useLibraryDrag/library-model 等消费，保持既有导入路径不变）。
 export interface LibSelectionInfo {
@@ -26,7 +27,11 @@ export interface LibSelectionInfo {
 export interface DragPayload {
   label: string
   onClick(): void
-  onDrop(position?: { x: number; y: number }): void
+  /**
+   * 拖入画布落点回调。缺省 = 该卡片不可拖入画布（历史（已归档）资产：拖入等于让
+   * 归档资产重新进入编排，必须先经属性栏「回滚」显式启用）。
+   */
+  onDrop?(position?: { x: number; y: number }): void
   /** 拖拽落点为协作组卡片时：生成节点并直接入组（角色模板）。 */
   onDropIntoGroup?(groupId: string, position?: { x: number; y: number }): void
 }
@@ -51,8 +56,13 @@ export interface LeftPanelProps {
   currentSessionId: string
   /** 工作流模板列表（全局共享；按当前 mode 过滤后传入；图2 交互改造）。 */
   flowTemplates: WorkflowTemplate[]
-  /** 资产列表（Active 版本索引；资产态左栏数据源）。 */
-  assets: { workflows: WorkflowAssetSummary[]; roles: RoleAssetSummary[] }
+  /** 资产列表（活跃 + 历史（已归档）；资产态左栏数据源）。 */
+  assets: {
+    workflows: WorkflowAssetSummary[]
+    roles: RoleAssetSummary[]
+    retiredWorkflows: WorkflowAssetSummary[]
+    retiredRoles: RoleAssetSummary[]
+  }
   parentTemplate: RoleTemplate | null
   roleTemplates: RoleTemplate[]
   fileTemplates: FileTemplate[]
@@ -95,7 +105,19 @@ export function LeftPanel(props: LeftPanelProps) {
     open, width, onCreateNew, onBeginDrag,
   } = props
 
-  const model = buildLibraryModel(props)
+  /**
+   * 分栏折叠态（纯渲染态，属组件本地状态）：历史资产分栏默认折叠，用户可手动展开。
+   * 不做持久化——折叠是「这次的查看方式」，把它写进业务状态会让状态机承担界面呈现细节。
+   */
+  const [collapsedSections, setCollapsedSections] = useState<readonly string[]>(() => [
+    ASSET_HISTORY_SECTIONS.workflow,
+    ASSET_HISTORY_SECTIONS.role,
+  ])
+  const toggleSection = (key: string): void => {
+    setCollapsedSections((previous) => (previous.includes(key) ? previous.filter((item) => item !== key) : [...previous, key]))
+  }
+
+  const model = buildLibraryModel({ ...props, collapsedSections })
 
   return (
     <aside className={`wf-docrail${open ? '' : ' is-collapsed'}`} style={{ width: open ? width : undefined }}>
@@ -130,34 +152,53 @@ export function LeftPanel(props: LeftPanelProps) {
         {model.sections.map((section) => (
           <div key={section.key}>
             <div className="wf-docgroup">
-              <span>{section.title}</span>
+              {section.collapsible
+                ? (
+                    <button
+                      type="button"
+                      className={`wf-docgroup__toggle${section.collapsed ? ' is-collapsed' : ''}`}
+                      aria-expanded={section.collapsed !== true}
+                      title={section.collapsed ? t.libSectionExpand : t.libSectionCollapse}
+                      onClick={() => toggleSection(section.key)}
+                    >
+                      <span className="wf-docgroup__caret" aria-hidden="true" />
+                      <span>{section.title}</span>
+                      {/* 折叠时给出命中数：搜索过滤照常生效，用户据此知道要不要展开 */}
+                      {section.collapsed === true && section.cards.length > 0
+                        ? <span className="wf-docgroup__count">{section.cards.length}</span>
+                        : null}
+                    </button>
+                  )
+                : <span>{section.title}</span>}
               {section.plus
                 ? <button type="button" className="wf-docgroup__add" title={t.newTemplate} onClick={() => onCreateNew(libTab, section.plusKind)}>＋</button>
                 : null}
             </div>
-            {section.cards.length === 0
-              ? <div className="wf-hint" style={{ padding: '2px 8px' }}>{section.emptyText}</div>
-              : section.cards.map((item) => {
-                  const statusText = statusLabelOf(t, item.runStatus)
-                  return (
-                    <button
-                      key={item.key}
-                      type="button"
-                      className={`wf-docitem${item.pinned ? ' is-pinned' : ''}${item.active ? ' is-active' : ''}`}
-                      onPointerDown={(event) => onBeginDrag(event, item.payload)}
-                    >
-                      <span className="wf-docitem__icon">{item.icon}</span>
-                      <span className="wf-docitem__texts">
-                        <span className="wf-docitem__title-row">
-                          <span className="wf-docitem__label">{item.name}</span>
-                          {item.isCurrent ? <span className="wf-docitem__badge is-current">{t.currentSessionBadge}</span> : null}
+            {section.collapsed === true
+              ? null
+              : section.cards.length === 0
+                ? <div className="wf-hint" style={{ padding: '2px 8px' }}>{section.emptyText}</div>
+                : section.cards.map((item) => {
+                    const statusText = statusLabelOf(t, item.runStatus)
+                    return (
+                      <button
+                        key={item.key}
+                        type="button"
+                        className={`wf-docitem${item.pinned ? ' is-pinned' : ''}${item.active ? ' is-active' : ''}`}
+                        onPointerDown={(event) => onBeginDrag(event, item.payload)}
+                      >
+                        <span className="wf-docitem__icon">{item.icon}</span>
+                        <span className="wf-docitem__texts">
+                          <span className="wf-docitem__title-row">
+                            <span className="wf-docitem__label">{item.name}</span>
+                            {item.isCurrent ? <span className="wf-docitem__badge is-current">{t.currentSessionBadge}</span> : null}
+                          </span>
+                          <span className="wf-docitem__path">{item.sub}</span>
                         </span>
-                        <span className="wf-docitem__path">{item.sub}</span>
-                      </span>
-                      {statusText ? <span className="wf-docitem__badge">{statusText}</span> : null}
-                    </button>
-                  )
-                })}
+                        {statusText ? <span className="wf-docitem__badge">{statusText}</span> : null}
+                      </button>
+                    )
+                  })}
           </div>
         ))}
       </div>

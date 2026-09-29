@@ -18,7 +18,12 @@ export interface LibraryCardModel {
     active: boolean;
     payload: DragPayload;
 }
-/** 分区模型（标题 + 是否显示「＋」新建 + 卡片列表 + 空态文案）。 */
+/** 资产态「历史资产」分栏 key（左侧栏的折叠状态以这两个 key 为准；底栏不折叠）。 */
+export declare const ASSET_HISTORY_SECTIONS: {
+    readonly workflow: "assetWorkflowHistory";
+    readonly role: "assetRoleHistory";
+};
+/** 分区模型（标题 + 是否显示「＋」新建 + 卡片列表 + 空态文案 + 可折叠性）。 */
 export interface LibrarySectionModel {
     key: string;
     title: string;
@@ -26,6 +31,10 @@ export interface LibrarySectionModel {
     plusKind?: 'file' | 'database' | 'flowTemplate' | 'group';
     /** 本分区无卡片时的空态文案（模版态/资产态不同）。 */
     emptyText: string;
+    /** 是否提供折叠开关（历史资产分栏为 true）。 */
+    collapsible?: boolean;
+    /** 当前是否处于折叠态（折叠时卡片不渲染，仅保留标题与命中数）。 */
+    collapsed?: boolean;
     cards: LibraryCardModel[];
 }
 /** Tag 模型（工作流/角色/数据/其他；图标化显示）。 */
@@ -50,6 +59,8 @@ export interface LibraryModelInput {
     librarySource?: LibrarySource;
     /** 搜索关键词（两态共用；大小写不敏感）。 */
     libSearch?: string;
+    /** 当前折叠的分区 key（视图层持有；缺省全展开）。 */
+    collapsedSections?: readonly string[];
     workflows: Array<{
         id: string;
         name: string;
@@ -60,10 +71,12 @@ export interface LibraryModelInput {
     }>;
     currentSessionId: string;
     flowTemplates: WorkflowTemplate[];
-    /** 资产列表（Active 版本索引）；缺省空。 */
+    /** 资产列表（活跃 + 历史（已归档））；缺省空。 */
     assets?: {
         workflows: WorkflowAssetSummary[];
         roles: RoleAssetSummary[];
+        retiredWorkflows?: WorkflowAssetSummary[];
+        retiredRoles?: RoleAssetSummary[];
     };
     parentTemplate: RoleTemplate | null;
     roleTemplates: RoleTemplate[];

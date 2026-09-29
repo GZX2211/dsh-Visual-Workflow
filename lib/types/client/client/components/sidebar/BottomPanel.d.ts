@@ -29,6 +29,8 @@ export interface BottomPanelProps {
     assets: {
         workflows: WorkflowAssetSummary[];
         roles: RoleAssetSummary[];
+        retiredWorkflows: WorkflowAssetSummary[];
+        retiredRoles: RoleAssetSummary[];
     };
     parentTemplate: RoleTemplate | null;
     roleTemplates: RoleTemplate[];

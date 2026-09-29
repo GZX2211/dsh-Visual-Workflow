@@ -368,7 +368,7 @@ describe('资产态状态机', () => {
     const state = baseState()
     expect(state.librarySource).toBe('template')
     expect(state.libSearch).toBe('')
-    expect(state.assets).toEqual({ workflows: [], roles: [] })
+    expect(state.assets).toEqual({ workflows: [], roles: [], retiredWorkflows: [], retiredRoles: [] })
     expect(state.assetDoc).toBeNull()
     expect(state.assetRoleDoc).toBeNull()
     expect(state.assetVersions).toBeNull()
@@ -382,14 +382,19 @@ describe('资产态状态机', () => {
     expect(state.libSearch).toBe('研究')
   })
 
-  it('ASSETS_LOADED：写入两类资产列表', () => {
+  it('ASSETS_LOADED：写入活跃与历史（已归档）四类资产列表', () => {
     const state = studioReducer(baseState(), {
       type: 'ASSETS_LOADED',
       workflows: [{ assetId: 'a-1', versionId: 1, name: '资产一', description: '', updatedAt: 1 }],
       roles: [{ assetId: 'a-r1', versionId: 1, name: '角色资产', kind: 'agent', roleAssetType: 'standalone', updatedAt: 1 }],
+      retiredWorkflows: [{ assetId: 'a-old', versionId: 1, name: '归档流程', description: '', updatedAt: 1 }],
+      retiredRoles: [{ assetId: 'a-rold', versionId: 1, name: '归档角色', kind: 'agent', roleAssetType: 'standalone', updatedAt: 1 }],
     })
     expect(state.assets.workflows.map((item) => item.assetId)).toEqual(['a-1'])
     expect(state.assets.roles.map((item) => item.assetId)).toEqual(['a-r1'])
+    // 归档资产与活跃资产分开持有：召回面（活跃列表）不会被历史资产污染
+    expect(state.assets.retiredWorkflows.map((item) => item.assetId)).toEqual(['a-old'])
+    expect(state.assets.retiredRoles.map((item) => item.assetId)).toEqual(['a-rold'])
   })
 
   it('OPEN_FLOW_ASSET：画布 = 资产详情投影，切到资产态并重置选中/编辑器/未保存标记', () => {

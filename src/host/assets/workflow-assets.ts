@@ -1,17 +1,22 @@
 // src/host/assets/workflow-assets.ts
 //
-// 工作流资产的写读端口：版本登记（含内联角色同步登记与引用统计）、节点壳重建、回滚、退役。
+// 工作流资产的写读端口：版本登记（含内联角色同步登记与引用统计）、内容查重、节点壳重建、
+// 回滚、归档与「引用解除 → 角色资产自动归档」结算。
 //
 // 本文件全部写函数都必须在调用方开启的事务内执行（ctx 由 withTx 提供）：
-// 「解析资产 → 角色节点逐个登记/引用 → 写工作流版本行 → 刷新引用统计」是一条
+// 「解析资产 → 角色节点逐个登记/引用 → 写工作流版本行 → 结算引用（含自动归档）」是一条
 // 原子链，中途失败必须整体回滚，否则会留下「工作流版本引用了不存在的角色版本」。
 //
 // 磁盘形状要点：workflow_asset_history.nodes_json 只存**节点壳**（角色节点仅留
 // id/kind/position/groupId/sourceAssetId），角色字段由 role_version_ids 指向角色
 // 版本行——角色内容因此可跨工作流共享，且历史版本回放不受角色资产后续修改影响。
+//
+// 归档语义：删除 workflow_asset_active 行即归档；历史行与角色资产全部保留（流程归档
+// 不触发角色归档：流程代表「对未来编排的参考」，角色代表「执行约束的参考」，二者解耦）。
 
 import type {
   AssetVersionEntry,
+  RoleAssetReference,
   WorkflowAssetDetail,
   WorkflowAssetRoleRef,
   WorkflowAssetSummary,
@@ -20,18 +25,25 @@ import type { GraphNode, Line, RoleNode, WorkflowMode } from '../shared/graph-mo
 import type { OrgMeta } from '../shared/org-meta.js'
 import type { AssetTxContext } from './db.js'
 import { assetNotFound, assetVersionNotFound } from './errors.js'
+import { stableStringify } from './fingerprint.js'
 import { versionRowId } from './ids.js'
 import { requireAssetId, toJsonText, toInteger } from './role-check.js'
 import {
   addRoleVersion,
   appendRoleReference,
   createRoleAsset,
+  demoteRoleAssetType,
   findRoleVersionByContent,
   isRoleAssetLive,
+  listRoleAssetReferences,
   markRoleVersionShared,
   readRoleActive,
   readRoleVersionRow,
   referenceCount,
+  releaseRoleReference,
+  retireRoleAssetRow,
+  roleAssetCurrentType,
+  roleAssetReferencedByAnyWorkflow,
   roleVersionType,
   type RolePortContext,
 } from './role-assets.js'
@@ -119,6 +131,8 @@ export interface WorkflowRegistration {
   rowId: string
   unchanged: boolean
   sharedRoleAssetIds: string[]
+  /** 本次登记使「已无任何工作流引用」而自动归档的角色资产 id（去重）。 */
+  archivedRoleAssetIds: string[]
 }
 
 const WORKFLOW_HISTORY_COLUMNS = [
@@ -144,7 +158,7 @@ const WORKFLOW_HISTORY_COLUMNS = [
 // 读路径
 // ---------------------------------------------------------------------------
 
-/** 工作流资产列表（Active 版本投影；单行损坏跳过并 warn，保证列表可用）。 */
+/** 工作流资产列表（活跃资产 = 有 Active 行的资产；Active 版本投影）。 */
 export function listWorkflowAssets(ctx: AssetTxContext): WorkflowAssetSummary[] {
   const rows = ctx.all(
     `SELECT a.asset_id AS asset_id, a.version_id AS version_id, a.name AS name,
@@ -154,6 +168,31 @@ export function listWorkflowAssets(ctx: AssetTxContext): WorkflowAssetSummary[] 
        JOIN workflow_asset_history h ON h.asset_id = a.asset_id AND h.version_id = a.version_id
       ORDER BY a.updated_at DESC, a.asset_id ASC`,
   )
+  return summarizeWorkflowRows(rows)
+}
+
+/**
+ * 历史（已归档）工作流资产列表：有历史行、但没有 Active 行的资产，按**最新版本行**投影。
+ * 与活跃列表分开返回：活跃列表是父代理召回面（`wf_org_catalog` 消费），归档资产不得混入。
+ *
+ * 排序与 updatedAt 用版本行的 created_at：workflow_asset_history 没有 updated_at 列
+ * （内容不可变，只有角色表把可变统计缓存记在行上），归档资产也没有 Active 行可取用。
+ */
+export function listRetiredWorkflowAssets(ctx: AssetTxContext): WorkflowAssetSummary[] {
+  const rows = ctx.all(
+    `SELECT h.asset_id AS asset_id, h.version_id AS version_id, h.name AS name,
+            h.source_template_id AS source_template_id, h.source_fingerprint AS source_fingerprint,
+            h.created_at AS updated_at, h.description AS description
+       FROM workflow_asset_history h
+      WHERE h.asset_id NOT IN (SELECT asset_id FROM workflow_asset_active)
+        AND h.version_id = (SELECT MAX(x.version_id) FROM workflow_asset_history x WHERE x.asset_id = h.asset_id)
+      ORDER BY h.created_at DESC, h.asset_id ASC`,
+  )
+  return summarizeWorkflowRows(rows)
+}
+
+/** 索引行 → 摘要（损坏行跳过并 warn；两个列表读共用同一份列映射）。 */
+function summarizeWorkflowRows(rows: Array<Record<string, unknown>>): WorkflowAssetSummary[] {
   const summaries: WorkflowAssetSummary[] = []
   for (const row of rows) {
     try {
@@ -177,35 +216,44 @@ export function listWorkflowAssets(ctx: AssetTxContext): WorkflowAssetSummary[] 
 }
 
 /**
- * 工作流资产详情：Active 版本 + 节点壳按 role_version_ids join 回角色版本字段。
+ * 工作流资产详情：节点壳按 role_version_ids join 回角色版本字段。
+ * 活跃资产取 Active 版本；归档资产取**最新版本行**并标 `retired`。
  * 壳与映射不一致（缺映射 / 引用行缺失）即抛带路径的错误：静默产半张图会让运行期
  * 拿到结构上无法执行的图，比直接失败更难排查。
  */
 export function getWorkflowAssetDetail(ctx: AssetTxContext, assetId: string): WorkflowAssetDetail | null {
   const active = readWorkflowActive(ctx, assetId)
-  if (!active) return null
-  const row = readWorkflowVersionRow(ctx, assetId, active.versionId)
-  if (!row) {
-    throw new Error(`工作流资产 ${assetId} 的 Active 版本 v${active.versionId} 在历史中缺失：资产行已损坏`)
+  if (active) {
+    const row = readWorkflowVersionRow(ctx, assetId, active.versionId)
+    if (!row) {
+      throw new Error(`工作流资产 ${assetId} 的 Active 版本 v${active.versionId} 在历史中缺失：资产行已损坏`)
+    }
+    return workflowDetailOf(ctx, row)
   }
-  return workflowDetailOf(ctx, row)
+  const latest = latestWorkflowVersionRow(ctx, assetId)
+  if (!latest) return null
+  return { ...workflowDetailOf(ctx, latest), retired: true }
 }
 
-/** 工作流资产版本列表（版本号倒序）。 */
+/**
+ * 工作流资产版本列表（版本号倒序）。
+ * 归档资产同样可列（无 Active 指针时全部标 `active: false`）：历史资产的「重新启用」
+ * 与「保存迭代」都以本列表为入口。
+ */
 export function readWorkflowVersionEntries(ctx: AssetTxContext, assetId: string): AssetVersionEntry[] {
   const active = readWorkflowActive(ctx, assetId)
-  if (!active) throw assetNotFound(assetId)
   const rows = ctx.all(
     'SELECT version_id, name, created_at, source FROM workflow_asset_history WHERE asset_id = ? ORDER BY version_id DESC',
     [assetId],
   )
+  if (rows.length === 0) throw assetNotFound(assetId)
   return rows.map((row) => ({
     versionId: toInteger(row.version_id, 0),
     rowId: versionRowId(assetId, toInteger(row.version_id, 0)),
     name: String(row.name ?? ''),
     createdAt: toInteger(row.created_at, 0),
     source: row.source === 'agent' ? 'agent' : 'human',
-    active: toInteger(row.version_id, 0) === active.versionId,
+    active: active !== null && toInteger(row.version_id, 0) === active.versionId,
   }))
 }
 
@@ -222,6 +270,16 @@ export function readWorkflowActive(ctx: AssetTxContext, assetId: string): Workfl
     sourceFingerprint: textOrUndefined(row.source_fingerprint) ?? null,
     updatedAt: toInteger(row.updated_at, 0),
   }
+}
+
+/** 最新版本行（max version_id）；归档资产的详情、保存基线与版本列表都以它为准。 */
+export function latestWorkflowVersionRow(ctx: AssetTxContext, assetId: string): WorkflowAssetRow | null {
+  const row = ctx.get(
+    `SELECT ${WORKFLOW_HISTORY_COLUMNS} FROM workflow_asset_history
+      WHERE asset_id = ? ORDER BY version_id DESC LIMIT 1`,
+    [assetId],
+  )
+  return row ? workflowRowToAssetRow(row) : null
 }
 
 /** 按来源模版定位绑定资产（同一模版的二次晋升复用同一资产）。 */
@@ -244,31 +302,28 @@ export function readWorkflowVersionRow(ctx: AssetTxContext, assetId: string, ver
 }
 
 /**
- * 回滚：只把 Active 指针移向目标版本（name / retrieval_context / 来源指纹同步），
+ * 回滚：把 Active 指针移向目标版本（name / retrieval_context / 来源指纹同步），
  * 不新增版本、不改历史行。
+ *
+ * 归档资产（无 Active 行）的回滚即「重新启用」：按目标版本重建 Active 行。
+ * 这也是归档资产恢复活跃的唯一入口（保存只做版本迭代，不改变归档状态）。
  */
 export function rollbackWorkflowAssetTo(ctx: RolePortContext, assetId: string, versionId: number): WorkflowAssetDetail {
-  // 先判资产存活：已退役资产的回滚应报「资产不可用」，而不是「版本非法」
-  if (!readWorkflowActive(ctx.tx, assetId)) throw assetNotFound(assetId)
   const target = readWorkflowVersionRow(ctx.tx, assetId, versionId)
   if (!target) throw assetVersionNotFound(assetId, versionId)
-  ctx.tx.run(
-    `UPDATE workflow_asset_active
-        SET version_id = ?, name = ?, retrieval_context = ?, source_fingerprint = ?, updated_at = ?
-      WHERE asset_id = ?`,
-    [
-      versionId,
-      target.name,
-      workflowRetrievalContext(assetId, target.name, target.description),
-      target.sourceFingerprint,
-      ctx.now(),
-      assetId,
-    ],
-  )
+  writeWorkflowActiveRow(ctx.tx, {
+    assetId,
+    versionId,
+    name: target.name,
+    retrievalContext: workflowRetrievalContext(assetId, target.name, target.description),
+    sourceTemplateId: target.sourceTemplateId,
+    sourceFingerprint: target.sourceFingerprint,
+    updatedAt: ctx.now(),
+  })
   return workflowDetailOf(ctx.tx, target)
 }
 
-/** 退役：删除 Active 行；历史行与其引用统计保留（审计与再次复用判定都依赖历史）。 */
+/** 归档：删除 Active 行；历史行与角色资产全部保留（流程归档不触发角色归档）。 */
 export function retireWorkflowAssetRow(tx: AssetTxContext, assetId: string): void {
   if (!readWorkflowActive(tx, assetId)) throw assetNotFound(assetId)
   tx.run('DELETE FROM workflow_asset_active WHERE asset_id = ?', [assetId])
@@ -283,45 +338,115 @@ export function workflowRetrievalContext(assetId: string, name: string, descript
   return `${assetId} ${name} ${description}`
 }
 
+/** Active 行插入或替换（asset_id 主键，指针语义；回滚与写入路径共用一份列映射）。 */
+function writeWorkflowActiveRow(
+  tx: AssetTxContext,
+  values: {
+    assetId: string
+    versionId: number
+    name: string
+    retrievalContext: string
+    sourceTemplateId: string | null
+    sourceFingerprint: string | null
+    updatedAt: number
+  },
+): void {
+  tx.run(
+    `INSERT INTO workflow_asset_active (asset_id, version_id, name, retrieval_context, source_template_id, source_fingerprint, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(asset_id) DO UPDATE SET
+       version_id = excluded.version_id,
+       name = excluded.name,
+       retrieval_context = excluded.retrieval_context,
+       source_template_id = excluded.source_template_id,
+       source_fingerprint = excluded.source_fingerprint,
+       updated_at = excluded.updated_at`,
+    [
+      values.assetId,
+      values.versionId,
+      values.name,
+      values.retrievalContext,
+      values.sourceTemplateId,
+      values.sourceFingerprint,
+      values.updatedAt,
+    ],
+  )
+}
+
 /** 首版登记：写入版本 1 并建立 Active 行（资产此前不存在）。 */
 export function createWorkflowAsset(
   ctx: RolePortContext,
   request: Omit<WorkflowWriteRequest, 'shortCircuitFingerprint'>,
 ): WorkflowRegistration {
-  return insertWorkflowVersion(ctx, request, 1)
+  return insertWorkflowVersion(ctx, request, 1, null, true)
 }
 
 /**
- * 追加版本：先判幂等短路（来源指纹未变即不新增版本），再解析角色节点并写版本行。
- * 只在资产已存在（Active 行在）时调用。
+ * 追加版本：先判幂等短路（来源指纹未变），再做内容查重（节点坐标不参与），
+ * 最后解析角色节点、写版本行并结算引用。
+ *
+ * 基线版本：活跃资产取 Active 版本；归档资产取最新版本行（保存只做迭代，不重建 Active 行）。
  */
 export function registerWorkflowVersion(ctx: RolePortContext, request: WorkflowWriteRequest): WorkflowRegistration {
   const active = readWorkflowActive(ctx.tx, request.assetId)
-  if (!active) throw assetNotFound(request.assetId)
-  if (
-    request.shortCircuitFingerprint !== null &&
-    active.sourceFingerprint !== null &&
-    active.sourceFingerprint === request.shortCircuitFingerprint
-  ) {
-    // 幂等短路：模版内容指纹未变，说明当前 Active 版本已是同一内容的登记结果
-    return {
-      assetId: request.assetId,
-      versionId: active.versionId,
-      rowId: versionRowId(request.assetId, active.versionId),
-      unchanged: true,
-      sharedRoleAssetIds: [],
+  if (active) {
+    if (
+      request.shortCircuitFingerprint !== null &&
+      active.sourceFingerprint !== null &&
+      active.sourceFingerprint === request.shortCircuitFingerprint
+    ) {
+      // 幂等短路：模版内容指纹未变，说明当前 Active 版本已是同一内容的登记结果
+      return {
+        assetId: request.assetId,
+        versionId: active.versionId,
+        rowId: versionRowId(request.assetId, active.versionId),
+        unchanged: true,
+        sharedRoleAssetIds: [],
+        archivedRoleAssetIds: [],
+      }
     }
   }
-  const previous = readWorkflowVersionRow(ctx.tx, request.assetId, active.versionId)
-  return insertWorkflowVersion(ctx, request, nextWorkflowVersionId(ctx.tx, request.assetId), previous)
+  const baseline = active
+    ? readWorkflowVersionRow(ctx.tx, request.assetId, active.versionId)
+    : latestWorkflowVersionRow(ctx.tx, request.assetId)
+  if (!baseline) {
+    // 既无 Active 行也无历史行：资产并不存在（归档资产至少留有一个版本行）
+    throw assetNotFound(request.assetId)
+  }
+  // 内容查重（用户裁决）：名称/描述/mode/meta + 节点内容（**忽略节点坐标**）+ 连线全等
+  // 即视为「未变化」，不新增版本。重复点击保存与纯坐标拖动都不会再堆版本。
+  if (sameWorkflowContent(workflowShapeOfRequest(request), workflowShapeOfRow(ctx.tx, baseline))) {
+    return {
+      assetId: request.assetId,
+      versionId: baseline.versionId,
+      rowId: baseline.id,
+      unchanged: true,
+      sharedRoleAssetIds: [],
+      archivedRoleAssetIds: [],
+    }
+  }
+  return insertWorkflowVersion(
+    ctx,
+    request,
+    nextWorkflowVersionId(ctx.tx, request.assetId),
+    baseline,
+    active !== null,
+  )
 }
 
-/** 版本行写入（版本号由调用方给定；previous 提供 created_at 的继承源）。 */
+/**
+ * 版本行写入（版本号由调用方给定；previous 提供 created_at 的继承源）。
+ *
+ * `activate` 为 false 时只追加版本行、不动 Active 行（归档资产的保存必须保持归档状态）。
+ * 写入后统一结算引用：解除本资产在新版本中不再引用的角色版本行引用，并对「已无任何工作流
+ * 引用」的内联/共享角色资产执行归档 + 类型降级。
+ */
 function insertWorkflowVersion(
   ctx: RolePortContext,
   request: Omit<WorkflowWriteRequest, 'shortCircuitFingerprint'>,
   versionId: number,
-  previous?: WorkflowAssetRow | null,
+  previous: WorkflowAssetRow | null,
+  activate: boolean,
 ): WorkflowRegistration {
   const shared = new Set<string>()
   const roleRefs: WorkflowAssetRoleRef[] = []
@@ -339,6 +464,9 @@ function insertWorkflowVersion(
     })
     shells.push(roleShellOf(node))
   }
+
+  // 引用结算的基线必须在本版本行写入之前读取：写入后本资产的引用集合已包含新版本
+  const previouslyReferenced = collectRoleVersionIds(ctx.tx, request.assetId)
 
   const now = ctx.now()
   const rowId = versionRowId(request.assetId, versionId)
@@ -367,26 +495,17 @@ function insertWorkflowVersion(
       previous?.createdAt ?? now,
     ],
   )
-  ctx.tx.run(
-    `INSERT INTO workflow_asset_active (asset_id, version_id, name, retrieval_context, source_template_id, source_fingerprint, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(asset_id) DO UPDATE SET
-       version_id = excluded.version_id,
-       name = excluded.name,
-       retrieval_context = excluded.retrieval_context,
-       source_template_id = excluded.source_template_id,
-       source_fingerprint = excluded.source_fingerprint,
-       updated_at = excluded.updated_at`,
-    [
-      request.assetId,
+  if (activate) {
+    writeWorkflowActiveRow(ctx.tx, {
+      assetId: request.assetId,
       versionId,
-      request.name,
-      workflowRetrievalContext(request.assetId, request.name, request.description),
-      request.sourceTemplateId,
-      request.fingerprint,
-      now,
-    ],
-  )
+      name: request.name,
+      retrievalContext: workflowRetrievalContext(request.assetId, request.name, request.description),
+      sourceTemplateId: request.sourceTemplateId,
+      sourceFingerprint: request.fingerprint,
+      updatedAt: now,
+    })
+  }
 
   // 引用统计与版本行同事务：本工作流版本行的 rowId 即引用记录的唯一标识。
   // 去重后逐个角色版本行处理：同一张图引用同一版本多次只是「一条引用记录」，
@@ -404,7 +523,175 @@ function insertWorkflowVersion(
     }
   }
 
-  return { assetId: request.assetId, versionId, rowId, unchanged: false, sharedRoleAssetIds: [...shared] }
+  const archivedRoleAssetIds = settleReleasedReferences(ctx, request.assetId, roleRefs, previouslyReferenced)
+
+  return {
+    assetId: request.assetId,
+    versionId,
+    rowId,
+    unchanged: false,
+    sharedRoleAssetIds: [...shared],
+    archivedRoleAssetIds,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 引用结算与影响面预览
+// ---------------------------------------------------------------------------
+
+/**
+ * 引用结算（用户裁决 A）：本工作流资产在新版本中不再引用的角色版本行，解除本资产的引用；
+ * 解除后若某个**内联/共享**角色资产已无任何工作流引用，则归档它并把类型降级为 standalone。
+ *
+ * 为什么只归档内联/共享：standalone 是用户在左侧栏显式晋升并管理的资产，不能因为某个工作流
+ * 移除了节点就自动离开活跃面；而 inline 的语义就是「某个工作流的内联角色」、shared 的语义
+ * 就是「被多个工作流共用」——两者失去全部引用后，其语义已不成立。
+ *
+ * 为什么可以只按「是否还有其他引用」判定而无需客户端参与：引用解除与归档判定共用同一份
+ * 统计缓存，谁引用、引用了哪个版本都只有这里知道；客户端只需报告「本工作流删掉了哪些节点」。
+ *
+ * @returns 本次被自动归档的角色资产 id（去重、稳定排序）。
+ */
+function settleReleasedReferences(
+  ctx: RolePortContext,
+  workflowAssetId: string,
+  roleRefs: WorkflowAssetRoleRef[],
+  previouslyReferenced: Set<string>,
+): string[] {
+  const stillReferenced = new Set(roleRefs.map((ref) => ref.roleVersionId))
+  const touched = new Set<string>()
+  for (const roleVersionId of previouslyReferenced) {
+    if (stillReferenced.has(roleVersionId)) continue
+    const roleAssetId = releaseRoleReference(ctx, roleVersionId, workflowAssetId)
+    if (roleAssetId) touched.add(roleAssetId)
+  }
+  const archived: string[] = []
+  for (const roleAssetId of touched) {
+    if (!isRoleAssetLive(ctx.tx, roleAssetId)) continue
+    if (roleAssetReferencedByAnyWorkflow(ctx.tx, roleAssetId)) continue
+    const type = roleAssetCurrentType(ctx.tx, roleAssetId)
+    if (type !== 'inline' && type !== 'shared') continue
+    retireRoleAssetRow(ctx.tx, roleAssetId)
+    demoteRoleAssetType(ctx, roleAssetId)
+    archived.push(roleAssetId)
+  }
+  return archived.sort((left, right) => (left === right ? 0 : left < right ? -1 : 1))
+}
+
+/**
+ * 本工作流资产历史版本引用过的全部角色版本行 id（引用结算基线）。
+ * 单行解析失败按 best-effort 跳过并 warn：统计缓存损坏不应阻断本次保存，
+ * 但跳过会让该行残留引用，因此必须留下可追溯的告警。
+ */
+function collectRoleVersionIds(ctx: AssetTxContext, assetId: string): Set<string> {
+  const ids = new Set<string>()
+  const rows = ctx.all('SELECT id, role_version_ids FROM workflow_asset_history WHERE asset_id = ?', [assetId])
+  for (const row of rows) {
+    let refs: unknown
+    try {
+      refs = parseJsonStrict(row.role_version_ids, `role_version_ids(asset=${assetId})`)
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      console.warn(`[assets] 跳过损坏的引用映射 ${String(row.id)}：${detail}`)
+      continue
+    }
+    if (!Array.isArray(refs)) continue
+    for (const ref of refs as Array<Partial<WorkflowAssetRoleRef>>) {
+      if (typeof ref?.roleVersionId === 'string' && ref.roleVersionId !== '') ids.add(ref.roleVersionId)
+    }
+  }
+  return ids
+}
+
+/**
+ * 保存前的影响面预览：本次内容会为哪些角色资产登记新版本，进而牵连哪些**其他**工作流资产。
+ *
+ * 判据与 registerRoleNode 的第一步完全一致（源资产存活性 + 内容是否与源资产 Active 版本全等），
+ * 因此「预览说会牵连」与「保存真的会牵连」不会出现分叉；只读、不落库。
+ * 排除 `workflowAssetId`（正在保存的本资产自己不算被牵连方）。
+ */
+export function previewWorkflowAssetCascade(
+  ctx: AssetTxContext,
+  input: { workflowAssetId: string | null; nodes: GraphNode[] },
+): RoleAssetReference[] {
+  const impacted = new Map<string, RoleAssetReference>()
+  for (const node of input.nodes) {
+    if (!isRoleNode(node)) continue
+    const declared = typeof node.data.sourceAssetId === 'string' ? node.data.sourceAssetId : ''
+    if (!declared || !isRoleAssetLive(ctx, declared)) continue
+    const active = readRoleActive(ctx, declared)
+    const activeRow = active ? readRoleVersionRow(ctx, declared, active.versionId) : null
+    if (activeRow && sameRoleFields(contentOfRow(activeRow), roleFieldsFromNode(node))) continue
+    for (const reference of listRoleAssetReferences(ctx, declared)) {
+      if (reference.assetId === input.workflowAssetId) continue
+      if (!impacted.has(reference.assetId)) impacted.set(reference.assetId, reference)
+    }
+  }
+  return [...impacted.values()].sort((left, right) => {
+    if (left.name !== right.name) return left.name < right.name ? -1 : 1
+    if (left.assetId === right.assetId) return 0
+    return left.assetId < right.assetId ? -1 : 1
+  })
+}
+
+/** 内容形状（保存查重判据）：节点坐标是纯视图事实，不参与比较。 */
+interface WorkflowContentShape {
+  mode: WorkflowMode
+  name: string
+  description: string
+  meta: OrgMeta | null
+  nodes: unknown[]
+  lines: Line[]
+}
+
+/** 待写入请求 → 内容形状。 */
+function workflowShapeOfRequest(request: Omit<WorkflowWriteRequest, 'shortCircuitFingerprint'>): WorkflowContentShape {
+  return {
+    mode: request.mode,
+    name: request.name,
+    description: request.description,
+    meta: request.meta,
+    nodes: request.nodes.map(comparableNodeOf),
+    lines: request.lines,
+  }
+}
+
+/** 已落库版本行 → 内容形状（角色节点经 join 还原角色字段，与请求侧同口径比较）。 */
+function workflowShapeOfRow(ctx: AssetTxContext, row: WorkflowAssetRow): WorkflowContentShape {
+  return {
+    mode: row.mode,
+    name: row.name,
+    description: row.description,
+    meta: row.meta,
+    nodes: rebuildNodes(ctx, row.assetId, row).map(comparableNodeOf),
+    lines: row.lines,
+  }
+}
+
+/**
+ * 节点 → 可比形状。角色节点用角色内容字段（与落库映射同一处本体）；
+ * 非角色节点取「除坐标外的持久化字段」，组关系与虚拟节点来源一并参与比较。
+ */
+function comparableNodeOf(node: GraphNode): unknown {
+  if (isRoleNode(node)) {
+    return {
+      role: roleFieldsFromNode(node),
+      groupId: node.data.groupId ?? null,
+      sourceAssetId: node.data.sourceAssetId ?? null,
+    }
+  }
+  const record = node as unknown as Record<string, unknown>
+  return {
+    id: record.id,
+    kind: record.kind,
+    data: record.data ?? null,
+    ...(record.proxySourceId === undefined ? {} : { proxySourceId: record.proxySourceId }),
+  }
+}
+
+/** 内容形状全等判定（稳定序列化：忽略字段书写顺序与显式 undefined）。 */
+function sameWorkflowContent(left: WorkflowContentShape, right: WorkflowContentShape): boolean {
+  return stableStringify(left) === stableStringify(right)
 }
 
 // ---------------------------------------------------------------------------

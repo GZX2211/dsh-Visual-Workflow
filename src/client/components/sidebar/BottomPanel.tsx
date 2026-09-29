@@ -35,7 +35,12 @@ export interface BottomPanelProps {
   workflows: Array<{ id: string; name: string; description?: string; nodes?: unknown[]; runStatus?: string | null; sessionId?: string }>
   currentSessionId: string
   flowTemplates: WorkflowTemplate[]
-  assets: { workflows: WorkflowAssetSummary[]; roles: RoleAssetSummary[] }
+  assets: {
+    workflows: WorkflowAssetSummary[]
+    roles: RoleAssetSummary[]
+    retiredWorkflows: WorkflowAssetSummary[]
+    retiredRoles: RoleAssetSummary[]
+  }
   parentTemplate: RoleTemplate | null
   roleTemplates: RoleTemplate[]
   fileTemplates: FileTemplate[]

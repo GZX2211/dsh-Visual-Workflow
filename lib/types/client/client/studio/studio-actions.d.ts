@@ -22,11 +22,13 @@ export type StudioAction = {
     type: 'SET_LIB_SEARCH';
     query: string;
 }
-/** 资产列表（Active 索引）加载完成。 */
+/** 资产列表（活跃 + 历史（已归档））加载完成。 */
  | {
     type: 'ASSETS_LOADED';
     workflows: WorkflowAssetSummary[];
     roles: RoleAssetSummary[];
+    retiredWorkflows: WorkflowAssetSummary[];
+    retiredRoles: RoleAssetSummary[];
 }
 /** 工作流资产详情装载（随后由 OPEN_FLOW_ASSET 把画布切到该资产文档）。 */
  | {

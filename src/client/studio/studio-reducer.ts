@@ -44,7 +44,15 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
     case 'SET_LIB_SEARCH':
       return { ...state, libSearch: action.query }
     case 'ASSETS_LOADED':
-      return { ...state, assets: { workflows: action.workflows, roles: action.roles } }
+      return {
+        ...state,
+        assets: {
+          workflows: action.workflows,
+          roles: action.roles,
+          retiredWorkflows: action.retiredWorkflows,
+          retiredRoles: action.retiredRoles,
+        },
+      }
     case 'ASSET_DOC_LOADED':
       return { ...state, assetDoc: action.detail }
     case 'ROLE_ASSET_LOADED':

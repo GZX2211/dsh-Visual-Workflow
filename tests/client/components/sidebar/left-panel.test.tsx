@@ -30,6 +30,19 @@ afterEach(() => {
   container?.remove()
 })
 
+/** 左栏资产列表（活跃 + 历史；用例只给关心的那一段）。 */
+function assetLists(
+  active: Partial<Pick<LeftPanelProps['assets'], 'workflows' | 'roles'>> = {},
+  retired: Partial<Pick<LeftPanelProps['assets'], 'retiredWorkflows' | 'retiredRoles'>> = {},
+): LeftPanelProps['assets'] {
+  return {
+    workflows: active.workflows ?? [],
+    roles: active.roles ?? [],
+    retiredWorkflows: retired.retiredWorkflows ?? [],
+    retiredRoles: retired.retiredRoles ?? [],
+  }
+}
+
 /** 左栏 props 工厂（只覆盖被测字段，其余为最小缺省）。 */
 function makeProps(partial: Partial<LeftPanelProps> = {}): LeftPanelProps {
   return {
@@ -46,7 +59,7 @@ function makeProps(partial: Partial<LeftPanelProps> = {}): LeftPanelProps {
     workflows: [],
     currentSessionId: 's-1',
     flowTemplates: [],
-    assets: { workflows: [], roles: [] },
+    assets: assetLists(),
     parentTemplate: null,
     roleTemplates: [],
     fileTemplates: [],
@@ -166,10 +179,58 @@ describe('资产态与搜索空态（词典文案）', () => {
     expect(document.querySelectorAll('.wf-docgroup')).toHaveLength(0)
   })
 
-  it('资产态工作流 Tab 为空：分区空态为「资产只能由模版入库晋升」', async () => {
+  it('资产态工作流 Tab 为空：活跃分区空态为「资产只能由模版入库晋升」', async () => {
     await renderPanel(makeProps({ librarySource: 'asset', libTab: 'workflow' }))
-    expect(document.querySelector('.wf-docgroup')?.textContent).toContain(zh.assetWorkflows)
+    expect(document.querySelector('.wf-docgroup')?.textContent).toContain(zh.assetActiveSection)
     expect(document.querySelector('.wf-hint')?.textContent).toBe(zh.assetEmptyHint)
+  })
+})
+
+describe('历史资产分栏折叠（左栏）', () => {
+  it('默认折叠：标题可点、卡片不渲染、标题旁显示命中数', async () => {
+    await renderPanel(makeProps({
+      librarySource: 'asset',
+      libTab: 'workflow',
+      assets: assetLists({}, { retiredWorkflows: [{ assetId: 'a-old', versionId: 1, name: '归档资产', description: '', updatedAt: 1 }] }),
+    }))
+
+    const toggle = document.querySelector('.wf-docgroup__toggle') as HTMLButtonElement
+    expect(toggle.textContent).toContain(zh.assetHistorySection)
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(document.querySelector('.wf-docgroup__count')?.textContent).toBe('1')
+    // 折叠 = 卡片隐藏（资产本身仍被搜索/列表持有，只是当前不渲染）
+    expect(Array.from(document.querySelectorAll('.wf-docitem')).map((item) => item.textContent)).not.toContain('归档资产')
+  })
+
+  it('点击标题展开：渲染历史资产卡片，再次点击收起', async () => {
+    await renderPanel(makeProps({
+      librarySource: 'asset',
+      libTab: 'workflow',
+      assets: assetLists({}, { retiredWorkflows: [{ assetId: 'a-old', versionId: 1, name: '归档资产', description: '', updatedAt: 1 }] }),
+    }))
+    const toggle = document.querySelector('.wf-docgroup__toggle') as HTMLButtonElement
+
+    await act(async () => { toggle.click() })
+    expect(document.querySelector('.wf-docgroup__toggle')?.getAttribute('aria-expanded')).toBe('true')
+    expect(Array.from(document.querySelectorAll('.wf-docitem')).map((item) => item.textContent?.includes('归档资产'))).toContain(true)
+
+    await act(async () => { (document.querySelector('.wf-docgroup__toggle') as HTMLButtonElement).click() })
+    expect(document.querySelector('.wf-docgroup__toggle')?.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('活跃资产卡片仍在历史分栏之上渲染（归档只是转移，不是消失）', async () => {
+    await renderPanel(makeProps({
+      librarySource: 'asset',
+      libTab: 'workflow',
+      assets: assetLists(
+        { workflows: [{ assetId: 'a-1', versionId: 2, name: '活跃资产', description: '', updatedAt: 2 }] },
+        { retiredWorkflows: [{ assetId: 'a-old', versionId: 1, name: '归档资产', description: '', updatedAt: 1 }] },
+      ),
+    }))
+    const labels = Array.from(document.querySelectorAll('.wf-docgroup')).map((group) => group.textContent)
+    expect(labels[0]).toContain(zh.assetActiveSection)
+    expect(labels[1]).toContain(zh.assetHistorySection)
+    expect(document.querySelector('.wf-docitem')?.textContent).toContain('活跃资产')
   })
 })
 
@@ -179,7 +240,7 @@ describe('资产卡片交互（左栏）', () => {
     await renderPanel(makeProps({
       librarySource: 'asset',
       libTab: 'workflow',
-      assets: { workflows: [{ assetId: 'a-1', versionId: 1, name: '资产一', description: '', updatedAt: 1 }], roles: [] },
+      assets: assetLists({ workflows: [{ assetId: 'a-1', versionId: 1, name: '资产一', description: '', updatedAt: 1 }] }),
       onBeginDrag,
     }))
     const card = document.querySelector('.wf-docitem') as HTMLButtonElement

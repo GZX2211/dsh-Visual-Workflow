@@ -1,4 +1,4 @@
-import type { AssetVersionEntry, WorkflowAssetDetail, WorkflowAssetRoleRef, WorkflowAssetSummary } from '../shared/asset-types.js';
+import type { AssetVersionEntry, RoleAssetReference, WorkflowAssetDetail, WorkflowAssetRoleRef, WorkflowAssetSummary } from '../shared/asset-types.js';
 import type { GraphNode, Line, WorkflowMode } from '../shared/graph-model.js';
 import type { OrgMeta } from '../shared/org-meta.js';
 import type { AssetTxContext } from './db.js';
@@ -75,36 +75,69 @@ export interface WorkflowRegistration {
     rowId: string;
     unchanged: boolean;
     sharedRoleAssetIds: string[];
+    /** 本次登记使「已无任何工作流引用」而自动归档的角色资产 id（去重）。 */
+    archivedRoleAssetIds: string[];
 }
-/** 工作流资产列表（Active 版本投影；单行损坏跳过并 warn，保证列表可用）。 */
+/** 工作流资产列表（活跃资产 = 有 Active 行的资产；Active 版本投影）。 */
 export declare function listWorkflowAssets(ctx: AssetTxContext): WorkflowAssetSummary[];
 /**
- * 工作流资产详情：Active 版本 + 节点壳按 role_version_ids join 回角色版本字段。
+ * 历史（已归档）工作流资产列表：有历史行、但没有 Active 行的资产，按**最新版本行**投影。
+ * 与活跃列表分开返回：活跃列表是父代理召回面（`wf_org_catalog` 消费），归档资产不得混入。
+ *
+ * 排序与 updatedAt 用版本行的 created_at：workflow_asset_history 没有 updated_at 列
+ * （内容不可变，只有角色表把可变统计缓存记在行上），归档资产也没有 Active 行可取用。
+ */
+export declare function listRetiredWorkflowAssets(ctx: AssetTxContext): WorkflowAssetSummary[];
+/**
+ * 工作流资产详情：节点壳按 role_version_ids join 回角色版本字段。
+ * 活跃资产取 Active 版本；归档资产取**最新版本行**并标 `retired`。
  * 壳与映射不一致（缺映射 / 引用行缺失）即抛带路径的错误：静默产半张图会让运行期
  * 拿到结构上无法执行的图，比直接失败更难排查。
  */
 export declare function getWorkflowAssetDetail(ctx: AssetTxContext, assetId: string): WorkflowAssetDetail | null;
-/** 工作流资产版本列表（版本号倒序）。 */
+/**
+ * 工作流资产版本列表（版本号倒序）。
+ * 归档资产同样可列（无 Active 指针时全部标 `active: false`）：历史资产的「重新启用」
+ * 与「保存迭代」都以本列表为入口。
+ */
 export declare function readWorkflowVersionEntries(ctx: AssetTxContext, assetId: string): AssetVersionEntry[];
 /** 工作流资产 Active 行。 */
 export declare function readWorkflowActive(ctx: AssetTxContext, assetId: string): WorkflowAssetActiveRow | null;
+/** 最新版本行（max version_id）；归档资产的详情、保存基线与版本列表都以它为准。 */
+export declare function latestWorkflowVersionRow(ctx: AssetTxContext, assetId: string): WorkflowAssetRow | null;
 /** 按来源模版定位绑定资产（同一模版的二次晋升复用同一资产）。 */
 export declare function findWorkflowAssetByTemplate(ctx: AssetTxContext, templateId: string): WorkflowAssetActiveRow | null;
 /** 工作流版本行读取（JSON 列严格解析，损坏即抛错）。 */
 export declare function readWorkflowVersionRow(ctx: AssetTxContext, assetId: string, versionId: number): WorkflowAssetRow | null;
 /**
- * 回滚：只把 Active 指针移向目标版本（name / retrieval_context / 来源指纹同步），
+ * 回滚：把 Active 指针移向目标版本（name / retrieval_context / 来源指纹同步），
  * 不新增版本、不改历史行。
+ *
+ * 归档资产（无 Active 行）的回滚即「重新启用」：按目标版本重建 Active 行。
+ * 这也是归档资产恢复活跃的唯一入口（保存只做版本迭代，不改变归档状态）。
  */
 export declare function rollbackWorkflowAssetTo(ctx: RolePortContext, assetId: string, versionId: number): WorkflowAssetDetail;
-/** 退役：删除 Active 行；历史行与其引用统计保留（审计与再次复用判定都依赖历史）。 */
+/** 归档：删除 Active 行；历史行与角色资产全部保留（流程归档不触发角色归档）。 */
 export declare function retireWorkflowAssetRow(tx: AssetTxContext, assetId: string): void;
 /** 工作流检索上下文 = id + name + description。 */
 export declare function workflowRetrievalContext(assetId: string, name: string, description: string): string;
 /** 首版登记：写入版本 1 并建立 Active 行（资产此前不存在）。 */
 export declare function createWorkflowAsset(ctx: RolePortContext, request: Omit<WorkflowWriteRequest, 'shortCircuitFingerprint'>): WorkflowRegistration;
 /**
- * 追加版本：先判幂等短路（来源指纹未变即不新增版本），再解析角色节点并写版本行。
- * 只在资产已存在（Active 行在）时调用。
+ * 追加版本：先判幂等短路（来源指纹未变），再做内容查重（节点坐标不参与），
+ * 最后解析角色节点、写版本行并结算引用。
+ *
+ * 基线版本：活跃资产取 Active 版本；归档资产取最新版本行（保存只做迭代，不重建 Active 行）。
  */
 export declare function registerWorkflowVersion(ctx: RolePortContext, request: WorkflowWriteRequest): WorkflowRegistration;
+/**
+ * 保存前的影响面预览：本次内容会为哪些角色资产登记新版本，进而牵连哪些**其他**工作流资产。
+ *
+ * 判据与 registerRoleNode 的第一步完全一致（源资产存活性 + 内容是否与源资产 Active 版本全等），
+ * 因此「预览说会牵连」与「保存真的会牵连」不会出现分叉；只读、不落库。
+ * 排除 `workflowAssetId`（正在保存的本资产自己不算被牵连方）。
+ */
+export declare function previewWorkflowAssetCascade(ctx: AssetTxContext, input: {
+    workflowAssetId: string | null;
+    nodes: GraphNode[];
+}): RoleAssetReference[];

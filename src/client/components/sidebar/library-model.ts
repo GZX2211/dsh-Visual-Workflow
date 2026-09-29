@@ -10,10 +10,15 @@
 //
 // 来源语义（用户裁决）：
 //   - 模版态：实例列表 + 工作流模板 / 父代理 + 角色模板 / 文件 + 数据库 / 阶段 + 协作组；
-//   - 资产态：工作流资产（不再区分实例与工作流模版）/ 角色资产（不再区分父/子代理），
+//   - 资产态：工作流资产 / 角色资产，各自再分「活跃资产」与「历史资产（已归档）」两栏，
 //     数据与其他 Tag 显示空态提示（V1 资产只含工作流与角色）。
+//   - 角色资产的活跃栏**不含内联资产**：内联角色的编辑入口在画布节点上，左栏并排显示
+//     会与画布形成两份互相看不出同步关系的视图（用户批注：信息不同步且冗余）；
+//     内联资产一旦被多个工作流引用升为共享资产，就会出现在活跃栏。
 // 搜索（两态常驻、共用同一关键词）：过滤当前 Tag 下**全部分区**卡片，
 // 字段 = 名称 + 描述/角色提示词，大小写不敏感、首尾 trim。
+// 折叠：历史资产分栏默认折叠（`collapsedSections` 由视图层持有）；搜索只做过滤，
+// 不因命中而自动展开——折叠是一种显式隐藏行为。
 
 import type { Dict } from '../../i18n.js'
 import type { LibTab, LibSelKind, LibrarySource } from '../../studio/studio-state.js'
@@ -37,7 +42,13 @@ export interface LibraryCardModel {
   payload: DragPayload
 }
 
-/** 分区模型（标题 + 是否显示「＋」新建 + 卡片列表 + 空态文案）。 */
+/** 资产态「历史资产」分栏 key（左侧栏的折叠状态以这两个 key 为准；底栏不折叠）。 */
+export const ASSET_HISTORY_SECTIONS = {
+  workflow: 'assetWorkflowHistory',
+  role: 'assetRoleHistory',
+} as const
+
+/** 分区模型（标题 + 是否显示「＋」新建 + 卡片列表 + 空态文案 + 可折叠性）。 */
 export interface LibrarySectionModel {
   key: string
   title: string
@@ -45,6 +56,10 @@ export interface LibrarySectionModel {
   plusKind?: 'file' | 'database' | 'flowTemplate' | 'group'
   /** 本分区无卡片时的空态文案（模版态/资产态不同）。 */
   emptyText: string
+  /** 是否提供折叠开关（历史资产分栏为 true）。 */
+  collapsible?: boolean
+  /** 当前是否处于折叠态（折叠时卡片不渲染，仅保留标题与命中数）。 */
+  collapsed?: boolean
   cards: LibraryCardModel[]
 }
 
@@ -72,11 +87,18 @@ export interface LibraryModelInput {
   librarySource?: LibrarySource
   /** 搜索关键词（两态共用；大小写不敏感）。 */
   libSearch?: string
+  /** 当前折叠的分区 key（视图层持有；缺省全展开）。 */
+  collapsedSections?: readonly string[]
   workflows: Array<{ id: string; name: string; description?: string; nodes?: unknown[]; runStatus?: string | null; sessionId?: string }>
   currentSessionId: string
   flowTemplates: WorkflowTemplate[]
-  /** 资产列表（Active 版本索引）；缺省空。 */
-  assets?: { workflows: WorkflowAssetSummary[]; roles: RoleAssetSummary[] }
+  /** 资产列表（活跃 + 历史（已归档））；缺省空。 */
+  assets?: {
+    workflows: WorkflowAssetSummary[]
+    roles: RoleAssetSummary[]
+    retiredWorkflows?: WorkflowAssetSummary[]
+    retiredRoles?: RoleAssetSummary[]
+  }
   parentTemplate: RoleTemplate | null
   roleTemplates: RoleTemplate[]
   fileTemplates: FileTemplate[]
@@ -148,6 +170,7 @@ export function buildLibraryModel(input: LibraryModelInput): LibraryModel {
 
   const librarySource: LibrarySource = input.librarySource === 'asset' ? 'asset' : 'template'
   const assets = input.assets ?? { workflows: [], roles: [] }
+  const collapsedSections = input.collapsedSections ?? []
   const query = String(input.libSearch ?? '').trim().toLowerCase()
   const searching = query !== ''
   /** 搜索命中判定（任一字段包含关键词即命中；空关键词全命中）。 */
@@ -163,15 +186,31 @@ export function buildLibraryModel(input: LibraryModelInput): LibraryModel {
     return { key, kind, id, icon, name, sub, pinned, runStatus, isCurrent, active: isActive(kind, id), payload }
   }
 
+  /**
+   * 历史资产分栏（可折叠）。
+   * 折叠态由视图层持有的 `collapsedSections` 决定：搜索只做过滤，不因命中而自动展开
+   * ——«折叠»是一种显式隐藏行为，自动展开会让用户的展开/收起操作失去可预期性。
+   */
+  function historySection(
+    key: string,
+    title: string,
+    emptyText: string,
+    cards: LibraryCardModel[],
+  ): LibrarySectionModel {
+    return { key, title, plus: false, emptyText, collapsible: true, collapsed: collapsedSections.includes(key), cards }
+  }
+
   const sections: LibrarySectionModel[] = []
 
   if (librarySource === 'asset') {
-    // 资产态：工作流 Tag 直接列工作流资产；角色 Tag 直接列角色资产（均不再分区）。
-    // 数据/其他 Tag 无资产（V1 只含工作流与角色）→ 整页空态。
+    // 资产态：工作流 Tag 列工作流资产、角色 Tag 列角色资产，各自再分「活跃资产」与
+    // 「历史资产（已归档）」两栏。归档不是从列表消失，而是从活跃栏转移到默认折叠的历史栏；
+    // 历史栏的卡片可点击打开（做版本迭代或回滚重新启用），但不可拖入画布
+    // ——拖入等于让已归档资产重新进入编排，必须先经「回滚」显式启用。
     if (libTab === 'workflow') {
       sections.push({
         key: 'assetWorkflows',
-        title: t.assetWorkflows,
+        title: t.assetActiveSection,
         plus: false,
         emptyText: t.assetEmptyHint,
         cards: (assets.workflows ?? [])
@@ -187,13 +226,29 @@ export function buildLibraryModel(input: LibraryModelInput): LibraryModel {
             },
           )),
       })
+      sections.push(historySection(
+        ASSET_HISTORY_SECTIONS.workflow, t.assetHistorySection, t.assetHistoryEmpty,
+        (assets.retiredWorkflows ?? [])
+          .filter((item) => hit(item.name, item.description))
+          .map((item) => card(
+            item.assetId, 'flowAsset', item.assetId, '▦', String(item.name ?? ''),
+            item.description ? truncate(item.description, 60) : `v${item.versionId}`,
+            {
+              label: String(item.name ?? ''),
+              onClick: () => onSelectFlowAsset?.(item.assetId),
+            },
+          )),
+      ))
     } else if (libTab === 'role') {
       sections.push({
         key: 'assetRoles',
-        title: t.assetRoles,
+        title: t.assetActiveSection,
         plus: false,
         emptyText: t.assetEmptyHint,
         cards: (assets.roles ?? [])
+          // 内联角色资产不在左栏显示：它的编辑入口在画布节点上，两侧并排会形成
+          // 看不出同步关系的两份视图；升为共享资产后自然出现在这里
+          .filter((item) => item.roleAssetType !== 'inline')
           // 搜索命中 = 名称 + 职责摘要（summary = Active 版本提示词前 60 字；模版态行为不变）
           .filter((item) => hit(item.name, item.summary))
           .map((item) => card(
@@ -209,6 +264,21 @@ export function buildLibraryModel(input: LibraryModelInput): LibraryModel {
             },
           )),
       })
+      sections.push(historySection(
+        ASSET_HISTORY_SECTIONS.role, t.assetHistorySection, t.assetHistoryEmpty,
+        (assets.retiredRoles ?? [])
+          .filter((item) => hit(item.name, item.summary))
+          .map((item) => card(
+            item.assetId, 'roleAsset', item.assetId, '◆', String(item.name ?? ''),
+            item.kind === 'parent'
+              ? t.parentAgent
+              : String((t.roleAssetType as Record<string, string>)[item.roleAssetType] || `v${item.versionId}`),
+            {
+              label: String(item.name ?? ''),
+              onClick: () => onOpenRoleAsset?.(item.assetId),
+            },
+          )),
+      ))
     }
   } else if (libTab === 'workflow') {
     // 图2 交互改造：左侧「工作流」Tag 拆两区——上方实例列表（无 + 号；运行中卡片

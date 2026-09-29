@@ -328,7 +328,11 @@ const WORKFLOW_DETAIL = {
   lines: [], roleVersionIds: [], createdAt: 1,
 }
 
-/** 角色资产 Active 详情夹具（字段域与 RoleAssetDetail 一致）。 */
+/**
+ * 角色资产 Active 详情夹具（字段域与 RoleAssetDetail 一致）。
+ * `referencingWorkflowAssets` 是归档/级联确认框的影响面事实来源（按资产聚合去重，
+ * 不取单版本行的 referenceWorkflowIds——后者新版本从零开始，会显示成「被 0 个工作流引用」）。
+ */
 const ROLE_DETAIL = {
   assetId: 'a-r1', versionId: 1, rowId: 'a-r1@1', kind: 'agent', roleAssetType: 'shared',
   name: '资产角色', systemPrompt: '提示词', provider: 'deepseek', model: 'deepseek-chat',
@@ -336,6 +340,15 @@ const ROLE_DETAIL = {
   inputSchema: 'in', outputSchema: 'out',
   systemPromptSource: 'a.md', injectSystemPrompt: false, injectToolSections: true,
   promptFilePath: 'D:\\p.md', referenceWorkflowIds: ['a-1@1', 'a-2@1'], createdAt: 1,
+  referencingWorkflowAssets: [
+    { assetId: 'a-1', name: '资产一', versionCount: 2 },
+    { assetId: 'a-2', name: '资产二', versionCount: 1 },
+  ],
+}
+
+/** shared 角色资产归档确认框的完整期望文案（影响面 = 资产名清单）。 */
+function sharedRetireMessageOf(count: string, names: string): string {
+  return zh.assetRetireSharedMessage.replace('{count}', count).replace('{names}', names)
 }
 
 /** 资产态集成装配：真实 useAssets + useUnsavedGuard + useEditorActions（共用一份假远端）。 */
@@ -430,6 +443,32 @@ function roleAssetState(overrides: Partial<StudioState> = {}): StudioState {
   }
 }
 
+/**
+ * 画布角色节点态（绑定来源角色资产 a-r1）。
+ * `bound=false` 模拟从模版/实例拖入的内联节点（没有 sourceAssetId → 无回滚对象）。
+ */
+function roleNodeState(options: { bound?: boolean } = {}): StudioState {
+  const node: CanvasNode = {
+    id: 'n-role',
+    kind: 'agent',
+    position: { x: 5, y: 6 },
+    data: {
+      label: '旧名',
+      systemPrompt: '旧提示词',
+      provider: 'deepseek',
+      model: 'deepseek-chat',
+      retryLimit: 2,
+      groupId: 'g-1',
+      ...(options.bound === false ? {} : { sourceAssetId: 'a-r1' }),
+    },
+  }
+  return {
+    ...createInitialState('s-1'),
+    editor: { source: 'node', id: 'n-role' },
+    canvas: { nodes: [node], edges: [] },
+  }
+}
+
 /** 资产写入端点的固定响应（列表端点返回空列表）。 */
 function assetWriteRemote(write: { endpoint: string; value: unknown }): ReturnType<typeof makeRemote> {
   return makeRemote((endpoint) => {
@@ -474,6 +513,8 @@ describe('模版 → 资产入库：目标与锁定判据（纯函数）', () =>
     const assets = {
       workflows: [{ assetId: 'a-1', versionId: 1, name: '工作流资产', description: '', sourceTemplateId: 'tpl-1', sourceFingerprint: 'fp', currentTemplateFingerprint: 'fp', updatedAt: 1 }],
       roles: [{ assetId: 'a-r1', versionId: 1, name: '角色资产', kind: 'agent' as const, roleAssetType: 'standalone' as const, sourceTemplateId: 'r-1', sourceFingerprint: 'fp', currentTemplateFingerprint: 'fp-2', updatedAt: 1 }],
+      retiredWorkflows: [],
+      retiredRoles: [],
     }
     expect(promoteLockedOf({ ...base, editor: { source: 'flowTemplate', id: 'tpl-1' }, assets })).toBe(true)
     expect(promoteLockedOf({ ...base, editor: { source: 'template', kind: 'role', id: 'r-1' }, assets })).toBe(false)
@@ -591,6 +632,8 @@ describe('模版 → 资产入库：编排（先保存，保存未落库即中�
       assets: {
         workflows: [{ assetId: 'a-1', versionId: 1, name: '资产', description: '', sourceTemplateId: 'tpl-1', sourceFingerprint: 'fp', currentTemplateFingerprint: 'fp', updatedAt: 1 }],
         roles: [],
+        retiredWorkflows: [],
+        retiredRoles: [],
       },
     }
     const harness = await renderAssetHarness(state, { remote, saveCanvas })
@@ -615,8 +658,14 @@ describe('资产态保存（登记新版本）', () => {
     let result: unknown = null
     await act(async () => { result = await harness.editor.saveEditor() })
 
-    expect(calls.map((call) => call.endpoint)).toEqual([EP.EP_SAVE_ASSET_VERSION, EP.EP_LIST_ASSETS, EP.EP_GET_ASSET])
-    expect(calls[0]!.args).toEqual({
+    expect(calls.map((call) => call.endpoint)).toEqual([
+      // 保存前先做只读影响面预览：无牵连才直接落库
+      EP.EP_PREVIEW_ASSET_CASCADE,
+      EP.EP_SAVE_ASSET_VERSION,
+      EP.EP_LIST_ASSETS,
+      EP.EP_GET_ASSET,
+    ])
+    expect(calls[1]!.args).toEqual({
       kind: 'workflow',
       assetId: 'a-1',
       payload: {
@@ -647,6 +696,70 @@ describe('资产态保存（登记新版本）', () => {
     expect(harness.dispatched.some((action) => action.type === 'OPEN_FLOW_ASSET')).toBe(false)
   })
 
+  it('flowAsset：无未保存改动（dirty=false）→ 不做影响面预览，直接保存（后端判未变化）', async () => {
+    const { remote, calls } = makeRemote((endpoint) => {
+      if (endpoint === EP.EP_SAVE_ASSET_VERSION) return { assetId: 'a-1', versionId: 2, rowId: 'a-1@2', unchanged: true }
+      return { workflows: [], roles: [] }
+    })
+    const harness = await renderAssetHarness(flowAssetState({ dirty: false }), { remote })
+
+    await act(async () => { await harness.editor.saveEditor() })
+
+    expect(calls.map((call) => call.endpoint)).toEqual([EP.EP_SAVE_ASSET_VERSION, EP.EP_LIST_ASSETS, EP.EP_GET_ASSET])
+    // 无改动保存仍走「重装载 + 重投影」以对齐实例态语义，但绝不弹确认框
+    expect(harness.dispatched.map((action) => action.type)).toEqual(['ASSETS_LOADED', 'ASSET_DOC_LOADED', 'OPEN_FLOW_ASSET'])
+  })
+
+  it('flowAsset：预览有牵连 → 先弹二次确认（本次不落库），确认后才登记新版本', async () => {
+    const { remote, calls } = makeRemote((endpoint) => {
+      if (endpoint === EP.EP_PREVIEW_ASSET_CASCADE) {
+        return { kind: 'workflow', affected: [{ assetId: 'a-other', name: '别的流程', versionCount: 1 }] }
+      }
+      if (endpoint === EP.EP_SAVE_ASSET_VERSION) return { assetId: 'a-1', versionId: 3, rowId: 'a-1@3', unchanged: false }
+      if (endpoint === EP.EP_GET_ASSET) return { ...WORKFLOW_DETAIL, versionId: 3, rowId: 'a-1@3' }
+      return { workflows: [], roles: [] }
+    })
+    const harness = await renderAssetHarness(flowAssetState(), { remote })
+
+    let result: unknown = 'sentinel'
+    await act(async () => { result = await harness.editor.saveEditor() })
+
+    // 待确认：本次调用不落库（返回 null，未保存守卫据此不接续原操作）
+    expect(result).toBeNull()
+    expect(calls.map((call) => call.endpoint)).toEqual([EP.EP_PREVIEW_ASSET_CASCADE])
+    const confirm = lastConfirm(harness.dispatched) as { title?: string; message?: string; onConfirm?: () => void } | undefined
+    expect(confirm?.title).toBe(zh.assetCascadeTitle)
+    expect(confirm?.message).toBe(zh.assetCascadeWorkflowMessage.replace('{names}', '别的流程'))
+
+    await act(async () => {
+      confirm!.onConfirm?.()
+      for (let i = 0; i < 6; i += 1) await Promise.resolve()
+    })
+
+    expect(calls.map((call) => call.endpoint)).toEqual([
+      EP.EP_PREVIEW_ASSET_CASCADE,
+      EP.EP_SAVE_ASSET_VERSION,
+      EP.EP_LIST_ASSETS,
+      EP.EP_GET_ASSET,
+    ])
+  })
+
+  it('roleAsset：预览有牵连 → 确认文案列出引用了该角色资产的工作流资产', async () => {
+    const { remote, calls } = makeRemote((endpoint) => {
+      if (endpoint === EP.EP_PREVIEW_ASSET_CASCADE) {
+        return { kind: 'role', affected: [{ assetId: 'a-2', name: '资产二', versionCount: 2 }] }
+      }
+      return { workflows: [], roles: [] }
+    })
+    const harness = await renderAssetHarness(roleAssetState(), { remote })
+
+    await act(async () => { await harness.editor.saveEditor() })
+
+    expect(calls.map((call) => call.endpoint)).toEqual([EP.EP_PREVIEW_ASSET_CASCADE])
+    const confirm = lastConfirm(harness.dispatched) as { message?: string } | undefined
+    expect(confirm?.message).toBe(zh.assetCascadeRoleMessage.replace('{names}', '资产二'))
+  })
+
   it('roleAsset：saveAssetVersion(kind=role) 上报角色字段投影，成功后重装载详情', async () => {
     const { remote, calls } = makeRemote((endpoint) => {
       if (endpoint === EP.EP_SAVE_ASSET_VERSION) return { assetId: 'a-r1', versionId: 2, rowId: 'a-r1@2', unchanged: false, roleAssetType: 'shared' }
@@ -658,8 +771,13 @@ describe('资产态保存（登记新版本）', () => {
     let result: unknown = null
     await act(async () => { result = await harness.editor.saveEditor() })
 
-    expect(calls.map((call) => call.endpoint)).toEqual([EP.EP_SAVE_ASSET_VERSION, EP.EP_LIST_ASSETS, EP.EP_GET_ASSET])
-    expect(calls[0]!.args).toEqual({
+    expect(calls.map((call) => call.endpoint)).toEqual([
+      EP.EP_PREVIEW_ASSET_CASCADE,
+      EP.EP_SAVE_ASSET_VERSION,
+      EP.EP_LIST_ASSETS,
+      EP.EP_GET_ASSET,
+    ])
+    expect(calls[1]!.args).toEqual({
       kind: 'role',
       assetId: 'a-r1',
       payload: {
@@ -688,15 +806,46 @@ describe('资产态保存（登记新版本）', () => {
 
   it('资产态保存失败：不重装载、不提示成功、返回值 null', async () => {
     const failure = new Error('boom')
-    const { remote } = makeRemote(() => { throw failure })
+    const { remote, calls } = makeRemote((endpoint) => {
+      if (endpoint === EP.EP_PREVIEW_ASSET_CASCADE) return { kind: 'workflow', affected: [] }
+      if (endpoint === EP.EP_SAVE_ASSET_VERSION) throw failure
+      return { workflows: [], roles: [] }
+    })
     const harness = await renderAssetHarness(flowAssetState(), { remote })
 
     let result: unknown = 'sentinel'
     await act(async () => { result = await harness.editor.saveEditor() })
 
     expect(result).toBeNull()
+    expect(calls.map((call) => call.endpoint)).toEqual([EP.EP_PREVIEW_ASSET_CASCADE, EP.EP_SAVE_ASSET_VERSION])
     expect(harness.errors).toEqual([failure])
+    // 失败路径不重装载、不重投影画布、不提示成功
     expect(harness.dispatched).toEqual([])
+    expect(harness.toasts).toEqual([])
+  })
+
+  it('影响面预览失败：显式提示并按「无影响面」降级，不阻断保存', async () => {
+    const previewFailure = new Error('preview unavailable')
+    const { remote, calls } = makeRemote((endpoint) => {
+      if (endpoint === EP.EP_PREVIEW_ASSET_CASCADE) throw previewFailure
+      if (endpoint === EP.EP_SAVE_ASSET_VERSION) return { assetId: 'a-1', versionId: 3, rowId: 'a-1@3', unchanged: false }
+      if (endpoint === EP.EP_GET_ASSET) return { ...WORKFLOW_DETAIL, versionId: 3, rowId: 'a-1@3' }
+      return { workflows: [], roles: [] }
+    })
+    const harness = await renderAssetHarness(flowAssetState(), { remote })
+
+    let result: unknown = null
+    await act(async () => { result = await harness.editor.saveEditor() })
+
+    // 预览只是告知辅助：失败必须提示（否则用户会把「没弹确认」误读成「没有级联影响」），但保存照常
+    expect(harness.errors).toEqual([previewFailure])
+    expect(result).not.toBeNull()
+    expect(calls.map((call) => call.endpoint)).toEqual([
+      EP.EP_PREVIEW_ASSET_CASCADE,
+      EP.EP_SAVE_ASSET_VERSION,
+      EP.EP_LIST_ASSETS,
+      EP.EP_GET_ASSET,
+    ])
   })
 
   it('未保存守卫「保存并继续」：资产态保存真实落库后接续原操作', async () => {
@@ -710,7 +859,8 @@ describe('资产态保存（登记新版本）', () => {
       await harness.guard.saveAndProceed((onSaved) => harness.editor.saveEditor({ onSaved }))
     })
 
-    expect(calls[0]!.endpoint).toBe(EP.EP_SAVE_ASSET_VERSION)
+    expect(calls[0]!.endpoint).toBe(EP.EP_PREVIEW_ASSET_CASCADE)
+    expect(calls[1]!.endpoint).toBe(EP.EP_SAVE_ASSET_VERSION)
     expect(proceeded).toBe(true)
   })
 
@@ -767,6 +917,50 @@ describe('资产版本回滚', () => {
 
     expect(harness.dispatched.some((action) => action.type === 'ASSET_VERSIONS_CLOSED')).toBe(false)
   })
+
+  it('openAssetVersions：画布角色节点按 sourceAssetId 装载版本列表', async () => {
+    const items = [{ versionId: 1, rowId: 'a-r1@1', name: 'v1', createdAt: 1, source: 'human', active: false }]
+    const { remote, calls } = makeRemote((endpoint) => (endpoint === EP.EP_LIST_ASSET_VERSIONS ? items : { workflows: [], roles: [] }))
+    const harness = await renderAssetHarness(roleNodeState(), { remote })
+
+    await act(async () => { await harness.editor.openAssetVersions() })
+
+    expect(calls[0]).toEqual({ endpoint: EP.EP_LIST_ASSET_VERSIONS, args: { kind: 'role', assetId: 'a-r1' } })
+  })
+
+  it('rollbackAssetVersion：画布角色节点回滚后刷新节点角色字段，且不动归属与绑定', async () => {
+    const rolledDetail = { ...ROLE_DETAIL, name: '回滚名', systemPrompt: '回滚提示词' }
+    const { remote, calls } = makeRemote((endpoint) => {
+      if (endpoint === EP.EP_ROLLBACK_ASSET) return rolledDetail
+      if (endpoint === EP.EP_GET_ASSET) return rolledDetail
+      return { workflows: [], roles: [] }
+    })
+    const harness = await renderAssetHarness(roleNodeState(), { remote })
+
+    await act(async () => { await harness.editor.rollbackAssetVersion(1) })
+
+    expect(calls[0]).toEqual({ endpoint: EP.EP_ROLLBACK_ASSET, args: { kind: 'role', assetId: 'a-r1', versionId: 1 } })
+    const patchAction = harness.dispatched.find((action) => action.type === 'NODE_DATA_PATCH') as
+      | { type: 'NODE_DATA_PATCH'; id: string; patch: Record<string, unknown> }
+      | undefined
+    expect(patchAction?.id).toBe('n-role')
+    expect(patchAction?.patch).toMatchObject({ label: '回滚名', systemPrompt: '回滚提示词' })
+    // 归属（groupId）与绑定（sourceAssetId）属于画布，不属于资产内容：不在刷新字段集内
+    expect(patchAction?.patch.groupId).toBeUndefined()
+    expect(patchAction?.patch.sourceAssetId).toBeUndefined()
+    // 回滚成功才收起版本列表
+    expect(harness.dispatched).toContainEqual({ type: 'ASSET_VERSIONS_CLOSED' })
+  })
+
+  it('rollbackAssetVersion：未绑定来源资产的画布节点没有可回滚对象（不发起任何调用）', async () => {
+    const { remote, calls } = makeRemote(() => ({ workflows: [], roles: [] }))
+    const harness = await renderAssetHarness(roleNodeState({ bound: false }), { remote })
+
+    await act(async () => { await harness.editor.rollbackAssetVersion(1) })
+
+    expect(calls).toEqual([])
+    expect(harness.dispatched).toEqual([])
+  })
 })
 
 describe('资产退役（二次确认 + 级联提示）', () => {
@@ -793,7 +987,7 @@ describe('资产退役（二次确认 + 级联提示）', () => {
     expect(harness.dispatched).toContainEqual({ type: 'ASSET_CLOSED', assetId: 'a-1' })
   })
 
-  it('shared 角色资产：确认文案追加级联提示并带引用数', async () => {
+  it('shared 角色资产：确认文案追加影响面（引用数与资产名清单）', async () => {
     const { remote, calls } = makeRemote((endpoint) => {
       if (endpoint === EP.EP_RETIRE_ASSET) return { kind: 'role', assetId: 'a-r1', retired: true }
       return { workflows: [], roles: [] }
@@ -803,8 +997,9 @@ describe('资产退役（二次确认 + 级联提示）', () => {
     await act(async () => { await harness.editor.deleteEditor() })
     const confirm = lastConfirm(harness.dispatched) as { message?: string; onConfirm?: () => void } | undefined
 
-    expect(confirm?.message).toBe(zh.assetRetireSharedMessage.replace('{count}', '2'))
+    expect(confirm?.message).toBe(sharedRetireMessageOf('2', '资产一、资产二'))
     expect(confirm?.message).not.toContain('{count}')
+    expect(confirm?.message).not.toContain('{names}')
 
     await act(async () => {
       confirm!.onConfirm?.()
@@ -816,15 +1011,32 @@ describe('资产退役（二次确认 + 级联提示）', () => {
     expect(harness.dispatched).toContainEqual({ type: 'ASSET_CLOSED', assetId: 'a-r1' })
   })
 
-  it('非 shared 角色资产：使用普通退役确认文案', async () => {
+  it('无引用的角色资产：使用普通归档确认文案', async () => {
     const harness = await renderAssetHarness(roleAssetState({
-      assetRoleDoc: { ...ROLE_DETAIL, roleAssetType: 'standalone', referenceWorkflowIds: [] } as never,
+      assetRoleDoc: {
+        ...ROLE_DETAIL,
+        roleAssetType: 'standalone',
+        referenceWorkflowIds: [],
+        referencingWorkflowAssets: [],
+      } as never,
     }), { remote: makeRemote(() => ({ workflows: [], roles: [] })).remote })
 
     await act(async () => { await harness.editor.deleteEditor() })
 
     const confirm = lastConfirm(harness.dispatched) as { message?: string } | undefined
     expect(confirm?.message).toBe(zh.assetRetireMessage)
+  })
+
+  it('已归档资产：归档动作直接返回（按钮已置灰，此处是第二道防线）', async () => {
+    const { remote, calls } = makeRemote(() => ({ workflows: [], roles: [] }))
+    const harness = await renderAssetHarness(flowAssetState({
+      assetDoc: { ...WORKFLOW_DETAIL, retired: true } as never,
+    }), { remote })
+
+    await act(async () => { await harness.editor.deleteEditor() })
+
+    expect(calls).toEqual([])
+    expect(harness.dispatched).toEqual([])
   })
 })
 

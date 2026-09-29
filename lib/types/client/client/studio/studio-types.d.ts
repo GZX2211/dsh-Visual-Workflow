@@ -128,10 +128,16 @@ export interface StudioState {
     librarySource: LibrarySource;
     /** 库搜索关键词（两态常驻、共用同一关键词；过滤当前 Tab 下全部分区卡片）。 */
     libSearch: string;
-    /** 资产列表（Active 版本索引；模版态不使用，资产态左栏数据源）。 */
+    /**
+     * 资产列表：活跃与历史（已归档）分开持有。
+     * 为什么分开而不是一条带标志位的列表：活跃列表是父代理召回面，历史资产只能出现在
+     * 左侧「历史资产」分栏，两者混存会让「召回什么」在界面上不可见。
+     */
     assets: {
         workflows: WorkflowAssetSummary[];
         roles: RoleAssetSummary[];
+        retiredWorkflows: WorkflowAssetSummary[];
+        retiredRoles: RoleAssetSummary[];
     };
     /** 资产态画布打开的资产文档（画布节点/连线的事实源；未打开为 null）。 */
     assetDoc: WorkflowAssetDetail | null;
@@ -225,8 +231,12 @@ export interface EditorData {
     asset?: boolean;
     /** 角色资产来源标记（同上）。 */
     roleAsset?: boolean;
-    /** 资产 id（保存新版本 / 回滚 / 退役按此定位；与当前画布 currentId 同源）。 */
+    /** 资产 id（保存新版本 / 回滚 / 归档按此定位；与当前画布 currentId 同源）。 */
     assetId?: string;
+    /** 已归档（历史资产）：属性栏的「归档」按钮据此置灰。 */
+    retired?: boolean;
+    /** 画布角色节点绑定的来源角色资产 id（拖入角色资产时写入；无回滚按钮的判据）。 */
+    sourceAssetId?: string;
     /** 画布节点 id（node 来源编辑器）。 */
     nodeId?: string;
     /** 虚拟节点主节点名称。 */

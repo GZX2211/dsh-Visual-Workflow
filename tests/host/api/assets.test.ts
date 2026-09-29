@@ -252,7 +252,36 @@ describe('资产版本、回滚与退役端点', () => {
     })
   })
 
-  it('retireAsset 退役后 Active 详情不可见，历史版本条目保留', async () => {
+  it('listAssets 活跃与历史（已归档）分开返回，归档资产不进活跃召回面', async () => {
+    const { h, assets } = await makeAssetHarness()
+    assets.seedRole({ assetId: 'a-role', name: '角色' })
+    assets.seedWorkflow({ assetId: 'a-flow', name: '流程' })
+    await h.api.handle('retireAsset', { kind: 'workflow', assetId: 'a-flow' })
+
+    const result = (await h.api.handle('listAssets', {})) as {
+      workflows: WorkflowAssetSummary[]
+      roles: RoleAssetSummary[]
+      retiredWorkflows: WorkflowAssetSummary[]
+      retiredRoles: RoleAssetSummary[]
+    }
+    expect(result.workflows).toEqual([])
+    expect(result.roles.map((item) => item.assetId)).toEqual(['a-role'])
+    expect(result.retiredWorkflows.map((item) => item.assetId)).toEqual(['a-flow'])
+    expect(result.retiredRoles).toEqual([])
+
+    // kind 限定只回该类的活跃 + 历史，另一类保持空数组（形状稳定）
+    const onlyRoles = (await h.api.handle('listAssets', { kind: 'role' })) as {
+      workflows: unknown[]
+      retiredWorkflows: unknown[]
+      roles: unknown[]
+      retiredRoles: unknown[]
+    }
+    expect(onlyRoles.roles).toHaveLength(1)
+    expect(onlyRoles.workflows).toEqual([])
+    expect(onlyRoles.retiredWorkflows).toEqual([])
+  })
+
+  it('retireAsset 归档后 Active 详情仍可读（标 retired），历史版本条目保留', async () => {
     const { h, assets } = await makeAssetHarness()
     assets.seedWorkflow({ assetId: 'a-flow', name: '流程' })
 
@@ -260,8 +289,55 @@ describe('资产版本、回滚与退役端点', () => {
     expect(result).toEqual({ kind: 'workflow', assetId: 'a-flow', retired: true })
     expect(assets.calls.retired).toEqual(['workflow:a-flow'])
 
-    await expect(h.api.handle('getAsset', { kind: 'workflow', assetId: 'a-flow' })).rejects.toMatchObject({ status: 404 })
+    // 归档资产（历史资产）仍可读：属性栏/画布要能打开它做版本迭代与重新启用
+    const detail = (await h.api.handle('getAsset', { kind: 'workflow', assetId: 'a-flow' })) as Record<string, unknown>
+    expect(detail).toMatchObject({ assetId: 'a-flow', retired: true })
     expect(await h.api.handle('listAssetVersions', { kind: 'workflow', assetId: 'a-flow' })).toHaveLength(1)
+  })
+})
+
+describe('资产影响面预览端点', () => {
+  it('previewAssetCascade 工作流：转交节点集与（可空的）本资产 id，返回牵连清单', async () => {
+    const { h, assets } = await makeAssetHarness()
+    assets.nextPreviewAffected = [{ assetId: 'a-other', name: '别的流程', versionCount: 2 }]
+
+    const result = (await h.api.handle('previewAssetCascade', {
+      kind: 'workflow',
+      assetId: 'a-flow',
+      payload: { nodes: [{ id: 'n1', kind: 'agent', position: { x: 0, y: 0 }, data: { label: 'A' } }] },
+    })) as { kind: string; affected: Array<Record<string, unknown>> }
+
+    expect(result.kind).toBe('workflow')
+    expect(result.affected).toEqual([{ assetId: 'a-other', name: '别的流程', versionCount: 2 }])
+    expect(assets.calls.preview).toEqual([
+      {
+        kind: 'workflow',
+        workflowAssetId: 'a-flow',
+        nodes: [{ id: 'n1', kind: 'agent', position: { x: 0, y: 0 }, data: { label: 'A' } }],
+      },
+    ])
+  })
+
+  it('previewAssetCascade 角色：以 payload 内容构造模版转交，assetId 必填', async () => {
+    const { h, assets } = await makeAssetHarness()
+    assets.seedRole({ assetId: 'a-role', name: '角色' })
+
+    const result = (await h.api.handle('previewAssetCascade', {
+      kind: 'role',
+      assetId: 'a-role',
+      payload: { name: '角色', systemPrompt: '任务：调研', provider: 'deepseek', model: 'v4', kind: 'agent' },
+    })) as { kind: string; affected: unknown[] }
+
+    expect(result).toEqual({ kind: 'role', affected: [] })
+    expect(assets.calls.preview[0]).toMatchObject({
+      kind: 'role',
+      assetId: 'a-role',
+      role: { id: 'a-role', name: '角色', systemPrompt: '任务：调研', kind: 'agent' },
+    })
+
+    await expect(h.api.handle('previewAssetCascade', { kind: 'role', payload: { nodes: [] } })).rejects.toMatchObject({
+      status: 400,
+    })
   })
 })
 
@@ -279,6 +355,8 @@ describe('资产端点参数校验与能力缝', () => {
       ['listAssetVersions', { kind: 'role', assetId: '   ' }],
       ['rollbackAsset', { kind: 'role', assetId: 'a-role' }],
       ['retireAsset', { kind: 'role' }],
+      ['previewAssetCascade', { kind: 'workflow' }],
+      ['previewAssetCascade', { kind: 'role', assetId: 'a-role' }],
     ]
     for (const [endpoint, args] of cases) {
       await expect(h.api.handle(endpoint, args)).rejects.toMatchObject({ status: 400 })
@@ -298,6 +376,7 @@ describe('资产端点参数校验与能力缝', () => {
       ['listAssetVersions', { kind: 'role', assetId: 'a' }],
       ['rollbackAsset', { kind: 'role', assetId: 'a', versionId: 1 }],
       ['retireAsset', { kind: 'role', assetId: 'a' }],
+      ['previewAssetCascade', { kind: 'workflow', payload: { nodes: [] } }],
     ]
     for (const [endpoint, args] of cases) {
       await expect(h.api.handle(endpoint, args)).rejects.toMatchObject({ status: 501, message: expect.stringContaining('资产库尚未装配') })

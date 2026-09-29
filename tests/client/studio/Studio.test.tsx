@@ -469,21 +469,21 @@ function libraryCard(text: string): HTMLButtonElement | undefined {
 }
 
 describe('资产态：库来源切换与搜索', () => {
-  it('资产态工作流 Tag 只显示工作流资产分区（不再分区实例 + 工作流模版）', async () => {
+  it('资产态工作流 Tag 显示活跃 / 历史两栏（不再分区实例 + 工作流模版）', async () => {
     await renderStudioWith(assetRemoteStub())
     await switchLibrarySource(zh.libSourceAsset)
-    expect(textOf('.wf-docgroup')).toEqual([zh.assetWorkflows])
+    expect(textOf('.wf-docgroup')).toEqual([zh.assetActiveSection, zh.assetHistorySection])
     expect(textOf('.wf-docitem__label')).toEqual(['资产流程'])
     // 来源标签选中态
     const assetTab = Array.from(document.querySelectorAll('.wf-lib-source__tab')).find((item) => item.textContent === zh.libSourceAsset)
     expect(assetTab?.classList.contains('is-active')).toBe(true)
   })
 
-  it('资产态角色 Tag 直接显示角色资产（不再分区父代理 / 角色模版）', async () => {
+  it('资产态角色 Tag 显示活跃 / 历史两栏（不再分区父代理 / 角色模版）', async () => {
     await renderStudioWith(assetRemoteStub())
     await switchLibrarySource(zh.libSourceAsset)
     await act(async () => { libTab(zh.libTab.role)?.click() })
-    expect(textOf('.wf-docgroup')).toEqual([zh.assetRoles])
+    expect(textOf('.wf-docgroup')).toEqual([zh.assetActiveSection, zh.assetHistorySection])
     expect(textOf('.wf-docitem__label')).toEqual(['资产角色'])
     await act(async () => { libTab(zh.libTab.data)?.click() })
     expect(textOf('.wf-docgroup')).toEqual([])
@@ -532,7 +532,7 @@ describe('资产态：库来源切换与搜索', () => {
     await act(async () => {
       Array.from(document.querySelector('.wf-confirm')!.querySelectorAll('button')).find((item) => item.textContent === zh.unsavedDiscard)?.click()
     })
-    expect(textOf('.wf-docgroup')).toEqual([zh.assetRoles])
+    expect(textOf('.wf-docgroup')).toEqual([zh.assetActiveSection, zh.assetHistorySection])
     expect(nodeCount()).toBe(0)
   })
 })

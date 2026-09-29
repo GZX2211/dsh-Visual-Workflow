@@ -22,7 +22,7 @@ export function createInitialState(sessionId: string): StudioState {
     // 缺省模版态（库来源与画布文档类型默认都是模版）
     librarySource: 'template',
     libSearch: '',
-    assets: { workflows: [], roles: [] },
+    assets: { workflows: [], roles: [], retiredWorkflows: [], retiredRoles: [] },
     assetDoc: null,
     assetRoleDoc: null,
     assetVersions: null,

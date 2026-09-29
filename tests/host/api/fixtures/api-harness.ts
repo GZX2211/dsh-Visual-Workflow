@@ -27,6 +27,7 @@ import type { EmbeddingEngine } from '../../../../src/host/embedding/engine.js'
 import type {
   AssetVersionEntry,
   RoleAssetDetail,
+  RoleAssetReference,
   RoleAssetSummary,
   WorkflowAssetDetail,
   WorkflowAssetSummary,
@@ -208,18 +209,24 @@ export interface WorkflowSeed {
  */
 export class FakeAssetStore implements FakeAssets {
   /** 调用痕迹（断言「边界传了什么」用）。 */
-  calls: { promoteRole: unknown[]; promoteWorkflow: unknown[]; saveRole: unknown[]; saveWorkflow: unknown[]; rollback: unknown[]; retired: string[] } = {
+  calls: { promoteRole: unknown[]; promoteWorkflow: unknown[]; saveRole: unknown[]; saveWorkflow: unknown[]; rollback: unknown[]; retired: string[]; preview: unknown[] } = {
     promoteRole: [],
     promoteWorkflow: [],
     saveRole: [],
     saveWorkflow: [],
     rollback: [],
     retired: [],
+    preview: [],
   }
   /** 下一次入库/保存抛出的领域错误（重复入库 409 路径用）。 */
   nextPromoteError: Error | null = null
+  /** 下一次影响面预览返回的牵连清单（缺省空 = 无牵连）。 */
+  nextPreviewAffected: RoleAssetReference[] = []
   roleAssets = new Map<string, RoleAssetDetail>()
   workflowAssets = new Map<string, WorkflowAssetDetail>()
+  /** 已归档资产（真实实现由「有历史行、无 Active 行」表达；夹具用独立表表达同一事实）。 */
+  retiredRoleAssets = new Map<string, RoleAssetDetail>()
+  retiredWorkflowAssets = new Map<string, WorkflowAssetDetail>()
   roleVersions = new Map<string, AssetVersionEntry[]>()
   workflowVersions = new Map<string, AssetVersionEntry[]>()
   /** 入库时记录的来源指纹（索引条目回填用；真实实现由 SQLite 索引行承载）。 */
@@ -333,8 +340,13 @@ export class FakeAssetStore implements FakeAssets {
     return [...this.roleAssets.values()].map((detail) => this.roleSummaryOf(detail, this.roleFingerprints.get(detail.assetId)))
   }
 
+  async listRetiredRoleAssets(): Promise<RoleAssetSummary[]> {
+    return [...this.retiredRoleAssets.values()].map((detail) => this.roleSummaryOf(detail, this.roleFingerprints.get(detail.assetId)))
+  }
+
   async getRoleAsset(assetId: string): Promise<RoleAssetDetail | null> {
-    return this.roleAssets.get(assetId) ?? null
+    // 归档资产仍可读（取最新版本行）——UI 的历史资产属性栏依赖它
+    return this.roleAssets.get(assetId) ?? this.retiredRoleAssets.get(assetId) ?? null
   }
 
   async listRoleVersions(assetId: string): Promise<AssetVersionEntry[]> {
@@ -343,25 +355,36 @@ export class FakeAssetStore implements FakeAssets {
 
   async rollbackRoleAsset(assetId: string, versionId: number): Promise<RoleAssetDetail> {
     this.calls.rollback.push({ kind: 'role', assetId, versionId })
-    const detail = this.roleAssets.get(assetId)
+    const retired = this.retiredRoleAssets.get(assetId)
+    const detail = this.roleAssets.get(assetId) ?? retired
     const version = (this.roleVersions.get(assetId) ?? []).find((item) => item.versionId === versionId)
     if (!detail || !version) throw this.versionNotFound(assetId, versionId)
+    // 归档资产的回滚 = 重新启用（移回活跃表），与真实实现同语义
     const rolled = { ...detail, versionId, rowId: version.rowId }
+    delete rolled.retired
+    if (retired) this.retiredRoleAssets.delete(assetId)
     this.roleAssets.set(assetId, rolled)
     return rolled
   }
 
   async retireRoleAsset(assetId: string): Promise<void> {
     this.calls.retired.push(`role:${assetId}`)
+    const detail = this.roleAssets.get(assetId)
+    if (!detail) return
     this.roleAssets.delete(assetId)
+    this.retiredRoleAssets.set(assetId, { ...detail, retired: true })
   }
 
   async listWorkflowAssets(): Promise<WorkflowAssetSummary[]> {
     return [...this.workflowAssets.values()].map((detail) => this.workflowSummaryOf(detail, this.workflowFingerprints.get(detail.assetId)))
   }
 
+  async listRetiredWorkflowAssets(): Promise<WorkflowAssetSummary[]> {
+    return [...this.retiredWorkflowAssets.values()].map((detail) => this.workflowSummaryOf(detail, this.workflowFingerprints.get(detail.assetId)))
+  }
+
   async getWorkflowAsset(assetId: string): Promise<WorkflowAssetDetail | null> {
-    return this.workflowAssets.get(assetId) ?? null
+    return this.workflowAssets.get(assetId) ?? this.retiredWorkflowAssets.get(assetId) ?? null
   }
 
   async listWorkflowVersions(assetId: string): Promise<AssetVersionEntry[]> {
@@ -370,17 +393,28 @@ export class FakeAssetStore implements FakeAssets {
 
   async rollbackWorkflowAsset(assetId: string, versionId: number): Promise<WorkflowAssetDetail> {
     this.calls.rollback.push({ kind: 'workflow', assetId, versionId })
-    const detail = this.workflowAssets.get(assetId)
+    const retired = this.retiredWorkflowAssets.get(assetId)
+    const detail = this.workflowAssets.get(assetId) ?? retired
     const version = (this.workflowVersions.get(assetId) ?? []).find((item) => item.versionId === versionId)
     if (!detail || !version) throw this.versionNotFound(assetId, versionId)
     const rolled = { ...detail, versionId, rowId: version.rowId }
+    delete rolled.retired
+    if (retired) this.retiredWorkflowAssets.delete(assetId)
     this.workflowAssets.set(assetId, rolled)
     return rolled
   }
 
   async retireWorkflowAsset(assetId: string): Promise<void> {
     this.calls.retired.push(`workflow:${assetId}`)
+    const detail = this.workflowAssets.get(assetId)
+    if (!detail) return
     this.workflowAssets.delete(assetId)
+    this.retiredWorkflowAssets.set(assetId, { ...detail, retired: true })
+  }
+
+  async previewAssetCascade(input: Parameters<FakeAssets['previewAssetCascade']>[0]): Promise<RoleAssetReference[]> {
+    this.calls.preview.push(input)
+    return this.nextPreviewAffected
   }
 
   /** 模版晋升：以模版 id 作为资产 id 建首个版本（与真实实现同语义，便于测试推定 assetId）。 */
@@ -389,7 +423,15 @@ export class FakeAssetStore implements FakeAssets {
     this.throwIfInjected()
     const existing = this.roleAssets.get(input.templateId)
     if (existing) {
-      return { assetId: existing.assetId, versionId: existing.versionId, rowId: existing.rowId, unchanged: true, roleAssetType: existing.roleAssetType }
+      return {
+        assetId: existing.assetId,
+        versionId: existing.versionId,
+        rowId: existing.rowId,
+        unchanged: true,
+        roleAssetType: existing.roleAssetType,
+        sharedRoleAssetIds: [],
+        archivedRoleAssetIds: [],
+      }
     }
     const detail = this.seedRole({
       assetId: input.templateId,
@@ -398,7 +440,15 @@ export class FakeAssetStore implements FakeAssets {
       sourceFingerprint: input.fingerprint,
       systemPrompt: input.role.systemPrompt,
     })
-    return { assetId: detail.assetId, versionId: detail.versionId, rowId: detail.rowId, unchanged: false, roleAssetType: detail.roleAssetType }
+    return {
+      assetId: detail.assetId,
+      versionId: detail.versionId,
+      rowId: detail.rowId,
+      unchanged: false,
+      roleAssetType: detail.roleAssetType,
+      sharedRoleAssetIds: [],
+      archivedRoleAssetIds: [],
+    }
   }
 
   async promoteWorkflow(input: WorkflowPromoteInput): Promise<AssetPromoteResult> {
@@ -406,7 +456,14 @@ export class FakeAssetStore implements FakeAssets {
     this.throwIfInjected()
     const existing = this.workflowAssets.get(input.templateId)
     if (existing) {
-      return { assetId: existing.assetId, versionId: existing.versionId, rowId: existing.rowId, unchanged: true }
+      return {
+        assetId: existing.assetId,
+        versionId: existing.versionId,
+        rowId: existing.rowId,
+        unchanged: true,
+        sharedRoleAssetIds: [],
+        archivedRoleAssetIds: [],
+      }
     }
     const detail = this.seedWorkflow({
       assetId: input.templateId,
@@ -415,31 +472,60 @@ export class FakeAssetStore implements FakeAssets {
       sourceTemplateId: input.templateId,
       sourceFingerprint: input.fingerprint,
     })
-    return { assetId: detail.assetId, versionId: detail.versionId, rowId: detail.rowId, unchanged: false }
+    return {
+      assetId: detail.assetId,
+      versionId: detail.versionId,
+      rowId: detail.rowId,
+      unchanged: false,
+      sharedRoleAssetIds: [],
+      archivedRoleAssetIds: [],
+    }
   }
 
   async saveRoleVersion(input: RoleSaveInput): Promise<AssetPromoteResult> {
     this.calls.saveRole.push(input)
     this.throwIfInjected()
-    const existing = this.roleAssets.get(input.assetId)
+    const existing = this.roleAssets.get(input.assetId) ?? this.retiredRoleAssets.get(input.assetId)
     if (!existing) throw this.assetNotFound(input.assetId)
     const versionId = existing.versionId + 1
     const rowId = `${input.assetId}-r${versionId}`
-    this.roleAssets.set(input.assetId, { ...existing, versionId, rowId, name: input.role.name, systemPrompt: input.role.systemPrompt })
+    // 归档资产的保存只迭代版本、不重建 Active 行（与真实实现同语义）
+    const isRetired = !this.roleAssets.has(input.assetId)
+    const saved = { ...existing, versionId, rowId, name: input.role.name, systemPrompt: input.role.systemPrompt }
+    if (isRetired) this.retiredRoleAssets.set(input.assetId, saved)
+    else this.roleAssets.set(input.assetId, saved)
     this.appendRoleVersion(input.assetId, versionId, rowId)
-    return { assetId: input.assetId, versionId, rowId, unchanged: false, roleAssetType: existing.roleAssetType }
+    return {
+      assetId: input.assetId,
+      versionId,
+      rowId,
+      unchanged: false,
+      roleAssetType: existing.roleAssetType,
+      sharedRoleAssetIds: [],
+      archivedRoleAssetIds: [],
+    }
   }
 
   async saveWorkflowVersion(input: WorkflowSaveInput): Promise<AssetPromoteResult> {
     this.calls.saveWorkflow.push(input)
     this.throwIfInjected()
-    const existing = this.workflowAssets.get(input.assetId)
+    const existing = this.workflowAssets.get(input.assetId) ?? this.retiredWorkflowAssets.get(input.assetId)
     if (!existing) throw this.assetNotFound(input.assetId)
     const versionId = existing.versionId + 1
     const rowId = `${input.assetId}-r${versionId}`
-    this.workflowAssets.set(input.assetId, { ...existing, versionId, rowId, name: input.name, description: input.description })
+    const isRetired = !this.workflowAssets.has(input.assetId)
+    const saved = { ...existing, versionId, rowId, name: input.name, description: input.description }
+    if (isRetired) this.retiredWorkflowAssets.set(input.assetId, saved)
+    else this.workflowAssets.set(input.assetId, saved)
     this.appendWorkflowVersion(input.assetId, versionId, rowId)
-    return { assetId: input.assetId, versionId, rowId, unchanged: false }
+    return {
+      assetId: input.assetId,
+      versionId,
+      rowId,
+      unchanged: false,
+      sharedRoleAssetIds: [],
+      archivedRoleAssetIds: [],
+    }
   }
 
   private throwIfInjected(): void {

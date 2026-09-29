@@ -1,12 +1,12 @@
 // src/host/api/assets.ts
 //
 // GUI API 资产端点组（AssetEndpoints）：模版晋升入库、资产态保存、版本列表、
-// 回滚、退役、列表与详情。资产事实由 assets 模块的 AssetStore（SQLite）拥有，
+// 回滚、归档、影响面预览、列表与详情。资产事实由 assets 模块的 AssetStore（SQLite）拥有，
 // 本层只做「请求 → 领域调用 → 稳定响应/错误码」的翻译。
 
 import { ERR_ASSET_BAD_ARGS, ERR_ASSET_NOT_FOUND } from '../shared/protocol.js'
 import { contentFingerprint } from '../assets/index.js'
-import type { AssetKind, AssetVersionEntry, RoleAssetDetail, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../shared/asset-types.js'
+import type { AssetKind, AssetVersionEntry, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../shared/asset-types.js'
 import type { RoleTemplate } from '../shared/template-types.js'
 import type { GraphNode, Line } from '../shared/graph-model.js'
 import type { OrgMeta } from '../shared/org-meta.js'
@@ -54,6 +54,32 @@ function requireKind(args: { kind?: unknown }): AssetKind {
   return kind
 }
 
+/** 取必填的 payload 对象（晋升/保存/预览共用同一形状校验）。 */
+function requirePayload(payload: unknown): Record<string, unknown> {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw assetBadArgs('requires a payload object')
+  return payload as Record<string, unknown>
+}
+
+/** payload → 角色模版（字段域与 RoleAssetDetail 一致；assetId 由端点参数定位，不进内容）。 */
+function roleTemplateOf(payload: Record<string, unknown>, assetId: string): RoleTemplate {
+  return {
+    ...payload,
+    id: assetId,
+    kind: payload.kind === 'parent' ? 'parent' : 'agent',
+    name: requireString(payload, 'name', 'role'),
+    systemPrompt: requireString(payload, 'systemPrompt', 'role'),
+    provider: requireString(payload, 'provider', 'role'),
+    model: requireString(payload, 'model', 'role'),
+    retryLimit: typeof payload.retryLimit === 'number' ? payload.retryLimit : 3,
+  }
+}
+
+/** payload → 工作流节点数组（保存与影响面预览共用同一形状校验）。 */
+function requireNodes(payload: Record<string, unknown>): GraphNode[] {
+  if (!Array.isArray(payload.nodes)) throw assetBadArgs('workflow payload requires nodes array')
+  return payload.nodes as GraphNode[]
+}
+
 /** 校验并归一化资产 id（必填）。 */
 function requireAssetId(args: { assetId?: unknown }): string {
   const assetId = String(args?.assetId ?? '').trim()
@@ -99,18 +125,33 @@ async function fillCurrentFingerprints<T extends FingerprintedItem>(
 export class AssetEndpoints extends VisualWorkflowApiBase {
   // ---------- 资产列表与详情 ----------
 
-  async listAssets(args: { kind?: unknown }): Promise<{ workflows: WorkflowAssetSummary[]; roles: RoleAssetSummary[] }> {
+  /**
+   * 资产列表：活跃与历史（已归档）分开返回，两类各自按 kind 拆分。
+   * 分开是契约要求而非展示细节——活跃列表是父代理召回面，归档资产绝不进召回面。
+   */
+  async listAssets(args: { kind?: unknown }): Promise<{
+    workflows: WorkflowAssetSummary[]
+    roles: RoleAssetSummary[]
+    retiredWorkflows: WorkflowAssetSummary[]
+    retiredRoles: RoleAssetSummary[]
+  }> {
     // kind 缺省即「两类都返回」；给了值就必须在取值域内（此处先校验，能力缝缺失时才轮得到 501）。
     const rawKind = args?.kind
     const kind = rawKind === undefined || rawKind === null || rawKind === '' ? null : requireKind(args)
     const assets = assetsOf(this.host)
-    const [workflows, roles] = await Promise.all([
-      kind === null || kind === 'workflow' ? assets.listWorkflowAssets() : [],
-      kind === null || kind === 'role' ? assets.listRoleAssets() : [],
+    const wantWorkflow = kind === null || kind === 'workflow'
+    const wantRole = kind === null || kind === 'role'
+    const [workflows, roles, retiredWorkflows, retiredRoles] = await Promise.all([
+      wantWorkflow ? assets.listWorkflowAssets() : [],
+      wantRole ? assets.listRoleAssets() : [],
+      wantWorkflow ? assets.listRetiredWorkflowAssets() : [],
+      wantRole ? assets.listRetiredRoleAssets() : [],
     ])
     return {
       workflows: await fillCurrentFingerprints(workflows, (templateId) => this.host.store.getFlowTemplate(templateId)),
       roles: await fillCurrentFingerprints(roles, (templateId) => this.host.store.getTemplate('role', templateId)),
+      retiredWorkflows: await fillCurrentFingerprints(retiredWorkflows, (templateId) => this.host.store.getFlowTemplate(templateId)),
+      retiredRoles: await fillCurrentFingerprints(retiredRoles, (templateId) => this.host.store.getTemplate('role', templateId)),
     }
   }
 
@@ -163,39 +204,55 @@ export class AssetEndpoints extends VisualWorkflowApiBase {
   async saveAssetVersion(args: { kind?: unknown; assetId?: unknown; payload?: unknown }): Promise<AssetPromoteResult> {
     const kind = requireKind(args)
     const assetId = requireAssetId(args)
-    const payload = args?.payload as Record<string, unknown> | null | undefined
-    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw assetBadArgs('requires a payload object')
+    const payload = requirePayload(args?.payload)
     const assets = assetsOf(this.host)
     // 资产态保存由资产库登记新版本（永不覆盖历史版本），故这里只校验形状、不落盘。
     if (kind === 'role') {
-      const role: RoleTemplate = {
-        ...payload,
-        id: assetId,
-        kind: payload.kind === 'parent' ? 'parent' : 'agent',
-        name: requireString(payload, 'name', 'role'),
-        systemPrompt: requireString(payload, 'systemPrompt', 'role'),
-        provider: requireString(payload, 'provider', 'role'),
-        model: requireString(payload, 'model', 'role'),
-        retryLimit: typeof payload.retryLimit === 'number' ? payload.retryLimit : 3,
-      }
-      const input: RoleSaveInput = { assetId, role, source: 'human' }
+      const input: RoleSaveInput = { assetId, role: roleTemplateOf(payload, assetId), source: 'human' }
       return assets.saveRoleVersion(input)
     }
     const name = requireString(payload, 'name', 'workflow')
     const description = requireString(payload, 'description', 'workflow')
-    if (!Array.isArray(payload.nodes)) throw assetBadArgs('workflow payload requires nodes array')
+    const nodes = requireNodes(payload)
     if (!Array.isArray(payload.lines)) throw assetBadArgs('workflow payload requires lines array')
     const input: WorkflowSaveInput = {
       assetId,
       mode: payload.mode === 'mode2' ? 'mode2' : 'mode1',
       name,
       description,
-      nodes: payload.nodes as GraphNode[],
+      nodes,
       lines: payload.lines as Line[],
       ...(payload.meta === undefined ? {} : { meta: payload.meta as OrgMeta }),
       source: 'human',
     }
     return assets.saveWorkflowVersion(input)
+  }
+
+  /**
+   * 影响面预览（只读，不落库）：按本次要保存的内容推演哪些**其他**工作流资产会被牵连。
+   *
+   * 为什么必须是独立端点而不是让客户端自行推演：角色字段映射、源资产存活性与共享判定
+   * 全部是 Host 的事实；客户端复制一份就会在「预览说没事、保存却级联」时分叉。
+   */
+  async previewAssetCascade(args: { kind?: unknown; assetId?: unknown; payload?: unknown }): Promise<{
+    kind: AssetKind
+    affected: RoleAssetReference[]
+  }> {
+    const kind = requireKind(args)
+    const assetId = String(args?.assetId ?? '').trim() || null
+    const payload = requirePayload(args?.payload)
+    const assets = assetsOf(this.host)
+    if (kind === 'role') {
+      if (!assetId) throw assetBadArgs('requires assetId for role preview')
+      const affected = await assets.previewAssetCascade({ kind: 'role', assetId, role: roleTemplateOf(payload, assetId) })
+      return { kind, affected }
+    }
+    const affected = await assets.previewAssetCascade({
+      kind: 'workflow',
+      workflowAssetId: assetId,
+      nodes: requireNodes(payload),
+    })
+    return { kind, affected }
   }
 
   // ---------- 版本列表、回滚与退役 ----------

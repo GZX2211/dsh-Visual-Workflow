@@ -105,16 +105,27 @@ const ROLE_DETAIL = {
   name: '资产角色', systemPrompt: '', provider: '', model: '', retryLimit: 3, referenceWorkflowIds: [], createdAt: 1,
 }
 
-describe('useAssets：七个资产端点的调用与参数', () => {
-  it('refresh → listAssets（无参）并写入规范化列表', async () => {
+describe('useAssets：八个资产端点的调用与参数', () => {
+  it('refresh → listAssets（无参）并写入规范化列表（活跃 + 历史）', async () => {
     const { remote, calls } = makeRemote((endpoint) => (endpoint === EP.EP_LIST_ASSETS
-      ? { workflows: [{ assetId: 'a-1' }], roles: [{ assetId: 'a-r1' }] }
+      ? {
+          workflows: [{ assetId: 'a-1' }],
+          roles: [{ assetId: 'a-r1' }],
+          retiredWorkflows: [{ assetId: 'a-old' }],
+          retiredRoles: [{ assetId: 'a-rold' }],
+        }
       : []))
     const { face, dispatched } = await renderAssets(remote)
     await act(async () => { await face.refresh() })
     expect(calls).toEqual([{ endpoint: EP.EP_LIST_ASSETS, args: {} }])
     expect(dispatched).toEqual([
-      { type: 'ASSETS_LOADED', workflows: [{ assetId: 'a-1' }], roles: [{ assetId: 'a-r1' }] },
+      {
+        type: 'ASSETS_LOADED',
+        workflows: [{ assetId: 'a-1' }],
+        roles: [{ assetId: 'a-r1' }],
+        retiredWorkflows: [{ assetId: 'a-old' }],
+        retiredRoles: [{ assetId: 'a-rold' }],
+      },
     ])
   })
 
@@ -122,7 +133,10 @@ describe('useAssets：七个资产端点的调用与参数', () => {
     const { remote } = makeRemote(() => [])
     const { face, dispatched } = await renderAssets(remote)
     await act(async () => { await face.refresh() })
-    expect(dispatched).toEqual([{ type: 'ASSETS_LOADED', workflows: [], roles: [] }])
+    // 旧形状（无历史字段）同样降级为空历史列表：形状漂移不因未知字段抛错
+    expect(dispatched).toEqual([
+      { type: 'ASSETS_LOADED', workflows: [], roles: [], retiredWorkflows: [], retiredRoles: [] },
+    ])
   })
 
   it('loadAsset：workflow → getAsset{kind,assetId} + ASSET_DOC_LOADED；role → ROLE_ASSET_LOADED', async () => {
@@ -179,7 +193,7 @@ describe('useAssets：七个资产端点的调用与参数', () => {
     expect(dispatched[1]).toEqual({ type: 'ASSET_VERSIONS_CLOSED' })
   })
 
-  it('rollback → rollbackAsset{kind,assetId,versionId} + 重新装载详情 + 刷新列表 + 返回成功标志', async () => {
+  it('rollback → rollbackAsset{kind,assetId,versionId} + 返回回滚后的详情（供画布节点刷新）', async () => {
     const { remote, calls } = makeRemote((endpoint) => {
       if (endpoint === EP.EP_ROLLBACK_ASSET) return WORKFLOW_DETAIL
       if (endpoint === EP.EP_GET_ASSET) return WORKFLOW_DETAIL
@@ -187,14 +201,14 @@ describe('useAssets：七个资产端点的调用与参数', () => {
     })
     const { face, toasts, dispatched } = await renderAssets(remote)
 
-    let rolledBack = false
-    await act(async () => { rolledBack = await face.rollback('workflow', 'a-1', 1) })
+    let rolled: unknown = null
+    await act(async () => { rolled = await face.rollback('workflow', 'a-1', 1) })
 
     expect(calls.map((call) => call.endpoint)).toEqual([EP.EP_ROLLBACK_ASSET, EP.EP_GET_ASSET, EP.EP_LIST_ASSETS])
     expect(calls[0]!.args).toEqual({ kind: 'workflow', assetId: 'a-1', versionId: 1 })
     expect(toasts).toEqual([{ kind: 'success', text: zh.toastAssetRolledBack }])
     expect(dispatched.map((action) => action.type)).toContain('ASSET_DOC_LOADED')
-    expect(rolledBack).toBe(true)
+    expect(rolled).toEqual(WORKFLOW_DETAIL)
   })
 
   it('rollback：当前画布正打开该工作流资产时重投影画布（OPEN_FLOW_ASSET）', async () => {
@@ -238,12 +252,12 @@ describe('useAssets：七个资产端点的调用与参数', () => {
     expect(retired).toBe(true)
   })
 
-  it('rollback / retire 领域失败 → 返回 false（调用方保留现场，不误判已生效）', async () => {
+  it('rollback 领域失败 → 返回 null（调用方保留现场，不误判已生效）', async () => {
     const rollbackRemote = makeRemote(() => { throw remoteError('not found', EP.ERR_ASSET_NOT_FOUND) })
     const rollbackHarness = await renderAssets(rollbackRemote.remote)
-    let rolledBack = true
-    await act(async () => { rolledBack = await rollbackHarness.face.rollback('workflow', 'a-1', 1) })
-    expect(rolledBack).toBe(false)
+    let rolled: unknown = 'unset'
+    await act(async () => { rolled = await rollbackHarness.face.rollback('workflow', 'a-1', 1) })
+    expect(rolled).toBeNull()
     expect(rollbackHarness.toasts[0]).toEqual({ kind: 'error', text: zh.assetNotFound })
   })
 

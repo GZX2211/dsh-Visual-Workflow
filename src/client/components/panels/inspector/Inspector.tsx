@@ -118,15 +118,26 @@ export function Inspector(props: InspectorProps) {
   }
 
   // 底部按钮规则（所见即所操作）
+  /**
+   * 可回滚对象 id：资产自身（属性栏编辑的资产），或**画布角色节点**绑定的来源角色资产。
+   * 画布节点是该资产的画布内联副本（data.sourceAssetId 是绑定事实），批注要求它与左侧栏
+   * 角色资产具备同样的回滚能力；未绑定来源资产的内联节点没有版本可回滚，故不显示回滚按钮。
+   * 计算放在渲染分支之外：版本列表的显示判据也要用它。
+   */
+  const nodeSourceAssetId = editorData?.sourceAssetId ?? ''
+  const rollbackAssetId = (editorData?.assetId ?? '') !== '' ? editorData!.assetId! : nodeSourceAssetId
+
   const footer: React.ReactNode[] = []
   if (editorData) {
     const kind = editorData.kind
     const isStage = kind === 'stage'
-    // 资产态（工作流资产 / 角色资产）：保存 = 登记新版本、删除 = 退役、回滚 = 打开版本列表
+    // 资产态（工作流资产 / 角色资产）：保存 = 登记新版本、归档 = 移出活跃复用面、回滚 = 版本列表
     const isAsset = editorData.asset === true || editorData.roleAsset === true
     const assetId = editorData.assetId ?? ''
-    // 展开态只在「仍编辑着同一个资产」时成立（编辑器切换即自动收起）
-    const versionsOpen = versionsAssetId !== null && versionsAssetId === assetId
+    const canRollback = rollbackAssetId !== ''
+      && (isAsset || (kind === 'role' && editorData.template !== true && nodeSourceAssetId !== ''))
+    // 展开态只在「仍编辑着同一个回滚对象」时成立（编辑器切换即自动收起）
+    const versionsOpen = versionsAssetId !== null && versionsAssetId === rollbackAssetId
     // 复制按钮：画布角色节点（含父代理节点，§4.2.3.1 规则 3 可创建虚拟节点）；
     // 模板与父代理模板不可复制，角色资产（不在画布上）同样不可复制
     const canCopyProxy = kind === 'role' && !editorData.template && !isAsset
@@ -140,8 +151,17 @@ export function Inspector(props: InspectorProps) {
       )
     }
     footer.push(
-      <button key="delete" type="button" className="wf-btn is-danger" onClick={onDelete} disabled={importBusy}>
-        {t.inspectorDelete}
+      // 资产态的删除按钮语义是「归档」（Active 移除、历史与版本内容全保留，绝不删除版本行）；
+      // 历史（已归档）资产的归档按钮置灰：归档只能生效一次，且不提供任何删除入口
+      <button
+        key="delete"
+        type="button"
+        className="wf-btn is-danger"
+        onClick={onDelete}
+        disabled={importBusy || (isAsset && editorData.retired === true)}
+        title={isAsset ? t.assetArchiveHint : undefined}
+      >
+        {isAsset ? t.assetArchive : t.inspectorDelete}
       </button>,
     )
     if (canPromote) {
@@ -158,8 +178,8 @@ export function Inspector(props: InspectorProps) {
         </button>,
       )
     }
-    // 资产态：回滚（展开版本上拉列表）；模版态不显示回滚
-    if (isAsset && assetId && onOpenVersions) {
+    // 回滚（展开版本列表）：资产态与「绑定来源资产的画布角色节点」都显示；模版态不显示
+    if (canRollback && onOpenVersions) {
       footer.push(
         <button
           key="rollback"
@@ -171,7 +191,7 @@ export function Inspector(props: InspectorProps) {
               onCloseVersions?.()
               return
             }
-            setVersionsAssetId(assetId)
+            setVersionsAssetId(rollbackAssetId)
             onOpenVersions()
           }}
           disabled={importBusy}
@@ -198,10 +218,8 @@ export function Inspector(props: InspectorProps) {
     }
   }
 
-  const rollbackAssetId = editorData?.assetId ?? ''
-  const showVersions = versionsAssetId !== null && versionsAssetId === rollbackAssetId
-    && rollbackAssetId !== ''
-    && (editorData?.asset === true || editorData?.roleAsset === true)
+  const showVersions = versionsAssetId !== null && rollbackAssetId !== '' && versionsAssetId === rollbackAssetId
+    && (editorData?.asset === true || editorData?.roleAsset === true || editorData?.sourceAssetId !== undefined)
 
   return (
     <aside className={`wf-inspector${open ? '' : ' is-collapsed'}`} style={{ width: open ? width : undefined }}>

@@ -111,6 +111,7 @@ export function editorDataOf(state: StudioState): EditorData | null {
       name: detail.name,
       asset: true,
       assetId: detail.assetId,
+      ...(detail.retired === true ? { retired: true } : {}),
     }
   }
   if (editor.source === 'roleAsset') {
@@ -124,6 +125,7 @@ export function editorDataOf(state: StudioState): EditorData | null {
       isParent: detail.kind === 'parent',
       roleAsset: true,
       assetId: detail.assetId,
+      ...(detail.retired === true ? { retired: true } : {}),
     }
   }
   if (editor.source === 'service') {
@@ -150,7 +152,17 @@ export function editorDataOf(state: StudioState): EditorData | null {
     if (!node) return null
     const data = node.data
     if (node.kind === 'parent' || node.kind === 'agent') {
-      return { kind: 'role', data, name: String(data.label ?? ''), nodeId: node.id, isParent: node.kind === 'parent' }
+      // sourceAssetId 是「画布角色节点绑定到某个角色资产」的唯一事实（拖入资产时写入）：
+      // 属性栏据此决定是否给出与左侧栏一致的回滚按钮
+      const sourceAssetId = typeof data.sourceAssetId === 'string' ? data.sourceAssetId : ''
+      return {
+        kind: 'role',
+        data,
+        name: String(data.label ?? ''),
+        nodeId: node.id,
+        isParent: node.kind === 'parent',
+        ...(sourceAssetId === '' ? {} : { sourceAssetId }),
+      }
     }
     if (node.kind === 'file') return { kind: 'file', data, name: String(data.label ?? ''), nodeId: node.id }
     if (node.kind === 'database') return { kind: 'database', data, name: String(data.label ?? ''), nodeId: node.id }
