@@ -13,6 +13,7 @@ export declare const zh: {
         data: string;
         other: string;
     };
+    parentMarker: string;
     flowInstances: string;
     flowTemplates: string;
     parentAgent: string;
@@ -152,6 +153,8 @@ export declare const zh: {
         start: string;
         end: string;
         pause: string;
+        input: string;
+        output: string;
         group: string;
         proxy: string;
     };
@@ -198,6 +201,8 @@ export declare const zh: {
     parentAdvancedHint: string;
     inputSchema: string;
     outputSchema: string;
+    inputSchemaExample: string;
+    outputSchemaExample: string;
     fileKind: string;
     fileContent: string;
     fileUnset: string;
@@ -370,6 +375,8 @@ export declare const zh: {
     comboSaved: string;
     comboDeleted: string;
     comboSaveFirst: string;
+    comboTagAll: string;
+    comboTagBuiltin: string;
     comboTagDisableAll: string;
     comboTagEnableAll: string;
     comboTagBulkHint: string;
@@ -429,6 +436,15 @@ export declare const zh: {
     schedulerWindowDays: string;
     schedulerWindowDaysAll: string;
     schedulerWeekdays: string[];
+    schedulerCalendarPreviousMonth: string;
+    schedulerCalendarNextMonth: string;
+    schedulerCalendarStart: string;
+    schedulerCalendarEnd: string;
+    schedulerCalendarMonthNames: string[];
+    schedulerCalendarMonthTitle: string;
+    schedulerTimePicker: string;
+    schedulerHour: string;
+    schedulerMinute: string;
     schedulerWindowRanges: string;
     schedulerRangeStart: string;
     schedulerRangeEnd: string;
@@ -469,6 +485,10 @@ export declare const zh: {
     schedulerDeleted: string;
     schedulerNeedName: string;
     schedulerNeedTemplate: string;
+    remoteTimeout: string;
+    remoteConnection: string;
+    remoteHttpStatus: string;
+    remoteEmptyStream: string;
 };
 export type Dict = typeof zh;
 export declare const en: Dict;

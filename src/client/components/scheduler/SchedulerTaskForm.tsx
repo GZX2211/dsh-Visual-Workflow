@@ -142,6 +142,14 @@ export function SchedulerTaskForm(props: SchedulerTaskFormProps) {
                   startDate: value.start ?? '',
                   endDate: value.end ?? '',
                 })}
+                weekdays={copy.schedulerWeekdays}
+                prevLabel={copy.schedulerCalendarPreviousMonth}
+                nextLabel={copy.schedulerCalendarNextMonth}
+                startLabel={copy.schedulerCalendarStart}
+                endLabel={copy.schedulerCalendarEnd}
+                formatMonth={(year, month) => copy.schedulerCalendarMonthTitle
+                  .replace('{month}', copy.schedulerCalendarMonthNames[month - 1] ?? String(month))
+                  .replace('{year}', String(year))}
               />
               <div className="wf-cal-card__foot">
                 <button type="button" className="wf-btn is-primary" onClick={onCloseCalendar}>{copy.inspectorSave}</button>
@@ -172,9 +180,9 @@ export function SchedulerTaskForm(props: SchedulerTaskFormProps) {
               {(draft?.window.timeRanges ?? []).map((range, index) => (
                 /* eslint-disable-next-line react/no-array-index-key -- 行级编辑按索引定位 */
                 <div key={`${index}:${range.start}-${range.end}`} className="wf-sched-range-row">
-                  <TimeInput value={range.start} onChange={(value) => onPatchRange(index, { start: value })} ariaLabel={copy.schedulerRangeStart} />
+                  <TimeInput value={range.start} onChange={(value) => onPatchRange(index, { start: value })} ariaLabel={copy.schedulerRangeStart} pickerLabel={copy.schedulerTimePicker} hourLabel={copy.schedulerHour} minuteLabel={copy.schedulerMinute} />
                   <span>~</span>
-                  <TimeInput value={range.end} onChange={(value) => onPatchRange(index, { end: value })} ariaLabel={copy.schedulerRangeEnd} />
+                  <TimeInput value={range.end} onChange={(value) => onPatchRange(index, { end: value })} ariaLabel={copy.schedulerRangeEnd} pickerLabel={copy.schedulerTimePicker} hourLabel={copy.schedulerHour} minuteLabel={copy.schedulerMinute} />
                   <button type="button" className="wf-btn wf-iconbtn" title={copy.inspectorDelete} onClick={() => onRemoveRange(index)}>×</button>
                 </div>
               ))}
@@ -204,7 +212,7 @@ export function SchedulerTaskForm(props: SchedulerTaskFormProps) {
                 {(draft.dailyTimeConfig?.timePoints ?? []).map((point, index) => (
                   /* eslint-disable-next-line react/no-array-index-key -- 行级编辑按索引定位 */
                   <div key={`${index}:${point}`} className="wf-sched-range-row">
-                    <TimeInput value={point} onChange={(value) => onPatchTimePoint(index, value)} ariaLabel={copy.schedulerTimePoints} />
+                    <TimeInput value={point} onChange={(value) => onPatchTimePoint(index, value)} ariaLabel={copy.schedulerTimePoints} pickerLabel={copy.schedulerTimePicker} hourLabel={copy.schedulerHour} minuteLabel={copy.schedulerMinute} />
                     <button type="button" className="wf-btn wf-iconbtn" title={copy.inspectorDelete} onClick={() => onRemoveTimePoint(index)}>×</button>
                   </div>
                 ))}
@@ -222,7 +230,10 @@ export function SchedulerTaskForm(props: SchedulerTaskFormProps) {
               <Field variant="scheduler" label={copy.schedulerIntervalStartFrom}>
                 <TimeInput value={draft?.intervalConfig?.startFrom ?? '09:00'}
                   onChange={(value) => onPatch({ intervalConfig: { ...(draft?.intervalConfig ?? { intervalMinutes: 120, startFrom: '09:00' }), startFrom: value } })}
-                  ariaLabel={copy.schedulerIntervalStartFrom} />
+                  ariaLabel={copy.schedulerIntervalStartFrom}
+                  pickerLabel={copy.schedulerTimePicker}
+                  hourLabel={copy.schedulerHour}
+                  minuteLabel={copy.schedulerMinute} />
               </Field>
             </div>
           )}

@@ -5,10 +5,11 @@ export interface DateRangeValue {
 export interface DateRangePickerProps {
     value: DateRangeValue;
     onChange(value: DateRangeValue): void;
-    /** 星期表头（7 个字符；默认 日一二三四五六）。 */
-    weekdays?: string[];
-    /** 翻月按钮可访问标签。 */
-    prevLabel?: string;
-    nextLabel?: string;
+    weekdays: string[];
+    prevLabel: string;
+    nextLabel: string;
+    startLabel: string;
+    endLabel: string;
+    formatMonth(year: number, month: number): string;
 }
-export declare function DateRangePicker({ value, onChange, weekdays, prevLabel, nextLabel }: DateRangePickerProps): import("react").JSX.Element;
+export declare function DateRangePicker({ value, onChange, weekdays, prevLabel, nextLabel, startLabel, endLabel, formatMonth, }: DateRangePickerProps): import("react").JSX.Element;

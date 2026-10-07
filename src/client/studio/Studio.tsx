@@ -66,7 +66,8 @@ export interface StudioProps {
 }
 
 export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: StudioProps) {
-  const remote = remoteProp ?? useRemote()
+  const defaultRemote = useRemote(t)
+  const remote = remoteProp ?? defaultRemote
   const { state, dispatch } = useStudioState(sessionId)
   const { toast, toastError } = useToast(dispatch)
   // 工作台全局化：列表为全部会话实例（不按 sessionId 过滤；sessionId 仅当前主会话）
@@ -270,7 +271,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
   }, [dispatch, state.panels.mode])
 
   // ---------- 派生 ----------
-  const stageKinds = useMemo(() => stageTemplateKinds(state.mode), [state.mode])
+  const stageKinds = useMemo(() => stageTemplateKinds(state.mode, t.nodeKinds), [state.mode, t.nodeKinds])
   const parentTemplate = useMemo(() => (state.templates.role as import('../../host/shared/types.js').RoleTemplate[]).find((item) => item.kind === 'parent') ?? null, [state.templates.role])
   const roleTemplates = useMemo(() => (state.templates.role as import('../../host/shared/types.js').RoleTemplate[]).filter((item) => item.kind !== 'parent'), [state.templates.role])
   // 画布连线即投影本体（CanvasEdge），渲染期按需计算颜色/条件标签，无需视图补充字段

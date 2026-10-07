@@ -12,6 +12,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import React from 'react'
 import { TimeInput, formatTimeBuffer, parseTimeText } from '../../../../src/client/components/time-input/TimeInput.js'
+import { en, zh } from '../../../../src/client/i18n.js'
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -21,8 +22,8 @@ beforeEach(() => {
   document.body.append(container)
 })
 
-afterEach(() => {
-  root?.unmount()
+afterEach(async () => {
+  if (root) await act(async () => root?.unmount())
   root = null
   container?.remove()
   container = null
@@ -48,10 +49,21 @@ async function blur(): Promise<void> {
   })
 }
 
-async function clickAndOpen(onChange: (v: string) => void): Promise<void> {
+function timeInputProps(value: string, onChange: (next: string) => void, copy = zh) {
+  return {
+    value,
+    onChange,
+    ariaLabel: copy.schedulerRangeStart,
+    pickerLabel: copy.schedulerTimePicker,
+    hourLabel: copy.schedulerHour,
+    minuteLabel: copy.schedulerMinute,
+  }
+}
+
+async function clickAndOpen(onChange: (v: string) => void, copy = zh): Promise<void> {
   await act(async () => {
     root = createRoot(container!)
-    root.render(React.createElement(TimeInput, { value: '09:00', onChange }))
+    root.render(React.createElement(TimeInput, timeInputProps('09:00', onChange, copy)))
   })
   await act(async () => {
     container!.querySelector<HTMLButtonElement>('.wf-time__clock')!.click()
@@ -80,11 +92,20 @@ describe('TimeInput 纯函数', () => {
 })
 
 describe('TimeInput 组件', () => {
+  it("test_english_copy_supplies_accessible_picker_labels", async () => {
+    await clickAndOpen(() => {}, en)
+    expect(field().getAttribute('aria-label')).toBe(en.schedulerRangeStart)
+    expect(container!.querySelector<HTMLButtonElement>('.wf-time__clock')?.getAttribute('aria-label')).toBe(en.schedulerRangeStart)
+    expect(container!.querySelector<HTMLElement>('.wf-time__picker')?.getAttribute('aria-label')).toBe(en.schedulerTimePicker)
+    const columns = Array.from(container!.querySelectorAll<HTMLElement>('.wf-time__col'))
+    expect(columns.map((column) => column.getAttribute('aria-label'))).toEqual([en.schedulerHour, en.schedulerMinute])
+  })
+
   it('文本输入：键入 1125 失焦后提交为 11:25', async () => {
     const log: string[] = []
     await act(async () => {
       root = createRoot(container!)
-      root.render(React.createElement(TimeInput, { value: '09:00', onChange: (v) => log.push(v) }))
+      root.render(React.createElement(TimeInput, timeInputProps('09:00', (v) => log.push(v))))
     })
     await typeText('1125')
     await blur()
@@ -95,7 +116,7 @@ describe('TimeInput 组件', () => {
     const log: string[] = []
     await act(async () => {
       root = createRoot(container!)
-      root.render(React.createElement(TimeInput, { value: '09:00', onChange: (v) => log.push(v) }))
+      root.render(React.createElement(TimeInput, timeInputProps('09:00', (v) => log.push(v))))
     })
     await typeText('25:99')
     await blur()

@@ -164,7 +164,7 @@ export function ComboCatalog(props: ComboCatalogProps) {
                   className={`wf-combo-tag${activeTag === tag.key ? ' is-active' : ''}`}
                   onClick={() => onTagChange(activeTag === tag.key ? TAG_ALL : tag.key)}
                 >
-                  {tag.label}
+                  {tag.kind === 'all' ? copy.comboTagAll : tag.kind === 'builtin' ? copy.comboTagBuiltin : tag.label}
                 </button>
               ))}
               {tagToolNames.length > 0

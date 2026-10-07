@@ -2,6 +2,10 @@ import * as EP from '../../host/shared/protocol.js';
 export { EP };
 /** 传输层超时错误码（client 侧专有；后端业务码见共享协议 ERR_* 常量）。 */
 export declare const REMOTE_TIMEOUT_CODE = "REMOTE_TIMEOUT";
+export declare const REMOTE_CONNECTION_CODE = "REMOTE_CONNECTION";
+export declare const REMOTE_HTTP_STATUS_CODE = "REMOTE_HTTP_STATUS";
+export declare const REMOTE_EMPTY_STREAM_CODE = "REMOTE_EMPTY_STREAM";
+export type RemoteFailureKind = 'timeout' | 'connection' | 'http' | 'emptyStream';
 /** 非流式调用默认超时：覆盖启动服务/运行/导入导出等长耗时端点，仅收敛「永久悬挂」。 */
 export declare const DEFAULT_REMOTE_TIMEOUT_MS = 120000;
 /** 轮询专用短超时：单轮请求悬挂时必须尽快释放 in-flight 位，下一轮才能继续。 */
@@ -9,6 +13,10 @@ export declare const POLL_REMOTE_TIMEOUT_MS = 8000;
 /** 携带稳定错误码的远端错误（code 可判定，调用方按语义分支）。 */
 export interface RemoteError extends Error {
     code?: string;
+    transportKind?: RemoteFailureKind;
+    detail?: string;
+    endpoint?: string;
+    status?: number;
 }
 /**
  * 乐观锁冲突判定（稳定错误码本体在共享协议常量）：保存路径据此走「冲突语义」

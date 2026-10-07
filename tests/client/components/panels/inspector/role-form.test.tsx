@@ -12,7 +12,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import React from 'react'
 import { RoleForm } from '../../../../../src/client/components/panels/inspector/role-form.js'
-import { zh } from '../../../../../src/client/i18n.js'
+import { en, zh } from '../../../../../src/client/i18n.js'
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -22,8 +22,8 @@ beforeEach(() => {
   document.body.append(container)
 })
 
-afterEach(() => {
-  root?.unmount()
+afterEach(async () => {
+  if (root) await act(async () => root?.unmount())
   root = null
   container?.remove()
   container = null
@@ -56,6 +56,12 @@ async function renderRoleForm(props: Partial<Parameters<typeof RoleForm>[0]> = {
 }
 
 describe('角色表单模式下拉', () => {
+  it("test_schema_placeholders_follow_the_supplied_dictionary", async () => {
+    await renderRoleForm({ copy: en })
+    const placeholders = Array.from(document.querySelectorAll<HTMLTextAreaElement>('textarea')).map((field) => field.placeholder)
+    expect(placeholders.slice(-2)).toEqual([en.inputSchemaExample, en.outputSchemaExample])
+  })
+
   it('子代理：preset + 自定义组合（optgroup 分组）都在下拉中', async () => {
     await renderRoleForm()
     const select = Array.from(document.querySelectorAll<HTMLSelectElement>('select')).find((item) => item.value === 'standard')
