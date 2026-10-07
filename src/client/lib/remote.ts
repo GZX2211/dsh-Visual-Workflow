@@ -5,7 +5,7 @@
 //
 // 失败语义（显式区分，见 client AGENTS「数据流与数据访问边界」）：
 //   - 业务失败：后端 { ok:false, error:{ message, code } } → 抛出携带稳定 code 的 Error；
-//   - 传输/解析失败：连接失败 → 「无法连接工作流服务」；响应超时 → code=REMOTE_TIMEOUT；
+//   - 传输失败带稳定分类与诊断数据；UI 注入面负责把它们映射为当前语言的提示；
 //   - 主动取消：调用方 signal 触发 → 原样抛出 AbortError（调用方按取消语义静默处理）。
 // 每个非流式调用都在超时预算内完成（timeoutMs=0 表示不设超时），悬挂请求不再永久占用调用方。
 
@@ -15,6 +15,11 @@ export { EP }
 
 /** 传输层超时错误码（client 侧专有；后端业务码见共享协议 ERR_* 常量）。 */
 export const REMOTE_TIMEOUT_CODE = 'REMOTE_TIMEOUT'
+export const REMOTE_CONNECTION_CODE = 'REMOTE_CONNECTION'
+export const REMOTE_HTTP_STATUS_CODE = 'REMOTE_HTTP_STATUS'
+export const REMOTE_EMPTY_STREAM_CODE = 'REMOTE_EMPTY_STREAM'
+
+export type RemoteFailureKind = 'timeout' | 'connection' | 'http' | 'emptyStream'
 
 /** 非流式调用默认超时：覆盖启动服务/运行/导入导出等长耗时端点，仅收敛「永久悬挂」。 */
 export const DEFAULT_REMOTE_TIMEOUT_MS = 120_000
@@ -25,6 +30,10 @@ export const POLL_REMOTE_TIMEOUT_MS = 8_000
 /** 携带稳定错误码的远端错误（code 可判定，调用方按语义分支）。 */
 export interface RemoteError extends Error {
   code?: string
+  transportKind?: RemoteFailureKind
+  detail?: string
+  endpoint?: string
+  status?: number
 }
 
 /**
@@ -74,32 +83,57 @@ function createDeadline(options: RemoteCallOptions | undefined): Deadline {
   }
 }
 
-/** 传输失败归一化：超时 / 主动取消 / 连接失败三态留在网络边界，调用方零猜测。 */
+/** Normalize transport failures without coupling the network boundary to UI copy. */
+function connectionFailure(error: unknown): RemoteError {
+  const detail = error instanceof Error ? error.message : String(error)
+  const failure = new Error(REMOTE_CONNECTION_CODE) as RemoteError
+  failure.code = REMOTE_CONNECTION_CODE
+  failure.transportKind = 'connection'
+  failure.detail = detail
+  return failure
+}
+
 function transportFailure(error: unknown, endpoint: string, deadline: Deadline): Error {
   if (deadline.didTimeout()) {
-    const timeout = new Error(`工作流服务响应超时（${endpoint}）`) as RemoteError
+    const timeout = new Error(REMOTE_TIMEOUT_CODE) as RemoteError
     timeout.code = REMOTE_TIMEOUT_CODE
+    timeout.transportKind = 'timeout'
+    timeout.endpoint = endpoint
     return timeout
   }
   if (deadline.abortedByCaller() || (error as Error | undefined)?.name === 'AbortError') return error as Error
-  return new Error(`无法连接工作流服务：${error instanceof Error ? error.message : String(error)}`)
+  return connectionFailure(error)
 }
 
-/** 非 2xx 响应 → 携带后端 message/code 的错误（非 JSON 响应保留 HTTP 兜底文案）。 */
-async function errorFromResponse(response: Response): Promise<RemoteError> {
-  let message = `工作流服务错误（HTTP ${response.status}）`
-  let code: string | undefined
-  try {
-    const payload = (await response.json()) as { error?: { message?: unknown; code?: unknown } }
-    if (payload?.error?.message) message = String(payload.error.message)
-    const rawCode = payload?.error?.code
-    if (typeof rawCode === 'string' && rawCode) code = rawCode
-  } catch {
-    // 非 JSON 响应：保留兜底文案
-  }
-  const error = new Error(message) as RemoteError
+type ErrorPayload = { error?: { message?: unknown; code?: unknown } | null } | null
+
+/** Keep Host error payloads outside the transport-localization path. */
+function responseError(payload: ErrorPayload, status: number): RemoteError {
+  const hostError = payload?.error
+  const hasHostError = hostError !== undefined && hostError !== null
+  const rawMessage = hostError?.message
+  const message = rawMessage ? String(rawMessage) : undefined
+  const rawCode = hostError?.code
+  const code = typeof rawCode === 'string' && rawCode ? rawCode : undefined
+  const fallback = code ?? (hasHostError ? `HTTP ${status}` : REMOTE_HTTP_STATUS_CODE)
+  const error = new Error(message ?? fallback) as RemoteError
   if (code) error.code = code
+  else if (!hasHostError && !message) error.code = REMOTE_HTTP_STATUS_CODE
+  if (!hasHostError && !message) {
+    error.transportKind = 'http'
+    error.status = status
+  }
   return error
+}
+
+async function errorFromResponse(response: Response): Promise<RemoteError> {
+  let payload: ErrorPayload = {}
+  try {
+    payload = (await response.json()) as ErrorPayload
+  } catch {
+    // Non-JSON responses have no Host error payload and use the localized HTTP fallback.
+  }
+  return responseError(payload, response.status)
 }
 
 /** 调用 Host API（同源 fetch；超时与取消见 RemoteCallOptions）。 */
@@ -128,14 +162,7 @@ export async function remoteCall(
     } catch {
       // 非 JSON 响应
     }
-    if (payload.ok === false) {
-      // 稳定错误码随 Error 携带：调用方按 code 分支处理（如 ERR_REVISION_CONFLICT 冲突语义），
-      // 而非仅展示通用 message。
-      const error = new Error(String(payload?.error?.message ?? `工作流服务错误（HTTP ${response.status}）`)) as RemoteError
-      const code = payload?.error?.code
-      if (typeof code === 'string' && code) error.code = code
-      throw error
-    }
+    if (payload.ok === false) throw responseError(payload, response.status)
     return payload.value
   } finally {
     deadline.dispose()
@@ -164,10 +191,15 @@ export async function streamCall(
     })
   } catch (error) {
     if ((error as Error)?.name === 'AbortError') return
-    throw new Error(`无法连接工作流服务：${error instanceof Error ? error.message : String(error)}`)
+    throw connectionFailure(error)
   }
   if (!response.ok) throw await errorFromResponse(response)
-  if (!response.body) throw new Error('流式响应无内容')
+  if (!response.body) {
+    const empty = new Error(REMOTE_EMPTY_STREAM_CODE) as RemoteError
+    empty.code = REMOTE_EMPTY_STREAM_CODE
+    empty.transportKind = 'emptyStream'
+    throw empty
+  }
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''

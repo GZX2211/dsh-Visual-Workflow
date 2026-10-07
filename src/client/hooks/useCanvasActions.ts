@@ -292,7 +292,7 @@ export function useCanvasActions(
       notify('error', t.stageDuplicatedHint)
       return
     }
-    const labels = stageTemplateKinds(state.mode)
+    const labels = stageTemplateKinds(state.mode, t.nodeKinds)
     const label = labels.find((item) => item.kind === kind)?.label ?? kind
     const node: CanvasNode = {
       id: `${kind}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
@@ -304,7 +304,7 @@ export function useCanvasActions(
     dispatch({ type: 'NODE_ADDED', node })
     dispatch({ type: 'SELECT_NODE', id: node.id })
     notify('success', t.toastNodeAdded)
-  }, [dispatch, history, notify, state.canvas.nodes, state.currentId, state.mode, t.stageDuplicatedHint, t.toastNodeAdded])
+  }, [dispatch, history, notify, state.canvas.nodes, state.currentId, state.mode, t.nodeKinds, t.stageDuplicatedHint, t.toastNodeAdded])
 
   /** 放置协作组节点。 */
   const placeGroupNode = useCallback((position: { x: number; y: number }) => {

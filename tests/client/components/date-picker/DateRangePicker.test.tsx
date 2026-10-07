@@ -13,6 +13,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import React from 'react'
 import { DateRangePicker, type DateRangeValue } from '../../../../src/client/components/date-picker/DateRangePicker.js'
+import { en, zh } from '../../../../src/client/i18n.js'
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -38,29 +39,41 @@ function qall<T extends Element>(selector: string): T[] {
   return Array.from(container!.querySelectorAll<T>(selector))
 }
 
-async function render(value: DateRangeValue, onChange: (v: DateRangeValue) => void): Promise<void> {
+function pickerProps(copy: typeof zh, value: DateRangeValue, onChange: (next: DateRangeValue) => void) {
+  return {
+    value,
+    onChange,
+    weekdays: copy.schedulerWeekdays,
+    prevLabel: copy.schedulerCalendarPreviousMonth,
+    nextLabel: copy.schedulerCalendarNextMonth,
+    startLabel: copy.schedulerCalendarStart,
+    endLabel: copy.schedulerCalendarEnd,
+    formatMonth: (year: number, month: number): string => copy.schedulerCalendarMonthTitle
+      .replace('{month}', copy.schedulerCalendarMonthNames[month - 1] ?? String(month))
+      .replace('{year}', String(year)),
+  }
+}
+
+async function render(value: DateRangeValue, onChange: (v: DateRangeValue) => void, copy = zh): Promise<void> {
   await act(async () => {
     root = createRoot(container!)
-    root.render(React.createElement(DateRangePicker, { value, onChange }))
+    root.render(React.createElement(DateRangePicker, pickerProps(copy, value, onChange)))
   })
 }
 
 /** 有状态容器（受控组件真实用法：onChange 回写 value 触发重渲）。 */
-function StatefulPicker({ initial, log }: { initial: DateRangeValue; log: DateRangeValue[] }) {
+function StatefulPicker({ initial, log, copy = zh }: { initial: DateRangeValue; log: DateRangeValue[]; copy?: typeof zh }) {
   const [value, setValue] = React.useState(initial)
-  return React.createElement(DateRangePicker, {
-    value,
-    onChange: (next) => {
-      log.push(next)
-      setValue(next)
-    },
-  })
+  return React.createElement(DateRangePicker, pickerProps(copy, value, (next) => {
+    log.push(next)
+    setValue(next)
+  }))
 }
 
-async function renderStateful(initial: DateRangeValue, log: DateRangeValue[]): Promise<void> {
+async function renderStateful(initial: DateRangeValue, log: DateRangeValue[], copy = zh): Promise<void> {
   await act(async () => {
     root = createRoot(container!)
-    root.render(React.createElement(StatefulPicker, { initial, log }))
+    root.render(React.createElement(StatefulPicker, { initial, log, copy }))
   })
 }
 
@@ -68,14 +81,14 @@ async function renderStateful(initial: DateRangeValue, log: DateRangeValue[]): P
  * 受控重渲染：同一 root 多次 render（不重建组件实例），
  * 模拟父组件切换任务时直接改 value.start（不经 onChange 回写）。
  */
-async function renderControlled(value: DateRangeValue): Promise<void> {
+async function renderControlled(value: DateRangeValue, copy = zh): Promise<void> {
   if (!root) {
     await act(async () => {
       root = createRoot(container!)
     })
   }
   await act(async () => {
-    root!.render(React.createElement(DateRangePicker, { value, onChange: () => {} }))
+    root!.render(React.createElement(DateRangePicker, pickerProps(copy, value, () => {})))
   })
   // flush 被动 effect（外部 value.start 变化 → setRange），确保无 act 外更新
   await act(async () => {})
@@ -92,6 +105,16 @@ describe('DateRangePicker', () => {
     expect(container!.textContent).toContain('六')
     // 每个面板都有 ‹ 和 ›（左右各自可切换）
     expect(qall('.wf-cal-nav').length).toBe(4)
+  })
+
+  it("test_english_copy_formats_months_and_accessible_navigation_labels", async () => {
+    await render({ start: '2026-10-01', end: '2026-10-31' }, () => {}, en)
+    expect(qall<HTMLElement>('.wf-cal-month__title')[0].textContent).toBe('October 2026')
+    expect(qall<HTMLButtonElement>('.wf-cal-nav')[0].getAttribute('aria-label')).toBe(en.schedulerCalendarPreviousMonth)
+    expect(qall<HTMLButtonElement>('.wf-cal-nav')[1].getAttribute('aria-label')).toBe(en.schedulerCalendarNextMonth)
+    expect(qall<HTMLElement>('.wf-cal-week')[0].textContent).toBe('Sun')
+    expect(qall<HTMLElement>('.wf-cal-cell.is-start .wf-cal-cell__tag')[0].textContent).toBe(en.schedulerCalendarStart)
+    expect(qall<HTMLElement>('.wf-cal-cell.is-end .wf-cal-cell__tag')[0].textContent).toBe(en.schedulerCalendarEnd)
   })
 
   it('左右月独立切换，且右月恒大于左月', async () => {
