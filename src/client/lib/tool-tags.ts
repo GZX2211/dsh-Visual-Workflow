@@ -20,8 +20,8 @@ export type ToolTagKind = 'all' | 'builtin' | 'mcp'
 export interface ToolTag {
   /** 稳定键：'all' | 'builtin' | `mcp:<server>`。 */
   key: string
-  /** 展示标签。 */
-  label: string
+  /** Dynamic MCP server label; fixed labels are supplied by the rendering component. */
+  label?: string
   kind: ToolTagKind
   /** MCP 服务器命名空间（kind='mcp' 时有值）。 */
   server?: string
@@ -80,8 +80,8 @@ export function buildToolTags(
     .map((item) => String(item?.serverName ?? '').trim())
     .filter(Boolean)
   const tags: ToolTag[] = [
-    { key: TAG_ALL, label: '全部', kind: 'all' },
-    { key: TAG_BUILTIN, label: '官方工具', kind: 'builtin' },
+    { key: TAG_ALL, kind: 'all' },
+    { key: TAG_BUILTIN, kind: 'builtin' },
   ]
   for (const namespace of namespaces) {
     // 标签显示优先用已配置 serverName：命名空间 == 配置名的规范化形式（服务名含

@@ -51,8 +51,8 @@ describe('buildToolTags', () => {
       'mcp:codegraph',
       'mcp:playwright_mcp',
     ])
-    expect(tags[0].label).toBe('全部')
-    expect(tags[1].label).toBe('官方工具')
+    expect(tags[0].label).toBeUndefined()
+    expect(tags[1].label).toBeUndefined()
   })
 
   it('新 server 工具出现时自动追加 Tag（动态性）', () => {

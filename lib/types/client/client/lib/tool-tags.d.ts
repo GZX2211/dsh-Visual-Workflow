@@ -6,8 +6,8 @@ export type ToolTagKind = 'all' | 'builtin' | 'mcp';
 export interface ToolTag {
     /** 稳定键：'all' | 'builtin' | `mcp:<server>`。 */
     key: string;
-    /** 展示标签。 */
-    label: string;
+    /** Dynamic MCP server label; fixed labels are supplied by the rendering component. */
+    label?: string;
     kind: ToolTagKind;
     /** MCP 服务器命名空间（kind='mcp' 时有值）。 */
     server?: string;

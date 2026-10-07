@@ -15,11 +15,12 @@ export interface DateRangeValue {
 export interface DateRangePickerProps {
   value: DateRangeValue
   onChange(value: DateRangeValue): void
-  /** 星期表头（7 个字符；默认 日一二三四五六）。 */
-  weekdays?: string[]
-  /** 翻月按钮可访问标签。 */
-  prevLabel?: string
-  nextLabel?: string
+  weekdays: string[]
+  prevLabel: string
+  nextLabel: string
+  startLabel: string
+  endLabel: string
+  formatMonth(year: number, month: number): string
 }
 
 /** 日历单格：day 为日号；year/month 为格子的实际所属年月（前后月灰显格取其真实年月）。 */
@@ -93,13 +94,15 @@ function buildMonthView(year: number, month: number): MonthView {
   return { year, month, cells }
 }
 
-export function DateRangePicker({ value, onChange, weekdays, prevLabel, nextLabel }: DateRangePickerProps) {
+export function DateRangePicker({
+  value, onChange, weekdays, prevLabel, nextLabel, startLabel, endLabel, formatMonth,
+}: DateRangePickerProps) {
   const today = todayKey()
   const start = parseDate(value.start)
   const end = parseDate(value.end)
   const startKey = start ? dayKey(start.year, start.month, start.day) : null
   const endKey = end ? dayKey(end.year, end.month, end.day) : null
-  const weekHeader = weekdays ?? ['日', '一', '二', '三', '四', '五', '六']
+  const weekHeader = weekdays
 
   /** 月偏移（跨年归一）。 */
   const addMonths = (year: number, month: number, delta: number): { year: number; month: number } => {
@@ -186,9 +189,9 @@ export function DateRangePicker({ value, onChange, weekdays, prevLabel, nextLabe
   const renderMonth = (view: MonthView, move: (delta: number) => void): React.JSX.Element => (
     <div className="wf-cal-month">
       <div className="wf-cal-month__head">
-        <button type="button" className="wf-cal-nav" title={prevLabel ?? '上一月'} onClick={() => move(-1)}>‹</button>
-        <span className="wf-cal-month__title">{`${view.year}年${view.month}月`}</span>
-        <button type="button" className="wf-cal-nav" title={nextLabel ?? '下一月'} onClick={() => move(1)}>›</button>
+        <button type="button" className="wf-cal-nav" title={prevLabel} aria-label={prevLabel} onClick={() => move(-1)}>‹</button>
+        <span className="wf-cal-month__title">{formatMonth(view.year, view.month)}</span>
+        <button type="button" className="wf-cal-nav" title={nextLabel} aria-label={nextLabel} onClick={() => move(1)}>›</button>
       </div>
       <div className="wf-cal-grid">
         {weekHeader.map((label) => <span key={label} className="wf-cal-week">{label}</span>)}
@@ -208,8 +211,8 @@ export function DateRangePicker({ value, onChange, weekdays, prevLabel, nextLabe
               tabIndex={cell.inMonth ? 0 : -1}
             >
               <span className="wf-cal-cell__num">{cell.day}</span>
-              {isStart ? <span className="wf-cal-cell__tag">开始</span> : null}
-              {isEnd ? <span className="wf-cal-cell__tag">结束</span> : null}
+              {isStart ? <span className="wf-cal-cell__tag">{startLabel}</span> : null}
+              {isEnd ? <span className="wf-cal-cell__tag">{endLabel}</span> : null}
             </button>
           )
         })}

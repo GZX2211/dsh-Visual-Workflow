@@ -21,7 +21,7 @@ import { computeRunLocks } from '../../../src/client/lib/run-locks.js'
 import { createInitialState, type StudioAction, type StudioState } from '../../../src/client/studio/studio-state.js'
 import type { GraphHistoryFace } from '../../../src/client/hooks/useGraphHistory.js'
 import type { RoleAssetDetail } from '../../../src/host/shared/asset-types.js'
-import { zh } from '../../../src/client/i18n.js'
+import { en, zh } from '../../../src/client/i18n.js'
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -80,7 +80,7 @@ interface CanvasHarness {
   saveCanvas: ReturnType<typeof vi.fn>
 }
 
-async function renderCanvas(state: StudioState): Promise<CanvasHarness> {
+async function renderCanvas(state: StudioState, copy = zh): Promise<CanvasHarness> {
   const dispatched: Array<{ type: string; [key: string]: unknown }> = []
   const toasts: Array<{ kind: string; text: string }> = []
   const saveCanvas = vi.fn(async () => null)
@@ -90,7 +90,7 @@ async function renderCanvas(state: StudioState): Promise<CanvasHarness> {
   const history = { remember: vi.fn(), undo: vi.fn(), redo: vi.fn(), canUndo: false, canRedo: false } as unknown as GraphHistoryFace
   let face: CanvasActionsFace | null = null
   function Harness(): null {
-    const f = useCanvasActions(state, dispatch, notify as never, history, zh, { locks, saveCanvas })
+    const f = useCanvasActions(state, dispatch, notify as never, history, copy, { locks, saveCanvas })
     useEffect(() => { face = f }, [f])
     return null
   }
@@ -136,6 +136,18 @@ describe('角色资产拖入画布（placeRoleAssetNode）', () => {
     await act(async () => { h.face.placeRoleAssetNode(roleAsset(), { x: 0, y: 0 }) })
     expect(h.dispatched).toEqual([])
     expect(h.toasts).toEqual([])
+  })
+})
+
+describe('localized stage defaults', () => {
+  it('test_new_stage_uses_current_copy_and_preserves_existing_saved_labels', async () => {
+    const existing = { id: 'agent-1', kind: 'agent' as const, position: { x: 0, y: 0 }, data: { label: 'Saved agent name' } }
+    const state = { ...assetState([existing]), mode: 'mode2' as const }
+    const h = await renderCanvas(state, en)
+    await act(async () => { h.face.placeStageNode('start', { x: 40, y: 60 }) })
+    const added = h.dispatched.find((action) => action.type === 'NODE_ADDED')
+    expect((added?.node as { data: { label: string } }).data.label).toBe(en.nodeKinds.input)
+    expect(existing.data.label).toBe('Saved agent name')
   })
 })
 
