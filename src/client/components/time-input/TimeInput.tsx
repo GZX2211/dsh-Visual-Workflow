@@ -15,6 +15,9 @@ export interface TimeInputProps {
   onChange(value: string): void
   placeholder?: string
   ariaLabel?: string
+  pickerLabel: string
+  hourLabel: string
+  minuteLabel: string
 }
 
 /** 解析 "HH:mm" / "H:mm" / "HHmm" / "Hmm"/ "HH" / "H" → {hour, minute}（非法 null）。 */
@@ -78,7 +81,7 @@ function pad2(num: number): string {
 const HOURS = Array.from({ length: 24 }, (_, i) => i)
 const MINUTES = Array.from({ length: 60 }, (_, i) => i)
 
-export function TimeInput({ value, onChange, placeholder, ariaLabel }: TimeInputProps) {
+export function TimeInput({ value, onChange, placeholder, ariaLabel, pickerLabel, hourLabel, minuteLabel }: TimeInputProps) {
   const [open, setOpen] = useState(false)
   const [pendingHour, setPendingHour] = useState<number | null>(null)
   const [pendingMinute, setPendingMinute] = useState<number | null>(null)
@@ -172,11 +175,11 @@ export function TimeInput({ value, onChange, placeholder, ariaLabel }: TimeInput
           }
         }}
       />
-      <button type="button" className="wf-time__clock" title={ariaLabel ?? '选择时间'} onClick={openPicker}>🕑</button>
+      <button type="button" className="wf-time__clock" title={ariaLabel ?? pickerLabel} aria-label={ariaLabel ?? pickerLabel} onClick={openPicker}>🕑</button>
       {open
         ? (
-            <span className="wf-time__picker" role="listbox" aria-label={ariaLabel ?? '选择时间'}>
-              <span className="wf-time__col" role="listbox" aria-label="时">
+            <span className="wf-time__picker" role="listbox" aria-label={pickerLabel}>
+              <span className="wf-time__col" role="listbox" aria-label={hourLabel}>
                 {HOURS.map((hour) => (
                   <button
                     key={`h:${hour}`}
@@ -190,7 +193,7 @@ export function TimeInput({ value, onChange, placeholder, ariaLabel }: TimeInput
                   </button>
                 ))}
               </span>
-              <span className="wf-time__col" role="listbox" aria-label="分">
+              <span className="wf-time__col" role="listbox" aria-label={minuteLabel}>
                 {MINUTES.map((minute) => (
                   <button
                     key={`m:${minute}`}

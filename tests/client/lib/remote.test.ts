@@ -10,7 +10,9 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  remoteCall, EP, isRevisionConflict, DEFAULT_REMOTE_TIMEOUT_MS, POLL_REMOTE_TIMEOUT_MS, REMOTE_TIMEOUT_CODE,
+  remoteCall, streamCall, EP, isRevisionConflict, DEFAULT_REMOTE_TIMEOUT_MS, POLL_REMOTE_TIMEOUT_MS,
+  REMOTE_TIMEOUT_CODE, REMOTE_CONNECTION_CODE, REMOTE_HTTP_STATUS_CODE, REMOTE_EMPTY_STREAM_CODE,
+  type RemoteError,
 } from '../../../src/client/lib/remote.js'
 
 afterEach(() => {
@@ -61,14 +63,22 @@ describe('remoteCall', () => {
     expect(error!.code).toBe('FLOW_REVISION_CONFLICT')
   })
 
-  it('非 JSON 响应：兜底文案', async () => {
+  it('非 JSON 响应：返回可本地化的 HTTP 状态失败', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('oops', { status: 500 })))
-    await expect(remoteCall('x')).rejects.toThrow('工作流服务错误')
+    await expect(remoteCall('x')).rejects.toMatchObject({
+      code: REMOTE_HTTP_STATUS_CODE,
+      transportKind: 'http',
+      status: 500,
+    })
   })
 
-  it('网络失败：连接错误文案', async () => {
+  it('网络失败：保留稳定连接码与底层诊断', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('fetch failed') }))
-    await expect(remoteCall('x')).rejects.toThrow('无法连接工作流服务')
+    await expect(remoteCall('x')).rejects.toMatchObject({
+      code: REMOTE_CONNECTION_CODE,
+      transportKind: 'connection',
+      detail: 'fetch failed',
+    })
   })
 
   it('端点常量与后端协议表零漂移（EP 命名空间导出）', () => {
@@ -76,6 +86,16 @@ describe('remoteCall', () => {
     expect(EP.EP_LIST_WORKFLOWS).toBe('listWorkflows')
     expect(EP.EP_SERVICE_START).toBe('serviceStart')
     expect(EP.EP_PUT_TEMPLATE).toBe('putTemplate')
+  })
+})
+
+describe('streamCall fallback errors', () => {
+  it('test_empty_success_response_uses_a_stable_localizable_failure', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 200 })))
+    await expect(streamCall('debug', {}, () => {})).rejects.toMatchObject({
+      code: REMOTE_EMPTY_STREAM_CODE,
+      transportKind: 'emptyStream',
+    })
   })
 })
 
@@ -91,12 +111,12 @@ describe('remoteCall 超时与取消（失败语义显式）', () => {
     vi.useFakeTimers()
     hangingFetch()
     const pending = remoteCall('slowEndpoint', {}, { timeoutMs: 50 })
-    const settled = pending.then(() => null, (error: unknown) => error as Error & { code?: string })
+    const settled = pending.then(() => null, (error: unknown) => error as RemoteError)
     await vi.advanceTimersByTimeAsync(50)
     const error = await settled
     expect(error).not.toBeNull()
     expect(error!.code).toBe(REMOTE_TIMEOUT_CODE)
-    expect(error!.message).toContain('slowEndpoint')
+    expect(error!.endpoint).toBe('slowEndpoint')
   })
 
   it('主动取消：原样抛出 AbortError（调用方按取消语义静默处理，不伪装成连接失败）', async () => {

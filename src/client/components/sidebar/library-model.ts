@@ -136,11 +136,11 @@ export interface LibraryModelInput {
 }
 
 /** 四 Tag（与左栏一致；底栏以图标展示）。 */
-const TAB_DEFS: Array<{ key: LibTab; label: string; icon: string }> = [
-  { key: 'workflow', label: '工作流', icon: '▦' },
-  { key: 'role', label: '角色', icon: '◆' },
-  { key: 'data', label: '数据', icon: '▤' },
-  { key: 'other', label: '其他', icon: '⋯' },
+const TAB_DEFS: Array<{ key: LibTab; icon: string }> = [
+  { key: 'workflow', icon: '▦' },
+  { key: 'role', icon: '◆' },
+  { key: 'data', icon: '▤' },
+  { key: 'other', icon: '⋯' },
 ]
 
 function truncate(value: unknown, limit: number): string {
@@ -378,7 +378,7 @@ export function buildLibraryModel(input: LibraryModelInput): LibraryModel {
         emptyText: t.libEmptyTemplates,
         cards: [
           card(
-            parentTemplate.id, 'parentTemplate', parentTemplate.id, '父', String(parentTemplate.name ?? t.parentAgent),
+            parentTemplate.id, 'parentTemplate', parentTemplate.id, t.parentMarker, String(parentTemplate.name ?? t.parentAgent),
             roleSubline(parentTemplate), {
               label: String(parentTemplate.name ?? t.parentAgent),
               onClick: () => onSelectLib('parentTemplate', parentTemplate.id),
@@ -493,7 +493,7 @@ export function buildLibraryModel(input: LibraryModelInput): LibraryModel {
     ...def,
     label: librarySource === 'asset' && def.key === 'data'
       ? t.libTabExperience
-      : ((t.libTab as Record<string, string>)[def.key] ?? def.label),
+      : (t.libTab as Record<string, string>)[def.key],
   }))
 
   return { tabs, sections: visible, emptyHint }

@@ -12,7 +12,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { ASSET_HISTORY_SECTIONS, buildLibraryModel, type LibraryModelInput } from '../../../../src/client/components/sidebar/library-model.js'
-import { zh } from '../../../../src/client/i18n.js'
+import { en, zh } from '../../../../src/client/i18n.js'
 
 /** builder 输入工厂（只覆盖被测字段，其余为最小缺省）。 */
 function makeInput(partial: Partial<LibraryModelInput> = {}): LibraryModelInput {
@@ -78,6 +78,22 @@ describe('P4 父模板卡高亮修复（buildLibraryModel）', () => {
     }))
     const parent = model.sections.find((section) => section.key === 'parent')
     expect(parent?.cards[0].pinned).toBe(false)
+  })
+})
+
+describe('library model labels', () => {
+  it('test_tabs_use_the_supplied_dictionary', () => {
+    const model = buildLibraryModel(makeInput({ copy: en }))
+    expect(model.tabs.map((tab) => tab.label)).toEqual(Object.values(en.libTab))
+  })
+
+  it('test_parent_marker_uses_the_supplied_dictionary', () => {
+    const model = buildLibraryModel(makeInput({
+      copy: en,
+      libTab: 'role',
+      parentTemplate: { id: 'tpl-parent', name: 'CEO' } as never,
+    }))
+    expect(model.sections.find((section) => section.key === 'parent')?.cards[0].icon).toBe(en.parentMarker)
   })
 })
 

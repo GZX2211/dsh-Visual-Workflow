@@ -175,8 +175,8 @@ export function RoleForm({ data, copy, presets, models, combos, onPatch, onLoadM
             <span className="wf-hint">{copy.parentAdvancedHint}</span>
           ) : (
             <>
-              <TextAreaField label={copy.inputSchema} value={data.inputSchema} placeholder="如：{query: string}" onChange={(value) => onPatch({ inputSchema: value })} />
-              <TextAreaField label={copy.outputSchema} value={data.outputSchema} placeholder="如：{result: string, pass: boolean}" onChange={(value) => onPatch({ outputSchema: value })} />
+              <TextAreaField label={copy.inputSchema} value={data.inputSchema} placeholder={copy.inputSchemaExample} onChange={(value) => onPatch({ inputSchema: value })} />
+              <TextAreaField label={copy.outputSchema} value={data.outputSchema} placeholder={copy.outputSchemaExample} onChange={(value) => onPatch({ outputSchema: value })} />
             </>
           )}
         </div>

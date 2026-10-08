@@ -22,15 +22,27 @@ export const HANDLES: Record<string, HandleSpec> = {
   group: { inputs: ['flow-in'], outputs: ['flow-out'] },
 }
 
-/** 阶段节点显示名（模式一：启动/结束；模式二：输入/输出，需求 §4.2.5.1）。 */
-export function stageLabels(mode: string): { start: string; end: string; pause: string } {
-  const isMode2 = mode === 'mode2'
-  return { start: isMode2 ? '输入' : '启动', end: isMode2 ? '输出' : '结束', pause: '暂停' }
+export interface StageLabelCopy {
+  start: string
+  end: string
+  pause: string
+  input: string
+  output: string
 }
 
-/** 阶段节点固定卡片（模式二没有暂停，需求 §4.2.5.1 规则 1/2）。 */
-export function stageTemplateKinds(mode: string): Array<{ kind: NodeKind; label: string }> {
-  const labels = stageLabels(mode)
+/** Stage labels are injected by UI callers so this pure graph helper stays locale-agnostic. */
+export function stageLabels(mode: string, copy: StageLabelCopy): { start: string; end: string; pause: string } {
+  const isMode2 = mode === 'mode2'
+  return {
+    start: isMode2 ? copy.input : copy.start,
+    end: isMode2 ? copy.output : copy.end,
+    pause: copy.pause,
+  }
+}
+
+/** Stage nodes available in each mode (mode 2 has no pause node). */
+export function stageTemplateKinds(mode: string, copy: StageLabelCopy): Array<{ kind: NodeKind; label: string }> {
+  const labels = stageLabels(mode, copy)
   const out: Array<{ kind: NodeKind; label: string }> = [
     { kind: 'start', label: labels.start },
     { kind: 'end', label: labels.end },
