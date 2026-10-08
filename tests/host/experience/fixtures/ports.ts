@@ -10,15 +10,23 @@
 // 派生规则必须确定（禁止随机数），这样排序结果可复现。
 
 import { normalizeVector } from "../../../../src/host/embedding/engine.js"
+import { NEUTRAL_STATS } from "../../../../src/host/experience/constants.js"
 import type {
   ExperienceDuplicateJudge,
   ExperienceEntry,
+  ExperienceEvaluationEntry,
+  ExperienceEvaluationInsertInput,
   ExperienceGenerationPromptEntry,
   ExperienceInsertCheckedInput,
   ExperienceInsertRow,
   ExperiencePatch,
   ExperienceRetrievalUpdate,
+  ExperienceStatsEntry,
+  ExperienceStatsRebuildInput,
+  ExperienceStatsValues,
   ExperienceType,
+  ExperienceUsageEntry,
+  ExperienceUsageRecordInput,
 } from "../../../../src/host/shared/asset-types.js"
 import type {
   ExperienceRetrievalRow,
@@ -37,6 +45,10 @@ export interface FakeRuntimeFacts {
   activeRuns: Map<string, { runId: string; flowId: string; sessionId: string }>
   childRuns: Map<string, { runId: string; flowId: string; sessionId: string; nodeId: string }>
   teamRuns: Set<string>
+  /** 主体身份 → 模型名（缺省回落 defaultModel；空串表达「无法确定」）。 */
+  models: Map<string, string>
+  /** 未登记模型名时的回落值。 */
+  defaultModel: string
 }
 
 /**
@@ -67,6 +79,17 @@ export interface FakeExperienceWorld {
   listActiveEmbeddingsCalls: ExperienceType[]
   lastInsert: ExperienceInsertCheckedInput | null
   lastUpdate: { id: string; patch: ExperiencePatch; next: ExperienceRetrievalUpdate } | null
+  /** 使用事实（显式注入）历史行。 */
+  usageRows: ExperienceUsageEntry[]
+  /** 评价历史行。 */
+  evaluationRows: ExperienceEvaluationEntry[]
+  /** 统计投影（缺行代表「证据不足」，读侧按中性解释）。 */
+  stats: Map<string, ExperienceStatsEntry>
+  recordUsageCalls: ExperienceUsageRecordInput[]
+  insertEvaluationsCalls: ExperienceEvaluationInsertInput[]
+  rebuildStatsCalls: ExperienceStatsRebuildInput[]
+  listInjectedIdsCalls: Array<{ subjectId: string; experienceType: ExperienceType; experienceIds: string[] }>
+  getStatsCalls: string[][]
   now: number
 }
 
@@ -77,6 +100,8 @@ export interface FakeWorldOptions {
   embed?: (texts: string[]) => Promise<Float64Array[]>
   now?: number
   maxIdSeed?: number
+  /** 运行事实端口在未登记主体模型名时的回落值（默认 fixture-model；空串表达「无法确定」）。 */
+  defaultModel?: string
 }
 
 /** 由文本派生确定向量（相同文本 → 相同向量；维度可配）。 */
@@ -168,7 +193,21 @@ export function createExperienceWorld(options: FakeWorldOptions = {}): FakeExper
   const prompts = new Map<ExperienceType, ExperienceGenerationPromptEntry>()
   const retrievalRows = new Map<ExperienceType, ExperienceRetrievalRow[]>()
   for (const type of FIXTURE_TYPES) retrievalRows.set(type, [])
-  const runtimeFacts: FakeRuntimeFacts = { activeRuns: new Map(), childRuns: new Map(), teamRuns: new Set() }
+  const runtimeFacts: FakeRuntimeFacts = {
+    activeRuns: new Map(),
+    childRuns: new Map(),
+    teamRuns: new Set(),
+    models: new Map(),
+    defaultModel: options.defaultModel ?? "fixture-model",
+  }
+  const usageRows: ExperienceUsageEntry[] = []
+  const evaluationRows: ExperienceEvaluationEntry[] = []
+  const stats = new Map<string, ExperienceStatsEntry>()
+  const recordUsageCalls: ExperienceUsageRecordInput[] = []
+  const insertEvaluationsCalls: ExperienceEvaluationInsertInput[] = []
+  const rebuildStatsCalls: ExperienceStatsRebuildInput[] = []
+  const listInjectedIdsCalls: Array<{ subjectId: string; experienceType: ExperienceType; experienceIds: string[] }> = []
+  const getStatsCalls: string[][] = []
   let idSeed = options.maxIdSeed ?? 0
   let now = options.now ?? FIXED_NOW
 
@@ -268,6 +307,84 @@ export function createExperienceWorld(options: FakeWorldOptions = {}): FakeExper
       entries.set(id, updated)
       return updated
     },
+    async recordUsage(input: ExperienceUsageRecordInput): Promise<{ recorded: number }> {
+      calls.push("store.recordUsage")
+      recordUsageCalls.push(input)
+      const batchCount = new Map<string, number>()
+      for (const row of input.rows) {
+        usageRows.push({ ...row, id: `usage-${usageRows.length + 1}`, createdAt: now })
+        batchCount.set(row.experienceId, (batchCount.get(row.experienceId) ?? 0) + 1)
+      }
+      // 与真实资产库同语义：首次建行用调用方给的中性投影，已存在则只累加 recalled_count
+      for (const [experienceId, count] of batchCount) {
+        const current = stats.get(experienceId)
+        stats.set(experienceId, current
+          ? { ...current, recalledCount: current.recalledCount + count, updatedAt: now }
+          : { experienceId, ...input.neutralStats, recalledCount: count, updatedAt: now })
+      }
+      return { recorded: input.rows.length }
+    },
+    async listInjectedIds(input: { subjectId: string; experienceType: ExperienceType; experienceIds: string[] }): Promise<string[]> {
+      calls.push("store.listInjectedIds")
+      listInjectedIdsCalls.push({ ...input, experienceIds: [...input.experienceIds] })
+      const seen = new Set<string>()
+      const injected: string[] = []
+      for (const id of input.experienceIds) {
+        if (seen.has(id)) continue
+        seen.add(id)
+        const entry = entries.get(id)
+        if (!entry || entry.experienceType !== input.experienceType) continue
+        if (usageRows.some((row) => row.subjectId === input.subjectId && row.experienceId === id)) injected.push(id)
+      }
+      return injected
+    },
+    async insertEvaluationsChecked(input: ExperienceEvaluationInsertInput): Promise<{
+      inserted: ExperienceEvaluationEntry[]
+      stats: ExperienceStatsEntry[]
+    }> {
+      calls.push("store.insertEvaluationsChecked")
+      insertEvaluationsCalls.push(input)
+      const inserted = input.rows.map((row) => {
+        const entry: ExperienceEvaluationEntry = { ...row, id: `eval-${evaluationRows.length + 1}`, createdAt: now }
+        evaluationRows.push(entry)
+        return entry
+      })
+      const affected = [...new Set(inserted.map((entry) => entry.experienceId))]
+      const rewritten: ExperienceStatsEntry[] = []
+      for (const experienceId of affected) {
+        const recalledCount = stats.get(experienceId)?.recalledCount ?? 0
+        const values = input.aggregate({
+          evaluations: evaluationRows.filter((entry) => entry.experienceId === experienceId),
+          recalledCount,
+        })
+        const row: ExperienceStatsEntry = { experienceId, ...values, updatedAt: now }
+        stats.set(experienceId, row)
+        rewritten.push(row)
+      }
+      return { inserted, stats: rewritten }
+    },
+    async getStats(experienceIds: string[]): Promise<ExperienceStatsEntry[]> {
+      calls.push("store.getStats")
+      getStatsCalls.push([...experienceIds])
+      return experienceIds
+        .map((id) => stats.get(id))
+        .filter((row): row is ExperienceStatsEntry => row !== undefined)
+    },
+    async rebuildStats(input: ExperienceStatsRebuildInput): Promise<{ experienceCount: number }> {
+      calls.push("store.rebuildStats")
+      rebuildStatsCalls.push(input)
+      const rebuilt = new Map<string, ExperienceStatsEntry>()
+      for (const experienceId of entries.keys()) {
+        const values = input.aggregate({
+          evaluations: evaluationRows.filter((entry) => entry.experienceId === experienceId),
+          recalledCount: usageRows.filter((row) => row.experienceId === experienceId).length,
+        })
+        rebuilt.set(experienceId, { experienceId, ...values, updatedAt: now })
+      }
+      stats.clear()
+      for (const [experienceId, row] of rebuilt) stats.set(experienceId, row)
+      return { experienceCount: rebuilt.size }
+    },
   }
 
   const runtime: ExperienceRuntimePort = {
@@ -286,6 +403,10 @@ export function createExperienceWorld(options: FakeWorldOptions = {}): FakeExper
     hasActiveRun(sessionId: string): boolean {
       calls.push("runtime.hasActiveRun")
       return runtimeFacts.activeRuns.has(sessionId)
+    },
+    modelForCaller(caller): string {
+      calls.push("runtime.modelForCaller")
+      return runtimeFacts.models.get(caller.childId ?? caller.sessionId) ?? runtimeFacts.defaultModel
     },
   }
 
@@ -315,6 +436,14 @@ export function createExperienceWorld(options: FakeWorldOptions = {}): FakeExper
     listActiveEmbeddingsCalls,
     lastInsert: null,
     lastUpdate: null,
+    usageRows,
+    evaluationRows,
+    stats,
+    recordUsageCalls,
+    insertEvaluationsCalls,
+    rebuildStatsCalls,
+    listInjectedIdsCalls,
+    getStatsCalls,
     now,
   }
   return world
@@ -401,3 +530,67 @@ export function seedChildRun(
 
 /** 判重判据的类型别名（fixture 侧引用，避免用例重复导入）。 */
 export type { ExperienceDuplicateJudge }
+
+/**
+ * 摆放一条使用事实（该主体已被显式注入过该经验）。
+ * 为什么不经端口方法：feedback 的准入判据读的是历史事实，用例需要直接构造「历史已有注入」，
+ * 与本次调用是否发生解耦。
+ */
+export function seedInjected(
+  world: FakeExperienceWorld,
+  input: { subjectId: string; experienceId: string; runId?: string },
+): ExperienceUsageEntry {
+  const row: ExperienceUsageEntry = {
+    experienceId: input.experienceId,
+    runId: input.runId ?? "run-1",
+    subjectId: input.subjectId,
+    id: `usage-seed-${world.usageRows.length + 1}`,
+    createdAt: world.now,
+  }
+  world.usageRows.push(row)
+  return row
+}
+
+/**
+ * 摆放一条使用事实的**真实路径**：经端口写入。
+ *
+ * 为什么与 seedInjected 并存：统计行（含 recalled_count）由端口在写入使用时同步建立，
+ * 直接推数组会造出「有使用事实但没有统计行」这一生产中不存在的中间态，
+ * 让「增量统计」与「重放统计」出现假差异。
+ */
+export async function seedUsed(
+  world: FakeExperienceWorld,
+  input: { subjectId: string; experienceId: string; runId?: string },
+): Promise<void> {
+  await world.store.recordUsage({
+    rows: [{ experienceId: input.experienceId, runId: input.runId ?? "run-1", subjectId: input.subjectId }],
+    neutralStats: NEUTRAL_STATS,
+  })
+}
+
+/** 摆放一条统计投影（缺行代表「证据不足」，用例据此构造有/无统计两种读侧状态）。 */export function seedStats(
+  world: FakeExperienceWorld,
+  experienceId: string,
+  values: Partial<ExperienceStatsValues>,
+): ExperienceStatsEntry {
+  const row: ExperienceStatsEntry = {
+    experienceId,
+    effectiveSampleCount: 0,
+    recalledCount: 0,
+    usedCount: 0,
+    fitMean: 0,
+    empiricalValue: 0,
+    variance: 0,
+    stability: 1,
+    evidenceStrength: 0,
+    harmCount: 0,
+    harmRate: 0,
+    harmSeverity: 0,
+    qualitySignal: 0,
+    trust: 0.5,
+    updatedAt: world.now,
+    ...values,
+  }
+  world.stats.set(experienceId, row)
+  return row
+}

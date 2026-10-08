@@ -10,7 +10,15 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
-import type { ExperienceDuplicateJudge, ExperienceInsertRow } from '../../../../src/host/shared/asset-types.js'
+import type {
+  ExperienceDuplicateJudge,
+  ExperienceEvaluationInsert,
+  ExperienceEvaluationScores,
+  ExperienceInsertRow,
+  ExperienceStatsAggregate,
+  ExperienceUsageInsert,
+  NeutralStatsValues,
+} from '../../../../src/host/shared/asset-types.js'
 import type { GraphNode, Handle, Line, RoleNode } from '../../../../src/host/shared/graph-model.js'
 import type { OrgMeta } from '../../../../src/host/shared/org-meta.js'
 import type { RoleTemplate } from '../../../../src/host/shared/template-types.js'
@@ -28,6 +36,21 @@ export function fakeClock(start = FIXED_NOW): () => number {
   }
 }
 
+/**
+ * 可手动推进的时钟：把「写入时取当前时刻记账」变成可断言的事实。
+ * 为什么需要它：恒定或自动前进的时钟都无法区分「刷新了记账时间」与「恰好取到同一个值」，
+ * 而记账时间是否刷新正是 AGENTS「updated_at 每次写入刷新」这条硬规则的唯一可观测面。
+ */
+export function settableClock(start = FIXED_NOW): { now: () => number; set: (value: number) => void } {
+  let current = start
+  return {
+    now: () => current,
+    set: (value: number) => {
+      current = value
+    },
+  }
+}
+
 /** 固定 id 源：序号递增，随机源恒为 0，使资产 id 形如 `role-1`。 */
 export function fakeIds(): AssetStoreDeps['ids'] {
   let sequence = 0
@@ -42,8 +65,13 @@ export function fakeIds(): AssetStoreDeps['ids'] {
 
 /** 建临时目录与资产库（调用方负责 afterEach 时 close + removeTempRoot）。 */
 export async function makeStore(): Promise<{ store: AssetStore; root: string }> {
+  return makeStoreWithClock(fakeClock())
+}
+
+/** 建临时目录与资产库，使用调用方给定的时钟（需要手动推进时传 settableClock().now）。 */
+export async function makeStoreWithClock(now: () => number): Promise<{ store: AssetStore; root: string }> {
   const root = await mkdtemp(join(tmpdir(), 'dsh-assets-'))
-  const store = new AssetStore(root, { now: fakeClock(), ids: fakeIds() })
+  const store = new AssetStore(root, { now, ids: fakeIds() })
   await store.init()
   return { store, root }
 }
@@ -65,6 +93,23 @@ export async function openRawDb(root: string): Promise<DatabaseSync> {
 /** 向量构造器：用例只写出关心的数值分量。 */
 export function vector(...values: number[]): Float64Array {
   return Float64Array.from(values)
+}
+
+/** 直连库文件执行只读查询：用于断言真正落盘的磁盘事实（写侧一律走 store）。 */
+export async function rawQuery(
+  root: string,
+  sql: string,
+  params: unknown[] = [],
+): Promise<Record<string, unknown>[]> {
+  const raw = await openRawDb(root)
+  try {
+    return raw
+      .prepare(sql)
+      .all(...(params as never[]))
+      .map((row) => ({ ...(row as Record<string, unknown>) }))
+  } finally {
+    raw.close()
+  }
 }
 
 /** 缺省判重：一律不重复（只验证写入路径本身时使用）。 */
@@ -94,6 +139,86 @@ export function experienceRow(id: string, overrides: Partial<ExperienceInsertRow
     generationPromptId: "ep-agent-v1",
     generationPromptVersion: "V1",
     ...overrides,
+  }
+}
+
+/** 使用事实写入行构造器（行 id 由资产库发号，因此入参不含 id）。 */
+export function usageRow(
+  experienceId: string,
+  overrides: Partial<ExperienceUsageInsert> = {},
+): ExperienceUsageInsert {
+  return { experienceId, runId: "run-1", subjectId: "session-1", ...overrides }
+}
+
+/** 评价写入行构造器（默认锚点便于手算断言，整体可覆盖）。 */
+export function evaluationRow(
+  experienceId: string,
+  overrides: Partial<ExperienceEvaluationInsert> = {},
+): ExperienceEvaluationInsert {
+  return {
+    experienceId,
+    runId: "run-1",
+    fitScore: 0.75,
+    decisionEffect: 0.5,
+    informationGain: 0.75,
+    causalConfidence: 0.75,
+    evidence: "该经验直接影响了并行/串行选择。",
+    evaluatorSubjectId: "session-1",
+    evaluatorModel: "test-model",
+    ...overrides,
+  }
+}
+
+/**
+ * 测试用中性统计口径（数值与经验域 NEUTRAL_STATS 同域，但测试不反向依赖域模块：
+ * 资产库只负责「按调用方给的口径建行」，口径属经验域）。
+ */
+export function neutralStatsFixture(): NeutralStatsValues {
+  return {
+    effectiveSampleCount: 0,
+    usedCount: 0,
+    fitMean: 0,
+    empiricalValue: 0,
+    variance: 0,
+    stability: 1,
+    evidenceStrength: 0,
+    harmCount: 0,
+    harmRate: 0,
+    harmSeverity: 0,
+    qualitySignal: 0,
+    trust: 0.5,
+  }
+}
+
+/**
+ * 测试用最简聚合器：只回答「资产库是否把全部评价历史与 recalledCount 原样交给聚合器、
+ * 并把返回值原样落盘」，刻意不复刻生产公式（公式属经验域，见 §26）。
+ * 每个字段都能手算：effectiveSampleCount 取条数 × 2，用于区分「有效样本量」与「评价条数」。
+ */
+export const simpleStatsAggregate: ExperienceStatsAggregate = ({ evaluations, recalledCount }) => {
+  const count = evaluations.length
+  const mean = (pick: (scores: ExperienceEvaluationScores) => number): number =>
+    count === 0 ? 0 : evaluations.reduce((sum, scores) => sum + pick(scores), 0) / count
+  // 显式落到 number：锚点联合类型会把 reduce 的累加器收窄成联合，算术结果并不是锚点
+  const effects: number[] = evaluations.map((scores) => scores.decisionEffect)
+  const harmCount = effects.filter((value) => value < 0).length
+  const harmMass = effects.reduce((sum, value) => sum + (value < 0 ? -value : 0), 0)
+  const empiricalValue = mean((scores) => scores.decisionEffect)
+  const evidenceStrength = count / (count + 1)
+  return {
+    effectiveSampleCount: count * 2,
+    recalledCount,
+    usedCount: count,
+    fitMean: mean((scores) => scores.fitScore),
+    empiricalValue,
+    variance: 0,
+    stability: count === 0 ? 1 : 0.5,
+    evidenceStrength,
+    harmCount,
+    harmRate: count === 0 ? 0 : harmCount / count,
+    harmSeverity: count === 0 ? 0 : harmMass / count,
+    qualitySignal: empiricalValue * evidenceStrength,
+    trust: 0.5 + 0.45 * empiricalValue,
   }
 }
 

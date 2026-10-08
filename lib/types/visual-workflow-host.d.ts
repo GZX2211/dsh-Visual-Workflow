@@ -168,7 +168,7 @@ export declare class VisualWorkflowHost extends Service {
     private experienceStorePort;
     /** 经验域运行事实端口：只经编排器的语义化 seam 读取运行事实，不触达其内部结构。 */
     private experienceRuntimePort;
-    /** 工具层经验能力缝（learn 与 recall 两工具共用经验域服务同一实例）。 */
+    /** 工具层经验能力缝（learn / recall / feedback 三工具共用经验域服务同一实例）。 */
     private experienceHost;
     /**
      * 经验域能力缝（API 边界消费）：资产库未就绪时返回 undefined，

@@ -1,0 +1,209 @@
+// tests/verification/_tmp-d3-recheck.test.ts
+//
+// 独立验证者临时文件（task-8 复核轮 D3）：
+//   1. 推进时钟下，使用计数累加是否真的刷新 updated_at，且**统计数值列**除 recalled_count 外一字未改。
+//   2. 修复后「增量 vs 重建」在**统计数值列**上是否仍逐字段一致。
+//   3. 重建的记账时间语义（整表覆盖写 = 同一重建时刻；与增量时刻不同）以及它是否构成真实缺陷
+//      （判据：updated_at 是否有任何 src 消费点）。
+// 验证完成后删除。
+
+import { afterEach, describe, expect, it } from "vitest"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { AssetStore } from "../../src/host/assets/index.js"
+import {
+  ExperienceService,
+  NEUTRAL_STATS,
+  type ExperienceEmbeddingPort,
+  type ExperienceRuntimePort,
+  type ExperienceStorePort,
+} from "../../src/host/experience/index.js"
+import type { ExperienceStatsEntry } from "../../src/host/shared/asset-types.js"
+
+const cleanups: Array<() => Promise<void>> = []
+afterEach(async () => {
+  await Promise.all(cleanups.splice(0).map((fn) => fn()))
+})
+
+function portOf(store: AssetStore): ExperienceStorePort {
+  return {
+    nextId: () => store.nextId(),
+    getActivePrompt: (type) => store.getActivePrompt(type),
+    listPrompts: () => store.listPrompts(),
+    listRows: (limit) => store.listRows(limit),
+    getRows: (ids, options) => store.getRows(ids, options),
+    listActiveEmbeddings: (type) => store.listActiveExperienceEmbeddings(type),
+    insertChecked: (input) => store.insertChecked(input),
+    updateFields: (id, patch, next) => store.updateFields(id, patch, next),
+    setActive: (id, active) => store.setActive(id, active),
+    recordUsage: (input) => store.recordUsage(input),
+    listInjectedIds: (input) => store.listInjectedIds(input),
+    insertEvaluationsChecked: (input) => store.insertEvaluationsChecked(input),
+    getStats: (ids) => store.getStats(ids),
+    rebuildStats: (input) => store.rebuildStats(input),
+  }
+}
+
+const embedding: ExperienceEmbeddingPort = {
+  source: "local",
+  dimension: 2,
+  async embed(texts: string[]): Promise<Float64Array[]> {
+    return texts.map((text) => (text.includes("低相关") ? new Float64Array([0.6, 0.8]) : new Float64Array([1, 0])))
+  },
+}
+
+function runtime(): ExperienceRuntimePort {
+  return {
+    activeRunForSession: () => null,
+    runForChild: () => null,
+    hasTeamInCurrentRun: () => false,
+    hasActiveRun: () => false,
+    modelForCaller: () => "verifier-model",
+  }
+}
+
+const caller = { isChild: false, sessionId: "verify-d3" }
+
+function candidate(keyword: string): Record<string, unknown> {
+  return {
+    responsibility: `${keyword}责任`,
+    task_type: "软件开发",
+    decision_domain: `${keyword}决策域`,
+    situation: `${keyword}情形需要判断前置条件`,
+    trigger: `准备处理${keyword}时`,
+    principle: `${keyword}原则：前置条件未稳定时并行会放大返工`,
+    recommended_action: `${keyword}行动：先建立显式完成闸门再并行`,
+    exclusions: [`${keyword}不适用时`],
+    evidence: [`一次${keyword}相关执行`],
+  }
+}
+
+function evaluation(experienceId: string, decisionEffect = 1) {
+  return { experienceId, fitScore: 1 as const, decisionEffect: decisionEffect as never, informationGain: 1 as const, causalConfidence: 1 as const, evidence: "" }
+}
+
+/** 统计数值列（排除记账时间）：重放等价性的比较面。 */
+function valuesOf(row: ExperienceStatsEntry): Omit<ExperienceStatsEntry, "updatedAt" | "experienceId"> {
+  const { updatedAt: _u, experienceId: _i, ...rest } = row
+  return rest
+}
+
+/** 可手动推进的时钟。 */
+function settableClock(start: number): { now: () => number; set: (value: number) => void } {
+  let current = start
+  return { now: () => current, set: (value) => { current = value } }
+}
+
+describe("D3 复核：使用计数增量刷新记账时间", () => {
+  it("test_推进时钟_第二次使用刷新updated_at且数值列只变recalledCount", async () => {
+    const clock = settableClock(1_000)
+    const dir = await mkdtemp(join(tmpdir(), "vw-d3-"))
+    cleanups.push(() => rm(dir, { recursive: true, force: true }))
+    const store = new AssetStore(dir, { now: clock.now })
+    await store.init()
+    cleanups.push(async () => store.close())
+
+    const submitted = await store.insertChecked({
+      rows: [{
+        id: "ex-d3",
+        experienceType: "agent",
+        responsibility: "责任",
+        taskType: "软件开发",
+        decisionDomain: "决策域",
+        situation: "情形",
+        trigger: "触发",
+        principle: "原则",
+        recommendedAction: "行动",
+        exclusions: [],
+        evidence: [],
+        taskRetrievalText: "task",
+        taskEmbedding: new Float64Array([1, 0]),
+        decisionRetrievalText: "decision",
+        decisionEmbedding: new Float64Array([1, 0]),
+        embeddingModel: "local",
+        embeddingDimension: 2,
+        sourceRunId: "",
+        generationPromptId: (await store.getActivePrompt("agent"))!.id,
+        generationPromptVersion: "V1",
+      }],
+      duplicateOf: () => ({ duplicate: false }),
+    })
+    expect(submitted.inserted).toHaveLength(1)
+
+    await store.recordUsage({ rows: [{ experienceId: "ex-d3", runId: "", subjectId: "s1" }], neutralStats: NEUTRAL_STATS })
+    const first = (await store.getStats(["ex-d3"]))[0]
+    expect(first.recalledCount).toBe(1)
+    expect(first.updatedAt).toBe(1_000)
+
+    clock.set(5_000)
+    await store.recordUsage({ rows: [{ experienceId: "ex-d3", runId: "", subjectId: "s1" }], neutralStats: NEUTRAL_STATS })
+    const second = (await store.getStats(["ex-d3"]))[0]
+    expect(second.recalledCount).toBe(2)
+    // D3 修复点：计数变了 → 记账时间必须跟着变（修复前实测恒为 1_000）
+    expect(second.updatedAt).toBe(5_000)
+    // 数值列除 recalledCount 外一字未改
+    expect(valuesOf(second)).toEqual({ ...valuesOf(first), recalledCount: 2 })
+    // eslint-disable-next-line no-console
+    console.log(`\nD3 证据：usage#1 updated_at=${first.updatedAt} → usage#2 updated_at=${second.updatedAt}（时钟推到 5000）\n`)
+  })
+
+  it("test_修复后_增量与重建在统计数值列上仍逐字段一致", async () => {
+    const clock = settableClock(1_000)
+    const dir = await mkdtemp(join(tmpdir(), "vw-d3b-"))
+    cleanups.push(() => rm(dir, { recursive: true, force: true }))
+    const store = new AssetStore(dir, { now: clock.now })
+    await store.init()
+    cleanups.push(async () => store.close())
+    const service = new ExperienceService({
+      store: portOf(store),
+      runtime: runtime(),
+      embedding,
+      now: clock.now,
+      logger: { warn: () => undefined },
+    })
+    await service.initializePrompt({ caller, type: "agent" })
+    const submitted = await service.submit({
+      caller,
+      type: "agent",
+      candidates: { experiences: [candidate("高相关"), candidate("低相关")] },
+    })
+    const [a, b] = submitted.inserted
+
+    // a：3 次使用 + 2 次评价（含负向）；b：2 次使用无评价
+    await service.recall({ caller, type: "agent", ids: [a.id] })
+    clock.set(2_000)
+    await service.feedback({ caller, type: "agent", evaluations: [evaluation(a.id)] })
+    clock.set(3_000)
+    await service.recall({ caller, type: "agent", ids: [a.id] })
+    clock.set(4_000)
+    await service.feedback({ caller, type: "agent", evaluations: [evaluation(a.id, -1)] })
+    clock.set(5_000)
+    await service.recall({ caller, type: "agent", ids: [a.id] })
+    await service.recall({ caller, type: "agent", ids: [b.id] })
+    clock.set(6_000)
+    await service.recall({ caller, type: "agent", ids: [b.id] })
+
+    const incremental = await store.getStats([a.id, b.id])
+    expect(incremental.find((row) => row.experienceId === a.id)?.recalledCount).toBe(3)
+    expect(incremental.find((row) => row.experienceId === b.id)?.recalledCount).toBe(2)
+    const incrementalUpdatedAt = new Map(incremental.map((row) => [row.experienceId, row.updatedAt]))
+
+    clock.set(9_000)
+    await service.rebuildStats()
+    const rebuilt = await store.getStats([a.id, b.id])
+
+    // 统计数值列（可重放投影的本体）逐字段一致
+    expect(rebuilt.map(valuesOf)).toEqual(incremental.map(valuesOf))
+    // 记账时间：增量路径按各自写入时刻（2_000/4_000/6_000 中最后一次），重建整批取重建时刻 9_000
+    for (const row of rebuilt) {
+      expect(row.updatedAt).toBe(9_000)
+      expect(incrementalUpdatedAt.get(row.experienceId)).toBeLessThan(9_000)
+    }
+    // 无评价历史的 b 在重建后仍等于「中性投影 + 使用计数」
+    const bRebuilt = rebuilt.find((row) => row.experienceId === b.id)!
+    expect(valuesOf(bRebuilt)).toEqual({ ...valuesOf({ ...NEUTRAL_STATS, recalledCount: 2, experienceId: b.id, updatedAt: 9_000 }) })
+    // eslint-disable-next-line no-console
+    console.log(`\nD3/重放证据：增量记账时间 a=${incrementalUpdatedAt.get(a.id)} b=${incrementalUpdatedAt.get(b.id)}；重建后统一=${rebuilt.map((r) => r.updatedAt).join(",")}；数值列逐字段一致=${JSON.stringify(rebuilt.map(valuesOf)) === JSON.stringify(incremental.map(valuesOf))}\n`)
+  })
+})

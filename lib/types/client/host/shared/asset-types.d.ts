@@ -222,6 +222,14 @@ export interface ExperienceEntry {
     createdAt: number;
     /** 最后更新时间（epoch 毫秒；编辑语义字段即刷新）。 */
     updatedAt: number;
+    /**
+     * 长期质量统计（派生投影；由评价历史聚合而来，不是经验本体的一部分）。
+     *
+     * 为什么挂在条目上而不是单开一条读路径：统计值只服务于「界面展示」与「召回排序」两类消费，
+     * 两处都已经在读取条目；单开一条路径会让「条目已读到、统计还没到」成为可能状态。
+     * 无统计行时省略（读侧按中性值解释，而不是伪造一个 0.5 的假事实）。
+     */
+    stats?: ExperienceStatsEntry;
 }
 /**
  * 经验可编辑字段补丁（属性栏「保存」载荷）。
@@ -353,4 +361,128 @@ export interface ExperienceRetrievalUpdate {
     decisionEmbedding: Float64Array;
     embeddingModel?: string;
     embeddingDimension?: number;
+}
+/**
+ * 五级语义锚点（0 / 0.25 / 0.50 / 0.75 / 1.00）。
+ *
+ * 为什么用离散联合而不是 number：模型侧只允许选锚点，连续小数（0.73）表达的是不存在的精度，
+ * 且会让评价重新退化成「凭感觉给数字」。类型层收窄后，越界值在编译期与运行期都被拦住。
+ */
+export type ExperienceScoreAnchor = 0 | 0.25 | 0.5 | 0.75 | 1;
+/** 决策效果的五级锚点（-1 / -0.50 / 0 / +0.50 / +1）：唯一跨零维度的取值域。 */
+export type ExperienceDecisionEffectAnchor = -1 | -0.5 | 0 | 0.5 | 1;
+/** 一次使用评价的四个维度（统一尺度；字段名与磁盘列一致）。 */
+export interface ExperienceEvaluationScores {
+    /** 适用性：这条经验是否真正适用于本次场景（0～1）。 */
+    fitScore: ExperienceScoreAnchor;
+    /** 决策效果：使用相比不使用，决策/结果实际改变了多少（-1～+1）。 */
+    decisionEffect: ExperienceDecisionEffectAnchor;
+    /** 信息增益：提供了多少具有区分度的决策信息（0～1）。 */
+    informationGain: ExperienceScoreAnchor;
+    /** 因果归因置信度：效果多大程度上确实来自该经验（0～1）。 */
+    causalConfidence: ExperienceScoreAnchor;
+}
+/**
+ * 评价写入行（评分锚点已由校验层收窄；provenance 全部由系统补齐）。
+ *
+ * 为什么没有 id：行 id 的命名空间与格式属磁盘契约（与经验 id 同口径），只能由资产库在
+ * 写入事务内发号；调用方持有 id 只会引出第二套格式，且域层没有任何使用 id 的语义。
+ */
+export interface ExperienceEvaluationInsert extends ExperienceEvaluationScores {
+    experienceId: string;
+    /** 该次使用所属运行 id；无运行来源时为空串（与经验 provenance 同口径）。 */
+    runId: string;
+    /** 支撑本次评价的事实说明（可为空串）。 */
+    evidence: string;
+    /** 评分者主体身份（子代理取 childId，父代理取会话 id）。 */
+    evaluatorSubjectId: string;
+    /** 评分者模型名；无法确定时为空串（不伪造）。 */
+    evaluatorModel: string;
+}
+/** 评价历史行投影（不可 update / delete 的历史事实）。 */
+export interface ExperienceEvaluationEntry extends ExperienceEvaluationInsert {
+    id: string;
+    createdAt: number;
+}
+/** 使用事实写入行（「该经验被显式注入过 agent 上下文」这一事实；id 同由资产库发号）。 */
+export interface ExperienceUsageInsert {
+    experienceId: string;
+    /** 显式注入发生时所属运行 id；无运行来源时为空串。 */
+    runId: string;
+    /** 被注入的主体身份（子代理 childId / 父代理会话 id）。 */
+    subjectId: string;
+}
+/** 使用事实历史行投影。 */
+export interface ExperienceUsageEntry extends ExperienceUsageInsert {
+    id: string;
+    createdAt: number;
+}
+/**
+ * 统计投影的数值部分（除主键与记账时间外的全部列）。
+ *
+ * 字段语义（§10～§14）：
+ *   - effectiveSampleCount = Σ 评价权重（不是使用次数，高置信高适用评价贡献更大）；
+ *   - recalledCount = 被显式注入次数（来自使用事实，不由评价聚合得出）；
+ *   - usedCount = 已提交评价的使用次数（来自评价条数）；
+ *   - fitMean = 评价权重的加权平均 fit；
+ *   - empiricalValue = 中性先验收缩后的经验价值（[-1,1]）；
+ *   - variance / stability = 加权方差与其映射出的稳定性（[0,1]）；
+ *   - evidenceStrength = 证据强度（随有效样本量饱和）；
+ *   - harmCount / harmRate / harmSeverity = 负向效果条数、比例与加权严重度；
+ *   - qualitySignal = 中心化质量信号（[-1,1]，召回修正的直接输入）；
+ *   - trust = 面向展示的信任度（[0.05,0.95]，0.5 = 证据不足保持中性）。
+ */
+export interface ExperienceStatsValues {
+    effectiveSampleCount: number;
+    recalledCount: number;
+    usedCount: number;
+    fitMean: number;
+    empiricalValue: number;
+    variance: number;
+    stability: number;
+    evidenceStrength: number;
+    harmCount: number;
+    harmRate: number;
+    harmSeverity: number;
+    qualitySignal: number;
+    trust: number;
+}
+/** 统计行投影（`experience_id` 主键 + 数值 + 记账时间）。 */
+export interface ExperienceStatsEntry extends ExperienceStatsValues {
+    experienceId: string;
+    updatedAt: number;
+}
+/**
+ * 聚合输入：某经验的全部评价历史与该经验的使用事实。
+ *
+ * 为什么把 recalledCount 作为输入而不是从评价推导：注入次数与评价次数是两个事实
+ * （被注入不一定被评价），它来自使用事实表，聚合器只负责原样带入。
+ */
+export interface ExperienceStatsAggregateInput {
+    evaluations: readonly ExperienceEvaluationScores[];
+    recalledCount: number;
+}
+/**
+ * 统计聚合器（纯函数，由经验域注入资产库）。
+ *
+ * 为什么以闭包注入而不是在资产库内实现公式：公式属于经验域且会演进（§25 的参数调整），
+ * 而「读全部历史 → 聚合 → 覆盖写入」必须原子，因此资产库只保证事务边界。
+ */
+export type ExperienceStatsAggregate = (input: ExperienceStatsAggregateInput) => ExperienceStatsValues;
+/** 首次建立某经验的统计行时的中性投影（不含 recalledCount，由资产库按本批条数填入）。 */
+export type NeutralStatsValues = Omit<ExperienceStatsValues, 'recalledCount'>;
+/** 评价批量写入入参：校验、聚合与写入落在同一笔事务内。 */
+export interface ExperienceEvaluationInsertInput {
+    rows: ExperienceEvaluationInsert[];
+    aggregate: ExperienceStatsAggregate;
+}
+/** 使用事实批量写入入参：插入使用行并按首次建立统计行的中性投影同步 recalled_count。 */
+export interface ExperienceUsageRecordInput {
+    rows: ExperienceUsageInsert[];
+    neutralStats: NeutralStatsValues;
+}
+/** 统计全量重建入参（读全部历史 → 聚合 → 覆盖写入，一笔事务）。 */
+export interface ExperienceStatsRebuildInput {
+    aggregate: ExperienceStatsAggregate;
+    neutralStats: NeutralStatsValues;
 }

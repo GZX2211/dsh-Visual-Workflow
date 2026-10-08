@@ -86,17 +86,27 @@ describe('wf_experience_recall：注册与 schema', () => {
     expect(schema.required).toBeUndefined()
   })
 
-  it('description 为官方标准英文，说明只读无副作用与和 wf_org_catalog 的分工', async () => {
+  it('description 为官方标准英文，说明阶段分工、有界信任修正与使用事实副作用', async () => {
     const h = await makeHarness()
     const description = h.tools.definitions.get(WF_EXPERIENCE_RECALL)!.description
     expect(description.length).toBeGreaterThan(200)
     expect(description).not.toMatch(/[\u4e00-\u9fff]/)
     expect(englishRatio(description)).toBeGreaterThan(0.85)
     expect(description).toContain('wf_org_catalog')
-    expect(description).toContain('Read-only')
     for (const code of [ERR_EXPERIENCE_WRONG_TYPE, ERR_EXPERIENCE_BAD_ARGS, ERR_EXPERIENCE_RECALL_FAILED]) {
       expect(description).toContain(code)
     }
+    // 召回发生在任务开始或执行途中；使用经验后应在同一收尾阶段提交反馈
+    expect(description).toContain('at the start of a task or while it is running')
+    expect(description).toContain('final completion stage')
+    expect(description).toContain('wf_experience_feedback')
+    expect(description).toContain('wf_experience_learn')
+    // 候选得分是「语义相关性 × 有界信任修正」，影响幅度有上限
+    expect(description).toContain('semantic relevance')
+    expect(description).toContain('trust')
+    expect(description).toContain('20%')
+    // ids 阶段会记录「这些经验被使用过」这一事实（副作用不得被描述成完全只读）
+    expect(description).toContain('count as used')
   })
 })
 

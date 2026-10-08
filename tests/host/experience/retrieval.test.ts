@@ -8,6 +8,7 @@
 
 import { describe, expect, it } from "vitest"
 import {
+  CANDIDATE_POOL_SIZE,
   DEFAULT_RECALL_TOP_K,
   MAX_RECALL_TOP_K,
 } from "../../../src/host/experience/constants.js"
@@ -90,7 +91,7 @@ describe("rankByEmbedding 双通道", () => {
     expect(scored[1].score).toBeCloseTo(0.8)
   })
 
-  it("test_并集结果_仍按 topK 截断", () => {
+  it("test_并集结果_仍按候选池大小截断", () => {
     const rows = [
       row("ex-a", new Float64Array([1, 0])),
       row("ex-b", new Float64Array([0.9, Math.sqrt(1 - 0.9 ** 2)])),
@@ -101,6 +102,36 @@ describe("rankByEmbedding 双通道", () => {
     const scored = rankByEmbedding(rows, new Float64Array([1, 0]), 2)
 
     expect(scored.map((hit) => hit.id)).toEqual(["ex-a", "ex-b"])
+  })
+
+  it("test_候选池_按固定常量截断且保留最高分", () => {
+    // 40 条：每条的决策侧相似度递减，池只保留前 CANDIDATE_POOL_SIZE 名
+    const rows = Array.from({ length: CANDIDATE_POOL_SIZE + 10 }, (_, index) => {
+      const similarity = 1 - index / 100
+      return row(`ex-${String(index).padStart(2, "0")}`, new Float64Array([similarity, Math.sqrt(Math.max(0, 1 - similarity ** 2))]))
+    })
+
+    const scored = rankByEmbedding(rows, new Float64Array([1, 0]), CANDIDATE_POOL_SIZE)
+
+    expect(scored).toHaveLength(CANDIDATE_POOL_SIZE)
+    expect(scored[0].id).toBe("ex-00")
+    expect(scored[CANDIDATE_POOL_SIZE - 1].id).toBe(`ex-${String(CANDIDATE_POOL_SIZE - 1).padStart(2, "0")}`)
+  })
+
+  it("test_池内命中_携带产生得分的召回行", () => {
+    const rows = [row("ex-a", new Float64Array([1, 0]), { taskText: "任务文本", decisionText: "决策文本" })]
+
+    const scored = rankByEmbedding(rows, new Float64Array([1, 0]), CANDIDATE_POOL_SIZE)
+
+    expect(scored[0].row.decisionRetrievalText).toBe("决策文本")
+  })
+
+  it("test_向量维度与查询不符_该行不参与打分", () => {
+    const rows = [row("ex-ok", new Float64Array([1, 0])), row("ex-mismatch", new Float64Array([1, 0, 0]))]
+
+    const scored = rankByEmbedding(rows, new Float64Array([1, 0]), CANDIDATE_POOL_SIZE)
+
+    expect(scored.map((hit) => hit.id)).toEqual(["ex-ok"])
   })
 })
 
@@ -163,6 +194,16 @@ describe("recallActiveHits 通道选择与回退标记", () => {
         throw new Error("外部嵌入端点不可用")
       },
     })
+    const rows = [row("ex-a", new Float64Array([1, 0]), { taskText: "并行启动 闸门", decisionText: "分解" })]
+
+    const outcome = await recallActiveHits({ query: "并行启动", rows, embedding: world.embedding })
+
+    expect(outcome.source).toBe("bm25")
+    expect(outcome.scored[0].id).toBe("ex-a")
+  })
+
+  it("test_嵌入未返回查询向量_回退词法并标记 bm25", async () => {
+    const world = createExperienceWorld({ embed: async () => [] })
     const rows = [row("ex-a", new Float64Array([1, 0]), { taskText: "并行启动 闸门", decisionText: "分解" })]
 
     const outcome = await recallActiveHits({ query: "并行启动", rows, embedding: world.embedding })

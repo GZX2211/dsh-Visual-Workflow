@@ -79,6 +79,17 @@ export declare const zh: {
     experienceExclusions: string;
     experienceEvidence: string;
     experienceListPlaceholder: string;
+    experienceStatsTitle: string;
+    experienceStatsEmpty: string;
+    experienceStatsHint: string;
+    experienceStatsFields: {
+        trust: string;
+        empiricalValue: string;
+        evidenceStrength: string;
+        stability: string;
+        usedCount: string;
+        harmRate: string;
+    };
     experienceRetrievalTitle: string;
     experienceTaskRetrievalText: string;
     experienceDecisionRetrievalText: string;

@@ -48,6 +48,7 @@ const TOOL_ZH: Record<string, string> = {
   wf_graph_patch: '改写工作流图（图结构 / 里程碑标记，一次补丁仅一组）；仅父代理可用',
   wf_experience_learn: '提交主体自己的经验候选入库；空数组调用取生成 Prompt',
   wf_experience_recall: '按主体类型语义召回既有经验（先取候选摘要，再按 id 取全文）',
+  wf_experience_feedback: '提交已使用经验的四维评价（任务收尾阶段，与经验学习同阶段）',
 }
 
 /**

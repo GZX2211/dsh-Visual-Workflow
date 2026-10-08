@@ -1,4 +1,4 @@
-import type { ExperienceEntry, ExperienceGenerationPromptEntry, ExperienceType } from "../shared/asset-types.js";
+import type { ExperienceEntry, ExperienceEvaluationScores, ExperienceGenerationPromptEntry, ExperienceType } from "../shared/asset-types.js";
 /**
  * 列值 → 主体类型。
  * CHECK 约束保证取值合法，非法值只在库被外部改坏时出现；此时回落到 agent 而不是抛错，
@@ -28,3 +28,10 @@ export declare function decodeRowEmbeddings(row: Record<string, unknown>): RowEm
 export declare function experienceRowToEntry(row: Record<string, unknown>): ExperienceEntry;
 /** 经验生成 Prompt 行 → 契约条目。 */
 export declare function experiencePromptRowToEntry(row: Record<string, unknown>): ExperienceGenerationPromptEntry;
+/**
+ * 评价行 → 四维评分（聚合器的输入）。
+ *
+ * 为什么直接按契约收窄而不再校验取值域：`fit_score` 等列的 CHECK 约束已经把取值锁在锚点集合内，
+ * 而校验清单的唯一本体在经验域；资产库再造一份锚点表只会变成第三处口径。
+ */
+export declare function evaluationScoresFromRow(row: Record<string, unknown>): ExperienceEvaluationScores;

@@ -174,4 +174,37 @@ describe('模型选择装配（model-selection.ts）', () => {
     const resolved = await assembleThenRequest(ctx, () => ({ provider: 'parent', model: 'parent' }))
     expect(resolved).toEqual({ provider: 'parent', model: 'parent' })
   })
+
+  // ---------------------------------------------------------------------------
+  // 按身份查询当前模型（经验评价的 evaluator_model 事实来源）：
+  // 为什么必须有查询入口而不是让消费方各自推断：模型路由只在本装配内成事实，
+  // 消费方（经验域）只能经此读取；读不到即「无法确定」，必须显式返回 null 而不是空对象。
+  // ---------------------------------------------------------------------------
+
+  it('test_按子代理身份查询模型_已留存选择时返回该选择_未留存时返回 null', () => {
+    const setup = createModelSelectionSetup()
+    setup.remember('child-1', { provider: 'member', model: 'member-model', reasoningEffort: 'high' })
+
+    expect(setup.modelOf('child-1')).toEqual({ provider: 'member', model: 'member-model', reasoningEffort: 'high' })
+    expect(setup.modelOf('child-unknown')).toBeNull()
+    expect(setup.modelOf('')).toBeNull()
+  })
+
+  it('test_按会话查询父代理模型_已绑定会话时返回最新选择_未绑定时返回 null', () => {
+    const setup = createModelSelectionSetup()
+    const ctx = new FakeChildCtx()
+    setup.bindParent(ctx, { provider: 'root', model: 'root-model' }, 'session-1')
+
+    expect(setup.parentModelOf('session-1')).toEqual({ provider: 'root', model: 'root-model' })
+    expect(setup.parentModelOf('session-unknown')).toBeNull()
+  })
+
+  it('test_按会话查询父代理模型_会话内改选后返回最新值（官方 selection 可变语义）', () => {
+    const setup = createModelSelectionSetup()
+    const ctx = new FakeChildCtx()
+    setup.bindParent(ctx, { provider: 'root', model: 'first' }, 'session-1')
+    setup.bindParent(ctx, { provider: 'root', model: 'second' }, 'session-1')
+
+    expect(setup.parentModelOf('session-1')?.model).toBe('second')
+  })
 })

@@ -45,6 +45,12 @@ export declare function listExperienceRows(ctx: AssetTxContext, limit: number): 
 /** 单条经验（无匹配返回 null）。 */
 export declare function readExperienceRow(ctx: AssetTxContext, id: string): ExperienceEntry | null;
 /**
+ * 给定 id 中真实存在的经验 id 集合（使用事实与评价写入的前置校验）。
+ * 为什么不让外键报错兜底：外键错误只说「引用了不存在的行」，说不出是哪条经验，
+ * 调用方拿不到可行动信息；这里先查一次，就能明确指出缺失的经验 id。
+ */
+export declare function readExistingExperienceIds(ctx: AssetTxContext, ids: string[]): Set<string>;
+/**
  * 按 id 读经验（保持入参顺序，命中不到的略过）。
  * `activeOnly` = 召回面语义：归档经验不得被召回，因此表现为「查不到」而不是返回内容。
  */

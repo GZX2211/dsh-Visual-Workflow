@@ -19,6 +19,7 @@ export { registerWfGraphPatch, type GraphPatchHost } from './wf-graph-patch/tool
 export { registerWfDbQuery } from './wf-db-query/tool.js'
 export { registerWfExperienceLearn } from './wf-experience-learn/tool.js'
 export { registerWfExperienceRecall } from './wf-experience-recall/tool.js'
+export { registerWfExperienceFeedback } from './wf-experience-feedback/tool.js'
 export type { WfExperienceHost } from './infrastructure/experience-contract.js'
 export { buildIndexForDatabase, ensureDatabaseIndexes, indexPathOf } from './wf-db-query/service.js'
 export { createDatabaseDriver, testDatabaseConnection } from './wf-db-query/driver.js'

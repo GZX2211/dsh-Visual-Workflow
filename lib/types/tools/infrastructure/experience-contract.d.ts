@@ -1,4 +1,5 @@
 import type { ExperienceEntry, ExperienceGenerationPromptEntry, ExperienceRecallHit, ExperienceType } from '../../shared/asset-types.js';
+import type { ExperienceFeedbackInput, ExperienceFeedbackResult } from '../../experience/index.js';
 /**
  * 工具层所需经验能力缝（宿主组合根装配真实实现；单测 fake）。
  *
@@ -52,6 +53,19 @@ export interface WfExperienceHost {
             kind: 'details';
             entries: ExperienceEntry[];
         }>;
+        /**
+         * 提交已使用经验的评价（评价入参的锚点已在工具层收窄；准入判定、入库与统计重算归 domain）。
+         * skipped 的原因由 domain 给出，工具层原样透传给模型。
+         */
+        feedback(input: {
+            caller: {
+                isChild: boolean;
+                sessionId: string;
+                childId?: string;
+            };
+            type: ExperienceType;
+            evaluations: ExperienceFeedbackInput[];
+        }): Promise<ExperienceFeedbackResult>;
     };
 }
 /** 解析并收窄模型侧 type 参数；未知取值抛 WF_EXPERIENCE_BAD_ARGS（消息给出合法取值）。 */

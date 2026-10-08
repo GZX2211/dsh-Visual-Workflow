@@ -18,6 +18,7 @@ import {
   ERR_EXPERIENCE_WRONG_TYPE,
 } from "../../../src/host/shared/protocol.js"
 import { buildRecallSummary, buildRetrievalProjection } from "../../../src/host/experience/projection.js"
+import { CANDIDATE_POOL_SIZE, NEUTRAL_STATS, TRUST_ADJUSTMENT_BETA } from "../../../src/host/experience/constants.js"
 import type { ExperienceCaller } from "../../../src/host/experience/ports.js"
 import { ExperienceService } from "../../../src/host/experience/service.js"
 import { TEAM_EXPERIENCE_CONTEXT_HEADING } from "../../../src/host/experience/team-context.js"
@@ -30,6 +31,8 @@ import {
   seedChildRun,
   seedEntry,
   seedPrompts,
+  seedStats,
+  seedUsed,
   similarityVector,
 } from "./fixtures/ports.js"
 import { errorOf } from "./fixtures/assertions.js"
@@ -704,5 +707,244 @@ describe("ExperienceService.teamExperienceContext", () => {
     const { service } = createService(world)
 
     expect(await service.teamExperienceContext({ ...INPUT, query: "   " })).toBeNull()
+  })
+})
+
+describe("ExperienceService.recall ids 阶段的使用事实", () => {
+  it("test_显式注入_记录使用事实并同步召回计数", async () => {
+    const world = createExperienceWorld()
+    seedEntry(world, { id: "ex-1", experienceType: "agent" })
+    const { service } = createService(world)
+
+    await service.recall({ caller: ROOT_CALLER, type: "agent", ids: ["ex-1"] })
+
+    expect(world.usageRows).toHaveLength(1)
+    expect(world.usageRows[0]).toMatchObject({ experienceId: "ex-1", runId: "", subjectId: "session-1" })
+    expect(world.stats.get("ex-1")).toMatchObject({ ...NEUTRAL_STATS, recalledCount: 1 })
+  })
+
+  it("test_同一经验两次显式注入_计为两次独立使用", async () => {
+    const world = createExperienceWorld()
+    seedEntry(world, { id: "ex-1", experienceType: "agent" })
+    const { service } = createService(world)
+
+    await service.recall({ caller: ROOT_CALLER, type: "agent", ids: ["ex-1"] })
+    await service.recall({ caller: ROOT_CALLER, type: "agent", ids: ["ex-1"] })
+
+    expect(world.usageRows).toHaveLength(2)
+    expect(world.stats.get("ex-1")?.recalledCount).toBe(2)
+  })
+
+  it("test_归档经验查不到_不记录使用事实", async () => {
+    const world = createExperienceWorld()
+    seedEntry(world, { id: "ex-archived", experienceType: "agent", active: false })
+    const { service } = createService(world)
+
+    const result = await service.recall({ caller: ROOT_CALLER, type: "agent", ids: ["ex-archived"] })
+
+    if (result.kind !== "details") throw new Error("期望详情阶段结果")
+    expect(result.entries).toEqual([])
+    expect(world.usageRows).toEqual([])
+  })
+
+  it("test_使用事实写入失败_仍返回经验并留下可诊断告警", async () => {
+    const world = createExperienceWorld()
+    seedEntry(world, { id: "ex-1", experienceType: "agent" })
+    world.store.recordUsage = async () => {
+      throw new Error("使用事实表写入失败")
+    }
+    const { service, warnings } = createService(world)
+
+    const result = await service.recall({ caller: ROOT_CALLER, type: "agent", ids: ["ex-1"] })
+
+    if (result.kind !== "details") throw new Error("期望详情阶段结果")
+    expect(result.entries.map((entry) => entry.id)).toEqual(["ex-1"])
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0].includes("使用事实表写入失败")).toBe(true)
+    expect(warnings[0].includes("仍返回经验")).toBe(true)
+  })
+})
+
+describe("ExperienceService.recall 候选阶段的第二段排序", () => {
+  /** 受控查询世界：查询向量固定为 [1,0]，嵌入只回这一个向量。 */
+  function seedQueryWorld(): FakeExperienceWorld {
+    return createExperienceWorld({ embed: async () => [new Float64Array([1, 0])] })
+  }
+
+  it("test_候选得分_为语义相关性乘有界信任修正且高信任排前", async () => {
+    const world = seedQueryWorld()
+    const vectors = { taskVector: new Float64Array([1, 0]), decisionVector: new Float64Array([1, 0]) }
+    seedEntry(world, { id: "ex-trusted", experienceType: "agent" }, vectors)
+    seedEntry(world, { id: "ex-harmful", experienceType: "agent" }, vectors)
+    seedStats(world, "ex-trusted", { qualitySignal: 1 })
+    seedStats(world, "ex-harmful", { qualitySignal: -1 })
+    const { service } = createService(world)
+
+    const result = await service.recall({ caller: ROOT_CALLER, type: "agent", query: "并行启动" })
+
+    if (result.kind !== "candidates") throw new Error("期望候选阶段结果")
+    expect(result.hits.map((hit) => hit.id)).toEqual(["ex-trusted", "ex-harmful"])
+    expect(result.hits[0].score).toBeCloseTo(1 + TRUST_ADJUSTMENT_BETA, 12)
+    expect(result.hits[1].score).toBeCloseTo(1 - TRUST_ADJUSTMENT_BETA, 12)
+  })
+
+  it("test_低相关超高信任_不能击败明显更相关的中性经验", async () => {
+    const world = seedQueryWorld()
+    seedEntry(
+      world,
+      { id: "ex-low", experienceType: "agent" },
+      { taskVector: new Float64Array([-0.1, Math.sqrt(1 - 0.1 ** 2)]), decisionVector: new Float64Array([-0.1, Math.sqrt(1 - 0.1 ** 2)]) },
+    )
+    seedEntry(
+      world,
+      { id: "ex-high", experienceType: "agent" },
+      { taskVector: new Float64Array([0.6, 0.8]), decisionVector: new Float64Array([0.6, 0.8]) },
+    )
+    seedStats(world, "ex-low", { qualitySignal: 1 })
+    seedStats(world, "ex-high", { qualitySignal: 0 })
+    const { service } = createService(world)
+
+    const result = await service.recall({ caller: ROOT_CALLER, type: "agent", query: "并行启动" })
+
+    if (result.kind !== "candidates") throw new Error("期望候选阶段结果")
+    expect(result.hits.map((hit) => hit.id)).toEqual(["ex-high", "ex-low"])
+    expect(result.hits[0].score).toBeCloseTo(0.8, 12)
+    expect(result.hits[1].score).toBeCloseTo(0.45 * (1 + TRUST_ADJUSTMENT_BETA), 12)
+  })
+
+  it("test_候选池固定为常量_即使 topK 更大也只从池内返回", async () => {
+    const world = seedQueryWorld()
+    for (let index = 0; index < CANDIDATE_POOL_SIZE + 10; index += 1) {
+      seedEntry(world, { id: `ex-${String(index).padStart(2, "0")}`, experienceType: "agent" })
+    }
+    const { service } = createService(world)
+
+    const result = await service.recall({ caller: ROOT_CALLER, type: "agent", query: "并行启动", topK: 50 })
+
+    if (result.kind !== "candidates") throw new Error("期望候选阶段结果")
+    expect(result.hits).toHaveLength(CANDIDATE_POOL_SIZE)
+  })
+
+  it("test_topK 参数_截断最终返回条数", async () => {
+    const world = seedQueryWorld()
+    seedEntry(world, { id: "ex-a", experienceType: "agent" }, { taskVector: new Float64Array([1, 0]), decisionVector: new Float64Array([1, 0]) })
+    seedEntry(world, { id: "ex-b", experienceType: "agent" }, { taskVector: new Float64Array([0.8, 0.6]), decisionVector: new Float64Array([0.8, 0.6]) })
+    seedEntry(world, { id: "ex-c", experienceType: "agent" }, { taskVector: new Float64Array([0.5, 0.5]), decisionVector: new Float64Array([0.5, 0.5]) })
+    const { service } = createService(world)
+
+    const result = await service.recall({ caller: ROOT_CALLER, type: "agent", query: "并行启动", topK: 1 })
+
+    if (result.kind !== "candidates") throw new Error("期望候选阶段结果")
+    expect(result.hits.map((hit) => hit.id)).toEqual(["ex-a"])
+  })
+
+  it("test_候选行存在但条目已不可读_该命中被丢弃", async () => {
+    const world = seedQueryWorld()
+    // 现实中只有「读检索行与读条目之间行被归档/清理」才会出现这种中间态，命中必须被丢弃
+    world.retrievalRows.get("agent")?.push({
+      id: "ex-ghost",
+      taskEmbedding: new Float64Array([1, 0]),
+      taskRetrievalText: "任务：幽灵",
+      decisionEmbedding: new Float64Array([1, 0]),
+      decisionRetrievalText: "决策：幽灵",
+    })
+    const { service } = createService(world)
+
+    const result = await service.recall({ caller: ROOT_CALLER, type: "agent", query: "并行启动" })
+
+    if (result.kind !== "candidates") throw new Error("期望候选阶段结果")
+    expect(result.hits).toEqual([])
+  })
+
+  it("test_统计读取失败_降级为信任中性继续召回并留下告警", async () => {
+    const world = seedQueryWorld()
+    seedEntry(world, { id: "ex-high", experienceType: "agent" }, { taskVector: new Float64Array([1, 0]), decisionVector: new Float64Array([1, 0]) })
+    seedEntry(world, { id: "ex-low", experienceType: "agent" }, { taskVector: new Float64Array([0.6, 0.8]), decisionVector: new Float64Array([0.6, 0.8]) })
+    seedStats(world, "ex-low", { qualitySignal: 1 })
+    world.store.getStats = async () => {
+      throw new Error("统计表不可读")
+    }
+    const { service, warnings } = createService(world)
+
+    const result = await service.recall({ caller: ROOT_CALLER, type: "agent", query: "并行启动" })
+
+    if (result.kind !== "candidates") throw new Error("期望候选阶段结果")
+    expect(result.hits.map((hit) => hit.id)).toEqual(["ex-high", "ex-low"])
+    expect(result.hits[1].score).toBeCloseTo(0.8, 12)
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0].includes("统计表不可读")).toBe(true)
+  })
+
+  it("test_查询阶段_不写使用事实且两次调用结果相同", async () => {
+    const world = seedQueryWorld()
+    seedEntry(world, { id: "ex-1", experienceType: "agent" })
+    const { service } = createService(world)
+
+    const first = await service.recall({ caller: ROOT_CALLER, type: "agent", query: "并行启动" })
+    const second = await service.recall({ caller: ROOT_CALLER, type: "agent", query: "并行启动" })
+
+    expect(world.usageRows).toEqual([])
+    expect(world.calls.includes("store.recordUsage")).toBe(false)
+    expect(second).toEqual(first)
+  })
+
+  it("test_语义回退词法_不读统计因而不套信任修正", async () => {
+    const world = createExperienceWorld({ embeddingSource: "bm25" })
+    seedEntry(world, { id: "ex-hit", experienceType: "agent", taskRetrievalText: "并行 前置条件 闸门", decisionRetrievalText: "决策 分解" })
+    const { service } = createService(world)
+
+    const result = await service.recall({ caller: ROOT_CALLER, type: "agent", query: "并行 前置条件" })
+
+    if (result.kind !== "candidates") throw new Error("期望候选阶段结果")
+    expect(result.source).toBe("bm25")
+    expect(result.hits.map((hit) => hit.id)).toEqual(["ex-hit"])
+    expect(world.calls.includes("store.getStats")).toBe(false)
+  })
+})
+
+describe("ExperienceService.feedback 与 rebuildStats", () => {
+  it("test_反馈委派_已使用经验写入评价且无跳过", async () => {
+    const world = createExperienceWorld()
+    seedEntry(world, { id: "ex-1", experienceType: "agent" })
+    await seedUsed(world, { subjectId: "session-1", experienceId: "ex-1" })
+    const { service } = createService(world)
+
+    const result = await service.feedback({
+      caller: ROOT_CALLER,
+      type: "agent",
+      evaluations: [{ experienceId: "ex-1", fitScore: 1, decisionEffect: 1, informationGain: 1, causalConfidence: 1 }],
+    })
+
+    expect(result.accepted.map((entry) => entry.experienceId)).toEqual(["ex-1"])
+    expect(result.skipped).toEqual([])
+    expect(world.stats.get("ex-1")?.usedCount).toBe(1)
+  })
+
+  it("test_反馈委派_未使用经验被跳过且文案为没有使用的经验不能评价", async () => {
+    const world = createExperienceWorld()
+    seedEntry(world, { id: "ex-1", experienceType: "agent" })
+    const { service } = createService(world)
+
+    const result = await service.feedback({
+      caller: ROOT_CALLER,
+      type: "agent",
+      evaluations: [{ experienceId: "ex-1", fitScore: 1, decisionEffect: 1, informationGain: 1, causalConfidence: 1 }],
+    })
+
+    expect(result.accepted).toEqual([])
+    expect(result.skipped[0].reason.includes("没有使用的经验，不能评价")).toBe(true)
+  })
+
+  it("test_重建委派_返回重建经验数并写出统计行", async () => {
+    const world = createExperienceWorld()
+    seedEntry(world, { id: "ex-1", experienceType: "agent" })
+    seedEntry(world, { id: "ex-2", experienceType: "agent" })
+    const { service } = createService(world)
+
+    const result = await service.rebuildStats()
+
+    expect(result.experienceCount).toBe(2)
+    expect(world.stats.get("ex-1")).toMatchObject({ trust: 0.5, evidenceStrength: 0 })
+    expect(world.calls.includes("store.rebuildStats")).toBe(true)
   })
 })

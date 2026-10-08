@@ -37,10 +37,11 @@ export interface ModelSelectionSetup {
      */
     withPending<T>(selection: ModelSelectionLike | undefined, operation: () => Promise<T>): Promise<T>;
     /**
-     * 按 childId 记住该子代理的模型选择，供后续重发布（冷恢复）时重装。
+     * 按 childId 记住该子代理的模型选择。
      *
-     * 为什么需要：可延续子代理在回合间会被销毁并冷恢复，创建窗口内写入的 selection 随之丢失；
-     * 冷恢复只依据持久描述符重建子代理路由，官方不接受成员级路由，故选择必须由本模块留存。
+     * 两处消费：重发布（冷恢复）时重装（restore），以及按身份查询当前模型（modelOf）——
+     * 因为「可延续子代理在回合间会被销毁并冷恢复」，创建窗口内写进 ctx 的 selection 会丢失，
+     * 冷恢复时官方不接受成员级路由，故选择必须由本模块留存。
      */
     remember(childId: string, selection: ModelSelectionLike): void;
     /**
@@ -53,6 +54,16 @@ export interface ModelSelectionSetup {
      * 服务商/模型/思考强度在会话内可调（官方 ModelSelection 语义），非侵入仅挂载。
      */
     bindParent(ctx: unknown, selection: ModelSelectionLike, sessionId: string): void;
+    /**
+     * 按子代理身份查询当前模型选择（无记录返回 null）。
+     *
+     * 为什么需要查询入口：模型路由只在本装配内成为事实，消费方（如经验评价记录评分者模型）
+     * 只能经此读取，各自推断必然与实际路由漂移。「无记录」返回 null 而不是空对象，
+     * 让消费方自己决定空值语义（记录空串 = 有事实但值为空）。
+     */
+    modelOf(childId: string): ModelSelectionLike | null;
+    /** 按会话查询父代理当前模型选择（未绑定返回 null）。 */
+    parentModelOf(sessionId: string): ModelSelectionLike | null;
 }
 /**
  * 创建模型选择装配：返回贡献与 attach 入口。

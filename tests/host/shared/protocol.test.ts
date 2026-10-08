@@ -23,6 +23,7 @@ import {
   EP_SAVE_EXPERIENCE,
   ERR_EXPERIENCE_BAD_ARGS,
   ERR_EXPERIENCE_EMBEDDING_UNAVAILABLE,
+  ERR_EXPERIENCE_FEEDBACK_FAILED,
   ERR_EXPERIENCE_NOT_FOUND,
   ERR_EXPERIENCE_NOT_INITIALIZED,
   ERR_EXPERIENCE_RECALL_FAILED,
@@ -42,6 +43,7 @@ import {
   WF_ASK,
   WF_ASK_AGENT,
   WF_DB_QUERY,
+  WF_EXPERIENCE_FEEDBACK,
   WF_EXPERIENCE_LEARN,
   WF_EXPERIENCE_RECALL,
   WF_FINISH,
@@ -181,16 +183,23 @@ describe('shared/protocol 工具名常量与可见性', () => {
     }
   })
 
-  it('元编排自进化工具（wf_experience_learn / wf_experience_recall）：所有代理可用，进可选注入集', () => {
-    // 经验学习与经验召回都是「当前主体的自主判断」：子代理也有自己的 agent 经验，
-    // 因此两者不再与自主编排工具同口径隐藏，而是进可选注入集（子代理经组合勾选才注入）。
+  it('元编排自进化工具（wf_experience_learn / wf_experience_recall / wf_experience_feedback）：所有代理可用，进可选注入集', () => {
+    // 经验学习、经验召回与经验反馈都是「当前主体的自主判断」：子代理也有自己的 agent 经验，
+    // 因此三者不与自主编排工具同口径隐藏，而是进可选注入集（子代理经组合勾选才注入）。
     expect(WF_EXPERIENCE_LEARN).toBe('wf_experience_learn')
     expect(WF_EXPERIENCE_RECALL).toBe('wf_experience_recall')
-    expect(TOOL_VISIBILITY.metaEvolution).toEqual([WF_EXPERIENCE_LEARN, WF_EXPERIENCE_RECALL])
+    expect(WF_EXPERIENCE_FEEDBACK).toBe('wf_experience_feedback')
+    expect(TOOL_VISIBILITY.metaEvolution).toEqual([
+      WF_EXPERIENCE_LEARN,
+      WF_EXPERIENCE_RECALL,
+      WF_EXPERIENCE_FEEDBACK,
+    ])
     expect(OPTIONAL_INJECT_TOOLS).toContain(WF_EXPERIENCE_LEARN)
     expect(OPTIONAL_INJECT_TOOLS).toContain(WF_EXPERIENCE_RECALL)
+    expect(OPTIONAL_INJECT_TOOLS).toContain(WF_EXPERIENCE_FEEDBACK)
     expect(CHILD_AGENT_HIDDEN_TOOLS).not.toContain(WF_EXPERIENCE_LEARN)
     expect(CHILD_AGENT_HIDDEN_TOOLS).not.toContain(WF_EXPERIENCE_RECALL)
+    expect(CHILD_AGENT_HIDDEN_TOOLS).not.toContain(WF_EXPERIENCE_FEEDBACK)
   })
 
   it('经验工具不残留旧名 wf_experience（改名后无兼容别名）', () => {
@@ -243,6 +252,7 @@ describe('shared/protocol 经验错误码', () => {
     expect(ERR_EXPERIENCE_RECALL_FAILED).toBe('WF_EXPERIENCE_RECALL_FAILED')
     expect(ERR_EXPERIENCE_NOT_FOUND).toBe('WF_EXPERIENCE_NOT_FOUND')
     expect(ERR_EXPERIENCE_BAD_ARGS).toBe('WF_EXPERIENCE_BAD_ARGS')
+    expect(ERR_EXPERIENCE_FEEDBACK_FAILED).toBe('WF_EXPERIENCE_FEEDBACK_FAILED')
   })
 
   it('经验错误码之间互不重复（不同语义不得共用同一码）', () => {
@@ -254,6 +264,7 @@ describe('shared/protocol 经验错误码', () => {
       ERR_EXPERIENCE_RECALL_FAILED,
       ERR_EXPERIENCE_NOT_FOUND,
       ERR_EXPERIENCE_BAD_ARGS,
+      ERR_EXPERIENCE_FEEDBACK_FAILED,
     ]
     expect(new Set(codes).size).toBe(codes.length)
   })

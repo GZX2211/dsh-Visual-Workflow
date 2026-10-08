@@ -86,6 +86,18 @@ export const zh = {
   experienceExclusions: '不适用条件',
   experienceEvidence: '证据',
   experienceListPlaceholder: '每行一条',
+  // 只读：长期质量统计（Host 由评价历史聚合的派生事实，§34 六项；界面不可编辑）
+  experienceStatsTitle: '长期统计（由评价历史聚合，只读）',
+  experienceStatsEmpty: '暂无统计',
+  experienceStatsHint: '统计由 Host 聚合得出，界面不可编辑；信任度 0.5 表示证据不足、保持中性',
+  experienceStatsFields: {
+    trust: '信任度',
+    empiricalValue: '经验价值',
+    evidenceStrength: '证据强度',
+    stability: '稳定性',
+    usedCount: '使用次数',
+    harmRate: '负向率',
+  },
   // 只读：系统生成的检索投影
   experienceRetrievalTitle: '检索投影（系统生成，不可编辑）',
   experienceTaskRetrievalText: '任务侧检索文本',
@@ -571,6 +583,18 @@ export const en: Dict = {
   experienceExclusions: 'Exclusions',
   experienceEvidence: 'Evidence',
   experienceListPlaceholder: 'One item per line',
+  // Read-only: long-term quality statistics (host-aggregated from evaluation history, §34 six values; not editable here)
+  experienceStatsTitle: 'Long-term statistics (aggregated from evaluation history, read-only)',
+  experienceStatsEmpty: 'No statistics yet',
+  experienceStatsHint: 'Statistics are aggregated by the host and cannot be edited here; trust 0.5 means insufficient evidence, kept neutral',
+  experienceStatsFields: {
+    trust: 'Trust',
+    empiricalValue: 'Empirical value',
+    evidenceStrength: 'Evidence strength',
+    stability: 'Stability',
+    usedCount: 'Use count',
+    harmRate: 'Harm rate',
+  },
   // Read-only: system-generated retrieval projection
   experienceRetrievalTitle: 'Retrieval projection (system-generated, read-only)',
   experienceTaskRetrievalText: 'Task retrieval text',

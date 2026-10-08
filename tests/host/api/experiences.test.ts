@@ -7,9 +7,32 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { ERR_EXPERIENCE_BAD_ARGS, ERR_EXPERIENCE_NOT_FOUND } from '../../../src/host/shared/protocol.js'
 import { EXPERIENCE_LIST_MAX_LIMIT } from '../../../src/host/assets/index.js'
+import type { ExperienceStatsEntry } from '../../../src/host/shared/asset-types.js'
 import { cleanupAll, FakeExperienceDomain, makeHarness } from './fixtures/api-harness.js'
 
 afterEach(cleanupAll)
+
+/** 一条完整的统计投影（派生事实；字段与 experience_stats 列一致）。 */
+function statsFixture(overrides: Partial<ExperienceStatsEntry> = {}): ExperienceStatsEntry {
+  return {
+    experienceId: 'ex-1',
+    effectiveSampleCount: 1.75,
+    recalledCount: 3,
+    usedCount: 2,
+    fitMean: 0.75,
+    empiricalValue: 0.4,
+    variance: 0.01,
+    stability: 0.9,
+    evidenceStrength: 0.2,
+    harmCount: 0,
+    harmRate: 0,
+    harmSeverity: 0,
+    qualitySignal: 0.07,
+    trust: 0.53,
+    updatedAt: 1_700_000_000_000,
+    ...overrides,
+  }
+}
 
 /** 九个语义字段的完整补丁（字段域闭集；顺序无关）。 */
 const FULL_PATCH = {
@@ -132,6 +155,48 @@ describe('经验列表与状态端点', () => {
     expect(restored.active).toBe(true)
     expect(domain.calls.retired).toEqual(['ex-1'])
     expect(domain.calls.restored).toEqual(['ex-1'])
+  })
+})
+
+describe('经验统计投影（只读透传）', () => {
+  it('test_列表_条目自带stats时原样透传且无统计行的条目不伪造', async () => {
+    const { h, domain } = await makeExperienceHarness()
+    const stats = statsFixture()
+    domain.seedExperience({ id: 'ex-1', stats })
+    domain.seedExperience({ id: 'ex-2' })
+
+    const items = (await h.api.handle('listExperiences', {})) as Array<Record<string, unknown>>
+
+    expect(items[0].stats).toEqual(stats)
+    // 没有统计行 ≠ 统计为 0：边界不得补一个假的 0.5 中性值
+    expect(Object.hasOwn(items[1], 'stats')).toBe(false)
+  })
+
+  it('test_保存归档恢复_返回条目仍带stats（派生投影不因状态切换丢失）', async () => {
+    const { h, domain } = await makeExperienceHarness()
+    const stats = statsFixture()
+    domain.seedExperience({ id: 'ex-1', stats })
+
+    const saved = (await h.api.handle('saveExperience', { experienceId: 'ex-1', patch: { principle: '改原则' } })) as Record<string, unknown>
+    const retired = (await h.api.handle('retireExperience', { experienceId: 'ex-1' })) as Record<string, unknown>
+    const restored = (await h.api.handle('restoreExperience', { experienceId: 'ex-1' })) as Record<string, unknown>
+
+    expect(saved.stats).toEqual(stats)
+    expect(retired.stats).toEqual(stats)
+    expect(restored.stats).toEqual(stats)
+  })
+
+  it('test_保存补丁携带统计字段_400拒绝（统计来自评价历史，人工不可编辑）', async () => {
+    const { h, domain } = await makeExperienceHarness()
+    domain.seedExperience({ id: 'ex-1', stats: statsFixture() })
+
+    for (const patch of [{ trust: 0.99 }, { empiricalValue: 1 }, { stats: statsFixture() }]) {
+      await expect(h.api.handle('saveExperience', { experienceId: 'ex-1', patch })).rejects.toMatchObject({
+        status: 400,
+        code: ERR_EXPERIENCE_BAD_ARGS,
+      })
+    }
+    expect(domain.calls.update).toHaveLength(0)
   })
 })
 

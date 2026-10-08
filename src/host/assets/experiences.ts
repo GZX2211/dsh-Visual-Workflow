@@ -23,11 +23,17 @@ import type {
   ExperienceType,
 } from "../shared/asset-types.js"
 import type { AssetTxContext } from "./db.js"
+import { sqlPlaceholders } from "./db.js"
 import { encodeEmbedding } from "./embedding-blob.js"
 import { asExperienceType, decodeRowEmbeddings, experienceRowToEntry, toJsonArray } from "./experience-codec.js"
+import {
+  EXPERIENCE_STATS_JOIN_COLUMNS_SQL,
+  EXPERIENCE_STATS_JOIN_SQL,
+  statsEntryFromRow,
+} from "./experience-stats.js"
 import { experienceBadArgs, experienceNotFound } from "./errors.js"
 import type { IdGeneratorDeps } from "./ids.js"
-import { requireAssetId, toNullableInteger, toOptionalText } from "./role-check.js"
+import { requireAssetId, toNullableInteger, toOptionalText, uniqueFilledIds } from "./role-check.js"
 
 /**
  * 界面经验列表一次最多返回的条数。
@@ -124,14 +130,33 @@ export function insertExperienceRowsChecked(
 export function listExperienceRows(ctx: AssetTxContext, limit: number): ExperienceEntry[] {
   const bounded = boundedListLimit(limit)
   if (bounded === 0) return []
-  const rows = ctx.all("SELECT * FROM experiences ORDER BY created_at DESC, id ASC LIMIT ?", [bounded])
-  return rows.map(experienceRowToEntry)
+  const rows = ctx.all(
+    `SELECT e.*${EXPERIENCE_STATS_JOIN_COLUMNS_SQL} FROM experiences e${EXPERIENCE_STATS_JOIN_SQL}
+      ORDER BY e.created_at DESC, e.id ASC LIMIT ?`,
+    [bounded],
+  )
+  return rows.map(experienceEntryOf)
 }
 
 /** 单条经验（无匹配返回 null）。 */
 export function readExperienceRow(ctx: AssetTxContext, id: string): ExperienceEntry | null {
-  const row = ctx.get("SELECT * FROM experiences WHERE id = ?", [id])
-  return row ? experienceRowToEntry(row) : null
+  const row = ctx.get(
+    `SELECT e.*${EXPERIENCE_STATS_JOIN_COLUMNS_SQL} FROM experiences e${EXPERIENCE_STATS_JOIN_SQL} WHERE e.id = ?`,
+    [id],
+  )
+  return row ? experienceEntryOf(row) : null
+}
+
+/**
+ * 给定 id 中真实存在的经验 id 集合（使用事实与评价写入的前置校验）。
+ * 为什么不让外键报错兜底：外键错误只说「引用了不存在的行」，说不出是哪条经验，
+ * 调用方拿不到可行动信息；这里先查一次，就能明确指出缺失的经验 id。
+ */
+export function readExistingExperienceIds(ctx: AssetTxContext, ids: string[]): Set<string> {
+  const wanted = uniqueFilledIds(ids)
+  if (wanted.length === 0) return new Set()
+  const rows = ctx.all(`SELECT id FROM experiences WHERE id IN (${sqlPlaceholders(wanted)})`, wanted)
+  return new Set(rows.map((row) => requireAssetId(row.id, "experiences.id")))
 }
 
 /**
@@ -146,12 +171,12 @@ export function readExperiencesByIds(
   // 重复 id 不去重：SQL IN 本身按集合取值，再按入参顺序回填即可
   const wanted = ids.filter((id) => typeof id === "string" && id !== "")
   if (wanted.length === 0) return []
-  const placeholders = wanted.map(() => "?").join(", ")
   const rows = ctx.all(
-    `SELECT * FROM experiences WHERE id IN (${placeholders})${options?.activeOnly === true ? " AND is_active = 1" : ""}`,
+    `SELECT e.*${EXPERIENCE_STATS_JOIN_COLUMNS_SQL} FROM experiences e${EXPERIENCE_STATS_JOIN_SQL}
+      WHERE e.id IN (${sqlPlaceholders(wanted)})${options?.activeOnly === true ? " AND e.is_active = 1" : ""}`,
     wanted,
   )
-  const byId = new Map(rows.map((row) => [String(row.id ?? ""), experienceRowToEntry(row)]))
+  const byId = new Map(rows.map((row) => [String(row.id ?? ""), experienceEntryOf(row)]))
   return wanted.map((id) => byId.get(id)).filter((entry): entry is ExperienceEntry => entry !== undefined)
 }
 
@@ -296,6 +321,16 @@ function insertExperienceRow(
       now,
     ],
   )
+}
+
+/**
+ * 行 → 条目：经验本体投影 + JOIN 回来的统计投影。
+ * 无统计行时省略 `stats`：读侧按中性值解释，而不是伪造一个「证据不足」的假事实。
+ */
+function experienceEntryOf(row: Record<string, unknown>): ExperienceEntry {
+  const entry = experienceRowToEntry(row)
+  const stats = statsEntryFromRow(row, "stats_")
+  return stats ? { ...entry, stats } : entry
 }
 
 /** 取某主体类型的活跃行比较面（首次访问时读盘并缓存，含本批已写入的行）。 */

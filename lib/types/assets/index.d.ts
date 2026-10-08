@@ -1,7 +1,8 @@
-import type { AssetVersionEntry, AssetVersionSource, ExperienceEntry, ExperienceGenerationPromptEntry, ExperienceInsertCheckedInput, ExperiencePatch, ExperienceRetrievalUpdate, ExperienceType, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, RoleAssetType, WorkflowAssetDetail, WorkflowAssetSummary } from '../shared/asset-types.js';
+import type { AssetVersionEntry, AssetVersionSource, ExperienceEntry, ExperienceEvaluationInsertInput, ExperienceGenerationPromptEntry, ExperienceInsertCheckedInput, ExperiencePatch, ExperienceRetrievalUpdate, ExperienceStatsEntry, ExperienceStatsRebuildInput, ExperienceType, ExperienceUsageRecordInput, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, RoleAssetType, WorkflowAssetDetail, WorkflowAssetSummary } from '../shared/asset-types.js';
 import type { GraphNode, Line, WorkflowMode } from '../shared/graph-model.js';
 import type { OrgMeta } from '../shared/org-meta.js';
 import type { RoleTemplate } from '../shared/template-types.js';
+import { type ExperienceEvaluationsCheckedResult } from './experience-evaluations.js';
 import { type ExperienceEmbeddingRow, type ExperienceInsertCheckedResult } from './experiences.js';
 import { type IdGeneratorDeps } from './ids.js';
 export { AssetError } from './errors.js';
@@ -9,9 +10,10 @@ export type { AssetErrorCode } from './errors.js';
 export { contentFingerprint, stableStringify } from './fingerprint.js';
 export { decodeEmbedding, encodeEmbedding, type EmbeddingDecode } from './embedding-blob.js';
 export type { ExperienceEmbeddingRow, ExperienceInsertCheckedResult } from './experiences.js';
+export type { ExperienceEvaluationsCheckedResult } from './experience-evaluations.js';
 export { EXPERIENCE_LIST_MAX_LIMIT } from './experiences.js';
 export { EXPERIENCE_PROMPT_SEED_VERSION, EXPERIENCE_PROMPT_SEEDS, type ExperiencePromptSeed } from './experience-seeds.js';
-export { EXPERIENCE_ID_PREFIX, ROLE_ASSET_ID_PREFIX, WORKFLOW_ASSET_ID_PREFIX, newExperienceId, newRoleAssetId, newWorkflowAssetId, versionRowId, type IdGeneratorDeps, type RandomSource, } from './ids.js';
+export { EXPERIENCE_EVALUATION_ID_PREFIX, EXPERIENCE_ID_PREFIX, EXPERIENCE_USAGE_ID_PREFIX, ROLE_ASSET_ID_PREFIX, WORKFLOW_ASSET_ID_PREFIX, newExperienceEvaluationId, newExperienceId, newExperienceUsageId, newRoleAssetId, newWorkflowAssetId, versionRowId, type IdGeneratorDeps, type RandomSource, } from './ids.js';
 export { ASSET_DB_FILE } from './schema.js';
 /** AssetStore 依赖：时钟与 id 生成（测试可确定化；缺省用系统实现）。 */
 export interface AssetStoreDeps {
@@ -189,4 +191,31 @@ export declare class AssetStore {
     updateFields(id: string, patch: ExperiencePatch, next: ExperienceRetrievalUpdate): Promise<ExperienceEntry>;
     /** 经验归档 / 恢复（状态写入的唯一入口；内容与检索投影一概不动）。 */
     setActive(id: string, active: boolean): Promise<ExperienceEntry>;
+    /**
+     * 记录使用事实（经验被显式注入 agent 上下文）：同一笔事务内插入使用行并同步统计的
+     * `recalled_count`；首次记录时按调用方给的中性口径建立统计行。
+     */
+    recordUsage(input: ExperienceUsageRecordInput): Promise<{
+        recorded: number;
+    }>;
+    /** 该主体在该经验类型下「已被显式注入」的经验 id（feedback 准入判据；保持入参顺序去重）。 */
+    listInjectedIds(input: {
+        subjectId: string;
+        experienceType: ExperienceType;
+        experienceIds: string[];
+    }): Promise<string[]>;
+    /**
+     * 批量写入评价并重算对应经验的统计（同一笔事务，任一步失败整批回滚）。
+     * 聚合器由调用方注入：公式属经验域且会演进，而「读全部历史 → 聚合 → 覆盖写」必须原子。
+     */
+    insertEvaluationsChecked(input: ExperienceEvaluationInsertInput): Promise<ExperienceEvaluationsCheckedResult>;
+    /** 读统计投影（缺行不返回：无统计即「证据不足」，读侧按中性解释，不伪造行）。 */
+    getStats(experienceIds: string[]): Promise<ExperienceStatsEntry[]>;
+    /**
+     * 全量重建统计投影（首次上线 / 调参 / 修复 / 迁移）。
+     * 一笔事务内读全部历史、重放聚合器并整表覆盖写；失败不留半成品。
+     */
+    rebuildStats(input: ExperienceStatsRebuildInput): Promise<{
+        experienceCount: number;
+    }>;
 }

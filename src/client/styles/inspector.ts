@@ -222,6 +222,33 @@ export const inspectorStyles = `
   gap: 6px;
 }
 
+/* 只读统计清单（经验「长期统计」区）：标签 + 数值两列，无控件外观——
+   与可编辑字段在视觉上区分（编辑区沿用 .wf-field 的输入控件样式）。 */
+.wf-stat-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.wf-stat {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wf-stat__label {
+  color: var(--wf-ink-2);
+  font-size: 11px;
+}
+
+.wf-stat__value {
+  margin: 0;
+  color: var(--wf-ink);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
 .wf-form-row {
   display: flex;
   align-items: center;

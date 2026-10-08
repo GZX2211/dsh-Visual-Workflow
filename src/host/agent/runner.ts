@@ -806,6 +806,9 @@ export class NodeAgentRunner implements NodeRunner {
     if (typeof reasoning === 'string' && reasoning.trim()) selection.reasoningEffort = reasoning
     try {
       this.deps.modelSelection.attach(agent.ctx as SelectionChildContext, selection)
+      // 同时按 childId 留存：attach 只写进该 child 的 ctx（无法按 id 反查），
+      // 而「这个子代理在用哪个模型」是评价归因等消费方需要按身份查询的事实。
+      this.deps.modelSelection.remember(childId, selection)
     } catch (error) {
       this.deps.logger?.warn(`[visual-workflow] model selection attach failed: ${String(error)}`)
     }

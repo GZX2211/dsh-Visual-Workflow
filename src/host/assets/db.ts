@@ -74,6 +74,15 @@ export function runSql(db: DatabaseSync, sql: string, params: unknown[] = []): v
   db.prepare(sql).run(...(params as never[]))
 }
 
+/**
+ * SQL `IN` 的占位符串（个数与入参列表严格相等）。
+ * 为什么由这个函数生成而不是各读路径手写：占位符个数与参数个数不一致时 SQLite 会把它当成
+ * 语法错误或漏绑，而这类错误只在运行时出现；集中在同一处便于逐处核对。
+ */
+export function sqlPlaceholders(values: readonly unknown[]): string {
+  return values.map(() => '?').join(', ')
+}
+
 /** 事务上下文：端口函数只依赖本接口，不直接触碰驱动。 */
 export interface AssetTxContext {
   exec(sql: string): void

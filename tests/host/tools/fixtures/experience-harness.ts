@@ -1,15 +1,20 @@
 // tests/host/tools/fixtures/experience-harness.ts
 //
-// 经验两工具（wf_experience_learn / wf_experience_recall）单测共用的宿主缝 fake：
-// 记录每次调用的入参（用于验证工具层是否原样传递调用方身份、类型与映射后的候选），
-// 并按用例回放可控结果或失败。工具不落盘，真实持久化由 domain 层承担，故此处只做缝。
+// 经验三工具（wf_experience_learn / wf_experience_recall / wf_experience_feedback）单测共用的
+// 宿主缝 fake：记录每次调用的入参（用于验证工具层是否原样传递调用方身份、类型与映射后的
+// 候选/评价），并按用例回放可控结果或失败。工具不落盘，真实持久化由 domain 层承担，故此处只做缝。
 
 import type {
   ExperienceEntry,
+  ExperienceEvaluationEntry,
   ExperienceGenerationPromptEntry,
   ExperienceRecallHit,
   ExperienceType,
 } from '../../../../src/host/shared/asset-types.js'
+import type {
+  ExperienceFeedbackInput,
+  ExperienceFeedbackResult,
+} from '../../../../src/host/experience/index.js'
 import type { WfExperienceHost } from '../../../../src/host/tools/infrastructure/experience-contract.js'
 
 /** 调用方身份（与宿主缝逐字同形：工具层不定义命名本体）。 */
@@ -39,6 +44,13 @@ export interface RecallCall {
   query?: string
   ids?: string[]
   topK?: number
+}
+
+/** 反馈调用记录（evaluations 为工具映射后的域层入参，形状由 domain 收窄）。 */
+export interface FeedbackCall {
+  caller: CallerShape
+  type: ExperienceType
+  evaluations: ExperienceFeedbackInput[]
 }
 
 /** 召回结果（与宿主缝返回联合同形）。 */
@@ -99,19 +111,45 @@ export function recallHitFixture(overrides: Partial<ExperienceRecallHit> = {}): 
 }
 
 /**
- * 宿主缝 fake：默认按请求类型回放对应 Prompt，提交成功、召回返回候选或详情；
- * `*Fail` 非空时抛该值（用例据此验证错误码透传与归一）。
+ * 已写入的评价行样本（含系统 provenance）。
+ * provenance 字段刻意给成与入参不同的值：工具层若把它回显给模型，用例会立刻暴露。
+ */
+export function evaluationEntryFixture(overrides: Partial<ExperienceEvaluationEntry> = {}): ExperienceEvaluationEntry {
+  return {
+    id: 'ev-1',
+    experienceId: 'ex-1',
+    runId: 'run-1',
+    fitScore: 0.75,
+    decisionEffect: 0.5,
+    informationGain: 0.75,
+    causalConfidence: 0.75,
+    evidence: '该经验直接影响了并行/串行选择',
+    evaluatorSubjectId: 'session-1',
+    evaluatorModel: 'fake-model',
+    createdAt: 1_700_000_000_000,
+    ...overrides,
+  }
+}
+
+/**
+ * 宿主缝 fake：默认按请求类型回放对应 Prompt，提交成功、召回返回候选或详情、反馈全部接受
+ * 且无跳过；`*Fail` 非空时抛该值（用例据此验证错误码透传与归一）。
  */
 export class FakeExperienceHost implements WfExperienceHost {
   initializeCalls: InitializeCall[] = []
   submitCalls: SubmitCall[] = []
   recallCalls: RecallCall[] = []
+  feedbackCalls: FeedbackCall[] = []
   initializeFail: unknown = null
   submitFail: unknown = null
   recallFail: unknown = null
+  feedbackFail: unknown = null
   inserted: ExperienceEntry[] = [experienceEntryFixture()]
   skipped: Array<{ reason: string; decisionRetrievalText: string }> = []
   recallReply: RecallReply = { kind: 'candidates', hits: [recallHitFixture()], source: 'semantic' }
+  /** 反馈默认把入参原样视为已写入（provenance 由域层补全，工具层不得读它）。 */
+  feedbackAccepted: ExperienceEvaluationEntry[] = [evaluationEntryFixture()]
+  feedbackSkipped: Array<{ experienceId: string; reason: string }> = []
 
   readonly experience = {
     initializePrompt: async (input: { caller: CallerShape; type: ExperienceType }): Promise<{ prompt: ExperienceGenerationPromptEntry }> => {
@@ -155,6 +193,19 @@ export class FakeExperienceHost implements WfExperienceHost {
         throw failure
       }
       return this.recallReply
+    },
+    feedback: async (input: {
+      caller: CallerShape
+      type: ExperienceType
+      evaluations: ExperienceFeedbackInput[]
+    }): Promise<ExperienceFeedbackResult> => {
+      this.feedbackCalls.push({ caller: input.caller, type: input.type, evaluations: input.evaluations })
+      if (this.feedbackFail !== null) {
+        const failure = this.feedbackFail
+        this.feedbackFail = null
+        throw failure
+      }
+      return { accepted: this.feedbackAccepted, skipped: this.feedbackSkipped }
     },
   }
 }

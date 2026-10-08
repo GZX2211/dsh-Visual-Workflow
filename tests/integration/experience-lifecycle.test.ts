@@ -69,6 +69,8 @@ function fakeRuntime(overrides: Partial<ExperienceRuntimePort> = {}): Experience
     runForChild: () => null,
     hasTeamInCurrentRun: () => false,
     hasActiveRun: () => false,
+    // 默认「无法确定模型名」：集成测试不依赖真实模型路由，需要时由用例覆盖
+    modelForCaller: () => "",
     ...overrides,
   }
 }
@@ -85,6 +87,11 @@ function storePortOf(store: AssetStore): ExperienceStorePort {
     insertChecked: (input) => store.insertChecked(input),
     updateFields: (id, patch, next) => store.updateFields(id, patch, next),
     setActive: (id, active) => store.setActive(id, active),
+    recordUsage: (input) => store.recordUsage(input),
+    listInjectedIds: (input) => store.listInjectedIds(input),
+    insertEvaluationsChecked: (input) => store.insertEvaluationsChecked(input),
+    getStats: (ids) => store.getStats(ids),
+    rebuildStats: (input) => store.rebuildStats(input),
   }
 }
 

@@ -6,20 +6,25 @@
 // 为什么旧形状 DDL 在测试里写死副本：迁移判定读的是 sqlite_master 的原文，
 // 若测试直接引用源码 DDL，「旧库能否升级」会随源码改动自动变成恒真。
 
-import { mkdtemp } from "node:fs/promises"
+import { mkdtemp, readFile, readdir } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { EXPERIENCE_PROMPT_SEEDS, EXPERIENCE_PROMPT_SEED_VERSION } from "../../../src/host/assets/experience-seeds.js"
 import { AssetStore } from "../../../src/host/assets/index.js"
 import {
+  evaluationRow,
   experienceRow,
   fakeClock,
   fakeIds,
   keepAllJudge,
   makeStore,
+  neutralStatsFixture,
   openRawDb,
+  rawQuery,
   removeTempRoot,
+  simpleStatsAggregate,
+  usageRow,
 } from "./fixtures/asset-fixture.js"
 
 /** 新 experiences 的列集合（按 DDL 声明顺序）。 */
@@ -70,6 +75,48 @@ const EXPERIENCE_PROMPT_COLUMNS = [
 ]
 
 const EXPERIENCE_PROMPT_INDEXES = ["idx_experience_prompts_active_type", "idx_experience_prompts_type"]
+
+/** 评价闭环三表的列集合（按 DDL 声明顺序）与索引（升序，便于与 PRAGMA 结果比对）。 */
+const EXPERIENCE_USAGE_COLUMNS = ["id", "experience_id", "run_id", "subject_id", "created_at"]
+const EXPERIENCE_EVALUATION_COLUMNS = [
+  "id",
+  "experience_id",
+  "run_id",
+  "fit_score",
+  "decision_effect",
+  "information_gain",
+  "causal_confidence",
+  "evidence",
+  "evaluator_subject_id",
+  "evaluator_model",
+  "created_at",
+]
+const EXPERIENCE_STATS_COLUMNS = [
+  "experience_id",
+  "effective_sample_count",
+  "recalled_count",
+  "used_count",
+  "fit_mean",
+  "empirical_value",
+  "variance",
+  "stability",
+  "evidence_strength",
+  "harm_count",
+  "harm_rate",
+  "harm_severity",
+  "quality_signal",
+  "trust",
+  "updated_at",
+]
+const EXPERIENCE_USAGE_INDEXES = ["idx_experience_usage_experience", "idx_experience_usage_subject"]
+const EXPERIENCE_EVALUATION_INDEXES = [
+  "idx_experience_evaluation_created",
+  "idx_experience_evaluation_experience",
+]
+const EXPERIENCE_STATS_INDEXES = ["idx_experience_stats_harm", "idx_experience_stats_trust"]
+
+/** 不可变历史表：只允许 INSERT 与 SELECT。 */
+const IMMUTABLE_EXPERIENCE_TABLES = ["experience_usage", "experience_evaluation"]
 
 /** 迁移前的经验表形状（冻结副本：早期版本无 experience_type，用的是 task_context/insight 单体形状）。 */
 const LEGACY_EXPERIENCES_DDL = `
@@ -189,6 +236,131 @@ describe("经验域磁盘形状", () => {
       expect(active).toMatchObject({ total: 1 })
     } finally {
       raw.close()
+    }
+  })
+})
+
+describe("评价闭环磁盘形状（使用事实 / 评价事实 / 统计投影）", () => {
+  it("test_初始化_新库_评价闭环三表列与索引齐备且外键指向经验表", async () => {
+    const raw = await openRawDb(root)
+    let usageColumns: string[] = []
+    let evaluationColumns: string[] = []
+    let statsColumns: string[] = []
+    let usageIndexes: string[] = []
+    let evaluationIndexes: string[] = []
+    let statsIndexes: string[] = []
+    let foreignKeys: Record<string, unknown>[] = []
+    let triggers: Record<string, unknown>[] = []
+    try {
+      usageColumns = columnsOf(raw, "experience_usage")
+      evaluationColumns = columnsOf(raw, "experience_evaluation")
+      statsColumns = columnsOf(raw, "experience_stats")
+      usageIndexes = indexNamesOf(raw, "experience_usage")
+      evaluationIndexes = indexNamesOf(raw, "experience_evaluation")
+      statsIndexes = indexNamesOf(raw, "experience_stats")
+      foreignKeys = [
+        ...(raw.prepare("PRAGMA foreign_key_list(experience_usage)").all() as Record<string, unknown>[]),
+        ...(raw.prepare("PRAGMA foreign_key_list(experience_evaluation)").all() as Record<string, unknown>[]),
+        ...(raw.prepare("PRAGMA foreign_key_list(experience_stats)").all() as Record<string, unknown>[]),
+      ]
+      triggers = raw.prepare("SELECT name FROM sqlite_master WHERE type = 'trigger'").all() as Record<string, unknown>[]
+    } finally {
+      raw.close()
+    }
+
+    expect(usageColumns).toEqual(EXPERIENCE_USAGE_COLUMNS)
+    expect(evaluationColumns).toEqual(EXPERIENCE_EVALUATION_COLUMNS)
+    expect(statsColumns).toEqual(EXPERIENCE_STATS_COLUMNS)
+    expect(usageIndexes).toEqual(EXPERIENCE_USAGE_INDEXES)
+    expect(evaluationIndexes).toEqual(EXPERIENCE_EVALUATION_INDEXES)
+    expect(statsIndexes).toEqual(EXPERIENCE_STATS_INDEXES)
+    expect(foreignKeys).toHaveLength(3)
+    expect(foreignKeys.map((key) => [key.table, key.from, key.to])).toEqual([
+      ["experiences", "experience_id", "id"],
+      ["experiences", "experience_id", "id"],
+      ["experiences", "experience_id", "id"],
+    ])
+    // 触发器会带来第二处写入边界：历史不可变靠「不存在写路径」保证，而不是靠触发器兜底
+    expect(triggers).toEqual([])
+  })
+
+  it("test_初始化_评价表_非锚点评分被取值约束拒绝", async () => {
+    await store.insertChecked({ rows: [experienceRow("ex-1")], duplicateOf: keepAllJudge })
+    const raw = await openRawDb(root)
+    const insert = (fit: string, effect: string): void => {
+      raw.exec(`INSERT INTO experience_evaluation (
+        id, experience_id, run_id, fit_score, decision_effect, information_gain, causal_confidence,
+        evidence, evaluator_subject_id, evaluator_model, created_at
+      ) VALUES ('xev-raw', 'ex-1', 'run-1', ${fit}, ${effect}, 0.5, 0.5, '', 'session-1', '', 1)`)
+    }
+    try {
+      expect(() => insert("0.3", "0.5")).toThrow(/CHECK/i)
+      expect(() => insert("0.5", "0.3")).toThrow(/CHECK/i)
+      // 合法锚点可写入：证明拒绝来自取值约束，而不是语句本身有别的毛病
+      insert("0.5", "-0.5")
+    } finally {
+      raw.close()
+    }
+    expect(await rawQuery(root, "SELECT fit_score, decision_effect FROM experience_evaluation")).toEqual([
+      { fit_score: 0.5, decision_effect: -0.5 },
+    ])
+  })
+
+  it("test_源码_整个Host半区_评价与使用历史不存在UPDATE与DELETE写路径", async () => {
+    const sources = await collectHostSources()
+    // 反空洞：门禁必须真的扫到那几张历史表的读写文件，否则新增文件绕过门禁时测试仍会通过
+    const scanned = sources.filter((file) =>
+      IMMUTABLE_EXPERIENCE_TABLES.some((table) => file.text.includes(table)),
+    )
+    expect(sources.length).toBeGreaterThan(50)
+    expect(scanned.map((file) => file.path)).toEqual(
+      expect.arrayContaining([
+        "assets/schema.ts",
+        "assets/experience-usage.ts",
+        "assets/experience-evaluations.ts",
+        "assets/experience-stats.ts",
+      ]),
+    )
+
+    for (const file of scanned) {
+      for (const table of IMMUTABLE_EXPERIENCE_TABLES) {
+        // 豁免说明：`experience_stats` 是可重建投影，允许整表覆盖写；本门禁只针对两张历史事实表
+        expect(file.text, `${file.path} 不得出现 UPDATE ${table}`).not.toMatch(
+          new RegExp(`UPDATE\\s+${table}\\b`, "i"),
+        )
+        expect(file.text, `${file.path} 不得出现 DELETE FROM ${table}`).not.toMatch(
+          new RegExp(`DELETE\\s+FROM\\s+${table}\\b`, "i"),
+        )
+      }
+    }
+  })
+
+  it("test_初始化_已有评价与使用事实_重复初始化不改变任何历史行", async () => {
+    await store.insertChecked({ rows: [experienceRow("ex-1")], duplicateOf: keepAllJudge })
+    await store.recordUsage({ rows: [usageRow("ex-1")], neutralStats: neutralStatsFixture() })
+    await store.insertEvaluationsChecked({ rows: [evaluationRow("ex-1")], aggregate: simpleStatsAggregate })
+    const before = {
+      usage: await rawQuery(root, "SELECT * FROM experience_usage ORDER BY id"),
+      evaluation: await rawQuery(root, "SELECT * FROM experience_evaluation ORDER BY id"),
+      stats: await rawQuery(root, "SELECT * FROM experience_stats ORDER BY experience_id"),
+    }
+    expect(before.usage).toHaveLength(1)
+    expect(before.evaluation).toHaveLength(1)
+    expect(before.stats).toHaveLength(1)
+    store.close()
+
+    const reopened = new AssetStore(root, { now: fakeClock(), ids: fakeIds() })
+    try {
+      await reopened.init()
+      await reopened.init()
+
+      expect({
+        usage: await rawQuery(root, "SELECT * FROM experience_usage ORDER BY id"),
+        evaluation: await rawQuery(root, "SELECT * FROM experience_evaluation ORDER BY id"),
+        stats: await rawQuery(root, "SELECT * FROM experience_stats ORDER BY experience_id"),
+      }).toEqual(before)
+    } finally {
+      reopened.close()
     }
   })
 })
@@ -380,6 +552,38 @@ describe("旧形状 experiences 迁移（用户裁决：旧数据直接删除）
     }
   })
 })
+
+/**
+ * 递归收集 `src/host/` 下全部源码文件（Host 半区相对路径 + 正文）。
+ *
+ * 为什么按目录遍历而不是固定文件名清单：门禁必须自动覆盖新增文件，
+ * 固定清单会让「新文件里引入历史表的 UPDATE/DELETE」静默通过。
+ *
+ * 为什么扫描根是整个 Host 半区而不是 assets 目录：这两张历史表的写入边界属 assets 模块，
+ * 但门禁若只扫 assets，别处（例如经验域直连库）写同一张表仍会绕过；扫描整个半区后，
+ * 任何位置的越界写入都会让本门禁变红。
+ */
+async function collectHostSources(): Promise<Array<{ path: string; text: string }>> {
+  const collected: Array<{ path: string; text: string }> = []
+  const walk = async (dir: URL, prefix: string): Promise<void> => {
+    const entries = await readdir(dir, { withFileTypes: true })
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        await walk(new URL(`${entry.name}/`, dir), `${prefix}${entry.name}/`)
+        continue
+      }
+      if (!entry.name.endsWith(".ts")) continue
+      collected.push({ path: `${prefix}${entry.name}`, text: await readFile(new URL(entry.name, dir), "utf8") })
+    }
+  }
+  await walk(new URL("../../../src/host/", import.meta.url), "")
+  return collected
+}
+
+/** 某张表上的列名（按 DDL 声明顺序）。 */
+function columnsOf(raw: Awaited<ReturnType<typeof openRawDb>>, table: string): string[] {
+  return (raw.prepare(`PRAGMA table_info(${table})`).all() as Record<string, unknown>[]).map((row) => String(row.name))
+}
 
 /** 某张表上由 schema 创建（非自增）的索引名（升序）。 */
 function indexNamesOf(raw: Awaited<ReturnType<typeof openRawDb>>, table: string): string[] {

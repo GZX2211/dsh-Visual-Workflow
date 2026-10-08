@@ -41,6 +41,7 @@ import {
   registerWfAsk,
   registerWfAskAgent,
   registerWfDbQuery,
+  registerWfExperienceFeedback,
   registerWfExperienceLearn,
   registerWfExperienceRecall,
   registerWfFinish,
@@ -468,6 +469,11 @@ export class VisualWorkflowHost extends Service {
       insertChecked: (input) => store().insertChecked(input),
       updateFields: (id, patch, next) => store().updateFields(id, patch, next),
       setActive: (id, active) => store().setActive(id, active),
+      recordUsage: (input) => store().recordUsage(input),
+      listInjectedIds: (input) => store().listInjectedIds(input),
+      insertEvaluationsChecked: (input) => store().insertEvaluationsChecked(input),
+      getStats: (ids) => store().getStats(ids),
+      rebuildStats: (input) => store().rebuildStats(input),
     }
   }
 
@@ -478,16 +484,26 @@ export class VisualWorkflowHost extends Service {
       runForChild: (childId) => this.orchestrator.experienceRunForChild(childId),
       hasTeamInCurrentRun: (sessionId) => this.orchestrator.hasTeamInCurrentRun(sessionId),
       hasActiveRun: (sessionId) => this.orchestrator.hasActiveRunForSession(sessionId),
+      // 评分者模型取自模型选择装配（节点子代理创建时确定、会话内父代理可改）：
+      // 取不到即空串——「不知道模型名」是真实事实，伪造一个默认模型会让校准数据变成假证据。
+      modelForCaller: (caller) => {
+        const childId = caller.isChild ? String(caller.childId ?? '').trim() : ''
+        const selection = childId
+          ? this.modelSelection.modelOf(childId)
+          : this.modelSelection.parentModelOf(caller.sessionId)
+        return selection?.model.trim() ?? ''
+      },
     }
   }
 
-  /** 工具层经验能力缝（learn 与 recall 两工具共用经验域服务同一实例）。 */
+  /** 工具层经验能力缝（learn / recall / feedback 三工具共用经验域服务同一实例）。 */
   private experienceHost(): WfExperienceHost {
     return {
       experience: {
         initializePrompt: (input) => this.experienceService.initializePrompt(input),
         submit: (input) => this.experienceService.submit(input),
         recall: (input) => this.experienceService.recall(input),
+        feedback: (input) => this.experienceService.feedback(input),
       },
     }
   }
@@ -650,8 +666,9 @@ export class VisualWorkflowHost extends Service {
     }
 
     // 元编排自进化工具注册：wf_experience_learn（单工具双态——空集取当前主体的生成 Prompt、
-    // 传候选即校验后入库）与 wf_experience_recall（两阶段语义召回）。
-    // 两者都是「主体自身的学习与回忆」，因此进可选注入集（子代理经组合勾选可用），
+    // 传候选即校验后入库）、wf_experience_recall（两阶段语义召回）与 wf_experience_feedback
+    // （任务收尾阶段提交已使用经验的四维评价）。
+    // 三者都是「主体自身的学习、回忆与复盘」，因此进可选注入集（子代理经组合勾选可用），
     // 不再与父代理专属工具同口径永久隐藏；工具内另有调用者身份与职责类型二次校验。
     // 资产库未就绪时不注册：工具只会在调用时抛「资产库不可用」，不如干脆不可见（组合管理里也不会勾到）。
     if (this.assetStoreReady) {
@@ -666,8 +683,13 @@ export class VisualWorkflowHost extends Service {
       } catch (error) {
         this.ctx.logger.warn(`[visual-workflow] wf_experience_recall 注册失败：${error instanceof Error ? error.message : String(error)}`)
       }
+      try {
+        this.ctx.effect(() => registerWfExperienceFeedback(this.ctx, experienceHost), 'visualWorkflowHost.wfExperienceFeedback')
+      } catch (error) {
+        this.ctx.logger.warn(`[visual-workflow] wf_experience_feedback 注册失败：${error instanceof Error ? error.message : String(error)}`)
+      }
     } else {
-      this.ctx.logger.warn('[visual-workflow] 资产库不可用：经验工具未注册（经验学习与召回能力不可用）')
+      this.ctx.logger.warn('[visual-workflow] 资产库不可用：经验工具未注册（经验学习、召回与反馈能力不可用）')
     }
 
     // `/arrange` 斜杠命令（P2 编排 SOP）：规划期「只采集 + 注入」入口——采集用户意图

@@ -99,6 +99,27 @@ function withLists(base: ExperienceEntry, lists: { exclusions?: unknown; evidenc
   return { ...base, ...lists } as ExperienceEntry
 }
 
+/** 长期统计样本（Host 派生事实；界面只读展示，保存补丁必须忽略它）。 */
+function stats(): NonNullable<ExperienceEntry['stats']> {
+  return {
+    experienceId: 'ex-1',
+    effectiveSampleCount: 3.5,
+    recalledCount: 7,
+    usedCount: 4,
+    fitMean: 0.8,
+    empiricalValue: -0.25,
+    variance: 0.02,
+    stability: 0.9,
+    evidenceStrength: 0.63,
+    harmCount: 1,
+    harmRate: 0.25,
+    harmSeverity: 0.5,
+    qualitySignal: 0.3,
+    trust: 0.5,
+    updatedAt: 20,
+  }
+}
+
 interface HarnessResult {
   face: ExperiencesFace
   dispatched: Array<{ type: string; [key: string]: unknown }>
@@ -152,7 +173,12 @@ describe('useExperiences：四个经验端点的调用与参数', () => {
     const { remote, calls } = makeRemote(() => updated)
     const { face, toasts, dispatched } = await renderExperiences(remote)
 
-    const result = await act(async () => await face.save(entry({ evidence: ['证据'], principle: '改写后的原则' })))
+    const result = await act(async () => await face.save(entry({
+      evidence: ['证据'],
+      principle: '改写后的原则',
+      // 条目携带长期统计：保存仍不得把它随补丁回传（统计是 Host 派生事实）
+      stats: stats(),
+    })))
 
     expect(calls).toEqual([{
       endpoint: EP.EP_SAVE_EXPERIENCE,
@@ -357,6 +383,15 @@ describe('experiencePatchOf（保存载荷投影）', () => {
   it('test_投影_不回传只读元信息（id/主体类型/状态/投影/向量/时间戳）', () => {
     const patch = experiencePatchOf(entry({ id: 'ex-9', active: false, createdAt: 1, updatedAt: 2, sourceRunId: 'run-1' }))
 
+    expect(Object.keys(patch).sort()).toEqual([
+      'decisionDomain', 'evidence', 'exclusions', 'principle', 'recommendedAction', 'responsibility', 'situation', 'taskType', 'trigger',
+    ])
+  })
+
+  it('test_投影_条目携带长期统计_补丁仍只含九个语义字段', () => {
+    const patch = experiencePatchOf(entry({ stats: stats() }))
+
+    expect('stats' in patch).toBe(false)
     expect(Object.keys(patch).sort()).toEqual([
       'decisionDomain', 'evidence', 'exclusions', 'principle', 'recommendedAction', 'responsibility', 'situation', 'taskType', 'trigger',
     ])

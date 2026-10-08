@@ -16,7 +16,7 @@ import type {
 import { decodeEmbedding } from "../../../src/host/assets/embedding-blob.js"
 import { asExperienceType, parseJsonArray } from "../../../src/host/assets/experience-codec.js"
 import { AssetStore, EXPERIENCE_LIST_MAX_LIMIT } from "../../../src/host/assets/index.js"
-import { experienceRow, keepAllJudge, makeStore, openRawDb, removeTempRoot, vector } from "./fixtures/asset-fixture.js"
+import { experienceRow, keepAllJudge, makeStore, neutralStatsFixture, openRawDb, removeTempRoot, usageRow, vector } from "./fixtures/asset-fixture.js"
 
 /** 决策侧检索文本相同即视为重复（验证判重接入点，不验证相似度算法）。 */
 const byDecisionText: ExperienceDuplicateJudge = (candidate, existing) =>
@@ -457,5 +457,62 @@ describe("经验编辑保存（重算检索投影，无版本）", () => {
     await expect(store.updateFields("ex-缺失", { principle: "改写" }, retrieval())).rejects.toMatchObject({
       code: "WF_EXPERIENCE_NOT_FOUND",
     })
+  })
+})
+
+describe("经验条目的统计投影挂载", () => {
+  it("test_读经验_有统计行_列表与按id召回都挂载同一份统计", async () => {
+    await insertOne(experienceRow("ex-1"))
+    await store.recordUsage({
+      rows: [usageRow("ex-1"), usageRow("ex-1")],
+      neutralStats: neutralStatsFixture(),
+    })
+
+    const [listed] = await store.listRows(10)
+    const [fetched] = await store.getRows(["ex-1"])
+
+    expect(listed.stats).toMatchObject({
+      experienceId: "ex-1",
+      effectiveSampleCount: 0,
+      recalledCount: 2,
+      usedCount: 0,
+      stability: 1,
+      evidenceStrength: 0,
+      qualitySignal: 0,
+      trust: 0.5,
+    })
+    expect(fetched.stats).toEqual(listed.stats)
+  })
+
+  it("test_读经验_无统计行_条目省略stats字段而非伪造中性值", async () => {
+    await insertOne(experienceRow("ex-1"))
+
+    const [listed] = await store.listRows(10)
+
+    expect("stats" in listed).toBe(false)
+    expect(await store.getStats(["ex-1"])).toEqual([])
+  })
+
+  it("test_读经验_仅部分经验有统计_各自独立挂载", async () => {
+    await insertOne(experienceRow("ex-1"))
+    await insertOne(experienceRow("ex-2"))
+    await store.recordUsage({ rows: [usageRow("ex-1")], neutralStats: neutralStatsFixture() })
+
+    const rows = await store.listRows(10)
+
+    expect(rows.map((entry) => [entry.id, entry.stats?.recalledCount ?? null])).toEqual([
+      ["ex-2", null],
+      ["ex-1", 1],
+    ])
+  })
+
+  it("test_保存_语义字段改写_统计投影不受影响", async () => {
+    await insertOne(experienceRow("ex-1"))
+    await store.recordUsage({ rows: [usageRow("ex-1")], neutralStats: neutralStatsFixture() })
+    const before = (await store.getRows(["ex-1"]))[0].stats
+
+    const updated = await store.updateFields("ex-1", { principle: "改写后的原则" }, retrieval())
+
+    expect(updated.stats).toEqual(before)
   })
 })

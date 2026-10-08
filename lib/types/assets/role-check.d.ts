@@ -2,6 +2,18 @@
 export declare function requireText(value: unknown, field: string): string;
 /** 资产/版本标识校验（非空字符串）。 */
 export declare function requireAssetId(value: unknown, field?: string): string;
+/**
+ * 经验域必填文本校验（缺失或空白即非法；返回 trim 后的值）。
+ * 与 requireText 分开是因为错误语义不同：经验写入失败要报经验入参问题，
+ * 调用方据此判断是「资产」还是「经验」的载荷需要修。
+ */
+export declare function requireExperienceText(value: unknown, field: string): string;
+/**
+ * 入参 id 列表归一：丢弃非字符串与纯空白项、按首次出现去重并保持顺序。
+ * 为什么读路径也要归一：id 列表来自工具层与界面，重复项会让「同一行被返回两次」，
+ * 而调用方按位置消费结果时无从分辨。
+ */
+export declare function uniqueFilledIds(values: readonly unknown[]): string[];
 /** 版本号校验（正整数）。 */
 export declare function requireVersionId(value: unknown): number;
 /** JSON 列序列化（undefined 落为 null，避免写入字符串 "undefined"）。 */

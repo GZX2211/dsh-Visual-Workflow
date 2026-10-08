@@ -10,11 +10,16 @@
 
 import type {
   ExperienceEntry,
+  ExperienceEvaluationEntry,
+  ExperienceEvaluationInsertInput,
   ExperienceGenerationPromptEntry,
   ExperienceInsertCheckedInput,
   ExperiencePatch,
   ExperienceRetrievalUpdate,
+  ExperienceStatsEntry,
+  ExperienceStatsRebuildInput,
   ExperienceType,
+  ExperienceUsageRecordInput,
 } from "../shared/asset-types.js"
 
 /**
@@ -69,6 +74,31 @@ export interface ExperienceStorePort {
   updateFields(id: string, patch: ExperiencePatch, next: ExperienceRetrievalUpdate): Promise<ExperienceEntry>
   /** 置活跃 / 归档（两个方向同一操作，避免两套写入路径）。 */
   setActive(id: string, active: boolean): Promise<ExperienceEntry>
+  /**
+   * 记录使用事实（经验被显式注入 agent 上下文），同一笔事务内同步 recalled_count。
+   *
+   * 为什么由持久化端口承担：使用事实是可重建统计的输入之一，必须与「首次建立统计行」原子，
+   * 且经验本体不得因统计写入失败而受影响。
+   */
+  recordUsage(input: ExperienceUsageRecordInput): Promise<{ recorded: number }>
+  /** 指定主体在给定经验类型下「已被显式注入」的经验 id（feedback 的准入判据；保持入参顺序）。 */
+  listInjectedIds(input: { subjectId: string; experienceType: ExperienceType; experienceIds: string[] }): Promise<string[]>
+  /**
+   * 批量写入评价并重算对应经验的统计（同一笔事务，失败整批回滚）。
+   *
+   * 聚合器由经验域以闭包注入：公式属经验域且会演进，而「读全部历史 → 聚合 → 写入」必须原子。
+   */
+  insertEvaluationsChecked(input: ExperienceEvaluationInsertInput): Promise<{
+    inserted: ExperienceEvaluationEntry[]
+    stats: ExperienceStatsEntry[]
+  }>
+  /** 读统计投影（缺行不返回：无统计即「证据不足」，读侧按中性解释，不伪造行）。 */
+  getStats(experienceIds: string[]): Promise<ExperienceStatsEntry[]>
+  /**
+   * 全量重建统计投影（首次上线 / 调参 / 修复 / 迁移）。
+   * 一笔事务内读全部评价与使用事实、重放聚合器、覆盖写入；失败不留半成品。
+   */
+  rebuildStats(input: ExperienceStatsRebuildInput): Promise<{ experienceCount: number }>
 }
 
 /**
@@ -81,6 +111,13 @@ export interface ExperienceRuntimePort {
   runForChild(childId: string): { runId: string; flowId: string; sessionId: string; nodeId: string } | null
   hasTeamInCurrentRun(sessionId: string): boolean
   hasActiveRun(sessionId: string): boolean
+  /**
+   * 调用方当前使用的模型名（评价的评分者模型，用于未来的评分者校准）。
+   *
+   * 为什么无法确定时返回空串而不是省略：`evaluator_model` 是评价行的必填列，
+   * 而「不知道模型名」是一个真实事实；伪造一个默认模型名会让校准数据变成假证据。
+   */
+  modelForCaller(caller: ExperienceCaller): string
 }
 
 /**

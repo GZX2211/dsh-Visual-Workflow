@@ -7,7 +7,14 @@
 // 时，漂移只会在两处口径不一致时才暴露；把「列怎么读」收敛到一处，两处消费方
 // 引用同一事实。
 
-import type { ExperienceEntry, ExperienceGenerationPromptEntry, ExperienceType } from "../shared/asset-types.js"
+import type {
+  ExperienceDecisionEffectAnchor,
+  ExperienceEntry,
+  ExperienceEvaluationScores,
+  ExperienceGenerationPromptEntry,
+  ExperienceScoreAnchor,
+  ExperienceType,
+} from "../shared/asset-types.js"
 import { decodeEmbedding } from "./embedding-blob.js"
 import { requireAssetId, toInteger, toNullableInteger, toNullableText } from "./role-check.js"
 
@@ -107,5 +114,20 @@ export function experiencePromptRowToEntry(row: Record<string, unknown>): Experi
     active: toInteger(row.is_active, 1) !== 0,
     createdAt: toInteger(row.created_at, 0),
     updatedAt: toInteger(row.updated_at, 0),
+  }
+}
+
+/**
+ * 评价行 → 四维评分（聚合器的输入）。
+ *
+ * 为什么直接按契约收窄而不再校验取值域：`fit_score` 等列的 CHECK 约束已经把取值锁在锚点集合内，
+ * 而校验清单的唯一本体在经验域；资产库再造一份锚点表只会变成第三处口径。
+ */
+export function evaluationScoresFromRow(row: Record<string, unknown>): ExperienceEvaluationScores {
+  return {
+    fitScore: Number(row.fit_score) as ExperienceScoreAnchor,
+    decisionEffect: Number(row.decision_effect) as ExperienceDecisionEffectAnchor,
+    informationGain: Number(row.information_gain) as ExperienceScoreAnchor,
+    causalConfidence: Number(row.causal_confidence) as ExperienceScoreAnchor,
   }
 }
