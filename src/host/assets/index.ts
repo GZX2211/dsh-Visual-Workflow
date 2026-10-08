@@ -9,10 +9,12 @@
 import type {
   AssetVersionEntry,
   AssetVersionSource,
-  ExperienceDraft,
   ExperienceEntry,
-  ExperienceIndexEntry,
+  ExperienceGenerationPromptEntry,
+  ExperienceInsertCheckedInput,
   ExperiencePatch,
+  ExperienceRetrievalUpdate,
+  ExperienceType,
   RoleAssetDetail,
   RoleAssetReference,
   RoleAssetSummary,
@@ -25,16 +27,18 @@ import type { OrgMeta } from '../shared/org-meta.js'
 import type { RoleTemplate } from '../shared/template-types.js'
 import { AssetDb } from './db.js'
 import { assetNotFound, AssetError } from './errors.js'
+import { getActivePromptRow, listPromptRows } from './experience-prompts.js'
 import {
-  insertExperienceDrafts,
-  listExperienceIndexRows,
+  insertExperienceRowsChecked,
+  listActiveExperienceEmbeddingRows,
   listExperienceRows,
   readExperiencesByIds,
   setExperienceActiveRow,
-  updateExperienceRow,
-  type ExperienceInsertResult,
+  updateExperienceFieldsRow,
+  type ExperienceEmbeddingRow,
+  type ExperienceInsertCheckedResult,
 } from './experiences.js'
-import { newRoleAssetId, newWorkflowAssetId, type IdGeneratorDeps } from './ids.js'
+import { newExperienceId, newRoleAssetId, newWorkflowAssetId, type IdGeneratorDeps } from './ids.js'
 import {
   getRoleAssetDetail,
   getRoleAssetVersionDetail,
@@ -67,8 +71,10 @@ import {
 export { AssetError } from './errors.js'
 export type { AssetErrorCode } from './errors.js'
 export { contentFingerprint, stableStringify } from './fingerprint.js'
-export type { ExperienceInsertResult } from './experiences.js'
-export { EXPERIENCE_INDEX_MAX_LIMIT } from './experiences.js'
+export { decodeEmbedding, encodeEmbedding, type EmbeddingDecode } from './embedding-blob.js'
+export type { ExperienceEmbeddingRow, ExperienceInsertCheckedResult } from './experiences.js'
+export { EXPERIENCE_LIST_MAX_LIMIT } from './experiences.js'
+export { EXPERIENCE_PROMPT_SEED_VERSION, EXPERIENCE_PROMPT_SEEDS, type ExperiencePromptSeed } from './experience-seeds.js'
 export {
   EXPERIENCE_ID_PREFIX,
   ROLE_ASSET_ID_PREFIX,
@@ -167,8 +173,8 @@ export class AssetStore {
   private initialized = false
 
   constructor(root: string, deps: AssetStoreDeps = {}) {
-    this.db = new AssetDb(root)
     this.now = deps.now ?? Date.now
+    this.db = new AssetDb(root, this.now)
     this.ids = deps.ids ?? {}
   }
 
@@ -410,39 +416,64 @@ export class AssetStore {
   // 经验
   // -------------------------------------------------------------------------
 
-  /** 经验索引（**召回面**：只含活跃经验；按 created_at 倒序，limit 条）。 */
-  listExperienceIndex(limit: number): Promise<ExperienceIndexEntry[]> {
-    return this.db.withTx((tx) => listExperienceIndexRows(tx, limit))
+  /**
+   * 生成新的经验 id。
+   * 为什么由资产库发号：经验 id 的命名空间与格式属磁盘契约（前缀、跨进程唯一性策略），
+   * 交给调用方各自拼装必然出现多套格式。
+   */
+  nextId(): string {
+    return newExperienceId(this.ids)
   }
 
-  /** 经验列表（界面数据源：活跃与已归档一并返回；条目自带 active 标记）。 */
-  listExperiences(limit: number): Promise<ExperienceEntry[]> {
+  /** 某主体类型当前生效的经验生成 Prompt（无活跃行返回 null，即该类型经验生成被关闭）。 */
+  getActivePrompt(type: ExperienceType): Promise<ExperienceGenerationPromptEntry | null> {
+    return this.db.withTx((tx) => getActivePromptRow(tx, type))
+  }
+
+  /** 全量经验生成 Prompt（含历史版本；同类型内活跃行排在前）。 */
+  listPrompts(): Promise<ExperienceGenerationPromptEntry[]> {
+    return this.db.withTx((tx) => listPromptRows(tx))
+  }
+
+  /** 界面经验列表（活跃与归档一并返回，条目自带 active 标记；超出上限按上限截断）。 */
+  listRows(limit: number): Promise<ExperienceEntry[]> {
     return this.db.withTx((tx) => listExperienceRows(tx, limit))
   }
 
   /**
-   * 经验详情（**召回面**：已归档经验一律查不到）。
-   * 消费方是父代理的目录召回，归档即不可召回必须在读取处生效，而不是靠调用方自觉过滤。
+   * 按 id 读经验（保持入参顺序，命中不到的略过）。
+   * `activeOnly` = 召回面语义：归档经验一律查不到，避免调用方各自判断归档过滤。
    */
-  getExperiences(ids: string[]): Promise<ExperienceEntry[]> {
-    return this.db.withTx((tx) => readExperiencesByIds(tx, ids, { activeOnly: true }))
-  }
-
-  /** 保存经验（就地更新可编辑字段；无版本语义，不产生历史行）。 */
-  saveExperience(id: string, patch: ExperiencePatch): Promise<ExperienceEntry> {
-    return this.db.withTx((tx) => updateExperienceRow({ tx, now: this.now, ids: this.ids }, id, patch))
-  }
-
-  /** 经验归档 / 恢复（状态切换的唯一入口；内容与历史一概不动）。 */
-  setExperienceActive(id: string, active: boolean): Promise<ExperienceEntry> {
-    return this.db.withTx((tx) => setExperienceActiveRow({ tx, now: this.now, ids: this.ids }, id, active))
+  getRows(ids: string[], options?: { activeOnly?: boolean }): Promise<ExperienceEntry[]> {
+    return this.db.withTx((tx) => readExperiencesByIds(tx, ids, options))
   }
 
   /**
-   * 批量插入经验：空字段与重复 insight 跳过并回传原因，其余入库。
-   * 整批在一笔事务内完成，任一条插入失败则整批回滚（不留下半批经验）。
+   * 某主体类型的活跃向量（召回输入：任务侧与决策侧双通道一次读盘）。
+   * 向量不可用或只有单侧的行不返回：这类行无法参与双通道召回。
    */
-  insertExperiences(drafts: ExperienceDraft[], reviewedAt: number): Promise<ExperienceInsertResult> {
-    return this.db.withTx((tx) => insertExperienceDrafts({ tx, now: this.now, ids: this.ids }, drafts, reviewedAt))
+  listActiveExperienceEmbeddings(type: ExperienceType): Promise<ExperienceEmbeddingRow[]> {
+    return this.db.withTx((tx) => listActiveExperienceEmbeddingRows(tx, type))
+  }
+
+  /**
+   * 批量判重写入：该主体类型的活跃行读取、判重与写入在**同一笔事务**内完成，任一条失败整批回滚。
+   * 向量必须在调用本方法**之前**算好随行传入：远程嵌入调用与首次模型加载都不得占用写事务。
+   */
+  insertChecked(input: ExperienceInsertCheckedInput): Promise<ExperienceInsertCheckedResult> {
+    return this.db.withTx((tx) => insertExperienceRowsChecked({ tx, now: this.now, ids: this.ids }, input))
+  }
+
+  /**
+   * 编辑保存：语义字段补丁 + 事务外算好的检索投影与向量一并写入。
+   * 必填语义字段被清空即抛可行动错误（经验没有版本，改坏无从回滚）。
+   */
+  updateFields(id: string, patch: ExperiencePatch, next: ExperienceRetrievalUpdate): Promise<ExperienceEntry> {
+    return this.db.withTx((tx) => updateExperienceFieldsRow({ tx, now: this.now, ids: this.ids }, id, patch, next))
+  }
+
+  /** 经验归档 / 恢复（状态写入的唯一入口；内容与检索投影一概不动）。 */
+  setActive(id: string, active: boolean): Promise<ExperienceEntry> {
+    return this.db.withTx((tx) => setExperienceActiveRow({ tx, now: this.now, ids: this.ids }, id, active))
   }
 }

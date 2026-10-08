@@ -16,8 +16,8 @@ export function assetDbPath(root: string): string {
   return join(root, ASSET_DB_FILE)
 }
 
-/** 打开（必要时创建）资产库：建父目录、设 PRAGMA、幂等建表（含形状迁移）。 */
-export function openAssetDatabase(root: string): DatabaseSync {
+/** 打开（必要时创建）资产库：建父目录、设 PRAGMA、幂等建表（含形状迁移与 Prompt 播种）。 */
+export function openAssetDatabase(root: string, now: () => number = Date.now): DatabaseSync {
   const file = assetDbPath(root)
   mkdirSync(dirname(file), { recursive: true })
   const db = new DatabaseSync(file)
@@ -25,7 +25,7 @@ export function openAssetDatabase(root: string): DatabaseSync {
     // 外键是 Active→History 引用完整性的唯一保障，每个连接都必须显式开启
     db.exec('PRAGMA foreign_keys = ON')
     applyJournalMode(db)
-    initSchema(db)
+    initSchema(db, now)
   } catch (error) {
     // 初始化失败（含形状迁移失败）不留下半开的连接：调用方要么拿到可用库，要么拿到错误
     db.close()
@@ -102,12 +102,12 @@ export class AssetDb {
   private db: DatabaseSync | null = null
   private readonly queue = new SerialQueue()
 
-  constructor(private readonly root: string) {}
+  constructor(private readonly root: string, private readonly now: () => number = Date.now) {}
 
   /** 打开连接并建表；重复调用无副作用（幂等）。 */
   open(): Promise<void> {
     if (this.db) return Promise.resolve()
-    const db = openAssetDatabase(this.root)
+    const db = openAssetDatabase(this.root, this.now)
     const verdict = integrityVerdict(db)
     if (verdict !== 'ok') {
       // 损坏库不静默当空库用：交给调用方决策（重建/备份），不带着坏数据继续写

@@ -5,6 +5,7 @@ import { AssetStore } from './assets/index.js';
 import { OrchestratorRuntime, type RootAgentLike } from './orchestrator/index.js';
 import { CordisAgentHost, NodeAgentRunner } from './agent/index.js';
 import { ToolSwitchStore } from './tools/index.js';
+import type { ExperienceDomainFace } from './api/index.js';
 import { EmbeddingService } from './embedding/engine.js';
 import { ServiceManager } from './service/index.js';
 import { SchedulerEngine, SchedulerTaskStore } from './scheduler/index.js';
@@ -75,6 +76,14 @@ export declare class VisualWorkflowHost extends Service {
     private readonly childPromptStates;
     /** 本地嵌入引擎（外部端点 > 本地资产 > BM25 降级；惰性加载）。 */
     private readonly embedding;
+    /**
+     * 经验域服务（校验/投影/向量/判重/召回/主体解析的唯一起点）。
+     * 为什么由宿主组装而不是让工具与 API 各自 new：经验域只声明最小端口，端口到
+     * AssetStore / 嵌入引擎 / 运行事实的适配必须在一处完成，否则同一套语义会有多份实现。
+     */
+    private readonly experienceService;
+    /** API 边界的经验域能力缝（资产端点与经验端点共用同一份判据）。 */
+    private readonly experienceDomain;
     /** 已清理标记（dispose 后为 true；重复 dispose 幂等）。 */
     private _disposed;
     /** 跳过磁盘对账（服务进程装配用：运行记录对账属主进程职责）。 */
@@ -152,6 +161,20 @@ export declare class VisualWorkflowHost extends Service {
      * 做出错误编排（与既有「核心清单读失败必须上抛」同口径）。
      */
     private requireAssetStore;
+    /**
+     * 经验域 Store 端口适配：每次调用重新判定资产库可用性（未就绪抛可行动错误），
+     * 避免把「库不可用」伪装成空结果；方法名与经验域契约逐字对应，不做语义加工。
+     */
+    private experienceStorePort;
+    /** 经验域运行事实端口：只经编排器的语义化 seam 读取运行事实，不触达其内部结构。 */
+    private experienceRuntimePort;
+    /** 工具层经验能力缝（learn 与 recall 两工具共用经验域服务同一实例）。 */
+    private experienceHost;
+    /**
+     * 经验域能力缝（API 边界消费）：资产库未就绪时返回 undefined，
+     * 使经验端点以「未装配」明确失败，而不是返回一个与事实不符的空列表。
+     */
+    get experience(): ExperienceDomainFace | undefined;
     /** 服务 apiKey（调试流式代理鉴权用；密钥仅 Host 持有，不下发浏览器）。 */
     get apiKey(): string | null;
     /** 嵌入引擎（数据工具向量检索用）。 */

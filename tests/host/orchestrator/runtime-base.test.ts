@@ -445,6 +445,76 @@ describe('父代理执行者模式', () => {
   })
 })
 
+describe('Experience 最小运行事实 seam（只读语义化查询）', () => {
+  it('无活跃 run：四个 seam 全部给出「无」结果，不抛错', async () => {
+    const h = await makeHarness()
+    expect(h.runtime.activeExperienceRunForSession('session-1')).toBeNull()
+    expect(h.runtime.experienceRunForChild('child-1')).toBeNull()
+    expect(h.runtime.hasTeamInCurrentRun('session-1')).toBe(false)
+    expect(h.runtime.hasActiveRunForSession('session-1')).toBe(false)
+  })
+
+  it('活跃 run：按会话给出 run 归属三元组（runId/flowId/sessionId）', async () => {
+    const h = await makeHarness()
+    await start(h, makeFlow())
+
+    expect(h.runtime.activeExperienceRunForSession('session-1')).toEqual({
+      runId: 'run-1',
+      flowId: 'flow-1',
+      sessionId: 'session-1',
+    })
+    expect(h.runtime.hasActiveRunForSession('session-1')).toBe(true)
+    expect(h.runtime.hasActiveRunForSession('session-2')).toBe(false)
+    expect(h.runtime.activeExperienceRunForSession('session-2')).toBeNull()
+  })
+
+  it('子代理：按 childId 给出 run 与节点归属；未登记返回 null', async () => {
+    const h = await makeHarness()
+    await start(h, makeFlow())
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+
+    expect(h.runtime.experienceRunForChild('child-1')).toEqual({
+      runId: 'run-1',
+      flowId: 'flow-1',
+      sessionId: 'session-1',
+      nodeId: 'n-a1',
+    })
+    expect(h.runtime.experienceRunForChild('child-none')).toBeNull()
+  })
+
+  it('已退役（被替换）的子代理：不再给出 run 归属', async () => {
+    const h = await makeHarness()
+    await start(h, makeFlow())
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    // 同节点再次启动且引擎报告替换了旧 child（配置签名变化路径）
+    h.runner.nextReplacedChildId = 'child-1'
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+
+    expect(h.runtime.experienceRunForChild('child-1')).toBeNull()
+    expect(h.runtime.experienceRunForChild('child-2')).toMatchObject({ runId: 'run-1', nodeId: 'n-a1' })
+  })
+
+  it('paused run 不算活跃：hasActiveRunForSession 为 false', async () => {
+    const h = await makeHarness()
+    await start(h, makeFlow())
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-pause' })
+
+    expect(h.runtime.pausedRun('session-1', 'flow-1')).not.toBeNull()
+    expect(h.runtime.hasActiveRunForSession('session-1')).toBe(false)
+  })
+
+  it('run 结束后不再给出归属：终态条目已释放', async () => {
+    const h = await makeHarness()
+    await start(h, makeFlow())
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    await h.runtime.stopRun('run-1')
+
+    expect(h.runtime.activeExperienceRunForSession('session-1')).toBeNull()
+    expect(h.runtime.experienceRunForChild('child-1')).toBeNull()
+    expect(h.runtime.hasActiveRunForSession('session-1')).toBe(false)
+  })
+})
+
 describe('运行活性基准刷新（touchRunForSession）', () => {
   /** 线性流程：start → a1 → end（无父代理执行单元，父代理为纯调度者）。 */
   function touchFlow(id: string, sessionId: string): WorkflowDocument {

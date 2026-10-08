@@ -37,17 +37,24 @@ export interface ExperiencesFace {
 }
 
 /**
- * 保存载荷投影（纯函数）：只取可编辑字段，只读元信息（id / 来源运行 / 时间戳 / 状态）
- * 一律不回传——回传等于让界面有权改写领域记账的事实。
- * 可空字段用 `null` 表达「清空」（与 `undefined` 的「不改」区分，见共享契约 ExperiencePatch）。
+ * 保存载荷投影（纯函数）：只取九个语义字段——检索投影、向量与只读元信息
+ * （id / 主体类型 / 状态 / 时间戳 / 来源运行 / 生成 Prompt）一律不回传，
+ * 回传等于让界面有权改写领域记账的事实与系统生成规则。
+ *
+ * 列表字段用 `null` 表达「清空」（与 `undefined` 的「不改」区分，见共享契约 ExperiencePatch）；
+ * 表单里的空文本域投影为 `[]`，与 `null` 在领域层同义（都落成空数组）。
  */
 export function experiencePatchOf(entry: ExperienceEntry): ExperiencePatch {
   return {
+    responsibility: entry.responsibility,
     taskType: entry.taskType,
-    taskContext: entry.taskContext,
-    insight: entry.insight,
+    decisionDomain: entry.decisionDomain,
+    situation: entry.situation,
+    trigger: entry.trigger,
+    principle: entry.principle,
+    recommendedAction: entry.recommendedAction,
+    exclusions: entry.exclusions ?? null,
     evidence: entry.evidence ?? null,
-    reviewFeedback: entry.reviewFeedback ?? null,
   }
 }
 

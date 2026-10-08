@@ -48,15 +48,25 @@ export type { WorkflowTemplate } from './graph-model.js'
 // 供既有 `from './types.js'` 调用方继续引用。
 export type { OrgBudget, OrgMeta } from './org-meta.js'
 
-// 资产与经验：本体在 asset-types.js（资产索引/详情、版本条目、经验条目）。
+// 资产与经验：本体在 asset-types.js（资产索引/详情、版本条目、经验条目与召回候选）。
 export type {
   AssetDetail,
   AssetKind,
   AssetVersionEntry,
   AssetVersionSource,
-  ExperienceDraft,
+  ExperienceDuplicateCandidate,
+  ExperienceDuplicateExisting,
+  ExperienceDuplicateJudge,
+  ExperienceDuplicateVerdict,
   ExperienceEntry,
-  ExperienceIndexEntry,
+  ExperienceGenerationPromptEntry,
+  ExperienceInsertCheckedInput,
+  ExperienceInsertDraft,
+  ExperienceInsertRow,
+  ExperiencePatch,
+  ExperienceRecallHit,
+  ExperienceRetrievalUpdate,
+  ExperienceType,
   RoleAssetDetail,
   RoleAssetKind,
   RoleAssetSummary,

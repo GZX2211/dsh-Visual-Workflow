@@ -1,20 +1,29 @@
-// src/host/api/experiences.ts
-//
 // GUI API 经验端点组（ExperienceEndpoints）：列表、保存、归档、恢复。
 //
-// 经验事实由 assets 模块的 AssetStore（SQLite）拥有，本层只做「请求 → 领域调用 →
-// 稳定响应/错误码」的翻译。经验**没有版本控制**，因此本组没有版本列表与回滚端点：
-// 状态切换只有归档 / 恢复两条（见 shared/protocol.ts 的端点语义说明）。
+// 本层只做「请求 → 经验域调用 → 稳定响应/错误码」的翻译：检索投影与向量的重算、
+// 判重与落库事务都在经验域内完成，因此编辑保存只透传语义字段补丁。
+// 经验**没有版本控制**，因此本组没有版本列表与回滚端点：状态切换只有归档 / 恢复两条
+// （见 shared/protocol.ts 的端点语义说明）。
 
 import { ERR_EXPERIENCE_BAD_ARGS } from '../shared/protocol.js'
 import type { ExperienceEntry, ExperiencePatch } from '../shared/asset-types.js'
-import { EXPERIENCE_INDEX_MAX_LIMIT } from '../assets/index.js'
+import { EXPERIENCE_LIST_MAX_LIMIT } from '../assets/index.js'
 import { httpError } from './http.js'
-import { requireAssets, VisualWorkflowApiBase } from './boundary.js'
+import { requireExperience, VisualWorkflowApiBase } from './boundary.js'
 
-/** 经验可编辑字段名（取值域闭集；未知字段一律 400，不静默忽略）。 */
-const PATCH_TEXT_FIELDS = ['taskType', 'taskContext', 'insight'] as const
-const PATCH_NULLABLE_FIELDS = ['evidence', 'reviewFeedback'] as const
+/** 经验可编辑的单值字段名（取值域闭集；未知字段一律 400，不静默忽略）。 */
+const PATCH_TEXT_FIELDS = [
+  'responsibility',
+  'taskType',
+  'decisionDomain',
+  'situation',
+  'trigger',
+  'principle',
+  'recommendedAction',
+] as const
+
+/** 经验可编辑的列表字段名（允许 null = 清空）。 */
+const PATCH_LIST_FIELDS = ['exclusions', 'evidence'] as const
 
 /**
  * 边界的参数错误：status 由传输层决定，code 用经验领域稳定码，
@@ -29,6 +38,16 @@ function requireExperienceId(args: { experienceId?: unknown }): string {
   const experienceId = String(args?.experienceId ?? '').trim()
   if (!experienceId) throw experienceBadArgs('requires experienceId')
   return experienceId
+}
+
+/** 校验列表字段取值（string[] 或 null 清空）。 */
+function requireListValue(field: string, value: unknown): string[] | null {
+  if (value === null) return null
+  if (!Array.isArray(value)) throw experienceBadArgs(`patch ${field} must be a string array or null`)
+  return value.map((item) => {
+    if (typeof item !== 'string') throw experienceBadArgs(`patch ${field} must contain only strings`)
+    return item
+  })
 }
 
 /**
@@ -50,9 +69,8 @@ function requirePatch(payload: unknown): ExperiencePatch {
       patch[field as (typeof PATCH_TEXT_FIELDS)[number]] = value
       continue
     }
-    if ((PATCH_NULLABLE_FIELDS as readonly string[]).includes(field)) {
-      if (value !== null && typeof value !== 'string') throw experienceBadArgs(`patch ${field} must be a string or null`)
-      patch[field as (typeof PATCH_NULLABLE_FIELDS)[number]] = value
+    if ((PATCH_LIST_FIELDS as readonly string[]).includes(field)) {
+      patch[field as (typeof PATCH_LIST_FIELDS)[number]] = requireListValue(field, value)
       continue
     }
     throw experienceBadArgs(`unknown patch field: ${field}`)
@@ -64,28 +82,31 @@ function requirePatch(payload: unknown): ExperiencePatch {
 export class ExperienceEndpoints extends VisualWorkflowApiBase {
   /**
    * 经验列表：活跃与已归档一并返回（条目自带 active 标记）。
-   * 上限用召回索引的同一常量：界面列表面向人工管理，不需要无限拉取。
+   * 上限用经验域导出的同一常量：界面列表面向人工管理，不需要无限拉取。
    */
   async listExperiences(): Promise<ExperienceEntry[]> {
-    return requireAssets(this.host).listExperiences(EXPERIENCE_INDEX_MAX_LIMIT)
+    return requireExperience(this.host).list({ limit: EXPERIENCE_LIST_MAX_LIMIT })
   }
 
-  /** 保存经验（就地改写可编辑字段；无版本语义，不产生历史行）。 */
+  /**
+   * 保存经验（就地改写语义字段；无版本语义，不产生历史行）。
+   * 检索投影与向量由经验域在事务外重算后落库，边界只透传语义字段补丁。
+   */
   async saveExperience(args: { experienceId?: unknown; patch?: unknown }): Promise<ExperienceEntry> {
     const experienceId = requireExperienceId(args)
     const patch = requirePatch(args?.patch)
-    return requireAssets(this.host).saveExperience(experienceId, patch)
+    return requireExperience(this.host).update({ experienceId, patch })
   }
 
   /** 归档经验：退出父代理召回面（内容全部保留，可恢复）。 */
   async retireExperience(args: { experienceId?: unknown }): Promise<ExperienceEntry> {
     const experienceId = requireExperienceId(args)
-    return requireAssets(this.host).setExperienceActive(experienceId, false)
+    return requireExperience(this.host).retire({ experienceId })
   }
 
   /** 恢复经验：重新进入父代理召回面。 */
   async restoreExperience(args: { experienceId?: unknown }): Promise<ExperienceEntry> {
     const experienceId = requireExperienceId(args)
-    return requireAssets(this.host).setExperienceActive(experienceId, true)
+    return requireExperience(this.host).restore({ experienceId })
   }
 }

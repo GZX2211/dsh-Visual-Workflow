@@ -1,12 +1,10 @@
 // tests/host/tools/wf-org-catalog/fixtures.ts
 //
 // wf_org_catalog 单测共用工厂：工作流/角色资产索引摘要、覆盖全部节点种类的资产详情样本、
-// 经验条目、宿主 fake（含取数调用计数）。
+// 宿主 fake（含取数调用计数）。
 // 只提供最小可复用样本，具体断言由各测试自持（不在这里预置期望值）。
 
 import type {
-  ExperienceEntry,
-  ExperienceIndexEntry,
   RoleAssetDetail,
   RoleAssetSummary,
   WorkflowAssetDetail,
@@ -155,42 +153,17 @@ export function inlineRoleNodeFixture(): RoleNode {
   return workflowAssetDetailFixture().nodes.find((node) => node.id === 'a1') as RoleNode
 }
 
-/** 经验索引条目。 */
-export function experienceIndexFixture(overrides: Partial<ExperienceIndexEntry> = {}): ExperienceIndexEntry {
-  return { id: 'ex-1', taskContext: '重构一个 TypeScript 插件的存储层', ...overrides }
-}
-
-/** 经验条目（完整内容；缺省活跃——入库即进入召回面）。 */
-export function experienceFixture(overrides: Partial<ExperienceEntry> = {}): ExperienceEntry {
-  return {
-    id: 'ex-1',
-    active: true,
-    sourceRunId: 'run-1',
-    reflectionPromptVersion: '1',
-    taskType: '软件开发',
-    taskContext: '重构一个 TypeScript 插件的存储层',
-    insight: '先冻结共享契约，再并行改造各模块',
-    evidence: '上一轮因为契约漂移导致两端各自维护了一份字段表',
-    createdAt: 1_700_000_000_000,
-    updatedAt: 1_700_000_100_000,
-    ...overrides,
-  }
-}
-
 /** 宿主 fake 的取数调用计数（批内缓存 / 批量取数断言的观测面）。 */
 export interface CatalogHostCalls {
   workflowLists: number
   roleLists: number
-  experienceIndexLists: number
-  experienceIndexLimits: number[]
   workflowReads: string[]
   roleReads: string[]
   roleVersionReads: string[]
-  experienceReads: string[][]
 }
 
 /**
- * 宿主 fake：默认提供一套完整资产与经验，并记录每次取数调用。
+ * 宿主 fake：默认提供一套完整资产，并记录每次取数调用。
  * `overrides` 可替换任意资产缝方法（用于逐条错误、核心清单抛错等场景）。
  */
 export function makeCatalogHost(overrides: Partial<OrgCatalogHost> = {}): {
@@ -200,12 +173,9 @@ export function makeCatalogHost(overrides: Partial<OrgCatalogHost> = {}): {
   const calls: CatalogHostCalls = {
     workflowLists: 0,
     roleLists: 0,
-    experienceIndexLists: 0,
-    experienceIndexLimits: [],
     workflowReads: [],
     roleReads: [],
     roleVersionReads: [],
-    experienceReads: [],
   }
   const defaults: OrgCatalogHost = {
     assets: {
@@ -224,15 +194,6 @@ export function makeCatalogHost(overrides: Partial<OrgCatalogHost> = {}): {
       async getRoleAsset(assetId: string) {
         calls.roleReads.push(assetId)
         return assetId === 'role-1' ? roleAssetDetailFixture() : null
-      },
-      async listExperienceIndex(limit: number) {
-        calls.experienceIndexLists += 1
-        calls.experienceIndexLimits.push(limit)
-        return [experienceIndexFixture()]
-      },
-      async getExperiences(ids: string[]) {
-        calls.experienceReads.push([...ids])
-        return [experienceFixture()].filter((entry) => ids.includes(entry.id))
       },
       async getRoleAssetVersion(roleRowId: string) {
         calls.roleVersionReads.push(roleRowId)

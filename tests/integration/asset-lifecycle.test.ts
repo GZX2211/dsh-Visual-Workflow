@@ -17,9 +17,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { VisualWorkflowHost, VisualWorkflowHostServiceName } from '../../src/host/index.js'
 import { resolveConfig } from '../../src/host/config.js'
-import { contentFingerprint } from '../../src/host/assets/index.js'
+import { contentFingerprint, type AssetStore } from '../../src/host/assets/index.js'
 import { executeOrgCatalog, type OrgCatalogHost } from '../../src/host/tools/wf-org-catalog/tool.js'
 import type { CatalogDetails, CatalogIndex, CatalogWorkflowDetail } from '../../src/host/tools/wf-org-catalog/types.js'
+import type { ExperienceInsertRow } from '../../src/host/shared/asset-types.js'
 import type { RoleNode, WorkflowTemplate } from '../../src/host/shared/graph-model.js'
 import type { RoleTemplate } from '../../src/host/shared/template-types.js'
 
@@ -28,6 +29,40 @@ const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((fn) => fn()))
 })
+
+/**
+ * 直接经资产库写入一条经验（检索文本与向量在真实链路里由经验域在事务外生成；
+ * 集成测试只关心中间那层「召回面读取」，故用固定向量避免依赖本地嵌入模型加载）。
+ */
+async function insertExperience(store: AssetStore): Promise<string> {
+  const prompt = await store.getActivePrompt('agent')
+  if (!prompt) throw new Error('缺少 agent 类型的活跃生成 Prompt（迁移播种未生效）')
+  const row: ExperienceInsertRow = {
+    id: store.nextId(),
+    experienceType: 'agent',
+    responsibility: '对插件资产的状态正确性负责',
+    taskType: '软件开发',
+    decisionDomain: '状态与版本',
+    situation: '同一条记录既要能归档又要能恢复',
+    trigger: '设计状态转换时',
+    principle: '状态转换与版本指针必须分开建模',
+    recommendedAction: '把状态列与版本指针分别承载，互不代偿',
+    exclusions: ['不存在历史版本时'],
+    evidence: ['归档与回滚曾互相干扰'],
+    taskRetrievalText: 'responsibility: 对插件资产的状态正确性负责',
+    taskEmbedding: new Float64Array([1, 0, 0]),
+    decisionRetrievalText: 'decision_domain: 状态与版本',
+    decisionEmbedding: new Float64Array([0, 1, 0]),
+    embeddingModel: 'test-fixture',
+    embeddingDimension: 3,
+    sourceRunId: 'run-experience-1',
+    generationPromptId: prompt.id,
+    generationPromptVersion: prompt.promptVersion,
+  }
+  const result = await store.insertChecked({ rows: [row], duplicateOf: () => ({ duplicate: false }) })
+  expect(result.inserted).toHaveLength(1)
+  return row.id
+}
 
 /** 角色模版（与工作流内联角色的提示词一致：用于验证内容去重命中）。 */
 function roleTemplate(): RoleTemplate {
@@ -116,13 +151,8 @@ describe('资产闭环（宿主装配 + SQLite + 勘察召回）', () => {
     const roleDetail = await host.assets!.getRoleAsset(rolePromotion.assetId)
     expect(roleDetail?.referenceWorkflowIds).toEqual([flowPromotion.rowId])
 
-    // ⑤ 勘察索引（经宿主装配缝）：资产条目 + 角色摘要 + 经验段
-    const inserted = await host.assets!.insertExperiences(
-      [{ taskType: '软件开发', taskContext: '移动端外卖 App', insight: '长任务应提前结构化交接', sourceRunId: 'run-1' }],
-      Date.now(),
-    )
-    expect(inserted.inserted).toHaveLength(1)
-
+    // ⑤ 勘察索引（经宿主装配缝）：资产条目 + 角色摘要
+    // 经验召回已按用户裁决移交 wf_experience_recall，故索引里不再有经验段（下面显式断言其缺席）。
     const seam = (host as unknown as { ecosystemAdapters(): OrgCatalogHost }).ecosystemAdapters()
     const index = (await executeOrgCatalog(seam, {})) as CatalogIndex
     expect(index.kind).toBe('index')
@@ -134,7 +164,7 @@ describe('资产闭环（宿主装配 + SQLite + 勘察召回）', () => {
       // 摘要由资产库在列表查询里 JOIN Active 版本行产出（不是空串、也不是完整提示词）
       summary: '你是分析员，负责拆解问题。',
     })
-    expect(index.experiences).toEqual([{ id: inserted.inserted[0].id, taskContext: '移动端外卖 App' }])
+    expect((index as { experiences?: unknown }).experiences).toBeUndefined()
 
     // ⑥ 详情召回：工作流骨架按钉住版本标注角色资产（依赖宿主 seam 的 getRoleAssetVersion）
     const details = (await executeOrgCatalog(seam, { ids: [flowPromotion.assetId] })) as CatalogDetails
@@ -177,42 +207,39 @@ describe('资产闭环（宿主装配 + SQLite + 勘察召回）', () => {
       lines: flow.lines,
       source: 'human',
     })
-    const inserted = await host.assets!.insertExperiences(
-      [{ taskType: '软件开发', taskContext: '插件资产管理', insight: '状态转换与版本指针必须分开' }],
-      Date.now(),
-    )
-    const experienceId = inserted.inserted[0].id
+    // ① 备好一条经验（与工作流资产构成两个召回面）：经验的召回面读取由经验域经资产库完成，
+    //    勘察工具不再承担经验召回，因此这里断言召回面读取（activeOnly）与界面列表两条路径。
+    const assets = host.assets!
+    const experienceDomain = host.experience!
+    const experienceId = await insertExperience(assets)
 
     const seam = (host as unknown as { ecosystemAdapters(): OrgCatalogHost }).ecosystemAdapters()
     const before = (await executeOrgCatalog(seam, {})) as CatalogIndex
     expect(before.assets.workflows.map((item) => item.id)).toEqual([promoted.assetId])
-    expect(before.experiences.map((item) => item.id)).toEqual([experienceId])
+    expect((await assets.getRows([experienceId], { activeOnly: true })).map((item) => item.id)).toEqual([experienceId])
 
-    // ② 归档：资产与经验同时退出父代理召回面（索引与按 id 详情两条路径都不可见）
-    await host.assets!.retireWorkflowAsset(promoted.assetId)
-    await host.assets!.setExperienceActive(experienceId, false)
+    // ② 归档：资产退出勘察召回面，经验退出经验召回面（归档即不可召回）
+    await assets.retireWorkflowAsset(promoted.assetId)
+    await experienceDomain.retire({ experienceId })
 
     const retiredIndex = (await executeOrgCatalog(seam, {})) as CatalogIndex
     expect(retiredIndex.assets.workflows).toEqual([])
     // 流程归档不触发角色资产归档（流程与角色解耦）：工作流带来的内联角色资产仍是活跃资产
     expect(retiredIndex.assets.roles.map((item) => item.roleAssetType)).toEqual(['inline'])
-    expect(retiredIndex.experiences).toEqual([])
-    // 归档经验按 id 也不能召回（召回面语义在读取处生效，不靠调用方自觉过滤）
-    const retiredDetails = (await executeOrgCatalog(seam, { ids: [experienceId] })) as CatalogDetails
-    expect(retiredDetails.assets).toEqual([])
-    expect(retiredDetails.errors.map((error) => error.id)).toEqual([experienceId])
+    // 归档经验在召回面读取处即不可见（语义在读取处生效，不靠调用方自觉过滤）
+    expect(await assets.getRows([experienceId], { activeOnly: true })).toEqual([])
 
     // ③ 界面数据源仍持有它们（否则用户无从恢复）：资产进历史资产、经验以非活跃条目返回
-    expect((await host.assets!.listRetiredWorkflowAssets()).map((item) => item.assetId)).toEqual([promoted.assetId])
-    expect((await host.assets!.listExperiences(10)).map((item) => [item.id, item.active])).toEqual([[experienceId, false]])
+    expect((await assets.listRetiredWorkflowAssets()).map((item) => item.assetId)).toEqual([promoted.assetId])
+    expect((await experienceDomain.list({ limit: 10 })).map((item) => [item.id, item.active])).toEqual([[experienceId, false]])
 
     // ④ 恢复：资产取最新版本行重建 Active 指针，经验置回活跃；两者重新进入召回面
-    await host.assets!.restoreWorkflowAsset(promoted.assetId)
-    await host.assets!.setExperienceActive(experienceId, true)
+    await assets.restoreWorkflowAsset(promoted.assetId)
+    await experienceDomain.restore({ experienceId })
 
     const restoredIndex = (await executeOrgCatalog(seam, {})) as CatalogIndex
     expect(restoredIndex.assets.workflows.map((item) => item.id)).toEqual([promoted.assetId])
-    expect(restoredIndex.experiences.map((item) => item.id)).toEqual([experienceId])
-    expect(await host.assets!.listRetiredWorkflowAssets()).toEqual([])
+    expect((await assets.getRows([experienceId], { activeOnly: true })).map((item) => item.id)).toEqual([experienceId])
+    expect(await assets.listRetiredWorkflowAssets()).toEqual([])
   })
 })

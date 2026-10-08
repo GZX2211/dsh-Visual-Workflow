@@ -1,7 +1,7 @@
 export { OrchestratorRuntime } from './runtime.js';
 export { GLOBAL_RUN_CALL_LIMIT, SUBAGENT_END_RETRY_DELAY_MS, SUBAGENT_END_RETRY_MAX, consoleLogger, type AgentHost, type CallerInfo, type ChildMeta, type CoordinatorMessage, type FlowLockInfo, type GroupMemberPlan, type GroupMemberStarted, type GroupStartInput, type GroupStartResult, type ModelSelectionValue, type NodeRunner, type NodeStartInput, type OrchestratorConfig, type OrchestratorLogger, type ParentModelSelectionLike, type ParentPromptSetupLike, type PromptStateLike, type RootAgentLike, type RootInjectedMessage, type TurnEndInfo, } from './seams.js';
 export { WfError, messageOf } from './errors.js';
-export { createWaiter, type FinishArgs, type FinishResult, type MilestoneMarkResult, type MilestoneRunFacts, type OrchestratorDeps, type RunEntry, type RunNodeArgs, type RunNodeResult, type StartRunOptions, type StartRunResult, type SubagentEndInfo, type TerminateOptions, type Waiter, } from './run-entry.js';
+export { createWaiter, type FinishArgs, type FinishResult, type MilestoneMarkResult, type MilestoneRunFacts, type OrchestratorDeps, type RunEntry, type RunNodeArgs, type RunNodeResult, type StartRunOptions, type StartRunResult, type SubagentEndInfo, type TeamExperienceContextInput, type TerminateOptions, type Waiter, } from './run-entry.js';
 export { ASK_MESSAGE_LIMIT, buildAskText, buildReplyText, coordinatorMessage, type AskAgentArgs, type AskAgentCmd, type AskAgentDelivery, type AskAgentResult, type AskAuditEntry, type PendingAsk, } from './ask-protocol.js';
 export { buildNodeContextFacts, collabBlockOf, collabGroupList, collabPromptOf, dbToolHintOf, labelOf, missingStageLabels, orchestrationNodeList, pauseNodeIdsOf, validateFlowForRun, } from './graph-facts.js';
 export { buildNodeBlocks, inputContractOf, outputContractOf } from './task-blocks.js';
@@ -11,4 +11,4 @@ export { OUTPUT_SUMMARY_LIMIT, cloneSnapshot, createRunSnapshot, lastAssistantTe
 export { RESUMABLE_STATUSES, buildResumedSnapshot, findResumableRun, type ResumeInput, type ResumeResult, } from './resume.js';
 export { lineKeyOf, nodeConfigKeyOf, summarizeFlowChange, type FlowChangeSummary } from './flow-diff.js';
 export { WATCHDOG_INTERVAL_MS, reconcileStaleRuns, scheduleIdleWatchdog, sweepWatchdogOnce } from './watchdog.js';
-export { injectReflection, reflectionFactsOf, REFLECTION_MESSAGE_SOURCE, type InjectReflectionInput, type ReflectionInjectionEnv, type RunReflectionFactsInput, } from './runtime-reflection.js';
+export { buildTeamExperienceQuery, TEAM_EXPERIENCE_CAUTION_FIELD, TEAM_EXPERIENCE_FIELD_LIMIT, TEAM_EXPERIENCE_MEMBER_LIMIT, TEAM_EXPERIENCE_MEMBERS_FIELD, TEAM_EXPERIENCE_QUERY_DIGEST_MARKER, TEAM_EXPERIENCE_QUERY_MARKER, TEAM_EXPERIENCE_QUERY_NONE, type TeamExperienceMemberTask, type TeamExperienceQueryInput, } from './team-experience.js';

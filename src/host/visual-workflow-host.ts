@@ -41,7 +41,8 @@ import {
   registerWfAsk,
   registerWfAskAgent,
   registerWfDbQuery,
-  registerWfExperience,
+  registerWfExperienceLearn,
+  registerWfExperienceRecall,
   registerWfFinish,
   registerWfGraphPatch,
   registerWfOrgCatalog,
@@ -49,9 +50,13 @@ import {
   registerWfRunNodeWait,
   type GraphPatchHost,
   type OrgCatalogHost,
+  type WfExperienceHost,
 } from './tools/index.js'
 import { registerArrangeCommand } from './commands/arrange.js'
 import { registerDownloadRoute, registerRoutes } from './api/index.js'
+import type { ExperienceDomainFace } from './api/index.js'
+import { ExperienceService } from './experience/index.js'
+import type { ExperienceRuntimePort, ExperienceStorePort } from './experience/index.js'
 import { EmbeddingService } from './embedding/engine.js'
 import { ServiceManager } from './service/index.js'
 import { SchedulerEngine, SchedulerTaskStore } from './scheduler/index.js'
@@ -123,6 +128,14 @@ export class VisualWorkflowHost extends Service {
   private readonly childPromptStates = new Map<string, ChildPromptState>()
   /** 本地嵌入引擎（外部端点 > 本地资产 > BM25 降级；惰性加载）。 */
   private readonly embedding: EmbeddingService
+  /**
+   * 经验域服务（校验/投影/向量/判重/召回/主体解析的唯一起点）。
+   * 为什么由宿主组装而不是让工具与 API 各自 new：经验域只声明最小端口，端口到
+   * AssetStore / 嵌入引擎 / 运行事实的适配必须在一处完成，否则同一套语义会有多份实现。
+   */
+  private readonly experienceService: ExperienceService
+  /** API 边界的经验域能力缝（资产端点与经验端点共用同一份判据）。 */
+  private readonly experienceDomain: ExperienceDomainFace
   /** 已清理标记（dispose 后为 true；重复 dispose 幂等）。 */
   private _disposed = false
   /** 跳过磁盘对账（服务进程装配用：运行记录对账属主进程职责）。 */
@@ -191,8 +204,36 @@ export class VisualWorkflowHost extends Service {
       },
       // 系统语言名：从 DSH 用户设置（locale.preference）读取，供提示词注入语言规则
       systemLanguage: () => this.systemLanguage(),
+      // Team 经验共享上下文（§15）：协作组启动前由编排器按组任务上下文查询一次，宿主据此
+      // 渲染同一份文本给全体成员。缝在调用时才求值，因此可在经验域服务构造之前注入。
+      teamExperienceContext: (input) => this.experienceService.teamExperienceContext(input),
+      // 运行终态：该会话的经验初始化状态随 run 结束失效（初始化态是「运行实例态」）。
+      // 失败只告警——收尾路径不得因辅助清理而中断。
+      onRunTerminal: ({ sessionId }) => {
+        try {
+          this.experienceService.clearSession({ sessionId })
+        } catch (error) {
+          this.ctx.logger.warn(`[visual-workflow] 经验初始化状态清理失败：${error instanceof Error ? error.message : String(error)}`)
+        }
+      },
       logger: cordisLogger(ctx),
     })
+    // 经验域服务：端口全部在此适配（Store 走资产库、Embedding 走既有引擎、运行事实走编排器 seam），
+    // 领域层因此不反向依赖任何模块内部实现。
+    this.experienceService = new ExperienceService({
+      store: this.experienceStorePort(),
+      runtime: this.experienceRuntimePort(),
+      embedding: this.embedding,
+      now: () => Date.now(),
+      logger: cordisLogger(ctx),
+    })
+    // API 边界只经此能力缝读改经验；未就绪时 getter 返回 undefined，边界据此给出 501。
+    this.experienceDomain = {
+      list: (input) => this.experienceService.list(input),
+      update: (input) => this.experienceService.update(input),
+      retire: (input) => this.experienceService.retire(input),
+      restore: (input) => this.experienceService.restore(input),
+    }
     // 新会话创建缝：装配到宿主（API createSession 端点使用；运行器不再消费——
     // 工作台全局化改版后运行只认实例绑定的会话，新会话仅在创建实例时创建）。
     this.sessionProvider = new CordisSessionProvider(ctx)
@@ -411,6 +452,54 @@ export class VisualWorkflowHost extends Service {
     return this.assetStore
   }
 
+  /**
+   * 经验域 Store 端口适配：每次调用重新判定资产库可用性（未就绪抛可行动错误），
+   * 避免把「库不可用」伪装成空结果；方法名与经验域契约逐字对应，不做语义加工。
+   */
+  private experienceStorePort(): ExperienceStorePort {
+    const store = (): AssetStore => this.requireAssetStore()
+    return {
+      nextId: () => store().nextId(),
+      getActivePrompt: (type) => store().getActivePrompt(type),
+      listPrompts: () => store().listPrompts(),
+      listRows: (limit) => store().listRows(limit),
+      getRows: (ids, options) => store().getRows(ids, options),
+      listActiveEmbeddings: (type) => store().listActiveExperienceEmbeddings(type),
+      insertChecked: (input) => store().insertChecked(input),
+      updateFields: (id, patch, next) => store().updateFields(id, patch, next),
+      setActive: (id, active) => store().setActive(id, active),
+    }
+  }
+
+  /** 经验域运行事实端口：只经编排器的语义化 seam 读取运行事实，不触达其内部结构。 */
+  private experienceRuntimePort(): ExperienceRuntimePort {
+    return {
+      activeRunForSession: (sessionId) => this.orchestrator.activeExperienceRunForSession(sessionId),
+      runForChild: (childId) => this.orchestrator.experienceRunForChild(childId),
+      hasTeamInCurrentRun: (sessionId) => this.orchestrator.hasTeamInCurrentRun(sessionId),
+      hasActiveRun: (sessionId) => this.orchestrator.hasActiveRunForSession(sessionId),
+    }
+  }
+
+  /** 工具层经验能力缝（learn 与 recall 两工具共用经验域服务同一实例）。 */
+  private experienceHost(): WfExperienceHost {
+    return {
+      experience: {
+        initializePrompt: (input) => this.experienceService.initializePrompt(input),
+        submit: (input) => this.experienceService.submit(input),
+        recall: (input) => this.experienceService.recall(input),
+      },
+    }
+  }
+
+  /**
+   * 经验域能力缝（API 边界消费）：资产库未就绪时返回 undefined，
+   * 使经验端点以「未装配」明确失败，而不是返回一个与事实不符的空列表。
+   */
+  get experience(): ExperienceDomainFace | undefined {
+    return this.assetStoreReady ? this.experienceDomain : undefined
+  }
+
   /** 服务 apiKey（调试流式代理鉴权用；密钥仅 Host 持有，不下发浏览器）。 */
   get apiKey(): string | null {
     return this.config.apiKey
@@ -560,24 +649,25 @@ export class VisualWorkflowHost extends Service {
       this.ctx.logger.warn(`[visual-workflow] wf_graph_patch 注册失败：${error instanceof Error ? error.message : String(error)}`)
     }
 
-    // 元编排自进化工具注册：wf_experience（复盘经验候选 → 官方多选卡片 → 用户确认后原子入库）。
-    // 与自主编排工具同口径：父代理专属（CHILD_AGENT_HIDDEN_TOOLS 永久隐藏 + 工具内 WF_NOT_ROOT 校验）。
+    // 元编排自进化工具注册：wf_experience_learn（单工具双态——空集取当前主体的生成 Prompt、
+    // 传候选即校验后入库）与 wf_experience_recall（两阶段语义召回）。
+    // 两者都是「主体自身的学习与回忆」，因此进可选注入集（子代理经组合勾选可用），
+    // 不再与父代理专属工具同口径永久隐藏；工具内另有调用者身份与职责类型二次校验。
     // 资产库未就绪时不注册：工具只会在调用时抛「资产库不可用」，不如干脆不可见（组合管理里也不会勾到）。
     if (this.assetStoreReady) {
+      const experienceHost = this.experienceHost()
       try {
-        this.ctx.effect(
-          () => registerWfExperience(this.ctx, {
-            assets: this.requireAssetStore(),
-            getRootAgent: (sessionId) => this.getRootAgent(sessionId),
-            orchestrator: this.orchestrator,
-          }),
-          'visualWorkflowHost.wfExperience',
-        )
+        this.ctx.effect(() => registerWfExperienceLearn(this.ctx, experienceHost), 'visualWorkflowHost.wfExperienceLearn')
       } catch (error) {
-        this.ctx.logger.warn(`[visual-workflow] wf_experience 注册失败：${error instanceof Error ? error.message : String(error)}`)
+        this.ctx.logger.warn(`[visual-workflow] wf_experience_learn 注册失败：${error instanceof Error ? error.message : String(error)}`)
+      }
+      try {
+        this.ctx.effect(() => registerWfExperienceRecall(this.ctx, experienceHost), 'visualWorkflowHost.wfExperienceRecall')
+      } catch (error) {
+        this.ctx.logger.warn(`[visual-workflow] wf_experience_recall 注册失败：${error instanceof Error ? error.message : String(error)}`)
       }
     } else {
-      this.ctx.logger.warn('[visual-workflow] 资产库不可用：wf_experience 未注册（经验入库能力不可用）')
+      this.ctx.logger.warn('[visual-workflow] 资产库不可用：经验工具未注册（经验学习与召回能力不可用）')
     }
 
     // `/arrange` 斜杠命令（P2 编排 SOP）：规划期「只采集 + 注入」入口——采集用户意图
@@ -626,8 +716,8 @@ export class VisualWorkflowHost extends Service {
     const ctx = this.ctx
     return {
       store: this.store,
-      // 资产缝：勘察工具只召回「资产 + 经验」（模版索引已按用户裁决移除）。资产库未就绪时
-      // 每个方法都抛可行动错误（不返回空集，理由见 requireAssetStore）。
+      // 资产缝：勘察工具只召回**资产**（经验召回已按用户裁决移交 wf_experience_recall；
+      // 模版索引此前已移除）。资产库未就绪时每个方法都抛可行动错误（不返回空集，理由见 requireAssetStore）。
       assets: {
         listWorkflowAssets: () => this.requireAssetStore().listWorkflowAssets(),
         listRoleAssets: () => this.requireAssetStore().listRoleAssets(),
@@ -635,8 +725,6 @@ export class VisualWorkflowHost extends Service {
         getRoleAsset: (assetId: string) => this.requireAssetStore().getRoleAsset(assetId),
         // 按钉住版本回溯角色资产：工作流资产骨架据此标注每个角色节点的 roleAssetId
         getRoleAssetVersion: (roleRowId: string) => this.requireAssetStore().getRoleAssetVersion(roleRowId),
-        listExperienceIndex: (limit: number) => this.requireAssetStore().listExperienceIndex(limit),
-        getExperiences: (ids: string[]) => this.requireAssetStore().getExperiences(ids),
       },
       // 工具组合不是资产事实：仍由宿主数据层提供（勘察索引的 combos 段）。
       listToolCombos: () => this.store.listToolCombos(),

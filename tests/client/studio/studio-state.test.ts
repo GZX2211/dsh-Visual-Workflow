@@ -368,10 +368,21 @@ function experienceEntry(overrides: Partial<ExperienceEntry> = {}): ExperienceEn
   return {
     id: 'ex-1',
     active: true,
-    reflectionPromptVersion: '1',
+    experienceType: 'agent',
+    responsibility: '重构旧模块',
     taskType: '软件开发',
-    taskContext: '重构旧模块',
-    insight: '先补测试再重构',
+    decisionDomain: '重构顺序',
+    situation: '旧模块缺少测试',
+    trigger: '再次重构旧模块',
+    principle: '先补测试再重构',
+    recommendedAction: '先补测试',
+    exclusions: [],
+    evidence: [],
+    taskRetrievalText: '任务侧投影',
+    decisionRetrievalText: '决策侧投影',
+    sourceRunId: 'run-1',
+    generationPromptId: 'prompt-1',
+    generationPromptVersion: 'v1',
     createdAt: 10,
     updatedAt: 10,
     ...overrides,
@@ -504,7 +515,7 @@ describe('资产态状态机', () => {
     let state = studioReducer(baseState(), { type: 'EXPERIENCES_LOADED', items })
     expect(state.experiences).toEqual(items)
 
-    const updated = experienceEntry({ insight: '改写后的经验', updatedAt: 20 })
+    const updated = experienceEntry({ principle: '改写后的原则', updatedAt: 20 })
     state = studioReducer(state, { type: 'EXPERIENCE_LOADED', entry: updated })
     expect(state.experienceDoc).toEqual(updated)
     // 列表与详情同源：装载详情时同步列表里对应条目，避免两处各留一份旧内容
@@ -529,13 +540,13 @@ describe('资产态状态机', () => {
 
   it('EXPERIENCE_PATCH：属性栏字段写回 experienceDoc；未装载详情时不改状态', () => {
     let state = studioReducer(baseState(), { type: 'EXPERIENCE_LOADED', entry: experienceEntry() })
-    state = studioReducer(state, { type: 'EXPERIENCE_PATCH', patch: { insight: '改写后的经验', evidence: '新证据' } })
+    state = studioReducer(state, { type: 'EXPERIENCE_PATCH', patch: { principle: '改写后的原则', evidence: ['新证据'] } })
 
-    expect(state.experienceDoc?.insight).toBe('改写后的经验')
-    expect(state.experienceDoc?.evidence).toBe('新证据')
+    expect(state.experienceDoc?.principle).toBe('改写后的原则')
+    expect(state.experienceDoc?.evidence).toEqual(['新证据'])
     expect(state.experienceDoc?.taskType).toBe('软件开发')
 
-    const untouched = studioReducer(baseState(), { type: 'EXPERIENCE_PATCH', patch: { insight: '改写后的经验' } })
+    const untouched = studioReducer(baseState(), { type: 'EXPERIENCE_PATCH', patch: { principle: '改写后的原则' } })
     expect(untouched.experienceDoc).toBeNull()
   })
 })
@@ -576,7 +587,7 @@ describe('资产态选择器（editorDataOf / currentFlowAssetOf / isInstanceSou
     const active = editorDataOf(state)
     expect(active?.kind).toBe('experience')
     expect(active?.name).toBe('重构旧模块')
-    expect((active?.data as { insight?: string }).insight).toBe('先补测试再重构')
+    expect((active?.data as { principle?: string }).principle).toBe('先补测试再重构')
     expect(active?.experience).toBe(true)
     expect(active?.experienceId).toBe('ex-1')
     expect(active?.retired).toBeUndefined()

@@ -505,7 +505,7 @@ function insertWorkflowVersion(
       toJsonText(request.meta),
       workflowRetrievalContext(request.assetId, request.name, request.description),
       request.source,
-      // source_run_id 由复盘链路补写（V1 晋升入口不携带 run 上下文），此处显式留空
+      // source_run_id 显式留 NULL：本晋升入口不携带 run 上下文，只有带来源运行记录的写入路径才填该列
       null,
       request.sourceTemplateId,
       request.fingerprint,

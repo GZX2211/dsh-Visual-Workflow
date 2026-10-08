@@ -177,9 +177,10 @@ export const EP_RESTORE_ASSET = 'restoreAsset'
 // ---------------------------------------------------------------------------
 // 经验（Experience）端点名常量
 // ---------------------------------------------------------------------------
-// 语义：经验是复盘沉淀的知识单元，**没有版本控制**（无历史表、无 Active 指针），
-// 只有「活跃 / 已归档」两态；归档即退出父代理召回面（wf_org_catalog 的经验索引）。
+// 语义：经验是自主主体沉淀的可复用决策原则，**没有版本控制**（无历史表、无 Active 指针），
+// 只有「活跃 / 已归档」两态；归档即退出召回面（wf_experience_recall 不再召回它）。
 // 因此界面侧只有「保存」与「归档 / 恢复」两组按钮，不提供回滚。
+// 保存可编辑的九个语义字段：检索文本与向量由 Host 在事务外重算后落库，界面只读展示。
 
 /** 列出经验端点名（活跃 + 已归档，一次返回；条目自带 active 标记）。 */
 export const EP_LIST_EXPERIENCES = 'listExperiences'
@@ -211,10 +212,17 @@ export const WF_ORG_CATALOG = 'wf_org_catalog'
 /** 父代理自主编排的写图工具名（两组：图结构 / 运行状态标记）。 */
 export const WF_GRAPH_PATCH = 'wf_graph_patch'
 /**
- * 经验入库工具名（父代理；复盘后提交经验候选 → 官方多选卡片 → 用户确认后原子落库）。
- * 调用者必须是主会话父代理（子代理经 CHILD_AGENT_HIDDEN_TOOLS 永久隐藏）。
+ * 经验学习工具名（所有代理可用；单工具双态：空集取当前主体类型的生成 Prompt，
+ * 传候选即校验后入库）。
+ * 与自主编排工具不同：经验是「每个主体自己的学习」，子代理同样需要，
+ * 因此经 OPTIONAL_INJECT_TOOLS 允许进入子代理工具集（由组合勾选决定）。
  */
-export const WF_EXPERIENCE = 'wf_experience'
+export const WF_EXPERIENCE_LEARN = 'wf_experience_learn'
+/**
+ * 经验召回工具名（所有代理可用；两阶段：先按 query 取候选摘要，再按 ids 取完整内容）。
+ * 与 wf_org_catalog 的分工：后者只勘察组织资产，不再承担经验召回。
+ */
+export const WF_EXPERIENCE_RECALL = 'wf_experience_recall'
 
 // ---------------------------------------------------------------------------
 // 工具可见性元数据
@@ -238,6 +246,8 @@ export const PARENT_AGENT_VISIBLE_TOOLS = [
  * wf_graph_patch（勘察与改图都是「父代理的组织权限」，子代理不得改图）。
  * 注意：全局工具开关（tool-switches）只影响「是否可见」，本集合是「永不进子代理」，
  * 两者正交——组合管理仍列出本集合工具（同一页面兼作全局开关面板），但永不随组合下发。
+ * 经验两工具（wf_experience_learn / wf_experience_recall）**不在**本集合：
+ * 每个主体都有自己的经验，子代理经可选注入集勾选后方可使用。
  */
 export const CHILD_AGENT_HIDDEN_TOOLS = [
   WF_RUN_NODE,
@@ -245,14 +255,15 @@ export const CHILD_AGENT_HIDDEN_TOOLS = [
   WF_FINISH,
   WF_ORG_CATALOG,
   WF_GRAPH_PATCH,
-  WF_EXPERIENCE, // 经验入库是「父代理的复盘权限」，子代理不得写经验库
 ] as const
 
 /**
- * 元编排自进化工具集（父代理专属）：经验入库（wf_experience）。
- * 与 ORG_AUTHORING_TOOLS 同口径——默认开启、子代理永久隐藏、工具内二次校验调用者身份。
+ * 元编排自进化工具集（所有代理可用）：经验学习与经验召回。
+ * 与 ORG_AUTHORING_TOOLS 的差别——后者是父代理的组织权限（永久隐藏于子代理），
+ * 本集合是「主体自身的学习与回忆」，因此同时存在于 OPTIONAL_INJECT_TOOLS
+ * （子代理经组合勾选才注入；父代理默认可见）。
  */
-export const META_EVOLUTION_TOOLS = [WF_EXPERIENCE] as const
+export const META_EVOLUTION_TOOLS = [WF_EXPERIENCE_LEARN, WF_EXPERIENCE_RECALL] as const
 
 /**
  * 自主编排工具集（**默认开启**，与其他工具同口径；由用户在组合管理中按需关闭）：
@@ -349,12 +360,19 @@ export const DEFAULT_DISABLED_ON_FIRST_INSTALL = [TEAM_SPAWN_TEAMMATE] as const
 export const RESERVED_TRANSPORT_TOOL = 'run_code'
 
 /**
- * 可选注入工具集（默认不注入任何代理，仅勾选/存在连线时按需进入子代理工具集）。
+ * 可选注入工具集（默认不注入子代理，仅勾选/存在连线时按需进入子代理工具集）。
  *  - wf_ask：组合/白名单勾选时注入
  *  - wf_ask_agent：组合/白名单勾选时注入（协作组内通信）
  *  - wf_db_query：存在数据库连线（db-in）时按连线自动注入
+ *  - wf_experience_learn / wf_experience_recall：组合勾选时注入（每个主体自己的学习与回忆）
  */
-export const OPTIONAL_INJECT_TOOLS = [WF_ASK, WF_ASK_AGENT, WF_DB_QUERY] as const
+export const OPTIONAL_INJECT_TOOLS = [
+  WF_ASK,
+  WF_ASK_AGENT,
+  WF_DB_QUERY,
+  WF_EXPERIENCE_LEARN,
+  WF_EXPERIENCE_RECALL,
+] as const
 
 /**
  * 工具可见性元数据总表：以「工具名 → 可见性描述」的统一视图汇总各规则，
@@ -365,11 +383,11 @@ export const TOOL_VISIBILITY = {
   parentVisible: PARENT_AGENT_VISIBLE_TOOLS,
   /** 子代理永久隐藏集（wf_run_node / wf_run_node_wait / wf_finish + 自主编排两工具）。 */
   childHidden: CHILD_AGENT_HIDDEN_TOOLS,
-  /** 可选注入集（wf_ask / wf_ask_agent / wf_db_query）。 */
+  /** 可选注入集（wf_ask / wf_ask_agent / wf_db_query / 经验两工具）。 */
   optionalInject: OPTIONAL_INJECT_TOOLS,
   /** 自主编排工具集（wf_org_catalog / wf_graph_patch；默认开启、父代理专属，可经全局工具开关关闭）。 */
   orgAuthoring: ORG_AUTHORING_TOOLS,
-  /** 元编排自进化工具集（wf_experience；父代理专属，子代理永久隐藏）。 */
+  /** 元编排自进化工具集（wf_experience_learn / wf_experience_recall；所有代理可用，进可选注入集）。 */
   metaEvolution: META_EVOLUTION_TOOLS,
   /**
    * 官方 Agent Team 工具集（9 个）：由官方包注册在 Team 成员作用域，插件不注册、不转写；
@@ -549,4 +567,29 @@ export const ERR_EXPERIENCE_NOT_FOUND = 'WF_EXPERIENCE_NOT_FOUND'
 
 /** 经验入参非法（id / 载荷形状 / 可编辑字段类型），HTTP 400。 */
 export const ERR_EXPERIENCE_BAD_ARGS = 'WF_EXPERIENCE_BAD_ARGS'
+
+/**
+ * 经验生成 Prompt 尚未初始化即提交候选。
+ * 消费方语义：模型必须先调用 `wf_experience_learn`（空集）取得当前主体类型的生成 Prompt，
+ * 再按 Prompt 产出候选并提交——该错误消息必须直接给出这一动作。
+ */
+export const ERR_EXPERIENCE_NOT_INITIALIZED = 'WF_EXPERIENCE_NOT_INITIALIZED'
+
+/** 经验候选不符合入库协议（未知字段、类型不符、长度或数量超限），HTTP 400。 */
+export const ERR_EXPERIENCE_VALIDATION = 'WF_EXPERIENCE_VALIDATION'
+
+/**
+ * 语义嵌入能力不可用（嵌入服务退化到 BM25 词法检索）。
+ * 消费方语义：持久化 V1 要求语义去重，此时**不写入**并如实上报；调用方可稍后重试。
+ */
+export const ERR_EXPERIENCE_EMBEDDING_UNAVAILABLE = 'WF_EXPERIENCE_EMBEDDING_UNAVAILABLE'
+
+/**
+ * 经验主体类型与当前实际职责不符（如编排父代理填 agent、未启动过 Team 却填 team）。
+ * 消费方语义：只能提交与自身职责对应的经验，错误消息给出当前实际职责与可选类型。
+ */
+export const ERR_EXPERIENCE_WRONG_TYPE = 'WF_EXPERIENCE_WRONG_TYPE'
+
+/** 经验召回失败（检索通道不可用且词法回退亦失败）。 */
+export const ERR_EXPERIENCE_RECALL_FAILED = 'WF_EXPERIENCE_RECALL_FAILED'
 

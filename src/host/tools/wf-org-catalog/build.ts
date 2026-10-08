@@ -15,8 +15,6 @@ import { CATALOG_LIMITS, ID_CONVENTION, INLINE_ROLE_SEPARATOR } from './types.js
 import type {
   CatalogComboEntry,
   CatalogDatabaseNodeEntry,
-  CatalogExperienceDetail,
-  CatalogExperienceIndexEntry,
   CatalogFileNodeEntry,
   CatalogGroupNodeEntry,
   CatalogIndex,
@@ -36,7 +34,6 @@ import type {
   WorkflowAssetEntry,
 } from './types.js'
 import type {
-  ExperienceEntry,
   RoleAssetDetail,
   RoleAssetSummary,
   WorkflowAssetDetail,
@@ -47,9 +44,9 @@ import type { GraphNode, Line, RoleNode } from '../../shared/graph-model.js'
 
 /** 索引里的召回指引：目录是候选清单而非全部内容，详情按 ids 召回。 */
 export const DETAIL_HINT =
-  '索引里的资产与经验只是**候选**（名称 / 描述 / 任务上下文），完整内容必须再次调用本工具并传 ids 召回：'
+  '索引里的资产只是**候选**（名称 / 描述 / 版本），完整内容必须再次调用本工具并传 ids 召回：'
   + '["flow-xxx"]=工作流资产完整骨架；["role-xxx"]=角色资产完整 systemPrompt；'
-  + '["flow-xxx#node-yyy"]=该工作流资产内联角色固定引用版本的完整 systemPrompt；["ex-xxx"]=经验完整 insight + evidence。'
+  + '["flow-xxx#node-yyy"]=该工作流资产内联角色固定引用版本的完整 systemPrompt。'
   + '骨架已含阶段节点、协作组配置、连线与数据节点正文（这些没有二次召回通道），'
   + '唯一按需召回的长字段是角色 systemPrompt。ids 中的坏 id 只单条报错，不影响其余。'
 
@@ -93,11 +90,10 @@ export interface ResolvedRoleRef {
   versionId: number
 }
 
-/** 组装资产与经验索引（第一次调用）。 */
+/** 组装资产索引（第一次调用）。 */
 export function buildIndex(input: {
   workflows: WorkflowAssetSummary[]
   roles: RoleAssetSummary[]
-  experiences: CatalogExperienceIndexEntry[]
   combos: Array<Record<string, unknown>>
   presets: CatalogPresetSource[]
   models: CatalogModelSource[]
@@ -109,7 +105,6 @@ export function buildIndex(input: {
   const modelEntries = input.models.map(modelEntryOf).filter((entry) => entry.provider || entry.model)
   const workflows = clipList(workflowEntries, CATALOG_LIMITS.workflowAssets)
   const roles = clipList(roleEntries, CATALOG_LIMITS.roleAssets)
-  const experiences = clipList(input.experiences, CATALOG_LIMITS.experiences)
   const combos = clipList(comboEntries, CATALOG_LIMITS.combos)
   const presets = clipList(presetEntries, CATALOG_LIMITS.presets)
   const models = clipList(modelEntries, CATALOG_LIMITS.models)
@@ -121,7 +116,6 @@ export function buildIndex(input: {
     presets: presets.items,
     models: models.items,
     assets: { workflows: workflows.items, roles: roles.items },
-    experiences: experiences.items,
     rules: {
       graphSemantics: ORG_SOP_L1_GRAPH_SEMANTICS,
       designMethod: ORG_SOP_DESIGN_METHOD,
@@ -131,7 +125,6 @@ export function buildIndex(input: {
     truncated:
       workflows.truncated
       || roles.truncated
-      || experiences.truncated
       || combos.truncated
       || presets.truncated
       || models.truncated,
@@ -312,25 +305,6 @@ export function buildInlineRoleDetail(input: {
     groupId: data.groupId ?? null,
     ...(promptSource ? { systemPromptSource: promptSource } : {}),
     systemPrompt: textOf(data.systemPrompt),
-  }
-}
-
-/** 组装经验详情（insight 与 evidence 完整返回，不截断：经验本体就是这两段文本）。 */
-export function buildExperienceDetail(experience: ExperienceEntry): CatalogExperienceDetail {
-  const evidence = trimmedOrNull(experience.evidence)
-  const reviewFeedback = trimmedOrNull(experience.reviewFeedback)
-  const sourceRunId = trimmedOrNull(experience.sourceRunId)
-  return {
-    type: 'experience',
-    id: textOf(experience.id),
-    taskType: textOf(experience.taskType),
-    taskContext: textOf(experience.taskContext),
-    insight: textOf(experience.insight),
-    ...(evidence ? { evidence } : {}),
-    ...(reviewFeedback ? { reviewFeedback } : {}),
-    ...(sourceRunId ? { sourceRunId } : {}),
-    createdAt: Number(experience.createdAt) || 0,
-    updatedAt: Number(experience.updatedAt) || 0,
   }
 }
 

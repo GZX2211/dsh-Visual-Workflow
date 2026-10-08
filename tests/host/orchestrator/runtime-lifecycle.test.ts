@@ -25,6 +25,26 @@ describe('terminate / stop / dispose', () => {
     expect((await h.store.getRun('run-1'))?.status).toBe('stopped')
   })
 
+  it('terminateRun：写终态与磁盘记录、释放内存条目与锁、不注入终态指令', async () => {
+    const h = await makeHarness()
+    const root = h.agents.roots.get('session-1')!
+    const { entry } = await start(h, makeFlow())
+    root.status = 'running'
+    const before = { steered: root.steered.length, messages: root.messages.length }
+
+    expect(await h.runtime.terminateRun(entry, { status: 'stopped', summary: '用户停止' })).toBe(true)
+
+    expect(entry.snapshot.status).toBe('stopped')
+    expect(entry.snapshot.summary).toBe('用户停止')
+    expect(entry.snapshot.endedAt).not.toBeNull()
+    expect((await h.store.getRun('run-1'))?.status).toBe('stopped')
+    expect(h.runtime.entryFor('run-1')).toBeNull()
+    expect(h.runtime.flowLockInfo('flow-1')).toBeNull()
+    // 旧终态复盘链已退役：收尾只做状态与资源，不再向父代理注入任何消息
+    expect(root.steered).toHaveLength(before.steered)
+    expect(root.messages).toHaveLength(before.messages)
+  })
+
   it('terminateRun 幂等：终止后再次终止返回 false', async () => {
     const h = await makeHarness()
     const { entry } = await start(h, makeFlow())

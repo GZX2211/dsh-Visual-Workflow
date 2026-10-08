@@ -17,9 +17,12 @@ export interface ExperiencesFace {
     setActive(experienceId: string, active: boolean): Promise<boolean>;
 }
 /**
- * 保存载荷投影（纯函数）：只取可编辑字段，只读元信息（id / 来源运行 / 时间戳 / 状态）
- * 一律不回传——回传等于让界面有权改写领域记账的事实。
- * 可空字段用 `null` 表达「清空」（与 `undefined` 的「不改」区分，见共享契约 ExperiencePatch）。
+ * 保存载荷投影（纯函数）：只取九个语义字段——检索投影、向量与只读元信息
+ * （id / 主体类型 / 状态 / 时间戳 / 来源运行 / 生成 Prompt）一律不回传，
+ * 回传等于让界面有权改写领域记账的事实与系统生成规则。
+ *
+ * 列表字段用 `null` 表达「清空」（与 `undefined` 的「不改」区分，见共享契约 ExperiencePatch）；
+ * 表单里的空文本域投影为 `[]`，与 `null` 在领域层同义（都落成空数组）。
  */
 export declare function experiencePatchOf(entry: ExperienceEntry): ExperiencePatch;
 /** 经验面（远端失败已就地翻译为提示；返回值 null/false 表示本次调用未产生结果）。 */

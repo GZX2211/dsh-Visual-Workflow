@@ -2,14 +2,13 @@
 //
 // wf_org_catalog 的返回契约与 ID 约定（纯类型 + 常量）。
 //
-// 为什么单独成文件：本工具采用「两次调用」模型——不传 ids 返回资产/经验索引，传 ids 返回
+// 为什么单独成文件：本工具采用「两次调用」模型——不传 ids 返回资产索引，传 ids 返回
 // 逐条详情。两份返回体的字段形状是模型消费的稳定契约，与 ID 前缀/复合键判据一样集中
 // 在此，避免「组装实现」与「参数描述」两处漂移。
 //
-// 语义边界（用户裁决）：本工具只召回**资产**（模版的晋升形态，带版本控制）与**经验**
-// （复盘沉淀），不召回模版——模版是可随意修改的草稿，不构成可参考的组织配置事实。
+// 语义边界（用户裁决）：本工具只召回**资产**（模版的晋升形态，带版本控制），不召回模版
+// ——模版是可随意修改的草稿，不构成可参考的组织配置事实。
 
-import type { ExperienceIndexEntry } from '../../shared/asset-types.js'
 import type { ConditionType, Handle } from '../../shared/graph-model.js'
 import type { OrgMeta } from '../../shared/types.js'
 
@@ -23,9 +22,6 @@ export const WORKFLOW_ID_PREFIX = 'flow-'
 /** 角色资产 id 前缀：可召回完整 systemPrompt。 */
 export const ROLE_ID_PREFIX = 'role-'
 
-/** 经验 id 前缀：可召回完整 insight + evidence。 */
-export const EXPERIENCE_ID_PREFIX = 'ex-'
-
 /** 工作流资产内联角色复合键分隔符：`<工作流资产 id>#<节点 id>`。 */
 export const INLINE_ROLE_SEPARATOR = '#'
 
@@ -34,7 +30,6 @@ export const ID_CONVENTION = {
   workflow: `${WORKFLOW_ID_PREFIX}* = 工作流资产 → 完整骨架（阶段节点 / 角色与协作组 / 连线 / 数据节点正文）`,
   role: `${ROLE_ID_PREFIX}* = 角色资产 → 完整 systemPrompt 及其映射信息`,
   inlineRole: `${WORKFLOW_ID_PREFIX}xxx${INLINE_ROLE_SEPARATOR}<节点 id> = 工作流资产内联角色 → 该节点固定引用版本的完整 systemPrompt`,
-  experience: `${EXPERIENCE_ID_PREFIX}* = 经验 → 完整 insight + evidence`,
 } as const
 
 /** 条目上限与摘要口径（超限截断并置 truncated，不做静默丢弃）。 */
@@ -43,8 +38,6 @@ export const CATALOG_LIMITS = {
   roleAssets: 60,
   /** 工作流资产条目上限。 */
   workflowAssets: 40,
-  /** 经验条目上限。 */
-  experiences: 30,
   /** 组合条目上限。 */
   combos: 30,
   /** 官方 preset 条目上限。 */
@@ -130,7 +123,7 @@ export interface CatalogRules {
   gateMarking: string
 }
 
-/** 资产与经验索引（第一次调用的返回体）。 */
+/** 资产索引（第一次调用的返回体）。 */
 export interface CatalogIndex {
   kind: 'index'
   idConvention: typeof ID_CONVENTION
@@ -139,8 +132,6 @@ export interface CatalogIndex {
   presets: CatalogPresetEntry[]
   models: CatalogModelEntry[]
   assets: CatalogAssetIndex
-  /** 经验索引条目：只有 id 与任务上下文，完整内容按 id 召回。 */
-  experiences: CatalogExperienceIndexEntry[]
   rules: CatalogRules
   truncated: boolean
 }
@@ -311,26 +302,11 @@ export interface CatalogInlineRoleDetail {
   systemPrompt: string
 }
 
-/** 经验详情（`ex-*` 的返回体）：过去发生过什么 / 以后注意什么。 */
-export interface CatalogExperienceDetail {
-  type: 'experience'
-  id: string
-  taskType: string
-  taskContext: string
-  insight: string
-  evidence?: string
-  reviewFeedback?: string
-  sourceRunId?: string
-  createdAt: number
-  updatedAt: number
-}
-
-/** 资产/经验详情条目。 */
+/** 资产详情条目。 */
 export type CatalogAssetDetail =
   | CatalogWorkflowDetail
   | CatalogRoleDetail
   | CatalogInlineRoleDetail
-  | CatalogExperienceDetail
 
 /** 坏 id 条目：单条失败不阻塞其余召回。 */
 export interface CatalogDetailError {
@@ -339,7 +315,7 @@ export interface CatalogDetailError {
   message: string
 }
 
-/** 资产与经验详情（第二次调用的返回体）。 */
+/** 资产详情（第二次调用的返回体）。 */
 export interface CatalogDetails {
   kind: 'details'
   assets: CatalogAssetDetail[]
@@ -349,9 +325,6 @@ export interface CatalogDetails {
 // ---------------------------------------------------------------------------
 // 宿主数据源形状（宿主适配与单测 fake 共用）
 // ---------------------------------------------------------------------------
-
-/** 经验索引条目（与共享契约同形；此处只收敛本地类型名）。 */
-export type CatalogExperienceIndexEntry = ExperienceIndexEntry
 
 /** preset 数据源条目。 */
 export interface CatalogPresetSource {

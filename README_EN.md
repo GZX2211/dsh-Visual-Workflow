@@ -46,9 +46,9 @@ The project combines **Workflow, Agent Team, Meta-Orchestration, Human-in-the-lo
                                 │
                                 ▼
                          ┌─────────────────┐
-                         │ Retrospective +  │
-                         │    Feedback      │
-                         │   Experience     │
+                         │  Self-directed   │
+                         │  Experience      │
+                         │    Learning      │
                          └────────┬────────┘
                                   │
                                   ▼
@@ -250,9 +250,10 @@ The following tools constitute the primary control plane of the current orchestr
 | **`wf_ask`** | Sub-agent initiates an official question card to the user on the "main interface" and waits for a response; supports question queue |
 | **`wf_ask_agent`** | Non-blocking `ask / reply` message communication between Agents within a collaboration group; cold recovery supported when target is offline |
 | **`wf_db_query`** | Database read-only access in three modes: `search / query / schema` |
-| **`wf_org_catalog`** | Recall organizational assets, experience, tool combinations, presets, models, and orchestration rules; parent agent only |
+| **`wf_org_catalog`** | Recall organizational assets, tool combinations, presets, models, and orchestration rules; parent agent only |
 | **`wf_graph_patch`** | Controlled graph modification on workflow templates or running instances; supports create, update, delete, edge adjustment, etc. |
-| **`wf_experience`** | Submit experience candidates from run retrospectives, render user multi-select confirmation cards, and write to the experience base based on user feedback |
+| **`wf_experience_learn`** | Store the subject's own experiences: call with an empty array to get the generation prompt, or submit candidates for validation and storage (available to all agents) |
+| **`wf_experience_recall`** | Semantic recall of existing experiences by subject type: first fetch candidate summaries, then fetch full content by id (available to all agents) |
 
 > Difference: Unlike official Teammate scheduling which can only pass the parent's tools and model, Agent nodes created by `wf_run_node` can freely combine any tools, set different models, and define different system prompts.
 
@@ -483,8 +484,9 @@ dsh-visual-workflow/
 │   ├── host/
 │   │   ├── shared/               # Frontend/backend shared pure type contracts
 │   │   ├── agent/                # Agent creation, model selection, Prompt injection, execution guardrails
-│   │   ├── assets/               # SQLite asset library, Experience
-│   │   ├── orchestrator/         # Runtime, state machine, dynamic orchestration, runtime facts, retrospective
+│   │   ├── assets/               # SQLite asset library and experience persistence
+│   │   ├── experience/           # Experience domain (validation/projection/vectors/dedup/recall/subject resolution)
+│   │   ├── orchestrator/         # Runtime, state machine, dynamic orchestration, runtime facts, team-experience injection
 │   │   ├── tools/                # wf_* orchestration tools
 │   │   ├── graph/                # Graph model, structural validation, organizational constraints and budget
 │   │   ├── team/                 # Agent Team capability adaptation
@@ -495,7 +497,7 @@ dsh-visual-workflow/
 │   │   ├── service/              # Mode 2 service management
 │   │   ├── api/                  # GUI API
 │   │   ├── commands/             # /arrange and other commands
-│   │   └── prompts/              # Orchestration, planning, retrospective Prompts
+│   │   └── prompts/              # Orchestration, planning, team-experience Prompts
 │   │
 │   └── client/
 │       ├── sidebar/              # Official Sidebar slot and workbench entry

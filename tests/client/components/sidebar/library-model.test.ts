@@ -168,18 +168,30 @@ describe('资产态「数据」Tag 以「经验」呈现（用户批注）', () 
   /** 经验条目（只给被测字段，其余为契约最小缺省）。 */
   function experience(
     id: string,
-    taskContext: string,
-    insight: string,
+    responsibility: string,
+    principle: string,
     active = true,
     taskType = '软件开发',
+    decisionDomain = '实现取舍',
   ): NonNullable<LibraryModelInput['experiences']>[number] {
     return {
       id,
       active,
-      reflectionPromptVersion: '1',
+      experienceType: 'agent',
+      responsibility,
       taskType,
-      taskContext,
-      insight,
+      decisionDomain,
+      situation: `情境：${id}`,
+      trigger: `信号：${id}`,
+      principle,
+      recommendedAction: `行动：${id}`,
+      exclusions: [],
+      evidence: [],
+      taskRetrievalText: `任务投影：${id}`,
+      decisionRetrievalText: `决策投影：${id}`,
+      sourceRunId: 'run-1',
+      generationPromptId: 'prompt-1',
+      generationPromptVersion: 'v1',
       createdAt: 1,
       updatedAt: 1,
     }
@@ -194,13 +206,13 @@ describe('资产态「数据」Tag 以「经验」呈现（用户批注）', () 
     expect(assetTabs.map((tab) => tab.key)).toEqual(['workflow', 'role', 'data', 'other'])
   })
 
-  it('经验分栏：活跃 / 历史两栏，主行取任务上下文、副行取经验摘要', () => {
+  it('经验分栏：活跃 / 历史两栏，主行取责任范围、副行取原则', () => {
     const model = buildLibraryModel(makeInput({
       librarySource: 'asset',
       libTab: 'data',
       experiences: [
         experience('ex-1', '重构旧模块', '先补测试再重构', true),
-        experience('ex-2', '归档的上下文', '已归档的经验', false),
+        experience('ex-2', '归档的责任', '已归档的原则', false),
       ],
     }))
     expect(model.sections.map((section) => section.key)).toEqual(['assetExperiences', ASSET_HISTORY_SECTIONS.experience])
@@ -210,7 +222,7 @@ describe('资产态「数据」Tag 以「经验」呈现（用户批注）', () 
     expect(model.sections[0].cards[0].kind).toBe('experience')
     expect(model.sections[0].cards[0].sub).toBe('先补测试再重构')
     expect(model.sections[1].title).toBe(zh.experienceHistorySection)
-    expect(model.sections[1].cards.map((card) => card.name)).toEqual(['归档的上下文'])
+    expect(model.sections[1].cards.map((card) => card.name)).toEqual(['归档的责任'])
     expect(model.emptyHint).toBeNull()
   })
 
@@ -219,7 +231,7 @@ describe('资产态「数据」Tag 以「经验」呈现（用户批注）', () 
     const model = buildLibraryModel(makeInput({
       librarySource: 'asset',
       libTab: 'data',
-      experiences: [experience('ex-1', '上下文一', '经验一')],
+      experiences: [experience('ex-1', '责任一', '原则一')],
       onOpenExperience,
     }))
     const payload = model.sections[0].cards[0].payload
@@ -236,23 +248,46 @@ describe('资产态「数据」Tag 以「经验」呈现（用户批注）', () 
     expect(model.emptyHint).toBeNull()
   })
 
-  it('经验搜索：命中任务类型 / 上下文 / 经验本体 / 证据（大小写不敏感）', () => {
+  it('经验搜索：命中任务类型 / 责任范围 / 决策领域 / 情境 / 触发信号 / 原则 / 建议行动 / 证据', () => {
     const base = {
       librarySource: 'asset' as const,
       libTab: 'data' as const,
       experiences: [
-        { ...experience('ex-1', '重构旧模块', '先补测试再重构', true, '软件开发'), evidence: '缺陷率下降' },
-        experience('ex-2', '撰写文档', '先列提纲', true, '写作'),
+        experience('ex-1', '重构旧模块', '先补测试再重构', true, '软件开发', '重构顺序'),
+        experience('ex-2', '撰写文档', '先列提纲', true, '写作', '表达取舍'),
       ],
     }
-    expect(buildLibraryModel(makeInput({ ...base, libSearch: '写作' })).sections[0].cards.map((card) => card.id)).toEqual(['ex-2'])
-    expect(buildLibraryModel(makeInput({ ...base, libSearch: '缺陷率' })).sections[0].cards.map((card) => card.id)).toEqual(['ex-1'])
-    expect(buildLibraryModel(makeInput({ ...base, libSearch: '先补测试' })).sections[0].cards.map((card) => card.id)).toEqual(['ex-1'])
-    expect(buildLibraryModel(makeInput({ ...base, libSearch: '软件开发' })).sections[0].cards.map((card) => card.id)).toEqual(['ex-1'])
+    const idsOf = (query: string): string[] =>
+      buildLibraryModel(makeInput({ ...base, libSearch: query })).sections[0]?.cards.map((card) => card.id) ?? []
+    expect(idsOf('写作')).toEqual(['ex-2'])                    // 任务类型
+    expect(idsOf('重构旧模块')).toEqual(['ex-1'])              // 责任范围
+    expect(idsOf('表达取舍')).toEqual(['ex-2'])                // 决策领域
+    expect(idsOf('情境：ex-2')).toEqual(['ex-2'])              // 情境
+    expect(idsOf('信号：ex-1')).toEqual(['ex-1'])              // 触发信号
+    expect(idsOf('先补测试')).toEqual(['ex-1'])                // 原则
+    expect(idsOf('行动：ex-2')).toEqual(['ex-2'])              // 建议行动
+    expect(idsOf('证据').length).toBe(0)                       // 空证据列表不产生命中
     // 无命中：整页空态（分区被过滤掉）
     const empty = buildLibraryModel(makeInput({ ...base, libSearch: '不存在的关键词' }))
     expect(empty.sections).toEqual([])
     expect(empty.emptyHint).toBe(zh.searchNoResult)
+  })
+
+  it('经验搜索：命中证据条目，且不搜系统生成的检索投影与来源信息', () => {
+    const base = {
+      librarySource: 'asset' as const,
+      libTab: 'data' as const,
+      experiences: [
+        { ...experience('ex-1', '重构旧模块', '先补测试再重构'), evidence: ['缺陷率下降'] },
+      ],
+    }
+    const idsOf = (query: string): string[] =>
+      buildLibraryModel(makeInput({ ...base, libSearch: query })).sections[0]?.cards.map((card) => card.id) ?? []
+    expect(idsOf('缺陷率下降')).toEqual(['ex-1'])
+    // 检索投影、来源运行与生成 Prompt 是系统字段，不参与人工搜索
+    expect(idsOf('任务投影')).toEqual([])
+    expect(idsOf('run-1')).toEqual([])
+    expect(idsOf('prompt-1')).toEqual([])
   })
 
   it('模版态数据 Tag 仍是文件 + 数据库（经验不参与）', () => {

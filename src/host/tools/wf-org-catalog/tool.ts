@@ -1,17 +1,16 @@
 // src/host/tools/wf-org-catalog/tool.ts
 //
-// wf_org_catalog 工具注册：父代理的「组织资产 + 经验」只读勘察。
+// wf_org_catalog 工具注册：父代理的「组织资产」只读勘察。
 //
 // 调用模型（用户裁决）：只区分「传 ids / 不传 ids」——
-//   - 不传（或空数组 / 空串）→ **资产与经验索引**：组合（含工具清单）、官方 preset、模型与
-//     思考强度、编排规则、工作流资产与角色资产索引、经验索引，以及 ID 约定与召回指引；
+//   - 不传（或空数组 / 空串）→ **资产索引**：组合（含工具清单）、官方 preset、模型与
+//     思考强度、编排规则、工作流资产与角色资产索引，以及 ID 约定与召回指引；
 //   - 传 ids → **批量详情**：`flow-*` 工作流骨架 / `role-*` 角色完整 systemPrompt /
-//     `<flow-id>#<node-id>` 工作流资产内联角色完整 systemPrompt / `ex-*` 经验全文；
-//     坏 id 只单条报错，不阻塞其余。
+//     `<flow-id>#<node-id>` 工作流资产内联角色完整 systemPrompt；坏 id 只单条报错，不阻塞其余。
 //
 // 职责边界：本文件只做「注册 + 取数编排 + 错误归一」；返回体装配在 build.ts（纯函数），
 // id 判定在 ids.ts（纯函数）。零写操作、幂等；不读运行实例（实例编排事实由运行期编排
-// 指令提供，本工具只暴露资产与经验）。
+// 指令提供，本工具只暴露资产）。
 //
 // 提示词规范：description 官方标准英文（何时调用/前置条件/失败语义/副作用）。
 
@@ -21,7 +20,6 @@ import { textRender } from '../infrastructure/text-render.js'
 import { callerOf } from '../infrastructure/caller.js'
 import { WfError } from '../../orchestrator/index.js'
 import {
-  buildExperienceDetail,
   buildIndex,
   buildInlineRoleDetail,
   buildRoleDetail,
@@ -29,7 +27,6 @@ import {
   type ResolvedRoleRef,
 } from './build.js'
 import { detailIdsLimitProblem, normalizeAssetIds, parseAssetId } from './ids.js'
-import { CATALOG_LIMITS } from './types.js'
 import type {
   CatalogAssetDetail,
   CatalogDetails,
@@ -39,8 +36,6 @@ import type {
   CatalogPresetSource,
 } from './types.js'
 import type {
-  ExperienceEntry,
-  ExperienceIndexEntry,
   RoleAssetDetail,
   RoleAssetSummary,
   WorkflowAssetDetail,
@@ -64,8 +59,6 @@ export interface OrgCatalogHost {
     listRoleAssets(): Promise<RoleAssetSummary[]>
     getWorkflowAsset(assetId: string): Promise<WorkflowAssetDetail | null>
     getRoleAsset(assetId: string): Promise<RoleAssetDetail | null>
-    listExperienceIndex(limit: number): Promise<ExperienceIndexEntry[]>
-    getExperiences(ids: string[]): Promise<ExperienceEntry[]>
     /**
      * 可选缝：把工作流资产里钉住的**角色版本行 id** 回溯为角色资产 id。
      * 没有它时骨架仍给 roleVersionId（钉的是哪一版），只是无法标注角色资产名。
@@ -88,7 +81,7 @@ export async function executeOrgCatalog(
   const ids = normalizeAssetIds(args?.ids)
   if (ids === null) {
     throw new WfError(
-      `ids 必须是字符串数组（只看资产与经验索引请省略该参数）——收到 ${JSON.stringify(args?.ids ?? null)}`,
+      `ids 必须是字符串数组（只看资产索引请省略该参数）——收到 ${JSON.stringify(args?.ids ?? null)}`,
       'WF_BAD_ARGS',
     )
   }
@@ -99,14 +92,13 @@ export async function executeOrgCatalog(
 
 /**
  * 索引取数。
- * 核心清单（资产 / 经验索引 / 组合）读取失败**向上抛**——不伪装成「没有资产」，
+ * 核心清单（资产 / 组合）读取失败**向上抛**——不伪装成「没有资产」，
  * 否则父代理会基于空目录做出错误编排；preset 与模型是可选目录，缺失或失败按空清单处理。
  */
 async function buildIndexFrom(host: OrgCatalogHost): Promise<CatalogIndex> {
-  const [workflows, roles, experiences, combos] = await Promise.all([
+  const [workflows, roles, combos] = await Promise.all([
     host.assets.listWorkflowAssets(),
     host.assets.listRoleAssets(),
-    host.assets.listExperienceIndex(CATALOG_LIMITS.experiences),
     host.listToolCombos(),
   ])
   const presets = host.listPresets ? await host.listPresets().catch(() => []) : []
@@ -114,7 +106,6 @@ async function buildIndexFrom(host: OrgCatalogHost): Promise<CatalogIndex> {
   return buildIndex({
     workflows: workflows ?? [],
     roles: roles ?? [],
-    experiences: experiences ?? [],
     combos: combos as Array<Record<string, unknown>>,
     presets,
     models,
@@ -144,7 +135,6 @@ async function buildDetailsFrom(host: OrgCatalogHost, ids: string[]): Promise<Ca
   const workflowCache = new Map<string, WorkflowAssetDetail | null>()
   const roleCache = new Map<string, RoleAssetDetail | null>()
   const roleVersionCache = new Map<string, ResolvedRoleRef | null>()
-  const experienceCache = new Map<string, ExperienceEntry | null>()
 
   const loadWorkflow = async (assetId: string): Promise<WorkflowAssetDetail | null> => {
     if (!workflowCache.has(assetId)) workflowCache.set(assetId, await host.assets.getWorkflowAsset(assetId))
@@ -167,27 +157,13 @@ async function buildDetailsFrom(host: OrgCatalogHost, ids: string[]): Promise<Ca
 
   // 单次预扫分类：形状非法的 id 不进入任何取数，避免为坏 id 触发无谓读盘。
   // 内联角色的容器也计入工作流资产读盘（同一容器去重后只读一次）。
-  const experienceIds: string[] = []
   const workflowIds: string[] = []
   const roleIds: string[] = []
   for (const { ref } of refs) {
     if (!ref.ok) continue
-    if (ref.kind === 'experience') experienceIds.push(ref.id)
-    else if (ref.kind === 'workflow') workflowIds.push(ref.id)
+    if (ref.kind === 'workflow') workflowIds.push(ref.id)
     else if (ref.kind === 'role') roleIds.push(ref.id)
     else if (!workflowIds.includes(ref.containerId)) workflowIds.push(ref.containerId)
-  }
-
-  // 经验一次批量取（宿主按 ids 批量实现），再按 id 归位以保持逐条独立。
-  // 整批取数失败时把同一个失败按 id 逐条落账：错误属于该批每一次引用，不是某一条的专属失败。
-  let experienceFailure: CatalogDetailError | null = null
-  if (experienceIds.length > 0) {
-    const lookup = await lookupOf(experienceIds[0], () => host.assets.getExperiences(experienceIds))
-    const found = lookup.ok
-      ? new Map((lookup.value ?? []).map((entry) => [String(entry?.id ?? ''), entry]))
-      : new Map<string, ExperienceEntry>()
-    if (!lookup.ok) experienceFailure = lookup.error
-    for (const id of experienceIds) experienceCache.set(id, found.get(id) ?? null)
   }
 
   const workflowLookups = await Promise.all(workflowIds.map((id) => lookupOf(id, () => loadWorkflow(id))))
@@ -231,19 +207,6 @@ async function buildDetailsFrom(host: OrgCatalogHost, ids: string[]): Promise<Ca
         continue
       }
       assets.push(buildRoleDetail(detail))
-      continue
-    }
-    if (ref.kind === 'experience') {
-      if (experienceFailure) {
-        errors.push({ ...experienceFailure, id })
-        continue
-      }
-      const experience = experienceCache.get(ref.id)
-      if (!experience) {
-        errors.push({ id, code: 'WF_ORG_NOT_FOUND', message: `经验不存在：${ref.id}` })
-        continue
-      }
-      assets.push(buildExperienceDetail(experience))
       continue
     }
     const container = workflowCache.get(ref.containerId)
@@ -302,19 +265,19 @@ export function registerWfOrgCatalog(
   const def = defineTool({
     name: WF_ORG_CATALOG,
     description:
-      'Read-only survey of the organization assets and past-run experience available for planning. Two call shapes: omit ids for the compact index (tool combos with their tool lists, official presets, provider/model plus reasoning-effort options, the orchestration rules, the workflow-asset and role-asset index, the experience index, and the id convention); pass ids to recall details for those entries in one batch. '
-      + 'Assets are reusable organization configurations promoted from templates and versioned — recall one to reuse a proven way of staffing and wiring a workflow. Experience entries record what happened in past runs and what to watch out for — recall them before planning a similar task. Neither is a template you may edit: templates are drafts and are NOT listed here. '
-      + 'The index rules carry the write-patch contract: rules.patchContract (op field shapes, role-node data fields, submission rules, error-code semantics) and rules.gateMarking (milestone-gate marking rules) — read them before calling wf_graph_patch. '
-      + 'Index entries are candidates only (name/description/task context); full content is never in the index and must be recalled by id. '
-      + 'Supported ids: flow-* (workflow asset → complete skeleton: stage nodes, roles, groups, lines and data-node bodies, plus roleAssetId/roleVersionId for each role node), role-* (role asset → full systemPrompt plus its mapping fields), <flow-id>#<node-id> (inline role pinned in that workflow asset → full systemPrompt of that fixed version), ex-* (experience → full insight and evidence). At most 20 ids per call. Bad, missing or retired ids come back as per-item errors and never block the others. '
-      + 'A node subagent\'s tools come ONLY from its presetId (a combo id from combos, or an official preset id), so picking presetId from this catalog is mandatory — an empty presetId means that node runs with zero tools. '
+      'Read-only survey of the organization assets available for planning. Two call shapes: omit ids for the compact index (tool combos with their tool lists, official presets, provider/model plus reasoning-effort options, the orchestration rules, and the workflow-asset and role-asset index); pass ids to recall details for those entries in one batch. '
+      + 'Assets are reusable organization configurations promoted from templates and versioned - recall one to reuse a proven way of staffing and wiring a workflow. They are not templates you may edit: templates are drafts and are NOT listed here. '
+      + 'The index rules carry the write-patch contract: rules.patchContract (op field shapes, role-node data fields, submission rules, error-code semantics) and rules.gateMarking (milestone-gate marking rules) - read them before calling wf_graph_patch. '
+      + 'Index entries are candidates only (name/description/version); full content is never in the index and must be recalled by id. '
+      + 'Supported ids: flow-* (workflow asset -> complete skeleton: stage nodes, roles, groups, lines and data-node bodies, plus roleAssetId/roleVersionId for each role node), role-* (role asset -> full systemPrompt plus its mapping fields), <flow-id>#<node-id> (inline role pinned in that workflow asset -> full systemPrompt of that fixed version). At most 20 ids per call. Bad, missing or retired ids come back as per-item errors and never block the others. '
+      + 'A node subagent\'s tools come ONLY from its presetId (a combo id from combos, or an official preset id), so picking presetId from this catalog is mandatory - an empty presetId means that node runs with zero tools. '
       + 'Role-node fields retryLimit / reactLimit / promptFilePath / injectSystemPrompt / injectToolSections / sourceAssetId are owned by the canvas UI: they are neither returned here nor settable through wf_graph_patch, so never pass them. '
-      + 'The workflow skeleton intentionally omits role systemPrompts (the longest fields) — recall them by composite id when you need to reuse them. Idempotent and side-effect free; only the parent agent may call this, child agents are rejected (WF_NOT_ROOT).',
+      + 'The workflow skeleton intentionally omits role systemPrompts (the longest fields) - recall them by composite id when you need to reuse them. Idempotent and side-effect free; only the parent agent may call this, child agents are rejected (WF_NOT_ROOT).',
     parameters: {
       ids: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Asset or experience ids to recall in detail; omit (or pass []) for the compact index. Supported: flow-* (workflow asset), role-* (role asset), <flow-id>#<node-id> (inline role pinned in that workflow asset), ex-* (experience). Bad, missing or retired ids come back as per-item errors and never block the others. At most 20 ids per call — submit further batches when needed.',
+        description: 'Asset ids to recall in detail; omit (or pass []) for the compact index. Supported: flow-* (workflow asset), role-* (role asset), <flow-id>#<node-id> (inline role pinned in that workflow asset). Bad, missing or retired ids come back as per-item errors and never block the others. At most 20 ids per call - submit further batches when needed.',
       },
     },
     output: {
@@ -323,13 +286,13 @@ export function registerWfOrgCatalog(
       schema: {
         type: 'object',
         additionalProperties: true,
-        description: 'kind="index": idConvention / detailHint / combos / presets / models / assets.workflows / assets.roles / experiences / rules / truncated. kind="details": assets (workflow skeleton | role asset | inline role | experience) + errors (per-id failures that did not block the rest).',
+        description: 'kind="index": idConvention / detailHint / combos / presets / models / assets.workflows / assets.roles / rules / truncated. kind="details": assets (workflow skeleton | role asset | inline role) + errors (per-id failures that did not block the rest).',
       },
       render: textRender,
     },
     async execute(args, exec: ToolExecLike) {
       const caller = callerOf(exec)
-      if (caller.isChild) throw new WfError('子代理无法调用 wf_org_catalog（仅当前会话主 Agent 可勘察组织资产与经验）', 'WF_NOT_ROOT')
+      if (caller.isChild) throw new WfError('子代理无法调用 wf_org_catalog（仅当前会话主 Agent 可勘察组织资产）', 'WF_NOT_ROOT')
       if (!caller.sessionId) throw new WfError('无法识别调用者会话', 'WF_BAD_CALLER')
       return executeOrgCatalog(host, (args ?? {}) as Record<string, unknown>)
     },

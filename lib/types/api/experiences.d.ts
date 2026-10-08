@@ -3,10 +3,13 @@ import { VisualWorkflowApiBase } from './boundary.js';
 export declare class ExperienceEndpoints extends VisualWorkflowApiBase {
     /**
      * 经验列表：活跃与已归档一并返回（条目自带 active 标记）。
-     * 上限用召回索引的同一常量：界面列表面向人工管理，不需要无限拉取。
+     * 上限用经验域导出的同一常量：界面列表面向人工管理，不需要无限拉取。
      */
     listExperiences(): Promise<ExperienceEntry[]>;
-    /** 保存经验（就地改写可编辑字段；无版本语义，不产生历史行）。 */
+    /**
+     * 保存经验（就地改写语义字段；无版本语义，不产生历史行）。
+     * 检索投影与向量由经验域在事务外重算后落库，边界只透传语义字段补丁。
+     */
     saveExperience(args: {
         experienceId?: unknown;
         patch?: unknown;

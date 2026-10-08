@@ -30,15 +30,29 @@ export declare const ROLE_ASSET_ACTIVE_INDEXES_DDL: string[];
 export declare const WORKFLOW_ASSET_ACTIVE_DDL = "\nCREATE TABLE IF NOT EXISTS workflow_asset_active (\n  asset_id TEXT PRIMARY KEY,\n  version_id INTEGER NOT NULL,\n  name TEXT NOT NULL,\n  retrieval_context TEXT NOT NULL,\n  embedding BLOB,\n  embedding_dimension INTEGER,\n  embedding_source TEXT,\n  embedding_model TEXT,\n  source_template_id TEXT,\n  source_fingerprint TEXT,\n  updated_at INTEGER NOT NULL,\n  FOREIGN KEY (asset_id, version_id) REFERENCES workflow_asset_history(asset_id, version_id)\n)";
 export declare const WORKFLOW_ASSET_ACTIVE_INDEXES_DDL: string[];
 /**
- * 经验表：没有版本控制（无历史表、也没有 Active 指针表），状态只有 is_active 两态。
- * 为什么状态放在行上而不是像资产那样用 Active 表：经验没有版本，"活跃" 只是
- * 「是否进入父代理召回面」这一个布尔事实，另建一张表等于给单布尔事实造第二处写入边界。
+ * 经验生成 Prompt 表：每个主体类型**至多一行活跃**，历史版本以 is_active = 0 保留。
+ *
+ * 为什么活跃唯一性必须由数据库保证：并发写入、外部工具改库、补数据脚本都会绕过本模块的
+ * 代码路径，只有部分唯一索引是任何写入者都绕不开的边界（TS 侧约定只能约束自家调用点）。
  */
-export declare const EXPERIENCES_DDL = "\nCREATE TABLE IF NOT EXISTS experiences (\n  id TEXT PRIMARY KEY,\n  source_run_id TEXT,\n  reflection_prompt_version TEXT NOT NULL DEFAULT '1',\n  task_type TEXT NOT NULL,\n  task_context TEXT NOT NULL,\n  insight TEXT NOT NULL,\n  evidence TEXT,\n  review_feedback TEXT,\n  reviewed_at INTEGER,\n  is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),\n  created_at INTEGER NOT NULL,\n  updated_at INTEGER NOT NULL\n)";
+export declare const EXPERIENCE_PROMPTS_DDL = "\nCREATE TABLE IF NOT EXISTS experience_prompts (\n  id TEXT PRIMARY KEY,\n  experience_type TEXT NOT NULL CHECK (experience_type IN ('agent','team','orchestrator')),\n  name TEXT NOT NULL,\n  description TEXT,\n  prompt TEXT NOT NULL,\n  prompt_version TEXT NOT NULL,\n  is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),\n  created_at INTEGER NOT NULL,\n  updated_at INTEGER NOT NULL\n)";
+export declare const EXPERIENCE_PROMPTS_INDEXES_DDL: string[];
+/**
+ * 经验表：没有版本控制（无历史表、也没有 Active 指针表），状态只有 is_active 两态。
+ * 为什么状态放在行上而不是像资产那样用 Active 表：经验没有版本，「活跃」只是
+ * 「是否进入召回面」这一个布尔事实，另建一张表等于给单布尔事实造第二处写入边界。
+ *
+ * 向量两列以 BLOB 存真实数值（Float64 字节序列），维度单独成列：SQLite 无向量类型，
+ * 而维度与字节长度互为校验，读侧据此判定一行是否真的可用于语义召回。
+ */
+export declare const EXPERIENCES_DDL = "\nCREATE TABLE IF NOT EXISTS experiences (\n  id TEXT PRIMARY KEY,\n  experience_type TEXT NOT NULL CHECK (experience_type IN ('agent','team','orchestrator')),\n  responsibility TEXT NOT NULL,\n  task_type TEXT NOT NULL,\n  decision_domain TEXT NOT NULL,\n  situation TEXT NOT NULL,\n  trigger TEXT NOT NULL,\n  principle TEXT NOT NULL,\n  recommended_action TEXT NOT NULL,\n  exclusions TEXT NOT NULL CHECK (json_valid(exclusions)),\n  evidence TEXT NOT NULL CHECK (json_valid(evidence)),\n  task_retrieval_text TEXT NOT NULL,\n  task_embedding BLOB,\n  decision_retrieval_text TEXT NOT NULL,\n  decision_embedding BLOB,\n  embedding_model TEXT,\n  embedding_dimension INTEGER,\n  source_run_id TEXT NOT NULL,\n  generation_prompt_id TEXT NOT NULL REFERENCES experience_prompts(id),\n  generation_prompt_version TEXT NOT NULL,\n  is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),\n  created_at INTEGER NOT NULL,\n  updated_at INTEGER NOT NULL\n)";
 export declare const EXPERIENCES_INDEXES_DDL: string[];
-/** 经验活跃态索引（召回面过滤按 is_active 等值走索引）。 */
-export declare const EXPERIENCES_ACTIVE_INDEX_DDL = "CREATE INDEX IF NOT EXISTS idx_experiences_active ON experiences(is_active)";
-/** 全部建表语句（顺序即依赖顺序：先历史后 Active，外键才可解析）。 */
+/** 全部建表语句（顺序即依赖顺序：先历史后 Active、先 Prompt 后经验，外键才可解析）。 */
 export declare const SCHEMA_STATEMENTS: string[];
-/** 幂等建表：全部 `IF NOT EXISTS`，重复调用不改变既有库。 */
-export declare function initSchema(db: DatabaseSync): void;
+/**
+ * 幂等建表：全部 `IF NOT EXISTS`，重复调用不改变既有库。
+ *
+ * 经验索引不放进 SCHEMA_STATEMENTS：旧形状的 experiences 还没有 experience_type 列，
+ * 先建索引会因「no such column」失败，必须等形状迁移完成后再建。
+ */
+export declare function initSchema(db: DatabaseSync, now?: () => number): void;

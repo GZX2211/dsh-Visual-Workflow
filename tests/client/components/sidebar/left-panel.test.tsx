@@ -193,17 +193,24 @@ describe('资产态与搜索空态（词典文案）', () => {
 
 describe('资产态「经验」列表（左栏）', () => {
   /** 经验条目（只给被测字段，其余为契约最小缺省）。 */
-  function experienceEntry(id: string, taskContext: string, insight: string, active = true): LeftPanelProps['experiences'][number] {
-    return { id, active, reflectionPromptVersion: '1', taskType: '软件开发', taskContext, insight, createdAt: 1, updatedAt: 1 }
+  function experienceEntry(id: string, responsibility: string, principle: string, active = true): LeftPanelProps['experiences'][number] {
+    return {
+      id, active, experienceType: 'agent', responsibility,
+      taskType: '软件开发', decisionDomain: '实现取舍', situation: `情境：${id}`,
+      trigger: `信号：${id}`, principle, recommendedAction: `行动：${id}`,
+      exclusions: [], evidence: [], taskRetrievalText: `任务投影：${id}`,
+      decisionRetrievalText: `决策投影：${id}`, sourceRunId: 'run-1',
+      generationPromptId: 'prompt-1', generationPromptVersion: 'v1', createdAt: 1, updatedAt: 1,
+    }
   }
 
-  it('活跃 / 历史两栏；卡片主行为任务上下文、副行为经验摘要', async () => {
+  it('活跃 / 历史两栏；卡片主行为责任范围、副行为原则', async () => {
     await renderPanel(makeProps({
       librarySource: 'asset',
       libTab: 'data',
       experiences: [
         experienceEntry('ex-1', '重构旧模块', '先补测试再重构'),
-        experienceEntry('ex-2', '已归档上下文', '已归档经验', false),
+        experienceEntry('ex-2', '归档的责任', '已归档的原则', false),
       ],
     }))
     const groups = Array.from(document.querySelectorAll('.wf-docgroup')).map((group) => group.textContent)
@@ -220,7 +227,7 @@ describe('资产态「经验」列表（左栏）', () => {
     await renderPanel(makeProps({
       librarySource: 'asset',
       libTab: 'data',
-      experiences: [experienceEntry('ex-1', '上下文一', '经验一')],
+      experiences: [experienceEntry('ex-1', '责任一', '原则一')],
       onOpenExperience,
       onBeginDrag,
     }))
@@ -230,7 +237,7 @@ describe('资产态「经验」列表（左栏）', () => {
     })
     expect(onBeginDrag).toHaveBeenCalledTimes(1)
     const payload = onBeginDrag.mock.calls[0]![1] as DragPayload
-    expect(payload.label).toBe('上下文一')
+    expect(payload.label).toBe('责任一')
     // 经验没有画布形态：payload 不提供任何落点回调（点击才是唯一入口）
     expect(payload.onDrop).toBeUndefined()
     await act(async () => { payload.onClick() })

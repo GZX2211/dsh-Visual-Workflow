@@ -1,8 +1,8 @@
 import { DatabaseSync } from 'node:sqlite';
 /** 库文件路径：固定 `<root>/assets.db`（root = 插件 dataDir）。 */
 export declare function assetDbPath(root: string): string;
-/** 打开（必要时创建）资产库：建父目录、设 PRAGMA、幂等建表（含形状迁移）。 */
-export declare function openAssetDatabase(root: string): DatabaseSync;
+/** 打开（必要时创建）资产库：建父目录、设 PRAGMA、幂等建表（含形状迁移与 Prompt 播种）。 */
+export declare function openAssetDatabase(root: string, now?: () => number): DatabaseSync;
 /** 行值：node:sqlite 返回 null 原型对象，凡向外传递前都必须转成普通对象。 */
 export type DbRow = Record<string, unknown>;
 /** 把 null 原型行对象转为普通对象（调用方不得持有驱动内部结构）。 */
@@ -23,9 +23,10 @@ export interface AssetTxContext {
 /** AssetStore 持有的库句柄：连接、串行队列与事务工厂。 */
 export declare class AssetDb {
     private readonly root;
+    private readonly now;
     private db;
     private readonly queue;
-    constructor(root: string);
+    constructor(root: string, now?: () => number);
     /** 打开连接并建表；重复调用无副作用（幂等）。 */
     open(): Promise<void>;
     /** 关闭连接（幂等；关闭后再操作会重新报「未初始化」）。 */
