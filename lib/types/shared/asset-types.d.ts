@@ -158,59 +158,331 @@ export interface WorkflowAssetDetail {
 }
 /** 资产 Active 详情（按 kind 判别）。 */
 export type AssetDetail = WorkflowAssetDetail | RoleAssetDetail;
-/** 经验索引条目（catalog 第一层召回：id + task_context）。 */
-export interface ExperienceIndexEntry {
-    id: string;
-    taskContext: string;
-}
-/** 经验条目（catalog 第二层召回：完整内容）。 */
+/**
+ * 经验主体类型：经验必须对应主体实际承担的工作职责。
+ *   - agent：一个执行主体（含子代理、以及未承担编排职责的父代理）完成实际任务后的经验；
+ *   - team：一个团队（协作组）完成协作任务后的协作经验；
+ *   - orchestrator：编排父代理完成组织/编排任务后的组织经验。
+ */
+export type ExperienceType = 'agent' | 'team' | 'orchestrator';
+/**
+ * 经验条目（磁盘行的对外投影）。
+ *
+ * 分层（与数据结构文档一致）：
+ *   - Identity：id / experienceType；
+ *   - Semantic Core：responsibility / taskType / decisionDomain / situation / trigger /
+ *     principle / recommendedAction / exclusions；
+ *   - Evidence：evidence（支撑事实，不是经验本体）；
+ *   - Retrieval Projection：taskRetrievalText / decisionRetrievalText 与 embedding 元信息
+ *     （系统生成，模型不得提交）；
+ *   - Provenance：sourceRunId / generationPromptId / generationPromptVersion；
+ *   - Lifecycle：active / createdAt / updatedAt。
+ *
+ * 经验没有版本控制：状态只有「活跃 / 已归档」两态，归档 = 退出召回面且内容全保留。
+ */
 export interface ExperienceEntry {
     id: string;
-    /**
-     * 是否活跃（磁盘列 `experiences.is_active`；持久化列名由资产库记账，契约侧只表达两态）。
-     * 经验没有版本控制，状态即「活跃 / 已归档」两态：归档 = 退出父代理召回面，
-     * 内容全部保留；置回活跃即重新进入召回面。缺省即活跃（旧数据无该列时按活跃读）。
-     */
+    /** 是否活跃（磁盘列 `experiences.is_active`；缺省即活跃）。 */
     active: boolean;
-    /** 产生该经验的那次工作流运行 id（可空）。 */
-    sourceRunId?: string;
-    /** 生成该经验时使用的复盘提示词版本号（V1 固定 '1'）。 */
-    reflectionPromptVersion: string;
-    /** 任务类型（粗粒度，如「软件开发」）。 */
+    /** 经验主体类型（决定召回面与主体边界）。 */
+    experienceType: ExperienceType;
+    /** 主体承担的责任范围（我对什么负责）。 */
+    responsibility: string;
+    /** 轻量任务分类标签（用于结构化检索，不是具体任务名称）。 */
     taskType: string;
-    /** 任务语义上下文（自然语言，召回检索锚点）。 */
-    taskContext: string;
-    /** 可复用经验本体（单句、精简）。 */
-    insight: string;
-    /** 支撑该经验的关键事实（可空）。 */
-    evidence?: string;
-    /** 人工审核意见 / 修改意见（用户在多选卡片里补充时写入）。 */
-    reviewFeedback?: string;
-    /** 人工审核时间（epoch 毫秒）；未审核为 undefined。 */
-    reviewedAt?: number;
+    /** 经验涉及的决策领域（这是哪一类决策问题）。 */
+    decisionDomain: string;
+    /** 经验成立时所面对的实际情境或状态。 */
+    situation: string;
+    /** 未来再次出现什么可识别信号时应当回忆该经验。 */
+    trigger: string;
+    /** 从运行结果中抽象出的核心规律、因果关系或判断原则。 */
+    principle: string;
+    /** 将原则转化为未来可执行的行为建议。 */
+    recommendedAction: string;
+    /** 不应直接迁移该经验的条件列表（防止负迁移）。 */
+    exclusions: string[];
+    /** 支撑该经验的关键事实列表（不保存完整运行日志）。 */
+    evidence: string[];
+    /** 任务侧检索文本（系统由 responsibility + taskType + situation + trigger 生成）。 */
+    taskRetrievalText: string;
+    /** 决策侧检索文本（系统由 decisionDomain + principle + recommendedAction + exclusions 生成）。 */
+    decisionRetrievalText: string;
+    /** 生成向量所用的嵌入模型名（无向量能力的历史行为 undefined）。 */
+    embeddingModel?: string;
+    /** 向量维度（记录用；与向量字节长度互相印证）。 */
+    embeddingDimension?: number;
+    /** 产生该经验的运行 id（由主体解析得到，模型不得填写）。 */
+    sourceRunId: string;
+    /** 生成该经验时使用的 Prompt 行 id。 */
+    generationPromptId: string;
+    /** 生成该经验时使用的 Prompt 版本。 */
+    generationPromptVersion: string;
+    /** 创建时间（epoch 毫秒）。 */
     createdAt: number;
+    /** 最后更新时间（epoch 毫秒；编辑语义字段即刷新）。 */
     updatedAt: number;
+    /**
+     * 长期质量统计（派生投影；由评价历史聚合而来，不是经验本体的一部分）。
+     *
+     * 为什么挂在条目上而不是单开一条读路径：统计值只服务于「界面展示」与「召回排序」两类消费，
+     * 两处都已经在读取条目；单开一条路径会让「条目已读到、统计还没到」成为可能状态。
+     * 无统计行时省略（读侧按中性值解释，而不是伪造一个 0.5 的假事实）。
+     */
+    stats?: ExperienceStatsEntry;
 }
 /**
  * 经验可编辑字段补丁（属性栏「保存」载荷）。
  *
- * 字段域是 ExperienceEntry 的可编辑子集：任务类型 / 任务上下文 / 经验本体 / 证据 / 审核意见。
- * 可空字段用 `null` 表达「清空」，缺省（undefined）表达「本次不改」——两者语义不同，
- * 因此不能把 undefined 当作清空。
+ * `undefined` = 本次不改，`null` = 清空：两者语义不同，因此不能用 `??` 合并。
+ * 数组字段允许 null（清空为空数组）；必填字符串字段被清空即拒绝（经验没有版本，改坏无从回滚）。
+ * 检索文本与向量不在补丁内：它们由系统按语义字段重算，模型与界面都不能直接改。
  */
 export interface ExperiencePatch {
+    responsibility?: string;
     taskType?: string;
-    taskContext?: string;
-    insight?: string;
-    evidence?: string | null;
-    reviewFeedback?: string | null;
+    decisionDomain?: string;
+    situation?: string;
+    trigger?: string;
+    principle?: string;
+    recommendedAction?: string;
+    exclusions?: string[] | null;
+    evidence?: string[] | null;
 }
-/** 经验候选（复盘后由父代理提交给入库工具；用户确认前不落库）。 */
-export interface ExperienceDraft {
+/**
+ * 经验候选（模型提交侧的最小形状）。
+ * 只含九个语义字段：主体类型与 provenance 由系统按当前主体解析结果补充，
+ * 两个检索文本与向量由系统生成——模型无法伪造来源与生成规则。
+ */
+export interface ExperienceInsertDraft {
+    experienceType: ExperienceType;
+    responsibility: string;
     taskType: string;
-    taskContext: string;
-    insight: string;
-    evidence?: string;
-    /** 产生该候选的 run id（可空）。 */
-    sourceRunId?: string;
+    decisionDomain: string;
+    situation: string;
+    trigger: string;
+    principle: string;
+    recommendedAction: string;
+    exclusions: string[];
+    evidence: string[];
+}
+/** 经验生成 Prompt 表投影（Prompt 本身不是经验，不参与向量检索）。 */
+export interface ExperienceGenerationPromptEntry {
+    id: string;
+    experienceType: ExperienceType;
+    name: string;
+    description?: string;
+    prompt: string;
+    promptVersion: string;
+    /** 是否为该经验类型当前生效的唯一 Prompt。 */
+    active: boolean;
+    createdAt: number;
+    updatedAt: number;
+}
+/**
+ * 经验召回候选（召回第一阶段的模型可见结果）。
+ * `summary` 固定为 responsibility + decisionDomain + exclusions + situation 的投影，
+ * 供模型判断是否需要第二阶段按 id 取回完整内容。
+ */
+export interface ExperienceRecallHit {
+    id: string;
+    /** 相似度得分（语义检索为单位向量内积；BM25 回退为词法得分）。 */
+    score: number;
+    summary: string;
+    /** 本次得分来源：semantic 语义检索 / bm25 词法回退。 */
+    source: 'semantic' | 'bm25';
+}
+/**
+ * 经验写入行：系统补全 provenance、检索投影与向量之后的**完整行事实**。
+ * 与 ExperienceEntry 的差别只有一处——行内携带向量本身，条目投影只带向量元信息。
+ */
+export interface ExperienceInsertRow {
+    id: string;
+    experienceType: ExperienceType;
+    responsibility: string;
+    taskType: string;
+    decisionDomain: string;
+    situation: string;
+    trigger: string;
+    principle: string;
+    recommendedAction: string;
+    exclusions: string[];
+    evidence: string[];
+    taskRetrievalText: string;
+    taskEmbedding: Float64Array;
+    decisionRetrievalText: string;
+    decisionEmbedding: Float64Array;
+    embeddingModel?: string;
+    embeddingDimension?: number;
+    sourceRunId: string;
+    generationPromptId: string;
+    generationPromptVersion: string;
+}
+/** 判重判据的候选侧事实（同一 experienceType 的语义核心向量）。 */
+export interface ExperienceDuplicateCandidate {
+    experienceType: ExperienceType;
+    decisionEmbedding: Float64Array;
+    decisionRetrievalText: string;
+}
+/** 判重判据的既有侧事实（库中或本批已写入的 active 行）。 */
+export interface ExperienceDuplicateExisting {
+    id: string;
+    decisionEmbedding: Float64Array;
+    decisionRetrievalText: string;
+}
+/** 判重结论：重复时给出可直接呈现给模型的原因。 */
+export type ExperienceDuplicateVerdict = {
+    duplicate: true;
+    reason: string;
+} | {
+    duplicate: false;
+};
+/**
+ * 判重判据（纯函数，由经验域注入资产库）。
+ *
+ * 为什么以闭包注入而不是在资产库内实现相似度：相似度算法与阈值属于经验域
+ * （向量来源可换、阈值可演进），而「读 active 行 → 判定 → 写入」必须原子，
+ * 因此资产库只保证事务边界，判定规则由调用方提供。
+ */
+export type ExperienceDuplicateJudge = (candidate: ExperienceDuplicateCandidate, existing: ExperienceDuplicateExisting) => ExperienceDuplicateVerdict;
+/** 批量判重写入入参：判定与写入落在同一笔事务内。 */
+export interface ExperienceInsertCheckedInput {
+    rows: ExperienceInsertRow[];
+    duplicateOf: ExperienceDuplicateJudge;
+}
+/**
+ * 编辑保存时一并刷新的检索投影与向量。
+ * 由经验域在**事务外**算好（向量可能走远程端点），事务内只做校验与写入。
+ */
+export interface ExperienceRetrievalUpdate {
+    taskRetrievalText: string;
+    decisionRetrievalText: string;
+    taskEmbedding: Float64Array;
+    decisionEmbedding: Float64Array;
+    embeddingModel?: string;
+    embeddingDimension?: number;
+}
+/**
+ * 五级语义锚点（0 / 0.25 / 0.50 / 0.75 / 1.00）。
+ *
+ * 为什么用离散联合而不是 number：模型侧只允许选锚点，连续小数（0.73）表达的是不存在的精度，
+ * 且会让评价重新退化成「凭感觉给数字」。类型层收窄后，越界值在编译期与运行期都被拦住。
+ */
+export type ExperienceScoreAnchor = 0 | 0.25 | 0.5 | 0.75 | 1;
+/** 决策效果的五级锚点（-1 / -0.50 / 0 / +0.50 / +1）：唯一跨零维度的取值域。 */
+export type ExperienceDecisionEffectAnchor = -1 | -0.5 | 0 | 0.5 | 1;
+/** 一次使用评价的四个维度（统一尺度；字段名与磁盘列一致）。 */
+export interface ExperienceEvaluationScores {
+    /** 适用性：这条经验是否真正适用于本次场景（0～1）。 */
+    fitScore: ExperienceScoreAnchor;
+    /** 决策效果：使用相比不使用，决策/结果实际改变了多少（-1～+1）。 */
+    decisionEffect: ExperienceDecisionEffectAnchor;
+    /** 信息增益：提供了多少具有区分度的决策信息（0～1）。 */
+    informationGain: ExperienceScoreAnchor;
+    /** 因果归因置信度：效果多大程度上确实来自该经验（0～1）。 */
+    causalConfidence: ExperienceScoreAnchor;
+}
+/**
+ * 评价写入行（评分锚点已由校验层收窄；provenance 全部由系统补齐）。
+ *
+ * 为什么没有 id：行 id 的命名空间与格式属磁盘契约（与经验 id 同口径），只能由资产库在
+ * 写入事务内发号；调用方持有 id 只会引出第二套格式，且域层没有任何使用 id 的语义。
+ */
+export interface ExperienceEvaluationInsert extends ExperienceEvaluationScores {
+    experienceId: string;
+    /** 该次使用所属运行 id；无运行来源时为空串（与经验 provenance 同口径）。 */
+    runId: string;
+    /** 支撑本次评价的事实说明（可为空串）。 */
+    evidence: string;
+    /** 评分者主体身份（子代理取 childId，父代理取会话 id）。 */
+    evaluatorSubjectId: string;
+    /** 评分者模型名；无法确定时为空串（不伪造）。 */
+    evaluatorModel: string;
+}
+/** 评价历史行投影（不可 update / delete 的历史事实）。 */
+export interface ExperienceEvaluationEntry extends ExperienceEvaluationInsert {
+    id: string;
+    createdAt: number;
+}
+/** 使用事实写入行（「该经验被显式注入过 agent 上下文」这一事实；id 同由资产库发号）。 */
+export interface ExperienceUsageInsert {
+    experienceId: string;
+    /** 显式注入发生时所属运行 id；无运行来源时为空串。 */
+    runId: string;
+    /** 被注入的主体身份（子代理 childId / 父代理会话 id）。 */
+    subjectId: string;
+}
+/** 使用事实历史行投影。 */
+export interface ExperienceUsageEntry extends ExperienceUsageInsert {
+    id: string;
+    createdAt: number;
+}
+/**
+ * 统计投影的数值部分（除主键与记账时间外的全部列）。
+ *
+ * 字段语义（§10～§14）：
+ *   - effectiveSampleCount = Σ 评价权重（不是使用次数，高置信高适用评价贡献更大）；
+ *   - recalledCount = 被显式注入次数（来自使用事实，不由评价聚合得出）；
+ *   - usedCount = 已提交评价的使用次数（来自评价条数）；
+ *   - fitMean = 评价权重的加权平均 fit；
+ *   - empiricalValue = 中性先验收缩后的经验价值（[-1,1]）；
+ *   - variance / stability = 加权方差与其映射出的稳定性（[0,1]）；
+ *   - evidenceStrength = 证据强度（随有效样本量饱和）；
+ *   - harmCount / harmRate / harmSeverity = 负向效果条数、比例与加权严重度；
+ *   - qualitySignal = 中心化质量信号（[-1,1]，召回修正的直接输入）；
+ *   - trust = 面向展示的信任度（[0.05,0.95]，0.5 = 证据不足保持中性）。
+ */
+export interface ExperienceStatsValues {
+    effectiveSampleCount: number;
+    recalledCount: number;
+    usedCount: number;
+    fitMean: number;
+    empiricalValue: number;
+    variance: number;
+    stability: number;
+    evidenceStrength: number;
+    harmCount: number;
+    harmRate: number;
+    harmSeverity: number;
+    qualitySignal: number;
+    trust: number;
+}
+/** 统计行投影（`experience_id` 主键 + 数值 + 记账时间）。 */
+export interface ExperienceStatsEntry extends ExperienceStatsValues {
+    experienceId: string;
+    updatedAt: number;
+}
+/**
+ * 聚合输入：某经验的全部评价历史与该经验的使用事实。
+ *
+ * 为什么把 recalledCount 作为输入而不是从评价推导：注入次数与评价次数是两个事实
+ * （被注入不一定被评价），它来自使用事实表，聚合器只负责原样带入。
+ */
+export interface ExperienceStatsAggregateInput {
+    evaluations: readonly ExperienceEvaluationScores[];
+    recalledCount: number;
+}
+/**
+ * 统计聚合器（纯函数，由经验域注入资产库）。
+ *
+ * 为什么以闭包注入而不是在资产库内实现公式：公式属于经验域且会演进（§25 的参数调整），
+ * 而「读全部历史 → 聚合 → 覆盖写入」必须原子，因此资产库只保证事务边界。
+ */
+export type ExperienceStatsAggregate = (input: ExperienceStatsAggregateInput) => ExperienceStatsValues;
+/** 首次建立某经验的统计行时的中性投影（不含 recalledCount，由资产库按本批条数填入）。 */
+export type NeutralStatsValues = Omit<ExperienceStatsValues, 'recalledCount'>;
+/** 评价批量写入入参：校验、聚合与写入落在同一笔事务内。 */
+export interface ExperienceEvaluationInsertInput {
+    rows: ExperienceEvaluationInsert[];
+    aggregate: ExperienceStatsAggregate;
+}
+/** 使用事实批量写入入参：插入使用行并按首次建立统计行的中性投影同步 recalled_count。 */
+export interface ExperienceUsageRecordInput {
+    rows: ExperienceUsageInsert[];
+    neutralStats: NeutralStatsValues;
+}
+/** 统计全量重建入参（读全部历史 → 聚合 → 覆盖写入，一笔事务）。 */
+export interface ExperienceStatsRebuildInput {
+    aggregate: ExperienceStatsAggregate;
+    neutralStats: NeutralStatsValues;
 }

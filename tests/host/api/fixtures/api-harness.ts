@@ -39,6 +39,9 @@ import { ERR_ASSET_NOT_FOUND, ERR_ASSET_VERSION_NOT_FOUND, ERR_EXPERIENCE_NOT_FO
 /** 资产库能力缝（从宿主能力缝派生，避免测试夹具自建第二份资产契约）。 */
 export type FakeAssets = NonNullable<ApiHost['assets']>
 
+/** 经验域能力缝（同样从宿主能力缝派生，与边界声明的形状零漂移）。 */
+export type FakeExperienceDomainFace = NonNullable<ApiHost['experience']>
+
 /** 能力缝入参/出参按方法签名派生（与宿主能力缝零漂移）。 */
 type RolePromoteInput = Parameters<FakeAssets['promoteRole']>[0]
 type WorkflowPromoteInput = Parameters<FakeAssets['promoteWorkflow']>[0]
@@ -178,6 +181,8 @@ export interface HarnessOptions {
   config?: Partial<OrchestratorConfig>
   /** 资产库能力缝注入（伪资产库；缺省不装配，用于 501 路径）。 */
   assets?: FakeAssets
+  /** 经验域能力缝注入（伪经验域；缺省不装配，用于 501 路径）。 */
+  experience?: FakeExperienceDomainFace
 }
 
 export interface RoleSeed {
@@ -235,60 +240,6 @@ export class FakeAssetStore implements FakeAssets {
   /** 入库时记录的来源指纹（索引条目回填用；真实实现由 SQLite 索引行承载）。 */
   roleFingerprints = new Map<string, string>()
   workflowFingerprints = new Map<string, string>()
-  /** 经验表（无版本：id → 条目；状态由条目 active 表达）。 */
-  experiences = new Map<string, ExperienceEntry>()
-  /** 经验端点调用痕迹（断言边界传了什么）。 */
-  experienceCalls: { saved: Array<{ id: string; patch: ExperiencePatch }>; active: Array<{ id: string; active: boolean }> } = {
-    saved: [],
-    active: [],
-  }
-
-  /** 登记一条经验（缺省活跃；用例按需覆盖状态与字段）。 */
-  seedExperience(entry: Partial<ExperienceEntry> & { id: string }): ExperienceEntry {
-    const full: ExperienceEntry = {
-      active: true,
-      reflectionPromptVersion: '1',
-      taskType: '软件开发',
-      taskContext: `上下文：${entry.id}`,
-      insight: `经验：${entry.id}`,
-      createdAt: 1_700_000_000_000,
-      updatedAt: 1_700_000_000_000,
-      ...entry,
-    }
-    this.experiences.set(full.id, full)
-    return full
-  }
-
-  async listExperiences(limit: number): Promise<ExperienceEntry[]> {
-    return [...this.experiences.values()].slice(0, Math.max(limit, 0))
-  }
-
-  async saveExperience(id: string, patch: ExperiencePatch): Promise<ExperienceEntry> {
-    this.experienceCalls.saved.push({ id, patch })
-    const current = this.experiences.get(id)
-    if (!current) throw this.experienceNotFound(id)
-    const updated: ExperienceEntry = {
-      ...current,
-      ...(patch.taskType === undefined ? {} : { taskType: patch.taskType }),
-      ...(patch.taskContext === undefined ? {} : { taskContext: patch.taskContext }),
-      ...(patch.insight === undefined ? {} : { insight: patch.insight }),
-      ...(patch.evidence === undefined ? {} : { evidence: patch.evidence ?? undefined }),
-      ...(patch.reviewFeedback === undefined ? {} : { reviewFeedback: patch.reviewFeedback ?? undefined }),
-      updatedAt: current.updatedAt + 1,
-    }
-    this.experiences.set(id, updated)
-    return updated
-  }
-
-  async setExperienceActive(id: string, active: boolean): Promise<ExperienceEntry> {
-    this.experienceCalls.active.push({ id, active })
-    const current = this.experiences.get(id)
-    if (!current) throw this.experienceNotFound(id)
-    const updated: ExperienceEntry = { ...current, active, updatedAt: current.updatedAt + 1 }
-    this.experiences.set(id, updated)
-    return updated
-  }
-
   /** 登记一个角色资产（Active 版本 v1；内容最简，测试按需覆盖）。 */
   seedRole(seed: RoleSeed): RoleAssetDetail {
     const versionId = seed.versionId ?? 1
@@ -633,13 +584,107 @@ export class FakeAssetStore implements FakeAssets {
     return this.errorLike(`资产 ${assetId} 的版本 v${versionId} 不存在`, ERR_ASSET_VERSION_NOT_FOUND)
   }
 
-  private experienceNotFound(id: string): Error {
-    return this.errorLike(`经验 ${id} 不存在`, ERR_EXPERIENCE_NOT_FOUND)
-  }
-
   /** 伪造领域错误形状（只带稳定 code；HTTP 状态映射是边界职责，不在此实现）。 */
   private errorLike(message: string, code: string): Error {
     return Object.assign(new Error(message), { code })
+  }
+}
+
+/**
+ * 伪经验域：只记录「边界传了什么」与返回可控条目，按 api 边界声明的能力缝形状实现
+ * （结构兼容由 `implements FakeExperienceDomainFace` 锁定）。
+ *
+ * 检索投影与向量的重算属领域职责：夹具用确定性投影模拟「保存后返回新投影字段」，
+ * 让边界测试只需验证透传，不必也不得在边界层实现投影。
+ */
+export class FakeExperienceDomain implements FakeExperienceDomainFace {
+  /** 调用痕迹（断言边界传了什么）。 */
+  calls: {
+    list: Array<{ limit: number }>
+    update: Array<{ experienceId: string; patch: ExperiencePatch }>
+    retired: string[]
+    restored: string[]
+  } = { list: [], update: [], retired: [], restored: [] }
+  /** 经验表（无版本：id → 条目；状态由条目 active 表达）。 */
+  experiences = new Map<string, ExperienceEntry>()
+
+  /** 登记一条经验（缺省活跃；用例按需覆盖状态与字段）。 */
+  seedExperience(entry: Partial<ExperienceEntry> & { id: string }): ExperienceEntry {
+    const full: ExperienceEntry = {
+      active: true,
+      experienceType: 'agent',
+      responsibility: `责任：${entry.id}`,
+      taskType: '软件开发',
+      decisionDomain: '实现取舍',
+      situation: `情境：${entry.id}`,
+      trigger: '再次遇到同类任务',
+      principle: `原则：${entry.id}`,
+      recommendedAction: '先补测试',
+      exclusions: [],
+      evidence: [],
+      taskRetrievalText: `任务：${entry.id}`,
+      decisionRetrievalText: `决策：${entry.id}`,
+      embeddingModel: 'fake-embed',
+      embeddingDimension: 4,
+      sourceRunId: 'run-1',
+      generationPromptId: 'prompt-1',
+      generationPromptVersion: 'v1',
+      createdAt: 1_700_000_000_000,
+      updatedAt: 1_700_000_000_000,
+      ...entry,
+    }
+    this.experiences.set(full.id, full)
+    return full
+  }
+
+  async list(input: { limit: number }): Promise<ExperienceEntry[]> {
+    this.calls.list.push(input)
+    return [...this.experiences.values()].slice(0, Math.max(input.limit, 0))
+  }
+
+  async update(input: { experienceId: string; patch: ExperiencePatch }): Promise<ExperienceEntry> {
+    this.calls.update.push(input)
+    const current = this.experiences.get(input.experienceId)
+    if (!current) throw this.notFound(input.experienceId)
+    const semantic: ExperienceEntry = { ...current }
+    for (const [field, value] of Object.entries(input.patch)) {
+      // undefined = 本次不改（跳过）；null = 清空（数组字段落库为空数组）
+      if (value === undefined) continue
+      ;(semantic as unknown as Record<string, unknown>)[field] = value === null ? [] : value
+    }
+    const updated: ExperienceEntry = { ...semantic, ...projectRetrievalOf(semantic), updatedAt: current.updatedAt + 1 }
+    this.experiences.set(input.experienceId, updated)
+    return updated
+  }
+
+  async retire(input: { experienceId: string }): Promise<ExperienceEntry> {
+    this.calls.retired.push(input.experienceId)
+    return this.setActive(input.experienceId, false)
+  }
+
+  async restore(input: { experienceId: string }): Promise<ExperienceEntry> {
+    this.calls.restored.push(input.experienceId)
+    return this.setActive(input.experienceId, true)
+  }
+
+  private setActive(id: string, active: boolean): ExperienceEntry {
+    const current = this.experiences.get(id)
+    if (!current) throw this.notFound(id)
+    const updated: ExperienceEntry = { ...current, active, updatedAt: current.updatedAt + 1 }
+    this.experiences.set(id, updated)
+    return updated
+  }
+
+  private notFound(id: string): Error {
+    return Object.assign(new Error(`经验 ${id} 不存在`), { code: ERR_EXPERIENCE_NOT_FOUND })
+  }
+}
+
+/** 确定性检索投影（夹具用；真实重算在经验域，边界只透传结果）。 */
+function projectRetrievalOf(entry: ExperienceEntry): Pick<ExperienceEntry, 'taskRetrievalText' | 'decisionRetrievalText'> {
+  return {
+    taskRetrievalText: [entry.responsibility, entry.taskType, entry.situation, entry.trigger].join(' / '),
+    decisionRetrievalText: [entry.decisionDomain, entry.principle, entry.recommendedAction, entry.exclusions.join('；')].join(' / '),
   }
 }
 
@@ -675,7 +720,14 @@ export async function makeHarness(options?: HarnessOptions): Promise<Harness> {
   })
   const ctx = new FakeCtx()
   const engine: EmbeddingEngine = { source: 'bm25', dimension: 0, async embed() { throw new Error('bm25 only') }, dispose() {} }
-  const host: ApiHost = { orchestrator: runtime, store, dataDir: dir, engine, ...(options?.assets ? { assets: options.assets } : {}) }
+  const host: ApiHost = {
+    orchestrator: runtime,
+    store,
+    dataDir: dir,
+    engine,
+    ...(options?.assets ? { assets: options.assets } : {}),
+    ...(options?.experience ? { experience: options.experience } : {}),
+  }
   const api = new VisualWorkflowApi(ctx, host)
   return { api, host, runtime, store, ctx, dataDir: dir }
 }

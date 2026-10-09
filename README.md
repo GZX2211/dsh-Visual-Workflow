@@ -44,7 +44,7 @@
 └─────────────────┘             │
                                 ▼
                          ┌─────────────────┐
-                         │  复盘 + 反馈     │
+                         │  自主经验学习    │
                          │ Experience      │
                          └────────┬────────┘
                                   │
@@ -246,9 +246,10 @@
 | **`wf_ask`** | 子代理向用户在“主界面”发起官方问题卡片并等待回答，支持提问队列 |
 | **`wf_ask_agent`** | 协作组内 Agent 间非阻塞 `ask / reply` 消息通信；目标离线时可冷恢复 |
 | **`wf_db_query`** | 数据库 `search / query / schema` 三模式只读访问 |
-| **`wf_org_catalog`** | 召回组织资产、经验、工具组合、preset、模型与编排规则；父代理专用 |
+| **`wf_org_catalog`** | 召回组织资产、工具组合、preset、模型与编排规则；父代理专用 |
 | **`wf_graph_patch`** | 对工作流模板或运行实例进行受控图修改；支持创建、更新、删除、连线调整等操作 |
-| **`wf_experience`** | 提交运行复盘得到的经验候选，渲染用户多选确认卡片，根据用户反馈写入经验库 |
+| **`wf_experience_learn`** | 主体自己的经验入库：空数组调用取得经验生成 Prompt，传候选即校验后入库（所有代理可用） |
+| **`wf_experience_recall`** | 按主体类型语义召回既有经验：先取候选摘要，再按 id 取完整内容（所有代理可用） |
 
 > 区别：不同于官方 Teammate 调度只能传递父的工具和模型，`wf_run_node` 创建的代理节点可以自由组合任意工具、设定不同模型和系统提示词（system prompt）。
 
@@ -481,8 +482,9 @@ dsh-visual-workflow/
 │   ├── host/
 │   │   ├── shared/               # 前后端共享纯类型契约
 │   │   ├── agent/                # Agent 创建、模型选择、Prompt 注入、执行护栏
-│   │   ├── assets/               # SQLite 资产库、Experience
-│   │   ├── orchestrator/         # 运行时、状态机、动态编排、运行事实、复盘
+│   │   ├── assets/               # SQLite 资产库与经验持久化
+│   │   ├── experience/           # 经验域（校验/投影/向量/判重/召回/主体解析）
+│   │   ├── orchestrator/         # 运行时、状态机、动态编排、运行事实、团队经验注入
 │   │   ├── tools/                # wf_* 编排工具
 │   │   ├── graph/                # 图模型、结构校验、组织约束与预算
 │   │   ├── team/                 # Agent Team 能力适配
@@ -493,7 +495,7 @@ dsh-visual-workflow/
 │   │   ├── service/              # Mode 2 服务管理
 │   │   ├── api/                  # GUI API
 │   │   ├── commands/             # /arrange 等命令
-│   │   └── prompts/              # 编排、规划、复盘 Prompt
+│   │   └── prompts/              # 编排、规划、团队经验 Prompt
 │   │
 │   └── client/
 │       ├── sidebar/              # 官方 Sidebar 插槽与工作台入口

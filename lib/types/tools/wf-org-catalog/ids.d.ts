@@ -9,10 +9,6 @@ export type AssetRef = {
     id: string;
 } | {
     ok: true;
-    kind: 'experience';
-    id: string;
-} | {
-    ok: true;
     kind: 'inlineRole';
     id: string;
     containerId: string;

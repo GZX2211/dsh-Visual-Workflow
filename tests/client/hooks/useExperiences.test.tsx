@@ -73,13 +73,50 @@ function entry(overrides: Partial<ExperienceEntry> = {}): ExperienceEntry {
   return {
     id: 'ex-1',
     active: true,
-    reflectionPromptVersion: '1',
+    experienceType: 'agent',
+    responsibility: '重构旧模块',
     taskType: '软件开发',
-    taskContext: '重构旧模块',
-    insight: '先补测试再重构',
+    decisionDomain: '重构顺序',
+    situation: '旧模块缺少测试',
+    trigger: '再次重构旧模块',
+    principle: '先补测试再重构',
+    recommendedAction: '先补测试',
+    exclusions: [],
+    evidence: [],
+    taskRetrievalText: '任务侧投影',
+    decisionRetrievalText: '决策侧投影',
+    sourceRunId: 'run-1',
+    generationPromptId: 'prompt-1',
+    generationPromptVersion: 'v1',
     createdAt: 10,
     updatedAt: 10,
     ...overrides,
+  }
+}
+
+/** 覆盖列表字段（用于断言缺失 / null 的容错投影；真实条目的列表字段必为数组）。 */
+function withLists(base: ExperienceEntry, lists: { exclusions?: unknown; evidence?: unknown }): ExperienceEntry {
+  return { ...base, ...lists } as ExperienceEntry
+}
+
+/** 长期统计样本（Host 派生事实；界面只读展示，保存补丁必须忽略它）。 */
+function stats(): NonNullable<ExperienceEntry['stats']> {
+  return {
+    experienceId: 'ex-1',
+    effectiveSampleCount: 3.5,
+    recalledCount: 7,
+    usedCount: 4,
+    fitMean: 0.8,
+    empiricalValue: -0.25,
+    variance: 0.02,
+    stability: 0.9,
+    evidenceStrength: 0.63,
+    harmCount: 1,
+    harmRate: 0.25,
+    harmSeverity: 0.5,
+    qualitySignal: 0.3,
+    trust: 0.5,
+    updatedAt: 20,
   }
 }
 
@@ -131,18 +168,33 @@ describe('useExperiences：四个经验端点的调用与参数', () => {
     expect(dispatched).toEqual([{ type: 'EXPERIENCES_LOADED', items: [] }])
   })
 
-  it('test_保存_按id与可编辑字段补丁上报_成功后刷新详情槽并提示', async () => {
-    const updated = entry({ insight: '改写后的经验', updatedAt: 20 })
+  it('test_保存_按id与九个语义字段补丁上报_成功后刷新详情槽并提示', async () => {
+    const updated = entry({ principle: '改写后的原则', updatedAt: 20 })
     const { remote, calls } = makeRemote(() => updated)
     const { face, toasts, dispatched } = await renderExperiences(remote)
 
-    const result = await act(async () => await face.save(entry({ evidence: '证据', reviewFeedback: '意见' })))
+    const result = await act(async () => await face.save(entry({
+      evidence: ['证据'],
+      principle: '改写后的原则',
+      // 条目携带长期统计：保存仍不得把它随补丁回传（统计是 Host 派生事实）
+      stats: stats(),
+    })))
 
     expect(calls).toEqual([{
       endpoint: EP.EP_SAVE_EXPERIENCE,
       args: {
         experienceId: 'ex-1',
-        patch: { taskType: '软件开发', taskContext: '重构旧模块', insight: '先补测试再重构', evidence: '证据', reviewFeedback: '意见' },
+        patch: {
+          responsibility: '重构旧模块',
+          taskType: '软件开发',
+          decisionDomain: '重构顺序',
+          situation: '旧模块缺少测试',
+          trigger: '再次重构旧模块',
+          principle: '改写后的原则',
+          recommendedAction: '先补测试',
+          exclusions: [],
+          evidence: ['证据'],
+        },
       },
     }])
     expect(result).toEqual(updated)
@@ -150,15 +202,15 @@ describe('useExperiences：四个经验端点的调用与参数', () => {
     expect(toasts).toEqual([{ kind: 'success', text: zh.toastExperienceSaved }])
   })
 
-  it('test_保存_可空字段缺省_上报null表达清空', async () => {
+  it('test_保存_列表字段缺失_上报null表达清空', async () => {
     const { remote, calls } = makeRemote(() => entry())
     const { face } = await renderExperiences(remote)
 
-    await act(async () => { await face.save(entry()) })
+    await act(async () => { await face.save(withLists(entry(), { exclusions: undefined, evidence: undefined })) })
 
     const patch = calls[0].args.patch as Record<string, unknown>
+    expect(patch.exclusions).toBeNull()
     expect(patch.evidence).toBeNull()
-    expect(patch.reviewFeedback).toBeNull()
   })
 
   it('test_归档_调用retireExperience并重取列表', async () => {
@@ -300,18 +352,48 @@ describe('useExperiences：竞态与卸载', () => {
 })
 
 describe('experiencePatchOf（保存载荷投影）', () => {
-  it('test_投影_只含可编辑字段且可空字段转null', () => {
-    expect(experiencePatchOf(entry({ evidence: '证据' }))).toEqual({
+  it('test_投影_只含九个语义字段且列表字段原样保留', () => {
+    expect(experiencePatchOf(entry({ exclusions: ['一次性脚本'], evidence: ['缺陷率下降'] }))).toEqual({
+      responsibility: '重构旧模块',
       taskType: '软件开发',
-      taskContext: '重构旧模块',
-      insight: '先补测试再重构',
-      evidence: '证据',
-      reviewFeedback: null,
+      decisionDomain: '重构顺序',
+      situation: '旧模块缺少测试',
+      trigger: '再次重构旧模块',
+      principle: '先补测试再重构',
+      recommendedAction: '先补测试',
+      exclusions: ['一次性脚本'],
+      evidence: ['缺陷率下降'],
     })
   })
 
-  it('test_投影_不回传只读元信息（id/状态/时间戳）', () => {
+  it('test_投影_空文本域的空数组原样上报', () => {
+    const patch = experiencePatchOf(entry({ exclusions: [], evidence: [] }))
+
+    expect(patch.exclusions).toEqual([])
+    expect(patch.evidence).toEqual([])
+  })
+
+  it('test_投影_列表字段为null或缺失_上报null表达清空', () => {
+    expect(experiencePatchOf(withLists(entry(), { exclusions: null, evidence: undefined }))).toMatchObject({
+      exclusions: null,
+      evidence: null,
+    })
+  })
+
+  it('test_投影_不回传只读元信息（id/主体类型/状态/投影/向量/时间戳）', () => {
     const patch = experiencePatchOf(entry({ id: 'ex-9', active: false, createdAt: 1, updatedAt: 2, sourceRunId: 'run-1' }))
-    expect(Object.keys(patch).sort()).toEqual(['evidence', 'insight', 'reviewFeedback', 'taskContext', 'taskType'])
+
+    expect(Object.keys(patch).sort()).toEqual([
+      'decisionDomain', 'evidence', 'exclusions', 'principle', 'recommendedAction', 'responsibility', 'situation', 'taskType', 'trigger',
+    ])
+  })
+
+  it('test_投影_条目携带长期统计_补丁仍只含九个语义字段', () => {
+    const patch = experiencePatchOf(entry({ stats: stats() }))
+
+    expect('stats' in patch).toBe(false)
+    expect(Object.keys(patch).sort()).toEqual([
+      'decisionDomain', 'evidence', 'exclusions', 'principle', 'recommendedAction', 'responsibility', 'situation', 'taskType', 'trigger',
+    ])
   })
 })

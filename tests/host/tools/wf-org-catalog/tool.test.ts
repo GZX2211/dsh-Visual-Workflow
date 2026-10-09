@@ -1,12 +1,13 @@
 // tests/host/tools/wf-org-catalog/tool.test.ts
 //
 // wf_org_catalog 执行层单测（两次调用模型）：
-//   - 分派：不传 ids（含空数组 / 空串 / 空白项）→ 资产与经验索引；传 ids → 批量详情；
-//   - 四类详情：flow-* 骨架（含角色节点的固定引用版本）、role-* 完整 systemPrompt、
-//     <flow-id>#<node-id> 内联角色、ex-* 经验全文；
+//   - 分派：不传 ids（含空数组 / 空串 / 空白项）→ 资产索引；传 ids → 批量详情；
+//   - 三类详情：flow-* 骨架（含角色节点的固定引用版本）、role-* 完整 systemPrompt、
+//     <flow-id>#<node-id> 内联角色；
+//   - 经验已彻底移出本工具：索引段没有 experiences，ex-* 不再是可识别 id；
 //   - 参数层错误：ids 非数组、超单次上限 → WF_BAD_ARGS；
 //   - 容错：坏 id / 不存在 / 已退役 / 单条读失败都只单条报错，不阻塞同批其余；
-//   - 效率与确定性：批内去重、同一资产只读一次、经验一次批量取、两次同输入结果一致；
+//   - 效率与确定性：批内去重、同一资产只读一次、两次同输入结果一致；
 //   - 注册面：仅父代理可调（子代理 WF_NOT_ROOT）、无法识别会话 WF_BAD_CALLER、
 //     tools 服务不可用时注册失败必须显式。
 
@@ -45,20 +46,16 @@ function roleNodeOf(details: CatalogDetails, containerIndex: number, nodeId: str
 }
 
 describe('executeOrgCatalog：索引 / 详情分派', () => {
-  it('不传 ids → 资产与经验索引', async () => {
-    const { host } = makeCatalogHost()
+  it('不传 ids → 资产索引（不含 experiences 段）', async () => {
+    const { host, calls } = makeCatalogHost()
     const out = await executeOrgCatalog(host, {}) as CatalogIndex
     expect(out.kind).toBe('index')
     expect(out.combos[0].id).toBe('combo-1')
     expect(out.assets.workflows[0].id).toBe('flow-1')
     expect(out.assets.roles[0].id).toBe('role-1')
-    expect(out.experiences).toEqual([{ id: 'ex-1', taskContext: '重构一个 TypeScript 插件的存储层' }])
-  })
-
-  it('经验索引按 CATALOG_LIMITS.experiences 取（上限口径由索引层决定）', async () => {
-    const { host, calls } = makeCatalogHost()
-    await executeOrgCatalog(host, {})
-    expect(calls.experienceIndexLimits).toEqual([CATALOG_LIMITS.experiences])
+    expect(Object.hasOwn(out, 'experiences')).toBe(false)
+    expect(calls.workflowLists).toBe(1)
+    expect(calls.roleLists).toBe(1)
   })
 
   it('空数组 / 空串 / 全空白项 → 资产索引（不是错误）', async () => {
@@ -110,41 +107,33 @@ describe('executeOrgCatalog：索引 / 详情分派', () => {
     })
   })
 
-  it('传经验 id → 经验全文（一次批量取数，按 id 归位）', async () => {
+  it('ex-* 不再是可识别 id：单条报 WF_BAD_ARGS，不触发任何资产读盘', async () => {
     const { host, calls } = makeCatalogHost()
     const out = await executeOrgCatalog(host, { ids: ['ex-1'] }) as CatalogDetails
-    expect(out.errors).toEqual([])
-    expect(out.assets[0]).toMatchObject({
-      type: 'experience',
-      id: 'ex-1',
-      taskType: '软件开发',
-      insight: '先冻结共享契约，再并行改造各模块',
-      evidence: '上一轮因为契约漂移导致两端各自维护了一份字段表',
-    })
-    expect(calls.experienceReads).toEqual([['ex-1']])
-  })
-
-  it('同一批多个经验只调一次批量取数', async () => {
-    const { host, calls } = makeCatalogHost()
-    await executeOrgCatalog(host, { ids: ['ex-1', 'ex-2'] })
-    expect(calls.experienceReads).toEqual([['ex-1', 'ex-2']])
+    expect(out.assets).toEqual([])
+    expect(out.errors).toHaveLength(1)
+    expect(out.errors[0]).toMatchObject({ id: 'ex-1', code: 'WF_BAD_ARGS' })
+    expect(out.errors[0].message).toContain('ex-1')
+    expect(calls.workflowReads).toEqual([])
+    expect(calls.roleReads).toEqual([])
   })
 
   it('坏 id 只单条报错，不阻塞同批其余 id', async () => {
     const { host, calls } = makeCatalogHost()
     const out = await executeOrgCatalog(
       host,
-      { ids: ['flow-1', 'nope-1', 'flow-1#missing', 'flow-1#f1', 'role-404', 'tpl-1'] },
+      { ids: ['flow-1', 'nope-1', 'flow-1#missing', 'flow-1#f1', 'role-404', 'tpl-1', 'ex-1'] },
     ) as CatalogDetails
     expect(out.assets).toHaveLength(1)
     expect(out.assets[0]).toMatchObject({ type: 'workflow', id: 'flow-1' })
-    expect(out.errors.map((item) => item.id)).toEqual(['nope-1', 'flow-1#missing', 'flow-1#f1', 'role-404', 'tpl-1'])
+    expect(out.errors.map((item) => item.id)).toEqual(['nope-1', 'flow-1#missing', 'flow-1#f1', 'role-404', 'tpl-1', 'ex-1'])
     expect(out.errors.map((item) => item.code)).toEqual([
       'WF_BAD_ARGS', // 形状无法识别
       'WF_ORG_NOT_FOUND', // 节点不存在
       'WF_BAD_ARGS', // 非角色节点（无 systemPrompt）
       'WF_ORG_NOT_FOUND', // 角色资产不存在
       'WF_BAD_ARGS', // 旧模版前缀不再支持
+      'WF_BAD_ARGS', // 经验不再由本工具召回
     ])
     expect(out.errors[2].message).toContain('file')
     // 形状非法的 id 不为它触发资产读盘
@@ -209,29 +198,10 @@ describe('executeOrgCatalog：索引 / 详情分派', () => {
     expect(out.errors).toEqual([{ id: 'flow-broken', code: 'WF_ORG_NOT_FOUND', message: '资产库读取失败' }])
   })
 
-  it('经验批量取数抛错：整批经验逐条报错，其它类型不受影响', async () => {
-    const base = makeCatalogHost().host
-    const host = {
-      ...base,
-      assets: { ...base.assets, async getExperiences() { throw new Error('经验库不可用') } },
-    }
-    const out = await executeOrgCatalog(host, { ids: ['ex-1', 'role-1'] }) as CatalogDetails
-    expect(out.assets.map((asset) => asset.id)).toEqual(['role-1'])
-    expect(out.errors).toEqual([{ id: 'ex-1', code: 'WF_ORG_NOT_FOUND', message: '经验库不可用' }])
-  })
-
-  it('经验批量取数缺项：缺的那个 id 单条报错，取到的照常返回', async () => {
-    const base = makeCatalogHost().host
-    const host = { ...base, assets: { ...base.assets, async getExperiences() { return [] } } }
-    const out = await executeOrgCatalog(host, { ids: ['ex-1'] }) as CatalogDetails
-    expect(out.assets).toEqual([])
-    expect(out.errors).toEqual([{ id: 'ex-1', code: 'WF_ORG_NOT_FOUND', message: '经验不存在：ex-1' }])
-  })
-
   it('连续两次同输入结果完全一致（确定性、无隐藏状态）', async () => {
     const { host } = makeCatalogHost()
-    const first = await executeOrgCatalog(host, { ids: ['flow-1', 'role-1', 'ex-1'] })
-    const second = await executeOrgCatalog(host, { ids: ['flow-1', 'role-1', 'ex-1'] })
+    const first = await executeOrgCatalog(host, { ids: ['flow-1', 'role-1'] })
+    const second = await executeOrgCatalog(host, { ids: ['flow-1', 'role-1'] })
     expect(JSON.stringify(first)).toBe(JSON.stringify(second))
   })
 
@@ -321,7 +291,7 @@ describe('registerWfOrgCatalog：注册面与调用方身份', () => {
     expect((error as WfError).code).toBe('WF_BAD_CALLER')
   })
 
-  it('父代理（根会话）调用 → 返回资产与经验索引', async () => {
+  it('父代理（根会话）调用 → 返回资产索引', async () => {
     const { host } = makeCatalogHost()
     const { ctx, registered } = registerFixture()
     registerWfOrgCatalog(ctx, host)
@@ -331,14 +301,16 @@ describe('registerWfOrgCatalog：注册面与调用方身份', () => {
     expect(out.assets.workflows[0].id).toBe('flow-1')
   })
 
-  it('工具描述公布四种 id 形状与两段调用模型（模型据此构造调用）', () => {
+  it('工具描述公布三种 id 形状与两段调用模型，且不再提经验（模型据此构造调用）', () => {
     const { host } = makeCatalogHost()
     const { ctx, registered } = registerFixture()
     registerWfOrgCatalog(ctx, host)
     const description = registered[0].description
-    for (const expected of ['flow-*', 'role-*', '<flow-id>#<node-id>', 'ex-*']) {
+    for (const expected of ['flow-*', 'role-*', '<flow-id>#<node-id>']) {
       expect(description).toContain(expected)
     }
+    expect(description).not.toContain('ex-*')
+    expect(description).not.toContain('experience index')
     expect(description).toContain('NOT listed here')
     expect(description).toContain('WF_NOT_ROOT')
   })

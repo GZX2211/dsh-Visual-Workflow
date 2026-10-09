@@ -1,5 +1,5 @@
 import type { CatalogDetails, CatalogIndex, CatalogModelSource, CatalogPresetSource } from './types.js';
-import type { ExperienceEntry, ExperienceIndexEntry, RoleAssetDetail, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../../shared/asset-types.js';
+import type { RoleAssetDetail, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../../shared/asset-types.js';
 /**
  * 工具层所需宿主能力（宿主 service 的最小结构适配；单测 fake）。
  *
@@ -16,8 +16,6 @@ export interface OrgCatalogHost {
         listRoleAssets(): Promise<RoleAssetSummary[]>;
         getWorkflowAsset(assetId: string): Promise<WorkflowAssetDetail | null>;
         getRoleAsset(assetId: string): Promise<RoleAssetDetail | null>;
-        listExperienceIndex(limit: number): Promise<ExperienceIndexEntry[]>;
-        getExperiences(ids: string[]): Promise<ExperienceEntry[]>;
         /**
          * 可选缝：把工作流资产里钉住的**角色版本行 id** 回溯为角色资产 id。
          * 没有它时骨架仍给 roleVersionId（钉的是哪一版），只是无法标注角色资产名。

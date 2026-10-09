@@ -2,15 +2,14 @@
 //
 // 索引 / 详情装配纯函数单测：
 //   - 索引：组合携带完整工具清单、模型携带思考强度档位、资产条目只给「够不够参考」的判据、
-//     经验条目只有 id 与任务上下文、规则与 ID 约定同源、四段 ID 约定齐全且不含模版措辞；
+//     规则与 ID 约定同源、三段 ID 约定齐全且不含模版措辞；
 //   - 骨架：阶段节点 / 角色 / 协作组 / 虚拟节点 / 数据节点正文 / 连接信息脱敏 / 连线 /
 //     可召回内联角色清单 / 角色节点的固定引用版本（roleAssetId + roleVersionId）；
 //   - 骨架的字段取舍：角色 systemPrompt 必须缺席（走按需召回），其余不可召回内容必须给全；
-//   - 角色 / 内联角色 / 经验详情：最长字段完整不截断，可选字段缺省时省略。
+//   - 角色 / 内联角色详情：最长字段完整不截断，可选字段缺省时省略。
 
 import { describe, expect, it } from 'vitest'
 import {
-  buildExperienceDetail,
   buildIndex,
   buildInlineRoleDetail,
   buildRoleDetail,
@@ -24,8 +23,6 @@ import { GATE_MARKING_SEMANTICS, PATCH_CONTRACT_TEXT } from '../../../../src/hos
 import { ORG_SOP_DESIGN_METHOD, ORG_SOP_L1_GRAPH_SEMANTICS } from '../../../../src/host/prompts/index.js'
 import {
   makeCatalogHost,
-  experienceFixture,
-  experienceIndexFixture,
   inlineRoleNodeFixture,
   roleAssetDetailFixture,
   roleAssetSummaryFixture,
@@ -44,46 +41,46 @@ function roleNodeOf(detail: CatalogWorkflowDetail, id: string): CatalogRoleNodeE
 const emptyIndexInput = {
   workflows: [] as WorkflowAssetSummary[],
   roles: [],
-  experiences: [],
   combos: [],
   presets: [],
   models: [],
 }
 
-describe('buildIndex（资产与经验索引装配）', () => {
+describe('buildIndex（资产索引装配）', () => {
   const hostFixture = makeCatalogHost()
 
-  it('索引只含约定字段（资产与经验分两段，不混入模型可见的其它运行态字段）', () => {
+  it('索引只含约定字段（资产分段，不混入经验与其它运行态字段）', () => {
     const index = buildIndex({ ...emptyIndexInput, workflows: [workflowAssetSummaryFixture()] })
     expect(Object.keys(index).sort()).toEqual(
-      ['assets', 'combos', 'detailHint', 'experiences', 'idConvention', 'kind', 'models', 'presets', 'rules', 'truncated'].sort(),
+      ['assets', 'combos', 'detailHint', 'idConvention', 'kind', 'models', 'presets', 'rules', 'truncated'].sort(),
     )
     expect(index.kind).toBe('index')
     expect(Object.keys(index.assets).sort()).toEqual(['roles', 'workflows'])
   })
 
-  it('四段 ID 约定齐全：工作流 / 角色 / 内联角色 / 经验，且不再出现模版措辞', () => {
+  it('三段 ID 约定齐全：工作流 / 角色 / 内联角色，且不再出现模版与经验措辞', () => {
     const index = buildIndex(emptyIndexInput)
-    expect(Object.keys(index.idConvention).sort()).toEqual(['experience', 'inlineRole', 'role', 'workflow'])
+    expect(Object.keys(index.idConvention).sort()).toEqual(['inlineRole', 'role', 'workflow'])
     expect(index.idConvention.workflow).toContain('flow-')
     expect(index.idConvention.role).toContain('role-')
     expect(index.idConvention.inlineRole).toContain('#')
     expect(index.idConvention.inlineRole).toContain('固定引用版本')
-    expect(index.idConvention.experience).toContain('ex-')
-    expect(index.idConvention.experience).toContain('insight')
     for (const text of Object.values(index.idConvention)) {
       expect(text).not.toContain('tpl-')
       expect(text).not.toContain('模板')
       expect(text).not.toContain('模版')
+      expect(text).not.toContain('经验')
     }
   })
 
-  it('召回指引说明「索引只是候选」，并逐条给出四种 id 的取数语义', () => {
+  it('召回指引说明「索引只是候选」，并逐条给出三种 id 的取数语义', () => {
     const index = buildIndex(emptyIndexInput)
     expect(index.detailHint).toContain('候选')
-    for (const expected of ['flow-xxx', 'role-xxx', 'flow-xxx#node-yyy', 'ex-xxx']) {
+    for (const expected of ['flow-xxx', 'role-xxx', 'flow-xxx#node-yyy']) {
       expect(index.detailHint).toContain(expected)
     }
+    expect(index.detailHint).not.toContain('ex-')
+    expect(index.detailHint).not.toContain('经验')
   })
 
   it('规则段与提示词基线 / 写图契约的常量同源（不在工具层复制文本）', () => {
@@ -181,11 +178,6 @@ describe('buildIndex（资产与经验索引装配）', () => {
     expect(index.assets.workflows.map((entry) => entry.id)).toEqual(['flow-2'])
   })
 
-  it('经验条目原样透出 id 与任务上下文（完整内容走 ex-* 召回）', () => {
-    const index = buildIndex({ ...emptyIndexInput, experiences: [experienceIndexFixture()] })
-    expect(index.experiences).toEqual([{ id: 'ex-1', taskContext: '重构一个 TypeScript 插件的存储层' }])
-  })
-
   it('preset 条目带描述（能看出它能给什么）', () => {
     const index = buildIndex({ ...emptyIndexInput, presets: [{ id: 'standard', name: '标准', description: '官方标准模式' }] })
     expect(index.presets[0]).toEqual({ id: 'standard', name: '标准', description: '官方标准模式' })
@@ -199,14 +191,6 @@ describe('buildIndex（资产与经验索引装配）', () => {
     const index = buildIndex({ ...emptyIndexInput, workflows, roles })
     expect(index.assets.workflows).toHaveLength(CATALOG_LIMITS.workflowAssets)
     expect(index.assets.roles).toHaveLength(CATALOG_LIMITS.roleAssets)
-    expect(index.truncated).toBe(true)
-  })
-
-  it('经验条目超量：同样截断并置 truncated', () => {
-    const experiences = Array.from({ length: CATALOG_LIMITS.experiences + 1 }, (_item, i) =>
-      experienceIndexFixture({ id: `ex-${i}` }))
-    const index = buildIndex({ ...emptyIndexInput, experiences })
-    expect(index.experiences).toHaveLength(CATALOG_LIMITS.experiences)
     expect(index.truncated).toBe(true)
   })
 
@@ -317,7 +301,7 @@ describe('buildWorkflowDetail（骨架自足性）', () => {
   })
 })
 
-describe('buildRoleDetail / buildInlineRoleDetail / buildExperienceDetail（最长字段完整召回）', () => {
+describe('buildRoleDetail / buildInlineRoleDetail（最长字段完整召回）', () => {
   it('角色资产：systemPrompt 不截断，资产类型与版本随详情给出，缺省字段省略', () => {
     const long = '提'.repeat(5000)
     const detail = buildRoleDetail(roleAssetDetailFixture({ systemPrompt: long }))
@@ -367,32 +351,6 @@ describe('buildRoleDetail / buildInlineRoleDetail / buildExperienceDetail（最�
     expect('roleAssetId' in detail).toBe(false)
     expect('roleVersionId' in detail).toBe(false)
     expect(detail.systemPrompt).toBe('你是分析员')
-  })
-
-  it('经验详情：insight 与 evidence 完整返回（不截断），可选字段缺省时省略', () => {
-    const long = '经'.repeat(4000)
-    const detail = buildExperienceDetail(experienceFixture({ insight: long }))
-    expect(detail.type).toBe('experience')
-    expect(detail.id).toBe('ex-1')
-    expect(detail.taskType).toBe('软件开发')
-    expect(detail.taskContext).toBe('重构一个 TypeScript 插件的存储层')
-    expect(detail.insight).toHaveLength(4000)
-    expect(detail.evidence).toBe('上一轮因为契约漂移导致两端各自维护了一份字段表')
-    expect(detail.sourceRunId).toBe('run-1')
-    expect(detail.createdAt).toBe(1_700_000_000_000)
-    expect(detail.updatedAt).toBe(1_700_000_100_000)
-
-    const withoutOptional = buildExperienceDetail(experienceFixture({
-      evidence: '',
-      reviewFeedback: undefined,
-      sourceRunId: undefined,
-    }))
-    expect('evidence' in withoutOptional).toBe(false)
-    expect('reviewFeedback' in withoutOptional).toBe(false)
-    expect('sourceRunId' in withoutOptional).toBe(false)
-
-    const reviewed = buildExperienceDetail(experienceFixture({ reviewFeedback: '结论过宽，改成先冻结契约' }))
-    expect(reviewed.reviewFeedback).toBe('结论过宽，改成先冻结契约')
   })
 })
 

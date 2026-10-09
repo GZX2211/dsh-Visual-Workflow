@@ -23,6 +23,16 @@ export const WORKFLOW_ASSET_ID_PREFIX = 'flow-'
 /** 经验 id 前缀。 */
 export const EXPERIENCE_ID_PREFIX = 'ex-'
 
+/**
+ * 经验使用事实行 id 前缀。
+ * 为什么与经验 id 用不同前缀：使用/评价行是同一条经验的多条历史事实，混用前缀会让磁盘上
+ * 无法一眼区分「经验本体」与「它的第 N 次使用」，排障时必须回表才能分辨。
+ */
+export const EXPERIENCE_USAGE_ID_PREFIX = 'xus-'
+
+/** 经验评价事实行 id 前缀。 */
+export const EXPERIENCE_EVALUATION_ID_PREFIX = 'xev-'
+
 /** 新建角色资产逻辑 id（`role-` 前缀）。 */
 export function newRoleAssetId(deps: IdGeneratorDeps = {}): string {
   return `${ROLE_ASSET_ID_PREFIX}${newToken(deps)}`
@@ -36,6 +46,16 @@ export function newWorkflowAssetId(deps: IdGeneratorDeps = {}): string {
 /** 新建经验 id（`ex-` 前缀）。 */
 export function newExperienceId(deps: IdGeneratorDeps = {}): string {
   return `${EXPERIENCE_ID_PREFIX}${newToken(deps)}`
+}
+
+/** 新建经验使用事实行 id（`xus-` 前缀；由资产库在写入事务内发号）。 */
+export function newExperienceUsageId(deps: IdGeneratorDeps = {}): string {
+  return `${EXPERIENCE_USAGE_ID_PREFIX}${newToken(deps)}`
+}
+
+/** 新建经验评价事实行 id（`xev-` 前缀；由资产库在写入事务内发号）。 */
+export function newExperienceEvaluationId(deps: IdGeneratorDeps = {}): string {
+  return `${EXPERIENCE_EVALUATION_ID_PREFIX}${newToken(deps)}`
 }
 
 /**

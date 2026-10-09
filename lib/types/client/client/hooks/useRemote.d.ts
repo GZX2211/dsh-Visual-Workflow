@@ -1,9 +1,10 @@
-import { type RemoteCallOptions } from '../lib/remote.js';
+import type { Dict } from "../i18n.js";
+import { type RemoteCallOptions } from "../lib/remote.js";
 export interface RemoteFace {
-    /** POST /visual-workflow/<endpoint>，body { args }，返回 value（超时/取消见 options）。 */
+    /** POST /visual-workflow/<endpoint>, body { args }, returning value. */
     call(endpoint: string, args?: Record<string, unknown>, options?: RemoteCallOptions): Promise<unknown>;
-    /** SSE 流式调用（服务调试）；生命周期由 signal 掌握。 */
+    /** SSE call for service debugging; lifecycle is controlled by signal. */
     stream(endpoint: string, args: Record<string, unknown>, onLine: (line: string) => void, signal?: AbortSignal): Promise<void>;
 }
-/** 远端调用面（remoteCall/streamCall 为纯函数，hook 仅提供稳定引用）。 */
-export declare function useRemote(): RemoteFace;
+/** Stable remote-call face; dictionary changes replace only the error-copy mapping. */
+export declare function useRemote(copy: Dict): RemoteFace;

@@ -6,7 +6,7 @@
 // 「缺字段 = 默认值」的归一化与「JSON 列读写」是全模块共用的最小事实，
 // 分别散落在角色/工作流两条写路径会造成两套默认值口径。
 
-import { assetBadArgs } from './errors.js'
+import { assetBadArgs, experienceBadArgs } from './errors.js'
 
 /** 必填字符串校验（缺失或空白即非法；返回 trim 后的值）。 */
 export function requireText(value: unknown, field: string): string {
@@ -18,6 +18,35 @@ export function requireText(value: unknown, field: string): string {
 /** 资产/版本标识校验（非空字符串）。 */
 export function requireAssetId(value: unknown, field = 'assetId'): string {
   return requireText(value, field)
+}
+
+/**
+ * 经验域必填文本校验（缺失或空白即非法；返回 trim 后的值）。
+ * 与 requireText 分开是因为错误语义不同：经验写入失败要报经验入参问题，
+ * 调用方据此判断是「资产」还是「经验」的载荷需要修。
+ */
+export function requireExperienceText(value: unknown, field: string): string {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (!text) throw experienceBadArgs(`经验入参缺少必填字段 ${field}：请补齐后重试`)
+  return text
+}
+
+/**
+ * 入参 id 列表归一：丢弃非字符串与纯空白项、按首次出现去重并保持顺序。
+ * 为什么读路径也要归一：id 列表来自工具层与界面，重复项会让「同一行被返回两次」，
+ * 而调用方按位置消费结果时无从分辨。
+ */
+export function uniqueFilledIds(values: readonly unknown[]): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const value of values) {
+    if (typeof value !== 'string') continue
+    const id = value.trim()
+    if (id === '' || seen.has(id)) continue
+    seen.add(id)
+    result.push(id)
+  }
+  return result
 }
 
 /** 版本号校验（正整数）。 */

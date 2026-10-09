@@ -1,15 +1,19 @@
-import type { AssetVersionEntry, AssetVersionSource, ExperienceDraft, ExperienceEntry, ExperienceIndexEntry, ExperiencePatch, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, RoleAssetType, WorkflowAssetDetail, WorkflowAssetSummary } from '../shared/asset-types.js';
+import type { AssetVersionEntry, AssetVersionSource, ExperienceEntry, ExperienceEvaluationInsertInput, ExperienceGenerationPromptEntry, ExperienceInsertCheckedInput, ExperiencePatch, ExperienceRetrievalUpdate, ExperienceStatsEntry, ExperienceStatsRebuildInput, ExperienceType, ExperienceUsageRecordInput, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, RoleAssetType, WorkflowAssetDetail, WorkflowAssetSummary } from '../shared/asset-types.js';
 import type { GraphNode, Line, WorkflowMode } from '../shared/graph-model.js';
 import type { OrgMeta } from '../shared/org-meta.js';
 import type { RoleTemplate } from '../shared/template-types.js';
-import { type ExperienceInsertResult } from './experiences.js';
+import { type ExperienceEvaluationsCheckedResult } from './experience-evaluations.js';
+import { type ExperienceEmbeddingRow, type ExperienceInsertCheckedResult } from './experiences.js';
 import { type IdGeneratorDeps } from './ids.js';
 export { AssetError } from './errors.js';
 export type { AssetErrorCode } from './errors.js';
 export { contentFingerprint, stableStringify } from './fingerprint.js';
-export type { ExperienceInsertResult } from './experiences.js';
-export { EXPERIENCE_INDEX_MAX_LIMIT } from './experiences.js';
-export { EXPERIENCE_ID_PREFIX, ROLE_ASSET_ID_PREFIX, WORKFLOW_ASSET_ID_PREFIX, newExperienceId, newRoleAssetId, newWorkflowAssetId, versionRowId, type IdGeneratorDeps, type RandomSource, } from './ids.js';
+export { decodeEmbedding, encodeEmbedding, type EmbeddingDecode } from './embedding-blob.js';
+export type { ExperienceEmbeddingRow, ExperienceInsertCheckedResult } from './experiences.js';
+export type { ExperienceEvaluationsCheckedResult } from './experience-evaluations.js';
+export { EXPERIENCE_LIST_MAX_LIMIT } from './experiences.js';
+export { EXPERIENCE_PROMPT_SEED_VERSION, EXPERIENCE_PROMPT_SEEDS, type ExperiencePromptSeed } from './experience-seeds.js';
+export { EXPERIENCE_EVALUATION_ID_PREFIX, EXPERIENCE_ID_PREFIX, EXPERIENCE_USAGE_ID_PREFIX, ROLE_ASSET_ID_PREFIX, WORKFLOW_ASSET_ID_PREFIX, newExperienceEvaluationId, newExperienceId, newExperienceUsageId, newRoleAssetId, newWorkflowAssetId, versionRowId, type IdGeneratorDeps, type RandomSource, } from './ids.js';
 export { ASSET_DB_FILE } from './schema.js';
 /** AssetStore 依赖：时钟与 id 生成（测试可确定化；缺省用系统实现）。 */
 export interface AssetStoreDeps {
@@ -151,22 +155,67 @@ export declare class AssetStore {
      * 名称/描述/mode/meta + 节点内容（忽略坐标）+ 连线全等即视为未变化、不新增版本。
      */
     saveWorkflowVersion(input: WorkflowSaveInput): Promise<AssetPromoteResult>;
-    /** 经验索引（**召回面**：只含活跃经验；按 created_at 倒序，limit 条）。 */
-    listExperienceIndex(limit: number): Promise<ExperienceIndexEntry[]>;
-    /** 经验列表（界面数据源：活跃与已归档一并返回；条目自带 active 标记）。 */
-    listExperiences(limit: number): Promise<ExperienceEntry[]>;
     /**
-     * 经验详情（**召回面**：已归档经验一律查不到）。
-     * 消费方是父代理的目录召回，归档即不可召回必须在读取处生效，而不是靠调用方自觉过滤。
+     * 生成新的经验 id。
+     * 为什么由资产库发号：经验 id 的命名空间与格式属磁盘契约（前缀、跨进程唯一性策略），
+     * 交给调用方各自拼装必然出现多套格式。
      */
-    getExperiences(ids: string[]): Promise<ExperienceEntry[]>;
-    /** 保存经验（就地更新可编辑字段；无版本语义，不产生历史行）。 */
-    saveExperience(id: string, patch: ExperiencePatch): Promise<ExperienceEntry>;
-    /** 经验归档 / 恢复（状态切换的唯一入口；内容与历史一概不动）。 */
-    setExperienceActive(id: string, active: boolean): Promise<ExperienceEntry>;
+    nextId(): string;
+    /** 某主体类型当前生效的经验生成 Prompt（无活跃行返回 null，即该类型经验生成被关闭）。 */
+    getActivePrompt(type: ExperienceType): Promise<ExperienceGenerationPromptEntry | null>;
+    /** 全量经验生成 Prompt（含历史版本；同类型内活跃行排在前）。 */
+    listPrompts(): Promise<ExperienceGenerationPromptEntry[]>;
+    /** 界面经验列表（活跃与归档一并返回，条目自带 active 标记；超出上限按上限截断）。 */
+    listRows(limit: number): Promise<ExperienceEntry[]>;
     /**
-     * 批量插入经验：空字段与重复 insight 跳过并回传原因，其余入库。
-     * 整批在一笔事务内完成，任一条插入失败则整批回滚（不留下半批经验）。
+     * 按 id 读经验（保持入参顺序，命中不到的略过）。
+     * `activeOnly` = 召回面语义：归档经验一律查不到，避免调用方各自判断归档过滤。
      */
-    insertExperiences(drafts: ExperienceDraft[], reviewedAt: number): Promise<ExperienceInsertResult>;
+    getRows(ids: string[], options?: {
+        activeOnly?: boolean;
+    }): Promise<ExperienceEntry[]>;
+    /**
+     * 某主体类型的活跃向量（召回输入：任务侧与决策侧双通道一次读盘）。
+     * 向量不可用或只有单侧的行不返回：这类行无法参与双通道召回。
+     */
+    listActiveExperienceEmbeddings(type: ExperienceType): Promise<ExperienceEmbeddingRow[]>;
+    /**
+     * 批量判重写入：该主体类型的活跃行读取、判重与写入在**同一笔事务**内完成，任一条失败整批回滚。
+     * 向量必须在调用本方法**之前**算好随行传入：远程嵌入调用与首次模型加载都不得占用写事务。
+     */
+    insertChecked(input: ExperienceInsertCheckedInput): Promise<ExperienceInsertCheckedResult>;
+    /**
+     * 编辑保存：语义字段补丁 + 事务外算好的检索投影与向量一并写入。
+     * 必填语义字段被清空即抛可行动错误（经验没有版本，改坏无从回滚）。
+     */
+    updateFields(id: string, patch: ExperiencePatch, next: ExperienceRetrievalUpdate): Promise<ExperienceEntry>;
+    /** 经验归档 / 恢复（状态写入的唯一入口；内容与检索投影一概不动）。 */
+    setActive(id: string, active: boolean): Promise<ExperienceEntry>;
+    /**
+     * 记录使用事实（经验被显式注入 agent 上下文）：同一笔事务内插入使用行并同步统计的
+     * `recalled_count`；首次记录时按调用方给的中性口径建立统计行。
+     */
+    recordUsage(input: ExperienceUsageRecordInput): Promise<{
+        recorded: number;
+    }>;
+    /** 该主体在该经验类型下「已被显式注入」的经验 id（feedback 准入判据；保持入参顺序去重）。 */
+    listInjectedIds(input: {
+        subjectId: string;
+        experienceType: ExperienceType;
+        experienceIds: string[];
+    }): Promise<string[]>;
+    /**
+     * 批量写入评价并重算对应经验的统计（同一笔事务，任一步失败整批回滚）。
+     * 聚合器由调用方注入：公式属经验域且会演进，而「读全部历史 → 聚合 → 覆盖写」必须原子。
+     */
+    insertEvaluationsChecked(input: ExperienceEvaluationInsertInput): Promise<ExperienceEvaluationsCheckedResult>;
+    /** 读统计投影（缺行不返回：无统计即「证据不足」，读侧按中性解释，不伪造行）。 */
+    getStats(experienceIds: string[]): Promise<ExperienceStatsEntry[]>;
+    /**
+     * 全量重建统计投影（首次上线 / 调参 / 修复 / 迁移）。
+     * 一笔事务内读全部历史、重放聚合器并整表覆盖写；失败不留半成品。
+     */
+    rebuildStats(input: ExperienceStatsRebuildInput): Promise<{
+        experienceCount: number;
+    }>;
 }

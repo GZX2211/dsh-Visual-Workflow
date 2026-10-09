@@ -1,0 +1,486 @@
+// tests/verification/_tmp-store-loop.test.ts
+//
+// 独立验证者的临时文件（task-8）：在**真实资产库**上复核 §24/§25 的增量↔重建等价性、
+// §35 四条失败隔离、§36 闭环与 Trust 有界性。验证完成后删除。
+
+import { afterEach, describe, expect, it } from "vitest"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { AssetStore } from "../../src/host/assets/index.js"
+import {
+  ExperienceService,
+  NEUTRAL_STATS,
+  aggregateExperienceStats,
+  type ExperienceEmbeddingPort,
+  type ExperienceRuntimePort,
+  type ExperienceStorePort,
+} from "../../src/host/experience/index.js"
+import type { ExperienceEntry, ExperienceEvaluationScores, ExperienceStatsEntry } from "../../src/host/shared/asset-types.js"
+
+const cleanups: Array<() => Promise<void>> = []
+afterEach(async () => {
+  await Promise.all(cleanups.splice(0).map((fn) => fn()))
+})
+
+const HIGH = new Float64Array([1, 0])
+const LOW = new Float64Array([0.6, 0.8])
+const THIRD = new Float64Array([-1, 0])
+
+/** 受控嵌入端口：按关键词映射到互不重复的单位向量；可选注入失败。 */
+function controlledEmbedding(fail = false): ExperienceEmbeddingPort {
+  return {
+    source: "local",
+    dimension: 2,
+    async embed(texts: string[]): Promise<Float64Array[]> {
+      if (fail) throw new Error("嵌入服务不可用")
+      return texts.map((text) => {
+        if (text.includes("低相关")) return LOW
+        if (text.includes("第三种")) return THIRD
+        return HIGH
+      })
+    },
+  }
+}
+
+function runtime(): ExperienceRuntimePort {
+  return {
+    activeRunForSession: () => null,
+    runForChild: () => null,
+    hasTeamInCurrentRun: () => false,
+    hasActiveRun: () => false,
+    modelForCaller: () => "verifier-model",
+  }
+}
+
+function portOf(store: AssetStore): ExperienceStorePort {
+  return {
+    nextId: () => store.nextId(),
+    getActivePrompt: (type) => store.getActivePrompt(type),
+    listPrompts: () => store.listPrompts(),
+    listRows: (limit) => store.listRows(limit),
+    getRows: (ids, options) => store.getRows(ids, options),
+    listActiveEmbeddings: (type) => store.listActiveExperienceEmbeddings(type),
+    insertChecked: (input) => store.insertChecked(input),
+    updateFields: (id, patch, next) => store.updateFields(id, patch, next),
+    setActive: (id, active) => store.setActive(id, active),
+    recordUsage: (input) => store.recordUsage(input),
+    listInjectedIds: (input) => store.listInjectedIds(input),
+    insertEvaluationsChecked: (input) => store.insertEvaluationsChecked(input),
+    getStats: (ids) => store.getStats(ids),
+    rebuildStats: (input) => store.rebuildStats(input),
+  }
+}
+
+interface World {
+  store: AssetStore
+  service: ExperienceService
+  warnings: string[]
+}
+
+async function makeWorld(options: {
+  embedding?: ExperienceEmbeddingPort
+  wrapStore?: (port: ExperienceStorePort) => ExperienceStorePort
+} = {}): Promise<World> {
+  const dir = await mkdtemp(join(tmpdir(), "vw-verify-"))
+  cleanups.push(() => rm(dir, { recursive: true, force: true }))
+  const store = new AssetStore(dir, { now: () => 5_000 })
+  await store.init()
+  cleanups.push(async () => store.close())
+  const warnings: string[] = []
+  const base = portOf(store)
+  const service = new ExperienceService({
+    store: options.wrapStore ? options.wrapStore(base) : base,
+    runtime: runtime(),
+    embedding: options.embedding ?? controlledEmbedding(),
+    now: () => 5_000,
+    logger: { warn: (message: string) => warnings.push(message) },
+  })
+  return { store, service, warnings }
+}
+
+const caller = { isChild: false, sessionId: "verify-session" }
+
+function candidate(keyword: string): Record<string, unknown> {
+  return {
+    responsibility: `${keyword}责任`,
+    task_type: "软件开发",
+    decision_domain: `${keyword}决策域`,
+    situation: `${keyword}情形需要判断前置条件`,
+    trigger: `准备处理${keyword}时`,
+    principle: `${keyword}原则：前置条件未稳定时并行会放大返工`,
+    recommended_action: `${keyword}行动：先建立显式完成闸门再并行`,
+    exclusions: [`${keyword}不适用时`],
+    evidence: [`一次${keyword}相关执行`],
+  }
+}
+
+function evalOf(experienceId: string, scores: Partial<ExperienceEvaluationScores> = {}, evidence = "证据"): {
+  experienceId: string
+  fitScore: ExperienceEvaluationScores["fitScore"]
+  decisionEffect: ExperienceEvaluationScores["decisionEffect"]
+  informationGain: ExperienceEvaluationScores["informationGain"]
+  causalConfidence: ExperienceEvaluationScores["causalConfidence"]
+  evidence: string
+} {
+  return {
+    experienceId,
+    fitScore: 1,
+    decisionEffect: 1,
+    informationGain: 1,
+    causalConfidence: 1,
+    evidence,
+    ...scores,
+  } as never
+}
+
+function must<T>(value: T | undefined, what: string): T {
+  if (value === undefined) throw new Error(`装配错误：期望 ${what} 存在`)
+  return value
+}
+
+function statsOf(store: AssetStore, id: string): Promise<ExperienceStatsEntry | undefined> {
+  return store.getStats([id]).then((rows) => rows[0])
+}
+
+const shape = (row: ExperienceStatsEntry): Omit<ExperienceStatsEntry, "updatedAt" | "experienceId"> => {
+  const { updatedAt: _drop, experienceId: _drop2, ...rest } = row
+  return rest
+}
+
+/** 手写聚合（§9～§14），全部输入即事实。 */
+function handAggregate(rows: ExperienceEvaluationScores[], recalledCount: number) {
+  const w = (s: ExperienceEvaluationScores) => s.fitScore * (0.25 + 0.75 * s.causalConfidence)
+  const v = (s: ExperienceEvaluationScores) => (s.decisionEffect >= 0 ? s.decisionEffect * (0.5 + 0.5 * s.informationGain) : s.decisionEffect)
+  const total = rows.reduce((sum, s) => sum + w(s), 0)
+  const weightedValue = rows.reduce((sum, s) => sum + w(s) * v(s), 0)
+  const mean = total === 0 ? 0 : weightedValue / total
+  const variance = total === 0 ? 0 : rows.reduce((sum, s) => sum + w(s) * (v(s) - mean) ** 2, 0) / total
+  const stability = Math.min(1, Math.max(0, 1 - Math.sqrt(variance)))
+  const empirical = weightedValue / (3 + total)
+  const evidence = 1 - Math.exp(-total / 8)
+  const quality = empirical * evidence * (0.5 + 0.5 * stability)
+  const harmCount = rows.filter((s) => v(s) < 0).length
+  return {
+    effectiveSampleCount: total,
+    recalledCount,
+    usedCount: rows.length,
+    fitMean: total === 0 ? 0 : rows.reduce((sum, s) => sum + w(s) * s.fitScore, 0) / total,
+    empiricalValue: empirical,
+    variance,
+    stability,
+    evidenceStrength: evidence,
+    harmCount,
+    harmRate: rows.length === 0 ? 0 : harmCount / rows.length,
+    harmSeverity: total === 0 ? 0 : rows.reduce((sum, s) => sum + w(s) * Math.max(-v(s), 0), 0) / total,
+    qualitySignal: quality,
+    trust: 0.5 + 0.45 * quality,
+  }
+}
+
+describe("§36 闭环 + §24/§25 增量↔重建", () => {
+  it("test_多经验多评价多使用_增量与全量重建逐字段一致", async () => {
+    const { store, service } = await makeWorld()
+    await service.initializePrompt({ caller, type: "agent" })
+    const submitted = await service.submit({
+      caller,
+      type: "agent",
+      candidates: { experiences: [candidate("高相关"), candidate("低相关"), candidate("第三种")] },
+    })
+    const [a, b, c] = submitted.inserted
+    expect(submitted.inserted).toHaveLength(3)
+
+    const history: Record<string, ExperienceEvaluationScores[]> = { [a.id]: [], [b.id]: [], [c.id]: [] }
+    const push = async (id: string, scores: Partial<ExperienceEvaluationScores>): Promise<void> => {
+      await service.recall({ caller, type: "agent", ids: [id] })
+      const result = await service.feedback({ caller, type: "agent", evaluations: [evalOf(id, scores)] })
+      expect(result.accepted.map((entry) => entry.experienceId)).toEqual([id])
+      history[id].push(evalOf(id, scores))
+    }
+
+    // a：4 次评价（含负向与信息增益为 0）
+    await push(a.id, { decisionEffect: 1, informationGain: 1 })
+    await push(a.id, { decisionEffect: 0.5, informationGain: 0 })
+    await push(a.id, { decisionEffect: -1, informationGain: 1 })
+    await push(a.id, { fitScore: 0.5, causalConfidence: 0.25, decisionEffect: 0, informationGain: 0.5 })
+    // b：2 次评价（全负，构成有害经验）
+    await push(b.id, { decisionEffect: -1, informationGain: 0 })
+    await push(b.id, { decisionEffect: -0.5, informationGain: 1, fitScore: 0.75 })
+    // c：只有使用、没有评价（再补两次注入使 recalled_count = 3）
+    await service.recall({ caller, type: "agent", ids: [c.id] })
+    await service.recall({ caller, type: "agent", ids: [c.id] })
+
+    const usageCount = { [a.id]: 4, [b.id]: 2, [c.id]: 2 }
+
+    for (const id of [a.id, b.id, c.id]) {
+      const actual = shape(must(await statsOf(store, id), `stats(${id})`))
+      const expected = handAggregate(history[id], usageCount[id])
+      expect(actual, `增量结果与手写聚合完全一致 id=${id}`).toEqual(expected)
+    }
+
+    const before = Object.fromEntries(
+      await Promise.all([a.id, b.id, c.id].map(async (id) => [id, shape(must(await statsOf(store, id), `stats(${id})`))])),
+    )
+    const rebuilt = await service.rebuildStats()
+    expect(rebuilt.experienceCount).toBe(3)
+    for (const id of [a.id, b.id, c.id]) {
+      const after = shape(must(await statsOf(store, id), `stats(${id})`))
+      expect(after, `重建后与增量逐字段一致 id=${id}`).toEqual(before[id])
+    }
+    // 没有评价历史的经验在重建后等于「中性投影 + 使用计数」
+    const noHistory = shape(must(await statsOf(store, c.id), "stats(c)"))
+    expect(noHistory).toEqual({ ...NEUTRAL_STATS, recalledCount: 2 })
+    // 并证明「不调聚合器直接写 neutralStats」与「调聚合器算空历史」结果完全相同
+    expect(aggregateExperienceStats({ evaluations: [], recalledCount: 2 })).toEqual({ ...NEUTRAL_STATS, recalledCount: 2 })
+  })
+
+  it("test_全量重建_确实按注入的聚合器重算而非复制旧行", async () => {
+    const { store, service } = await makeWorld()
+    await service.initializePrompt({ caller, type: "agent" })
+    const submitted = await service.submit({ caller, type: "agent", candidates: { experiences: [candidate("高相关")] } })
+    const a = must(submitted.inserted[0], "经验 a")
+    await service.recall({ caller, type: "agent", ids: [a.id] })
+    await service.feedback({ caller, type: "agent", evaluations: [evalOf(a.id)] })
+
+    const real = must(await statsOf(store, a.id), "stats(a)")
+    // 用「标记聚合器」重放：若重建只是复制旧行，则标记值不会出现
+    await store.rebuildStats({
+      neutralStats: NEUTRAL_STATS,
+      aggregate: (input) => ({ ...NEUTRAL_STATS, recalledCount: input.recalledCount, empiricalValue: 0.123, trust: 0.456 }),
+    })
+    const marked = must(await statsOf(store, a.id), "stats(a) 标记重放后")
+    expect(marked.empiricalValue).toBeCloseTo(0.123, 12)
+    expect(marked.trust).toBeCloseTo(0.456, 12)
+    expect(marked.usedCount).toBe(0) // 标记聚合器没有复制旧行里的 usedCount=1
+    expect(marked.recalledCount).toBe(real.recalledCount)
+
+    // §35「Stats 更新失败 → rebuild 修复」：修复后必须回到正确投影
+    await service.rebuildStats()
+    expect(shape(must(await statsOf(store, a.id), "stats(a) 修复后"))).toEqual(shape(real))
+  })
+
+  it("test_已有统计行时记录使用_只涨计数不改其它列且不刷新updated_at", async () => {
+    const { store, service } = await makeWorld()
+    await service.initializePrompt({ caller, type: "agent" })
+    const submitted = await service.submit({ caller, type: "agent", candidates: { experiences: [candidate("高相关")] } })
+    const a = must(submitted.inserted[0], "经验 a")
+    await service.recall({ caller, type: "agent", ids: [a.id] })
+    const first = must(await statsOf(store, a.id), "首次统计行")
+    expect(first.recalledCount).toBe(1)
+
+    await service.recall({ caller, type: "agent", ids: [a.id] })
+    const second = must(await statsOf(store, a.id), "第二次统计行")
+    expect(second.recalledCount).toBe(2)
+    expect(second.updatedAt).toBe(first.updatedAt)
+    expect(shape(second)).toEqual({ ...shape(first), recalledCount: 2 })
+    // 重建仍能与使用事实对齐
+    await service.rebuildStats()
+    expect(shape(must(await statsOf(store, a.id), "重建后"))).toEqual({ ...shape(first), recalledCount: 2 })
+  })
+})
+
+describe("§35 失败隔离四条", () => {
+  it("test_Stats读取失败_召回按信任中性继续且经验仍可用", async () => {
+    const world = await makeWorld({
+      wrapStore: (port) => ({ ...port, getStats: async () => { throw new Error("统计表不可读") } }),
+    })
+    await world.service.initializePrompt({ caller, type: "agent" })
+    const submitted = await world.service.submit({ caller, type: "agent", candidates: { experiences: [candidate("高相关")] } })
+    const a = must(submitted.inserted[0], "经验 a")
+
+    const recalled = await world.service.recall({ caller, type: "agent", query: "高相关" })
+    if (recalled.kind !== "candidates") throw new Error("应为候选摘要")
+    expect(recalled.hits.map((hit) => hit.id)).toEqual([a.id])
+    expect(recalled.hits[0].score).toBeCloseTo(1, 12) // 中性信任下 sim01(cos=1)=1
+    expect(world.warnings.some((message) => message.includes("经验统计读取失败"))).toBe(true)
+  })
+
+  it("test_Feedback写入失败_经验本体与既有评价历史不受影响且错误可行动", async () => {
+    const world = await makeWorld({
+      wrapStore: (port) => ({
+        ...port,
+        insertEvaluationsChecked: async () => { throw new Error("评价表不可写") },
+      }),
+    })
+    await world.service.initializePrompt({ caller, type: "agent" })
+    const submitted = await world.service.submit({ caller, type: "agent", candidates: { experiences: [candidate("高相关")] } })
+    const a = must(submitted.inserted[0], "经验 a")
+    await world.service.recall({ caller, type: "agent", ids: [a.id] })
+    const before = must((await world.store.getRows([a.id], { activeOnly: false }))[0], "经验行")
+
+    await expect(
+      world.service.feedback({ caller, type: "agent", evaluations: [evalOf(a.id)] }),
+    ).rejects.toMatchObject({ code: "WF_EXPERIENCE_FEEDBACK_FAILED" })
+
+    const after = must((await world.store.getRows([a.id], { activeOnly: false }))[0], "经验行")
+    expect(after.principle).toBe(before.principle)
+    expect(after.updatedAt).toBe(before.updatedAt)
+    const stats = must(await statsOf(world.store, a.id), "统计行")
+    expect(stats.usedCount).toBe(0)
+    expect(stats.trust).toBe(0.5)
+  })
+
+  it("test_Embedding失败_召回回退BM25且不修改经验信任", async () => {
+    const world = await makeWorld()
+    await world.service.initializePrompt({ caller, type: "agent" })
+    const submitted = await world.service.submit({
+      caller,
+      type: "agent",
+      candidates: { experiences: [candidate("高相关"), candidate("低相关")] },
+    })
+    expect(submitted.inserted).toHaveLength(2)
+
+    // 先把使用与评价写好，使信任偏离中性（此时嵌入端口仍写着向量）
+    const a = must(submitted.inserted[0], "经验 a")
+    await world.service.recall({ caller, type: "agent", ids: [a.id] })
+    await world.service.feedback({ caller, type: "agent", evaluations: [evalOf(a.id)] })
+    const statsBefore = shape(must(await statsOf(world.store, a.id), "统计行"))
+
+    // 换成会失败的嵌入端口：召回必须回退 BM25，且统计不被改写
+    const failing = new ExperienceService({
+      store: portOf(world.store),
+      runtime: runtime(),
+      embedding: controlledEmbedding(true),
+      now: () => 5_000,
+      logger: { warn: (message: string) => world.warnings.push(message) },
+    })
+    const recalled = await failing.recall({ caller, type: "agent", query: "高相关" })
+    if (recalled.kind !== "candidates") throw new Error("应为候选摘要")
+    expect(recalled.source).toBe("bm25")
+    expect(recalled.hits.length).toBeGreaterThan(0)
+    // BM25 得分不是余弦，不参与信任重排；统计投影一字未改
+    expect(shape(must(await statsOf(world.store, a.id), "统计行"))).toEqual(statsBefore)
+  })
+
+  it("test_写入路径嵌入失败_明确拒绝且不留下半成品", async () => {
+    const world = await makeWorld({ embedding: controlledEmbedding(true) })
+    await world.service.initializePrompt({ caller, type: "agent" })
+    await expect(
+      world.service.submit({ caller, type: "agent", candidates: { experiences: [candidate("高相关")] } }),
+    ).rejects.toMatchObject({ code: "WF_EXPERIENCE_EMBEDDING_UNAVAILABLE" })
+    expect(await world.store.listRows(10)).toEqual([])
+  })
+})
+
+describe("§36 召回：信任不是独立召回轴", () => {
+  it("test_低相关经验刷满信任_仍不得击败高相关经验且得分被±20%夹住", async () => {
+    const { store, service } = await makeWorld()
+    await service.initializePrompt({ caller, type: "agent" })
+    const submitted = await service.submit({
+      caller,
+      type: "agent",
+      candidates: { experiences: [candidate("高相关"), candidate("低相关")] },
+    })
+    const a = must(submitted.inserted[0], "经验 a（高相关）")
+    const b = must(submitted.inserted[1], "经验 b（低相关）")
+
+    // 低相关经验累积 20 次满分评价（每次先显式注入以满足准入）
+    for (let index = 0; index < 20; index += 1) {
+      await service.recall({ caller, type: "agent", ids: [b.id] })
+      await service.feedback({ caller, type: "agent", evaluations: [evalOf(b.id)] })
+    }
+    const bStats = must(await statsOf(store, b.id), "stats(b)")
+    expect(bStats.usedCount).toBe(20)
+    expect(bStats.evidenceStrength).toBeGreaterThan(0.8)
+    expect(bStats.qualitySignal).toBeGreaterThan(0.5)
+
+    const recalled = await service.recall({ caller, type: "agent", query: "高相关" })
+    if (recalled.kind !== "candidates") throw new Error("应为候选摘要")
+    expect(recalled.hits[0].id).toBe(a.id)
+    const bHit = must(recalled.hits.find((hit) => hit.id === b.id), "低相关命中")
+    // cos(LOW, HIGH) = 0.6 → sim01 = 0.8；上限为 0.8 × 1.2 = 0.96 < 1.0
+    expect(bHit.score).toBeCloseTo(0.8 * (1 + 0.2 * bStats.qualitySignal), 12)
+    expect(bHit.score).toBeLessThanOrEqual(0.8 * 1.2 + 1e-12)
+    expect(recalled.hits[0].score).toBeCloseTo(1 * (1 + 0.2 * 0), 12)
+  })
+
+  it("test_候选阶段不写使用事实_只有ids阶段才产生使用边界", async () => {
+    const { store, service } = await makeWorld()
+    await service.initializePrompt({ caller, type: "agent" })
+    const submitted = await service.submit({ caller, type: "agent", candidates: { experiences: [candidate("高相关")] } })
+    const a = must(submitted.inserted[0], "经验 a")
+    await service.recall({ caller, type: "agent", query: "高相关" })
+    expect(await store.getStats([a.id])).toEqual([])
+    await service.recall({ caller, type: "agent", ids: [a.id] })
+    expect(must(await statsOf(store, a.id), "统计行").recalledCount).toBe(1)
+  })
+
+  it("test_经验本体不被反馈改动", async () => {
+    const { store, service } = await makeWorld()
+    await service.initializePrompt({ caller, type: "agent" })
+    const submitted = await service.submit({ caller, type: "agent", candidates: { experiences: [candidate("高相关")] } })
+    const before = must((await store.getRows([submitted.inserted[0].id], { activeOnly: false }))[0], "经验行")
+    const beforeBody = (({ stats: _ignored, ...rest }) => rest)(before)
+    await service.recall({ caller, type: "agent", ids: [before.id] })
+    await service.feedback({ caller, type: "agent", evaluations: [evalOf(before.id, { decisionEffect: -1 })] })
+    const after = must((await store.getRows([before.id], { activeOnly: false }))[0], "经验行")
+    const afterBody = (({ stats: _ignored2, ...rest }) => rest)(after)
+    expect(afterBody).toEqual(beforeBody)
+    expect(after.stats?.usedCount).toBe(1)
+  })
+})
+
+describe("§36 评分：锚点确定性拒绝", () => {
+  it("test_连续小数_evaluation被整批拒绝且不落库", async () => {
+    const { store, service } = await makeWorld()
+    await service.initializePrompt({ caller, type: "agent" })
+    const submitted = await service.submit({ caller, type: "agent", candidates: { experiences: [candidate("高相关")] } })
+    const a = must(submitted.inserted[0], "经验 a")
+    await service.recall({ caller, type: "agent", ids: [a.id] })
+    const bad = evalOf(a.id)
+    await expect(
+      service.feedback({ caller, type: "agent", evaluations: [{ ...bad, causalConfidence: 0.73 } as never] }),
+    ).rejects.toMatchObject({ code: "WF_EXPERIENCE_BAD_ARGS" })
+    const stats = must(await statsOf(store, a.id), "统计行")
+    expect(stats.usedCount).toBe(0)
+    expect(stats.trust).toBe(0.5)
+  })
+
+  it("test_decisionEffect取0.25_跨维度取值域被拒绝", async () => {
+    const { service } = await makeWorld()
+    await service.initializePrompt({ caller, type: "agent" })
+    const submitted = await service.submit({ caller, type: "agent", candidates: { experiences: [candidate("高相关")] } })
+    const a = must(submitted.inserted[0], "经验 a")
+    await service.recall({ caller, type: "agent", ids: [a.id] })
+    await expect(
+      service.feedback({ caller, type: "agent", evaluations: [evalOf(a.id, { decisionEffect: 0.25 as never })] }),
+    ).rejects.toMatchObject({ code: "WF_EXPERIENCE_BAD_ARGS" })
+  })
+
+  it("test_未使用过的经验_评价被跳过且统计不变", async () => {
+    const { store, service } = await makeWorld()
+    await service.initializePrompt({ caller, type: "agent" })
+    const submitted = await service.submit({
+      caller,
+      type: "agent",
+      candidates: { experiences: [candidate("高相关"), candidate("低相关")] },
+    })
+    const a = must(submitted.inserted[0], "经验 a")
+    const b = must(submitted.inserted[1], "经验 b")
+    await service.recall({ caller, type: "agent", ids: [a.id] })
+    const result = await service.feedback({
+      caller,
+      type: "agent",
+      evaluations: [evalOf(a.id), evalOf(b.id)],
+    })
+    expect(result.accepted.map((entry) => entry.experienceId)).toEqual([a.id])
+    expect(result.skipped.map((item) => item.experienceId)).toEqual([b.id])
+    expect(result.skipped[0].reason).toContain("没有使用的经验，不能评价")
+    expect(await store.getStats([b.id])).toEqual([])
+  })
+
+  it("test_其它主体的使用事实_不能作为本主体的评价准入", async () => {
+    const { store, service } = await makeWorld()
+    await service.initializePrompt({ caller, type: "agent" })
+    const submitted = await service.submit({ caller, type: "agent", candidates: { experiences: [candidate("高相关")] } })
+    const a = must(submitted.inserted[0], "经验 a")
+    // 用另一主体记录使用事实
+    await store.recordUsage({
+      rows: [{ experienceId: a.id, runId: "", subjectId: "another-subject" }],
+      neutralStats: NEUTRAL_STATS,
+    })
+    const result = await service.feedback({ caller, type: "agent", evaluations: [evalOf(a.id)] })
+    expect(result.accepted).toEqual([])
+    expect(result.skipped).toHaveLength(1)
+  })
+})

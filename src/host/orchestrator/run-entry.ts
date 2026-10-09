@@ -20,6 +20,19 @@ import type {
 } from './seams.js'
 import type { PendingAsk } from './ask-protocol.js'
 
+/**
+ * Team 经验共享上下文召回的入参（编排器与 Experience 域的最小契约）：
+ * query 由 buildTeamExperienceQuery 依本组任务上下文确定性组装，宿主据此召回 Team 经验。
+ */
+export interface TeamExperienceContextInput {
+  sessionId: string
+  flowId: string
+  /** 协作组节点 id。 */
+  groupId: string
+  /** 本组任务上下文摘要（稳定、可去重）。 */
+  query: string
+}
+
 /** 单次运行的内存条目（旧项目 entry 同构：快照 + 护栏计数 + in-flight 表）。 */
 export interface RunEntry {
   /** 运行级取消控制器（停止/终止/插件卸载时 abort；阻塞中的 wait/提问随之取消）。 */
@@ -131,6 +144,20 @@ export interface OrchestratorDeps {
    * 为什么注入能力而非具体实现：具体索引服务属数据工具域，编排器不反向依赖 tools。
    */
   dbIndexer?: { ensureIndexes(nodeId: string, flow: WorkflowDocument): Promise<void> }
+  /**
+   * Team 经验共享上下文召回缝（宿主注入；缺省不注入任何文本，行为与既有完全一致）。
+   * 编排器只表达「按本组任务上下文取一段 Team 经验文本」，返回 null 表示无可用经验。
+   * 为什么经缝注入：经验域能力与召回策略属 Experience 域，编排器不反向依赖它。
+   */
+  teamExperienceContext?: (input: TeamExperienceContextInput) => Promise<string | null>
+  /**
+   * 运行终态通知缝（宿主注入；缺省不通知，行为与现状一致）。
+   * 为什么需要：宿主持有的「运行实例态」（如 Experience 初始化状态）以 run 终态为失效边界，
+   * 而终态落定只在编排器内部可见，宿主无从查询；本缝是该失效边界的唯一对外通知点。
+   * 语义：仅 completed / failed / stopped 通知一次，paused / interrupted（可续跑）不通知；
+   * 失败只告警，绝不阻断终态收尾与资源释放（best-effort 辅助路径）。
+   */
+  onRunTerminal?: (input: { sessionId: string; runId: string; status: string }) => void
   /** 系统语言名读取（宿主注入：从 DSH 用户设置读取；缺省回退默认语言）。 */
   systemLanguage?: () => string
   /** 日志（缺省 console）。 */

@@ -135,7 +135,7 @@ export function editorDataOf(state: StudioState): EditorData | null {
     return {
       kind: 'experience',
       data: entry as unknown as Record<string, unknown>,
-      name: entry.taskContext,
+      name: entry.responsibility,
       experience: true,
       experienceId: entry.id,
       ...(entry.active ? {} : { retired: true }),

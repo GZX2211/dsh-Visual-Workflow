@@ -1,6 +1,6 @@
 // src/host/tools/wf-org-catalog/ids.ts
 //
-// 资产 / 经验 ID 解析（纯函数）。
+// 资产 ID 解析（纯函数）。
 //
 // 为什么单独成文件：主调用模型只有「传 ids / 不传 ids」两种形态，id 形状判定是
 // 「取数分派」与「错误提示」共用的唯一判据，必须与索引里公布的约定逐字一致。
@@ -8,7 +8,6 @@
 
 import {
   CATALOG_LIMITS,
-  EXPERIENCE_ID_PREFIX,
   ID_CONVENTION,
   INLINE_ROLE_SEPARATOR,
   ROLE_ID_PREFIX,
@@ -19,13 +18,12 @@ import {
 export type AssetRef =
   | { ok: true; kind: 'workflow'; id: string }
   | { ok: true; kind: 'role'; id: string }
-  | { ok: true; kind: 'experience'; id: string }
   | { ok: true; kind: 'inlineRole'; id: string; containerId: string; nodeId: string }
   | { ok: false; reason: string }
 
 /** 支持的 id 形状说明（错误提示复用，避免措辞漂移）。 */
 export function idShapesHint(): string {
-  return `支持：${ID_CONVENTION.workflow}；${ID_CONVENTION.role}；${ID_CONVENTION.inlineRole}；${ID_CONVENTION.experience}`
+  return `支持：${ID_CONVENTION.workflow}；${ID_CONVENTION.role}；${ID_CONVENTION.inlineRole}`
 }
 
 /**
@@ -51,7 +49,6 @@ export function parseAssetId(raw: unknown): AssetRef {
   }
   if (id.startsWith(ROLE_ID_PREFIX)) return { ok: true, kind: 'role', id }
   if (id.startsWith(WORKFLOW_ID_PREFIX)) return { ok: true, kind: 'workflow', id }
-  if (id.startsWith(EXPERIENCE_ID_PREFIX)) return { ok: true, kind: 'experience', id }
   return { ok: false, reason: `无法识别的 id「${id}」——${idShapesHint()}` }
 }
 

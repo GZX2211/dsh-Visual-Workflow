@@ -21,6 +21,7 @@ import {
   type NodeRunner,
   type NodeStartInput,
   type OrchestratorConfig,
+  type OrchestratorDeps,
   type RootAgentLike,
   type RootInjectedMessage,
   type TurnEndInfo,
@@ -185,6 +186,10 @@ export class FakeRunner implements NodeRunner {
   teamEnabled = false
   /** 协作组启动记录（startGroupTask 入参）。 */
   groupCalls: GroupStartInput[] = []
+  /** 下一次 startGroupTask 返回 null（模拟启动瞬间官方 Team 能力消失）。 */
+  groupStartUnavailable = false
+  /** 下一次 startGroupTask 抛出的错误（模拟启动通道异常）。 */
+  groupStartFail: unknown = null
   private seq = 0
   private groupSeq = 0
   async startNodeTask(input: NodeStartInput): Promise<{ childId: string; created: boolean; replacedChildId?: string }> {
@@ -208,8 +213,14 @@ export class FakeRunner implements NodeRunner {
   teamAvailable(): boolean {
     return this.teamEnabled
   }
-  async startGroupTask(input: GroupStartInput): Promise<GroupStartResult> {
+  async startGroupTask(input: GroupStartInput): Promise<GroupStartResult | null> {
     this.groupCalls.push(input)
+    if (this.groupStartFail !== null) {
+      const error = this.groupStartFail
+      this.groupStartFail = null
+      throw error instanceof Error ? error : new Error(String(error))
+    }
+    if (this.groupStartUnavailable) return null
     return {
       members: input.members.map((plan) => {
         this.groupSeq += 1
@@ -238,6 +249,7 @@ export interface Harness {
 /** 装配：临时目录真实 FlowStore + fake 依赖 + 可控时钟与 id 生成。 */
 export async function makeHarness(
   config?: Partial<OrchestratorConfig>,
+  deps?: Partial<Pick<OrchestratorDeps, 'teamExperienceContext' | 'onRunTerminal'>>,
 ): Promise<Harness> {
   const dir = await mkdtemp(join(tmpdir(), 'vw-orch-'))
   cleanups.push(() => rm(dir, { recursive: true, force: true }))
@@ -273,6 +285,8 @@ export async function makeHarness(
       uuidSeq.n += 1
       return `uuid-${uuidSeq.n}`
     },
+    ...(deps?.teamExperienceContext ? { teamExperienceContext: deps.teamExperienceContext } : {}),
+    ...(deps?.onRunTerminal ? { onRunTerminal: deps.onRunTerminal } : {}),
   })
   return { runtime, store, agents, runner, clock, warnings, dir }
 }

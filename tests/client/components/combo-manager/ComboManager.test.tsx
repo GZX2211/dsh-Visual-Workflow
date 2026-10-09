@@ -13,7 +13,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import React from 'react'
 import { ComboManager } from '../../../../src/client/components/combo-manager/ComboManager.js'
-import { zh } from '../../../../src/client/i18n.js'
+import { en, zh } from '../../../../src/client/i18n.js'
 import { EP } from '../../../../src/client/lib/remote.js'
 import type { RemoteFace } from '../../../../src/client/hooks/useRemote.js'
 
@@ -25,8 +25,8 @@ beforeEach(() => {
   document.body.append(container)
 })
 
-afterEach(() => {
-  root?.unmount()
+afterEach(async () => {
+  if (root) await act(async () => root?.unmount())
   root = null
   container?.remove()
   container = null
@@ -65,12 +65,12 @@ function makeRemote(initial: Partial<RemoteState> = {}): { remote: RemoteFace; s
   return { remote, state }
 }
 
-async function openComboManager(remote: RemoteFace, onToast = vi.fn(), onChanged = vi.fn()): Promise<void> {
+async function openComboManager(remote: RemoteFace, onToast = vi.fn(), onChanged = vi.fn(), copy = zh): Promise<void> {
   await act(async () => {
     root = createRoot(container!)
     root.render(
       React.createElement(ComboManager, {
-        copy: zh,
+        copy,
         remote,
         sessionId: 's-1',
         onClose: vi.fn(),
@@ -105,6 +105,15 @@ describe('组合管理', () => {
     expect(container!.textContent).toContain('wf_ask')
     await clickButton(zh.comboTabMcp)
     expect(Array.from(document.querySelectorAll('.wf-combo-card')).some((item) => item.textContent?.includes('files'))).toBe(true)
+  })
+
+  it('test_static_tool_tag_labels_follow_the_supplied_dictionary', async () => {
+    const { remote } = makeRemote()
+    await openComboManager(remote, vi.fn(), vi.fn(), en)
+    const labels = Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-combo-tag')).map((tag) => tag.textContent)
+    expect(labels).toContain(en.comboTagAll)
+    expect(labels).toContain(en.comboTagBuiltin)
+    expect(labels).not.toContain(zh.comboTagAll)
   })
 
   it('目录描述：str_replace_editor 标注「简单模式专用，非该模式禁止勾选」且保留展示', async () => {

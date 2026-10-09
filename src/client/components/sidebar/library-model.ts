@@ -18,7 +18,8 @@
 //     会与画布形成两份互相看不出同步关系的视图（用户批注：信息不同步且冗余）；
 //     内联资产一旦被多个工作流引用升为共享资产，就会出现在活跃栏。
 // 搜索（两态常驻、共用同一关键词）：过滤当前 Tag 下**全部分区**卡片，
-// 字段 = 名称 + 描述/角色提示词；经验取任务类型 / 任务上下文 / 经验本体 / 证据。
+// 字段 = 名称 + 描述/角色提示词；经验取任务类型 / 责任范围 / 决策领域 / 情境 /
+// 触发信号 / 原则 / 建议行动 / 证据。
 // 大小写不敏感、首尾 trim。
 // 折叠：历史分栏默认折叠（`collapsedSections` 由视图层持有）；搜索只做过滤，
 // 不因命中而自动展开——折叠是一种显式隐藏行为。
@@ -135,11 +136,11 @@ export interface LibraryModelInput {
 }
 
 /** 四 Tag（与左栏一致；底栏以图标展示）。 */
-const TAB_DEFS: Array<{ key: LibTab; label: string; icon: string }> = [
-  { key: 'workflow', label: '工作流', icon: '▦' },
-  { key: 'role', label: '角色', icon: '◆' },
-  { key: 'data', label: '数据', icon: '▤' },
-  { key: 'other', label: '其他', icon: '⋯' },
+const TAB_DEFS: Array<{ key: LibTab; icon: string }> = [
+  { key: 'workflow', icon: '▦' },
+  { key: 'role', icon: '◆' },
+  { key: 'data', icon: '▤' },
+  { key: 'other', icon: '⋯' },
 ]
 
 function truncate(value: unknown, limit: number): string {
@@ -297,23 +298,33 @@ export function buildLibraryModel(input: LibraryModelInput): LibraryModel {
       const retired = experiences.filter((item) => !item.active)
       const experienceCard = (item: ExperienceEntry): LibraryCardModel => card(
         item.id, 'experience', item.id, '✦',
-        // 主行取任务上下文（召回检索锚点），副行取经验本体的摘要
-        String(item.taskContext ?? ''), truncate(String(item.insight ?? ''), 60),
+        // 主行取责任范围（先看「它对什么负责」），副行取原则（该经验的核心规律）
+        String(item.responsibility ?? ''), truncate(String(item.principle ?? ''), 60),
         {
-          label: String(item.taskContext ?? ''),
+          label: String(item.responsibility ?? ''),
           onClick: () => onOpenExperience?.(item.id),
         },
+      )
+      const hits = (item: ExperienceEntry): boolean => hit(
+        item.taskType,
+        item.responsibility,
+        item.decisionDomain,
+        item.situation,
+        item.trigger,
+        item.principle,
+        item.recommendedAction,
+        item.evidence,
       )
       sections.push({
         key: 'assetExperiences',
         title: t.experienceActiveSection,
         plus: false,
         emptyText: t.experienceEmptyHint,
-        cards: active.filter((item) => hit(item.taskContext, item.taskType, item.insight, item.evidence)).map(experienceCard),
+        cards: active.filter(hits).map(experienceCard),
       })
       sections.push(historySection(
         ASSET_HISTORY_SECTIONS.experience, t.experienceHistorySection, t.experienceHistoryEmpty,
-        retired.filter((item) => hit(item.taskContext, item.taskType, item.insight, item.evidence)).map(experienceCard),
+        retired.filter(hits).map(experienceCard),
       ))
     }
   } else if (libTab === 'workflow') {
@@ -367,7 +378,7 @@ export function buildLibraryModel(input: LibraryModelInput): LibraryModel {
         emptyText: t.libEmptyTemplates,
         cards: [
           card(
-            parentTemplate.id, 'parentTemplate', parentTemplate.id, '父', String(parentTemplate.name ?? t.parentAgent),
+            parentTemplate.id, 'parentTemplate', parentTemplate.id, t.parentMarker, String(parentTemplate.name ?? t.parentAgent),
             roleSubline(parentTemplate), {
               label: String(parentTemplate.name ?? t.parentAgent),
               onClick: () => onSelectLib('parentTemplate', parentTemplate.id),
@@ -482,7 +493,7 @@ export function buildLibraryModel(input: LibraryModelInput): LibraryModel {
     ...def,
     label: librarySource === 'asset' && def.key === 'data'
       ? t.libTabExperience
-      : ((t.libTab as Record<string, string>)[def.key] ?? def.label),
+      : (t.libTab as Record<string, string>)[def.key],
   }))
 
   return { tabs, sections: visible, emptyHint }

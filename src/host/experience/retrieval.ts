@@ -1,0 +1,172 @@
+// src/host/experience/retrieval.ts
+//
+// 经验召回第一段：双通道语义候选池（§8.2 / §16）与词法回退（§8.3）。
+//
+// 为什么对任务侧与决策侧分别取池再取并集：同一经验可能因「任务情形相似」或「决策问题相似」
+// 任一侧被回忆，单通道会漏掉另一侧的合理命中。相似度一律复用嵌入引擎的单位向量内积语义，
+// 本文件不另写一套余弦实现，避免两处算法漂移。
+//
+// 为什么池大小是固定常量而不是调用方的 topK：候选池决定「哪些经验有机会被信任重排看见」
+// （§15 / §17），若它随最终返回条数伸缩，低相关高信任的经验就能靠缩小池子挤进前列。
+//
+// 为什么回退要显式标注来源：词法得分与语义得分不可比（BM25 无上下界、非余弦），调用方需要
+// 知道本次结果「不是语义检索」——它决定能否做信任重排与 MMR，因此来源是返回值上的事实。
+
+import { dotProduct } from "../embedding/engine.js"
+import { CANDIDATE_POOL_SIZE, DEFAULT_RECALL_TOP_K, MAX_RECALL_TOP_K } from "./constants.js"
+import type { ExperienceEmbeddingPort, ExperienceRetrievalRow } from "./ports.js"
+
+/** BM25 参数（业界常用经验值；此处只用于词法回退排序，不追求与任何实现对齐）。 */
+const BM25_K1 = 1.2
+const BM25_B = 0.75
+
+/** 单条命中（id + 得分）。 */
+export interface ExperienceScoredId {
+  id: string
+  score: number
+}
+
+/**
+ * 池内命中：得分 + 产生该得分的召回行。
+ *
+ * 为什么带行本身：第二段排序需要在候选之间算几何相似度（MMR 的 diversity 项），
+ * 只传 id 会让调用方再用 id 回查一次行，凭空制造「查不到」这一现实中不存在的分支。
+ */
+export interface ExperienceScoredRow extends ExperienceScoredId {
+  row: ExperienceRetrievalRow
+}
+
+/** 召回结果：已排序的候选池与本次得分的来源通道。 */
+export interface ExperienceRecallOutcome {
+  scored: ExperienceScoredRow[]
+  source: "semantic" | "bm25"
+}
+
+/** 召回入参：查询文本 + 已按类型筛好的活跃行 + 嵌入端口。 */
+export interface ExperienceRecallInput {
+  query: string
+  rows: ExperienceRetrievalRow[]
+  embedding: ExperienceEmbeddingPort
+}
+
+/** 最终返回条数归一化：缺省/非法回落默认值，超上限截到上限。 */
+export function normalizeTopK(topK?: number): number {
+  if (topK === undefined || !Number.isFinite(topK) || topK <= 0) return DEFAULT_RECALL_TOP_K
+  return Math.min(Math.floor(topK), MAX_RECALL_TOP_K)
+}
+
+/** 稳定排序：分数降序，同分按 id 升序（同分顺序必须确定，否则结果不可复现）。 */
+function sortScored<T extends ExperienceScoredId>(scores: readonly T[]): T[] {
+  return [...scores].sort((left, right) => {
+    if (right.score !== left.score) return right.score - left.score
+    return left.id < right.id ? -1 : left.id > right.id ? 1 : 0
+  })
+}
+
+/** 单通道打分：与查询向量维度不一致的行无法比较，直接跳过（不猜测、不补零）。 */
+function scoreChannel(
+  rows: readonly ExperienceRetrievalRow[],
+  queryVector: Float64Array,
+  pick: (row: ExperienceRetrievalRow) => Float64Array,
+  poolSize: number,
+): ExperienceScoredRow[] {
+  const scored: ExperienceScoredRow[] = []
+  for (const row of rows) {
+    const vector = pick(row)
+    if (vector.length !== queryVector.length) continue
+    scored.push({ id: row.id, score: dotProduct(queryVector, vector), row })
+  }
+  return sortScored(scored).slice(0, poolSize)
+}
+
+/** 并集去重：同一经验取两通道中的较高分（保留得分所属的那一行，两侧向量本来就在同一行上）。 */
+function mergeChannels(channels: ReadonlyArray<readonly ExperienceScoredRow[]>, poolSize: number): ExperienceScoredRow[] {
+  const best = new Map<string, ExperienceScoredRow>()
+  for (const channel of channels) {
+    for (const hit of channel) {
+      const current = best.get(hit.id)
+      if (current === undefined || hit.score > current.score) best.set(hit.id, hit)
+    }
+  }
+  return sortScored([...best.values()]).slice(0, poolSize)
+}
+
+/** 双通道语义候选池：各通道取池大小 → 并集去重取最高分 → 仍按池大小截断。 */
+export function rankByEmbedding(
+  rows: readonly ExperienceRetrievalRow[],
+  queryVector: Float64Array,
+  poolSize: number,
+): ExperienceScoredRow[] {
+  const taskChannel = scoreChannel(rows, queryVector, (row) => row.taskEmbedding, poolSize)
+  const decisionChannel = scoreChannel(rows, queryVector, (row) => row.decisionEmbedding, poolSize)
+  return mergeChannels([taskChannel, decisionChannel], poolSize)
+}
+
+/** 词法分词：拉丁词按词切分，中日韩文本按二元组切分（无分词器也能稳定匹配）。 */
+export function tokenizeForLexical(text: string): string[] {
+  const tokens: string[] = []
+  const pattern = /[a-z0-9]+|[\u4e00-\u9fff]+/gu
+  for (const match of text.toLowerCase().matchAll(pattern)) {
+    const piece = match[0]
+    if (piece.length === 1 || /^[a-z0-9]+$/u.test(piece)) {
+      tokens.push(piece)
+      continue
+    }
+    for (let index = 0; index + 1 < piece.length; index += 1) tokens.push(piece.slice(index, index + 2))
+  }
+  return tokens
+}
+
+/** BM25 词法评分（按文档顺序返回得分）。 */
+export function bm25Scores(query: string, documents: readonly string[]): number[] {
+  if (documents.length === 0) return []
+  const queryTokens = [...new Set(tokenizeForLexical(query))]
+  const documentTokens = documents.map((document) => tokenizeForLexical(document))
+  const totalLength = documentTokens.reduce((sum, tokens) => sum + tokens.length, 0)
+  const averageLength = totalLength / documentTokens.length
+  const scores = documents.map(() => 0)
+  for (const token of queryTokens) {
+    const frequencies = documentTokens.map((tokens) => tokens.filter((item) => item === token).length)
+    const documentFrequency = frequencies.filter((count) => count > 0).length
+    if (documentFrequency === 0) continue
+    const idf = Math.log(1 + (documents.length - documentFrequency + 0.5) / (documentFrequency + 0.5))
+    frequencies.forEach((frequency, index) => {
+      if (frequency === 0) return
+      const length = documentTokens[index].length
+      const lengthRatio = averageLength > 0 ? length / averageLength : 0
+      const denominator = frequency + BM25_K1 * (1 - BM25_B + BM25_B * lengthRatio)
+      scores[index] += (idf * frequency * (BM25_K1 + 1)) / denominator
+    })
+  }
+  return scores
+}
+
+/** 词法回退候选池：把两个检索文本拼成一篇文档做 BM25，取池大小。 */
+export function rankByBm25(query: string, rows: readonly ExperienceRetrievalRow[], poolSize: number): ExperienceScoredRow[] {
+  const documents = rows.map((row) => `${row.taskRetrievalText}\n${row.decisionRetrievalText}`)
+  const scores = bm25Scores(query, documents)
+  const scored = rows.map((row, index) => ({ id: row.id, score: scores[index] ?? 0, row }))
+  return sortScored(scored).slice(0, poolSize)
+}
+
+/**
+ * 一次查询嵌入 + 双通道候选池；语义不可用（端口退化 bm25 或嵌入调用失败）时回退词法检索。
+ * 成功路径只发起一次查询嵌入（不逐条候选发请求）。
+ */
+export async function recallActiveHits(input: ExperienceRecallInput): Promise<ExperienceRecallOutcome> {
+  if (input.rows.length === 0) {
+    // 无活跃行时不必付出一次远程嵌入的代价；来源仍如实反映当前端口能力
+    return { scored: [], source: input.embedding.source === "bm25" ? "bm25" : "semantic" }
+  }
+  if (input.embedding.source !== "bm25") {
+    try {
+      const vectors = await input.embedding.embed([input.query])
+      const queryVector = vectors[0]
+      if (!queryVector) throw new Error("嵌入服务未返回查询向量")
+      return { scored: rankByEmbedding(input.rows, queryVector, CANDIDATE_POOL_SIZE), source: "semantic" }
+    } catch {
+      // 语义路径不可用即降级词法检索：宁可给词法命中并标注来源，也不要静默返回空结果
+    }
+  }
+  return { scored: rankByBm25(input.query, input.rows, CANDIDATE_POOL_SIZE), source: "bm25" }
+}

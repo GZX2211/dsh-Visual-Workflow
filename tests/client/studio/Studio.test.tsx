@@ -443,8 +443,20 @@ function assetRemoteStub(): RemoteFace & { calls: Array<{ endpoint: string; args
       if (endpoint === EP.EP_GET_ASSET) return args?.kind === 'role' ? roleDetail : workflowDetail
       if (endpoint === EP.EP_LIST_EXPERIENCES) {
         return [
-          { id: 'ex-1', active: true, reflectionPromptVersion: '1', taskType: '软件开发', taskContext: '重构旧模块', insight: '先补测试再重构', createdAt: 2, updatedAt: 2 },
-          { id: 'ex-2', active: false, reflectionPromptVersion: '1', taskType: '软件开发', taskContext: '归档上下文', insight: '归档经验', createdAt: 1, updatedAt: 1 },
+          {
+            id: 'ex-1', active: true, experienceType: 'agent', responsibility: '重构旧模块',
+            taskType: '软件开发', decisionDomain: '重构顺序', situation: '旧模块缺少测试',
+            trigger: '再次重构旧模块', principle: '先补测试再重构', recommendedAction: '先补测试',
+            exclusions: [], evidence: [], taskRetrievalText: '任务侧投影', decisionRetrievalText: '决策侧投影',
+            sourceRunId: 'run-1', generationPromptId: 'prompt-1', generationPromptVersion: 'v1', createdAt: 2, updatedAt: 2,
+          },
+          {
+            id: 'ex-2', active: false, experienceType: 'agent', responsibility: '归档的责任',
+            taskType: '软件开发', decisionDomain: '归档取舍', situation: '归档情境',
+            trigger: '归档信号', principle: '归档原则', recommendedAction: '归档行动',
+            exclusions: [], evidence: [], taskRetrievalText: '任务侧投影', decisionRetrievalText: '决策侧投影',
+            sourceRunId: 'run-2', generationPromptId: 'prompt-1', generationPromptVersion: 'v1', createdAt: 1, updatedAt: 1,
+          },
         ]
       }
       if (endpoint === EP.EP_LIST_TEMPLATES && String(args?.kind ?? '') === 'role') {

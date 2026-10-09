@@ -77,12 +77,5 @@ export {
   type OrgPlanTargetKind,
 } from './org-plan.js'
 
-// 运行终态「复盘指令」文案（run 进入 completed/failed/stopped 时注入父代理；
-// 由 orchestrator/runtime-reflection 消费，父代理复盘后经 wf_experience 提交候选经验）。
-export {
-  buildReflectionPrompt,
-  REFLECTION_MARKER,
-  REFLECTION_MAX_EXPERIENCES,
-  REFLECTION_TOOL_NAME,
-  type RunReflectionFacts,
-} from './reflection.js'
+// Team 经验共享上下文块（协作组启动前追加给每个成员的独立文本块；由 orchestrator 消费）。
+export { buildTeamExperienceBlock, TEAM_EXPERIENCE_MARKER } from './team-experience.js'

@@ -35,9 +35,6 @@ interface AssetStoreLike {
     restoreWorkflowAsset(assetId: string): Promise<WorkflowAssetDetail>;
     retireWorkflowAsset(assetId: string): Promise<void>;
     previewAssetCascade(input: AssetCascadePreviewInput): Promise<RoleAssetReference[]>;
-    listExperiences(limit: number): Promise<ExperienceEntry[]>;
-    saveExperience(id: string, patch: ExperiencePatch): Promise<ExperienceEntry>;
-    setExperienceActive(id: string, active: boolean): Promise<ExperienceEntry>;
     promoteRole(input: {
         templateId: string;
         fingerprint: string;
@@ -71,6 +68,28 @@ interface AssetStoreLike {
         source: 'human' | 'agent';
     }): Promise<PromoteResult>;
 }
+/**
+ * 经验域能力缝（api 边界消费的最小结构）。
+ *
+ * 为什么编辑只暴露语义字段补丁：保存要重算两个检索投影与向量，而重算规则（投影口径、
+ * 嵌入模型可用性、判重）属经验域；边界只做「请求 → 领域调用 → 稳定响应」的翻译，
+ * 因此这里既没有投影也没有相似度，领域实现由宿主装配（缺失时端点明确 501）。
+ */
+export interface ExperienceDomainFace {
+    list(input: {
+        limit: number;
+    }): Promise<ExperienceEntry[]>;
+    update(input: {
+        experienceId: string;
+        patch: ExperiencePatch;
+    }): Promise<ExperienceEntry>;
+    retire(input: {
+        experienceId: string;
+    }): Promise<ExperienceEntry>;
+    restore(input: {
+        experienceId: string;
+    }): Promise<ExperienceEntry>;
+}
 /** 宿主能力缝（index.ts 装配；单测 fake）。 */
 export interface ApiHost {
     orchestrator: OrchestratorRuntime;
@@ -103,12 +122,19 @@ export interface ApiHost {
     toolSwitches?: ToolSwitchStore;
     /** 资产库能力缝（宿主注入 assets 模块的 AssetStore；缺失时资产端点返回 501）。 */
     assets?: AssetStoreLike;
+    /** 经验域能力缝（宿主注入经验域实现；缺失时经验端点返回 501）。 */
+    experience?: ExperienceDomainFace;
 }
 /**
  * 取资产库能力缝。未装配时明确 501——静默降级为「空资产库」会让用户看到
  * 「库里什么都没有」这种与事实不符的界面；资产端点与经验端点共用同一份判据。
  */
 export declare function requireAssets(host: ApiHost): NonNullable<ApiHost['assets']>;
+/**
+ * 取经验域能力缝。未装配时明确 501——静默返回空经验列表会让用户看到
+ * 「库里没有经验」这种与事实不符的界面，也可能让保存静默失败。
+ */
+export declare function requireExperience(host: ApiHost): ExperienceDomainFace;
 /**
  * GUI API 分发基座：按端点名分发（白名单禁止命中原型链方法）。
  * 所有方法为 async (args) => value；参数缺失抛 HttpError(400)。

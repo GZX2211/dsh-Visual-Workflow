@@ -526,4 +526,33 @@ describe('wfFinish 收尾', () => {
     await expect(h.runtime.wfFinish(childCaller, {})).rejects.toMatchObject({ code: 'WF_NOT_ROOT' })
     await expect(h.runtime.wfFinish(caller, {})).rejects.toMatchObject({ code: 'WF_NO_ACTIVE_RUN' })
   })
+
+  it('failed：终止节点全部落 fail 并写盘，锁释放', async () => {
+    const h = await makeHarness()
+    const { entry } = await start(h, makeFlow())
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+
+    await h.runtime.wfFinish(caller, { status: 'failed', summary: '无法继续' })
+
+    expect(entry.snapshot.endedAt).not.toBeNull()
+    expect(entry.snapshot.nodes.filter((n) => n.status === 'running').length).toBe(0)
+    expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-a1')!.status).toBe('fail')
+    expect((await h.store.getRun('run-1'))?.status).toBe('failed')
+    expect(h.runtime.flowLockInfo('flow-1')).toBeNull()
+    expect(h.runtime.entryFor('run-1')).toBeNull()
+  })
+
+  it('收尾不再注入终态复盘指令：父代理既无插队消息也无新回合', async () => {
+    const h = await makeHarness()
+    const root = h.agents.roots.get('session-1')!
+    await start(h, makeFlow())
+    // startRun 本身注入一条编排指令；parent 忙碌以覆盖 steer 通道
+    root.status = 'running'
+    const before = { steered: root.steered.length, messages: root.messages.length }
+
+    await h.runtime.wfFinish(caller, { status: 'completed', summary: '完成' })
+
+    expect(root.steered).toHaveLength(before.steered)
+    expect(root.messages).toHaveLength(before.messages)
+  })
 })

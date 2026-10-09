@@ -38,9 +38,12 @@ dsh-visual-workflow/
 │   ├── host/                     # Host 插件
 │   │   ├── shared/               # 前后端共享纯类型契约
 │   │   ├── storage/              # 持久化存储
+│   │   ├── assets/               # SQLite 资产库与经验持久化
+│   │   ├── experience/           # 经验域（校验/投影/向量/判重/召回/主体解析）
 │   │   ├── orchestrator/         # 运行锁、断点状态机、双向同步
 │   │   ├── agent/                # 子代理执行引擎、护栏、提示词注入
 │   │   ├── tools/                # wf_* 工具注册
+│   │   ├── team/                 # 官方 Agent Team 能力适配
 │   │   ├── api/                  # GUI HTTP API 边界
 │   │   ├── mcp/                  # Host 侧 MCP 配置注册表
 │   │   ├── transfer/             # 导入导出
@@ -54,7 +57,8 @@ dsh-visual-workflow/
 │   └── client/                   # WebUI 源码
 │       ├── sidebar/              # 右侧 Sidebar 标签页 / 侧边栏入口 / 常驻容器
 │       ├── studio/               # 主状态机
-│       ├── components/           # 组件
+│       ├── styles/               # 样式文件
+│       ├── components/           # 画布、资产、历史、定时任务等 UI 组件
 │       ├── hooks/                # 职责单一 hooks
 │       └── lib/                  # 纯逻辑（remote/graph-model/bundle/storage）
 ├── tests/                        # 测试文件（client / host / contract / integration）
@@ -93,7 +97,6 @@ dsh-visual-workflow/
 - 核心逻辑优先使用纯函数；运行时能力通过最小接口进行依赖注入。保持单向依赖，避免循环依赖；共享逻辑放入职责明确的模块，不创建无明确职责的 `utils.ts`、`helpers.ts` 等聚合文件。
 - 文件使用 `kebab-case`；变量、函数和参数使用 `camelCase`；类型、接口、类和组件使用 `PascalCase`。命名应描述职责，而不是描述实现方式。
 - 每个文件承担一个明确职责，尽量只有一个主要变更原因；不同职责拆分为独立模块。
-- 字符串统一使用双引号 `"`，并遵循项目 formatter / linter 配置。
 - 修改公共接口、Tool Schema、数据结构或运行时契约时，必须同步检查调用方、测试等相关内容。
 
 ---
@@ -101,7 +104,8 @@ dsh-visual-workflow/
 ## 注释规范
 
 - 原则：注释只补充代码未表达的信息，只解释 why（非显而易见的约束、绕行、决策背景、陷阱）；删掉不影响理解就不写。
-- 禁止：历史叙述；路径/行号/内部文档指针；复述代码；断言外部库行为。
+- 禁止：历史叙述；行号/内部文档指针；复述代码；断言外部库行为。
+- 保留：文件首行路径头注释。
 - 必须：兼容与降级（分支条件、失败行为）；不变量/前置条件；业务/安全规则；无法从代码推断的设计依据。
 - 书写：贴近所描述代码；公共 API 用对应文档注释格式（JSDoc/TSDoc），只写自然语言，结构标签交给工具；精炼、简洁、准确，长度以必要为限。
 - 行为变更同步更新或删除注释，不能同步时删除优于保留错误注释。

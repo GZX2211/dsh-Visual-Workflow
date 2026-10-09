@@ -192,10 +192,10 @@ describe('Inspector 底部按钮分录（模版态 / 资产态）', () => {
   })
 
   it('经验（活跃 / 已归档）：只有保存 + 归档（或恢复），没有回滚与入库', async () => {
-    const entry = { id: 'ex-1', active: true, taskType: '软件开发', taskContext: '上下文', insight: '经验一', createdAt: 1, updatedAt: 1 }
+    const entry = { id: 'ex-1', active: true, responsibility: '责任一', taskType: '软件开发', principle: '经验一', createdAt: 1, updatedAt: 1 }
     await render(React.createElement(Inspector, {
       ...common,
-      editorData: { kind: 'experience', data: entry, name: entry.taskContext, experience: true, experienceId: 'ex-1' } as never,
+      editorData: { kind: 'experience', data: entry, name: entry.responsibility, experience: true, experienceId: 'ex-1' } as never,
     } as never))
     expect(footerLabels()).toEqual([zh.inspectorSave, zh.assetArchive])
     expect(footerButton(zh.assetArchive)?.getAttribute('title')).toBe(zh.experienceArchiveHint)
@@ -206,7 +206,7 @@ describe('Inspector 底部按钮分录（模版态 / 资产态）', () => {
       editorData: {
         kind: 'experience',
         data: { ...entry, active: false },
-        name: entry.taskContext,
+        name: entry.responsibility,
         experience: true,
         experienceId: 'ex-1',
         retired: true,
@@ -216,32 +216,91 @@ describe('Inspector 底部按钮分录（模版态 / 资产态）', () => {
     expect(footerButton(zh.assetRestore)?.getAttribute('title')).toBe(zh.experienceRestoreHint)
   })
 
-  it('经验表单：五个可编辑字段自上而下 + 只读元信息', async () => {
+  it('经验表单：九个语义字段自上而下 + 检索投影与来源信息只读', async () => {
     const entry = {
       id: 'ex-1',
       active: true,
+      experienceType: 'agent',
+      responsibility: '负责发布链路',
+      taskType: '插件开发',
+      decisionDomain: '发布时机',
+      situation: '发布前发现缺陷',
+      trigger: '再次发布',
+      principle: '先跑端到端',
+      recommendedAction: '补一轮端到端验证',
+      exclusions: ['一次性脚本'],
+      evidence: ['回归缺陷'],
+      taskRetrievalText: '任务侧投影',
+      decisionRetrievalText: '决策侧投影',
+      embeddingModel: 'bge-m3',
+      embeddingDimension: 1024,
       sourceRunId: 'run-9',
-      taskType: '软件开发',
-      taskContext: '上下文一',
-      insight: '经验一',
-      evidence: '证据一',
-      reviewFeedback: '审核意见一',
+      generationPromptId: 'prompt-3',
+      generationPromptVersion: 'v2',
       createdAt: 1700000000000,
       updatedAt: 1700000000000,
     }
     await render(React.createElement(Inspector, {
       ...common,
-      editorData: { kind: 'experience', data: entry, name: entry.taskContext, experience: true, experienceId: 'ex-1' } as never,
+      editorData: { kind: 'experience', data: entry, name: entry.responsibility, experience: true, experienceId: 'ex-1' } as never,
     } as never))
+
     const labels = Array.from(document.querySelectorAll('.wf-field .wf-hint')).map((node) => node.textContent)
-    expect(labels.slice(0, 5)).toEqual([
-      zh.experienceTaskType, zh.experienceTaskContext, zh.experienceInsight, zh.experienceEvidence, zh.experienceReviewFeedback,
+    expect(labels).toEqual([
+      zh.experienceResponsibility, zh.experienceTaskType, zh.experienceDecisionDomain, zh.experienceSituation,
+      zh.experienceTrigger, zh.experiencePrinciple, zh.experienceRecommendedAction, zh.experienceExclusions,
+      zh.experienceEvidence,
     ])
+    // 列表字段按「每行一条」编辑：数组以换行呈现
+    const texts = Array.from(document.querySelectorAll('.wf-field textarea')).map((node) => (node as HTMLTextAreaElement).value)
+    expect(texts).toContain('一次性脚本')
+    expect(texts).toContain('回归缺陷')
+
+    // 只读区：检索投影与来源信息（界面只展示，保存不回传）
     const readonlyText = Array.from(document.querySelectorAll('.wf-form-stack .wf-hint')).map((node) => node.textContent).join('\n')
+    expect(readonlyText).toContain(zh.experienceRetrievalTitle)
+    expect(readonlyText).toContain(`${zh.experienceTaskRetrievalText}：任务侧投影`)
+    expect(readonlyText).toContain(`${zh.experienceDecisionRetrievalText}：决策侧投影`)
+    expect(readonlyText).toContain(zh.experienceProvenanceTitle)
     expect(readonlyText).toContain(`${zh.experienceIdLabel}：ex-1`)
     expect(readonlyText).toContain(`${zh.experienceSourceRun}：run-9`)
+    expect(readonlyText).toContain(`${zh.experienceGenerationPromptId}：prompt-3`)
+    expect(readonlyText).toContain(`${zh.experienceGenerationPromptVersion}：v2`)
+    expect(readonlyText).toContain(`${zh.experienceEmbeddingModel}：bge-m3`)
+    expect(readonlyText).toContain(`${zh.experienceEmbeddingDimension}：1024`)
     expect(readonlyText).toContain(zh.experienceCreatedAt)
     expect(readonlyText).toContain(zh.experienceUpdatedAt)
+  })
+
+  it('经验表单：只读字段不生成可编辑控件（区间外无输入）', async () => {
+    const entry = {
+      id: 'ex-1',
+      active: true,
+      responsibility: '责任一',
+      taskType: '软件开发',
+      decisionDomain: '取舍',
+      situation: '情境一',
+      trigger: '信号一',
+      principle: '原则一',
+      recommendedAction: '行动一',
+      exclusions: [],
+      evidence: [],
+      taskRetrievalText: '任务侧投影',
+      decisionRetrievalText: '决策侧投影',
+      createdAt: 1700000000000,
+      updatedAt: 1700000000000,
+    }
+    await render(React.createElement(Inspector, {
+      ...common,
+      editorData: { kind: 'experience', data: entry, name: entry.responsibility, experience: true, experienceId: 'ex-1' } as never,
+    } as never))
+
+    // 字符字段 7 个 + 列表字段 2 个 = 9 个可编辑控件；检索投影/来源信息一律只读展示
+    expect(document.querySelectorAll('.wf-field input, .wf-field textarea')).toHaveLength(9)
+    const inputs = Array.from(document.querySelectorAll('.wf-field input, .wf-field textarea')) as Array<HTMLInputElement>
+    expect(inputs.some((node) => (node.value ?? '') === '任务侧投影')).toBe(false)
+    expect(inputs.some((node) => (node.value ?? '') === '决策侧投影')).toBe(false)
+    expect(inputs.some((node) => (node.value ?? '') === '1700000000000')).toBe(false)
   })
 
   it('画布角色节点：绑定来源资产时多出回滚按钮（与左侧栏角色资产一致）', async () => {

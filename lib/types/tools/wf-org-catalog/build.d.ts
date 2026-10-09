@@ -1,5 +1,5 @@
-import type { CatalogExperienceDetail, CatalogExperienceIndexEntry, CatalogIndex, CatalogInlineRoleDetail, CatalogModelSource, CatalogPresetSource, CatalogRoleDetail, CatalogWorkflowDetail } from './types.js';
-import type { ExperienceEntry, RoleAssetDetail, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../../shared/asset-types.js';
+import type { CatalogIndex, CatalogInlineRoleDetail, CatalogModelSource, CatalogPresetSource, CatalogRoleDetail, CatalogWorkflowDetail } from './types.js';
+import type { RoleAssetDetail, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../../shared/asset-types.js';
 import type { RoleNode } from '../../shared/graph-model.js';
 /** 索引里的召回指引：目录是候选清单而非全部内容，详情按 ids 召回。 */
 export declare const DETAIL_HINT: string;
@@ -16,11 +16,10 @@ export interface ResolvedRoleRef {
     assetId: string | null;
     versionId: number;
 }
-/** 组装资产与经验索引（第一次调用）。 */
+/** 组装资产索引（第一次调用）。 */
 export declare function buildIndex(input: {
     workflows: WorkflowAssetSummary[];
     roles: RoleAssetSummary[];
-    experiences: CatalogExperienceIndexEntry[];
     combos: Array<Record<string, unknown>>;
     presets: CatalogPresetSource[];
     models: CatalogModelSource[];
@@ -39,8 +38,6 @@ export declare function buildInlineRoleDetail(input: {
     roleAssetId?: string;
     roleVersionId?: number;
 }): CatalogInlineRoleDetail;
-/** 组装经验详情（insight 与 evidence 完整返回，不截断：经验本体就是这两段文本）。 */
-export declare function buildExperienceDetail(experience: ExperienceEntry): CatalogExperienceDetail;
 /**
  * 数据库连接脱敏：密钥字段替换为占位符，其余字段原样保留（保证资产可复用）。
  * 为什么必须脱敏：连接信息没有二次召回通道，必须一次性给出；而密码一旦进入模型

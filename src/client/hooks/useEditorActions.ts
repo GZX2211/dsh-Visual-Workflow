@@ -278,8 +278,8 @@ export function useEditorActions(
       return
     }
     if (editor.source === 'experience') {
-      // 经验表单只下发可编辑字段（任务类型/上下文/经验/证据/审核意见）：直接落详情槽，
-      // 保存时再由 experiencePatchOf 做一次投影——此处不复制字段清单，避免两处漂移。
+      // 经验表单只下发九个可编辑语义字段：直接落详情槽，保存时再由 experiencePatchOf
+      // 做一次投影——此处不复制字段清单，避免两处漂移。
       dispatch({ type: 'EXPERIENCE_PATCH', patch })
       return
     }

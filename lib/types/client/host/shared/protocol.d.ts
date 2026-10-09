@@ -160,10 +160,25 @@ export declare const WF_ORG_CATALOG = "wf_org_catalog";
 /** 父代理自主编排的写图工具名（两组：图结构 / 运行状态标记）。 */
 export declare const WF_GRAPH_PATCH = "wf_graph_patch";
 /**
- * 经验入库工具名（父代理；复盘后提交经验候选 → 官方多选卡片 → 用户确认后原子落库）。
- * 调用者必须是主会话父代理（子代理经 CHILD_AGENT_HIDDEN_TOOLS 永久隐藏）。
+ * 经验学习工具名（所有代理可用；单工具双态：空集取当前主体类型的生成 Prompt，
+ * 传候选即校验后入库）。
+ * 与自主编排工具不同：经验是「每个主体自己的学习」，子代理同样需要，
+ * 因此经 OPTIONAL_INJECT_TOOLS 允许进入子代理工具集（由组合勾选决定）。
  */
-export declare const WF_EXPERIENCE = "wf_experience";
+export declare const WF_EXPERIENCE_LEARN = "wf_experience_learn";
+/**
+ * 经验召回工具名（所有代理可用；两阶段：先按 query 取候选摘要，再按 ids 取完整内容）。
+ * 与 wf_org_catalog 的分工：后者只勘察组织资产，不再承担经验召回。
+ */
+export declare const WF_EXPERIENCE_RECALL = "wf_experience_recall";
+/**
+ * 经验反馈工具名（所有代理可用；提交本次任务中**实际使用过**的经验评价）。
+ *
+ * 阶段语义（用户裁决）：召回发生在任务开始或执行途中，而反馈与学习一样只发生在
+ * **任务最终完成阶段**——只有做完整件事，才有资格评价某条经验带来的实际效果。
+ * 只接受已被显式注入（wf_experience_recall 的 ids 阶段）过的经验，"没有使用的经验不能评价"。
+ */
+export declare const WF_EXPERIENCE_FEEDBACK = "wf_experience_feedback";
 /** 父代理（主会话 Agent）可见工具集：wf_run_node / wf_run_node_wait、wf_finish、wf_ask_agent。 */
 export declare const PARENT_AGENT_VISIBLE_TOOLS: readonly ["wf_run_node", "wf_run_node_wait", "wf_finish", "wf_ask_agent"];
 /**
@@ -173,13 +188,19 @@ export declare const PARENT_AGENT_VISIBLE_TOOLS: readonly ["wf_run_node", "wf_ru
  * wf_graph_patch（勘察与改图都是「父代理的组织权限」，子代理不得改图）。
  * 注意：全局工具开关（tool-switches）只影响「是否可见」，本集合是「永不进子代理」，
  * 两者正交——组合管理仍列出本集合工具（同一页面兼作全局开关面板），但永不随组合下发。
+ * 经验三工具（wf_experience_learn / wf_experience_recall / wf_experience_feedback）**不在**本集合：
+ * 每个主体都有自己的经验，子代理经可选注入集勾选后方可使用。
  */
-export declare const CHILD_AGENT_HIDDEN_TOOLS: readonly ["wf_run_node", "wf_run_node_wait", "wf_finish", "wf_org_catalog", "wf_graph_patch", "wf_experience"];
+export declare const CHILD_AGENT_HIDDEN_TOOLS: readonly ["wf_run_node", "wf_run_node_wait", "wf_finish", "wf_org_catalog", "wf_graph_patch"];
 /**
- * 元编排自进化工具集（父代理专属）：经验入库（wf_experience）。
- * 与 ORG_AUTHORING_TOOLS 同口径——默认开启、子代理永久隐藏、工具内二次校验调用者身份。
+ * 元编排自进化工具集（所有代理可用）：经验学习、经验召回与经验反馈。
+ * 与 ORG_AUTHORING_TOOLS 的差别——后者是父代理的组织权限（永久隐藏于子代理），
+ * 本集合是「主体自身的学习、回忆与复盘」，因此同时存在于 OPTIONAL_INJECT_TOOLS
+ * （子代理经组合勾选才注入；父代理默认可见）。
+ *
+ * 三者的阶段语义：召回发生在任务开始或执行途中；学习与反馈都发生在**任务最终完成阶段**。
  */
-export declare const META_EVOLUTION_TOOLS: readonly ["wf_experience"];
+export declare const META_EVOLUTION_TOOLS: readonly ["wf_experience_learn", "wf_experience_recall", "wf_experience_feedback"];
 /**
  * 自主编排工具集（**默认开启**，与其他工具同口径；由用户在组合管理中按需关闭）：
  * 勘察/改图属「组织权限」，但**父代理专属**——子代理经 CHILD_AGENT_HIDDEN_TOOLS
@@ -236,12 +257,14 @@ export declare const DEFAULT_DISABLED_ON_FIRST_INSTALL: readonly ["spawn_teammat
  */
 export declare const RESERVED_TRANSPORT_TOOL = "run_code";
 /**
- * 可选注入工具集（默认不注入任何代理，仅勾选/存在连线时按需进入子代理工具集）。
+ * 可选注入工具集（默认不注入子代理，仅勾选/存在连线时按需进入子代理工具集）。
  *  - wf_ask：组合/白名单勾选时注入
  *  - wf_ask_agent：组合/白名单勾选时注入（协作组内通信）
  *  - wf_db_query：存在数据库连线（db-in）时按连线自动注入
+ *  - wf_experience_learn / wf_experience_recall / wf_experience_feedback：
+ *    组合勾选时注入（每个主体自己的学习、回忆与复盘反馈）
  */
-export declare const OPTIONAL_INJECT_TOOLS: readonly ["wf_ask", "wf_ask_agent", "wf_db_query"];
+export declare const OPTIONAL_INJECT_TOOLS: readonly ["wf_ask", "wf_ask_agent", "wf_db_query", "wf_experience_learn", "wf_experience_recall", "wf_experience_feedback"];
 /**
  * 工具可见性元数据总表：以「工具名 → 可见性描述」的统一视图汇总各规则，
  * 供测试做关键规则断言与消费侧做静态判定（as const，零运行时 import）。
@@ -250,13 +273,13 @@ export declare const TOOL_VISIBILITY: {
     /** 父代理可见集（wf_run_node / wf_run_node_wait / wf_finish / wf_ask_agent(resolve) + 有 db-in 时的 wf_db_query）。 */
     readonly parentVisible: readonly ["wf_run_node", "wf_run_node_wait", "wf_finish", "wf_ask_agent"];
     /** 子代理永久隐藏集（wf_run_node / wf_run_node_wait / wf_finish + 自主编排两工具）。 */
-    readonly childHidden: readonly ["wf_run_node", "wf_run_node_wait", "wf_finish", "wf_org_catalog", "wf_graph_patch", "wf_experience"];
-    /** 可选注入集（wf_ask / wf_ask_agent / wf_db_query）。 */
-    readonly optionalInject: readonly ["wf_ask", "wf_ask_agent", "wf_db_query"];
+    readonly childHidden: readonly ["wf_run_node", "wf_run_node_wait", "wf_finish", "wf_org_catalog", "wf_graph_patch"];
+    /** 可选注入集（wf_ask / wf_ask_agent / wf_db_query / 经验三工具）。 */
+    readonly optionalInject: readonly ["wf_ask", "wf_ask_agent", "wf_db_query", "wf_experience_learn", "wf_experience_recall", "wf_experience_feedback"];
     /** 自主编排工具集（wf_org_catalog / wf_graph_patch；默认开启、父代理专属，可经全局工具开关关闭）。 */
     readonly orgAuthoring: readonly ["wf_org_catalog", "wf_graph_patch"];
-    /** 元编排自进化工具集（wf_experience；父代理专属，子代理永久隐藏）。 */
-    readonly metaEvolution: readonly ["wf_experience"];
+    /** 元编排自进化工具集（wf_experience_learn / wf_experience_recall / wf_experience_feedback；所有代理可用，进可选注入集）。 */
+    readonly metaEvolution: readonly ["wf_experience_learn", "wf_experience_recall", "wf_experience_feedback"];
     /**
      * 官方 Agent Team 工具集（9 个）：由官方包注册在 Team 成员作用域，插件不注册、不转写；
      * 插件只把它作为「全局工具开关」与组合管理列表的目标集。禁止进入任何 restrict allow/deny 名单。
@@ -356,3 +379,28 @@ export declare const ERR_ASSET_BAD_ARGS = "WF_ASSET_BAD_ARGS";
 export declare const ERR_EXPERIENCE_NOT_FOUND = "WF_EXPERIENCE_NOT_FOUND";
 /** 经验入参非法（id / 载荷形状 / 可编辑字段类型），HTTP 400。 */
 export declare const ERR_EXPERIENCE_BAD_ARGS = "WF_EXPERIENCE_BAD_ARGS";
+/**
+ * 经验生成 Prompt 尚未初始化即提交候选。
+ * 消费方语义：模型必须先调用 `wf_experience_learn`（空集）取得当前主体类型的生成 Prompt，
+ * 再按 Prompt 产出候选并提交——该错误消息必须直接给出这一动作。
+ */
+export declare const ERR_EXPERIENCE_NOT_INITIALIZED = "WF_EXPERIENCE_NOT_INITIALIZED";
+/** 经验候选不符合入库协议（未知字段、类型不符、长度或数量超限），HTTP 400。 */
+export declare const ERR_EXPERIENCE_VALIDATION = "WF_EXPERIENCE_VALIDATION";
+/**
+ * 语义嵌入能力不可用（嵌入服务退化到 BM25 词法检索）。
+ * 消费方语义：持久化 V1 要求语义去重，此时**不写入**并如实上报；调用方可稍后重试。
+ */
+export declare const ERR_EXPERIENCE_EMBEDDING_UNAVAILABLE = "WF_EXPERIENCE_EMBEDDING_UNAVAILABLE";
+/**
+ * 经验主体类型与当前实际职责不符（如编排父代理填 agent、未启动过 Team 却填 team）。
+ * 消费方语义：只能提交与自身职责对应的经验，错误消息给出当前实际职责与可选类型。
+ */
+export declare const ERR_EXPERIENCE_WRONG_TYPE = "WF_EXPERIENCE_WRONG_TYPE";
+/** 经验召回失败（检索通道不可用且词法回退亦失败）。 */
+export declare const ERR_EXPERIENCE_RECALL_FAILED = "WF_EXPERIENCE_RECALL_FAILED";
+/**
+ * 经验反馈失败（评价写入或统计聚合失败；经验本体不受影响）。
+ * 消费方语义：本次评价未落库，调用方可稍后在任务收尾阶段重试；已有评价历史一律不被改写。
+ */
+export declare const ERR_EXPERIENCE_FEEDBACK_FAILED = "WF_EXPERIENCE_FEEDBACK_FAILED";
