@@ -57,6 +57,27 @@ function flowOf(nodes: GraphNode[]): WorkflowDocument {
   }
 }
 
+/** 文本型文件节点。 */
+function fileNode(id: string, label = id): GraphNode {
+  return { id, kind: 'file', position: { x: 0, y: 0 }, data: { label, fileKind: 'text', content: '' } }
+}
+
+/** 既有受管文件节点（画布手工拖入的形态：带受管副本路径）。 */
+function managedFileNode(id: string, label = id): GraphNode {
+  return {
+    id,
+    kind: 'file',
+    position: { x: 0, y: 0 },
+    data: {
+      label,
+      fileKind: 'file',
+      managedPath: 'data/files/旧件.md',
+      fileName: '旧件.md',
+      files: [{ fileName: '旧件.md', managedPath: 'data/files/旧件.md' }],
+    },
+  }
+}
+
 /** 含闸门的最小合法图：start → m1(→p1) → a1 → end。 */
 function gateFlow(role?: 'executor' | 'milestone'): WorkflowDocument {
   return {
@@ -70,6 +91,78 @@ function gateFlow(role?: 'executor' | 'milestone'): WorkflowDocument {
     lines: [flowLine('l1', 's', 'm1'), flowLine('l2', 'm1', 'a1'), flowLine('l3', 'a1', 'e')],
   }
 }
+
+describe('file 节点：写图只产文本型（D-07）', () => {
+  /** 取节点 data：结果文档的 nodes 是 unknown[]，测试内收窄一次。 */
+  function dataOf(doc: { nodes: unknown[] }, id: string): Record<string, unknown> {
+    const found = (doc.nodes as Array<{ id: string; data: Record<string, unknown> }>).find((node) => node.id === id)
+    if (!found) throw new Error(`测试夹具缺少节点：${id}`)
+    return found.data
+  }
+
+  it('test_create_node 传受管文件_归一化为文本型并报告归一化', () => {
+    const doc = flowOf([stage('s', 'start'), stage('e', 'end')])
+
+    const result = applyGraphOps({
+      doc,
+      ops: [{
+        op: 'create_node',
+        node: {
+          kind: 'file',
+          id: 'f1',
+          data: {
+            label: '交付文件',
+            fileKind: 'file',
+            managedPath: 'data/files/x.md',
+            files: [{ fileName: 'x.md', managedPath: 'data/files/x.md' }],
+          },
+        },
+      }],
+    })
+
+    expect(dataOf(result.doc, 'f1')).toMatchObject({ fileKind: 'text', label: '交付文件' })
+    expect(dataOf(result.doc, 'f1').managedPath).toBeUndefined()
+    expect(dataOf(result.doc, 'f1').files).toBeUndefined()
+    expect(result.fileNodeTextOnlyIds).toEqual(['f1'])
+  })
+
+  it('test_create_node 传文本型_不报告归一化', () => {
+    const doc = flowOf([stage('s', 'start'), stage('e', 'end')])
+
+    const result = applyGraphOps({
+      doc,
+      ops: [{ op: 'create_node', node: { kind: 'file', id: 'f2', data: { label: '任务书', fileKind: 'text', content: '正文' } } }],
+    })
+
+    expect(dataOf(result.doc, 'f2')).toMatchObject({ label: '任务书', fileKind: 'text', content: '正文' })
+    expect(result.fileNodeTextOnlyIds).toEqual([])
+  })
+
+  it('test_update_node_data 显式要求受管_归一化为文本型并报告', () => {
+    const doc = flowOf([stage('s', 'start'), fileNode('f1'), stage('e', 'end')])
+
+    const result = applyGraphOps({
+      doc,
+      ops: [{ op: 'update_node_data', nodeId: 'f1', data: { fileKind: 'file', managedPath: 'data/files/x.md' } }],
+    })
+
+    expect(dataOf(result.doc, 'f1')).toMatchObject({ fileKind: 'text' })
+    expect(dataOf(result.doc, 'f1').managedPath).toBeUndefined()
+    expect(result.fileNodeTextOnlyIds).toEqual(['f1'])
+  })
+
+  it('test_update_node_data 仅改名称_保留既有受管配置', () => {
+    const doc = flowOf([stage('s', 'start'), managedFileNode('f1'), stage('e', 'end')])
+
+    const result = applyGraphOps({
+      doc,
+      ops: [{ op: 'update_node_data', nodeId: 'f1', data: { label: '改名' } }],
+    })
+
+    expect(dataOf(result.doc, 'f1')).toMatchObject({ label: '改名', fileKind: 'file', managedPath: 'data/files/旧件.md' })
+    expect(result.fileNodeTextOnlyIds).toEqual([])
+  })
+})
 
 describe('补丁层 proxy data 归一化（applyGraphOps 纯函数）', () => {
   it('create_node：虚拟节点的 label / role 落盘（只保留这两个字段）', () => {

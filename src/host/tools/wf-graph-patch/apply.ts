@@ -57,6 +57,43 @@ function stageLabelOf(kind: 'start' | 'end' | 'pause', mode: 'mode1' | 'mode2'):
 }
 
 /**
+ * file 节点 data 归一化为**文本型**（D-07）。
+ *
+ * 为什么写图不产受管文件：`fileKind='file'` 必须指向已存在的受管副本（检查器 `dataNodeIncomplete`
+ * 强制），而编排期真正要表达的是「未来要产出的交付文件」——受管限制会把这种规划直接挡掉。
+ * 归一化**不静默**：被改写的节点 id 经结果返回，由工具层转成 warning 告知调用方。
+ *
+ * @returns data 为归一化后的形状；normalized 表示原本显式要求受管（需提示调用方）
+ */
+function normalizeFileNodeData(raw: Record<string, unknown>, fallbackLabel: string): {
+  data: Record<string, unknown>
+  normalized: boolean
+} {
+  const wanted = String(raw.fileKind ?? '').trim()
+  const hasManagedPayload = Boolean(
+    String(raw.managedPath ?? '').trim()
+    || String(raw.fileName ?? '').trim()
+    || (Array.isArray(raw.files) && raw.files.length > 0),
+  )
+  return {
+    data: {
+      label: String(raw.label ?? '').trim() || fallbackLabel,
+      fileKind: 'text',
+      content: String(raw.content ?? ''),
+    },
+    normalized: wanted === 'file' || hasManagedPayload,
+  }
+}
+
+/** 补丁是否**显式要求受管文件**（仅显式才归一化，避免改 label 时顺手抹掉既有受管配置）。 */
+function wantsManagedFile(raw: Record<string, unknown>): boolean {
+  return String(raw.fileKind ?? '').trim() === 'file'
+    || raw.managedPath !== undefined
+    || raw.files !== undefined
+    || raw.fileName !== undefined
+}
+
+/**
  * 协作组一致性：成员节点的 groupId 与组的 memberIds 双向对齐。
  * 入组：写 node.data.groupId；出组：置 null。组不存在或成员不存在 → 稳定错误。
  */
@@ -203,6 +240,8 @@ export function applyGraphOps(input: {
   const updatedNodeIds: string[] = []
   const connectedLineIds: string[] = []
   const disconnectedLineIds: string[] = []
+  /** 被归一化为文本型的 file 节点（D-07；工具层据此出 warning）。 */
+  const fileNodeTextOnlyIds: string[] = []
   const mode: 'mode1' | 'mode2' = doc.mode === 'mode2' ? 'mode2' : 'mode1'
 
   for (const op of input.ops ?? []) {
@@ -266,6 +305,12 @@ export function applyGraphOps(input: {
             // 组卡片尺寸（视图数据；缺省与画布默认一致）
             size: (data.size as { w: number; h: number } | undefined) ?? { w: 300, h: 220 },
           }
+        }
+        if (node.kind === 'file') {
+          // 写图只产文本型文件节点（D-07）：受管文件必须已存在，会挡掉「未来要产出的交付文件」
+          const normalized = normalizeFileNodeData((raw.data ?? {}) as Record<string, unknown>, id)
+          ;(node as unknown as { data: Record<string, unknown> }).data = normalized.data
+          if (normalized.normalized) fileNodeTextOnlyIds.push(id)
         }
         doc.nodes.push(node)
         createdNodeIds.push(id)
@@ -331,6 +376,16 @@ export function applyGraphOps(input: {
           const proxyData = normalizeProxyData(merged)
           if (proxyData) (node as { data?: Record<string, unknown> }).data = proxyData
           else delete (node as { data?: unknown }).data
+        } else if (node.kind === 'file') {
+          const target = node as unknown as { data?: Record<string, unknown> }
+          // 只在补丁**显式要求受管**时归一化：仅改 label 等字段不应抹掉既有的受管配置
+          if (wantsManagedFile(patch)) {
+            const normalized = normalizeFileNodeData({ ...(target.data ?? {}), ...patch }, nodeId)
+            target.data = normalized.data
+            if (normalized.normalized) fileNodeTextOnlyIds.push(nodeId)
+          } else {
+            target.data = { ...(target.data ?? {}), ...patch }
+          }
         } else {
           const target = node as unknown as { data?: Record<string, unknown> }
           const next = { ...(target.data ?? {}), ...patch }
@@ -478,6 +533,7 @@ export function applyGraphOps(input: {
     updatedNodeIds,
     connectedLineIds,
     disconnectedLineIds,
+    fileNodeTextOnlyIds,
   }
 }
 
@@ -503,6 +559,7 @@ export function applyGraphOpsTolerant(input: {
   const updatedNodeIds: string[] = []
   const connectedLineIds: string[] = []
   const disconnectedLineIds: string[] = []
+  const fileNodeTextOnlyIds: string[] = []
   let doc = input.doc
   const ops = input.ops ?? []
   for (let index = 0; index < ops.length; index += 1) {
@@ -515,6 +572,7 @@ export function applyGraphOpsTolerant(input: {
       updatedNodeIds.push(...applied.updatedNodeIds)
       connectedLineIds.push(...applied.connectedLineIds)
       disconnectedLineIds.push(...applied.disconnectedLineIds)
+      fileNodeTextOnlyIds.push(...applied.fileNodeTextOnlyIds)
     } catch (error) {
       if (!(error instanceof WfError)) throw error
       errors.push({
@@ -533,6 +591,7 @@ export function applyGraphOpsTolerant(input: {
       updatedNodeIds,
       connectedLineIds,
       disconnectedLineIds,
+      fileNodeTextOnlyIds,
     },
     errors,
   }
