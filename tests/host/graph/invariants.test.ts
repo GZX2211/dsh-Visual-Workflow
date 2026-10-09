@@ -383,13 +383,22 @@ describe('规则矩阵（每个 code 一例）', () => {
     expect(codes(issues)).toContain('ctxSourceInvalid')
   })
 
-  it('dbLineTargetInvalid：数据库出线指向角色节点', () => {
+  it('dbLineTargetInvalid：数据库出线指向非角色节点（文件节点）', () => {
+    const doc = flow(
+      [stage('s', 'start'), agent('a1'), fileNode('f1'), dbNode('d1', { localPath: 'x.db' }), stage('e', 'end')],
+      [line('l1', 's', 'a1'), line('l2', 'a1', 'e'), line('c1', 'd1', 'f1', 'db')],
+    )
+    const issues = check({ flow: doc })
+    expect(codes(issues)).toContain('dbLineTargetInvalid')
+  })
+
+  it('数据库出线指向角色节点：合法（db 通道只向角色注入检索/查询工具）', () => {
     const doc = flow(
       [stage('s', 'start'), agent('a1'), dbNode('d1', { localPath: 'x.db' }), stage('e', 'end')],
       [line('l1', 's', 'a1'), line('l2', 'a1', 'e'), line('c1', 'd1', 'a1', 'db')],
     )
     const issues = check({ flow: doc })
-    expect(codes(issues)).toContain('dbLineTargetInvalid')
+    expect(codes(issues)).not.toContain('dbLineTargetInvalid')
   })
 
   it('pauseNodeDangling：暂停节点缺少流程出', () => {

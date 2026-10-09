@@ -155,21 +155,30 @@ export function ruleCtxSource({ flow }: CheckGraphInput): GraphIssue[] {
   return issues
 }
 
-/** e) 数据库出线目标合法性（必须是数据库节点）。 */
+/**
+ * e) 数据库出线目标合法性：**必须是角色节点**（子代理 / 父代理 / 虚拟节点）。
+ *
+ * 为什么不是「必须是数据库节点」：db 通道的语义是「把数据源转换为检索/查询工具注入角色」
+ * （数据库内容绝不注入上下文），配对矩阵 `HANDLE_PAIRING` 也只把 db-out 映到 db-in——
+ * 而 db-in 只存在于角色节点上（database 的 inputs 为空，无法自连）。若要求目标为数据库节点，
+ * 则 db 线在任何路径下都无法成立，database 节点必然悬空、整类节点不可用。
+ */
 export function ruleDbTarget({ flow }: CheckGraphInput): GraphIssue[] {
   const byId = nodeMapOf(flow)
   const issues: GraphIssue[] = []
   for (const line of flow?.lines ?? []) {
     if (line.sourceHandle !== 'db-out') continue
     const target = byId.get(line.target)
-    if (!target || target.kind === 'database') continue
+    if (!target) continue
+    const isRoleNode = target.kind === 'agent' || target.kind === 'parent' || target.kind === 'proxy'
+    if (isRoleNode) continue
     issues.push({
       code: 'dbLineTargetInvalid',
       level: 'error',
-      message: `数据库出线的目标「${line.target}」（${target.kind}）不是数据库节点`,
+      message: `数据库出线的目标「${line.target}」（${target.kind}）不是角色节点——数据库内容不注入上下文，只以检索/查询工具形式提供给子代理/父代理`,
       nodeIds: [line.source, target.id],
       lineIds: [line.id],
-      suggestion: '数据库出线只能连到数据库节点的数据库入点',
+      suggestion: '数据库出线只能连到角色节点（子代理 / 父代理 / 虚拟节点）的数据库入点',
     })
   }
   return issues
