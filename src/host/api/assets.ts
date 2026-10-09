@@ -11,7 +11,7 @@ import type { RoleTemplate } from '../shared/template-types.js'
 import type { GraphNode, Line } from '../shared/graph-model.js'
 import type { OrgMeta } from '../shared/org-meta.js'
 import { httpError } from './http.js'
-import { requireAssets, VisualWorkflowApiBase, type ApiHost } from './boundary.js'
+import { presentationOf, requireAssets, VisualWorkflowApiBase, type ApiHost } from './boundary.js'
 
 /** 资产库能力缝（形状由 boundary 的宿主能力缝定义，本模块不自建第二份）。 */
 type Assets = NonNullable<ApiHost['assets']>
@@ -156,7 +156,7 @@ export class AssetEndpoints extends VisualWorkflowApiBase {
     const assetId = requireAssetId(args)
     const assets = assetsOf(this.host)
     const detail = kind === 'workflow' ? await assets.getWorkflowAsset(assetId) : await assets.getRoleAsset(assetId)
-    if (!detail) throw httpError(404, `资产不存在或已退役：${assetId}`, ERR_ASSET_NOT_FOUND)
+    if (!detail) throw httpError(404, presentationOf(this.host, `资产不存在或已退役：${assetId}`, `Asset does not exist or was retired: ${assetId}`), ERR_ASSET_NOT_FOUND)
     return detail
   }
 
@@ -174,7 +174,7 @@ export class AssetEndpoints extends VisualWorkflowApiBase {
   /** 角色模版入库：模版内容整体作为首个资产版本的来源。 */
   private async promoteRoleTemplate(assets: Assets, templateId: string): Promise<AssetPromoteResult> {
     const role = (await this.host.store.getTemplate('role', templateId)) as RoleTemplate | null
-    if (!role) throw httpError(404, `角色模版不存在：${templateId}`, ERR_ASSET_NOT_FOUND)
+    if (!role) throw httpError(404, presentationOf(this.host, `角色模版不存在：${templateId}`, `Role template does not exist: ${templateId}`), ERR_ASSET_NOT_FOUND)
     const input: RolePromoteInput = { templateId, fingerprint: contentFingerprint(role), role, source: 'human' }
     return assets.promoteRole(input)
   }
@@ -182,7 +182,7 @@ export class AssetEndpoints extends VisualWorkflowApiBase {
   /** 工作流模版入库：模版图整体作为首个资产版本的来源（meta 缺省不落约束）。 */
   private async promoteWorkflowTemplate(assets: Assets, templateId: string): Promise<AssetPromoteResult> {
     const template = await this.host.store.getFlowTemplate(templateId)
-    if (!template) throw httpError(404, `工作流模版不存在：${templateId}`, ERR_ASSET_NOT_FOUND)
+    if (!template) throw httpError(404, presentationOf(this.host, `工作流模版不存在：${templateId}`, `Workflow template does not exist: ${templateId}`), ERR_ASSET_NOT_FOUND)
     const input: WorkflowPromoteInput = {
       templateId,
       fingerprint: contentFingerprint(template),

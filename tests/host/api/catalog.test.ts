@@ -146,3 +146,31 @@ describe('MCP 端点', () => {
     expect(await h.api.handle('mcpList', {})).toEqual([])
   })
 })
+
+describe('呈现语言（systemLanguage 能力缝）', () => {
+  it('英文界面：边界错误文案为英文，状态与错误码不变', async () => {
+    const h = await makeHarness({ systemLanguage: () => 'English' })
+    await expect(h.api.handle('toolComboPut', { combo: { id: 'bad', name: 'x' } })).rejects.toMatchObject({ status: 400 })
+    await expect(h.api.handle('toolComboPut', { combo: { id: 'bad', name: 'x' } })).rejects.toThrow(
+      'A combo needs a combo- prefixed id and a name',
+    )
+
+    await markToolSwitchesInstalled(h.dataDir)
+    h.host.toolSwitches = new ToolSwitchStore(h.dataDir)
+    await h.host.toolSwitches.load()
+    await expect(h.api.handle('toolSwitchPutMany', { names: [], disabled: true })).rejects.toMatchObject({ status: 400 })
+    await expect(h.api.handle('toolSwitchPutMany', { names: [], disabled: true })).rejects.toThrow(
+      'A bulk tool switch needs at least one settable tool name',
+    )
+  })
+
+  it('英文界面：pluginCatalog 工具卡片取 TOOL_EN 短描述，不加 [EN] 前缀', async () => {
+    const h = await makeHarness({ systemLanguage: () => 'English' })
+    const longEnglish = 'Apply one patch to a workflow template or the running instance; three op groups. '.repeat(4)
+    h.ctx.services.set('tools', { schemas: () => [{ name: 'wf_graph_patch', description: longEnglish }] })
+
+    const catalog = (await h.api.handle('pluginCatalog', {})) as { items: Array<{ name: string; description: string }> }
+    const item = catalog.items.find((entry) => entry.name === 'wf_graph_patch')
+    expect(item?.description).toBe('Rewrite the workflow graph (structure / milestone marking); parent only')
+  })
+})

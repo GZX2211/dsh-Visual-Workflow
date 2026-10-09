@@ -1,6 +1,6 @@
 // src/host/api/tool-descriptions.ts
 //
-// 工具卡片描述（端点响应的展示数据加工）：内置工具中文短描述 + 长度兜底。
+// 工具卡片描述（端点响应的展示数据加工）：内置工具中/英短描述 + 语言选择 + 长度兜底。
 // 为什么独立于端点文件：其变化原因（内置工具集合、卡片文案、卡片宽度约束）与
 // 端点协议、参数校验完全无关。
 //
@@ -12,8 +12,8 @@
 // 保证「名称 + 描述 + 操作按钮」三者在卡片内互不重叠。
 export const CARD_DESC_MAX = 80
 
-/** 内置常用工具中文描述映射（未命中回退原文，英文加 [EN] 前缀）。 */
-const TOOL_ZH: Record<string, string> = {
+/** 内置常用工具中文描述映射（未命中回退原文，英文加 [EN] 前缀；导出供单测做中/英键对称门禁）。 */
+export const TOOL_ZH: Record<string, string> = {
   read: '读取文件内容（支持多种编码与行区间）',
   write: '创建或整体替换文件内容',
   edit: '对已有文件做精确的局部文本替换',
@@ -51,20 +51,64 @@ const TOOL_ZH: Record<string, string> = {
   wf_experience_feedback: '提交已使用经验的四维评价（任务收尾阶段，与经验学习同阶段）',
 }
 
+/** 内置常用工具英文描述映射（与 TOOL_ZH 同键；未命中回退 schema 原文，不加 [EN] 前缀）。 */
+export const TOOL_EN: Record<string, string> = {
+  // —— 英文短描述（与 TOOL_ZH 同键；非中文界面取此表，命中即不再回退 schema 原文）——
+  read: 'Read file contents (multiple encodings and line ranges)',
+  write: 'Create or fully replace a file',
+  edit: 'Exact partial text replacement in an existing file',
+  bash: 'Run shell commands in the sandbox',
+  run_code: 'Run a code snippet in the code runtime',
+  str_replace_editor: 'Code/text editor: view, replace, insert, undo (simple mode only)',
+  glob: 'Find file paths by glob pattern',
+  grep: 'Regex-search file contents and return matching lines',
+  todo_write: 'Maintain and update the structured task list',
+  pwsh: 'Run PowerShell commands',
+  ask_user_question: 'Ask the user a question and wait for the answer',
+  web_search: 'Search the web for current information',
+  ssh_exec: 'Run a remote command on a configured SSH host',
+  ssh_list: 'List configured SSH hosts',
+  ssh_upload: 'Upload a local file to an SSH host',
+  ssh_download: 'Download a file from an SSH host',
+  ssh_tunnel: 'Manage local port-forwarding tunnels',
+  ssh_cluster: 'Run one command concurrently on multiple SSH hosts',
+  list_agents: 'List continuable background subagents',
+  send_message: 'Send a message to a background subagent',
+  interrupt_agent: 'Request cancellation of a subagent turn',
+  subagent: 'Delegate a self-contained task to a subagent',
+  workflow: 'Run a multi-subagent orchestration workflow script',
+  // —— dsh-visual-workflow 自有工具：卡片短英文；模型侧 schema 描述（英文）不受影响 ——
+  wf_run_node: 'Start a node subagent (async, non-blocking; parent orchestration)',
+  wf_run_node_wait: 'Start a node subagent and wait for it (mode 2 services)',
+  wf_finish: 'Finish the workflow run and release the run lock',
+  wf_ask: 'Child agent asks the main-session user (official question card)',
+  wf_ask_agent: 'Blocking agent-to-agent messaging (ask / reply / resolve)',
+  wf_db_query: 'Three-mode database access (search / query / schema; needs a db-in edge)',
+  wf_org_catalog: 'Read-only survey of org assets; recall details on demand; parent only',
+  wf_graph_patch: 'Rewrite the workflow graph (structure / milestone marking); parent only',
+  wf_experience_learn: 'Submit your own experience candidates; empty array fetches the prompt',
+  wf_experience_recall: 'Recall existing experiences by subject type; then read full entries by id',
+  wf_experience_feedback: 'Rate the experiences you used (four dimensions; task wrap-up stage)',
+}
+
 /**
  * 组合管理卡片描述（纯函数，导出供单测）：
- *   - 命中 TOOL_ZH → 短中文；
- *   - 未命中 → schema 原文（英文加 [EN] 前缀；已是中文则原样）；
+ *   - 中文界面：命中 TOOL_ZH → 短中文；未命中 → schema 原文（英文加 [EN] 前缀标记
+ *     「这条不是中文」，已是中文则原样）；空描述 → 中文占位。
+ *   - 非中文界面：命中 TOOL_EN → 短英文；未命中 → schema 原文（不加 [EN] 前缀——
+ *     该前缀只在中文界面里表达「未翻译」）；空描述 → 英文占位。
  *   - **一律按 CARD_DESC_MAX 截断**（超长描述不得撑破卡片）。
+ * @param chinese - 是否用中文呈现（由 API 边界的 isChinesePresentation 判定）。
  */
-export function zhDescription(name: string, fallback: string): string {
-  const hit = TOOL_ZH[String(name ?? '')]
+export function toolCardDescription(name: string, fallback: string, chinese: boolean): string {
+  const hit = (chinese ? TOOL_ZH : TOOL_EN)[String(name ?? '')]
   let text: string
   if (hit) {
     text = hit
   } else {
     const raw = String(fallback ?? '').trim()
-    text = !raw ? '（暂无描述）' : (/[\u4e00-\u9fa5]/.test(raw) ? raw : `[EN] ${raw}`)
+    if (chinese) text = !raw ? '（暂无描述）' : (/[\u4e00-\u9fa5]/.test(raw) ? raw : `[EN] ${raw}`)
+    else text = raw || 'No description'
   }
   return text.length > CARD_DESC_MAX ? `${text.slice(0, CARD_DESC_MAX - 1)}…` : text
 }
