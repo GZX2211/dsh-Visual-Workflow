@@ -8,7 +8,7 @@ import { resolveWorkspacePath } from '../workspace-path.js'
 import { resolveNewSessionCwd } from '../sessions/session-provider.js'
 import { httpError } from './http.js'
 import { ERR_REVISION_CONFLICT } from '../shared/protocol.js'
-import { VisualWorkflowApiBase } from './boundary.js'
+import { presentationOf, VisualWorkflowApiBase } from './boundary.js'
 
 export class WorkflowEndpoints extends VisualWorkflowApiBase {
   // ---------- 工作流（工作台全局化：列表跨会话，读写按实例自身会话） ----------
@@ -35,10 +35,11 @@ export class WorkflowEndpoints extends VisualWorkflowApiBase {
   async createSession(args: { sessionId?: unknown; workspacePath?: unknown; label?: unknown }): Promise<unknown> {
     const provider = this.host.sessionProvider
     if (!provider || typeof provider.createSession !== 'function') {
-      throw httpError(501, '会话创建能力未装配', 'WF_AGENT_UNAVAILABLE')
+      throw httpError(501, presentationOf(this.host, '会话创建能力未装配', 'Session creation is unavailable'), 'WF_AGENT_UNAVAILABLE')
     }
     const creatorSessionId = String(args?.sessionId ?? '')
-    const label = String(args?.label ?? '工作流实例').trim() || '工作流实例'
+    const defaultLabel = presentationOf(this.host, '工作流实例', 'Workflow instance')
+    const label = String(args?.label ?? defaultLabel).trim() || defaultLabel
     // 工作区输入校验在此处完成（HTTP 端点是用户输入的校验责任者）；cwd 决策
     // （显式路径优先 → 否则继承创建者）归 sessions 模块的唯一实现 resolveNewSessionCwd。
     const explicit = String(args?.workspacePath ?? '').trim()
@@ -61,7 +62,7 @@ export class WorkflowEndpoints extends VisualWorkflowApiBase {
     const id = String(args?.id ?? '')
     if (!sessionId || !id) throw httpError(400, 'requires sessionId and id')
     const flow = await this.host.store.getWorkflow(sessionId, id)
-    if (!flow) throw httpError(404, `工作流不存在：${id}`)
+    if (!flow) throw httpError(404, presentationOf(this.host, `工作流不存在：${id}`, `Workflow not found: ${id}`))
     return flow
   }
 
@@ -74,7 +75,7 @@ export class WorkflowEndpoints extends VisualWorkflowApiBase {
         id: `wf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
         sessionId,
         mode: 'mode1',
-        name: String(args?.name ?? '').trim() || '未命名工作流',
+        name: String(args?.name ?? '').trim() || presentationOf(this.host, '未命名工作流', 'Untitled workflow'),
         description: String(args?.description ?? ''),
         revision: 0,
         nodes: [],
@@ -116,7 +117,7 @@ export class WorkflowEndpoints extends VisualWorkflowApiBase {
     const id = String(args?.id ?? '')
     if (!sessionId || !id) throw httpError(400, 'requires sessionId and id')
     const deleted = await this.host.store.deleteWorkflow(sessionId, id)
-    if (!deleted) throw httpError(404, `工作流不存在：${id}`)
+    if (!deleted) throw httpError(404, presentationOf(this.host, `工作流不存在：${id}`, `Workflow not found: ${id}`))
     return { deleted: true }
   }
 
@@ -138,7 +139,7 @@ export class WorkflowEndpoints extends VisualWorkflowApiBase {
     const id = String(args?.id ?? '')
     if (!sessionId || !id) throw httpError(400, 'requires sessionId and id')
     const service = await this.host.store.getService(sessionId, id)
-    if (!service) throw httpError(404, `服务不存在：${id}`)
+    if (!service) throw httpError(404, presentationOf(this.host, `服务不存在：${id}`, `Service not found: ${id}`))
     return service
   }
 
@@ -185,7 +186,7 @@ export class WorkflowEndpoints extends VisualWorkflowApiBase {
     const id = String(args?.id ?? '')
     if (!sessionId || !id) throw httpError(400, 'requires sessionId and id')
     const deleted = await this.host.store.deleteService(sessionId, id)
-    if (!deleted) throw httpError(404, `服务不存在：${id}`)
+    if (!deleted) throw httpError(404, presentationOf(this.host, `服务不存在：${id}`, `Service not found: ${id}`))
     return { deleted: true }
   }
 
@@ -214,10 +215,10 @@ export class WorkflowEndpoints extends VisualWorkflowApiBase {
     // 会话归属校验：服务按 sessionId 分桶，越权会话不得启动/停止/查看他人服务
     // （不匹配按不存在处理，不泄露 serviceId 是否存在）。
     const service = await this.host.store.getService(sessionId, serviceId)
-    if (!service) throw httpError(404, `服务不存在：${serviceId}`)
+    if (!service) throw httpError(404, presentationOf(this.host, `服务不存在：${serviceId}`, `Service not found: ${serviceId}`))
     const manager = this.host.serviceManager
     if (!manager || typeof manager[action] !== 'function') {
-      throw httpError(501, '服务管理器尚未启用（模式二服务管理未装配）', 'WF_SERVICE_MANAGER_UNAVAILABLE')
+      throw httpError(501, presentationOf(this.host, '服务管理器尚未启用（模式二服务管理未装配）', 'Service manager is not enabled (mode 2 service management is not assembled)'), 'WF_SERVICE_MANAGER_UNAVAILABLE')
     }
     // 合并返回完整服务状态（Bug 22）：manager 结果只含 serviceId/status/port/pid 等
     // 运行时字段，不能整体替代 ServiceState——否则前端 SERVICE_UPDATED 用残缺对象替换

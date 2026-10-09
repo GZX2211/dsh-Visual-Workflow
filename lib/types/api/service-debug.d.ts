@@ -19,12 +19,17 @@ export declare class ServiceDebugError extends Error {
     constructor(status: number, message: string, code?: string);
 }
 /**
+ * 展示文案选择（zh/en 二选一）。
+ * 缺省仅中文：调试代理也被测试等非 API 边界调用方直接使用，缺省保持既有语义。
+ */
+export type DebugPresentation = (zh: string, en: string) => string;
+/**
  * 发起调试请求：POST 上游 /v1/chat/completions（stream: true），校验响应状态后
  * 返回响应 body 流。非 2xx 抛 ServiceDebugError（调用方此时尚未写响应头，
  * 可返回标准 JSON 错误）。为什么先 fetch 再写头：上游鉴权/参数错误应在
  * HTTP 状态码层透传，而不是伪装成 SSE 错误流。
  */
-export declare function openServiceDebug(target: ServiceDebugTarget, prompt: string, fetchImpl?: typeof fetch, signal?: AbortSignal): Promise<ReadableStream<Uint8Array>>;
+export declare function openServiceDebug(target: ServiceDebugTarget, prompt: string, fetchImpl?: typeof fetch, signal?: AbortSignal, presentation?: DebugPresentation): Promise<ReadableStream<Uint8Array>>;
 /**
  * 把上游 SSE body 逐块转发到 sink（原有字节透传；打字机粒度由上游控制）。
  * AbortError 视为用户停止，静默收尾。

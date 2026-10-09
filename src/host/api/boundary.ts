@@ -30,6 +30,7 @@ import type {
 import type { RoleTemplate } from '../shared/template-types.js'
 import type { GraphNode, Line, WorkflowMode } from '../shared/graph-model.js'
 import type { OrgMeta } from '../shared/org-meta.js'
+import { DEFAULT_SYSTEM_LANGUAGE, isChineseSystemLanguage } from '../system-language.js'
 import { httpError } from './http.js'
 
 /**
@@ -130,6 +131,11 @@ export interface ApiHost {
   assets?: AssetStoreLike
   /** 经验域能力缝（宿主注入经验域实现；缺失时经验端点返回 501）。 */
   experience?: ExperienceDomainFace
+  /**
+   * 系统语言名（宿主注入；与提示词注入共用同一次设置读取）。
+   * 只表达事实：缺失时的呈现降级由 presentationOf 决定，本层不决定降级语义。
+   */
+  systemLanguage?: () => string
 }
 
 /**
@@ -141,12 +147,30 @@ const assetStoreFits: AssertAssetStoreFits = true
 void assetStoreFits
 
 /**
+ * 是否用中文呈现 GUI 文案（展示层语言判定的唯一入口）。
+ * host 能力缝缺失时按默认语言（中文）——与插件默认中文界面一致。
+ */
+export function isChinesePresentation(host: ApiHost): boolean {
+  return isChineseSystemLanguage(host.systemLanguage?.() ?? DEFAULT_SYSTEM_LANGUAGE)
+}
+
+/**
+ * GUI 展示文案选择：中文界面取 zh，其余（未支持语言 / 读取失败）取 en。
+ * 只用于展示数据；稳定错误码、状态映射与机器可读字段不在此改写。
+ */
+export function presentationOf(host: ApiHost, zh: string, en: string): string {
+  return isChinesePresentation(host) ? zh : en
+}
+
+/**
  * 取资产库能力缝。未装配时明确 501——静默降级为「空资产库」会让用户看到
  * 「库里什么都没有」这种与事实不符的界面；资产端点与经验端点共用同一份判据。
  */
 export function requireAssets(host: ApiHost): NonNullable<ApiHost['assets']> {
   const assets = host.assets
-  if (!assets) throw httpError(501, '资产库尚未装配（asset store unavailable）')
+  if (!assets) {
+    throw httpError(501, presentationOf(host, '资产库尚未装配（asset store unavailable）', 'Asset store is unavailable'))
+  }
   return assets
 }
 
@@ -156,7 +180,9 @@ export function requireAssets(host: ApiHost): NonNullable<ApiHost['assets']> {
  */
 export function requireExperience(host: ApiHost): ExperienceDomainFace {
   const experience = host.experience
-  if (!experience) throw httpError(501, '经验域尚未装配（experience domain unavailable）')
+  if (!experience) {
+    throw httpError(501, presentationOf(host, '经验域尚未装配（experience domain unavailable）', 'Experience domain is unavailable'))
+  }
   return experience
 }
 

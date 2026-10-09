@@ -183,6 +183,8 @@ export interface HarnessOptions {
   assets?: FakeAssets
   /** 经验域能力缝注入（伪经验域；缺省不装配，用于 501 路径）。 */
   experience?: FakeExperienceDomainFace
+  /** 系统语言能力缝注入（缺省不注入 = 宿主默认中文呈现）。 */
+  systemLanguage?: () => string
 }
 
 export interface RoleSeed {
@@ -727,6 +729,7 @@ export async function makeHarness(options?: HarnessOptions): Promise<Harness> {
     engine,
     ...(options?.assets ? { assets: options.assets } : {}),
     ...(options?.experience ? { experience: options.experience } : {}),
+    ...(options?.systemLanguage ? { systemLanguage: options.systemLanguage } : {}),
   }
   const api = new VisualWorkflowApi(ctx, host)
   return { api, host, runtime, store, ctx, dataDir: dir }
