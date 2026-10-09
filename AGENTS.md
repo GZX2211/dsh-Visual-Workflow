@@ -126,6 +126,15 @@ dsh-visual-workflow/
 
 ---
 
+## 交付（PR）
+
+- PR 一律提交到本仓库自己的 fork：<https://github.com/lordraiden/dsh-Visual-Workflow>（base 分支 `main`）；不再提交到上游 `GZX2211/dsh-Visual-Workflow`。
+- 特性分支从 fork 的 `main` 切出；上游有新提交时先把 `upstream/main` 合入 fork `main`（`git fetch upstream && git merge upstream/main`），再切特性分支——避免 PR 夹带上游提交。
+- 分支名 `feature/<issue>-<slug>`；PR 标题与正文使用英文。
+- 开完 PR 后必须确认 `.github/workflows/check.yml`（windows-latest）通过，交付才算完成。
+
+---
+
 ## 修改代码前
 
 进行非 trivial 修改前，先明确：
