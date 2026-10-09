@@ -1,6 +1,6 @@
 {
   "name": "dsh-visual-workflow",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "private": true,
   "type": "module",
   "description": "DSH 可视化 Agent 编排平台",
