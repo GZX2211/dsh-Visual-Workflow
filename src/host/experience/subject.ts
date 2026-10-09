@@ -123,17 +123,22 @@ export function allowedExperienceTypes(input: ExperienceCallerInput): Experience
   return allowedFromFacts(dutyFactsOf(input.caller, input.runtime))
 }
 
+/** 主体解析的动作语境：写入侧要求类型属于当前职责，读取侧不要求。 */
+type ExperienceSubjectAction = "submit" | "recall"
+
 /**
- * 解析当前调用方对应的经验主体。
+ * 解析当前调用方对应的经验主体（内部实现，按 action 决定是否施加职责门禁）。
  * 来源运行全部取自运行事实：模型无法填写，父代理在无运行时的 agent 经验也没有来源运行可伪造。
  */
-export function resolveExperienceSubject(input: ExperienceSubjectInput): ExperienceSubject {
+function resolveSubject(input: ExperienceSubjectInput, action: ExperienceSubjectAction): ExperienceSubject {
   const { caller, type, runtime } = input
   const facts = dutyFactsOf(caller, runtime)
   if (!isExperienceType(type)) {
+    const tail = action === "recall"
+      ? "请改用合法类型后重新召回。"
+      : "请改用当前职责对应的类型后重新提交。"
     throw new WfError(
-      `经验类型非法（实际为 ${String(type)}）：只能是 ${EXPERIENCE_TYPES.join(" / ")}；当前实际职责：${describeDuty(facts)}。`
-        + "请改用当前职责对应的类型后重新提交。",
+      `经验类型非法（实际为 ${String(type)}）：只能是 ${EXPERIENCE_TYPES.join(" / ")}；当前实际职责：${describeDuty(facts)}。` + tail,
       ERR_EXPERIENCE_WRONG_TYPE,
     )
   }
@@ -143,13 +148,31 @@ export function resolveExperienceSubject(input: ExperienceSubjectInput): Experie
       ERR_EXPERIENCE_BAD_ARGS,
     )
   }
-  const allowed = allowedFromFacts(facts)
-  if (!allowed.includes(type)) throw wrongTypeError(facts, type, allowed)
+  if (action === "submit") {
+    const allowed = allowedFromFacts(facts)
+    if (!allowed.includes(type)) throw wrongTypeError(facts, type, allowed)
+  }
   if (facts.isChild) {
+    // 子代理的身份事实是「执行主体」：它的经验池恒为 agent（见下方恒返回 experienceType='agent'）。
+    // 读取侧若传入其它类型，必须**明确拒绝**而不是静默按 agent 处理——否则调用方以为在读编排经验，
+    // 实际拿到的是执行经验，错误被藏起来。这同时保留原设计「子代理不接触编排/团队经验」的防线：
+    // 子代理读取父代理的组织层经验只会污染它自己的上下文。
+    if (action === "recall" && type !== "agent") {
+      throw new WfError(
+        `子代理只能召回 agent 经验（收到 ${type}）：子代理的身份是执行主体，`
+          + "编排经验与团队经验属于父代理 / 协作组的职责，读取它们只会污染子代理上下文。",
+        ERR_EXPERIENCE_WRONG_TYPE,
+      )
+    }
     const childRun = facts.childRun
     const childId = facts.childId
-    // 与 allowed 判定同源，因此这里必然成立；仍显式收窄以满足「来源运行必须来自事实」
-    if (!childRun || !childId) throw wrongTypeError(facts, type, allowed)
+    if (!childRun || !childId) {
+      // 写入侧走到这里即职责不成立（与 allowed 判定同源）；读取侧只需身份可解析，
+      // 来源运行缺失时按「无运行来源」处理（空串，兼容磁盘列 NOT NULL）。
+      if (!childId) throw new WfError("子代理调用缺少 childId：无法确定经验主体。", ERR_EXPERIENCE_BAD_ARGS)
+      if (action === "submit") throw wrongTypeError(facts, type, allowedFromFacts(facts))
+      return { experienceType: "agent", sessionId: caller.sessionId, subjectId: childId, sourceRunId: "", childId }
+    }
     return { experienceType: "agent", sessionId: childRun.sessionId, subjectId: childId, sourceRunId: childRun.runId, childId }
   }
   if (type === "agent") {
@@ -158,9 +181,30 @@ export function resolveExperienceSubject(input: ExperienceSubjectInput): Experie
   }
   const run = facts.run
   if (!run) {
-    // 改过图但没有运行实例（规划期 / 运行后复盘）：编排经验同样没有来源运行，用空串表达
-    // （与父代理执行经验同一口径，兼容磁盘列的 NOT NULL）
+    // 无运行实例（规划期 / 运行后复盘 / 读取侧）：编排经验同样没有来源运行，用空串表达
     return { experienceType: type, sessionId: caller.sessionId, subjectId: caller.sessionId, sourceRunId: "" }
   }
   return { experienceType: type, sessionId: caller.sessionId, subjectId: caller.sessionId, sourceRunId: run.runId }
+}
+
+/**
+ * 写入侧主体解析（提交经验 / 初始化生成 Prompt / 写入评价）：要求类型属于当前职责。
+ *
+ * 为什么写入侧必须校验：经验只有对应「主体实际承担的职责」才有意义，否则经验库会被错误主体的
+ * 经验污染，而召回侧按类型过滤时无法分辨。
+ */
+export function resolveExperienceSubject(input: ExperienceSubjectInput): ExperienceSubject {
+  return resolveSubject(input, "submit")
+}
+
+/**
+ * 读取侧主体解析（召回）：只要求类型合法与身份可解析，**不要求类型属于当前职责**。
+ *
+ * 为什么读取侧放开（用户裁决 2026-10-10）：写入侧的类型表达「这条经验属于谁」（客观归属），
+ * 读取侧若要求表达「我此刻是谁」（主观身份），就会因职责随会话进程变化而自锁——例如先改图成为
+ * 编排管理者之后，再想参考执行侧经验就被自己的身份门禁挡住。读操作不写任何事实，无污染风险；
+ * sessionId / subjectId 仍然解析（使用事实与评价准入要用到它们）。
+ */
+export function resolveExperienceReaderSubject(input: ExperienceSubjectInput): ExperienceSubject {
+  return resolveSubject(input, "recall")
 }

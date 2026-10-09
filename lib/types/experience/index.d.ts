@@ -7,7 +7,7 @@ export { decodeEmbedding, encodeEmbedding } from "./embedding-codec.js";
 export type { ExperienceRecallInput, ExperienceRecallOutcome, ExperienceScoredId, ExperienceScoredRow, } from "./retrieval.js";
 export { bm25Scores, normalizeTopK, rankByBm25, rankByEmbedding, recallActiveHits, tokenizeForLexical, } from "./retrieval.js";
 export type { ExperienceCallerInput, ExperienceSubject, ExperienceSubjectInput, } from "./subject.js";
-export { allowedExperienceTypes, resolveExperienceSubject } from "./subject.js";
+export { allowedExperienceTypes, resolveExperienceReaderSubject, resolveExperienceSubject } from "./subject.js";
 export type { AnchorDefinition, EvaluationDimension, EvaluationDimensionDefinition, } from "./anchor-definitions.js";
 export { EVALUATION_DIMENSION_DEFINITIONS, renderAnchorGlossary } from "./anchor-definitions.js";
 export type { EvaluationScoreCandidate, EvaluationScoreField, EvaluationScoreValidation } from "./scoring.js";

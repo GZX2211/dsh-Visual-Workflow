@@ -82,7 +82,7 @@ export type {
   ExperienceSubject,
   ExperienceSubjectInput,
 } from "./subject.js"
-export { allowedExperienceTypes, resolveExperienceSubject } from "./subject.js"
+export { allowedExperienceTypes, resolveExperienceReaderSubject, resolveExperienceSubject } from "./subject.js"
 
 export type {
   AnchorDefinition,

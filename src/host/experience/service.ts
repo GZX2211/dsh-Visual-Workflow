@@ -42,7 +42,7 @@ import { buildRecallSummary, buildRetrievalProjection } from "./projection.js"
 import { rebuildExperienceStats } from "./rebuild.js"
 import { normalizeTopK, recallActiveHits, type ExperienceScoredId, type ExperienceScoredRow } from "./retrieval.js"
 import { rankRecallCandidates, type RecallRankingCandidate } from "./retrieval-ranking.js"
-import { resolveExperienceSubject, type ExperienceSubject } from "./subject.js"
+import { resolveExperienceReaderSubject, resolveExperienceSubject, type ExperienceSubject } from "./subject.js"
 import { renderTeamExperienceContext } from "./team-context.js"
 import { validateExperienceCandidates, validateExperiencePatch } from "./validation.js"
 
@@ -143,7 +143,8 @@ export class ExperienceService {
    * 否则按 query 取候选摘要——候选阶段只读、幂等，不写任何事实。
    */
   async recall(input: { caller: ExperienceCaller; type: ExperienceType; query?: string; ids?: string[]; topK?: number }): Promise<ExperienceRecallResult> {
-    const subject = resolveExperienceSubject({ caller: input.caller, type: input.type, runtime: this.deps.runtime })
+    // 读取侧：不要求类型属于当前职责（用户裁决 2026-10-10；见 resolveExperienceReaderSubject）
+    const subject = resolveExperienceReaderSubject({ caller: input.caller, type: input.type, runtime: this.deps.runtime })
     const ids = input.ids
     if (ids !== undefined && ids.length === 0) {
       throw new WfError("ids 不能为空数组：请传第一阶段返回的候选 id，或改用 query 做候选召回。", ERR_EXPERIENCE_BAD_ARGS)
@@ -263,7 +264,9 @@ export class ExperienceService {
       return null
     }
     try {
-      const subject = resolveExperienceSubject({
+      // 读取侧：协作组启动前的上下文查询会早于「本运行内是否启动过协作组」这一事实成立，
+      // 故不能走写入侧的职责门禁（否则 team 经验注入恒被自身判据挡掉）
+      const subject = resolveExperienceReaderSubject({
         caller: { isChild: false, sessionId: input.sessionId },
         type: "team",
         runtime: this.deps.runtime,
