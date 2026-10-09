@@ -13,6 +13,7 @@ import {
   ERR_EXPERIENCE_WRONG_TYPE,
   WF_EXPERIENCE_LEARN,
 } from '../../../../src/host/shared/protocol.js'
+import { FIELD_BUDGETS, FIELD_LIMITS } from '../../../../src/host/experience/index.js'
 import { WfError } from '../../../../src/host/orchestrator/index.js'
 import { registerWfExperienceLearn } from '../../../../src/host/tools/wf-experience-learn/tool.js'
 import type { JsonSchemaNode } from '../../../../src/host/tools/infrastructure/define-tool.js'
@@ -75,6 +76,15 @@ function englishRatio(text: string): number {
   return letters / text.length
 }
 
+/** 候选对象九个字段的 schema 描述（字数约束的模型可见位置）。 */
+function candidateFieldDescriptions(h: Harness): Record<string, string> {
+  const def = h.tools.definitions.get(WF_EXPERIENCE_LEARN)
+  if (!def) throw new Error('wf_experience_learn 未注册')
+  const experiences = (def.parameters.properties ?? {}).experiences as JsonSchemaNode
+  const fields = (experiences.items as JsonSchemaNode).properties ?? {}
+  return Object.fromEntries(Object.entries(fields).map(([key, node]) => [key, node.description ?? '']))
+}
+
 describe('wf_experience_learn：注册与 schema', () => {
   it('注册成功；disposer 注销全量生效', async () => {
     const h = await makeHarness()
@@ -120,6 +130,40 @@ describe('wf_experience_learn：注册与 schema', () => {
       expect(description).toContain(code)
     }
     expect(description).toContain('do not submit')
+  })
+})
+
+describe('wf_experience_learn：字段字数约束（只做提示词引导，不做校验）', () => {
+  it('字段描述：逐字段给出域层预算与硬上限（数字取自经验域本体，工具层不重复定义）', async () => {
+    const h = await makeHarness()
+    const fields = candidateFieldDescriptions(h)
+
+    const scalarFields: Array<[string, number, number]> = [
+      ['responsibility', FIELD_BUDGETS.responsibility, FIELD_LIMITS.responsibility],
+      ['task_type', FIELD_BUDGETS.taskType, FIELD_LIMITS.taskType],
+      ['decision_domain', FIELD_BUDGETS.decisionDomain, FIELD_LIMITS.decisionDomain],
+      ['situation', FIELD_BUDGETS.situation, FIELD_LIMITS.situation],
+      ['trigger', FIELD_BUDGETS.trigger, FIELD_LIMITS.trigger],
+      ['principle', FIELD_BUDGETS.principle, FIELD_LIMITS.principle],
+      ['recommended_action', FIELD_BUDGETS.recommendedAction, FIELD_LIMITS.recommendedAction],
+    ]
+    for (const [name, budget, cap] of scalarFields) {
+      expect(fields[name]).toContain(`at most ${budget} characters`)
+      expect(fields[name]).toContain(`cap is ${cap}`)
+    }
+    for (const name of ['exclusions', 'evidence']) {
+      expect(fields[name]).toContain(`At most ${FIELD_BUDGETS.arrayLength} items, each aimed at ${FIELD_BUDGETS.arrayElement} characters`)
+      expect(fields[name]).toContain(`${FIELD_LIMITS.arrayLength} items of ${FIELD_LIMITS.arrayElement} characters`)
+    }
+  })
+
+  it('工具描述：声明预算是提示词引导（轻微超出仍受理），并给出总预算与总上限', async () => {
+    const h = await makeHarness()
+    const description = h.tools.definitions.get(WF_EXPERIENCE_LEARN)!.description
+
+    expect(description).toContain('prompt guidance, not a validation rule')
+    expect(description).toContain('a slight overrun is still accepted')
+    expect(description).toContain(`within about ${FIELD_BUDGETS.total} characters in total (cap ${FIELD_LIMITS.total})`)
   })
 })
 
