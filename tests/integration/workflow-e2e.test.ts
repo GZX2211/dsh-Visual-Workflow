@@ -169,7 +169,7 @@ async function makeHarness(): Promise<Harness> {
     orchestrator: runtime,
     store,
     dataDir: dir,
-    engine: { source: 'bm25', dimension: 0, async embed() { throw new Error('bm25 only') }, dispose() {} },
+    engine: { source: 'bm25', dimension: 0, async ensureReady() {}, async embed() { throw new Error('bm25 only') }, dispose() {} },
   } as ApiHost)
   return { store, runtime, agents, runner, api, dataDir: dir, root }
 }

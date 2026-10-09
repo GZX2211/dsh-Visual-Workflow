@@ -38,6 +38,7 @@ function fakeEmbedding(): ExperienceEmbeddingPort & { calls: number; batches: nu
   const port = {
     source: "local" as const,
     dimension: 3,
+    async ensureReady() {},
     calls: 0,
     batches: 0,
     async embed(texts: string[]): Promise<Float64Array[]> {

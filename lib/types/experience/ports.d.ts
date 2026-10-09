@@ -124,5 +124,14 @@ export interface ExperienceRuntimePort {
 export interface ExperienceEmbeddingPort {
     readonly source: "local" | "remote" | "bm25";
     readonly dimension: number;
+    /**
+     * 确保嵌入能力就绪（惰性引擎的加载入口；返回值即就绪后的来源，可忽略）。
+     *
+     * 为什么必须显式暴露：嵌入引擎是惰性加载的，就绪**之前** source 恒为 bm25（初始值）——
+     * 那表达的是「尚未探测」而不是「已降级」。任何读取 source/dimension 做能力判定的调用方
+     * 都必须先就绪，否则会把「尚未加载」误判成「不可用」：写入被永久拒绝、召回永久退化为词法。
+     * 只在真正需要向量能力时调用即可（避免无谓加载）。
+     */
+    ensureReady(): Promise<unknown>;
     embed(texts: string[]): Promise<Float64Array[]>;
 }

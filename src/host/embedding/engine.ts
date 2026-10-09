@@ -33,6 +33,14 @@ export interface EmbeddingEngine {
   readonly source: EmbeddingSource
   /** 向量维度（bm25 降级时为 0）。 */
   readonly dimension: number
+  /**
+   * 确保引擎就绪（惰性加载入口；返回值即就绪后的来源，可忽略）。
+   *
+   * 为什么进契约：实现是惰性的，就绪**之前** source 恒为 bm25（初始值）——那表达的是
+   * 「尚未探测」而不是「已降级」。凡读 source/dimension 做能力判定的调用方都必须先就绪，
+   * 否则会把「尚未加载」误判成「不可用」（索引被永久写成词法索引、写入被拒绝）。
+   */
+  ensureReady(): Promise<unknown>
   /** 批量嵌入（返回单位长度向量；bm25 降级时抛明确错误）。 */
   embed(texts: string[]): Promise<Float64Array[]>
   /** 释放本地模型等资源（幂等）。 */

@@ -24,7 +24,7 @@ afterEach(cleanupTempDirs)
 
 /** 降级引擎替身（bm25：不做嵌入）。 */
 function bm25Engine(): EmbeddingEngine {
-  return { source: 'bm25', dimension: 0, async embed() { throw new Error('bm25 only') }, dispose() {} }
+  return { source: 'bm25', dimension: 0, async ensureReady() {}, async embed() { throw new Error('bm25 only') }, dispose() {} }
 }
 
 describe('buildIndexForDatabase', () => {
@@ -60,7 +60,7 @@ describe('buildIndexForDatabase', () => {
         conn: { host: '127.0.0.1', port: 3306, user: 'u', password: 'p', db: 'd' },
       },
     }
-    const error = await buildIndexForDatabase(dir, node, { source: 'bm25', dimension: 0, embed: async () => [], dispose() {} }).catch((e) => e)
+    const error = await buildIndexForDatabase(dir, node, { source: 'bm25', dimension: 0, async ensureReady() {}, embed: async () => [], dispose() {} }).catch((e) => e)
     // 服务器类型已纳入本地索引构建，不再抛 WF_DB_MODE；测试环境驱动缺失/服务不可达 → 驱动或连接错误
     expect(error?.code).not.toBe('WF_DB_MODE')
   })
@@ -78,7 +78,7 @@ describe('buildIndexForDatabase', () => {
         vectorOptions: { chunkSize: 8, overlap: 2, maxRows: 2 },
       },
     }
-    const { file: indexFile } = await buildIndexForDatabase(dir, node, { source: 'bm25', dimension: 0, embed: async () => [], dispose() {} })
+    const { file: indexFile } = await buildIndexForDatabase(dir, node, { source: 'bm25', dimension: 0, async ensureReady() {}, embed: async () => [], dispose() {} })
     // products 表 3 行 + notes 表 2 行；maxRows=2 → 只索引 2 行（truncated）
     // 但需验证 rowKey 落盘与分块窗口被采纳。
     const chunkRows = indexFile.chunks.filter((c) => c.rowKey !== undefined)

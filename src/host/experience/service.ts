@@ -290,9 +290,16 @@ export class ExperienceService {
     return prompt
   }
 
-  /** 事务外批量嵌入：单次调用算完本批全部文本，任何失败都不得留下部分写入。 */
+  /**
+   * 事务外批量嵌入：单次调用算完本批全部文本，任何失败都不得留下部分写入。
+   *
+   * 为什么先 ensureReady 再读端口 source：source 是「能力事实」，但嵌入引擎惰性加载——
+   * 就绪之前 source 恒为 bm25（初始值），直接预读会把「尚未加载」误判成「已降级」并永久
+   * 拒绝写入；而真正能触发加载的 embed() 那时还没有机会被调用。就绪后 source 才代表真实能力。
+   */
   private async embedOutOfTransaction(texts: string[]): Promise<Float64Array[]> {
     const { embedding } = this.deps
+    await embedding.ensureReady()
     if (embedding.source === "bm25") throw embeddingUnavailable("语义嵌入能力不可用（当前为 BM25 词法检索）")
     let vectors: Float64Array[]
     try {

@@ -242,6 +242,24 @@ describe("ExperienceService.submit 事务边界与 provenance", () => {
     expect(world.entries.size).toBe(0)
   })
 
+  it("test_惰性引擎就绪前的 source 为 bm25_就绪后写入成功", async () => {
+    const world = createExperienceWorld({
+      embeddingSource: "bm25",
+      onEnsureReady: () => {
+        // 模拟惰性引擎加载完成：就绪之后 source 才代表真实能力
+        world.embedding.source = "local"
+      },
+    })
+    seedPrompts(world)
+    const { service } = createService(world)
+    await service.initializePrompt({ caller: ROOT_CALLER, type: "agent" })
+
+    await service.submit({ caller: ROOT_CALLER, type: "agent", candidates: [createCandidatePayload()] })
+
+    expect(world.entries.size).toBe(1)
+    expect(world.lastInsert?.rows[0]?.embeddingModel).toBe("local")
+  })
+
   it("test_嵌入调用抛错_拒绝写入", async () => {
     const world = createExperienceWorld({
       embed: async () => {

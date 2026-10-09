@@ -719,7 +719,7 @@ export async function makeHarness(options?: HarnessOptions): Promise<Harness> {
     uuid: () => `uuid-${runSeq.n}`,
   })
   const ctx = new FakeCtx()
-  const engine: EmbeddingEngine = { source: 'bm25', dimension: 0, async embed() { throw new Error('bm25 only') }, dispose() {} }
+  const engine: EmbeddingEngine = { source: 'bm25', dimension: 0, async ensureReady() {}, async embed() { throw new Error('bm25 only') }, dispose() {} }
   const host: ApiHost = {
     orchestrator: runtime,
     store,
