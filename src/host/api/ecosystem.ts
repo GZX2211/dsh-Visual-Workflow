@@ -8,7 +8,7 @@
 
 import { RESERVED_TRANSPORT_TOOL } from '../shared/protocol.js'
 import { listAgentPresets, listEcosystemModels } from '../ecosystem-directory.js'
-import { VisualWorkflowApiBase } from './boundary.js'
+import { presentationOf, VisualWorkflowApiBase } from './boundary.js'
 
 export class EcosystemEndpoints extends VisualWorkflowApiBase {
   // ---------- 生态枚举（presets / tools / models） ----------
@@ -16,7 +16,8 @@ export class EcosystemEndpoints extends VisualWorkflowApiBase {
   /** agent preset 模式列表（agentPresets 服务缺失时返回空列表）。 */
   async presets(): Promise<unknown> {
     const presets = await listAgentPresets(this.ctx).catch((error) => {
-      throw new Error(`preset 列表读取失败：${error instanceof Error ? error.message : String(error)}`)
+      const detail = error instanceof Error ? error.message : String(error)
+      throw new Error(presentationOf(this.host, `preset 列表读取失败：${detail}`, `Failed to read the preset list: ${detail}`))
     })
     return presets ?? []
   }
@@ -34,7 +35,8 @@ export class EcosystemEndpoints extends VisualWorkflowApiBase {
         })
         .filter((item) => item.name && item.name !== RESERVED_TRANSPORT_TOOL)
     } catch (error) {
-      throw new Error(`工具清单读取失败：${error instanceof Error ? error.message : String(error)}`)
+      const detail = error instanceof Error ? error.message : String(error)
+      throw new Error(presentationOf(this.host, `工具清单读取失败：${detail}`, `Failed to read the tool list: ${detail}`))
     }
   }
 

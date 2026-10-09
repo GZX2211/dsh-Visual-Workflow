@@ -124,7 +124,22 @@ export interface ApiHost {
     assets?: AssetStoreLike;
     /** 经验域能力缝（宿主注入经验域实现；缺失时经验端点返回 501）。 */
     experience?: ExperienceDomainFace;
+    /**
+     * 系统语言名（宿主注入；与提示词注入共用同一次设置读取）。
+     * 只表达事实：缺失时的呈现降级由 presentationOf 决定，本层不决定降级语义。
+     */
+    systemLanguage?: () => string;
 }
+/**
+ * 是否用中文呈现 GUI 文案（展示层语言判定的唯一入口）。
+ * host 能力缝缺失时按默认语言（中文）——与插件默认中文界面一致。
+ */
+export declare function isChinesePresentation(host: ApiHost): boolean;
+/**
+ * GUI 展示文案选择：中文界面取 zh，其余（未支持语言 / 读取失败）取 en。
+ * 只用于展示数据；稳定错误码、状态映射与机器可读字段不在此改写。
+ */
+export declare function presentationOf(host: ApiHost, zh: string, en: string): string;
 /**
  * 取资产库能力缝。未装配时明确 501——静默降级为「空资产库」会让用户看到
  * 「库里什么都没有」这种与事实不符的界面；资产端点与经验端点共用同一份判据。

@@ -10,7 +10,7 @@ import { buildIndexForDatabase, createDatabaseDriver, indexPathOf, testDatabaseC
 import { VectorIndex } from '../embedding/indexer.js'
 import { exportAgentTemplate, exportWorkflowBundle, importAgentTemplate, importWorkflowBundle } from '../transfer/bundle.js'
 import { httpError } from './http.js'
-import { VisualWorkflowApiBase } from './boundary.js'
+import { presentationOf, VisualWorkflowApiBase } from './boundary.js'
 
 export class RunEndpoints extends VisualWorkflowApiBase {
   // ---------- 运行（父代理编排） ----------
@@ -39,11 +39,11 @@ export class RunEndpoints extends VisualWorkflowApiBase {
     if (!sessionId || !runId) throw httpError(400, 'requires sessionId and runId')
     const snapshot = this.host.orchestrator.runSnapshot(runId)
     if (snapshot) {
-      if (snapshot.sessionId !== sessionId) throw httpError(404, `运行不存在：${runId}`)
+      if (snapshot.sessionId !== sessionId) throw httpError(404, presentationOf(this.host, `运行不存在：${runId}`, `Run not found: ${runId}`))
       return snapshot
     }
     const disk = await this.host.store.getRun(runId)
-    if (!disk || disk.sessionId !== sessionId) throw httpError(404, `运行不存在：${runId}`)
+    if (!disk || disk.sessionId !== sessionId) throw httpError(404, presentationOf(this.host, `运行不存在：${runId}`, `Run not found: ${runId}`))
     return disk
   }
 
@@ -67,12 +67,12 @@ export class RunEndpoints extends VisualWorkflowApiBase {
     // （越权会话不得停止他人运行；不匹配按不存在处理，不泄露 runId 是否存在）。
     const entry = this.host.orchestrator.entryFor(runId)
     if (entry) {
-      if (entry.snapshot.sessionId !== sessionId) throw httpError(404, `运行不存在：${runId}`)
+      if (entry.snapshot.sessionId !== sessionId) throw httpError(404, presentationOf(this.host, `运行不存在：${runId}`, `Run not found: ${runId}`))
       await this.host.orchestrator.stopRun(runId)
       return { stopped: true }
     }
     const disk = await this.host.store.getRun(runId)
-    if (!disk || disk.sessionId !== sessionId) throw httpError(404, `运行不存在：${runId}`)
+    if (!disk || disk.sessionId !== sessionId) throw httpError(404, presentationOf(this.host, `运行不存在：${runId}`, `Run not found: ${runId}`))
     // 终态幂等：磁盘记录存在且归属匹配 → 视为已停止
     return { stopped: true }
   }
@@ -132,7 +132,9 @@ export class RunEndpoints extends VisualWorkflowApiBase {
     const topK = Number(args?.topK ?? 5) || Number(vectorOptions?.topK) || 5
     const index = new VectorIndex(indexPathOf(this.host.dataDir, dataId))
     if (args?.rebuild === true || (await index.load()) === null) {
-      if (!node || node.kind !== 'database') throw httpError(422, '索引不存在且未提供数据库节点，无法构建')
+      if (!node || node.kind !== 'database') {
+        throw httpError(422, presentationOf(this.host, '索引不存在且未提供数据库节点，无法构建', 'The index does not exist and no database node was provided; cannot build'))
+      }
       await buildIndexForDatabase(this.host.dataDir, node, this.host.engine)
     }
     if (!query) return { dataId, hits: [] }

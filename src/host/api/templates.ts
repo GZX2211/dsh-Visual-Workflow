@@ -6,7 +6,7 @@
 import { httpError } from './http.js'
 import { ERR_REVISION_CONFLICT } from '../shared/protocol.js'
 import { copyIntoManagedFile } from '../storage/managed-files.js'
-import { VisualWorkflowApiBase } from './boundary.js'
+import { presentationOf, VisualWorkflowApiBase } from './boundary.js'
 
 export class TemplateEndpoints extends VisualWorkflowApiBase {
   // ---------- 模板（角色/文件/数据库） ----------
@@ -51,7 +51,7 @@ export class TemplateEndpoints extends VisualWorkflowApiBase {
     }
     if (!id) throw httpError(400, 'requires a template id')
     const deleted = await this.host.store.deleteTemplate(kind as 'role' | 'file' | 'database' | 'group', id)
-    if (!deleted) throw httpError(404, `模板不存在：${id}`)
+    if (!deleted) throw httpError(404, presentationOf(this.host, `模板不存在：${id}`, `Template not found: ${id}`))
     return { deleted: true }
   }
 
@@ -88,7 +88,7 @@ export class TemplateEndpoints extends VisualWorkflowApiBase {
     const id = String(args?.id ?? '')
     if (!id) throw httpError(400, 'requires a flow template id')
     const deleted = await this.host.store.deleteFlowTemplate(id)
-    if (!deleted) throw httpError(404, `工作流模板不存在：${id}`)
+    if (!deleted) throw httpError(404, presentationOf(this.host, `工作流模板不存在：${id}`, `Workflow template not found: ${id}`))
     return { deleted: true }
   }
   /** 受管文件上传：base64 内容 → data/files/<safeName>（原子发布；返回 managedPath）。 */

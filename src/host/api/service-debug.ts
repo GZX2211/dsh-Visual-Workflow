@@ -37,8 +37,15 @@ export class ServiceDebugError extends Error {
   }
 }
 
+/**
+ * 展示文案选择（zh/en 二选一）。
+ * 缺省仅中文：调试代理也被测试等非 API 边界调用方直接使用，缺省保持既有语义。
+ */
+export type DebugPresentation = (zh: string, en: string) => string
+const chineseOnly: DebugPresentation = (zh) => zh
+
 /** 上游服务非 2xx 时读取错误文本（SSE error 行 / OpenAI error 体 / 原始文本）。 */
-async function upstreamErrorText(response: Response): Promise<string> {
+async function upstreamErrorText(response: Response, presentation: DebugPresentation): Promise<string> {
   try {
     const payload = (await response.json()) as { error?: { message?: unknown } }
     if (payload?.error?.message) return String(payload.error.message)
@@ -46,7 +53,7 @@ async function upstreamErrorText(response: Response): Promise<string> {
     // 非 JSON 响应体，走原始文本
   }
   const text = await response.text().catch(() => '')
-  return text.trim() || `服务返回 HTTP ${response.status}`
+  return text.trim() || presentation(`服务返回 HTTP ${response.status}`, `Service returned HTTP ${response.status}`)
 }
 
 /**
@@ -60,6 +67,7 @@ export async function openServiceDebug(
   prompt: string,
   fetchImpl: typeof fetch = fetch,
   signal?: AbortSignal,
+  presentation: DebugPresentation = chineseOnly,
 ): Promise<ReadableStream<Uint8Array>> {
   let response: Response
   try {
@@ -79,17 +87,18 @@ export async function openServiceDebug(
     })
   } catch (error) {
     if ((error as Error)?.name === 'AbortError') throw error
-    throw new ServiceDebugError(502, `无法连接服务进程：${error instanceof Error ? error.message : String(error)}`)
+    const detail = error instanceof Error ? error.message : String(error)
+    throw new ServiceDebugError(502, presentation(`无法连接服务进程：${detail}`, `Cannot connect to the service process: ${detail}`))
   }
   if (!response.ok) {
-    const message = await upstreamErrorText(response)
+    const message = await upstreamErrorText(response, presentation)
     if ((response.status === 401 || response.status === 403) && target.apiKey) {
-      throw new ServiceDebugError(response.status, `${message}（调试代理已携带配置的 API Key）`)
+      throw new ServiceDebugError(response.status, presentation(`${message}（调试代理已携带配置的 API Key）`, `${message} (the debug proxy sent the configured API key)`))
     }
     throw new ServiceDebugError(response.status, message)
   }
   if (!response.body) {
-    throw new ServiceDebugError(502, '服务流式响应无 body')
+    throw new ServiceDebugError(502, presentation('服务流式响应无 body', 'The service streaming response has no body'))
   }
   return response.body
 }
