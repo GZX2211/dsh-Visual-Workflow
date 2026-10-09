@@ -118,6 +118,8 @@ export function makeFlow(): WorkflowDocument {
 export class FakeRoot implements RootAgentLike {
   id: string
   status = 'idle'
+  /** 根 Agent 的 ctx（父代理配置绑定注入的目标；恒为非 null 对象）。 */
+  ctx: Record<string, unknown> = {}
   messages: RootInjectedMessage[] = []
   /** steer 插队注入的消息（编排变更通知/协作超时通知等；父代理忙碌时走该通道）。 */
   steered: CoordinatorMessage[] = []
@@ -249,7 +251,7 @@ export interface Harness {
 /** 装配：临时目录真实 FlowStore + fake 依赖 + 可控时钟与 id 生成。 */
 export async function makeHarness(
   config?: Partial<OrchestratorConfig>,
-  deps?: Partial<Pick<OrchestratorDeps, 'teamExperienceContext' | 'onRunTerminal'>>,
+  deps?: Partial<Pick<OrchestratorDeps, 'teamExperienceContext' | 'onRunTerminal' | 'promptSetup' | 'modelSelection' | 'resolveRolePrompt'>>,
 ): Promise<Harness> {
   const dir = await mkdtemp(join(tmpdir(), 'vw-orch-'))
   cleanups.push(() => rm(dir, { recursive: true, force: true }))
@@ -287,6 +289,9 @@ export async function makeHarness(
     },
     ...(deps?.teamExperienceContext ? { teamExperienceContext: deps.teamExperienceContext } : {}),
     ...(deps?.onRunTerminal ? { onRunTerminal: deps.onRunTerminal } : {}),
+    ...(deps?.promptSetup ? { promptSetup: deps.promptSetup } : {}),
+    ...(deps?.modelSelection ? { modelSelection: deps.modelSelection } : {}),
+    ...(deps?.resolveRolePrompt ? { resolveRolePrompt: deps.resolveRolePrompt } : {}),
   })
   return { runtime, store, agents, runner, clock, warnings, dir }
 }
