@@ -242,6 +242,20 @@ describe("ExperienceService.submit 事务边界与 provenance", () => {
     expect(world.entries.size).toBe(0)
   })
 
+  it("test_嵌入降级且带原因_拒绝写入并回显原因", async () => {
+    const world = createExperienceWorld({ embeddingSource: "bm25" })
+    world.embedding.degradeReason = "本地嵌入模型资产缺失：/nope"
+    seedPrompts(world)
+    const { service } = createService(world)
+    await service.initializePrompt({ caller: ROOT_CALLER, type: "agent" })
+
+    const error = await errorOf(() => service.submit({ caller: ROOT_CALLER, type: "agent", candidates: [createCandidatePayload()] }))
+
+    expect(error.code).toBe(ERR_EXPERIENCE_EMBEDDING_UNAVAILABLE)
+    expect(error.message).toContain("本地嵌入模型资产缺失：/nope")
+    expect(world.entries.size).toBe(0)
+  })
+
   it("test_惰性引擎就绪前的 source 为 bm25_就绪后写入成功", async () => {
     const world = createExperienceWorld({
       embeddingSource: "bm25",

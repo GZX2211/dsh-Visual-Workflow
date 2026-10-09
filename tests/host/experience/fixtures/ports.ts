@@ -58,6 +58,8 @@ export interface FakeRuntimeFacts {
  */
 export interface FakeEmbeddingPort {
   source: "local" | "remote" | "bm25"
+  /** 降级原因（用例可摆放，用于断言「拒绝写入时回显原因」）。 */
+  degradeReason?: string | null
   readonly dimension: number
   ensureReady(): Promise<void>
   embed(texts: string[]): Promise<Float64Array[]>
@@ -418,6 +420,7 @@ export function createExperienceWorld(options: FakeWorldOptions = {}): FakeExper
 
   const embedding: FakeEmbeddingPort = {
     source: options.embeddingSource ?? "local",
+    degradeReason: null,
     dimension,
     async ensureReady(): Promise<void> {
       calls.push("embedding.ensureReady")

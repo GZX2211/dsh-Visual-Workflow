@@ -123,6 +123,11 @@ export interface ExperienceRuntimePort {
  */
 export interface ExperienceEmbeddingPort {
     readonly source: "local" | "remote" | "bm25";
+    /**
+     * 降级原因（source 为 bm25 时的可诊断信息；未降级或实现不提供时为 null/undefined）。
+     * 为什么在端口上可见：只说「已降级」而不给原因，使用者无从定位（可观测性要求）。
+     */
+    readonly degradeReason?: string | null;
     readonly dimension: number;
     /**
      * 确保嵌入能力就绪（惰性引擎的加载入口；返回值即就绪后的来源，可忽略）。

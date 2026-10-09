@@ -300,7 +300,15 @@ export class ExperienceService {
   private async embedOutOfTransaction(texts: string[]): Promise<Float64Array[]> {
     const { embedding } = this.deps
     await embedding.ensureReady()
-    if (embedding.source === "bm25") throw embeddingUnavailable("语义嵌入能力不可用（当前为 BM25 词法检索）")
+    if (embedding.source === "bm25") {
+      // 带上降级原因：只说「降级了」使用者无从定位（可观测性）；原因缺失时保持原文案
+      const reason = embedding.degradeReason?.trim()
+      throw embeddingUnavailable(
+        reason
+          ? `语义嵌入能力不可用（当前为 BM25 词法检索；原因：${reason}）`
+          : "语义嵌入能力不可用（当前为 BM25 词法检索）",
+      )
+    }
     let vectors: Float64Array[]
     try {
       vectors = await embedding.embed(texts)

@@ -31,6 +31,8 @@ export type EmbeddingSource = 'local' | 'remote' | 'bm25'
 export interface EmbeddingEngine {
   /** 当前来源。 */
   readonly source: EmbeddingSource
+  /** 降级原因（source 为 bm25 时给出可诊断信息；未降级为 null）。 */
+  readonly degradeReason?: string | null
   /** 向量维度（bm25 降级时为 0）。 */
   readonly dimension: number
   /**
@@ -143,7 +145,9 @@ export class EmbeddingService implements EmbeddingEngine {
     if (this.source === 'local' && this.local) {
       return this.embedLocal(texts)
     }
-    throw new Error('本地嵌入模型不可用（资产缺失或加载失败），请使用 BM25 相似度检索')
+    throw new Error(
+      `本地嵌入模型不可用（资产缺失或加载失败）${this.degrade ? `：${this.degrade}` : ''}，请使用 BM25 相似度检索`,
+    )
   }
 
   /** 释放本地模型（幂等）。 */
@@ -158,6 +162,18 @@ export class EmbeddingService implements EmbeddingEngine {
       }
     }
     this.local = null
+  }
+
+  /** 降级原因（加载失败时的可诊断信息；未降级为 null）。 */
+  private degrade: string | null = null
+
+  /**
+   * 降级原因：source 为 bm25 时说明「为什么」。
+   * 为什么不只写日志：日志是否落盘取决于宿主，而降级事实必须能被使用者与调用方拿到
+   * （写入被拒、召回退化时都要能看到原因），否则排障只能靠主动探针复现。
+   */
+  get degradeReason(): string | null {
+    return this.degrade
   }
 
   /** 就绪准备（单飞入口内的实际加载；只由 ensureReady 触发一次）。 */
@@ -184,6 +200,8 @@ export class EmbeddingService implements EmbeddingEngine {
       ;(this as { dimension: number }).dimension = 512
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
+      // 记录降级原因并保留原日志（双通道：日志 + 可读原因），避免静默降级
+      this.degrade = message
       this.options.logger?.warn(`[visual-workflow] 本地嵌入模型加载失败，降级 BM25 相似度检索：${message}`)
     }
     return this.source
