@@ -74,6 +74,17 @@ export declare class VisualWorkflowHost extends Service {
      * 条目为极小字符串、会话内数量有限，仅随宿主 dispose 统一清理即可。
      */
     private readonly childPromptStates;
+    /**
+     * 「本会话改过图」事实的持久化（D-05；经验域编排职责判据之一）。
+     * 为什么由宿主持有：写入方是 wf_graph_patch 工具、读取方是经验域，两侧都只经适配缝，
+     * 而事实本身必须落在 storage。
+     */
+    private readonly graphPatchLog;
+    /**
+     * 改过图的会话内存索引（运行事实端口的查询是同步的，故不每次读盘）。
+     * 装载时机：宿主 init 扫盘一次 + 本进程每次记录即时加入。
+     */
+    private readonly graphPatchedSessions;
     /** 本地嵌入引擎（外部端点 > 本地资产 > BM25 降级；惰性加载）。 */
     private readonly embedding;
     /**

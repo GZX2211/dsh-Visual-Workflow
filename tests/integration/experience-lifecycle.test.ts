@@ -70,6 +70,7 @@ function fakeRuntime(overrides: Partial<ExperienceRuntimePort> = {}): Experience
     runForChild: () => null,
     hasTeamInCurrentRun: () => false,
     hasActiveRun: () => false,
+    hasGraphPatch: () => false,
     // 默认「无法确定模型名」：集成测试不依赖真实模型路由，需要时由用例覆盖
     modelForCaller: () => "",
     ...overrides,

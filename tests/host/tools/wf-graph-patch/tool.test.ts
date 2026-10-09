@@ -1628,3 +1628,36 @@ describe('wf_graph_patch · 参数层契约守卫', () => {
     expect(err.message).toContain('memberIds')
   })
 })
+
+describe('wf_graph_patch：改图事实记录（D-05）', () => {
+  it('test_图结构补丁成功_调用记录缝并带上会话目标与作用域', async () => {
+    const recorded: Array<{ sessionId: string; targetId: string; scope: string }> = []
+    const { host } = makeHost({
+      newTemplateId: () => 'tpl-rec1',
+      recordGraphPatch: async (input) => { recorded.push(input) },
+    })
+
+    await executeGraphPatch(host, 'session-1', {
+      scope: 'template', create: { name: '记录探针' }, ops: createOps(),
+    })
+
+    expect(recorded).toEqual([{ sessionId: 'session-1', targetId: 'tpl-rec1', scope: 'template' }])
+  })
+
+  it('test_补丁被检查器阻断_不记录改图事实', async () => {
+    const recorded: Array<{ sessionId: string; targetId: string; scope: string }> = []
+    const { host } = makeHost({
+      newTemplateId: () => 'tpl-rec2',
+      recordGraphPatch: async (input) => { recorded.push(input) },
+    })
+
+    // 缺 start/end 的图 → 检查器阻断（整批不落盘），因此不得留下「改过图」的事实
+    await expectWfError(() => executeGraphPatch(host, 'session-1', {
+      scope: 'template',
+      create: { name: '非法图' },
+      ops: [{ op: 'create_node', node: { id: 'a1', kind: 'agent', data: { label: 'x', systemPrompt: 'x', retryLimit: 3, provider: '', model: '' } } }],
+    }), 'WF_GRAPH_INVALID')
+
+    expect(recorded).toEqual([])
+  })
+})

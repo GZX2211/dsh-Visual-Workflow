@@ -1,6 +1,6 @@
 import type { TemplateKind } from './template-model.js';
 /** 顶层数据目录（init 时创建；外部工具与测试以此为布局契约）。 */
-export declare const DIRS: readonly ["workflows", "services", "roles", "data", "groups", "runs", "orchestrations", "flow-templates"];
+export declare const DIRS: readonly ["workflows", "services", "roles", "data", "groups", "runs", "orchestrations", "flow-templates", "graph-patches"];
 /** 嵌套子目录（相对 root 的路径；随顶层目录一并幂等创建）。 */
 export declare const NESTED_DIRS: readonly ["data/files"];
 /** 受管文件目录（data/files，存放非文本文件模板的受管拷贝）。 */
@@ -22,6 +22,8 @@ export declare function templateDir(kind: TemplateKind): string;
 export declare function templatePath(root: string, kind: TemplateKind, id: string): string;
 /** 工作流模板文件路径（flow-templates/，全局共享）。 */
 export declare function flowTemplatePath(root: string, templateId: string): string;
+/** 会话的图补丁记录文件路径（graph-patches/<sessionId>.json；「改过图」事实的持久化位点）。 */
+export declare function graphPatchLogPath(root: string, sessionId: string): string;
 /** run 快照文件路径。 */
 export declare function runsPath(root: string, runId: string): string;
 /** 运行时流程定义文件路径（orchestrations/）。 */

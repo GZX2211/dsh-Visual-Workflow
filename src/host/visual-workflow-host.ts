@@ -7,6 +7,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { Config } from './config.js'
 import { FlowStore } from './storage/flow-store.js'
+import { GraphPatchLogStore } from './storage/graph-patch-log.js'
 import { AssetStore } from './assets/index.js'
 import {
   OrchestratorRuntime,
@@ -127,6 +128,17 @@ export class VisualWorkflowHost extends Service {
    * 条目为极小字符串、会话内数量有限，仅随宿主 dispose 统一清理即可。
    */
   private readonly childPromptStates = new Map<string, ChildPromptState>()
+  /**
+   * 「本会话改过图」事实的持久化（D-05；经验域编排职责判据之一）。
+   * 为什么由宿主持有：写入方是 wf_graph_patch 工具、读取方是经验域，两侧都只经适配缝，
+   * 而事实本身必须落在 storage。
+   */
+  private readonly graphPatchLog: GraphPatchLogStore
+  /**
+   * 改过图的会话内存索引（运行事实端口的查询是同步的，故不每次读盘）。
+   * 装载时机：宿主 init 扫盘一次 + 本进程每次记录即时加入。
+   */
+  private readonly graphPatchedSessions = new Set<string>()
   /** 本地嵌入引擎（外部端点 > 本地资产 > BM25 降级；惰性加载）。 */
   private readonly embedding: EmbeddingService
   /**
@@ -156,6 +168,7 @@ export class VisualWorkflowHost extends Service {
     this.skipReconcile = options.skipReconcile === true
     this.store = new FlowStore(config.dataDir)
     this.assetStore = new AssetStore(config.dataDir)
+    this.graphPatchLog = new GraphPatchLogStore(config.dataDir)
     this.toolSwitches = new ToolSwitchStore(config.dataDir)
     this.agents = new CordisAgentHost(ctx)
     this.embedding = new EmbeddingService({
@@ -484,6 +497,8 @@ export class VisualWorkflowHost extends Service {
       runForChild: (childId) => this.orchestrator.experienceRunForChild(childId),
       hasTeamInCurrentRun: (sessionId) => this.orchestrator.hasTeamInCurrentRun(sessionId),
       hasActiveRun: (sessionId) => this.orchestrator.hasActiveRunForSession(sessionId),
+      // 「改过图」事实：内存索引（init 扫盘装载 + 本进程记录即时加入），端口查询保持同步
+      hasGraphPatch: (sessionId) => this.graphPatchedSessions.has(sessionId),
       // 评分者模型取自模型选择装配（节点子代理创建时确定、会话内父代理可改）：
       // 取不到即空串——「不知道模型名」是真实事实，伪造一个默认模型会让校准数据变成假证据。
       modelForCaller: (caller) => {
@@ -536,6 +551,16 @@ export class VisualWorkflowHost extends Service {
 
     // 数据目录结构初始化（幂等）
     await this.store.init()
+
+    // 「改过图」事实的内存索引装载（经验域编排职责判据用；端口查询同步，故启动时装载一次）。
+    // 失败只告警：退化为「本进程内记录的事实」，不影响其它能力（记录路径仍会即时加入内存）。
+    try {
+      for (const sessionId of await this.graphPatchLog.listSessionIds()) this.graphPatchedSessions.add(sessionId)
+    } catch (error) {
+      this.ctx.logger.warn(
+        `[visual-workflow] 图补丁记录装载失败（编排经验判据退化为进程内事实）：${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
 
     // 资产库（SQLite）初始化：失败降级为「不可用」而不是让 fiber 失败——模版编排、运行、
     // 定时任务等既有能力不依赖资产库，让新能力拖垮整个插件不划算；但降级必须显式：
@@ -775,6 +800,18 @@ export class VisualWorkflowHost extends Service {
           }))
         } catch {
           return []
+        }
+      },
+      // 「改过图」事实记录（D-05）：先落内存索引（保证本进程判据立刻成立），再落盘（跨进程存活）。
+      // 记录失败**不抛错**——补丁已经落盘，让调用方看到失败是更糟的假象；降级为进程内事实并告警。
+      recordGraphPatch: async (input) => {
+        this.graphPatchedSessions.add(input.sessionId)
+        try {
+          await this.graphPatchLog.record(input)
+        } catch (error) {
+          this.ctx.logger.warn(
+            `[visual-workflow] 图补丁记录落盘失败（编排经验判据退化为进程内事实）：${error instanceof Error ? error.message : String(error)}`,
+          )
         }
       },
       // 闸门计数（D-21）：口径唯一来源是运行快照的 milestoneUsed（P3 落地，可审计 + 续跑继承）

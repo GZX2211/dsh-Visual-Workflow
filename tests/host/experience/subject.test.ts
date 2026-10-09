@@ -116,13 +116,28 @@ describe("resolveExperienceSubject 父代理", () => {
     expect(subject).toMatchObject({ experienceType: "agent", sourceRunId: "", sessionId: "session-1", subjectId: "session-1" })
   })
 
-  it("test_无活跃运行时填 orchestrator_拒绝并说明需要先运行工作流", async () => {
+  it("test_无活跃运行且未改过图_填 orchestrator_拒绝并给出可选类型", async () => {
     const world = createExperienceWorld()
 
     const error = await errorOf(() => resolveExperienceSubject({ caller: rootCaller(), type: "orchestrator", runtime: world.runtime }))
 
     expect(error.code).toBe(ERR_EXPERIENCE_WRONG_TYPE)
+    expect(error.message.includes("也没有改过工作流图")).toBe(true)
     expect(error.message.includes("agent")).toBe(true)
+  })
+
+  it("test_无活跃运行但曾改过图_填 orchestrator_允许且来源运行为空", () => {
+    const world = createExperienceWorld()
+    world.runtimeFacts.graphPatchedSessions.add("session-1")
+
+    const subject = resolveExperienceSubject({ caller: rootCaller(), type: "orchestrator", runtime: world.runtime })
+
+    expect(subject).toMatchObject({
+      experienceType: "orchestrator",
+      sourceRunId: "",
+      sessionId: "session-1",
+      subjectId: "session-1",
+    })
   })
 
   it("test_本运行启动过协作组_允许 team 并取运行作为来源", () => {
@@ -188,6 +203,13 @@ describe("allowedExperienceTypes", () => {
     const world = createExperienceWorld()
 
     expect(allowedExperienceTypes({ caller: rootCaller(), runtime: world.runtime })).toEqual(["agent"])
+  })
+
+  it("test_无活跃运行但曾改过图_允许 orchestrator", () => {
+    const world = createExperienceWorld()
+    world.runtimeFacts.graphPatchedSessions.add("session-1")
+
+    expect(allowedExperienceTypes({ caller: rootCaller(), runtime: world.runtime })).toEqual(["orchestrator"])
   })
 
   it("test_无法定位的子代理_无可选类型", () => {

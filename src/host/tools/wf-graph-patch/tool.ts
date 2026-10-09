@@ -105,6 +105,13 @@ export interface GraphPatchHost {
    * 抽成缝的原因：单测需要确定性 id，而 id 生成不是工具的校验逻辑。
    */
   newTemplateId?: () => string
+  /**
+   * 记录「本会话成功改过图」的事实（D-05；经验域编排职责判据之一）。
+   *
+   * 为什么是可选缝：它不影响补丁本身的成败（图已落盘），单测可省略；实现方必须自行保证
+   * **不抛错**（记录失败降级为进程内事实并告警），否则会让调用方看到「补丁失败」的假象。
+   */
+  recordGraphPatch?: (input: { sessionId: string; targetId: string; scope: string }) => Promise<void>
 }
 
 /** 补丁执行结果（工具返回体）。 */
@@ -660,6 +667,9 @@ export async function executeGraphPatch(
 
   if (group === 'graph') {
     const { revision, issues, result, budget } = await runGraphGroup(host, baseInput, ops as GraphPatchOp[])
+    // 「改过图」事实记录（D-05）：补丁已成功落盘，故记录失败不得让本次调用表现为失败——
+    // 实现方（宿主）自行降级为进程内事实并告警，见 GraphPatchHost.recordGraphPatch。
+    await host.recordGraphPatch?.({ sessionId, targetId, scope })
     return {
       ok: true,
       scope,

@@ -64,6 +64,7 @@ function fakeRuntime(overrides: Partial<ExperienceRuntimePort> = {}): Experience
     runForChild: () => null,
     hasTeamInCurrentRun: () => false,
     hasActiveRun: () => false,
+    hasGraphPatch: () => false,
     modelForCaller: () => "test-model",
     ...overrides,
   }

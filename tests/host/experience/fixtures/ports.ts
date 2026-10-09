@@ -45,6 +45,8 @@ export interface FakeRuntimeFacts {
   activeRuns: Map<string, { runId: string; flowId: string; sessionId: string }>
   childRuns: Map<string, { runId: string; flowId: string; sessionId: string; nodeId: string }>
   teamRuns: Set<string>
+  /** 曾成功改过图的会话（编排职责判据之一；D-05）。 */
+  graphPatchedSessions: Set<string>
   /** 主体身份 → 模型名（缺省回落 defaultModel；空串表达「无法确定」）。 */
   models: Map<string, string>
   /** 未登记模型名时的回落值。 */
@@ -205,6 +207,7 @@ export function createExperienceWorld(options: FakeWorldOptions = {}): FakeExper
     activeRuns: new Map(),
     childRuns: new Map(),
     teamRuns: new Set(),
+    graphPatchedSessions: new Set(),
     models: new Map(),
     defaultModel: options.defaultModel ?? "fixture-model",
   }
@@ -411,6 +414,10 @@ export function createExperienceWorld(options: FakeWorldOptions = {}): FakeExper
     hasActiveRun(sessionId: string): boolean {
       calls.push("runtime.hasActiveRun")
       return runtimeFacts.activeRuns.has(sessionId)
+    },
+    hasGraphPatch(sessionId: string): boolean {
+      calls.push("runtime.hasGraphPatch")
+      return runtimeFacts.graphPatchedSessions.has(sessionId)
     },
     modelForCaller(caller): string {
       calls.push("runtime.modelForCaller")
