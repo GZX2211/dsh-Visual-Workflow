@@ -33,7 +33,7 @@ export function registerWfFinish(
     name: WF_FINISH,
     description:
       'Finish the active Visual Workflow orchestration. Call once when the whole flow is complete or cannot continue: marks the run completed/failed, persists the record, and releases the run lock; ' +
-      'a paused or stopped run is resumed first so the closure is recorded. Repeated calls on a finished run return idempotently. ' +
+      'a paused, stopped or interrupted run is silently resumed first (no orchestration directive is injected) so the closure is recorded. Repeated calls on a finished run return idempotently. ' +
       'Only the parent agent may call this; child agents are rejected (WF_NOT_ROOT).',
     parameters: {
       status: { type: 'string', enum: ['completed', 'failed'] as const, description: 'completed (default) or failed.' },

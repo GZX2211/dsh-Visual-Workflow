@@ -108,6 +108,14 @@ export interface ExperienceRuntimePort {
     hasTeamInCurrentRun(sessionId: string): boolean;
     hasActiveRun(sessionId: string): boolean;
     /**
+     * 本会话是否曾成功提交过图结构补丁（「改过图」）。
+     *
+     * 为什么需要它：编排职责的判据不能只看「当前有没有运行中的实例」——规划期（尚未启动运行）
+     * 与运行结束后的复盘同样在履行编排职责，此时只按运行事实判定会把编排者误判成执行主体，
+     * 从而拒绝沉淀编排经验。改过图是编排行为的直接证据，且该事实跨进程存活。
+     */
+    hasGraphPatch(sessionId: string): boolean;
+    /**
      * 调用方当前使用的模型名（评价的评分者模型，用于未来的评分者校准）。
      *
      * 为什么无法确定时返回空串而不是省略：`evaluator_model` 是评价行的必填列，
@@ -123,6 +131,20 @@ export interface ExperienceRuntimePort {
  */
 export interface ExperienceEmbeddingPort {
     readonly source: "local" | "remote" | "bm25";
+    /**
+     * 降级原因（source 为 bm25 时的可诊断信息；未降级或实现不提供时为 null/undefined）。
+     * 为什么在端口上可见：只说「已降级」而不给原因，使用者无从定位（可观测性要求）。
+     */
+    readonly degradeReason?: string | null;
     readonly dimension: number;
+    /**
+     * 确保嵌入能力就绪（惰性引擎的加载入口；返回值即就绪后的来源，可忽略）。
+     *
+     * 为什么必须显式暴露：嵌入引擎是惰性加载的，就绪**之前** source 恒为 bm25（初始值）——
+     * 那表达的是「尚未探测」而不是「已降级」。任何读取 source/dimension 做能力判定的调用方
+     * 都必须先就绪，否则会把「尚未加载」误判成「不可用」：写入被永久拒绝、召回永久退化为词法。
+     * 只在真正需要向量能力时调用即可（避免无谓加载）。
+     */
+    ensureReady(): Promise<unknown>;
     embed(texts: string[]): Promise<Float64Array[]>;
 }

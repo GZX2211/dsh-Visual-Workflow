@@ -6,7 +6,7 @@
 // （见 scheduler/task-config.ts），调度决策见 scheduler 引擎。
 
 import { httpError } from './http.js'
-import { VisualWorkflowApiBase } from './boundary.js'
+import { presentationOf, VisualWorkflowApiBase } from './boundary.js'
 import {
   normalizeScheduledTask,
   parseScheduledTaskInput,
@@ -20,7 +20,7 @@ export class SchedulerEndpoints extends VisualWorkflowApiBase {
   /** 定时任务列表（任务 + 引擎运行态视图）。 */
   async schedulerTasks(): Promise<unknown> {
     const scheduler = this.host.scheduler
-    if (!scheduler) throw httpError(501, '定时任务引擎不可用')
+    if (!scheduler) throw httpError(501, presentationOf(this.host, '定时任务引擎不可用', 'Scheduler engine is unavailable'))
     return scheduler.listViews()
   }
 
@@ -51,7 +51,7 @@ export class SchedulerEndpoints extends VisualWorkflowApiBase {
       }
     }
     const store = this.host.schedulerTaskStore
-    if (!store) throw httpError(501, '定时任务存储不可用')
+    if (!store) throw httpError(501, presentationOf(this.host, '定时任务存储不可用', 'Scheduler task store is unavailable'))
     const saved = await store.save(normalizeScheduledTask(task))
     return saved
   }
@@ -61,7 +61,7 @@ export class SchedulerEndpoints extends VisualWorkflowApiBase {
     const taskId = String(args?.taskId ?? '')
     if (!taskId) throw httpError(400, 'requires taskId')
     const store = this.host.schedulerTaskStore
-    if (!store) throw httpError(501, '定时任务存储不可用')
+    if (!store) throw httpError(501, presentationOf(this.host, '定时任务存储不可用', 'Scheduler task store is unavailable'))
     const deleted = await store.delete(taskId)
     if (deleted) await this.host.scheduler?.forgetTask(taskId)
     return { deleted }

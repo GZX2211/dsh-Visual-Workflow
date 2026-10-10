@@ -95,6 +95,35 @@ export declare const FIELD_LIMITS: {
     readonly total: 8000;
 };
 /**
+ * 字段的「提示词预算」（模型侧 Prompt 的引导长度，不是校验闸门）。
+ *
+ * 与 FIELD_LIMITS 的分工：上限是「超过即拒绝」的硬护栏，取自磁盘列宽与业务裁决；预算回答的是
+ * 另一个问题——一条经验写多长才仍然可检索、可读、不挤占召回上下文。两者同处本文件，因为
+ * 「模型侧 Prompt 允许产出的长度」与「校验层接受的长度」是同一份事实的两面，分处两模块就会
+ * 漂移成「模型按 Prompt 写出却被拒绝」这种无法自解释的失败。
+ *
+ * 取值依据：召回候选摘要会原样渲染 responsibility / decision_domain / exclusions / situation，
+ * 两个检索投影又把其余字段喂给嵌入模型，因此预算按「一句话一条」的紧凑口径给
+ * （决策者口径：中文语境下标签 ≤ 20 字、条件/信号 ≤ 30 字、原则与行动 ≤ 60 字、
+ * 每个数组元素 ≤ 15 字）。硬上限保持原有磁盘护栏不动，因此预算只是引导，
+ * 轻微超出不会让候选被拒。总预算 ≈ 九个字段各自预算之和
+ * （标量 240 + 两个数组各 4×15），逐项守预算即不会撞总上限。
+ *
+ * 不变量：逐项 ≤ FIELD_LIMITS 同项，总预算 ≤ 总上限。
+ */
+export declare const FIELD_BUDGETS: {
+    readonly responsibility: 30;
+    readonly decisionDomain: 20;
+    readonly taskType: 10;
+    readonly situation: 30;
+    readonly trigger: 30;
+    readonly principle: 60;
+    readonly recommendedAction: 60;
+    readonly arrayElement: 15;
+    readonly arrayLength: 4;
+    readonly total: 400;
+};
+/**
  * 初始化状态表的会话数上界。
  *
  * 为什么需要上界：状态键含会话，长驻宿主进程里会话只增不减；上界触及时按最早会话逐出，

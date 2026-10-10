@@ -9,8 +9,10 @@
 // 不落盘、不重算检索投影。工具之间解耦：不调用任何其它 Tool 的注册/执行函数。
 //
 // 提示词规范：description 用官方标准英文，回答「何时调用 / 调用前需要什么 / 失败时
-// 会发生什么 / 是否产生副作用」。
+// 会发生什么 / 是否产生副作用」，并逐字段给出字数预算（数字取自经验域 FIELD_BUDGETS，
+// 措辞只在工具层维护）：预算是生成引导而非校验规则，模型据此自我约束即可。
 
+import { FIELD_BUDGETS, FIELD_LIMITS } from '../../experience/index.js'
 import { ERR_EXPERIENCE_BAD_ARGS, WF_EXPERIENCE_LEARN } from '../../shared/protocol.js'
 import { WfError } from '../../orchestrator/index.js'
 import { experienceCallerOf } from '../infrastructure/caller.js'
@@ -19,6 +21,19 @@ import { assertExperienceTypeOwnership, parseExperienceType, type WfExperienceHo
 import { textRender } from '../infrastructure/text-render.js'
 import { mapExperienceCandidates } from './apply.js'
 import type { LearnResult } from './types.js'
+
+/**
+ * 标量字段的长度提示：预算（生成引导值）+ 上限（超过即拒绝的硬护栏）。
+ * 数字取自经验域唯一本体；措辞属工具层——模型必须读成「引导」而不是「校验」。
+ */
+function scalarLengthNote(budget: number, cap: number): string {
+  return ` Aim for at most ${budget} characters; the cap is ${cap}.`
+}
+
+/** 数组字段的长度提示：条数与单条长度都有预算与上限，两者都要交代。 */
+function listLengthNote(items: number, element: number, itemCap: number, elementCap: number): string {
+  return ` At most ${items} items, each aimed at ${element} characters; the caps are ${itemCap} items of ${elementCap} characters.`
+}
 
 /**
  * 注册 wf_experience_learn（全局层；ctx.tools.register）。
@@ -37,6 +52,7 @@ export function registerWfExperienceLearn(
     name: WF_EXPERIENCE_LEARN,
     description:
       'Learn the durable experiences from a finished unit of work, or fetch the generation prompt that tells you what to learn. Two call shapes share this tool: pass an empty experiences array to get the active Experience Generation Prompt for your current subject type, then pass candidate experiences to store them. Each candidate carries the nine semantic fields the prompt asks for, in snake_case: responsibility, task_type, decision_domain, situation, trigger, principle, recommended_action, exclusions (array of strings) and evidence (array of strings); unknown fields are rejected by validation instead of being silently dropped. '
+      + `Field length: every field below states a generation budget in characters. Those budgets are prompt guidance, not a validation rule, so a slight overrun is still accepted; text that exceeds a field cap (or the total cap) fails the whole call with WF_EXPERIENCE_VALIDATION and nothing is recorded. Keep the nine fields of one candidate within about ${FIELD_BUDGETS.total} characters in total (cap ${FIELD_LIMITS.total}): a shorter candidate stays retrievable and cheap to recall. `
       + 'Preconditions: the prompt for the same type must be fetched in this run before any candidate is accepted, otherwise the call fails with WF_EXPERIENCE_NOT_INITIALIZED and you must fetch the prompt first. A generation prompt is shared by every subject of its type, so fetching it again is safe and idempotent. '
       + 'Failure semantics: a child agent may only pass type "agent" (WF_EXPERIENCE_WRONG_TYPE); a candidate that breaks the protocol fails the whole call with WF_EXPERIENCE_VALIDATION; malformed arguments fail with WF_EXPERIENCE_BAD_ARGS; when semantic embedding is unavailable nothing is written and the call fails with WF_EXPERIENCE_EMBEDDING_UNAVAILABLE. '
       + 'Side effects: a successful submission writes the accepted candidates into the shared experience library; near-duplicate experiences are skipped and reported in skipped with the reason instead of being stored twice. '
@@ -45,20 +61,20 @@ export function registerWfExperienceLearn(
       experiences: {
         type: 'array',
         required: true,
-        description: 'Candidate experiences to store, or an empty array to fetch the generation prompt instead of storing anything. Each candidate carries the nine semantic fields the prompt asks for; unknown fields are rejected by validation, not dropped.',
+        description: 'Candidate experiences to store, or an empty array to fetch the generation prompt instead of storing anything. Each candidate carries the nine semantic fields the prompt asks for; unknown fields are rejected by validation, not dropped, and each field description below states its length budget.',
         items: {
           type: 'object',
           additionalProperties: true,
           properties: {
-            responsibility: { type: 'string', description: 'What the subject is responsible for in this unit of work.' },
-            task_type: { type: 'string', description: 'Coarse task category label used for retrieval, not the concrete task name.' },
-            decision_domain: { type: 'string', description: 'The class of decision this experience is about.' },
-            situation: { type: 'string', description: 'The situation or state the experience was learned in.' },
-            trigger: { type: 'string', description: 'The recognizable future signal that should make this experience worth recalling.' },
-            principle: { type: 'string', description: 'The reusable rule, causal relation or judgement principle.' },
-            recommended_action: { type: 'string', description: 'The future action the principle turns into.' },
-            exclusions: { type: 'array', items: { type: 'string' }, description: 'Conditions under which this experience must not be transferred.' },
-            evidence: { type: 'array', items: { type: 'string' }, description: 'Key facts that support the experience (not a run log).' },
+            responsibility: { type: 'string', description: 'What the subject is responsible for in this unit of work.' + scalarLengthNote(FIELD_BUDGETS.responsibility, FIELD_LIMITS.responsibility) },
+            task_type: { type: 'string', description: 'Coarse task category label used for retrieval, not the concrete task name.' + scalarLengthNote(FIELD_BUDGETS.taskType, FIELD_LIMITS.taskType) },
+            decision_domain: { type: 'string', description: 'The class of decision this experience is about.' + scalarLengthNote(FIELD_BUDGETS.decisionDomain, FIELD_LIMITS.decisionDomain) },
+            situation: { type: 'string', description: 'The situation or state the experience was learned in.' + scalarLengthNote(FIELD_BUDGETS.situation, FIELD_LIMITS.situation) },
+            trigger: { type: 'string', description: 'The recognizable future signal that should make this experience worth recalling.' + scalarLengthNote(FIELD_BUDGETS.trigger, FIELD_LIMITS.trigger) },
+            principle: { type: 'string', description: 'The reusable rule, causal relation or judgement principle.' + scalarLengthNote(FIELD_BUDGETS.principle, FIELD_LIMITS.principle) },
+            recommended_action: { type: 'string', description: 'The future action the principle turns into.' + scalarLengthNote(FIELD_BUDGETS.recommendedAction, FIELD_LIMITS.recommendedAction) },
+            exclusions: { type: 'array', items: { type: 'string' }, description: 'Conditions under which this experience must not be transferred.' + listLengthNote(FIELD_BUDGETS.arrayLength, FIELD_BUDGETS.arrayElement, FIELD_LIMITS.arrayLength, FIELD_LIMITS.arrayElement) },
+            evidence: { type: 'array', items: { type: 'string' }, description: 'Key facts that support the experience (not a run log).' + listLengthNote(FIELD_BUDGETS.arrayLength, FIELD_BUDGETS.arrayElement, FIELD_LIMITS.arrayLength, FIELD_LIMITS.arrayElement) },
           },
         },
       },

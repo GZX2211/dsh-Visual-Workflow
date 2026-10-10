@@ -228,20 +228,21 @@ describe('暂停门（§4.4.2 规则 3 / §4.7 规则 4）', () => {
     expect(h.runtime.pausedRun('session-1', 'flow-1')?.snapshot.id).toBe('run-1')
   })
 
-  it('暂停后：同会话调度自动续跑（新 run 接管锁）；startRun 仍 WF_PAUSED；跨会话 WF_LOCKED', async () => {
+  it('暂停后：同会话调度静默续跑（新 run 接管锁，不注入编排指令）；startRun 仍 WF_PAUSED；跨会话 WF_LOCKED', async () => {
     const h = await makeHarness()
     await start(h, makeFlow())
     await h.runtime.wfRunNode(caller, { nodeId: 'n-pause' })
 
-    // 运行锁降权（用户裁决）：父代理在暂停后直接调度不再 WF_PAUSED，而是自动续跑接管
+    // 运行锁降权 + 静默接续：父代理在自身回合内（busy）直接调度即可接管断点——
+    // 不再要求父代理空闲让位给「编排指令注入」，人工点运行不再是必需动作
+    const root = h.agents.roots.get('session-1')!
+    root.status = 'running'
+    const injected = root.messages.length
     const resumed = await h.runtime.wfRunNode(caller, { nodeId: 'n-a2' })
     expect(resumed).toMatchObject({ nodeId: 'n-a2', status: 'started' })
     expect(h.runtime.flowLockInfo('flow-1')).toMatchObject({ status: 'running', runId: 'run-2' })
     expect((await h.store.getRun('run-2'))?.resumedFromRunId).toBe('run-1')
-    // 续跑指令注入父代理（断点起点 = 暂停节点，已 ok 节点不重跑）
-    const directive = h.agents.roots.get('session-1')!.messages.at(-1)!.content[0].text
-    expect(directive).toContain('正在恢复先前运行')
-    expect(directive).toContain('n-pause')
+    expect(root.messages).toHaveLength(injected) // 静默：不注入编排指令
 
     // 显式 startRun（工作台「运行」按钮语义）仍按原锁语义拒绝暂停态，避免绕过续跑语义
     await h.runtime.wfRunNode(caller, { nodeId: 'n-pause' })
@@ -263,13 +264,27 @@ describe('暂停门（§4.4.2 规则 3 / §4.7 规则 4）', () => {
     const h = await makeHarness()
     await start(h, makeFlow())
     await h.runtime.wfRunNode(caller, { nodeId: 'n-pause' })
-    // 运行锁降权（用户裁决）：收尾也走自动续跑，不再幂等返回 paused——父代理在续跑
-    // 指令下重新确认流程已走完后收尾，运行锁随之释放
+    // 运行锁降权（用户裁决）：收尾也走自动续跑，不再幂等返回 paused——父代理确认流程已走完后收尾
     const finish = await h.runtime.wfFinish(caller, { status: 'completed' })
     expect(finish).toMatchObject({ ok: true, status: 'completed', runId: 'run-2' })
     expect(h.runtime.flowLockInfo('flow-1')).toBeNull()
     // 旧断点记录不被改写（历史可追溯）
     expect((await h.store.getRun('run-1'))?.status).toBe('paused')
+  })
+
+  it('暂停状态下父代理忙碌：wfFinish 静默续跑后收尾（不注入编排指令）', async () => {
+    const h = await makeHarness()
+    await start(h, makeFlow())
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-pause' })
+    const root = h.agents.roots.get('session-1')!
+    root.status = 'running'
+    const injected = root.messages.length
+
+    const finish = await h.runtime.wfFinish(caller, { status: 'completed' })
+
+    expect(finish).toMatchObject({ ok: true, status: 'completed', runId: 'run-2' })
+    expect(h.runtime.flowLockInfo('flow-1')).toBeNull()
+    expect(root.messages).toHaveLength(injected)
   })
 })
 

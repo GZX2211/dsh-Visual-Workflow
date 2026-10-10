@@ -9,7 +9,7 @@
 
 import type { FlowDag } from './dag.js'
 import type { CheckGraphInput, GraphIssue } from './invariants-types.js'
-import type { DatabaseNode, FileNode, GraphNode, Line } from '../shared/graph-model.js'
+import type { DatabaseNode, GraphNode, Line } from '../shared/graph-model.js'
 import { proxyRoleOf } from './model.js'
 
 /** 按 id 建索引（保持输入顺序）。 */
@@ -94,40 +94,35 @@ export function ruleProxySource({ flow }: CheckGraphInput): GraphIssue[] {
   return issues
 }
 
-/** c) 数据节点配置完整性（缺少运行必需项 → error）。 */
+/**
+ * c) 数据节点配置完整性：**只校验数据库节点**（缺少运行必需项 → error）。
+ *
+ * 为什么不再校验 file 节点（用户裁决 2026-10-10）：
+ *   1. 唯一生产调用方是 wf_graph_patch（origin='agent'），而写图只产**文本型** file 节点（D-07）——
+ *      「受管文件未选文件」这一形态在代理路径上已不可达，规则成为死码；
+ *   2. 受管形态只能由画布产生，而画布保存路径只跑结构校验 validateFlow、不经本检查器——
+ *      它从未真正保护过用户路径；
+ *   3. 文本型文件节点允许空内容（占位 / 待填），空文本不构成运行期失败（ctx 注入空串，节点照常运行）；
+ *   4. 该判定是 error 级 = 整批补丁原子失败 + 全量 op 重发；收益为零而误伤成本高。
+ *
+ * 保留数据库分支的理由相反：既无本地路径又无连接信息时运行期**必然**失败（索引无从构建），
+ * 属配置残缺而非「可空字段」，值得在规划期阻断。
+ */
 export function ruleDataNodeComplete({ flow }: CheckGraphInput): GraphIssue[] {
   const issues: GraphIssue[] = []
   for (const node of flow?.nodes ?? []) {
-    if (node.kind === 'database') {
-      const db = node as DatabaseNode
-      const hasLocal = String(db.data?.localPath ?? '').trim().length > 0
-      const hasConn = !!db.data?.conn
-      if (!hasLocal && !hasConn) {
-        issues.push({
-          code: 'dataNodeIncomplete',
-          level: 'error',
-          message: `数据库节点「${db.data?.label || db.id}」既无本地文件路径也无服务器连接信息`,
-          nodeIds: [db.id],
-          suggestion: '补全数据库配置（本地类型填文件路径，服务器类型填连接信息），否则运行期必然失败',
-        })
-      }
-      continue
-    }
-    if (node.kind === 'file') {
-      const file = node as FileNode
-      if (file.data?.fileKind !== 'file') continue
-      const hasManaged = String(file.data?.managedPath ?? '').trim().length > 0
-      const hasFiles = Array.isArray(file.data?.files) && file.data.files.length > 0
-      if (!hasManaged && !hasFiles) {
-        issues.push({
-          code: 'dataNodeIncomplete',
-          level: 'error',
-          message: `文件节点「${file.data?.label || file.id}」未选择任何文件`,
-          nodeIds: [file.id],
-          suggestion: '为该文件节点选择至少一个文件（或把类型改回文本并填写内容）',
-        })
-      }
-    }
+    if (node.kind !== 'database') continue
+    const db = node as DatabaseNode
+    const hasLocal = String(db.data?.localPath ?? '').trim().length > 0
+    const hasConn = !!db.data?.conn
+    if (hasLocal || hasConn) continue
+    issues.push({
+      code: 'dataNodeIncomplete',
+      level: 'error',
+      message: `数据库节点「${db.data?.label || db.id}」既无本地文件路径也无服务器连接信息`,
+      nodeIds: [db.id],
+      suggestion: '补全数据库配置（本地类型填文件路径，服务器类型填连接信息），否则运行期必然失败',
+    })
   }
   return issues
 }
@@ -155,21 +150,30 @@ export function ruleCtxSource({ flow }: CheckGraphInput): GraphIssue[] {
   return issues
 }
 
-/** e) 数据库出线目标合法性（必须是数据库节点）。 */
+/**
+ * e) 数据库出线目标合法性：**必须是角色节点**（子代理 / 父代理 / 虚拟节点）。
+ *
+ * 为什么不是「必须是数据库节点」：db 通道的语义是「把数据源转换为检索/查询工具注入角色」
+ * （数据库内容绝不注入上下文），配对矩阵 `HANDLE_PAIRING` 也只把 db-out 映到 db-in——
+ * 而 db-in 只存在于角色节点上（database 的 inputs 为空，无法自连）。若要求目标为数据库节点，
+ * 则 db 线在任何路径下都无法成立，database 节点必然悬空、整类节点不可用。
+ */
 export function ruleDbTarget({ flow }: CheckGraphInput): GraphIssue[] {
   const byId = nodeMapOf(flow)
   const issues: GraphIssue[] = []
   for (const line of flow?.lines ?? []) {
     if (line.sourceHandle !== 'db-out') continue
     const target = byId.get(line.target)
-    if (!target || target.kind === 'database') continue
+    if (!target) continue
+    const isRoleNode = target.kind === 'agent' || target.kind === 'parent' || target.kind === 'proxy'
+    if (isRoleNode) continue
     issues.push({
       code: 'dbLineTargetInvalid',
       level: 'error',
-      message: `数据库出线的目标「${line.target}」（${target.kind}）不是数据库节点`,
+      message: `数据库出线的目标「${line.target}」（${target.kind}）不是角色节点——数据库内容不注入上下文，只以检索/查询工具形式提供给子代理/父代理`,
       nodeIds: [line.source, target.id],
       lineIds: [line.id],
-      suggestion: '数据库出线只能连到数据库节点的数据库入点',
+      suggestion: '数据库出线只能连到角色节点（子代理 / 父代理 / 虚拟节点）的数据库入点',
     })
   }
   return issues

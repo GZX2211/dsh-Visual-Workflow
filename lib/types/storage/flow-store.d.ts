@@ -8,7 +8,7 @@ export { FlowRevisionConflictError } from './document-policy.js';
 export declare class FlowStore {
     readonly root: string;
     /** 顶层数据目录（init 时创建；常量表供测试与外部工具断言布局）。 */
-    static readonly DIRS: readonly ["workflows", "services", "roles", "data", "groups", "runs", "orchestrations", "flow-templates"];
+    static readonly DIRS: readonly ["workflows", "services", "roles", "data", "groups", "runs", "orchestrations", "flow-templates", "graph-patches"];
     /** 嵌套子目录（相对 root；随顶层目录一并幂等创建）。 */
     static readonly NESTED_DIRS: readonly ["data/files"];
     constructor(root: string);

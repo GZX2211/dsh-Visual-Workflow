@@ -352,20 +352,24 @@ describe('规则矩阵（每个 code 一例）', () => {
     expect(issues.find((i) => i.code === 'cannotReachEnd')?.level).toBe('warning')
   })
 
-  it('dataNodeIncomplete：数据库无路径无连接 / 受管文件未选文件', () => {
+  it('dataNodeIncomplete：数据库无路径且无连接', () => {
     const doc = flow(
-      [stage('s', 'start'), agent('a1'), dbNode('d1'), fileNode('f1', { fileKind: 'file' }), stage('e', 'end')],
-      [
-        line('l1', 's', 'a1'),
-        line('l2', 'a1', 'e'),
-        line('c1', 'f1', 'a1', 'ctx'),
-        line('c2', 'a1', 'd1', 'db'),
-      ],
+      [stage('s', 'start'), agent('a1'), dbNode('d1'), stage('e', 'end')],
+      [line('l1', 's', 'a1'), line('l2', 'a1', 'e'), line('c2', 'a1', 'd1', 'db')],
     )
     const issues = check({ flow: doc })
     const incomplete = issues.filter((i) => i.code === 'dataNodeIncomplete')
-    expect(incomplete).toHaveLength(2)
-    expect(incomplete.flatMap((i) => i.nodeIds ?? []).sort()).toEqual(['d1', 'f1'])
+    expect(incomplete).toHaveLength(1)
+    expect(incomplete[0].nodeIds).toEqual(['d1'])
+  })
+
+  it('受管文件节点未选文件：不再阻断（写图只产文本型，该校验已取消）', () => {
+    const doc = flow(
+      [stage('s', 'start'), agent('a1'), fileNode('f1', { fileKind: 'file' }), stage('e', 'end')],
+      [line('l1', 's', 'a1'), line('l2', 'a1', 'e'), line('c1', 'f1', 'a1', 'ctx')],
+    )
+    const issues = check({ flow: doc })
+    expect(issues.some((i) => i.code === 'dataNodeIncomplete')).toBe(false)
   })
 
   it('ctxSourceInvalid：上下文入线来自暂停节点', () => {
@@ -383,13 +387,22 @@ describe('规则矩阵（每个 code 一例）', () => {
     expect(codes(issues)).toContain('ctxSourceInvalid')
   })
 
-  it('dbLineTargetInvalid：数据库出线指向角色节点', () => {
+  it('dbLineTargetInvalid：数据库出线指向非角色节点（文件节点）', () => {
+    const doc = flow(
+      [stage('s', 'start'), agent('a1'), fileNode('f1'), dbNode('d1', { localPath: 'x.db' }), stage('e', 'end')],
+      [line('l1', 's', 'a1'), line('l2', 'a1', 'e'), line('c1', 'd1', 'f1', 'db')],
+    )
+    const issues = check({ flow: doc })
+    expect(codes(issues)).toContain('dbLineTargetInvalid')
+  })
+
+  it('数据库出线指向角色节点：合法（db 通道只向角色注入检索/查询工具）', () => {
     const doc = flow(
       [stage('s', 'start'), agent('a1'), dbNode('d1', { localPath: 'x.db' }), stage('e', 'end')],
       [line('l1', 's', 'a1'), line('l2', 'a1', 'e'), line('c1', 'd1', 'a1', 'db')],
     )
     const issues = check({ flow: doc })
-    expect(codes(issues)).toContain('dbLineTargetInvalid')
+    expect(codes(issues)).not.toContain('dbLineTargetInvalid')
   })
 
   it('pauseNodeDangling：暂停节点缺少流程出', () => {

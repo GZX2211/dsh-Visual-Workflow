@@ -28,6 +28,8 @@ function fakeEngine(source: 'local' | 'remote' | 'bm25' = 'local', dimension = 4
   return {
     source,
     dimension,
+    // fake 的 source 即能力事实（等价于引擎已就绪），故就绪钩子为空操作
+    async ensureReady() {},
     async embed(texts: string[]): Promise<Float64Array[]> {
       return texts.map((text) => {
         const vec = new Float64Array(dimension)
@@ -37,6 +39,27 @@ function fakeEngine(source: 'local' | 'remote' | 'bm25' = 'local', dimension = 4
         return normalizeVector(vec)
       })
     },
+    dispose() {},
+  }
+}
+
+/**
+ * 惰性 fake：模拟真实引擎「就绪之前 source 恒为 bm25」的行为——
+ * 未就绪时读到的 source 表达「尚未探测」，而不是「已降级」。
+ */
+function lazyEngine(dimension = 4): EmbeddingEngine {
+  const base = fakeEngine('bm25', dimension)
+  let source: 'local' | 'remote' | 'bm25' = 'bm25'
+  return {
+    get source() {
+      return source
+    },
+    dimension,
+    async ensureReady(): Promise<unknown> {
+      source = 'local'
+      return source
+    },
+    embed: base.embed,
     dispose() {},
   }
 }
@@ -107,6 +130,21 @@ describe('VectorIndex 重建与检索', () => {
     expect(file.source).toBe('bm25')
     expect(file.dimension).toBe(0)
     expect(file.chunks.every((c) => c.vector === undefined)).toBe(true)
+  })
+
+  it('test_rebuild_引擎尚未就绪_先就绪再判定故仍写入向量索引', async () => {
+    const dir = await tempDir('vw-idx-')
+    const index = new VectorIndex(join(dir, 'idx.json'))
+
+    const file = await index.rebuild({
+      dataId: 'db-1',
+      records: [{ text: '惰性 引擎 首次 构建' }],
+      engine: lazyEngine(),
+    })
+
+    expect(file.source).toBe('embedding')
+    expect(file.dimension).toBe(4)
+    expect(file.chunks[0].vector?.length).toBe(4)
   })
 
   it('rebuild 逐记录分块：长记录被切窗且 source 保留', async () => {

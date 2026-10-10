@@ -8,8 +8,8 @@ import { agentPresetsServiceOf, releasePresetLease } from '../agent/index.js'
 import { agentTeamsServiceLike } from '../team/index.js'
 import { listMcpServers, upsertMcpServer, removeMcpServer, toggleMcpServer, renderCommandLine } from '../mcp/registry.js'
 import { httpError } from './http.js'
-import { zhDescription } from './tool-descriptions.js'
-import { VisualWorkflowApiBase } from './boundary.js'
+import { toolCardDescription } from './tool-descriptions.js'
+import { isChinesePresentation, presentationOf, VisualWorkflowApiBase } from './boundary.js'
 
 export class CatalogEndpoints extends VisualWorkflowApiBase {
   // ---------- 工具组合 / 插件目录 / MCP ----------
@@ -22,7 +22,7 @@ export class CatalogEndpoints extends VisualWorkflowApiBase {
     const combo = args?.combo as Record<string, unknown> | null | undefined
     const id = String(combo?.id ?? '')
     if (!combo || !id.startsWith('combo-') || !String(combo.name ?? '').trim()) {
-      throw httpError(400, '组合需要 combo- 前缀 id 与名称')
+      throw httpError(400, presentationOf(this.host, '组合需要 combo- 前缀 id 与名称', 'A combo needs a combo- prefixed id and a name'))
     }
     return this.host.store.saveToolCombo({
       id: id as `combo-${string}`,
@@ -41,7 +41,7 @@ export class CatalogEndpoints extends VisualWorkflowApiBase {
   }
 
   /**
-   * 插件目录：工具（全局层 ∪ 存活 agent scope ∪ preset standing scope，含中文
+   * 插件目录：工具（全局层 ∪ 存活 agent scope ∪ preset standing scope，含中/英
    * 描述映射）+ MCP 服务器 + 已装载插件摘要。scope key 必须是 agent 对象本身
    * （官方 ScopeKey 语义），传错只能看到全局层。
    */
@@ -59,7 +59,7 @@ export class CatalogEndpoints extends VisualWorkflowApiBase {
       items.push({
         key: `tool:${name}`,
         name,
-        description: zhDescription(name, String(entry.description ?? '')),
+        description: toolCardDescription(name, String(entry.description ?? ''), isChinesePresentation(this.host)),
         kind: 'tool',
         source: name.startsWith('mcp__') ? 'mcp' : 'builtin',
       })
@@ -89,9 +89,7 @@ export class CatalogEndpoints extends VisualWorkflowApiBase {
         id: server.id,
         name: server.serverName,
         serverName: server.serverName,
-        description: server.url
-          ? `MCP 服务器（streamable-http：${server.url}）`
-          : `MCP 服务器（stdio：${renderCommandLine(String(server.command ?? ''), (server.args ?? []) as string[])}）`,
+        description: this.mcpCardDescription(server),
         transport: server.transport,
         disabled: server.disabled === true,
         // 组合管理「编辑」表单的字段来源：缺失时编辑后启动命令/参数恒为空
@@ -194,6 +192,19 @@ export class CatalogEndpoints extends VisualWorkflowApiBase {
     })
   }
 
+  /**
+   * MCP 服务器卡片描述（两种传输的中/英文案）。
+   * 命令行为用户配置数据，两种语言都原样嵌入，不翻译。
+   */
+  private mcpCardDescription(server: { url?: unknown; command?: unknown; args?: unknown }): string {
+    if (server.url) {
+      const url = String(server.url)
+      return presentationOf(this.host, `MCP 服务器（streamable-http：${url}）`, `MCP server (streamable-http: ${url})`)
+    }
+    const line = renderCommandLine(String(server.command ?? ''), (Array.isArray(server.args) ? server.args : []) as string[])
+    return presentationOf(this.host, `MCP 服务器（stdio：${line}）`, `MCP server (stdio: ${line})`)
+  }
+
   /** MCP 服务器：列表 / 增删改 / 启停（写入 profile 托管区，重启生效）。 */
   async mcpList(): Promise<unknown> {
     const servers = await listMcpServers()
@@ -244,9 +255,12 @@ export class CatalogEndpoints extends VisualWorkflowApiBase {
   async toolSwitchPut(args: { name?: unknown; disabled?: unknown }): Promise<unknown> {
     if (!this.host.toolSwitches) throw httpError(501, 'tool switches unavailable')
     const name = String(args?.name ?? '')
-    if (!name) throw httpError(400, '工具开关需要 name')
+    if (!name) throw httpError(400, presentationOf(this.host, '工具开关需要 name', 'A tool switch needs name'))
     if (name === RESERVED_TRANSPORT_TOOL) {
-      throw httpError(400, `${RESERVED_TRANSPORT_TOOL} 为官方保留传输名，不可关闭`)
+      throw httpError(
+        400,
+        presentationOf(this.host, `${RESERVED_TRANSPORT_TOOL} 为官方保留传输名，不可关闭`, `${RESERVED_TRANSPORT_TOOL} is the official reserved transport name and cannot be disabled`),
+      )
     }
     return { disabled: await this.host.toolSwitches.setDisabled(name, args?.disabled !== false) }
   }
@@ -262,7 +276,9 @@ export class CatalogEndpoints extends VisualWorkflowApiBase {
     const names = (Array.isArray(args?.names) ? args.names : [])
       .map((name) => String(name ?? '').trim())
       .filter((name) => name && name !== RESERVED_TRANSPORT_TOOL)
-    if (names.length === 0) throw httpError(400, '工具批量开关需要一个以上可设置的工具名')
+    if (names.length === 0) {
+      throw httpError(400, presentationOf(this.host, '工具批量开关需要一个以上可设置的工具名', 'A bulk tool switch needs at least one settable tool name'))
+    }
     return { disabled: await this.host.toolSwitches.setDisabledMany(names, args?.disabled !== false) }
   }
 }

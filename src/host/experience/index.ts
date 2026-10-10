@@ -22,6 +22,7 @@ export {
   EVALUATION_EVIDENCE_LIMIT,
   EVIDENCE_STRENGTH_SCALE,
   EXPERIENCE_TYPES,
+  FIELD_BUDGETS,
   FIELD_LIMITS,
   MAX_CANDIDATES_PER_CALL,
   MAX_EVALUATIONS_PER_CALL,
@@ -82,7 +83,7 @@ export type {
   ExperienceSubject,
   ExperienceSubjectInput,
 } from "./subject.js"
-export { allowedExperienceTypes, resolveExperienceSubject } from "./subject.js"
+export { allowedExperienceTypes, resolveExperienceReaderSubject, resolveExperienceSubject } from "./subject.js"
 
 export type {
   AnchorDefinition,

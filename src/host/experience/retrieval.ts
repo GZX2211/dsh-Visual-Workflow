@@ -158,6 +158,9 @@ export async function recallActiveHits(input: ExperienceRecallInput): Promise<Ex
     // 无活跃行时不必付出一次远程嵌入的代价；来源仍如实反映当前端口能力
     return { scored: [], source: input.embedding.source === "bm25" ? "bm25" : "semantic" }
   }
+  // 端口 source 是能力事实，但引擎惰性加载：读取前必须先就绪，否则「尚未加载」会被
+  // 误判成「已降级」而永久走词法检索。（无命中分支不触发加载，也不参与排序。）
+  await input.embedding.ensureReady()
   if (input.embedding.source !== "bm25") {
     try {
       const vectors = await input.embedding.embed([input.query])

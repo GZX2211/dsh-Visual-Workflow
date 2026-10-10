@@ -188,6 +188,22 @@ describe("recallActiveHits 通道选择与回退标记", () => {
     expect(outcome.scored[0].id).toBe("ex-a")
   })
 
+  it("test_惰性引擎就绪前的 source 为 bm25_就绪后走语义通道", async () => {
+    const world = createExperienceWorld({
+      embeddingSource: "bm25",
+      onEnsureReady: () => {
+        // 模拟惰性引擎加载完成：就绪之后 source 才代表真实能力
+        world.embedding.source = "local"
+      },
+    })
+    const rows = [row("ex-a", new Float64Array([1, 0]), { taskText: "并行启动 闸门", decisionText: "分解" })]
+
+    const outcome = await recallActiveHits({ query: "并行启动", rows, embedding: world.embedding })
+
+    expect(outcome.source).toBe("semantic")
+    expect(world.embedCalls).toEqual([["并行启动"]])
+  })
+
   it("test_嵌入调用抛错_回退词法并标记 bm25", async () => {
     const world = createExperienceWorld({
       embed: async () => {

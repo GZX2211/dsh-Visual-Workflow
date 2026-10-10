@@ -242,6 +242,38 @@ describe("ExperienceService.submit 事务边界与 provenance", () => {
     expect(world.entries.size).toBe(0)
   })
 
+  it("test_嵌入降级且带原因_拒绝写入并回显原因", async () => {
+    const world = createExperienceWorld({ embeddingSource: "bm25" })
+    world.embedding.degradeReason = "本地嵌入模型资产缺失：/nope"
+    seedPrompts(world)
+    const { service } = createService(world)
+    await service.initializePrompt({ caller: ROOT_CALLER, type: "agent" })
+
+    const error = await errorOf(() => service.submit({ caller: ROOT_CALLER, type: "agent", candidates: [createCandidatePayload()] }))
+
+    expect(error.code).toBe(ERR_EXPERIENCE_EMBEDDING_UNAVAILABLE)
+    expect(error.message).toContain("本地嵌入模型资产缺失：/nope")
+    expect(world.entries.size).toBe(0)
+  })
+
+  it("test_惰性引擎就绪前的 source 为 bm25_就绪后写入成功", async () => {
+    const world = createExperienceWorld({
+      embeddingSource: "bm25",
+      onEnsureReady: () => {
+        // 模拟惰性引擎加载完成：就绪之后 source 才代表真实能力
+        world.embedding.source = "local"
+      },
+    })
+    seedPrompts(world)
+    const { service } = createService(world)
+    await service.initializePrompt({ caller: ROOT_CALLER, type: "agent" })
+
+    await service.submit({ caller: ROOT_CALLER, type: "agent", candidates: [createCandidatePayload()] })
+
+    expect(world.entries.size).toBe(1)
+    expect(world.lastInsert?.rows[0]?.embeddingModel).toBe("local")
+  })
+
   it("test_嵌入调用抛错_拒绝写入", async () => {
     const world = createExperienceWorld({
       embed: async () => {
@@ -480,13 +512,27 @@ describe("ExperienceService.recall", () => {
     expect(world.embedCalls).toEqual([])
   })
 
-  it("test_召回类型职责不符_拒绝", async () => {
+  it("test_召回不再施加职责门禁_类型只决定候选池（D-09）", async () => {
     const world = seedRecallWorld()
     const { service } = createService(world)
 
-    const error = await errorOf(() => service.recall({ caller: ROOT_CALLER, type: "team", query: "协作" }))
+    // 写入侧此刻只允许 agent（无运行实例、未改图），但读取侧应按 type 取池子
+    const result = await service.recall({ caller: ROOT_CALLER, type: "team", query: "协作" })
 
-    expect(error.code).toBe(ERR_EXPERIENCE_WRONG_TYPE)
+    if (result.kind !== "candidates") throw new Error("期望候选阶段结果")
+    expect(result.hits.map((hit) => hit.id)).toEqual(["ex-team-1"])
+    expect(world.listActiveEmbeddingsCalls).toEqual(["team"])
+  })
+
+  it("test_改过图的父代理召回 agent 经验_不再被自身身份挡住（D-09）", async () => {
+    const world = seedRecallWorld()
+    world.runtimeFacts.graphPatchedSessions.add(ROOT_CALLER.sessionId)
+    const { service } = createService(world)
+
+    const result = await service.recall({ caller: ROOT_CALLER, type: "agent", query: "并行启动" })
+
+    if (result.kind !== "candidates") throw new Error("期望候选阶段结果")
+    expect(result.hits.map((hit) => hit.id)).toEqual(["ex-agent-1"])
   })
 
   it("test_检索通道不可用_返回 WF_EXPERIENCE_RECALL_FAILED", async () => {
@@ -680,15 +726,18 @@ describe("ExperienceService.teamExperienceContext", () => {
     expect(world.embedCalls).toEqual([])
   })
 
-  it("test_职责校检不通过_返回 null 并留下可诊断信息", async () => {
-    const world = createExperienceWorld()
+  it("test_尚未启动协作组但池中有 team 经验_仍可注入（读取侧不再走职责门禁）", async () => {
+    const world = createExperienceWorld({ embed: async () => [new Float64Array([1, 0])] })
     seedActiveRun(world, "session-1")
+    // 注意：协作组上下文是在「启动协作组之前」查询的，此刻 hasTeam 必然还是 false——
+    // 旧实现因此恒被自身判据挡掉（隐藏缺陷），读取侧放开后该路径才成立。
+    seedEntry(world, { id: "ex-team-early", experienceType: "team" }, { decisionVector: new Float64Array([1, 0]) })
     const { service, warnings } = createService(world)
 
-    expect(await service.teamExperienceContext(INPUT)).toBeNull()
-    expect(warnings).toHaveLength(1)
-    expect(warnings[0].includes("team")).toBe(true)
-    expect(warnings[0].includes("group-1")).toBe(true)
+    const text = await service.teamExperienceContext(INPUT)
+
+    expect(text?.includes("ex-team-early")).toBe(true)
+    expect(warnings).toEqual([])
   })
 
   it("test_经验库读取失败_返回 null 而不抛给调用方", async () => {

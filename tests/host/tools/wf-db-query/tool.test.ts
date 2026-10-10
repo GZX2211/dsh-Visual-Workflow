@@ -27,7 +27,7 @@ import {
 afterEach(cleanupTempDirs)
 
 /** 降级引擎替身（bm25：不做嵌入）。 */
-const engine: EmbeddingEngine = { source: 'bm25', dimension: 0, async embed() { throw new Error('bm25 only') }, dispose() {} }
+const engine: EmbeddingEngine = { source: 'bm25', dimension: 0, async ensureReady() {}, async embed() { throw new Error('bm25 only') }, dispose() {} }
 
 interface DbHarness extends TestEnv {
   host: WfDbQueryHost

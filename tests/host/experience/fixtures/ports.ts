@@ -45,6 +45,8 @@ export interface FakeRuntimeFacts {
   activeRuns: Map<string, { runId: string; flowId: string; sessionId: string }>
   childRuns: Map<string, { runId: string; flowId: string; sessionId: string; nodeId: string }>
   teamRuns: Set<string>
+  /** 曾成功改过图的会话（编排职责判据之一；D-05）。 */
+  graphPatchedSessions: Set<string>
   /** 主体身份 → 模型名（缺省回落 defaultModel；空串表达「无法确定」）。 */
   models: Map<string, string>
   /** 未登记模型名时的回落值。 */
@@ -58,7 +60,10 @@ export interface FakeRuntimeFacts {
  */
 export interface FakeEmbeddingPort {
   source: "local" | "remote" | "bm25"
+  /** 降级原因（用例可摆放，用于断言「拒绝写入时回显原因」）。 */
+  degradeReason?: string | null
   readonly dimension: number
+  ensureReady(): Promise<void>
   embed(texts: string[]): Promise<Float64Array[]>
   readonly embedCalls: string[][]
 }
@@ -98,6 +103,11 @@ export interface FakeWorldOptions {
   embeddingSource?: "local" | "remote" | "bm25"
   dimension?: number
   embed?: (texts: string[]) => Promise<Float64Array[]>
+  /**
+   * 就绪钩子：模拟惰性引擎「就绪之后 source/dimension 才代表真实能力」的行为。
+   * 缺省为空操作——此时用例摆放的 source 即能力事实，等价于引擎已就绪。
+   */
+  onEnsureReady?: () => void | Promise<void>
   now?: number
   maxIdSeed?: number
   /** 运行事实端口在未登记主体模型名时的回落值（默认 fixture-model；空串表达「无法确定」）。 */
@@ -197,6 +207,7 @@ export function createExperienceWorld(options: FakeWorldOptions = {}): FakeExper
     activeRuns: new Map(),
     childRuns: new Map(),
     teamRuns: new Set(),
+    graphPatchedSessions: new Set(),
     models: new Map(),
     defaultModel: options.defaultModel ?? "fixture-model",
   }
@@ -404,6 +415,10 @@ export function createExperienceWorld(options: FakeWorldOptions = {}): FakeExper
       calls.push("runtime.hasActiveRun")
       return runtimeFacts.activeRuns.has(sessionId)
     },
+    hasGraphPatch(sessionId: string): boolean {
+      calls.push("runtime.hasGraphPatch")
+      return runtimeFacts.graphPatchedSessions.has(sessionId)
+    },
     modelForCaller(caller): string {
       calls.push("runtime.modelForCaller")
       return runtimeFacts.models.get(caller.childId ?? caller.sessionId) ?? runtimeFacts.defaultModel
@@ -412,7 +427,12 @@ export function createExperienceWorld(options: FakeWorldOptions = {}): FakeExper
 
   const embedding: FakeEmbeddingPort = {
     source: options.embeddingSource ?? "local",
+    degradeReason: null,
     dimension,
+    async ensureReady(): Promise<void> {
+      calls.push("embedding.ensureReady")
+      await options.onEnsureReady?.()
+    },
     async embed(texts: string[]): Promise<Float64Array[]> {
       calls.push("embed")
       embedCalls.push([...texts])

@@ -15,6 +15,7 @@
 //   data/files/                          受管文件副本（非文本文件受管拷贝）
 //   groups/<groupId>.json                协作组模板（全局共享）
 //   flow-templates/<templateId>.json     工作流模板（全局共享；图2 交互改造新增）
+//   graph-patches/<sessionId>.json       会话的图结构补丁记录（「改过图」事实；编排职责判据）
 //   combos.json                          工具组合列表（全局共享）
 //   runs/<runId>.json                    运行历史（RunSnapshot，含 flowId/断点/节点产出）
 //   orchestrations/<runId>.json          运行时流程定义（父代理只读的事实源）
@@ -39,6 +40,7 @@ export const DIRS = [
   'runs',
   'orchestrations',
   'flow-templates',
+  'graph-patches',
 ] as const
 
 /** 嵌套子目录（相对 root 的路径；随顶层目录一并幂等创建）。 */
@@ -87,6 +89,11 @@ export function templatePath(root: string, kind: TemplateKind, id: string): stri
 /** 工作流模板文件路径（flow-templates/，全局共享）。 */
 export function flowTemplatePath(root: string, templateId: string): string {
   return join(root, 'flow-templates', `${safeFilePart(templateId)}.json`)
+}
+
+/** 会话的图补丁记录文件路径（graph-patches/<sessionId>.json；「改过图」事实的持久化位点）。 */
+export function graphPatchLogPath(root: string, sessionId: string): string {
+  return join(root, 'graph-patches', `${safeFilePart(sessionId)}.json`)
 }
 
 /** run 快照文件路径。 */

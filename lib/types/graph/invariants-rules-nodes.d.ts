@@ -4,11 +4,31 @@ import type { CheckGraphInput, GraphIssue } from './invariants-types.js';
 export declare function ruleGroupMembers(input: CheckGraphInput, dag: FlowDag): GraphIssue[];
 /** b) 虚拟节点引用缺失或指向非角色节点。 */
 export declare function ruleProxySource({ flow }: CheckGraphInput): GraphIssue[];
-/** c) 数据节点配置完整性（缺少运行必需项 → error）。 */
+/**
+ * c) 数据节点配置完整性：**只校验数据库节点**（缺少运行必需项 → error）。
+ *
+ * 为什么不再校验 file 节点（用户裁决 2026-10-10）：
+ *   1. 唯一生产调用方是 wf_graph_patch（origin='agent'），而写图只产**文本型** file 节点（D-07）——
+ *      「受管文件未选文件」这一形态在代理路径上已不可达，规则成为死码；
+ *   2. 受管形态只能由画布产生，而画布保存路径只跑结构校验 validateFlow、不经本检查器——
+ *      它从未真正保护过用户路径；
+ *   3. 文本型文件节点允许空内容（占位 / 待填），空文本不构成运行期失败（ctx 注入空串，节点照常运行）；
+ *   4. 该判定是 error 级 = 整批补丁原子失败 + 全量 op 重发；收益为零而误伤成本高。
+ *
+ * 保留数据库分支的理由相反：既无本地路径又无连接信息时运行期**必然**失败（索引无从构建），
+ * 属配置残缺而非「可空字段」，值得在规划期阻断。
+ */
 export declare function ruleDataNodeComplete({ flow }: CheckGraphInput): GraphIssue[];
 /** d) 上下文入线来源合法性（角色 / 虚拟节点 / 文件 / 模式二输入节点）。 */
 export declare function ruleCtxSource({ flow }: CheckGraphInput): GraphIssue[];
-/** e) 数据库出线目标合法性（必须是数据库节点）。 */
+/**
+ * e) 数据库出线目标合法性：**必须是角色节点**（子代理 / 父代理 / 虚拟节点）。
+ *
+ * 为什么不是「必须是数据库节点」：db 通道的语义是「把数据源转换为检索/查询工具注入角色」
+ * （数据库内容绝不注入上下文），配对矩阵 `HANDLE_PAIRING` 也只把 db-out 映到 db-in——
+ * 而 db-in 只存在于角色节点上（database 的 inputs 为空，无法自连）。若要求目标为数据库节点，
+ * 则 db 线在任何路径下都无法成立，database 节点必然悬空、整类节点不可用。
+ */
 export declare function ruleDbTarget({ flow }: CheckGraphInput): GraphIssue[];
 /**
  * f) 数据流契约（warning，规划期提醒；用户裁决 C6）：把「上下游交接没有通道」变成规划期

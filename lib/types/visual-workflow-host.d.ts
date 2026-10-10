@@ -74,6 +74,17 @@ export declare class VisualWorkflowHost extends Service {
      * 条目为极小字符串、会话内数量有限，仅随宿主 dispose 统一清理即可。
      */
     private readonly childPromptStates;
+    /**
+     * 「本会话改过图」事实的持久化（D-05；经验域编排职责判据之一）。
+     * 为什么由宿主持有：写入方是 wf_graph_patch 工具、读取方是经验域，两侧都只经适配缝，
+     * 而事实本身必须落在 storage。
+     */
+    private readonly graphPatchLog;
+    /**
+     * 改过图的会话内存索引（运行事实端口的查询是同步的，故不每次读盘）。
+     * 装载时机：宿主 init 扫盘一次 + 本进程每次记录即时加入。
+     */
+    private readonly graphPatchedSessions;
     /** 本地嵌入引擎（外部端点 > 本地资产 > BM25 降级；惰性加载）。 */
     private readonly embedding;
     /**
@@ -97,10 +108,11 @@ export declare class VisualWorkflowHost extends Service {
     getRootAgent(sessionId: string): RootAgentLike | null;
     /**
      * 系统语言名（从 DSH 用户设置 locale.preference 读取）。
-     * 单一读取路径：编排提示词注入与 /arrange 规划提示词注入共用，避免同一读取
-     * 表达式散落两处（口径分叉时界面与提示词语言会不一致）。
+     * 单一读取路径：编排提示词注入、/arrange 规划提示词注入与 GUI 呈现文案共用，
+     * 避免同一读取表达式散落两处（口径分叉时界面与提示词语言会不一致）。
+     * 公开供 API 边界能力缝（ApiHost.systemLanguage）消费。
      */
-    private systemLanguage;
+    systemLanguage(): string;
     /**
      * 在子代理创建窗口内安装四类每子代理作用域贡献，返回合并 disposer（host 管理生命周期）。
      * 与官方 installModelSelection(agentCtx) 的「拿到 child 的 ctx 后安装」范式一致：

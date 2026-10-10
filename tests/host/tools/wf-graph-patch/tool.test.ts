@@ -1628,3 +1628,81 @@ describe('wf_graph_patch · 参数层契约守卫', () => {
     expect(err.message).toContain('memberIds')
   })
 })
+
+describe('wf_graph_patch：改图事实记录（D-05）', () => {
+  it('test_图结构补丁成功_调用记录缝并带上会话目标与作用域', async () => {
+    const recorded: Array<{ sessionId: string; targetId: string; scope: string }> = []
+    const { host } = makeHost({
+      newTemplateId: () => 'tpl-rec1',
+      recordGraphPatch: async (input) => { recorded.push(input) },
+    })
+
+    await executeGraphPatch(host, 'session-1', {
+      scope: 'template', create: { name: '记录探针' }, ops: createOps(),
+    })
+
+    expect(recorded).toEqual([{ sessionId: 'session-1', targetId: 'tpl-rec1', scope: 'template' }])
+  })
+
+  it('test_补丁被检查器阻断_不记录改图事实', async () => {
+    const recorded: Array<{ sessionId: string; targetId: string; scope: string }> = []
+    const { host } = makeHost({
+      newTemplateId: () => 'tpl-rec2',
+      recordGraphPatch: async (input) => { recorded.push(input) },
+    })
+
+    // 缺 start/end 的图 → 检查器阻断（整批不落盘），因此不得留下「改过图」的事实
+    await expectWfError(() => executeGraphPatch(host, 'session-1', {
+      scope: 'template',
+      create: { name: '非法图' },
+      ops: [{ op: 'create_node', node: { id: 'a1', kind: 'agent', data: { label: 'x', systemPrompt: 'x', retryLimit: 3, provider: '', model: '' } } }],
+    }), 'WF_GRAPH_INVALID')
+
+    expect(recorded).toEqual([])
+  })
+})
+
+describe('wf_graph_patch：file 节点只写文本型（D-07）', () => {
+  it('test_写受管文件节点_归一化为文本型并在 warnings 里告知', async () => {
+    const { host, storeState } = makeHost({ newTemplateId: () => 'tpl-file1' })
+    const ops = [
+      { op: 'create_node', node: { id: 's', kind: 'start', data: { label: stageLabel('start', 'mode1') } } },
+      { op: 'create_node', node: { id: 'a1', kind: 'agent', data: { label: '执行', systemPrompt: 'x', presetId: 'combo-1', retryLimit: 3, provider: '', model: '' } } },
+      { op: 'create_node', node: { id: 'f1', kind: 'file', data: { label: '交付文件', fileKind: 'file', managedPath: 'data/files/x.md' } } },
+      { op: 'create_node', node: { id: 'e', kind: 'end', data: { label: stageLabel('end', 'mode1') } } },
+      { op: 'connect', source: 's', target: 'a1', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+      { op: 'connect', source: 'a1', target: 'e', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+      { op: 'connect', source: 'f1', target: 'a1', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' },
+    ]
+
+    const result = await executeGraphPatch(host, 'session-1', {
+      scope: 'template', create: { name: '文本型文件节点' }, ops,
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.warnings.some((w) => w.code === 'fileNodeTextOnly')).toBe(true)
+    const saved = storeState.templates.get('tpl-file1') as { nodes: Array<{ id: string; data: { fileKind?: string; content?: string } }> }
+    const fileNode = saved.nodes.find((node) => node.id === 'f1')
+    expect(fileNode?.data.fileKind).toBe('text')
+    expect(fileNode?.data.content).toBe('')
+  })
+
+  it('test_写文本型文件节点_不出归一化 warning', async () => {
+    const { host } = makeHost({ newTemplateId: () => 'tpl-file2' })
+    const ops = [
+      { op: 'create_node', node: { id: 's', kind: 'start', data: { label: stageLabel('start', 'mode1') } } },
+      { op: 'create_node', node: { id: 'a1', kind: 'agent', data: { label: '执行', systemPrompt: 'x', presetId: 'combo-1', retryLimit: 3, provider: '', model: '' } } },
+      { op: 'create_node', node: { id: 'f1', kind: 'file', data: { label: '任务书', fileKind: 'text', content: '正文' } } },
+      { op: 'create_node', node: { id: 'e', kind: 'end', data: { label: stageLabel('end', 'mode1') } } },
+      { op: 'connect', source: 's', target: 'a1', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+      { op: 'connect', source: 'a1', target: 'e', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+      { op: 'connect', source: 'f1', target: 'a1', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' },
+    ]
+
+    const result = await executeGraphPatch(host, 'session-1', {
+      scope: 'template', create: { name: '文本节点' }, ops,
+    })
+
+    expect(result.warnings.some((w) => w.code === 'fileNodeTextOnly')).toBe(false)
+  })
+})

@@ -111,6 +111,98 @@ describe('运行上下文自动接续（运行锁降权）', () => {
   })
 })
 
+describe('工具路径静默接续（父代理在自身回合内自行接管断点）', () => {
+  it('内存 paused 断点 + 父代理忙碌：静默接管锁且不注入编排指令', async () => {
+    const h = await makeHarness()
+    await start(h, makeFlow())
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-pause' })
+    expect(h.runtime.flowLockInfo('flow-1')).toMatchObject({ status: 'paused', runId: 'run-1' })
+
+    // 父代理此刻正在自身回合内调用工具（root.status === 'running'）——这正是
+    // 「人工点运行」旧限制成立的场景：续跑若要求父代理空闲，工具路径永远接不上。
+    const root = h.agents.roots.get('session-1')!
+    root.status = 'running'
+    const injected = root.messages.length
+
+    const result = await h.runtime.wfRunNode(caller, { nodeId: 'n-a2' })
+
+    expect(result).toMatchObject({ nodeId: 'n-a2', status: 'started' })
+    expect(h.runtime.flowLockInfo('flow-1')).toMatchObject({ status: 'running', runId: 'run-2' })
+    expect((await h.store.getRun('run-2'))?.resumedFromRunId).toBe('run-1')
+    // 静默：不向父代理注入编排指令，父代理在自己的回合里继续调度
+    expect(root.messages).toHaveLength(injected)
+    expect(root.steered).toHaveLength(0)
+    // 旧 paused 内存条目已释放（锁随新 run 接管）
+    expect(h.runtime.entryFor('run-1')).toBeNull()
+  })
+
+  it('磁盘 stopped 断点 + 父代理忙碌：静默接管锁且不注入编排指令', async () => {
+    const h = await makeHarness()
+    await start(h, makeFlow())
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    await h.runtime.handleSubagentEnd({ id: 'child-1', stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: 'A 完成' }] })
+    await h.runtime.stopRun('run-1')
+
+    const root = h.agents.roots.get('session-1')!
+    root.status = 'running'
+    const injected = root.messages.length
+
+    const result = await h.runtime.wfRunNode(caller, { nodeId: 'n-a2' })
+
+    expect(result).toMatchObject({ nodeId: 'n-a2', status: 'started' })
+    expect((await h.store.getRun('run-2'))?.resumedFromRunId).toBe('run-1')
+    // 断点继承语义不变：已 ok 节点不重跑
+    expect(h.runtime.runSnapshot('run-2')?.nodes.find((n) => n.nodeId === 'n-a1')?.resumed).toBe(true)
+    expect(root.messages).toHaveLength(injected)
+  })
+
+  it('父代理忙碌但无任何断点：仍报 WF_NO_ACTIVE_RUN（静默接续不放宽硬边界）', async () => {
+    const h = await makeHarness()
+    h.agents.roots.get('session-1')!.status = 'running'
+
+    await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })).rejects.toMatchObject({ code: 'WF_NO_ACTIVE_RUN' })
+  })
+
+  it('静默接续仍绑定父代理配置（角色 Prompt/模型），只跳过编排指令', async () => {
+    const bound: string[] = []
+    const h = await makeHarness(undefined, {
+      promptSetup: { bindParent: (_ctx, state, sessionId) => { bound.push(`${sessionId}:${state.systemPrompt}`) } },
+      modelSelection: { bindParent: () => {} },
+      resolveRolePrompt: async () => '父代理角色提示词',
+    })
+    const flow = makeFlow()
+    flow.nodes.push(parentNode('n-parent', '父代理'))
+    await start(h, flow)
+    expect(bound).toEqual(['session-1:父代理角色提示词'])
+
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-pause' })
+    const root = h.agents.roots.get('session-1')!
+    root.status = 'running'
+    const injected = root.messages.length
+
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a2' })
+
+    // 配置绑定照常执行（静默不等于完全跳过注入）；注入到会话的编排指令则不追加
+    expect(bound).toEqual(['session-1:父代理角色提示词', 'session-1:父代理角色提示词'])
+    expect(root.messages).toHaveLength(injected)
+  })
+
+  it('工作台显式续跑（resumeRun）仍要求父代理空闲：忙碌报 WF_ROOT_BUSY 且不接管锁', async () => {
+    const h = await makeHarness()
+    await start(h, makeFlow())
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-pause' })
+    const root = h.agents.roots.get('session-1')!
+    root.status = 'running'
+    const injected = root.messages.length
+
+    await expect(h.runtime.resumeRun({ sessionId: 'session-1', flowId: 'flow-1' })).rejects.toMatchObject({ code: 'WF_ROOT_BUSY' })
+
+    // 失败无副作用：旧暂停断点与运行锁原样保留
+    expect(h.runtime.flowLockInfo('flow-1')).toMatchObject({ status: 'paused', runId: 'run-1' })
+    expect(root.messages).toHaveLength(injected)
+  })
+})
+
 describe('currentResolvedFlow 双向同步（§4.7 规则 1 ①）', () => {
   it('运行中画布修改即时生效：新增节点可被调度', async () => {
     const h = await makeHarness()

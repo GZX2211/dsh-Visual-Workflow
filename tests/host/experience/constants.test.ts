@@ -18,6 +18,7 @@ import {
   EVIDENCE_STRENGTH_SCALE,
   EVALUATION_EVIDENCE_LIMIT,
   EXPERIENCE_TYPES,
+  FIELD_BUDGETS,
   FIELD_LIMITS,
   MAX_CANDIDATES_PER_CALL,
   MAX_EVALUATIONS_PER_CALL,
@@ -88,6 +89,38 @@ describe("experience 常量", () => {
 
   it("test_经验类型本体_与共享联合类型双向穷尽", () => {
     expect([...EXPERIENCE_TYPES].sort()).toEqual(Object.keys(TYPE_COVERAGE).sort())
+  })
+
+  it("test_字段预算表_取一句话一条的紧凑引导长度", () => {
+    expect(FIELD_BUDGETS.taskType).toBe(10)
+    expect(FIELD_BUDGETS.decisionDomain).toBe(20)
+    expect(FIELD_BUDGETS.responsibility).toBe(30)
+    expect(FIELD_BUDGETS.trigger).toBe(30)
+    expect(FIELD_BUDGETS.situation).toBe(30)
+    expect(FIELD_BUDGETS.recommendedAction).toBe(60)
+    expect(FIELD_BUDGETS.principle).toBe(60)
+    expect(FIELD_BUDGETS.arrayElement).toBe(15)
+    expect(FIELD_BUDGETS.arrayLength).toBe(4)
+    expect(FIELD_BUDGETS.total).toBe(400)
+  })
+
+  it("test_字段预算_逐项不超过对应硬上限", () => {
+    // 预算是引导值，硬上限才是拒绝边界：任一预算被改到超过上限，就会让「按 Prompt 生成也可能被拒」
+    // 重新变成事实，且模型无从从描述里看出矛盾。
+    const overCap = (Object.keys(FIELD_LIMITS) as Array<keyof typeof FIELD_BUDGETS>)
+      .filter((key) => FIELD_BUDGETS[key] > FIELD_LIMITS[key])
+
+    expect(overCap).toEqual([])
+  })
+
+  it("test_字段预算_逐字段之和不超过总预算", () => {
+    // 总预算必须容得下「每个字段都写满自己预算」的候选，否则两条引导会互相矛盾
+    // （数组各按预算条数计：8 条元素）。
+    const scalarTotal = FIELD_BUDGETS.responsibility + FIELD_BUDGETS.taskType + FIELD_BUDGETS.decisionDomain
+      + FIELD_BUDGETS.situation + FIELD_BUDGETS.trigger + FIELD_BUDGETS.principle + FIELD_BUDGETS.recommendedAction
+    const arrayTotal = 2 * FIELD_BUDGETS.arrayLength * FIELD_BUDGETS.arrayElement
+
+    expect(scalarTotal + arrayTotal).toBeLessThanOrEqual(FIELD_BUDGETS.total)
   })
 
   it("test_初始化状态上界_为正整数上界声明", () => {

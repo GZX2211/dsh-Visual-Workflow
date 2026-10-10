@@ -48,6 +48,7 @@ function keywordEmbedding(): ExperienceEmbeddingPort & { batches: string[][] } {
   return {
     source: "local",
     dimension: 2,
+    async ensureReady() {},
     batches,
     async embed(texts: string[]): Promise<Float64Array[]> {
       batches.push([...texts])
@@ -63,6 +64,7 @@ function fakeRuntime(overrides: Partial<ExperienceRuntimePort> = {}): Experience
     runForChild: () => null,
     hasTeamInCurrentRun: () => false,
     hasActiveRun: () => false,
+    hasGraphPatch: () => false,
     modelForCaller: () => "test-model",
     ...overrides,
   }
