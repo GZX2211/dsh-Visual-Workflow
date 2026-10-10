@@ -8,7 +8,7 @@
 
 import { httpError } from './http.js'
 import { openServiceDebug, pumpServiceDebug, type SseSink } from './service-debug.js'
-import type { ApiHost } from './boundary.js'
+import { presentationOf, type ApiHost } from './boundary.js'
 
 /**
  * 处理 serviceDebug 流式端点：先校验参数与服务运行态，再打开上游流并写 SSE 头。
@@ -34,7 +34,7 @@ export async function streamServiceDebugEndpoint(
   if (!manager) throw httpError(501, 'service manager unavailable')
   const status = (await manager.status(serviceId)) as { status?: string; port?: number } | null
   if (status?.status !== 'running' || !status.port) {
-    throw httpError(409, '服务未运行，请先启动服务', 'WF_SERVICE_NOT_RUNNING')
+    throw httpError(409, presentationOf(host, '服务未运行，请先启动服务', 'The service is not running; start it first'), 'WF_SERVICE_NOT_RUNNING')
   }
   const controller = new AbortController()
   // 浏览器断连时中止转发（避免残留请求占用服务并发槽）
@@ -49,6 +49,7 @@ export async function streamServiceDebugEndpoint(
       prompt,
       fetch,
       controller.signal,
+      (zh, en) => presentationOf(host, zh, en),
     )
     res.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',

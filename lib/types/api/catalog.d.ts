@@ -8,7 +8,7 @@ export declare class CatalogEndpoints extends VisualWorkflowApiBase {
         id?: unknown;
     }): Promise<unknown>;
     /**
-     * 插件目录：工具（全局层 ∪ 存活 agent scope ∪ preset standing scope，含中文
+     * 插件目录：工具（全局层 ∪ 存活 agent scope ∪ preset standing scope，含中/英
      * 描述映射）+ MCP 服务器 + 已装载插件摘要。scope key 必须是 agent 对象本身
      * （官方 ScopeKey 语义），传错只能看到全局层。
      */
@@ -17,6 +17,11 @@ export declare class CatalogEndpoints extends VisualWorkflowApiBase {
     }): Promise<unknown>;
     /** 全部可见工具 schema（全局层 ∪ 存活 root agent ∪ preset standing scope）。 */
     private allToolSchemas;
+    /**
+     * MCP 服务器卡片描述（两种传输的中/英文案）。
+     * 命令行为用户配置数据，两种语言都原样嵌入，不翻译。
+     */
+    private mcpCardDescription;
     /** MCP 服务器：列表 / 增删改 / 启停（写入 profile 托管区，重启生效）。 */
     mcpList(): Promise<unknown>;
     mcpPut(args: {

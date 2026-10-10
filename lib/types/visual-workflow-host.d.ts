@@ -108,10 +108,11 @@ export declare class VisualWorkflowHost extends Service {
     getRootAgent(sessionId: string): RootAgentLike | null;
     /**
      * 系统语言名（从 DSH 用户设置 locale.preference 读取）。
-     * 单一读取路径：编排提示词注入与 /arrange 规划提示词注入共用，避免同一读取
-     * 表达式散落两处（口径分叉时界面与提示词语言会不一致）。
+     * 单一读取路径：编排提示词注入、/arrange 规划提示词注入与 GUI 呈现文案共用，
+     * 避免同一读取表达式散落两处（口径分叉时界面与提示词语言会不一致）。
+     * 公开供 API 边界能力缝（ApiHost.systemLanguage）消费。
      */
-    private systemLanguage;
+    systemLanguage(): string;
     /**
      * 在子代理创建窗口内安装四类每子代理作用域贡献，返回合并 disposer（host 管理生命周期）。
      * 与官方 installModelSelection(agentCtx) 的「拿到 child 的 ctx 后安装」范式一致：
