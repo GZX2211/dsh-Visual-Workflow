@@ -981,7 +981,7 @@ describe("ExperienceService.feedback 与 rebuildStats", () => {
     })
 
     expect(result.accepted).toEqual([])
-    expect(result.skipped[0].reason.includes("没有使用的经验，不能评价")).toBe(true)
+    expect(result.skipped[0].reason.includes("an experience that was not used cannot be rated")).toBe(true)
   })
 
   it("test_重建委派_返回重建经验数并写出统计行", async () => {

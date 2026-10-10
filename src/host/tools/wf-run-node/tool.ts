@@ -32,18 +32,14 @@ export function registerWfRunNode(
   const definition = defineTool({
     name: WF_RUN_NODE,
     description:
-      'Start one agent node of an orchestration run asynchronously. Use only in mode1: pass the node id from the flow definition file. ' +
-      'Returns started with the child id immediately; do not wait for the node child. ' +
-      'A collaboration-group card starts the whole group as official Agent Team members and returns their list; ' +
-      'without that capability it fails WF_TEAM_UNAVAILABLE — start members one by one. ' +
-      'If the run is paused, stopped or interrupted, this call silently resumes it from the checkpoint (no orchestration directive is injected) and then starts the node. ' +
-      'A pause-node id pauses the run and persists a checkpoint instead (returns paused). ' +
-      'Child agents are rejected; fails with WF_* codes on invalid arguments, missing nodes, mode mismatch, or a session that never started a run.',
+      'Start one agent node of a mode1 orchestration run asynchronously and return the child id immediately; do not wait for the child. ' +
+      'A collaboration-group card starts the whole group as official Agent Team members and returns their list. ' +
+      'A paused, stopped, or interrupted run is resumed before the node starts; a pause-node id pauses the run instead and returns paused.',
     parameters: {
-      nodeId: { type: 'string', required: true, description: 'Node id from the flow definition file (nodes[].id) to start: a role node, or a collaboration-group card to start that whole group as an official Agent Team. A proxy node is a real flow step: pass the proxy id and the runtime resolves it to its source node for execution — never skip a proxy or pass its source node id instead.' },
-      thinking: { type: 'string', description: 'Optional reasoning-effort override for this node run; value domain follows the official adapter. For a collaboration group it applies to every member.' },
-      iterationLimit: { type: 'number', description: 'Optional ReAct iteration-limit override (soft cap: the child stops calling tools and concludes). For a collaboration group it applies to every member.' },
-      retryLimit: { type: 'number', description: 'Optional per-node retry-limit override (hard guard, over the node default).' },
+      nodeId: { type: 'string', required: true, description: 'Node id from the flow definition file (nodes[].id): a role node, or a collaboration-group card to start that whole group. A proxy node is a real flow step: pass the proxy id and never skip a proxy or pass its source node id instead.' },
+      thinking: { type: 'string', description: 'Optional reasoning-effort override for this node run; for a group it applies to every member.' },
+      iterationLimit: { type: 'number', description: 'Optional ReAct iteration-limit override (soft cap: the child concludes); for a group it applies to every member.' },
+      retryLimit: { type: 'number', description: 'Optional per-node retry-limit override (hard guard).' },
     },
     output: {
       schema: {

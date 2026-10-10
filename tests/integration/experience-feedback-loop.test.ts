@@ -216,7 +216,7 @@ describe("经验评价闭环（真实资产库 + 真实经验域）", () => {
     expect(feedback.accepted.map((entry) => entry.experienceId)).toEqual([high.id])
     expect(feedback.skipped.map((item) => item.experienceId)).toEqual([low.id])
     const reason = feedback.skipped[0]?.reason ?? ""
-    expect(reason).toContain("没有使用的经验，不能评价")
+    expect(reason).toContain("an experience that was not used cannot be rated")
     // 用户裁决：不得把「再补一次召回」变成评价的合法路径
     expect(reason).not.toContain("ids")
     expect(reason).not.toContain("再召回")

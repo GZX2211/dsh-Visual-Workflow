@@ -171,10 +171,12 @@ describe('shared/protocol 工具名常量与可见性', () => {
     expect(OPTIONAL_INJECT_TOOLS).toContain('wf_db_query')
   })
 
-  it('父代理可见集含 wf_run_node / wf_finish / wf_ask_agent', () => {
+  it('父代理默认可用集含 wf_run_node / wf_finish；不含仅子代理可用的 wf_ask_agent', () => {
     expect(PARENT_AGENT_VISIBLE_TOOLS).toContain('wf_run_node')
     expect(PARENT_AGENT_VISIBLE_TOOLS).toContain('wf_finish')
-    expect(PARENT_AGENT_VISIBLE_TOOLS).toContain('wf_ask_agent')
+    // 事实修正（2026.10）：wf_ask_agent 的 ask/reply 均仅子代理可用（父代理调用必被
+    // WF_NOT_CHILD 拒绝），resolve 退役后它不再有父代理用途，故不在本集中。
+    expect(PARENT_AGENT_VISIBLE_TOOLS).not.toContain('wf_ask_agent')
   })
 
   it('子代理永久隐藏集不含任何可选注入工具（互斥）', () => {

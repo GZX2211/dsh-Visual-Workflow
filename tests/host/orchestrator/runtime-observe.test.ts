@@ -56,7 +56,7 @@ describe('subagent/end 迟到缓冲（wait:true 死锁回归）', () => {
       agents: h.agents,
       config: {
         outputFullLimit: 400, documentTextLimit: 200, runIdleTimeoutMs: 500,
-        retryLimitDefault: 3, reactIterationLimitDefault: 50, wfAskAgentTimeoutMs: 500,
+        retryLimitDefault: 3, reactIterationLimitDefault: 50, wfAskAgentTtlMs: 500,
       },
       logger: { warn: (message) => h.warnings.push(message), info: () => {}, debug: () => {} },
       now: () => h.clock.now,
@@ -225,6 +225,31 @@ describe('subagent/end 观察回写（§8 #21）', () => {
     // 组卡片 ok 后成员重试失败不回退
     await h.runtime.wfRunNode(caller, { nodeId: 'n-a2' })
     await h.runtime.handleSubagentEnd({ id: 'child-3', stopReason: 'error' })
+    expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-group')!.status).toBe('ok')
+  })
+
+  it('协作组聚合：未过期的待回复 ask 阻塞组 ok；TTL 到期后不再阻塞（不依赖惰性清理是否触发）', async () => {
+    const h = await makeHarness()
+    const { entry } = await start(h, flowWithGroupMember())
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    // 登记一条指向组内成员的待回复 ask（非阻塞协议：登记 = 已发出但尚无回复）
+    entry.asks.set('ask-1', {
+      askId: 'ask-1',
+      from: 'child-other',
+      to: 'child-1',
+      fromNodeId: 'n-other',
+      toNodeId: 'n-a1',
+      message: 'ping',
+      ttlMs: 1000,
+      expiresAt: h.clock.now + 1000,
+    })
+    await h.runtime.handleSubagentEnd({ id: 'child-1', stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: 'A' }] })
+    // 成员已产出一轮，但组内有未过期的待回复 ask → 组卡片不判 ok
+    expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-group')!.status).toBe('pending')
+    // TTL 到期（惰性清理未触发：本路径不经通信调用）→ 聚合必须自行忽略过期记录
+    entry.asks.get('ask-1')!.expiresAt = h.clock.now - 1
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    await h.runtime.handleSubagentEnd({ id: 'child-2', stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: 'A2' }] })
     expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-group')!.status).toBe('ok')
   })
 

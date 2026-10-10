@@ -1,7 +1,7 @@
 // tests/host/tools/wf-graph-patch/apply.test.ts
 //
 // wf_graph_patch 纯函数内核的**虚拟节点 data 归一化**用例
-// （原 tests/host/milestone-gate.test.ts 的「补丁层 proxy data 归一化」段，
+// （原 tests/host/milestone-gate.test.ts 的"补丁层 proxy data 归一化"段，
 //   按 tests/AGENTS.md 的镜像规则迁到被测源文件 apply.ts 旁）：
 //   - create_node：虚拟节点只保留 label / role 两个字段；
 //   - role 越界 → WF_GRAPH_INVALID（错误文本给出取值域）；
@@ -208,14 +208,14 @@ describe('补丁层 proxy data 归一化（applyGraphOps 纯函数）', () => {
   it('update_node_data：引用不存在的主节点 → 拒绝（既有校验保留）', () => {
     const doc = gateFlow('milestone')
     expect(() => applyGraphOps({ doc, ops: [{ op: 'update_node_data', nodeId: 'm1', data: { proxySourceId: '不存在' } }] }))
-      .toThrowError(/必须引用已存在的角色节点/)
+      .toThrowError(/must reference an existing role node/)
   })
 })
 
 // ---------------------------------------------------------------------------
 // 角色节点 data 补全（apply.ts 的 normalizeRoleNodeData）
 // ---------------------------------------------------------------------------
-// 为什么归到这里：原 graph/validate.ts 的 normalizeFlow 也做「角色节点补默认值」，
+// 为什么归到这里：原 graph/validate.ts 的 normalizeFlow 也做"角色节点补默认值"，
 // 但它从未被生产代码调用且实现为字段白名单重写（会丢 meta/lastPatch 与未来新增字段），
 // 2026.10 治理中已删除。真正生效的补全入口是本模块的 normalizeRoleNodeData（父代理
 // 经 wf_graph_patch 建/改节点时的唯一规范化点），故其补全语义的断言收敛于此。
@@ -360,7 +360,7 @@ describe('容错应用（applyGraphOpsTolerant）', () => {
     const { errors } = applyGraphOpsTolerant({
       doc: flowOf([stage('s', 'start'), agentNode('a1')]),
       ops: [
-        // group 已存在 → create_group 抛错；随后的 set_group_members 仍应看到原组成员
+        // group already exists → create_group 抛错；随后的 set_group_members 仍应看到原组成员
         { op: 'create_group', groupId: 'a1', label: 'x' },
         { op: 'set_group_members', groupId: 'g1', memberIds: ['a1'] },
       ],
@@ -368,7 +368,7 @@ describe('容错应用（applyGraphOpsTolerant）', () => {
     expect(errors.map((item) => item.index)).toEqual([0, 1])
   })
 
-  it('非 WfError 直接抛出，不被收集（工具缺陷不得伪装成「某条 op 写错了」）', () => {
+  it('非 WfError 直接抛出，不被收集（工具缺陷不得伪装成"某条 op 写错了"）', () => {
     const broken = { get op(): string { throw new TypeError('内部缺陷') } }
     expect(() => applyGraphOpsTolerant({
       doc: flowOf([stage('s', 'start')]),

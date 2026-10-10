@@ -247,7 +247,7 @@ The following tools constitute the primary control plane of the current orchestr
 | **`wf_run_node`** | Mode 1: asynchronously launch an Agent node or an entire collaboration group; returns immediately without blocking the parent agent |
 | **`wf_run_node_wait`** | Mode 2: launch an Agent node and block-wait, returning `ok / fail` with final output |
 | **`wf_finish`** | Mark this orchestration as complete/failed, persist run records, and release the run lock; idempotent |
-| **`wf_ask`** | Sub-agent initiates an official question card to the user on the "main interface" and waits for a response; supports question queue |
+| **`wf_ask`** | Ask the user via an official question card and wait for the answer; one call carries a batch of questions; any agent may use it (a child asks through its session root) |
 | **`wf_ask_agent`** | Non-blocking `ask / reply` message communication between Agents within a collaboration group; cold recovery supported when target is offline |
 | **`wf_db_query`** | Database read-only access in three modes: `search / query / schema` |
 | **`wf_org_catalog`** | Recall organizational assets, tool combinations, presets, models, and orchestration rules; parent agent only |
@@ -438,7 +438,7 @@ Default values can be overridden in `cordis.patch.yml`:
         servicePortBase: 7860
         apiKey: null
         maxConcurrentPerService: 50
-        wfAskAgentTimeoutMs: 120000
+        wfAskAgentTtlMs: 120000
         runIdleTimeoutMs: 1800000
         reactIterationLimitDefault: 50
         retryLimitDefault: 3

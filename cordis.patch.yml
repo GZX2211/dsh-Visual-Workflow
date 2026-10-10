@@ -19,8 +19,8 @@
         apiKey: null
         # 模式二单服务并发请求上限（超出返回 429，需求 §4.1.3 默认 50）。
         maxConcurrentPerService: 50
-        # wf_ask_agent 阻塞通信的超时毫秒数（默认 120s，需求 §4.4.1 默认 2 分钟）。
-        wfAskAgentTimeoutMs: 120000
+        # wf_ask_agent 待回复登记的 TTL 毫秒数（到期后不再接受 reply，也不再阻塞组聚合；默认 120s）。
+        wfAskAgentTtlMs: 120000
         # 运行空闲超时毫秒数（无 in-flight 时的看护门限，默认 30 分钟）。
         runIdleTimeoutMs: 1800000
         # 运行状态回显（编排 → 画布双向同步）的轮询间隔毫秒数（预留：当前前端

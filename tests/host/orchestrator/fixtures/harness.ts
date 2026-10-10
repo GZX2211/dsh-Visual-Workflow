@@ -274,7 +274,7 @@ export async function makeHarness(
       runIdleTimeoutMs: 500,
       retryLimitDefault: 3,
       reactIterationLimitDefault: 50,
-      wfAskAgentTimeoutMs: 500,
+      wfAskAgentTtlMs: 500,
       ...config,
     },
     logger: { warn: (message) => warnings.push(message), info: () => {}, debug: () => {} },

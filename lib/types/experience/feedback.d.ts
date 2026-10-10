@@ -3,10 +3,10 @@ import type { ExperienceCaller, ExperienceRuntimePort, ExperienceStorePort } fro
 /**
  * 准入拒绝的固定语义（文案是产品要求，不是提示词建议）。
  *
- * 用户明确要求只表达「没有使用的经验，不能评价」，不得引导模型「先用 ids 召回再评价」：
+ * 用户明确要求只表达「an experience that was not used cannot be rated」，不得引导模型「先用 ids 召回再评价」：
  * 该引导会把「补一次召回再评价」变成合法路径，从而让未真正使用过的经验也能被评价。
  */
-export declare const FEEDBACK_ADMISSION_REJECTED_REASON = "\u6CA1\u6709\u4F7F\u7528\u7684\u7ECF\u9A8C\uFF0C\u4E0D\u80FD\u8BC4\u4EF7";
+export declare const FEEDBACK_ADMISSION_REJECTED_REASON = "an experience that was not used cannot be rated";
 /** 单条待提交评价（四维评分 + 经验 id + 证据说明）。 */
 export interface ExperienceFeedbackInput extends ExperienceEvaluationScores {
     experienceId: string;

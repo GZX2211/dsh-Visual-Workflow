@@ -4,7 +4,7 @@
 //   - knownModelsOf：清单结构守卫（非法行跳过、空清单/null、档位两种来源）；
 //   - writtenModelSelectionsOf：只收集本批显式写入项（含应用后的有效 provider/model）；
 //   - modelSelectionFailures：provider 未知 / provider 与 model 写反 / model 不属于该 provider /
-//     provider 为空时按全清单判定 / reasoning 档位判定与「未公布档位不判定」的兼容性。
+//     provider 为空时按全清单判定 / reasoning 档位判定与"未公布档位不判定"的兼容性。
 // 清单数据取自实机（GUI models 端点）形状，其中 ling-3.0 确实**不公布**思考强度档位。
 
 import { describe, expect, it } from 'vitest'
@@ -43,7 +43,7 @@ function roleNode(id: string, data: Record<string, unknown> = {}, kind: 'agent' 
   return { id, kind, position: { x: 0, y: 0 }, data: { label: id, systemPrompt: '', provider: '', model: '', retryLimit: 3, ...data } } as GraphNode
 }
 
-/** 造一条「本批显式写入」记录（默认有效值与写入值一致）。 */
+/** 造一条"本批显式写入"记录（默认有效值与写入值一致）。 */
 function written(overrides: Partial<WrittenModelSelection> = {}): WrittenModelSelection {
   return {
     index: 0,
@@ -102,7 +102,7 @@ describe('writtenModelSelectionsOf · 只收集本批显式写入项', () => {
 
   it('create_node 未显式给 id：nodeId 用占位文案（不伪造 id）', () => {
     const ops = [{ op: 'create_node' as const, node: { kind: 'agent', data: { model: LING_MODEL } } }]
-    expect(writtenModelSelectionsOf(ops, { nodes: [] })[0].nodeId).toBe('(待生成 id)')
+    expect(writtenModelSelectionsOf(ops, { nodes: [] })[0].nodeId).toBe('(id pending)')
   })
 
   it('update_node_data：有效 provider/model 取应用后的文档（未写入的字段继承现值）', () => {
@@ -136,7 +136,7 @@ describe('writtenModelSelectionsOf · 只收集本批显式写入项', () => {
 // ---------------------------------------------------------------------------
 
 describe('modelSelectionFailures · provider/model 存在性', () => {
-  it('实机复现：把 model 的「组织/」前缀当成 provider → 两条失败并给出正确配对', () => {
+  it('实机复现：把 model 的"组织/"前缀当成 provider → 两条失败并给出正确配对', () => {
     const failures = modelSelectionFailures(catalogOf(), [written({
       provider: 'inclusionai',
       model: 'ling-3.0-flash-sante:free',
@@ -145,13 +145,13 @@ describe('modelSelectionFailures · provider/model 存在性', () => {
     })])
     expect(failures).toHaveLength(2)
     expect(failures.every((item) => item.code === 'WF_BAD_ARGS')).toBe(true)
-    expect(failures[0].message).toContain('provider「inclusionai」不在模型清单中')
-    expect(failures[0].message).toContain(`应写 provider="commandcode"、model="${LING_MODEL}"`)
-    expect(failures[0].message).toContain('可用配对')
-    expect(failures[1].message).toContain('model「ling-3.0-flash-sante:free」不在模型清单中')
+    expect(failures[0].message).toContain('provider "inclusionai" is not in the model catalog')
+    expect(failures[0].message).toContain(`write provider="commandcode", model="${LING_MODEL}"`)
+    expect(failures[0].message).toContain('available pairs')
+    expect(failures[1].message).toContain('model "ling-3.0-flash-sante:free" is not in the model catalog')
   })
 
-  it('合法配对通过（model 里的「组织/」前缀原样保留）', () => {
+  it('合法配对通过（model 里的"组织/"前缀原样保留）', () => {
     expect(modelSelectionFailures(catalogOf(), [written({
       provider: 'commandcode', model: LING_MODEL, effectiveProvider: 'commandcode', effectiveModel: LING_MODEL,
     })])).toEqual([])
@@ -162,8 +162,8 @@ describe('modelSelectionFailures · provider/model 存在性', () => {
       provider: 'commandcode', model: 'deepseek-flash', effectiveProvider: 'commandcode', effectiveModel: 'deepseek-flash',
     })])
     expect(failures).toHaveLength(1)
-    expect(failures[0].message).toContain('不在 provider「commandcode」的模型清单中')
-    expect(failures[0].message).toContain('该 model 属于 provider「deepseek-official」')
+    expect(failures[0].message).toContain('is not in provider "commandcode" model catalog')
+    expect(failures[0].message).toContain('this model belongs to provider "deepseek-official"')
     expect(failures[0].message).toContain('deepseek/deepseek-v4.1-flash')
   })
 
@@ -172,7 +172,7 @@ describe('modelSelectionFailures · provider/model 存在性', () => {
       model: 'deepseek-flash', effectiveProvider: 'commandcode', effectiveModel: 'deepseek-flash',
     })])
     expect(failures).toHaveLength(1)
-    expect(failures[0].message).toContain('provider「commandcode」')
+    expect(failures[0].message).toContain('provider "commandcode"')
   })
 
   it('只写 provider 而节点现值 model 与之不匹配 → 拒绝（补丁后的配对必须可用）', () => {
@@ -180,7 +180,7 @@ describe('modelSelectionFailures · provider/model 存在性', () => {
       provider: 'deepseek-official', effectiveProvider: 'commandcode', effectiveModel: LING_MODEL,
     })])
     expect(failures).toHaveLength(1)
-    expect(failures[0].message).toContain(`model「${LING_MODEL}」`)
+    expect(failures[0].message).toContain(`model "${LING_MODEL}"`)
   })
 
   it('provider 为空（未写入）且 model 未知 → 按全清单判定并拒绝', () => {
@@ -188,7 +188,7 @@ describe('modelSelectionFailures · provider/model 存在性', () => {
       model: 'not-a-model', effectiveModel: 'not-a-model',
     })])
     expect(failures).toHaveLength(1)
-    expect(failures[0].message).toContain('未写入 provider，按节点现值与全清单判定')
+    expect(failures[0].message).toContain('no provider written; judged against the node current provider and the full catalog')
   })
 })
 
@@ -197,8 +197,8 @@ describe('modelSelectionFailures · reasoning 档位', () => {
     const base = { provider: 'deepseek-official', model: 'deepseek-flash', effectiveProvider: 'deepseek-official', effectiveModel: 'deepseek-flash' }
     const bad = modelSelectionFailures(catalogOf(), [written({ ...base, reasoning: 'medium' })])
     expect(bad).toHaveLength(1)
-    expect(bad[0].message).toContain('reasoning「medium」')
-    expect(bad[0].message).toContain('可用：off/high')
+    expect(bad[0].message).toContain('reasoning "medium"')
+    expect(bad[0].message).toContain('available: off/high')
     expect(modelSelectionFailures(catalogOf(), [written({ ...base, reasoning: 'high' })])).toEqual([])
   })
 

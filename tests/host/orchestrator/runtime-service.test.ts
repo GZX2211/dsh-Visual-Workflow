@@ -174,7 +174,7 @@ async function makeHarness(): Promise<Harness> {
     runIdleTimeoutMs: 60000,
     retryLimitDefault: 3,
     reactIterationLimitDefault: 50,
-    wfAskAgentTimeoutMs: 1000,
+    wfAskAgentTtlMs: 1000,
   }
   const runtime = new OrchestratorRuntime({
     store,

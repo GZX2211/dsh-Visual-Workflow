@@ -243,7 +243,7 @@
 | **`wf_run_node`** | Mode 1 异步启动一个 Agent 节点或整个协作组；立即返回，不阻塞父代理等待 |
 | **`wf_run_node_wait`** | Mode 2 启动 Agent 节点并阻塞等待，返回 `ok / fail` 与最终输出 |
 | **`wf_finish`** | 标记本次编排完成/失败、持久化运行记录并释放运行锁；幂等 |
-| **`wf_ask`** | 子代理向用户在“主界面”发起官方问题卡片并等待回答，支持提问队列 |
+| **`wf_ask`** | 向用户发起官方提问卡片并等待回答，一次可批量提问；任何代理可用（子代理自动借其会话根代理身份） |
 | **`wf_ask_agent`** | 协作组内 Agent 间非阻塞 `ask / reply` 消息通信；目标离线时可冷恢复 |
 | **`wf_db_query`** | 数据库 `search / query / schema` 三模式只读访问 |
 | **`wf_org_catalog`** | 召回组织资产、工具组合、preset、模型与编排规则；父代理专用 |
@@ -436,7 +436,7 @@ scheduler/                  # 定时任务定义与触发记录
         servicePortBase: 7860
         apiKey: null
         maxConcurrentPerService: 50
-        wfAskAgentTimeoutMs: 120000
+        wfAskAgentTtlMs: 120000
         runIdleTimeoutMs: 1800000
         reactIterationLimitDefault: 50
         retryLimitDefault: 3

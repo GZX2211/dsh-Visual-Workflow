@@ -263,12 +263,12 @@ describe('executeOrgCatalog：参数层校验', () => {
     }
   })
 
-  it('ids 超过单次上限 → WF_BAD_ARGS（提示分批）', async () => {
+  it('ids 超过单次上限 → WF_BAD_ARGS（提示batches）', async () => {
     const { host } = makeCatalogHost()
     const ids = Array.from({ length: CATALOG_LIMITS.detailIds + 1 }, (_item, index) => `flow-1#node-${index}`)
     const error = await executeOrgCatalog(host, { ids }).catch((reason: unknown) => reason)
     expect((error as WfError).code).toBe('WF_BAD_ARGS')
-    expect((error as WfError).message).toContain('分批')
+    expect((error as WfError).message).toContain('batches')
   })
 })
 
@@ -312,7 +312,9 @@ describe('registerWfOrgCatalog：注册面与调用方身份', () => {
     expect(description).not.toContain('ex-*')
     expect(description).not.toContain('experience index')
     expect(description).toContain('NOT listed here')
-    expect(description).toContain('WF_NOT_ROOT')
+    // 身份限制不再写进描述：子代理经 CHILD_AGENT_HIDDEN_TOOLS 双保险隐藏，该声明对
+    // 唯一可调用方（父代理）无信息量（与 wf_run_node / wf_finish 同一口径）。
+    expect(description).not.toContain('WF_NOT_ROOT')
   })
 
   it('tools 服务不可用 → 注册显式失败（不静默跳过）', () => {

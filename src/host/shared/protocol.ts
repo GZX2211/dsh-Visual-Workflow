@@ -201,9 +201,9 @@ export const WF_RUN_NODE = 'wf_run_node'
 export const WF_RUN_NODE_WAIT = 'wf_run_node_wait'
 /** 幂等收尾工具名（父代理；释放运行锁）。 */
 export const WF_FINISH = 'wf_finish'
-/** 子代理向主会话用户提问工具名（官网提问卡，可选注入）。 */
+/** 向用户提问工具名（官方提问卡；任何 agent 可用，可选注入）。 */
 export const WF_ASK = 'wf_ask'
-/** Agent 间阻塞通信工具名（ask/reply/resolve 三态，可选注入）。 */
+/** 协作成员间非阻塞通信工具名（ask/reply 两态；子代理可选注入）。 */
 export const WF_ASK_AGENT = 'wf_ask_agent'
 /** 单工具三模式数据访问工具名（search/query/schema，有 db-in 连线时注入）。 */
 export const WF_DB_QUERY = 'wf_db_query'
@@ -235,16 +235,23 @@ export const WF_EXPERIENCE_FEEDBACK = 'wf_experience_feedback'
 // ---------------------------------------------------------------------------
 // 工具可见性元数据
 // ---------------------------------------------------------------------------
-// 说明：以下 as const 常量表描述三类工具集的静态划分，供 host 半区
-// resolveAgentTools()（T-022）与 tools.restrict 显式隐藏（双保险）引用，也供
-// client 组合管理（T-048）判定哪些 wf_* 工具可勾选（可选注入集）。
+// 说明：以下 as const 常量表描述工具集的静态划分。**唯一有运行时消费者的表是
+// CHILD_AGENT_HIDDEN_TOOLS**（resolveAgentTools 的 allow 剔除 + child scope
+// tools.restrict deny 双保险）与 OPTIONAL_INJECT_TOOLS（组合勾选面）；
+// PARENT_AGENT_VISIBLE_TOOLS 与 ORG_AUTHORING_TOOLS 等其余表为声明与测试锚点，
+// 没有运行时读取者——父代理侧可见性实际由全局工具开关与各工具自身归属校验决定。
 
-/** 父代理（主会话 Agent）可见工具集：wf_run_node / wf_run_node_wait、wf_finish、wf_ask_agent。 */
+/**
+ * 父代理（主会话 Agent）默认可用的插件编排工具集（静态元数据，无运行时消费者）。
+ *
+ * 事实修正（2026.10）：wf_ask_agent 已移出——它的 ask/reply 均仅子代理可用
+ * （父代理调用必被 WF_NOT_CHILD 拒绝），resolve 退役后它不再有任何父代理用途，
+ * 列在本表中与运行时事实矛盾。
+ */
 export const PARENT_AGENT_VISIBLE_TOOLS = [
   WF_RUN_NODE,
   WF_RUN_NODE_WAIT,
   WF_FINISH,
-  WF_ASK_AGENT, // resolve 裁决能力内聚于父代理
 ] as const
 
 /**
@@ -391,7 +398,7 @@ export const OPTIONAL_INJECT_TOOLS = [
  * 供测试做关键规则断言与消费侧做静态判定（as const，零运行时 import）。
  */
 export const TOOL_VISIBILITY = {
-  /** 父代理可见集（wf_run_node / wf_run_node_wait / wf_finish / wf_ask_agent(resolve) + 有 db-in 时的 wf_db_query）。 */
+  /** 父代理默认可用集（wf_run_node / wf_run_node_wait / wf_finish；静态元数据，无运行时消费者）。 */
   parentVisible: PARENT_AGENT_VISIBLE_TOOLS,
   /** 子代理永久隐藏集（wf_run_node / wf_run_node_wait / wf_finish + 自主编排两工具）。 */
   childHidden: CHILD_AGENT_HIDDEN_TOOLS,

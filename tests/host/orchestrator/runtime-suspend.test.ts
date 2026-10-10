@@ -131,7 +131,7 @@ async function makeRuntime(): Promise<{ runtime: OrchestratorRuntime; store: Flo
       runIdleTimeoutMs: 500,
       retryLimitDefault: 3,
       reactIterationLimitDefault: 50,
-      wfAskAgentTimeoutMs: 500,
+      wfAskAgentTtlMs: 500,
     } satisfies OrchestratorConfig,
     logger: { warn: () => {}, info: () => {}, debug: () => {} },
     now: () => clock.now,

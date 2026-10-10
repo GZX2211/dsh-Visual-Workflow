@@ -36,9 +36,9 @@ export function ruleStartRequired({ flow }: CheckGraphInput): GraphIssue[] {
   return [{
     code: 'startRequired',
     level: 'error',
-    message: starts.length === 0 ? '缺少启动/输入节点' : `启动/输入节点只能有一个（当前 ${starts.length} 个）`,
+    message: starts.length === 0 ? 'missing the start/input node' : `there must be exactly one start/input node (currently ${starts.length})`,
     nodeIds: starts.map((node) => node.id),
-    suggestion: '保留且只保留一个启动/输入节点，作为流程的唯一入口',
+    suggestion: 'keep exactly one start/input node as the single flow entry',
   }]
 }
 
@@ -54,9 +54,9 @@ export function ruleStartFlowOut(input: CheckGraphInput, dag: FlowDag): GraphIss
       issues.push({
         code: 'startNoFlowOut',
         level: 'error',
-        message: '启动/输入节点没有流程出线，流程无法开始',
+        message: 'the start/input node has no flow-out edge, so the flow cannot begin',
         nodeIds: [node.id],
-        suggestion: '把启动/输入节点的流程出连接到第一个可执行节点（子代理 / 父代理 / 协作组）',
+        suggestion: 'connect the start/input node\'s flow-out to the first executable node (agent / parent / collaboration group)',
       })
       continue
     }
@@ -65,9 +65,9 @@ export function ruleStartFlowOut(input: CheckGraphInput, dag: FlowDag): GraphIss
       issues.push({
         code: 'startNoFlowOut',
         level: 'error',
-        message: `启动/输入节点的流程出指向了不可执行节点：${bad.join('、')}`,
+        message: `the start/input node's flow-out points at non-executable nodes: ${bad.join(', ')}`,
         nodeIds: [node.id, ...bad],
-        suggestion: '流程线的目标只能是可执行节点（子代理 / 父代理 / 协作组）；数据节点请用上下文或数据库连线',
+        suggestion: 'a flow edge may only target an executable node (agent / parent / collaboration group); wire data nodes with context or database edges',
       })
     }
   }
@@ -81,9 +81,9 @@ export function ruleEndRequired({ flow }: CheckGraphInput): GraphIssue[] {
   return [{
     code: 'endRequired',
     level: 'error',
-    message: ends.length === 0 ? '缺少结束/输出节点' : `结束/输出节点只能有一个（当前 ${ends.length} 个）`,
+    message: ends.length === 0 ? 'missing the end/output node' : `there must be exactly one end/output node (currently ${ends.length})`,
     nodeIds: ends.map((node) => node.id),
-    suggestion: '保留且只保留一个结束/输出节点，作为流程的唯一出口',
+    suggestion: 'keep exactly one end/output node as the single flow exit',
   }]
 }
 
@@ -99,9 +99,9 @@ export function ruleEndFlowIn(input: CheckGraphInput, dag: FlowDag): GraphIssue[
       issues.push({
         code: 'endNoFlowIn',
         level: 'error',
-        message: '结束/输出节点没有流程入线，流程无法收口',
+        message: 'the end/output node has no flow-in edge, so the flow cannot close',
         nodeIds: [node.id],
-        suggestion: '把最后一个可执行节点的流程出连接到结束/输出节点',
+        suggestion: 'connect the last executable node\'s flow-out to the end/output node',
       })
       continue
     }
@@ -110,9 +110,9 @@ export function ruleEndFlowIn(input: CheckGraphInput, dag: FlowDag): GraphIssue[
       issues.push({
         code: 'endNoFlowIn',
         level: 'error',
-        message: `结束/输出节点的流程入来自不可执行节点：${bad.join('、')}`,
+        message: `the end/output node's flow-in comes from non-executable nodes: ${bad.join(', ')}`,
         nodeIds: [node.id, ...bad],
-        suggestion: '结束节点的流程入只能来自可执行节点（子代理 / 父代理 / 协作组）',
+        suggestion: 'the end node\'s flow-in may only come from an executable node (agent / parent / collaboration group)',
       })
     }
   }
@@ -131,9 +131,9 @@ export function ruleOrphanNode({ flow }: CheckGraphInput): GraphIssue[] {
     .map((node) => ({
       code: 'orphanNode',
       level: 'error' as const,
-      message: `节点「${node.id}」既未接入流程，也没有上下文/数据库连线（悬空节点）`,
+      message: `node "${node.id}" is neither wired into the flow nor connected by context/database edges (dangling node)`,
       nodeIds: [node.id],
-      suggestion: '删除该节点，或用流程线/上下文线/数据库线把它接入流程',
+      suggestion: 'delete this node, or wire it in with a flow, context or database edge',
     }))
 }
 
@@ -158,19 +158,19 @@ export function ruleConditionPair({ flow }: CheckGraphInput): GraphIssue[] {
       issues.push({
         code: 'conditionMissingOpposite',
         level: 'warning',
-        message: `节点「${source}」只有「通过」分支，缺少「不通过」分支`,
+        message: `node "${source}" only has a pass branch and lacks a fail branch`,
         nodeIds: [source],
         lineIds: group.ids,
-        suggestion: '补充「不通过」条件线（失败分支），否则失败路径无处可去',
+        suggestion: 'add the fail conditional edge, otherwise the failure path has nowhere to go',
       })
     } else if (group.fail.length > 0 && group.pass.length === 0) {
       issues.push({
         code: 'conditionMissingOpposite',
         level: 'warning',
-        message: `节点「${source}」只有「不通过」分支，缺少「通过」分支`,
+        message: `node "${source}" only has a fail branch and lacks a pass branch`,
         nodeIds: [source],
         lineIds: group.ids,
-        suggestion: '补充「通过」条件线，否则成功路径无处可去',
+        suggestion: 'add the pass conditional edge, otherwise the success path has nowhere to go',
       })
     }
   }
@@ -187,9 +187,9 @@ export function ruleFlowCycle(_input: CheckGraphInput, dag: FlowDag, cycleNodes:
   return [{
     code: 'flowCycle',
     level: 'error',
-    message: `流程存在环路：${multi.join(' → ')}`,
+    message: `the flow contains a cycle: ${multi.join(' -> ')}`,
     nodeIds: multi,
-    suggestion: '打断环上的某条流程线（改为条件分支或串行），流程必须是可终止的 DAG',
+    suggestion: 'break one flow edge in the cycle (turn it into a conditional branch or serialize it); the flow must be a terminable DAG',
   }]
 }
 
@@ -216,9 +216,9 @@ export function ruleReachability(input: CheckGraphInput, dag: FlowDag): GraphIss
     issues.push({
       code: 'unreachableFromStart',
       level: 'error',
-      message: `节点「${node.id}」有流程入线，但从启动节点沿流程不可达（孤岛段）`,
+      message: `node "${node.id}" has a flow-in edge but is unreachable from the start node (island segment)`,
       nodeIds: [node.id],
-      suggestion: '把该孤岛接回主流程（从可达节点连一条流程线过来），或删除整段孤岛',
+      suggestion: 'reconnect the island to the main flow (a flow edge from a reachable node), or delete the whole island',
     })
   }
   return issues
@@ -235,9 +235,9 @@ export function ruleCannotReachEnd(input: CheckGraphInput, dag: FlowDag): GraphI
     issues.push({
       code: 'cannotReachEnd',
       level: 'warning',
-      message: `节点「${node.id}」有流程入但无流程出，流程走到此处会断头`,
+      message: `node "${node.id}" has a flow-in but no flow-out, so the flow dead-ends here`,
       nodeIds: [node.id],
-      suggestion: '补一条流程出线继续向下游（或直接连到结束节点）；若确为终点，请改为结束节点',
+      suggestion: 'add a flow-out edge onwards (or straight to the end node); if this really is the end, convert it into the end node',
     })
   }
   return issues
@@ -254,9 +254,9 @@ export function ruleStageDirection({ flow }: CheckGraphInput, dag: FlowDag): Gra
         issues.push({
           code: 'pauseNodeDangling',
           level: 'error',
-          message: `暂停节点「${node.id}」${!hasIncoming ? '缺少流程入' : '缺少流程出'}`,
+          message: `pause node "${node.id}" ${!hasIncoming ? 'is missing its flow-in' : 'is missing its flow-out'}`,
           nodeIds: [node.id],
-          suggestion: '暂停节点必须有流程入与流程出（它是流程门，两端都要接）',
+          suggestion: 'a pause node needs both a flow-in and a flow-out (it is a flow gate: both ends must be wired)',
         })
       }
       continue
@@ -265,9 +265,9 @@ export function ruleStageDirection({ flow }: CheckGraphInput, dag: FlowDag): Gra
       issues.push({
         code: 'startHasFlowIn',
         level: 'error',
-        message: '启动/输入节点存在流程入线（方向违规）',
+        message: 'the start/input node has a flow-in edge (direction violation)',
         nodeIds: [node.id],
-        suggestion: '删除指回启动/输入节点的流程线——它只能是流程起点',
+        suggestion: 'delete the flow edge pointing back into the start/input node - it can only be the flow origin',
       })
       continue
     }
@@ -275,9 +275,9 @@ export function ruleStageDirection({ flow }: CheckGraphInput, dag: FlowDag): Gra
       issues.push({
         code: 'endHasFlowOut',
         level: 'error',
-        message: '结束/输出节点存在流程出线（方向违规）',
+        message: 'the end/output node has a flow-out edge (direction violation)',
         nodeIds: [node.id],
-        suggestion: '删除从结束/输出节点出发的流程线——它只能是流程终点',
+        suggestion: 'delete the flow edge leaving the end/output node - it can only be the flow terminus',
       })
     }
   }

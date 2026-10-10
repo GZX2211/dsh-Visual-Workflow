@@ -34,15 +34,14 @@ export function registerWfRunNodeWait(
   const definition = defineTool({
     name: WF_RUN_NODE_WAIT,
     description:
-      'Start one agent node of a service run and block until it finishes. Use only in mode2: pass the node id from the flow definition file. ' +
-      'Returns ok/fail with the child final output when the node child completes, or paused for a pause-node id. ' +
-      'If the run is paused, stopped or interrupted, this call silently resumes it from the checkpoint (no orchestration directive is injected) and then starts the node. ' +
-      'Child agents are rejected; fails with WF_* codes on invalid arguments, missing nodes, or mode mismatch.',
+      'Start one agent node of a mode2 service run and block until it finishes. ' +
+      'Returns ok/fail with the child final output, or paused for a pause-node id. ' +
+      'A paused, stopped, or interrupted run is resumed before the node starts.',
     parameters: {
-      nodeId: { type: 'string', required: true, description: 'Node id from the flow definition file (nodes[].id) to start. A proxy node is a real flow step: pass the proxy id and the runtime resolves it to its source node for execution — never skip a proxy or pass its source node id instead.' },
-      thinking: { type: 'string', description: 'Optional reasoning-effort override for this node run; value domain follows the official adapter.' },
-      iterationLimit: { type: 'number', description: 'Optional ReAct iteration-limit override (soft cap: the child stops calling tools and concludes).' },
-      retryLimit: { type: 'number', description: 'Optional per-node retry-limit override (hard guard, over the node default).' },
+      nodeId: { type: 'string', required: true, description: 'Node id from the flow definition file (nodes[].id). A proxy node is a real flow step: pass the proxy id and never skip a proxy or pass its source node id instead.' },
+      thinking: { type: 'string', description: 'Optional reasoning-effort override for this node run.' },
+      iterationLimit: { type: 'number', description: 'Optional ReAct iteration-limit override (soft cap: the child concludes).' },
+      retryLimit: { type: 'number', description: 'Optional per-node retry-limit override (hard guard).' },
     },
     output: {
       schema: {

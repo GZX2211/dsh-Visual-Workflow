@@ -6,7 +6,7 @@ export declare const OP_FIELD_SHAPES: Record<string, string>;
 /** 图结构组的全部 op 形状（一段可整体引用的文本）。 */
 export declare const GRAPH_OP_FIELD_TEXT: string;
 /** 标记组的 op 形状。 */
-export declare const MARK_OP_FIELD_TEXT = "{ op:'mark_node', nodeId:string, status:'ok'|'fail' }\uFF08\u53EA\u6807\u8BB0**\u5F53\u524D**\u95F8\u95E8\uFF0C\u4E00\u6B21\u8865\u4E01\u53EA\u80FD 1 \u6761\uFF09";
+export declare const MARK_OP_FIELD_TEXT = "{ op:'mark_node', nodeId:string, status:'ok'|'fail' } (marks the CURRENT gate only; one patch carries exactly 1 mark op)";
 /**
  * 角色节点（agent / parent）的 data 字段契约。
  * 为什么必须显式写清 presetId：它为空意味着该节点运行期**零工具**（连读写文件都调不到），
@@ -25,8 +25,8 @@ export declare const GATE_MARKING_SEMANTICS: string;
  */
 export declare const PATCH_CONTRACT_TEXT: string;
 /**
- * 工具描述里的**契约指引**（中英混排的唯一一处）。
+ * 工具描述里的**契约指引**。
  * 两个工具共用同一份字面量：它点名 rules 的键名，如果键名改了，两侧一起失败而不是
  * 「描述指向一个不存在的字段」这种静默漂移。
  */
-export declare const PATCH_CONTRACT_POINTER: string;
+export declare const PATCH_CONTRACT_POINTER = "Field shapes and submission rules are not repeated here: read rules.patchContract and rules.gateMarking from wf_org_catalog before your first patch.";

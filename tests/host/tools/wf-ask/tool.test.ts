@@ -1,7 +1,8 @@
 // tests/host/tools/wf-ask/tool.test.ts
 //
 // wf_ask（tool.ts）单测：注册面（questions 参数/answers 输出 schema/description W-03）与
-// 子代理提问语义（WF_NOT_CHILD / 运行态校验 / 参数归一化 / 官方 ask 调用形状 / 取消映射）。
+// 提问语义（身份分派：子代理借其会话 root、其它 agent 用自身 / 参数归一化 / 官方 ask
+// 调用形状 / 取消映射 / 与编排运行解耦）。
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { WF_ASK } from '../../../../src/host/shared/protocol.js'
@@ -79,25 +80,35 @@ describe('wf_ask 注册与 schema', () => {
 })
 
 describe('wf_ask 工具执行', () => {
-  it('根 Agent 调用被拒绝（WF_NOT_CHILD）', async () => {
-    const h = await makeHarness()
-    await start(h)
-    const def = h.tools.definitions.get(WF_ASK)!
-    await expect(def.execute({ questions: [{ id: 'q1', question: '继续？' }] }, execOf(rootAgent))).rejects.toMatchObject({ code: 'WF_NOT_CHILD' })
-  })
-
-  it('子代理调用但无运行 → WF_NO_ACTIVE_RUN', async () => {
+  it('根 Agent 可直接提问：不依赖编排运行，提问身份取自身', async () => {
     const h = await makeHarness()
     const def = h.tools.definitions.get(WF_ASK)!
-    await expect(def.execute({ questions: [{ id: 'q1', question: '继续？' }] }, execOf(childAgent))).rejects.toMatchObject({ code: 'WF_NO_ACTIVE_RUN' })
+    const exec = execOf(rootAgent)
+    const result = await def.execute({ questions: [{ id: 'q1', question: '继续？' }] }, exec)
+    expect(result).toEqual({ answers: [{ id: 'q1', selected: ['是'], custom: '' }] })
+    expect(h.questions.calls).toHaveLength(1)
+    // 根 Agent 自身即 runtime root（官方 assertLiveRoot 要求精确实例），且无运行时不并入运行信号
+    expect(h.questions.calls[0].agent).toBe(rootAgent)
+    expect(h.questions.calls[0].signal).toBe(exec.signal)
   })
 
-  it('运行已暂停 → 无激活运行（WF_NO_ACTIVE_RUN；暂停下无子代理可提问）', async () => {
+  it('子代理借其会话的 root 身份提问；该 root 不存在 → WF_NO_ASK_TARGET', async () => {
+    const h = await makeHarness()
+    const def = h.tools.definitions.get(WF_ASK)!
+    await def.execute({ questions: [{ id: 'q1', question: '继续？' }] }, execOf(childAgent))
+    expect(h.questions.calls[0].agent).toBe(h.agents.roots.get('session-1'))
+    h.agents.roots.delete('session-1')
+    await expect(def.execute({ questions: [{ id: 'q1', question: '继续？' }] }, execOf(childAgent)))
+      .rejects.toMatchObject({ code: 'WF_NO_ASK_TARGET' })
+  })
+
+  it('运行已暂停不影响提问（提问与运行状态解耦）', async () => {
     const h = await makeHarness()
     await start(h)
     h.runtime.activeRunForSession('session-1')!.snapshot.status = 'paused'
     const def = h.tools.definitions.get(WF_ASK)!
-    await expect(def.execute({ questions: [{ id: 'q1', question: '继续？' }] }, execOf(childAgent))).rejects.toMatchObject({ code: 'WF_NO_ACTIVE_RUN' })
+    await expect(def.execute({ questions: [{ id: 'q1', question: '继续？' }] }, execOf(childAgent))).resolves.toBeDefined()
+    expect(h.questions.calls).toHaveLength(1)
   })
 
   it('空 questions → WF_BAD_ARGS（schema 不含 minItems，约束由运行时承担）', async () => {
@@ -146,12 +157,22 @@ describe('wf_ask 工具执行', () => {
     expect(normalized[1]).toMatchObject({ id: 'q9', multiSelect: true })
   })
 
-  it('官方 ASK_ABORTED → 映射为 WF_CANCELLED', async () => {
+  it.each(['ASK_ABORTED', 'ASK_CANCELLED', 'ASK_TIMED_OUT'])('官方 %s → 映射为 WF_CANCELLED（码进模型可见文本）', async (code) => {
     const h = await makeHarness()
     await start(h)
-    h.questions.fail = Object.assign(new Error('提问已取消'), { code: 'ASK_ABORTED' })
+    h.questions.fail = Object.assign(new Error('提问已取消'), { code })
     const def = h.tools.definitions.get(WF_ASK)!
-    await expect(def.execute({ questions: [{ id: 'q1', question: '继续？' }] }, execOf(childAgent))).rejects.toMatchObject({ code: 'WF_CANCELLED' })
+    await expect(def.execute({ questions: [{ id: 'q1', question: '继续？' }] }, execOf(childAgent)))
+      .rejects.toMatchObject({ code: 'WF_CANCELLED', message: expect.stringContaining('WF_CANCELLED:') })
+  })
+
+  it('非取消类官方错误原样透传（不被吞成 WF_CANCELLED）', async () => {
+    const h = await makeHarness()
+    await start(h)
+    h.questions.fail = Object.assign(new Error('human interaction is unavailable while the calling agent is owned by another live agent'), { code: 'DELEGATED_CALLER' })
+    const def = h.tools.definitions.get(WF_ASK)!
+    await expect(def.execute({ questions: [{ id: 'q1', question: '继续？' }] }, execOf(childAgent)))
+      .rejects.toMatchObject({ code: 'DELEGATED_CALLER' })
   })
 
   it('userQuestions 服务缺失 → 明确错误', async () => {

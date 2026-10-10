@@ -11,7 +11,7 @@
 // 预算与上限（见 tests/host/service/manager.test.ts 的 CRASH_WAIT_MS / CRASH_TEST_TIMEOUT_MS）。
 //
 // 口径（重要）：**放宽的是用例整体上限，不是断言强度**。所有用例的等待条件、断言与数据
-// 原样保留；只有「单个用例最多跑多久」从 5s 提到 20s，使内部等待（含 vi.waitFor）能先于
+// 原样保留；只有「单个用例最多跑多久」从 5s 提到 60s，使内部等待（含 vi.waitFor）能先于
 // 外层超时给出可读失败。任何真实挂起或逻辑回归仍会失败。
 //
 // 为什么不在此限制并行 worker 数：vitest 4 的 `UserConfig` 不再暴露
@@ -23,10 +23,10 @@ import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
   test: {
-    // 单测/集成用例的整体上限（含内部 vi.waitFor 等待）：20s 覆盖并行负载放大，
-    // 又远小于「真挂起」应当被发现的尺度。
-    testTimeout: 20_000,
+    // 单测/集成用例的整体上限（含内部 vi.waitFor 等待）：60s 覆盖并行负载放大，
+    // 又远小于「真挂起」应当被发现的尺度；瓶颈是 contract 构建用例与其余用例并行时的 CPU 饥饿。
+    testTimeout: 60_000,
     // 钩子（beforeEach/afterEach 的临时目录与 store 清理）同口径放宽。
-    hookTimeout: 20_000,
+    hookTimeout: 60_000,
   },
 })

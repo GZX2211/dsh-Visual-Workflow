@@ -30,10 +30,10 @@ import { resolveExperienceSubject } from "./subject.js"
 /**
  * 准入拒绝的固定语义（文案是产品要求，不是提示词建议）。
  *
- * 用户明确要求只表达「没有使用的经验，不能评价」，不得引导模型「先用 ids 召回再评价」：
+ * 用户明确要求只表达「an experience that was not used cannot be rated」，不得引导模型「先用 ids 召回再评价」：
  * 该引导会把「补一次召回再评价」变成合法路径，从而让未真正使用过的经验也能被评价。
  */
-export const FEEDBACK_ADMISSION_REJECTED_REASON = "没有使用的经验，不能评价"
+export const FEEDBACK_ADMISSION_REJECTED_REASON = "an experience that was not used cannot be rated"
 
 /** 单条待提交评价（四维评分 + 经验 id + 证据说明）。 */
 export interface ExperienceFeedbackInput extends ExperienceEvaluationScores {
@@ -94,7 +94,7 @@ export async function submitExperienceFeedback(
     }
     skipped.push({
       experienceId: evaluation.experienceId,
-      reason: `${FEEDBACK_ADMISSION_REJECTED_REASON}：经验 ${evaluation.experienceId} 不在该主体已被显式注入的经验集合内；`
+      reason: `${FEEDBACK_ADMISSION_REJECTED_REASON}: experience ${evaluation.experienceId} is not in the set this subject had explicitly injected;`
         + "本条已跳过，同批其余条目照常处理。",
     })
   }
@@ -166,7 +166,7 @@ function validateFeedbackShape(evaluations: readonly ExperienceFeedbackInput[]):
       causalConfidence: evaluation.causalConfidence,
     })
     if (!validation.ok) {
-      throw new WfError(`经验 ${experienceId} 的${validation.reason}`, ERR_EXPERIENCE_BAD_ARGS)
+      throw new WfError(`experience ${experienceId}: ${validation.reason}`, ERR_EXPERIENCE_BAD_ARGS)
     }
   }
   return [...evaluations]

@@ -68,11 +68,11 @@ export function registerWfExperienceRecall(
   const definition = defineTool({
     name: WF_EXPERIENCE_RECALL,
     description:
-      'Recall the experiences your current subject has already learned, to inform the decision you are about to make. Recall happens at the start of a task or while it is running: read the candidates before planning, and read the ones worth following in the middle of execution when the situation changes. It is a two-stage call: first pass a natural-language query to get ranked candidate summaries shaped as [{id, score, summary, source}], then pass the ids worth reading in a second call to get the full experience entries. The summary is produced by the retrieval layer, and source tells you which channel answered: "semantic" for embedding search, "bm25" for the lexical fallback. '
-      + 'The score of a candidate is semantic relevance adjusted by a bounded trust correction: the ranking already applies a limited trust adjustment of at most ±20%, and trust can never outweigh relevance, so prefer clearly more relevant candidates over high-trust but weakly related ones. '
-      + 'Use wf_org_catalog instead when you need to survey reusable organization assets (workflow assets and role assets): that tool inspects the organization, while this one recalls the learned experience of your own subject type. Both are usually useful before planning, and neither replaces the other. '
-      + 'After you actually use recalled experiences, submit how they affected your decisions with wf_experience_feedback in the final completion stage of that same task, the wrap-up stage shared with wf_experience_learn; feedback submitted earlier has nothing real to report. '
-      + 'Side effects: reading candidates changes nothing, and the same query can be repeated safely. Returning full entries by ids is the point where those experiences count as used: that fact is recorded for this subject, which is what later allows them to be rated with wf_experience_feedback. Experience content is never modified, and the ranking is never recalculated here. Only experiences of the subject type you pass are returned, so a child agent may only pass type "agent" (otherwise WF_EXPERIENCE_WRONG_TYPE). '
+      'Recall the experiences your current subject has already learned, to inform the decision you are about to make. Recall happens at the start of a task or while it is running: use query before planning, then ids during execution when the situation changes. It is a two-stage call: query returns ranked candidate summaries [{id, score, summary, source}], then ids returns the full entries. source is "semantic" for embedding search or "bm25" for the lexical fallback. '
+      + 'A candidate score is semantic relevance adjusted by a bounded trust correction of at most ±20%; trust can never outweigh relevance, so prefer clearly more relevant candidates over high-trust but weakly related ones. '
+      + 'Use wf_org_catalog instead to survey reusable organization assets (workflow and role assets): that tool inspects the organization, while this one recalls the learned experience of your own subject type. '
+      + 'After you use recalled experiences, rate them with wf_experience_feedback in the final completion stage of that same task, the wrap-up stage shared with wf_experience_learn. '
+      + 'Reading candidates changes nothing and can be repeated safely; reading full entries by ids is what makes them count as used, which later allows rating them with wf_experience_feedback. Content is never modified and the ranking is never recalculated here. Only experiences of the subject type you pass are returned, so a child agent may only pass type "agent" (otherwise WF_EXPERIENCE_WRONG_TYPE). '
       + 'Failure semantics: a missing or invalid type, mixed-stage arguments, or malformed ids and topK fail with WF_EXPERIENCE_BAD_ARGS; an unknown id fails with WF_EXPERIENCE_NOT_FOUND; a retrieval failure fails with WF_EXPERIENCE_RECALL_FAILED.',
     parameters: {
       type: {
@@ -107,18 +107,18 @@ export function registerWfExperienceRecall(
     },
     async execute(args: Record<string, unknown>, exec: ToolExecLike): Promise<RecallResult> {
       const caller = experienceCallerOf(exec)
-      if (!caller.sessionId) throw new WfError('无法识别调用者会话，无法确定经验归属的主体', 'WF_BAD_CALLER')
+      if (!caller.sessionId) throw new WfError('WF_BAD_CALLER: cannot identify the caller session, so the experience subject cannot be resolved', 'WF_BAD_CALLER')
       const type = parseExperienceType(args?.type)
       assertExperienceTypeOwnership(caller, type)
 
       const query = textOf(args?.query)
       const ids = normalizeRecallIds(args?.ids)
       if (ids === null) {
-        throw new WfError('ids 必须是字符串数组（第二阶段按 id 取回完整经验）', ERR_EXPERIENCE_BAD_ARGS)
+        throw new WfError('WF_EXPERIENCE_BAD_ARGS: ids must be an array of strings (the second stage reads full entries by id)', ERR_EXPERIENCE_BAD_ARGS)
       }
       const topK = normalizeTopK(args?.topK)
       if (topK === null) {
-        throw new WfError('topK 必须是正整数（query 阶段返回的候选条数上限）', ERR_EXPERIENCE_BAD_ARGS)
+        throw new WfError('WF_EXPERIENCE_BAD_ARGS: topK must be a positive integer (the cap on candidate summaries in the query stage)', ERR_EXPERIENCE_BAD_ARGS)
       }
       // 两个阶段的取数语义不同（模糊检索 vs 精确取回），混用会让「返回什么」不可预测
       if (query && ids.length > 0) {
@@ -134,7 +134,7 @@ export function registerWfExperienceRecall(
         )
       }
       if (ids.length > 0 && topK !== undefined) {
-        throw new WfError('topK 只用于 query 阶段：ids 阶段按 id 精确取回，不涉及候选条数上限', ERR_EXPERIENCE_BAD_ARGS)
+        throw new WfError('WF_EXPERIENCE_BAD_ARGS: topK belongs to the query stage only; the ids stage reads exact entries and has no candidate cap', ERR_EXPERIENCE_BAD_ARGS)
       }
 
       try {

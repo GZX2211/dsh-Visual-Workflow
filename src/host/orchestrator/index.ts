@@ -68,7 +68,6 @@ export {
   type AskAgentCmd,
   type AskAgentDelivery,
   type AskAgentResult,
-  type AskAuditEntry,
   type PendingAsk,
 } from './ask-protocol.js'
 

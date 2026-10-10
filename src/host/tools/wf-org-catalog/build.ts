@@ -44,16 +44,16 @@ import type { GraphNode, Line, RoleNode } from '../../shared/graph-model.js'
 
 /** 索引里的召回指引：目录是候选清单而非全部内容，详情按 ids 召回。 */
 export const DETAIL_HINT =
-  '索引里的资产只是**候选**（名称 / 描述 / 版本），完整内容必须再次调用本工具并传 ids 召回：'
-  + '["flow-xxx"]=工作流资产完整骨架；["role-xxx"]=角色资产完整 systemPrompt；'
-  + '["flow-xxx#node-yyy"]=该工作流资产内联角色固定引用版本的完整 systemPrompt。'
-  + '骨架已含阶段节点、协作组配置、连线与数据节点正文（这些没有二次召回通道），'
-  + '唯一按需召回的长字段是角色 systemPrompt。ids 中的坏 id 只单条报错，不影响其余。'
+  'Index entries are **candidates** only (name / description / version); full content must be recalled by calling this tool again with ids: '
+  + '["flow-xxx"] = the workflow asset\'s complete skeleton; ["role-xxx"] = the role asset\'s full systemPrompt; '
+  + '["flow-xxx#node-yyy"] = the full systemPrompt of that inline role\'s fixed version. '
+  + 'The skeleton already contains stage nodes, group configuration, lines and data-node bodies (those have no second recall path); '
+  + 'the only long field recalled on demand is the role systemPrompt. A bad id among ids fails alone and does not block the rest.'
 
 /** 骨架返回体里的提示：角色提示词走复合 id 按需召回；角色版本无法解析时的取舍。 */
 export const WORKFLOW_DETAIL_NOTE =
-  'nodes 中角色节点（kind=agent|parent）的 systemPrompt 未包含：按 inlineRoles 里的复合 id 逐个召回。'
-  + 'roleAssetId / roleVersionId 是该节点固定引用的角色资产与版本；角色版本行已无法解析时这两个字段省略（骨架其余字段不受影响）。'
+  'Role nodes in nodes (kind=agent|parent) omit systemPrompt: recall each one by its composite id from inlineRoles. '
+  + 'roleAssetId / roleVersionId are the role asset and version this node is pinned to; when that role version row can no longer be resolved, both fields are omitted (the rest of the skeleton is unaffected).'
 
 /** 数据库连接里不进模型上下文的密钥字段。 */
 const SECRET_CONNECTION_KEYS = ['password'] as const
@@ -61,7 +61,7 @@ const SECRET_CONNECTION_KEYS = ['password'] as const
 /** 文本截断（空白压缩 + 超限标注，供角色摘要等短字段使用）。 */
 export function clip(value: unknown, limit: number): string {
   const text = String(value ?? '').replace(/\s+/g, ' ').trim()
-  return text.length > limit ? `${text.slice(0, limit)}…（已截断）` : text
+  return text.length > limit ? `${text.slice(0, limit)}… (truncated)` : text
 }
 
 /** 数组预算：超限截断并返回是否截断。 */

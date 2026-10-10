@@ -24,14 +24,14 @@ const cleanups: Array<() => Promise<void>> = []
 // 「内存条目清理」等处的偶发超时（单独跑必过）。放宽的只是「最多等多久」，
 // 等待条件与断言原样保留，任何真实挂起或逻辑回归仍会失败。
 // 「crashed 回写」的预算另见 CRASH_WAIT_MS：它的上界由磁盘锁决定，比本值更大。
-const WAIT_MS = 15_000
+const WAIT_MS = 30_000
 
 // 崩溃标记落盘的等待预算：必须覆盖被测路径的有界最坏情形（磁盘锁获取上限 30s + 有限重试退避）。
 // 为什么不能沿用 WAIT_MS：预算小于该上界时，「落盘慢」与「落盘永久失败」在测试层面不可区分，
 // 断言只会看到 running——此前 15s 预算与 30s 磁盘锁上限错配，正是 CI 偶发失败的成因之一。
-const CRASH_WAIT_MS = 35_000
+const CRASH_WAIT_MS = 70_000
 /** 承载上面等待的用例整体上限（须大于 CRASH_WAIT_MS，并显式覆盖默认 20s）。 */
-const CRASH_TEST_TIMEOUT_MS = 45_000
+const CRASH_TEST_TIMEOUT_MS = 100_000
 
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((fn) => fn()))

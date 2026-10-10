@@ -149,9 +149,9 @@ export declare const WF_RUN_NODE = "wf_run_node";
 export declare const WF_RUN_NODE_WAIT = "wf_run_node_wait";
 /** 幂等收尾工具名（父代理；释放运行锁）。 */
 export declare const WF_FINISH = "wf_finish";
-/** 子代理向主会话用户提问工具名（官网提问卡，可选注入）。 */
+/** 向用户提问工具名（官方提问卡；任何 agent 可用，可选注入）。 */
 export declare const WF_ASK = "wf_ask";
-/** Agent 间阻塞通信工具名（ask/reply/resolve 三态，可选注入）。 */
+/** 协作成员间非阻塞通信工具名（ask/reply 两态；子代理可选注入）。 */
 export declare const WF_ASK_AGENT = "wf_ask_agent";
 /** 单工具三模式数据访问工具名（search/query/schema，有 db-in 连线时注入）。 */
 export declare const WF_DB_QUERY = "wf_db_query";
@@ -179,8 +179,14 @@ export declare const WF_EXPERIENCE_RECALL = "wf_experience_recall";
  * 只接受已被显式注入（wf_experience_recall 的 ids 阶段）过的经验，"没有使用的经验不能评价"。
  */
 export declare const WF_EXPERIENCE_FEEDBACK = "wf_experience_feedback";
-/** 父代理（主会话 Agent）可见工具集：wf_run_node / wf_run_node_wait、wf_finish、wf_ask_agent。 */
-export declare const PARENT_AGENT_VISIBLE_TOOLS: readonly ["wf_run_node", "wf_run_node_wait", "wf_finish", "wf_ask_agent"];
+/**
+ * 父代理（主会话 Agent）默认可用的插件编排工具集（静态元数据，无运行时消费者）。
+ *
+ * 事实修正（2026.10）：wf_ask_agent 已移出——它的 ask/reply 均仅子代理可用
+ * （父代理调用必被 WF_NOT_CHILD 拒绝），resolve 退役后它不再有任何父代理用途，
+ * 列在本表中与运行时事实矛盾。
+ */
+export declare const PARENT_AGENT_VISIBLE_TOOLS: readonly ["wf_run_node", "wf_run_node_wait", "wf_finish"];
 /**
  * 子代理永久隐藏工具集（双保险：resolveAgentTools 的 allow 名单剔除 +
  * child scope `tools.restrict({ deny })` 显式隐藏，两处均直接引用本常量）：
@@ -270,8 +276,8 @@ export declare const OPTIONAL_INJECT_TOOLS: readonly ["wf_ask", "wf_ask_agent", 
  * 供测试做关键规则断言与消费侧做静态判定（as const，零运行时 import）。
  */
 export declare const TOOL_VISIBILITY: {
-    /** 父代理可见集（wf_run_node / wf_run_node_wait / wf_finish / wf_ask_agent(resolve) + 有 db-in 时的 wf_db_query）。 */
-    readonly parentVisible: readonly ["wf_run_node", "wf_run_node_wait", "wf_finish", "wf_ask_agent"];
+    /** 父代理默认可用集（wf_run_node / wf_run_node_wait / wf_finish；静态元数据，无运行时消费者）。 */
+    readonly parentVisible: readonly ["wf_run_node", "wf_run_node_wait", "wf_finish"];
     /** 子代理永久隐藏集（wf_run_node / wf_run_node_wait / wf_finish + 自主编排两工具）。 */
     readonly childHidden: readonly ["wf_run_node", "wf_run_node_wait", "wf_finish", "wf_org_catalog", "wf_graph_patch"];
     /** 可选注入集（wf_ask / wf_ask_agent / wf_db_query / 经验三工具）。 */

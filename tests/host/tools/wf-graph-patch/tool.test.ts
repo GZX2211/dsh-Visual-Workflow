@@ -5,14 +5,14 @@
 //   - 参数层：混组拒绝（WF_PATCH_MIXED_GROUPS）、未知 op 名拒绝（WF_BAD_ARGS）、空补丁拒绝；
 //   - scope 与目标类型不匹配（WF_SCOPE_INVALID，按真实类型判定）；目标不存在（WF_ORG_NOT_FOUND）；
 //   - revision 冲突不重试（WF_PATCH_CONFLICT）；
-//   - 检查器阻断（WF_GRAPH_INVALID，错误文本含修复建议）；
+//   - 检查器阻断（WF_GRAPH_INVALID，错误文本含修复suggestion）；
 //   - 元参数硬护栏恒生效 + 元参数组已下线（set_meta 被拒、来源参数不存在）；
 //   - mark_node：无运行拒绝、节点不存在拒绝、闸门预算用尽拒绝、成功改写快照；
 //   - 虚拟节点引用校验；阶段节点属性锁定；坐标不入补丁（哨兵 {0,0}）；
 //   - 工具注册面：参数与 output schema 必须与实际行为一致。
 //
-// 说明：所有用例的「补丁后图」都构造为通过图检查器的合法图（error 级阻断是预期行为之一，
-// 故非法中间态不能出现在同一个补丁里——这正是「先建后连」需要拆两次提交的原因）。
+// 说明：所有用例的"补丁后图"都构造为通过图检查器的合法图（error 级阻断是预期行为之一，
+// 故非法中间态不能出现在同一个补丁里——这正是"先建后连"需要拆两次提交的原因）。
 
 import { describe, expect, it } from 'vitest'
 import { executeGraphPatch, registerWfGraphPatch, type GraphPatchHost } from '../../../../src/host/tools/wf-graph-patch/tool.js'
@@ -276,7 +276,7 @@ describe('wf_graph_patch · 图结构变更组', () => {
   it('create_node：坐标不入补丁 —— 缺省写哨兵 {0,0} 交由客户端自动布局（D-16）', async () => {
     const { host, storeState } = makeHost()
     storeState.workflows.set('wf-1', makeFlow())
-    // 先建（孤立但允许：本补丁只做「记哨兵」语义），再连（第二个补丁把图连回合法）
+    // 先建（孤立但允许：本补丁只做"记哨兵"语义），再连（第二个补丁把图连回合法）
     await executeGraphPatch(host, 'session-1', {
       scope: 'instance',
       targetId: 'wf-1',
@@ -305,7 +305,7 @@ describe('wf_graph_patch · 图结构变更组', () => {
     void host
   })
 
-  it('create_node：虚拟节点必须引用已存在的角色节点', async () => {
+  it('create_node：a proxy node must reference an existing role node', async () => {
     const { host, storeState } = makeHost()
     storeState.workflows.set('wf-1', makeFlow())
     await expectWfError(() => executeGraphPatch(host, 'session-1', {
@@ -432,7 +432,7 @@ describe('wf_graph_patch · 图结构变更组', () => {
     const { host, storeState } = makeHost()
     // 基线：s → g1（空组，流程门）→ e；a1 → a2 走上下文线（两者都不参与流程，但非孤儿）。
     // 说明：组卡片只有流程连接点、组内成员只有 ctx/db 连接点（§4.2.5.2 规则 4），
-    // 故「把 a1/a2 入组」不会破坏结构校验。
+    // 故"把 a1/a2 入组"不会破坏结构校验。
     storeState.workflows.set('wf-1', makeFlow('wf-1', {
       nodes: [stageNode('s', 'start'), groupNode('g1', []), roleNode('a1'), roleNode('a2'), stageNode('e', 'end')],
       lines: [
@@ -592,7 +592,7 @@ describe('wf_graph_patch · 参数层校验', () => {
 // ---------------------------------------------------------------------------
 
 describe('wf_graph_patch · 检查器与元参数护栏', () => {
-  it('检查器 error 阻断（新增孤立节点 → orphanNode），错误文本含修复建议', async () => {
+  it('检查器 error 阻断（新增孤立节点 → orphanNode），错误文本含修复suggestion', async () => {
     const { host, storeState } = makeHost()
     storeState.workflows.set('wf-1', makeFlow())
     const error = await expectWfError(() => executeGraphPatch(host, 'session-1', {
@@ -601,7 +601,7 @@ describe('wf_graph_patch · 检查器与元参数护栏', () => {
       ops: [{ op: 'create_node', node: { id: '孤儿', kind: 'agent', data: { label: '孤儿' } } }],
     }), 'WF_GRAPH_INVALID')
     expect(error.message).toContain('orphanNode')
-    expect(error.message).toContain('建议')
+    expect(error.message).toContain('suggestion')
   })
 
   it('元参数硬护栏：超 nodeMax 的改图一律被拒，且磁盘零变更', async () => {
@@ -634,7 +634,7 @@ describe('wf_graph_patch · 检查器与元参数护栏', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 聚合失败项：一次列全 + 整批不落盘
+// 聚合失败项：一次列全 + nothing was persisted
 // ---------------------------------------------------------------------------
 
 describe('wf_graph_patch · 聚合失败项', () => {
@@ -654,7 +654,7 @@ describe('wf_graph_patch · 聚合失败项', () => {
     expect(error.message).toContain('#1 remove_node [WF_GRAPH_INVALID]')
     expect(error.message).toContain('#2 connect [WF_GRAPH_INVALID]')
     expect(error.message).toContain('#3 connect [WF_BAD_ARGS]')
-    expect(error.message).toContain('整批不落盘')
+    expect(error.message).toContain('nothing was persisted')
     // 磁盘零变更：revision 未推进，也没有留下代理改动标注
     expect(storeState.workflows.get('wf-1')?.revision).toBe(3)
     expect(storeState.workflows.get('wf-1')).not.toHaveProperty('lastPatch')
@@ -678,8 +678,8 @@ describe('wf_graph_patch · 聚合失败项', () => {
   it('失败项不污染后续 op 的判定基础：前一条失败后，后一条仍按原文档判定', async () => {
     const { host, storeState } = makeHost()
     storeState.workflows.set('wf-1', makeFlow())
-    // 第 1 条想删掉 a1（不存在于文档的引用），第 2 条再删一次同一节点：
-    // 若失败项留下中间状态，第 2 条的报错会变成「节点不存在」之外的其它形状
+    // 第 exactly 1 op想删掉 a1（不存在于文档的引用），第 2 条再删一次同一节点：
+    // 若失败项留下中间状态，第 2 条的报错会变成"节点不存在"之外的其它形状
     const error = await expectWfError(() => executeGraphPatch(host, 'session-1', {
       scope: 'instance',
       targetId: 'wf-1',
@@ -745,7 +745,7 @@ describe('wf_graph_patch · presetId 存在性校验', () => {
     expect((node?.data as { label?: string }).label).toBe('新标签')
   })
 
-  it('空 presetId 不是错误：只由检查器告警提示（保留「先建骨架、后配组合」的中间态）', async () => {
+  it('空 presetId 不是错误：只由检查器告警提示（保留"先建骨架、后配组合"的中间态）', async () => {
     const { host, storeState } = makeHost()
     storeState.workflows.set('wf-1', makeFlow())
     const result = await executeGraphPatch(host, 'session-1', {
@@ -791,11 +791,11 @@ describe('wf_graph_patch · presetId 存在性校验', () => {
 // provider/model/reasoning 存在性校验（只校验本批写入值；模型清单是 best-effort 生态缝）
 // ---------------------------------------------------------------------------
 // 实机背景（2026.09）：清单里是 provider=commandcode / model=inclusionai/ling-3.0-flash-sante:free，
-// 父代理把 model 的「组织/」前缀当成 provider，写进去的配对静默落盘；画布下拉只列清单内的值，
-// 清单外的值在面板上退化成显示 (default)，表现为「工具传了、界面不回显」。
+// 父代理把 model 的"组织/"前缀当成 provider，写进去的配对静默落盘；画布下拉只列清单内的值，
+// 清单外的值在面板上退化成显示 (default)，表现为"工具传了、界面不回显"。
 
 describe('wf_graph_patch · provider/model/reasoning 存在性校验', () => {
-  /** 把 a1 的现值换成一组「历史脏」配对（用于验证只校验本批写入值）。 */
+  /** 把 a1 的现值换成一组"历史脏"配对（用于验证只校验本批写入值）。 */
   function makeFlowWithNodeData(data: Record<string, unknown>): WorkflowDocument {
     const node = roleNode('a1', '旧节点')
     node.data = { ...node.data, ...data } as typeof node.data
@@ -814,15 +814,15 @@ describe('wf_graph_patch · provider/model/reasoning 存在性校验', () => {
         data: { provider: 'inclusionai', model: 'ling-3.0-flash-sante:free' },
       }],
     }), 'WF_BAD_ARGS')
-    expect(error.message).toContain('provider「inclusionai」不在模型清单中')
-    expect(error.message).toContain('应写 provider="commandcode"、model="inclusionai/ling-3.0-flash-sante:free"')
-    // 整批不落盘：revision 未递增、节点现值未被改写
+    expect(error.message).toContain('provider "inclusionai" is not in the model catalog')
+    expect(error.message).toContain('write provider="commandcode", model="inclusionai/ling-3.0-flash-sante:free"')
+    // nothing was persisted：revision 未递增、节点现值未被改写
     const saved = storeState.workflows.get('wf-1')
     expect(saved?.revision).toBe(3)
     expect((saved?.nodes.find((node) => node.id === 'a1')?.data as { provider?: string } | undefined)?.provider).toBe('')
   })
 
-  it('合法配对通过：model 里的「组织/」前缀原样保留', async () => {
+  it('合法配对通过：model 里的"组织/"前缀原样保留', async () => {
     const { host, storeState } = makeHost()
     storeState.workflows.set('wf-1', makeFlow())
     const result = await executeGraphPatch(host, 'session-1', {
@@ -847,7 +847,7 @@ describe('wf_graph_patch · provider/model/reasoning 存在性校验', () => {
       targetId: 'wf-1',
       ops: [{ op: 'update_node_data', nodeId: 'a1', data: { provider: 'commandcode', model: 'deepseek-flash' } }],
     }), 'WF_BAD_ARGS')
-    expect(error.message).toContain('不在 provider「commandcode」的模型清单中')
+    expect(error.message).toContain('is not in provider "commandcode" model catalog')
     expect(error.message).toContain('deepseek/deepseek-v4.1-flash')
   })
 
@@ -865,7 +865,7 @@ describe('wf_graph_patch · provider/model/reasoning 存在性校验', () => {
       ],
     }), 'WF_BAD_ARGS')
     expect(error.message).toContain('#1 create_node')
-    expect(error.message).toContain('provider「inclusionai」不在模型清单中')
+    expect(error.message).toContain('provider "inclusionai" is not in the model catalog')
     expect(storeState.workflows.get('wf-1')?.nodes.map((node) => node.id)).toEqual(['s', 'a1', 'e'])
   })
 
@@ -881,8 +881,8 @@ describe('wf_graph_patch · provider/model/reasoning 存在性校验', () => {
         data: { presetId: 'combo-typo', provider: 'inclusionai', model: 'ling-3.0-flash-sante:free' },
       }],
     }), 'WF_BAD_ARGS')
-    expect(error.message).toContain('presetId「combo-typo」')
-    expect(error.message).toContain('provider「inclusionai」不在模型清单中')
+    expect(error.message).toContain('presetId "combo-typo"')
+    expect(error.message).toContain('provider "inclusionai" is not in the model catalog')
   })
 
   it('只校验本批写入值：节点上的历史脏配对不阻断只改标签的补丁', async () => {
@@ -936,8 +936,8 @@ describe('wf_graph_patch · provider/model/reasoning 存在性校验', () => {
       targetId: 'wf-1',
       ops: [{ op: 'update_node_data', nodeId: 'a1', data: { reasoning: 'medium' } }],
     }), 'WF_BAD_ARGS')
-    expect(error.message).toContain('reasoning「medium」')
-    expect(error.message).toContain('可用：off/low/high/max')
+    expect(error.message).toContain('reasoning "medium"')
+    expect(error.message).toContain('available: off/low/high/max')
   })
 
   it('reasoning：模型未公布档位（实机 ling-3.0）时任意档位不判定，保留模型默认行为', async () => {
@@ -1019,7 +1019,7 @@ describe('wf_graph_patch · 只读预算', () => {
 // ---------------------------------------------------------------------------
 
 describe('wf_graph_patch · 运行状态标记组', () => {
-  it('mark 组超过 1 条 op：WF_BAD_ARGS，且不触碰运行快照', async () => {
+  it('mark 组超过 exactly 1 op op：WF_BAD_ARGS，且不触碰运行快照', async () => {
     const { host, entries } = makeHost({ persistRun: async () => {} })
     const entry = withGateFlow(makeRunEntry('wf-1', ['p1']))
     entry.executorParentId = 'p1'
@@ -1034,7 +1034,7 @@ describe('wf_graph_patch · 运行状态标记组', () => {
         { op: 'mark_node', nodeId: 'p1', status: 'ok' },
       ],
     }), 'WF_BAD_ARGS')
-    expect(error.message).toContain('1 条')
+    expect(error.message).toContain('exactly 1 op')
     expect(entry.snapshot.nodes.every((node) => node.status === 'pending')).toBe(true)
     expect(Number(entry.snapshot.milestoneUsed ?? 0)).toBe(0)
   })
@@ -1057,7 +1057,7 @@ describe('wf_graph_patch · 运行状态标记组', () => {
     })
     const entry = makeRunEntry('wf-1', ['s', 'a1', 'e'])
     entry.snapshot.meta = { milestoneMax: 2 }
-    // P3 闸门状态机：只有闸门轮（executorIsMilestone + executorParentId）才可标记
+    // P3 闸门状态机：只有gate turn（executorIsMilestone + executorParentId）才可标记
     entry.executorParentId = 'a1'
     entry.executorIsMilestone = true
     entry.milestoneProxyId = 'm1'
@@ -1096,13 +1096,13 @@ describe('wf_graph_patch · 运行状态标记组', () => {
       targetId: 'wf-1',
       ops: [{ op: 'mark_node', nodeId: 'a1', status: 'ok' }],
     }), 'WF_MILESTONE_INVALID')
-    expect(error.message).toContain('已用尽')
+    expect(error.message).toContain('exhausted')
   })
 })
 
 // ---------------------------------------------------------------------------
 // create 通路：新建模板（用户裁决 2026.09；修正方案 §4.2 的自相矛盾）
-// 规划期主用例「无模板 → 产出模板」必须可走通；create 只与 graph 组同用。
+// 规划期主用例"无模板 → 产出模板"必须可走通；create 只与 graph 组同用。
 // ---------------------------------------------------------------------------
 
 /** 新建一份完整合法图的 graph 组 ops（start → a1 → end）。 */
@@ -1149,7 +1149,7 @@ describe('wf_graph_patch · create 新建模板', () => {
     expect(storeState.templates.has('tpl-plan-a')).toBe(true)
   })
 
-  it('目标模板已存在：WF_PATCH_CONFLICT，且绝不覆盖既有模板', async () => {
+  it('目标模板already exists：WF_PATCH_CONFLICT，且绝不覆盖既有模板', async () => {
     const { host, storeState } = makeHost()
     storeState.templates.set('tpl-1', makeTemplate())
     const error = await expectWfError(() => executeGraphPatch(host, 'session-1', {
@@ -1158,7 +1158,7 @@ describe('wf_graph_patch · create 新建模板', () => {
       create: { name: '想覆盖' },
       ops: createOps(),
     }), 'WF_PATCH_CONFLICT')
-    expect(error.message).toContain('已存在')
+    expect(error.message).toContain('already exists')
     expect(storeState.templates.get('tpl-1')?.name).toBe('模板')
   })
 
@@ -1253,10 +1253,10 @@ describe('wf_graph_patch · create 新建模板', () => {
 })
 
 // ---------------------------------------------------------------------------
-// P3 闸门状态机（mark_node 三关：闸门轮 / 当前闸门 / 预算）
+// P3 闸门状态机（mark_node 三关：gate turn / 当前闸门 / 预算）
 // ---------------------------------------------------------------------------
 
-/** 让 fake run 的 baseFlow 带上「父代理 + 闸门虚拟节点」，供目标归一化使用。 */
+/** 让 fake run 的 baseFlow 带上"父代理 + 闸门虚拟节点"，供目标归一化使用。 */
 function withGateFlow(entry: RunEntry, role: 'executor' | 'milestone' = 'milestone'): RunEntry {
   entry.baseFlow = {
     ...entry.baseFlow,
@@ -1270,7 +1270,7 @@ function withGateFlow(entry: RunEntry, role: 'executor' | 'milestone' = 'milesto
 }
 
 describe('wf_graph_patch · 闸门状态机（mark_node）', () => {
-  it('非闸门轮：executorIsMilestone 缺失 → WF_MILESTONE_INVALID（纯编排/普通执行轮没有可标记的闸门）', async () => {
+  it('非gate turn：executorIsMilestone 缺失 → WF_MILESTONE_INVALID（纯编排/普通执行轮没有可标记的闸门）', async () => {
     const { host, entries } = makeHost({ persistRun: async () => {} })
     const entry = makeRunEntry('wf-1', ['a1'])
     entry.executorParentId = 'a1'
@@ -1279,7 +1279,7 @@ describe('wf_graph_patch · 闸门状态机（mark_node）', () => {
       scope: 'instance', targetId: 'wf-1',
       ops: [{ op: 'mark_node', nodeId: 'a1', status: 'ok' }],
     }), 'WF_MILESTONE_INVALID')
-    expect(error.message).toContain('闸门轮')
+    expect(error.message).toContain('gate turn')
   })
 
   it('目标不是当前闸门：其它节点 id → WF_MILESTONE_INVALID（错误文本给出当前闸门）', async () => {
@@ -1333,7 +1333,7 @@ describe('wf_graph_patch · 闸门状态机（mark_node）', () => {
     const second = await expectWfError(() => executeGraphPatch(host, 'session-1', {
       scope: 'instance', targetId: 'wf-1', ops: [{ op: 'mark_node', nodeId: 'p1', status: 'ok' }],
     }), 'WF_MILESTONE_INVALID')
-    expect(second.message).toContain('已用尽')
+    expect(second.message).toContain('exhausted')
     // fail 不消耗预算：同一次已用计数下仍允许标记失败
     const failed = await executeGraphPatch(host, 'session-1', {
       scope: 'instance', targetId: 'wf-1', ops: [{ op: 'mark_node', nodeId: 'p1', status: 'fail' }],
@@ -1367,12 +1367,12 @@ describe('wf_graph_patch · 闸门状态机（mark_node）', () => {
     const error = await expectWfError(() => executeGraphPatch(host, 'session-1', {
       scope: 'instance', targetId: 'wf-1', ops: [{ op: 'mark_node', nodeId: 'p1', status: 'ok' }],
     }), 'WF_MILESTONE_INVALID')
-    expect(error.message).toContain('已用尽')
+    expect(error.message).toContain('exhausted')
   })
 })
 
 // ---------------------------------------------------------------------------
-// P4 代理补丁标注（lastPatch → 画布「AI 调整」角标）
+// P4 代理补丁标注（lastPatch → 画布"AI 调整"角标）
 // ---------------------------------------------------------------------------
 
 describe('wf_graph_patch · 代理补丁标注（lastPatch）', () => {
@@ -1490,7 +1490,7 @@ describe('wf_graph_patch · 工具注册面回归', () => {
     expect(description).not.toContain(OP_FIELD_SHAPES.set_group_members)
     expect(ops).not.toContain(OP_FIELD_SHAPES.set_group_members)
     expect(ops).not.toContain(OP_FIELD_SHAPES.connect)
-    // 但必须留下「去哪取契约」的指引，否则模型无从得知字段形状
+    // 但必须留下"去哪取契约"的指引，否则模型无从得知字段形状
     expect(description).toContain(PATCH_CONTRACT_POINTER)
     expect(description).toContain('rules.patchContract')
     // 起手可用的最小示例保留（漏写 node 包装 / 端点字段名是历史高频错因）
@@ -1520,12 +1520,12 @@ describe('wf_graph_patch · 工具注册面回归', () => {
 // ---------------------------------------------------------------------------
 // D 组：参数层契约守卫（2026-09 实机取证回归）
 //
-// 三起真实故障（模型侧全部表现为「报错指向图，但真因在入参形状」）：
-//   1. connect 的端点字段猜成 from/to → 旧报错「源节点不存在「」」（空字符串，无法定位）；
-//   2. create_node 把 kind 平铺到 op 顶层（少了 node 包装）→ 旧报错「非法节点种类「」」；
+// 三起真实故障（模型侧全部表现为"报错指向图，但真因在入参形状"）：
+//   1. connect 的端点字段猜成 from/to → 旧报错"源节点不存在"""（空字符串，无法定位）；
+//   2. create_node 把 kind 平铺到 op 顶层（少了 node 包装）→ 旧报错"非法节点种类"""；
 //   3. connect 省略 sourceHandle/targetHandle → 旧实现兜底成 ''，写出 isFlowLine()=false 的
-//      幽灵线，检查器随后报「启动节点没有流程出线」（真因被完全掩盖）。
-// 本组用例把「参数层 = WF_BAD_ARGS + 可自修正的错误文本」与「handle 缺省按流程通道补全」
+//      幽灵线，检查器随后报"启动节点没有流程出线"（真因被完全掩盖）。
+// 本组用例把"参数层 = WF_BAD_ARGS + 可自修正的错误文本"与"handle 缺省按流程通道补全"
 // 两条契约钉死，防止再次回退。
 // ---------------------------------------------------------------------------
 
@@ -1545,7 +1545,7 @@ describe('wf_graph_patch · 参数层契约守卫', () => {
     expect(err.message).toContain('source/target')
   })
 
-  it('connect 缺 source/target：WF_BAD_ARGS（不再误报成「源节点不存在」）', async () => {
+  it('connect 缺 source/target：WF_BAD_ARGS（不再误报成"源节点不存在"）', async () => {
     const { host, storeState } = makeHost()
     storeState.workflows.set('wf-1', makeFlow())
     const err = await expectWfError(() => executeGraphPatch(host, 'session-1', {
@@ -1651,7 +1651,7 @@ describe('wf_graph_patch：改图事实记录（D-05）', () => {
       recordGraphPatch: async (input) => { recorded.push(input) },
     })
 
-    // 缺 start/end 的图 → 检查器阻断（整批不落盘），因此不得留下「改过图」的事实
+    // 缺 start/end 的图 → 检查器阻断（nothing was persisted），因此不得留下"改过图"的事实
     await expectWfError(() => executeGraphPatch(host, 'session-1', {
       scope: 'template',
       create: { name: '非法图' },

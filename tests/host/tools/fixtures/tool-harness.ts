@@ -196,7 +196,7 @@ export async function makeEnv(options: { config?: Partial<OrchestratorConfig> } 
       runIdleTimeoutMs: 500,
       retryLimitDefault: 3,
       reactIterationLimitDefault: 50,
-      wfAskAgentTimeoutMs: 500,
+      wfAskAgentTtlMs: 500,
       ...options.config,
     },
     logger: { warn: () => {}, info: () => {}, debug: () => {} },

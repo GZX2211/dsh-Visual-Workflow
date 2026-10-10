@@ -15,7 +15,7 @@ import type { ToolExecLike } from './define-tool.js'
  * 从工具执行上下文派生调用方身份（CallerInfo）。
  * 官方 Session header 事实：子代理会话的 header 携带 `origin: 'subagent'` 与
  * `parentSession`（父会话 id）；根 Agent 会话无这两个字段，其 id 即会话 id。
- * 派生结果供 wf_run_node/wf_finish（仅根 Agent）与 wf_ask（仅子代理）归属校验共用。
+ * 派生结果供 wf_run_node/wf_finish（仅根 Agent）归属校验与 wf_ask（提问身份分派）共用。
  */
 export function callerOf(exec: ToolExecLike): CallerInfo {
   const agent = exec?.agent as { id?: unknown; session?: { header?: Record<string, unknown> } } | null | undefined
@@ -46,8 +46,8 @@ export function experienceCallerOf(
  * 经验两工具所需的能力缝另立（主体解析与持久化归 domain 层，不由本文件承担）。
  */
 export interface WfToolsHost {
-  /** 编排运行时（wf_run_node/wf_finish/wf_ask 校验与执行）。 */
+  /** 编排运行时（wf_run_node/wf_finish 校验与执行；wf_ask 借其触碰空闲基准/并入运行取消信号）。 */
   orchestrator: OrchestratorRuntime
-  /** 按会话取根 Agent（wf_ask 以父 root 身份发起官方提问）。 */
+  /** 按会话取根 Agent（wf_ask 子代理路径借其会话 root 发起官方提问）。 */
   getRootAgent(sessionId: string): RootAgentLike | null
 }

@@ -159,7 +159,7 @@ async function makeHarness(): Promise<Harness> {
       runIdleTimeoutMs: 60_000,
       retryLimitDefault: 3,
       reactIterationLimitDefault: 50,
-      wfAskAgentTimeoutMs: 60_000,
+      wfAskAgentTtlMs: 60_000,
     },
     logger: { warn: () => {}, info: () => {}, debug: () => {} },
     newRunId: () => `run-${++seq}`,

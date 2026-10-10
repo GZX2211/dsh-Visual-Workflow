@@ -23,7 +23,7 @@ export type AssetRef =
 
 /** 支持的 id 形状说明（错误提示复用，避免措辞漂移）。 */
 export function idShapesHint(): string {
-  return `支持：${ID_CONVENTION.workflow}；${ID_CONVENTION.role}；${ID_CONVENTION.inlineRole}`
+  return `Supported: ${ID_CONVENTION.workflow}; ${ID_CONVENTION.role}; ${ID_CONVENTION.inlineRole}`
 }
 
 /**
@@ -34,22 +34,22 @@ export function idShapesHint(): string {
  */
 export function parseAssetId(raw: unknown): AssetRef {
   const id = String(raw ?? '').trim()
-  if (!id) return { ok: false, reason: 'id 为空' }
+  if (!id) return { ok: false, reason: 'the id is empty' }
   const separatorAt = id.indexOf(INLINE_ROLE_SEPARATOR)
   if (separatorAt >= 0) {
     const containerId = id.slice(0, separatorAt).trim()
     const nodeId = id.slice(separatorAt + 1).trim()
     if (!containerId || !nodeId) {
-      return { ok: false, reason: `复合 id 形状应为 <工作流资产 id>${INLINE_ROLE_SEPARATOR}<节点 id>——${idShapesHint()}` }
+      return { ok: false, reason: `a composite id must look like <workflow asset id>${INLINE_ROLE_SEPARATOR}<node id> — ${idShapesHint()}` }
     }
     if (!containerId.startsWith(WORKFLOW_ID_PREFIX)) {
-      return { ok: false, reason: `复合 id 左侧必须是工作流资产 id（${WORKFLOW_ID_PREFIX}*）：内联角色只从工作流资产召回——${idShapesHint()}` }
+      return { ok: false, reason: `the left side of a composite id must be a workflow asset id (${WORKFLOW_ID_PREFIX}*): inline roles are recalled from workflow assets only — ${idShapesHint()}` }
     }
     return { ok: true, kind: 'inlineRole', id, containerId, nodeId }
   }
   if (id.startsWith(ROLE_ID_PREFIX)) return { ok: true, kind: 'role', id }
   if (id.startsWith(WORKFLOW_ID_PREFIX)) return { ok: true, kind: 'workflow', id }
-  return { ok: false, reason: `无法识别的 id「${id}」——${idShapesHint()}` }
+  return { ok: false, reason: `unrecognized id "${id}" — ${idShapesHint()}` }
 }
 
 /**
@@ -74,5 +74,5 @@ export function normalizeAssetIds(raw: unknown): string[] | null {
 /** ids 数量校验：超限返回错误文案（调用方据此抛 WF_BAD_ARGS），未超限返回 null。 */
 export function detailIdsLimitProblem(count: number): string | null {
   if (count <= CATALOG_LIMITS.detailIds) return null
-  return `单次详情召回最多 ${CATALOG_LIMITS.detailIds} 个 id（收到 ${count} 个）：请分批提交`
+  return `at most ${CATALOG_LIMITS.detailIds} ids may be recalled in detail per call (received ${count}); submit further batches`
 }

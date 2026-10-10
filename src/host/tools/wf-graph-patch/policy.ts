@@ -110,7 +110,7 @@ export function writtenModelSelectionsOf(
       out.push({
         index,
         op: 'create_node',
-        nodeId: String(node.id ?? '').trim() || '(待生成 id)',
+        nodeId: String(node.id ?? '').trim() || '(id pending)',
         ...(provider === undefined ? {} : { provider }),
         ...(model === undefined ? {} : { model }),
         ...(reasoning === undefined ? {} : { reasoning }),
@@ -148,7 +148,7 @@ export function writtenModelSelectionsOf(
 /** 清单摘要（截断；避免错误文本被清单撑爆）。 */
 function sampleOf(values: string[]): string {
   const head = values.slice(0, 10).join('、')
-  return values.length > 10 ? `${head}…（共 ${values.length} 项）` : head
+  return values.length > 10 ? `${head}… (${values.length} items in total)` : head
 }
 
 /** provider/model 配对的可读摘要。 */
@@ -161,7 +161,7 @@ function reversedPairHintOf(known: ModelCatalogEntry[], provider: string, model:
   if (!model) return ''
   const hit = known.find((entry) => entry.model === `${provider}/${model}`)
   return hit
-    ? `（provider 与 model 可能写反了：model 里的「组织/」前缀属于 model 本身，应写 provider="${hit.provider}"、model="${hit.model}"）`
+    ? ` (provider and model may be swapped: the "org/" prefix in model belongs to the model itself; write provider="${hit.provider}", model="${hit.model}")`
     : ''
 }
 
@@ -202,9 +202,9 @@ export function modelSelectionFailures(
     if (item.provider !== undefined && !providers.has(item.provider)) {
       out.push(failureOf(
         item,
-        `节点「${item.nodeId}」的 provider「${item.provider}」不在模型清单中`
+        `node "${item.nodeId}": provider "${item.provider}" is not in the model catalog`
         + reversedPairHintOf(known, item.provider, item.model ?? item.effectiveModel)
-        + `。provider 与 model 必须成对取自模型清单的两列，可用配对：${pairSampleOf(known)}`,
+        + `. provider and model must be taken together from the catalog columns; available pairs: ${pairSampleOf(known)}`,
       ))
     }
     if (model !== '' && (item.model !== undefined || item.provider !== undefined)) {
@@ -213,17 +213,17 @@ export function modelSelectionFailures(
           const owner = ownerProviderOf(known, model)
           out.push(failureOf(
             item,
-            `节点「${item.nodeId}」的 model「${model}」不在 provider「${provider}」的模型清单中`
-            + (owner ? `（该 model 属于 provider「${owner}」，切换时请连 provider 一起写）` : '')
-            + `。provider「${provider}」可用模型：${sampleOf(known.filter((entry) => entry.provider === provider).map((entry) => entry.model))}`,
+            `node "${item.nodeId}": model "${model}" is not in provider "${provider}" model catalog`
+            + (owner ? ` (this model belongs to provider "${owner}"; write provider together with it when switching)` : '')
+            + `. models available for provider "${provider}": ${sampleOf(known.filter((entry) => entry.provider === provider).map((entry) => entry.model))}`,
           ))
         }
       } else if (!allModels.has(model)) {
         out.push(failureOf(
           item,
-          `节点「${item.nodeId}」的 model「${model}」不在模型清单中`
-          + (item.provider === undefined ? '（未写入 provider，按节点现值与全清单判定）' : '（provider 未知时 model 按全清单判定）')
-          + `。可用配对：${pairSampleOf(known)}`,
+          `node "${item.nodeId}": model "${model}" is not in the model catalog`
+          + (item.provider === undefined ? ' (no provider written; judged against the node current provider and the full catalog)' : ' (with an unknown provider the model is judged against the full catalog)')
+          + `. available pairs: ${pairSampleOf(known)}`,
         ))
       }
     }
@@ -233,7 +233,7 @@ export function modelSelectionFailures(
       if (efforts.length > 0 && !efforts.includes(item.reasoning)) {
         out.push(failureOf(
           item,
-          `节点「${item.nodeId}」的 reasoning「${item.reasoning}」不在模型「${model}」公布的思考强度档位中（可用：${efforts.join('/')}；留空 = 模型默认行为）`,
+          `node "${item.nodeId}": reasoning "${item.reasoning}" is not among the efforts published for model "${model}" (available: ${efforts.join('/')}; empty = the model default)`,
         ))
       }
     }

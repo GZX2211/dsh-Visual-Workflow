@@ -51,7 +51,7 @@ export function registerWfExperienceLearn(
   const definition = defineTool({
     name: WF_EXPERIENCE_LEARN,
     description:
-      'Learn the durable experiences from a finished unit of work, or fetch the generation prompt that tells you what to learn. Two call shapes share this tool: pass an empty experiences array to get the active Experience Generation Prompt for your current subject type, then pass candidate experiences to store them. Each candidate carries the nine semantic fields the prompt asks for, in snake_case: responsibility, task_type, decision_domain, situation, trigger, principle, recommended_action, exclusions (array of strings) and evidence (array of strings); unknown fields are rejected by validation instead of being silently dropped. '
+      'Learn the durable experiences from a finished unit of work, or fetch the generation prompt that tells you what to learn. Pass an empty experiences array to get the active Experience Generation Prompt for your current subject type, then pass candidate experiences to store them. Each candidate carries the nine semantic fields the prompt asks for, in snake_case: responsibility, task_type, decision_domain, situation, trigger, principle, recommended_action, exclusions (array of strings) and evidence (array of strings); unknown fields are rejected, not dropped. '
       + `Field length: every field below states a generation budget in characters. Those budgets are prompt guidance, not a validation rule, so a slight overrun is still accepted; text that exceeds a field cap (or the total cap) fails the whole call with WF_EXPERIENCE_VALIDATION and nothing is recorded. Keep the nine fields of one candidate within about ${FIELD_BUDGETS.total} characters in total (cap ${FIELD_LIMITS.total}): a shorter candidate stays retrievable and cheap to recall. `
       + 'Preconditions: the prompt for the same type must be fetched in this run before any candidate is accepted, otherwise the call fails with WF_EXPERIENCE_NOT_INITIALIZED and you must fetch the prompt first. A generation prompt is shared by every subject of its type, so fetching it again is safe and idempotent. '
       + 'Failure semantics: a child agent may only pass type "agent" (WF_EXPERIENCE_WRONG_TYPE); a candidate that breaks the protocol fails the whole call with WF_EXPERIENCE_VALIDATION; malformed arguments fail with WF_EXPERIENCE_BAD_ARGS; when semantic embedding is unavailable nothing is written and the call fails with WF_EXPERIENCE_EMBEDDING_UNAVAILABLE. '
@@ -97,7 +97,7 @@ export function registerWfExperienceLearn(
     },
     async execute(args: Record<string, unknown>, exec: ToolExecLike): Promise<LearnResult> {
       const caller = experienceCallerOf(exec)
-      if (!caller.sessionId) throw new WfError('无法识别调用者会话，无法确定经验归属的主体', 'WF_BAD_CALLER')
+      if (!caller.sessionId) throw new WfError('WF_BAD_CALLER: cannot identify the caller session, so the experience subject cannot be resolved', 'WF_BAD_CALLER')
       const type = parseExperienceType(args?.type)
       assertExperienceTypeOwnership(caller, type)
 

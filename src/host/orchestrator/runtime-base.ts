@@ -537,15 +537,15 @@ export abstract class RuntimeBase {
   ): MilestoneMarkResult {
     const entry = this.activeRunForSession(sessionId)
     if (!entry || entry.snapshot.status !== 'running') {
-      throw new WfError('mark_node: 当前会话没有正在运行的编排（闸门标记只在运行期有意义）', 'WF_MILESTONE_INVALID')
+      throw new WfError('WF_MILESTONE_INVALID: no running orchestration in this session (gate marking only makes sense during a run)', 'WF_MILESTONE_INVALID')
     }
     const { nodeId, status } = input
     if (status !== 'ok' && status !== 'fail') {
-      throw new WfError('mark_node: status 必须是 ok 或 fail', 'WF_GRAPH_INVALID')
+      throw new WfError('WF_GRAPH_INVALID: mark_node status must be ok or fail', 'WF_GRAPH_INVALID')
     }
     const snapshot = entry.snapshot
     if (!snapshot.nodes.some((node) => node.nodeId === nodeId)) {
-      throw new WfError(`mark_node: 节点不在当前运行快照中「${nodeId}」`, 'WF_MILESTONE_INVALID')
+      throw new WfError(`WF_MILESTONE_INVALID: node "${nodeId}" is not in the current run snapshot`, 'WF_MILESTONE_INVALID')
     }
     setNodeStatus(snapshot, nodeId, status, { now: this.now(), stopReason: 'milestone', recordTurn: true })
     const milestoneUsed = Math.max(0, Math.floor(Number(snapshot.milestoneUsed) || 0)) + (status === 'ok' ? 1 : 0)
@@ -747,7 +747,7 @@ export abstract class RuntimeBase {
   /** 拒绝某运行的全部阻塞等待器（终止/卸载路径）。 */
   protected rejectWaiters(entry: RunEntry): void {
     for (const waiter of entry.waiters.values()) {
-      waiter.reject(new WfError('该工作流已停止', 'WF_CANCELLED'))
+      waiter.reject(new WfError('WF_CANCELLED: the run has been stopped', 'WF_CANCELLED'))
     }
     entry.waiters.clear()
   }

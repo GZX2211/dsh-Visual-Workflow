@@ -10,7 +10,7 @@ import { detailIdsLimitProblem, normalizeAssetIds, parseAssetId } from '../../..
 import { CATALOG_LIMITS } from '../../../../src/host/tools/wf-org-catalog/types.js'
 
 describe('parseAssetId（资产 id 形状判定）', () => {
-  it('工作流资产 id：flow-* 前缀', () => {
+  it('workflow asset id：flow-* 前缀', () => {
     expect(parseAssetId('flow-1')).toEqual({ ok: true, kind: 'workflow', id: 'flow-1' })
   })
 
@@ -41,13 +41,13 @@ describe('parseAssetId（资产 id 形状判定）', () => {
   it('复合 id 缺一端 → 非法（提示正确形状）', () => {
     const result = parseAssetId('flow-1#')
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.reason).toContain('工作流资产 id')
+    if (!result.ok) expect(result.reason).toContain('workflow asset id')
   })
 
-  it('复合 id 左侧不是工作流资产 id → 非法（内联角色只从工作流资产召回）', () => {
+  it('复合 id 左侧不是workflow asset id → 非法（inline roles are recalled from workflow assets only）', () => {
     const result = parseAssetId('role-1#node-abc')
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.reason).toContain('内联角色只从工作流资产召回')
+    if (!result.ok) expect(result.reason).toContain('inline roles are recalled from workflow assets only')
   })
 
   it('未知前缀（含旧模版前缀 tpl-）→ 非法（原因列出三种支持的形状）', () => {
@@ -98,9 +98,9 @@ describe('detailIdsLimitProblem（单次召回上限）', () => {
     expect(detailIdsLimitProblem(CATALOG_LIMITS.detailIds)).toBeNull()
   })
 
-  it('超限 → 给出可行动的提示（含上限与分批要求）', () => {
+  it('超限 → 给出可行动的提示（含上限与batches要求）', () => {
     const problem = detailIdsLimitProblem(CATALOG_LIMITS.detailIds + 1)
     expect(problem).toContain(String(CATALOG_LIMITS.detailIds))
-    expect(problem).toContain('分批')
+    expect(problem).toContain('batches')
   })
 })

@@ -64,7 +64,7 @@ export class ServerDriver implements DatabaseDriver {
 
   private requireHost(): string {
     const host = String(this.conn.host ?? '').trim()
-    if (!host) throw new WfError('数据库节点未配置服务器地址', 'WF_DB_CONFIG')
+    if (!host) throw new WfError('WF_DB_CONFIG: this database node has no server host configured', 'WF_DB_CONFIG')
     return host
   }
 
@@ -73,7 +73,7 @@ export class ServerDriver implements DatabaseDriver {
     try {
       mysql = (await import('mysql2/promise')) as unknown as typeof mysql
     } catch {
-      throw new WfError('服务器数据库（MySQL）查询需要驱动：请在运行环境安装 mysql2', 'WF_DB_DRIVER_MISSING')
+      throw new WfError('WF_DB_DRIVER_MISSING: querying a MySQL server requires the mysql2 driver; install mysql2 in the runtime environment', 'WF_DB_DRIVER_MISSING')
     }
     const connection = await mysql.createConnection({
       host: this.requireHost(),
@@ -101,7 +101,7 @@ export class ServerDriver implements DatabaseDriver {
     try {
       pg = (await import('pg')) as unknown as typeof pg
     } catch {
-      throw new WfError('服务器数据库（PostgreSQL）查询需要驱动：请在运行环境安装 pg', 'WF_DB_DRIVER_MISSING')
+      throw new WfError('WF_DB_DRIVER_MISSING: querying a PostgreSQL server requires the pg driver; install pg in the runtime environment', 'WF_DB_DRIVER_MISSING')
     }
     const client = new pg.Client({
       host: this.requireHost(),
@@ -155,10 +155,10 @@ export class ServerDriver implements DatabaseDriver {
 /** 按数据库节点创建驱动（本地/服务器；配置缺失给明确错误）。 */
 export function createDatabaseDriver(node: DatabaseNode): DatabaseDriver {
   if (node.data.dbType === 'local') {
-    if (!node.data.localPath) throw new WfError('数据库节点未配置本地文件路径', 'WF_DB_CONFIG')
+    if (!node.data.localPath) throw new WfError('WF_DB_CONFIG: this database node has no local file path configured', 'WF_DB_CONFIG')
     return new SqliteDriver(node.data.localPath)
   }
-  if (!node.data.conn) throw new WfError('数据库节点未配置服务器连接信息', 'WF_DB_CONFIG')
+  if (!node.data.conn) throw new WfError('WF_DB_CONFIG: this database node has no server connection configured', 'WF_DB_CONFIG')
   const conn = node.data.conn
   return new ServerDriver({
     dbKind: node.data.dbKind === 'postgresql' ? 'postgresql' : 'mysql',

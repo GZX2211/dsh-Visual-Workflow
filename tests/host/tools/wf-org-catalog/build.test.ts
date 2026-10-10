@@ -4,7 +4,7 @@
 //   - 索引：组合携带完整工具清单、模型携带思考强度档位、资产条目只给「够不够参考」的判据、
 //     规则与 ID 约定同源、三段 ID 约定齐全且不含模版措辞；
 //   - 骨架：阶段节点 / 角色 / 协作组 / 虚拟节点 / 数据节点正文 / 连接信息脱敏 / 连线 /
-//     可召回内联角色清单 / 角色节点的固定引用版本（roleAssetId + roleVersionId）；
+//     可召回内联角色清单 / 角色节点的fixed version（roleAssetId + roleVersionId）；
 //   - 骨架的字段取舍：角色 systemPrompt 必须缺席（走按需召回），其余不可召回内容必须给全；
 //   - 角色 / 内联角色详情：最长字段完整不截断，可选字段缺省时省略。
 
@@ -64,7 +64,7 @@ describe('buildIndex（资产索引装配）', () => {
     expect(index.idConvention.workflow).toContain('flow-')
     expect(index.idConvention.role).toContain('role-')
     expect(index.idConvention.inlineRole).toContain('#')
-    expect(index.idConvention.inlineRole).toContain('固定引用版本')
+    expect(index.idConvention.inlineRole).toContain('fixed version')
     for (const text of Object.values(index.idConvention)) {
       expect(text).not.toContain('tpl-')
       expect(text).not.toContain('模板')
@@ -73,9 +73,9 @@ describe('buildIndex（资产索引装配）', () => {
     }
   })
 
-  it('召回指引说明「索引只是候选」，并逐条给出三种 id 的取数语义', () => {
+  it('召回指引说明「索引只是candidates」，并逐条给出三种 id 的取数语义', () => {
     const index = buildIndex(emptyIndexInput)
-    expect(index.detailHint).toContain('候选')
+    expect(index.detailHint).toContain('candidates')
     for (const expected of ['flow-xxx', 'role-xxx', 'flow-xxx#node-yyy']) {
       expect(index.detailHint).toContain(expected)
     }
@@ -367,6 +367,6 @@ describe('maskConnection / clip（辅助纯函数）', () => {
 
   it('clip：空白压缩 + 超限标注', () => {
     expect(clip('  a\n\nb  ', 10)).toBe('a b')
-    expect(clip('x'.repeat(20), 5)).toBe('xxxxx…（已截断）')
+    expect(clip('x'.repeat(20), 5)).toBe('xxxxx… (truncated)')
   })
 })

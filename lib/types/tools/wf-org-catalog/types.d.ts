@@ -8,9 +8,9 @@ export declare const ROLE_ID_PREFIX = "role-";
 export declare const INLINE_ROLE_SEPARATOR = "#";
 /** ID 约定文本（判据本体；索引与错误提示共用同一份）。 */
 export declare const ID_CONVENTION: {
-    readonly workflow: "flow-* = 工作流资产 → 完整骨架（阶段节点 / 角色与协作组 / 连线 / 数据节点正文）";
-    readonly role: "role-* = 角色资产 → 完整 systemPrompt 及其映射信息";
-    readonly inlineRole: "flow-xxx#<节点 id> = 工作流资产内联角色 → 该节点固定引用版本的完整 systemPrompt";
+    readonly workflow: "flow-* = workflow asset -> complete skeleton (stage nodes / roles and groups / lines / data-node bodies)";
+    readonly role: "role-* = role asset -> full systemPrompt plus its mapping fields";
+    readonly inlineRole: "flow-xxx#<node id> = inline role pinned in that workflow asset -> full systemPrompt of that fixed version";
 };
 /** 条目上限与摘要口径（超限截断并置 truncated，不做静默丢弃）。 */
 export declare const CATALOG_LIMITS: {

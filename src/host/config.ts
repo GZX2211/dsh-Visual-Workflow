@@ -27,8 +27,13 @@ export interface Config {
   apiKey: string | null
   /** 模式二单服务并发请求上限。 */
   maxConcurrentPerService: number
-  /** wf_ask_agent 阻塞通信超时毫秒数。 */
-  wfAskAgentTimeoutMs: number
+  /** wf_ask_agent 待回复登记的 TTL 毫秒数（到期后不再接受 reply，也不再阻塞组聚合）。 */
+  wfAskAgentTtlMs: number
+  /**
+   * @deprecated 旧键名（历史命名把「待回复登记 TTL」写成了 Timeout）。
+   * 仅供读取兼容：resolveConfig 在 >0 时把它投影到 wfAskAgentTtlMs，禁止新增写入。
+   */
+  wfAskAgentTimeoutMs?: number
   /** 运行空闲超时毫秒数（无 in-flight 看护门限）。 */
   runIdleTimeoutMs: number
   /** 运行状态回显轮询间隔毫秒数。 */
@@ -53,7 +58,9 @@ export const Config: z<Config> = z.object({
   servicePortBase: z.natural().default(7860),
   apiKey: z.union([z.string(), z.const(null)]).default(null),
   maxConcurrentPerService: z.natural().default(50),
-  wfAskAgentTimeoutMs: z.natural().default(120000),
+  wfAskAgentTtlMs: z.natural().default(120000),
+  /** 旧键名（读取兼容；0 表示未设置。resolveConfig 投影到 wfAskAgentTtlMs，禁止新增写入）。 */
+  wfAskAgentTimeoutMs: z.natural().default(0),
   runIdleTimeoutMs: z.natural().default(1800000),
   runPollMs: z.natural().default(2000),
   reactIterationLimitDefault: z.natural().default(50),
@@ -75,5 +82,12 @@ export const Config: z<Config> = z.object({
  * apiKey / embeddingModelDir / embeddingEndpoint 的取值。
  */
 export function resolveConfig(input: Partial<Config>): Config {
-  return (Config as unknown as (value: Partial<Config>) => Config)(input)
+  // 旧键读取兼容：早期把「待回复登记 TTL」命名为 wfAskAgentTimeoutMs；只在解析入口投影到
+  // 新键（新键优先），既有部署的旧配置继续生效，消费侧只见 wfAskAgentTtlMs。
+  const { wfAskAgentTimeoutMs: legacy, ...rest } = input
+  const merged: Partial<Config> =
+    rest.wfAskAgentTtlMs === undefined && typeof legacy === 'number' && legacy > 0
+      ? { ...rest, wfAskAgentTtlMs: legacy }
+      : rest
+  return (Config as unknown as (value: Partial<Config>) => Config)(merged)
 }

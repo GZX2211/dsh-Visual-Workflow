@@ -86,11 +86,10 @@ export function registerWfAskAgent(
   const def = defineTool({
     name: WF_ASK_AGENT,
     description:
-      'Exchange messages between agent nodes of the running workflow. ' +
-      'Use inside a collaboration group: ask sends a message to a peer and returns immediately with an askId (it does not wait); ' +
-      'targetChildId takes the peer node id from your collaboration block, or its child session id, and the peer is reachable even when idle or stopped (cold-resumed and woken); ' +
-      'reply answers an ask by its askId; the reply is delivered back to the asker as a new message, so the answer arrives in a later turn rather than as this call result. ' +
-      'Fails with WF_* codes on invalid targets, ownership violations, or after the run stops.',
+      'Exchange messages between agent nodes of a running workflow. ' +
+      'Use inside a collaboration group: ask sends a message to a peer and returns immediately with an askId — it does not wait; ' +
+      'targetChildId takes the peer node id from your collaboration block or its child session id, and the peer is reachable even when idle or stopped; ' +
+      'reply answers an ask by its askId and is delivered back to the asker as a new message, so the answer arrives in a later turn rather than as this call result.',
     parameters: {
       cmd: { type: 'string', required: true, enum: ['ask', 'reply'] as const, description: 'ask: send a message and return an askId; reply: answer an ask by its askId.' },
       targetChildId: { type: 'string', description: 'Peer node id (from your collaboration block) or child session id: the ask target (ask), or the original asker to reply to (reply).' },

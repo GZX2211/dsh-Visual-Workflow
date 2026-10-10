@@ -34,6 +34,6 @@ export declare class RuntimeComm extends RuntimeExecute {
      * 到期记录静默移除：其 askId 不再接受 reply，审计由宿主日志承载。
      */
     private sweepExpiredAsks;
-    /** 写协作通信审计：内存审计链 + 宿主日志（越权校验的可追溯性）。 */
+    /** 写协作通信审计日志（越权校验的可追溯性）：只落宿主日志，不在内存驻留审计链。 */
     private auditAsk;
 }

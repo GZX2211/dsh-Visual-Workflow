@@ -209,7 +209,7 @@ async function makeHarness(options?: HarnessOptions): Promise<Harness> {
       runIdleTimeoutMs: 500,
       retryLimitDefault: 3,
       reactIterationLimitDefault: 50,
-      wfAskAgentTimeoutMs: 500,
+      wfAskAgentTtlMs: 500,
       ...options?.config,
     },
     logger: { warn: () => {}, info: (message) => infos.push(message), debug: () => {} },
@@ -569,7 +569,7 @@ describe('越权拒绝（R-04）', () => {
 describe('待回复登记 TTL 惰性清理', () => {
   it('TTL 未到期：仍可回复并反向投递', async () => {
     let clock = 1_000
-    const h = await makeHarness({ config: { wfAskAgentTimeoutMs: 500 }, now: () => clock })
+    const h = await makeHarness({ config: { wfAskAgentTtlMs: 500 }, now: () => clock })
     await start(h)
     const def = h.tools.definitions.get(WF_ASK_AGENT)!
     const receipt = await ask(h)
@@ -582,7 +582,7 @@ describe('待回复登记 TTL 惰性清理', () => {
 
   it('TTL 到期：登记被惰性清理，其 askId 不再接受 reply（WF_ASK_NOT_FOUND）', async () => {
     let clock = 1_000
-    const h = await makeHarness({ config: { wfAskAgentTimeoutMs: 500 }, now: () => clock })
+    const h = await makeHarness({ config: { wfAskAgentTtlMs: 500 }, now: () => clock })
     await start(h)
     const def = h.tools.definitions.get(WF_ASK_AGENT)!
     const receipt = await ask(h)
@@ -600,7 +600,7 @@ describe('待回复登记 TTL 惰性清理', () => {
 
   it('到期清理不影响其他未到期登记', async () => {
     let clock = 1_000
-    const h = await makeHarness({ config: { wfAskAgentTimeoutMs: 500 }, now: () => clock })
+    const h = await makeHarness({ config: { wfAskAgentTtlMs: 500 }, now: () => clock })
     await start(h)
     const def = h.tools.definitions.get(WF_ASK_AGENT)!
     const first = await ask(h)

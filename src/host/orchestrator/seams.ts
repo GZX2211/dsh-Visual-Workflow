@@ -208,8 +208,8 @@ export interface OrchestratorConfig {
   retryLimitDefault: number
   /** ReAct 迭代次数默认上限（节点未配置时兜底）。 */
   reactIterationLimitDefault: number
-  /** wf_ask_agent 阻塞通信超时毫秒数（超时后注入父代理裁决）。 */
-  wfAskAgentTimeoutMs: number
+  /** wf_ask_agent 待回复登记的 TTL 毫秒数。 */
+  wfAskAgentTtlMs: number
 }
 
 /** 日志缝（默认 console；单测注入收集器断言 warn 路径）。 */

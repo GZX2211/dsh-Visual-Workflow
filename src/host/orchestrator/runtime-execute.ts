@@ -17,7 +17,7 @@ import { buildNodeBlocks } from './task-blocks.js'
 import { buildTeamExperienceQuery } from './team-experience.js'
 import { WfError, messageOf } from './errors.js'
 import { createWaiter, type FinishArgs, type FinishResult, type RunEntry, type RunNodeArgs, type RunNodeResult, type Waiter } from './run-entry.js'
-import { setNodeStatus, statusText, terminalizeNodes } from './snapshot.js'
+import { setNodeStatus, terminalizeNodes } from './snapshot.js'
 import { GLOBAL_RUN_CALL_LIMIT, type CallerInfo, type GroupMemberPlan, type GroupStartResult } from './seams.js'
 import { RuntimeLaunch } from './runtime-launch.js'
 import type { GroupNode, WorkflowDocument } from '../shared/graph-model.js'
@@ -27,9 +27,9 @@ export class RuntimeExecute extends RuntimeLaunch {
 
   /** 校验调用者为「当前会话根 Agent」并取可直接执行节点的激活运行（必要时静默接续）。 */
   private async requireRootRun(caller: CallerInfo, toolName: string): Promise<RunEntry> {
-    if (caller.isChild) throw new WfError(`子代理无法调用 ${toolName}（仅当前会话主 Agent 可调度编排）`, 'WF_NOT_ROOT')
+    if (caller.isChild) throw new WfError(`WF_NOT_ROOT: a child agent cannot call ${toolName}; only the session main agent may orchestrate`, 'WF_NOT_ROOT')
     const sessionId = caller.sessionId
-    if (!sessionId) throw new WfError('无法识别调用者会话', 'WF_BAD_CALLER')
+    if (!sessionId) throw new WfError('WF_BAD_CALLER: cannot identify the caller session', 'WF_BAD_CALLER')
     // 运行锁降权 + 静默接续（用户裁决）：本会话存在暂停/已停止/已中断的断点时不报错，
     // 而是接管运行事实与锁后继续（不注入编排指令）——父代理在自身回合内自行恢复，
     // 「继续」由父代理按语义触发，无需人工回工作台点「运行」。
@@ -37,11 +37,11 @@ export class RuntimeExecute extends RuntimeLaunch {
     if (!run) {
       // 本会话既无激活运行、也无任何可恢复断点：确实是「从未启动过运行」。
       // 此时插件拿不到任何 workflow 实例依据（无断点即无 flowId），只能给出可行动提示。
-      throw new WfError('当前没有正在运行的工作流编排，也没有可恢复的断点（请先在画布点击「运行」）', 'WF_NO_ACTIVE_RUN')
+      throw new WfError('WF_NO_ACTIVE_RUN: no active orchestration and no resumable checkpoint for this session; start a run on the canvas first', 'WF_NO_ACTIVE_RUN')
     }
     if (run.snapshot.status !== 'running') {
       // 静默接续未能生效（例如工作流已不完整）——给出终态文案，不静默
-      throw new WfError(`该工作流已${statusText(run.snapshot.status)}，无法继续执行`, 'WF_STOPPED')
+      throw new WfError(`WF_STOPPED: the run can no longer execute (status: ${run.snapshot.status})`, 'WF_STOPPED')
     }
     return run
   }
@@ -66,14 +66,14 @@ export class RuntimeExecute extends RuntimeLaunch {
     if (options?.expectedMode && run.snapshot.mode !== options.expectedMode) {
       throw new WfError(
         options.expectedMode === 'mode2'
-          ? 'wf_run_node_wait 只能在API服务模式（mode2）中使用'
-          : 'wf_run_node 只能在流程编排模式（mode1）中使用',
+          ? 'WF_MODE_MISMATCH: wf_run_node_wait only works in mode2 (API service runs)'
+          : 'WF_MODE_MISMATCH: wf_run_node only works in mode1 (flow orchestration runs)',
         'WF_MODE_MISMATCH',
       )
     }
     const nodeId = String(args?.nodeId ?? '').trim()
-    if (!nodeId) throw new WfError('wf_run_node 需要参数 nodeId', 'WF_BAD_ARGS')
-    if (run.controller.signal.aborted) throw new WfError('该工作流已停止', 'WF_CANCELLED')
+    if (!nodeId) throw new WfError('WF_BAD_ARGS: wf_run_node requires nodeId', 'WF_BAD_ARGS')
+    if (run.controller.signal.aborted) throw new WfError('WF_CANCELLED: the run has been stopped', 'WF_CANCELLED')
 
     // 执行者模式：父代理开始调度（首次 wf_run_node 成功前）→ 自身节点任务视为完成，
     // 快照标记 ok 并把父代理最近产出回写（下游 ctx 连线可注入该产出）
@@ -84,10 +84,10 @@ export class RuntimeExecute extends RuntimeLaunch {
 
     // 虚拟节点解析为主节点（共享同一子代理执行实例）
     let node = nodeById(flow, nodeId)
-    if (!node) throw new WfError(`节点不存在或已从画布移除：${nodeId}`, 'WF_NODE_MISSING')
+    if (!node) throw new WfError(`WF_NODE_MISSING: node not found or removed from the canvas: ${nodeId}`, 'WF_NODE_MISSING')
     if (node.kind === 'proxy') {
       const source = nodeById(flow, node.proxySourceId)
-      if (!source) throw new WfError(`虚拟节点引用的主节点不存在：${node.proxySourceId}`, 'WF_NODE_MISSING')
+      if (!source) throw new WfError(`WF_NODE_MISSING: the proxy node's source node is missing: ${node.proxySourceId}`, 'WF_NODE_MISSING')
       node = source
     }
 
@@ -95,10 +95,10 @@ export class RuntimeExecute extends RuntimeLaunch {
     if (node.kind === 'pause') {
       run.callCount += 1
       if (run.callCount > GLOBAL_RUN_CALL_LIMIT) {
-        throw new WfError(`编排执行超过全局调用上限（${GLOBAL_RUN_CALL_LIMIT} 次 wf_run_node）`, 'WF_GLOBAL_LIMIT')
+        throw new WfError(`WF_GLOBAL_LIMIT: orchestration exceeded the global call limit (${GLOBAL_RUN_CALL_LIMIT} wf_run_node calls)`, 'WF_GLOBAL_LIMIT')
       }
       run.lastActiveAt = this.now()
-      setNodeStatus(run.snapshot, nodeId, 'ok', { attempts: 1, output: '（暂停门）暂停运行', now: this.now() })
+      setNodeStatus(run.snapshot, nodeId, 'ok', { attempts: 1, output: '(pause gate) run paused', now: this.now() })
       run.snapshot.status = 'paused'
       run.snapshot.resumeFromNodeId = nodeId
       await this.persistWarn(run)
@@ -110,7 +110,7 @@ export class RuntimeExecute extends RuntimeLaunch {
     if (node.kind === 'group') {
       if (run.snapshot.mode !== 'mode1') {
         throw new WfError(
-          `wf_run_node_wait 不接受协作组节点；「${labelOf(node)}」请逐个启动其成员节点`,
+          `WF_NODE_KIND: wf_run_node_wait does not accept a collaboration-group node; start its member nodes one by one ("${labelOf(node)}")`,
           'WF_NODE_KIND',
         )
       }
@@ -118,7 +118,7 @@ export class RuntimeExecute extends RuntimeLaunch {
     }
 
     if (node.kind !== 'agent') {
-      throw new WfError(`wf_run_node 只接受角色(agent)节点；「${labelOf(node)}」类型为 ${node.kind}`, 'WF_NODE_KIND')
+      throw new WfError(`WF_NODE_KIND: wf_run_node only accepts an agent node; "${labelOf(node)}" is ${node.kind}`, 'WF_NODE_KIND')
     }
     // 虚拟节点解析后一切以主节点 key 记账（共享同一子代理执行实例与快照记录）
     const resolvedNodeId = node.id
@@ -126,13 +126,13 @@ export class RuntimeExecute extends RuntimeLaunch {
     // 硬护栏：全局调用上限 + 单节点重试上限
     run.callCount += 1
     if (run.callCount > GLOBAL_RUN_CALL_LIMIT) {
-      throw new WfError(`编排执行超过全局调用上限（${GLOBAL_RUN_CALL_LIMIT} 次 wf_run_node），自动停止`, 'WF_GLOBAL_LIMIT')
+      throw new WfError(`WF_GLOBAL_LIMIT: orchestration exceeded the global call limit (${GLOBAL_RUN_CALL_LIMIT} wf_run_node calls); stopped automatically`, 'WF_GLOBAL_LIMIT')
     }
     const attempt = (run.attempts.get(resolvedNodeId) ?? 0) + 1
     run.attempts.set(resolvedNodeId, attempt)
     const effectiveRetryLimit = effectiveRetryLimitOf(node, args, this.deps.config.retryLimitDefault)
     if (attempt > effectiveRetryLimit + 1) {
-      throw new WfError(`节点「${labelOf(node)}」执行次数超过上限（最多 ${effectiveRetryLimit} 次重试）`, 'WF_RETRY_LIMIT')
+      throw new WfError(`WF_RETRY_LIMIT: node "${labelOf(node)}" exceeded its retry limit (at most ${effectiveRetryLimit} retries)`, 'WF_RETRY_LIMIT')
     }
     const effectiveReactLimit = effectiveReactLimitOf(node, args, this.deps.config.reactIterationLimitDefault)
     const thinking = effectiveThinkingOf(node, args)
@@ -204,7 +204,7 @@ export class RuntimeExecute extends RuntimeLaunch {
     // wait 阻塞：等待 subagent/end 唤醒（完成）或运行终止/调用取消（reject）
     const onAbort = (): void => {
       run.waiters.delete(waitKey)
-      waiter!.reject(new WfError('该工作流已停止', 'WF_CANCELLED'))
+      waiter!.reject(new WfError('WF_CANCELLED: the run has been stopped', 'WF_CANCELLED'))
     }
     if (callerSignal && !callerSignal.aborted) callerSignal.addEventListener('abort', onAbort, { once: true })
     else if (callerSignal?.aborted) onAbort()
@@ -246,18 +246,18 @@ export class RuntimeExecute extends RuntimeLaunch {
     const groupId = group.id
     const memberIds = [...new Set(((group.data.memberIds ?? []) as unknown[]).map((id) => String(id ?? '')).filter(Boolean))]
     if (memberIds.length === 0) {
-      throw new WfError(`协作组「${labelOf(group)}」没有成员，无法启动`, 'WF_GROUP_EMPTY')
+      throw new WfError(`WF_GROUP_EMPTY: collaboration group "${labelOf(group)}" has no members`, 'WF_GROUP_EMPTY')
     }
     if (args?.wait === true) {
-      throw new WfError(`协作组「${labelOf(group)}」不支持阻塞等待；请用 wf_run_node 异步启动`, 'WF_GROUP_WAIT_UNSUPPORTED')
+      throw new WfError(`WF_GROUP_WAIT_UNSUPPORTED: collaboration group "${labelOf(group)}" does not support a blocking wait; start it asynchronously with wf_run_node`, 'WF_GROUP_WAIT_UNSUPPORTED')
     }
     const runner = this.deps.runner
     const startGroup = runner.startGroupTask
     const recall = this.deps.teamExperienceContext
     if (typeof startGroup !== 'function' || runner.teamAvailable?.(sessionId) !== true) {
       throw new WfError(
-        `未启用官方 Agent Team 能力，无法整组启动协作组「${labelOf(group)}」。` +
-        `请改为逐个调用 wf_run_node 启动成员节点 [${memberIds.join(', ')}]。`,
+        `WF_TEAM_UNAVAILABLE: the official Agent Team capability is not available, so collaboration group "${labelOf(group)}" cannot be started as a whole. ` +
+        `Start its member nodes one by one with wf_run_node: [${memberIds.join(', ')}].`,
         'WF_TEAM_UNAVAILABLE',
       )
     }
@@ -265,13 +265,13 @@ export class RuntimeExecute extends RuntimeLaunch {
     // 硬护栏与单节点路径同口径（全局调用上限 + 组级尝试计数 + 组级参数覆盖）
     run.callCount += 1
     if (run.callCount > GLOBAL_RUN_CALL_LIMIT) {
-      throw new WfError(`编排执行超过全局调用上限（${GLOBAL_RUN_CALL_LIMIT} 次 wf_run_node），自动停止`, 'WF_GLOBAL_LIMIT')
+      throw new WfError(`WF_GLOBAL_LIMIT: orchestration exceeded the global call limit (${GLOBAL_RUN_CALL_LIMIT} wf_run_node calls); stopped automatically`, 'WF_GLOBAL_LIMIT')
     }
     const attempt = (run.attempts.get(groupId) ?? 0) + 1
     run.attempts.set(groupId, attempt)
     const effectiveRetryLimit = effectiveRetryLimitOf(group, args, this.deps.config.retryLimitDefault)
     if (attempt > effectiveRetryLimit + 1) {
-      throw new WfError(`协作组「${labelOf(group)}」执行次数超过上限（最多 ${effectiveRetryLimit} 次重试）`, 'WF_RETRY_LIMIT')
+      throw new WfError(`WF_RETRY_LIMIT: collaboration group "${labelOf(group)}" exceeded its retry limit (at most ${effectiveRetryLimit} retries)`, 'WF_RETRY_LIMIT')
     }
     const effectiveReactLimit = effectiveReactLimitOf(group, args, this.deps.config.reactIterationLimitDefault)
     const thinking = effectiveThinkingOf(group, args)
@@ -283,7 +283,7 @@ export class RuntimeExecute extends RuntimeLaunch {
     for (const memberId of memberIds) {
       const member = nodeById(flow, memberId)
       if (!member || member.kind !== 'agent') {
-        throw new WfError(`协作组成员必须是角色(agent)节点：${memberId}`, 'WF_NODE_KIND')
+        throw new WfError(`WF_NODE_KIND: a collaboration-group member must be an agent node: ${memberId}`, 'WF_NODE_KIND')
       }
       memberTasks.push({ label: labelOf(member), task: String(member.data.systemPrompt ?? '') })
     }
@@ -321,7 +321,7 @@ export class RuntimeExecute extends RuntimeLaunch {
     for (const memberId of memberIds) {
       const member = nodeById(flow, memberId)
       if (!member || member.kind !== 'agent') {
-        throw new WfError(`协作组成员必须是角色(agent)节点：${memberId}`, 'WF_NODE_KIND')
+        throw new WfError(`WF_NODE_KIND: a collaboration-group member must be an agent node: ${memberId}`, 'WF_NODE_KIND')
       }
       // 成员 db-in 索引预建：与单节点路径同一时机（启动前吸收构建耗时；best-effort）
       if (this.deps.dbIndexer) await this.deps.dbIndexer.ensureIndexes(memberId, flow)
@@ -369,8 +369,8 @@ export class RuntimeExecute extends RuntimeLaunch {
       this.unmarkTeamStarted(run)
       setNodeStatus(run.snapshot, groupId, 'fail', { attempts: attempt, now: this.now() })
       throw new WfError(
-        `官方 Agent Team 在启动协作组「${labelOf(group)}」时不可用；` +
-        `请改为逐个调用 wf_run_node 启动成员节点 [${memberIds.join(', ')}]。`,
+        `WF_TEAM_UNAVAILABLE: the official Agent Team became unavailable while starting collaboration group "${labelOf(group)}"; ` +
+        `start its member nodes one by one with wf_run_node: [${memberIds.join(', ')}].`,
         'WF_TEAM_UNAVAILABLE',
       )
     }
@@ -399,7 +399,7 @@ export class RuntimeExecute extends RuntimeLaunch {
    * 返回终态幂等/报错。
    */
   async wfFinish(caller: CallerInfo, args: FinishArgs): Promise<FinishResult> {
-    if (caller.isChild) throw new WfError('子代理无法调用 wf_finish（仅当前会话主 Agent 可收尾编排）', 'WF_NOT_ROOT')
+    if (caller.isChild) throw new WfError('WF_NOT_ROOT: a child agent cannot call wf_finish; only the session main agent may close an orchestration', 'WF_NOT_ROOT')
     const sessionId = caller.sessionId
     const run = sessionId ? await this.ensureActiveRun(sessionId) : null
     // 执行者模式：wf_finish 同样视为父代理自身任务完成（无后续调度、直接收尾的流程）
@@ -417,7 +417,7 @@ export class RuntimeExecute extends RuntimeLaunch {
       } catch {
         // 磁盘读失败按无历史处理
       }
-      throw new WfError('当前没有正在运行的工作流编排', 'WF_NO_ACTIVE_RUN')
+      throw new WfError('WF_NO_ACTIVE_RUN: no running orchestration in this session', 'WF_NO_ACTIVE_RUN')
     }
     const snapshot = run.snapshot
     if (snapshot.status !== 'running') return { ok: true, runId: snapshot.id, status: snapshot.status, idempotent: true }

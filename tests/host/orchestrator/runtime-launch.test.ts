@@ -39,7 +39,7 @@ describe('startRun 并发运行锁（TOCTOU 竞态回归）', () => {
       agents: h.agents,
       config: {
         outputFullLimit: 400, documentTextLimit: 200, runIdleTimeoutMs: 500,
-        retryLimitDefault: 3, reactIterationLimitDefault: 50, wfAskAgentTimeoutMs: 500,
+        retryLimitDefault: 3, reactIterationLimitDefault: 50, wfAskAgentTtlMs: 500,
       },
       logger: { warn: (message) => h.warnings.push(message), info: () => {}, debug: () => {} },
       now: () => h.clock.now,

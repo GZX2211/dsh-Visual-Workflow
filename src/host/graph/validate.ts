@@ -65,32 +65,32 @@ export interface ConnectionCheck {
  */
 export function connectionProblem(nodes: GraphNode[], line: Line): ConnectionCheck {
   if (!line || !line.source || !line.target) {
-    return { valid: false, code: 'invalidConnection', message: '连线缺少端点' }
+    return { valid: false, code: 'invalidConnection', message: 'edge is missing an endpoint' }
   }
   if (line.source === line.target) {
-    return { valid: false, code: 'selfLoop', message: '不允许自环' }
+    return { valid: false, code: 'selfLoop', message: 'self-loops are not allowed' }
   }
   const source = nodes.find((n) => n.id === line.source)
   const target = nodes.find((n) => n.id === line.target)
   if (!source || !target) {
-    return { valid: false, code: 'invalidNode', message: '连线端点节点不存在' }
+    return { valid: false, code: 'invalidNode', message: 'the edge endpoint node does not exist' }
   }
   const sourceDef = NODE_HANDLES[source.kind]
   const targetDef = NODE_HANDLES[target.kind]
   if (!sourceDef.outputs.includes(line.sourceHandle)) {
-    return { valid: false, code: 'invalidHandle', message: `节点 ${source.kind}（${line.source}）没有输出点 ${line.sourceHandle}` }
+    return { valid: false, code: 'invalidHandle', message: `node ${source.kind} (${line.source}) has no output port ${line.sourceHandle}` }
   }
   if (!targetDef.inputs.includes(line.targetHandle)) {
-    return { valid: false, code: 'invalidHandle', message: `节点 ${target.kind}（${line.target}）没有输入点 ${line.targetHandle}` }
+    return { valid: false, code: 'invalidHandle', message: `node ${target.kind} (${line.target}) has no input port ${line.targetHandle}` }
   }
   // 三通道配对：db-out 只能连 db-in（数据库内容绝不注入上下文，§4.2.4.2 规则 4）
   const expectedTarget = HANDLE_PAIRING[line.sourceHandle]
   if (line.targetHandle !== expectedTarget) {
-    return { valid: false, code: 'handleMismatch', message: `${line.sourceHandle} 只能连接 ${expectedTarget}` }
+    return { valid: false, code: 'handleMismatch', message: `${line.sourceHandle} can only connect ${expectedTarget}` }
   }
   // 条件仅流程线（§4.3 规则 4）
   if (line.condition && line.sourceHandle !== 'flow-out') {
-    return { valid: false, code: 'conditionOnNonFlow', message: '条件连线仅支持流程出 → 流程入' }
+    return { valid: false, code: 'conditionOnNonFlow', message: 'conditional edges are supported on flow-out -> flow-in only' }
   }
   return { valid: true, code: 'ok', message: '' }
 }
@@ -115,14 +115,14 @@ export function validateFlow(flow: Partial<WorkflowDocument>): ValidateResult {
   const nodeMap = new Map<string, GraphNode>()
   for (const node of nodes) {
     if (!node || !node.id) {
-      issues.push({ code: 'badNode', message: `非法节点：${JSON.stringify(node)}` })
+      issues.push({ code: 'badNode', message: `invalid node: ${JSON.stringify(node)}` })
       continue
     }
     if (!NODE_KINDS.includes(node.kind)) {
-      issues.push({ code: 'badNode', message: `节点 ${node.id} 的 kind 非法：${String((node as GraphNode).kind)}` })
+      issues.push({ code: 'badNode', message: `node ${node.id} has an invalid kind: ${String((node as GraphNode).kind)}` })
       continue
     }
-    if (seen.has(node.id)) issues.push({ code: 'dupNode', message: `节点 id 重复：${node.id}`, id: node.id })
+    if (seen.has(node.id)) issues.push({ code: 'dupNode', message: `duplicate node id: ${node.id}`, id: node.id })
     seen.add(node.id)
     nodeMap.set(node.id, node)
 
@@ -130,19 +130,19 @@ export function validateFlow(flow: Partial<WorkflowDocument>): ValidateResult {
     if (node.kind === 'start' || node.kind === 'end' || node.kind === 'pause') {
       const expected = stageLabel(node.kind, mode)
       if (node.data.label !== expected) {
-        issues.push({ code: 'stageLabelLocked', message: `阶段节点 ${node.id} 名称锁定为「${expected}」`, id: node.id })
+        issues.push({ code: 'stageLabelLocked', message: `stage node ${node.id} has its label locked to "${expected}"`, id: node.id })
       }
     }
     // 虚拟节点：必须携带引用且引用主节点存在且为角色节点（§4.2.3.2 规则 4/7）
     if (node.kind === 'proxy') {
       if (!node.proxySourceId) {
-        issues.push({ code: 'proxySourceMissing', message: `虚拟节点 ${node.id} 缺少引用主节点`, id: node.id })
+        issues.push({ code: 'proxySourceMissing', message: `proxy node ${node.id} is missing its source node reference`, id: node.id })
       }
     }
     // 角色节点：retryLimit 必为有限正数（归一化会补默认，此处只防显式非法值）
     if ((node.kind === 'parent' || node.kind === 'agent') && typeof node.data.retryLimit === 'number') {
       if (!Number.isFinite(node.data.retryLimit) || node.data.retryLimit < 0) {
-        issues.push({ code: 'badRetryLimit', message: `节点 ${node.id} 的 retryLimit 非法`, id: node.id })
+        issues.push({ code: 'badRetryLimit', message: `node ${node.id} has an invalid retryLimit`, id: node.id })
       }
     }
   }
@@ -152,11 +152,11 @@ export function validateFlow(flow: Partial<WorkflowDocument>): ValidateResult {
     if (node.kind !== 'proxy' || !node.proxySourceId) continue
     const source = nodeMap.get(node.proxySourceId)
     if (!source) {
-      issues.push({ code: 'proxySourceMissing', message: `虚拟节点 ${node.id} 引用的主节点 ${node.proxySourceId} 不存在`, id: node.id })
+      issues.push({ code: 'proxySourceMissing', message: `proxy node ${node.id} references a source node ${node.proxySourceId} that does not exist`, id: node.id })
       continue
     }
     if (source.kind !== 'parent' && source.kind !== 'agent') {
-      issues.push({ code: 'proxySourceKind', message: `虚拟节点 ${node.id} 只能引用角色节点（当前为 ${source.kind}）`, id: node.id })
+      issues.push({ code: 'proxySourceKind', message: `proxy node ${node.id} can only reference a role node (currently ${source.kind})`, id: node.id })
     }
   }
   // 主/虚不得同时连入同一目标节点的同一连接点（防止重复触发，§4.2.3.2 规则 6）
@@ -187,7 +187,7 @@ export function validateFlow(flow: Partial<WorkflowDocument>): ValidateResult {
       }
       for (const eff of effectiveIds) {
         if (seenSources.has(eff)) {
-          issues.push({ code: 'proxyParallel', message: `主节点与其虚拟节点不得同时连入 ${targetId} 的同一连接点`, id: l.id })
+          issues.push({ code: 'proxyParallel', message: `a source node and its proxy node must not both connect to the same port of ${targetId}`, id: l.id })
           break
         }
         seenSources.add(eff)
@@ -205,17 +205,17 @@ export function validateFlow(flow: Partial<WorkflowDocument>): ValidateResult {
     }
     const key = `${line.source}|${line.target}|${line.sourceHandle}|${line.targetHandle}`
     if (lineKeys.has(key)) {
-      issues.push({ code: 'dupEdge', message: `重复连线：${line.source} → ${line.target}`, id: line.id })
+      issues.push({ code: 'dupEdge', message: `duplicate edge: ${line.source} -> ${line.target}`, id: line.id })
     }
     lineKeys.add(key)
 
     // 条件连线：content 必须带内容值（§4.3 规则 2/属性设计表）
     if (line.condition) {
       if (!CONDITION_TYPES.includes(line.condition.type)) {
-        issues.push({ code: 'badCondition', message: `非法条件类型：${String((line.condition as { type: string }).type)}`, id: line.id })
+        issues.push({ code: 'badCondition', message: `invalid condition type: ${String((line.condition as { type: string }).type)}`, id: line.id })
       }
       if (line.condition.type === 'content' && !(line.condition.label ?? '').trim()) {
-        issues.push({ code: 'contentLabelRequired', message: '条件类型「内容」必须填写内容值', id: line.id })
+        issues.push({ code: 'contentLabelRequired', message: 'a content condition must carry its content value', id: line.id })
       }
     }
 
@@ -225,10 +225,10 @@ export function validateFlow(flow: Partial<WorkflowDocument>): ValidateResult {
     const sourceInGroup = source && (source.kind === 'parent' || source.kind === 'agent') && Boolean(source.data.groupId)
     const targetInGroup = target && (target.kind === 'parent' || target.kind === 'agent') && Boolean(target.data.groupId)
     if (sourceInGroup && (line.sourceHandle === 'flow-out')) {
-      issues.push({ code: 'groupMemberFlowHandle', message: `协作组成员 ${line.source} 仅有上下文连接点，无流程出`, id: line.id })
+      issues.push({ code: 'groupMemberFlowHandle', message: `collaboration-group member ${line.source} only has context ports, no flow-out`, id: line.id })
     }
     if (targetInGroup && line.targetHandle === 'flow-in') {
-      issues.push({ code: 'groupMemberFlowHandle', message: `协作组成员 ${line.target} 仅有上下文连接点，无流程入`, id: line.id })
+      issues.push({ code: 'groupMemberFlowHandle', message: `collaboration-group member ${line.target} only has context ports, no flow-in`, id: line.id })
     }
     // 组卡片仅 flow 连接点：矩阵（NODE_HANDLES.group 只有 flow-in/flow-out）已在
     // connectionProblem 层拦截组卡片的 ctx/db 连线（invalidHandle/handleMismatch），
@@ -237,10 +237,10 @@ export function validateFlow(flow: Partial<WorkflowDocument>): ValidateResult {
     // 模式差异（§4.2.5.1）：mode1 的 start 无 ctx-out；mode1 的 end 无 ctx-in
     if (mode === 'mode1') {
       if (source && source.kind === 'start' && line.sourceHandle === 'ctx-out') {
-        issues.push({ code: 'mode1StartCtxOut', message: '模式一下启动节点无上下文出（仅模式二输入节点提供）', id: line.id })
+        issues.push({ code: 'mode1StartCtxOut', message: 'a mode1 start node has no context-out (only the mode2 input node provides one)', id: line.id })
       }
       if (target && target.kind === 'end' && line.targetHandle === 'ctx-in') {
-        issues.push({ code: 'mode1EndCtxIn', message: '模式一下结束节点无上下文入（仅模式二输出节点提供）', id: line.id })
+        issues.push({ code: 'mode1EndCtxIn', message: 'a mode1 end node has no context-in (only the mode2 output node provides one)', id: line.id })
       }
     }
   }
@@ -248,18 +248,18 @@ export function validateFlow(flow: Partial<WorkflowDocument>): ValidateResult {
   // —— 阶段节点唯一性（§4.2.5.1 说明段：启动/输入与结束/输出各至多一个）——
   const starts = nodes.filter((n) => n.kind === 'start')
   const ends = nodes.filter((n) => n.kind === 'end')
-  if (starts.length > 1) issues.push({ code: 'startUnique', message: `启动/输入节点只能存在一个（当前 ${starts.length} 个）` })
-  if (ends.length > 1) issues.push({ code: 'endUnique', message: `结束/输出节点只能存在一个（当前 ${ends.length} 个）` })
+  if (starts.length > 1) issues.push({ code: 'startUnique', message: `there must be exactly one start/input node (currently ${starts.length})` })
+  if (ends.length > 1) issues.push({ code: 'endUnique', message: `there must be exactly one end/output node (currently ${ends.length})` })
   // 暂停节点仅模式一（§4.2.5.1 规则 2：模式二左侧栏不显示暂停）
   if (mode === 'mode2' && nodes.some((n) => n.kind === 'pause')) {
-    issues.push({ code: 'pauseMode2', message: '模式二工作流不允许暂停节点' })
+    issues.push({ code: 'pauseMode2', message: 'a mode2 workflow does not allow pause nodes' })
   }
 
   // —— 父代理唯一性（§4.2.3.1 规则 5：至多一个；模式二必须恰好一个）——
   const parents = nodes.filter((n) => n.kind === 'parent')
-  if (parents.length > 1) issues.push({ code: 'parentUnique', message: `父代理节点最多一个（当前 ${parents.length} 个）` })
+  if (parents.length > 1) issues.push({ code: 'parentUnique', message: `at most one parent-agent node is allowed (currently ${parents.length})` })
   if (mode === 'mode2' && parents.length === 0) {
-    issues.push({ code: 'parentRequiredMode2', message: '模式二必须存在父代理节点' })
+    issues.push({ code: 'parentRequiredMode2', message: 'a mode2 workflow must contain a parent-agent node' })
   }
 
   // —— 协作组成员一致性：成员 id 必须真实存在（§4.2.5.2）——
@@ -267,7 +267,7 @@ export function validateFlow(flow: Partial<WorkflowDocument>): ValidateResult {
   const groupIds = new Set(nodes.filter((n) => n.kind === 'group').map((n) => n.id))
   for (const node of nodes) {
     if ((node.kind === 'parent' || node.kind === 'agent') && node.data.groupId && !groupIds.has(node.data.groupId)) {
-      issues.push({ code: 'groupGhost', message: `节点 ${node.id} 声明属于协作组 ${node.data.groupId}，但该组不存在`, id: node.id })
+      issues.push({ code: 'groupGhost', message: `node ${node.id} declares membership in collaboration group ${node.data.groupId}, but that group does not exist`, id: node.id })
     }
   }
   for (const node of nodes) {
@@ -275,17 +275,17 @@ export function validateFlow(flow: Partial<WorkflowDocument>): ValidateResult {
     for (const mid of node.data.memberIds ?? []) {
       const m = nodeMap.get(mid)
       if (!m) {
-        issues.push({ code: 'groupMemberMissing', message: `协作组 ${node.id} 的成员 ${mid} 不存在`, id: node.id })
+        issues.push({ code: 'groupMemberMissing', message: `collaboration group ${node.id} references a member ${mid} that does not exist`, id: node.id })
         continue
       }
       if (m.kind !== 'parent' && m.kind !== 'agent') {
-        issues.push({ code: 'groupMemberKind', message: `协作组 ${node.id} 的成员 ${mid} 必须是角色节点`, id: node.id })
+        issues.push({ code: 'groupMemberKind', message: `collaboration group ${node.id} member ${mid} must be a role node`, id: node.id })
       }
     }
     // 成员节点的 groupId 与组 memberIds 双向一致
     for (const m of nodes) {
       if ((m.kind === 'parent' || m.kind === 'agent') && m.data.groupId === node.id && !(node.data.memberIds ?? []).includes(m.id)) {
-        issues.push({ code: 'groupMemberMismatch', message: `节点 ${m.id} 声明属于协作组 ${node.id} 但组内无此成员`, id: m.id })
+        issues.push({ code: 'groupMemberMismatch', message: `node ${m.id} declares membership in collaboration group ${node.id}, but the group does not list it as a member`, id: m.id })
       }
     }
   }

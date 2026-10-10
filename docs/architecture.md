@@ -689,7 +689,7 @@ runtime.ts           OrchestratorRuntime 收口类（继承链最终类）
 runtime-base.ts      字段/查询/上下文自动接续/清理/父代理配置注入
 runtime-launch.ts    startRun / resumeRun
 runtime-execute.ts   wf_run_node / wf_finish（含协作组整组启动）
-runtime-comm.ts      wf_ask_agent 三态协议
+runtime-comm.ts      wf_ask_agent 两态非阻塞协议（ask/reply）
 runtime-observe.ts   subagent/end 回写与协作组聚合
 runtime-lifecycle.ts 终止 / 停止 / 挂起
 seams.ts             依赖缝、常量、配置与身份类型

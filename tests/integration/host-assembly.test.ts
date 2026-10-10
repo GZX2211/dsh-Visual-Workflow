@@ -25,7 +25,7 @@ function makeConfig(dir: string): Config {
     servicePortBase: 7860,
     apiKey: null,
     maxConcurrentPerService: 50,
-    wfAskAgentTimeoutMs: 120000,
+    wfAskAgentTtlMs: 120000,
     runIdleTimeoutMs: 1800000,
     runPollMs: 2000,
     reactIterationLimitDefault: 50,

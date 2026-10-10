@@ -44,7 +44,7 @@ const CONFIG_KEYS: Array<[string, string]> = [
   ['servicePortBase', '7860'],
   ['apiKey', 'null'],
   ['maxConcurrentPerService', '50'],
-  ['wfAskAgentTimeoutMs', '120000'],
+  ['wfAskAgentTtlMs', '120000'],
   ['runIdleTimeoutMs', '1800000'],
   ['runPollMs', '2000'],
   ['reactIterationLimitDefault', '50'],
@@ -107,7 +107,7 @@ describe('T-002 Host 入口契约（index/config/visual-workflow-host 拆分后�
     const numericDefaults: Array<[string, number]> = [
       ['servicePortBase', 7860],
       ['maxConcurrentPerService', 50],
-      ['wfAskAgentTimeoutMs', 120000],
+      ['wfAskAgentTtlMs', 120000],
       ['runIdleTimeoutMs', 1800000],
       ['runPollMs', 2000],
       ['reactIterationLimitDefault', 50],

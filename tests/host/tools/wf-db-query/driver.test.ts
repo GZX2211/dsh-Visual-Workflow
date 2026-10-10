@@ -66,11 +66,11 @@ describe('createDatabaseDriver 与连接测试', () => {
   }
 
   it('本地无路径 → 配置错误', () => {
-    expect(() => createDatabaseDriver(dbNode())).toThrow('未配置本地文件路径')
+    expect(() => createDatabaseDriver(dbNode())).toThrow('WF_DB_CONFIG')
   })
 
   it('服务器无连接信息 → 配置错误', () => {
-    expect(() => createDatabaseDriver(dbNode({ dbType: 'server', dbKind: 'mysql' }))).toThrow('未配置服务器连接信息')
+    expect(() => createDatabaseDriver(dbNode({ dbType: 'server', dbKind: 'mysql' }))).toThrow('WF_DB_CONFIG')
   })
 
   it('本地库连接测试成功/文件缺失失败', async () => {

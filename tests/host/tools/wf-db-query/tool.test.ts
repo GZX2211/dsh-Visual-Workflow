@@ -84,9 +84,8 @@ describe('wf_db_query 注册与 schema', () => {
     expect(description.length).toBeGreaterThan(20)
     const ascii = [...description].filter((ch) => /[A-Za-z ]/.test(ch)).length
     expect(ascii / description.length).toBeGreaterThan(0.9)
-    // 既有偏差（如实记录，不在目录治理中改动提示词文本）：本条 description 实测约 139 词，
-    // 超出 W-03 的 ≤120 tokens 目标；它是模型可见文本且非本次目录治理范围，故不在此收紧。
-    expect(description.split(/\s+/).length).toBeGreaterThan(20)
+    // 文案已精简至 W-03 口径（原 139 词偏差随本轮提示词优化收敛），恢复标准上限门禁
+    expect(description.split(/\s+/).length).toBeLessThanOrEqual(130)
   })
 })
 

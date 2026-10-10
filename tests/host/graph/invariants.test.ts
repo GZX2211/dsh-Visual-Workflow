@@ -467,7 +467,7 @@ describe('规则矩阵（每个 code 一例）', () => {
     )
     const issue = check({ flow: doc }).find((i) => i.code === 'milestoneProxyInvalid')
     expect(issue).toBeDefined()
-    expect(issue?.message).toContain('不是父代理节点')
+    expect(issue?.message).toContain('is not a parent node')
     expect(issue?.level).toBe('warning')
   })
 

@@ -140,8 +140,11 @@ export class RuntimeObserve extends RuntimeComm {
       if (!allProduced) continue
       const memberSet = new Set(group.data.memberIds ?? [])
       // 非阻塞协议下登记即「已发出但尚无回复」；有其一则不判组完成。
+      // 必须按 expiresAt 过滤：TTL 惰性清理只在通信调用进入时触发，若此处只看登记表，
+      // 过期未回复的 ask 会把组卡片永久卡在 running（直到下一次通信或 run 结束）。
+      const now = this.now()
       const groupHasPendingAsk = Array.from(entry.asks.values()).some(
-        (ask) => ask.toNodeId === group.id || memberSet.has(ask.toNodeId),
+        (ask) => ask.expiresAt > now && (ask.toNodeId === group.id || memberSet.has(ask.toNodeId)),
       )
       if (groupHasPendingAsk) continue
       const current = snapshot.nodes.find((n) => n.nodeId === group.id)

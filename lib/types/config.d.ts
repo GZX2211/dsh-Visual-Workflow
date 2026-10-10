@@ -12,8 +12,13 @@ export interface Config {
     apiKey: string | null;
     /** 模式二单服务并发请求上限。 */
     maxConcurrentPerService: number;
-    /** wf_ask_agent 阻塞通信超时毫秒数。 */
-    wfAskAgentTimeoutMs: number;
+    /** wf_ask_agent 待回复登记的 TTL 毫秒数（到期后不再接受 reply，也不再阻塞组聚合）。 */
+    wfAskAgentTtlMs: number;
+    /**
+     * @deprecated 旧键名（历史命名把「待回复登记 TTL」写成了 Timeout）。
+     * 仅供读取兼容：resolveConfig 在 >0 时把它投影到 wfAskAgentTtlMs，禁止新增写入。
+     */
+    wfAskAgentTimeoutMs?: number;
     /** 运行空闲超时毫秒数（无 in-flight 看护门限）。 */
     runIdleTimeoutMs: number;
     /** 运行状态回显轮询间隔毫秒数。 */
