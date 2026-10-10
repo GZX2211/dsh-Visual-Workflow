@@ -98,6 +98,15 @@ export declare class ServiceManager {
     /** patch 产物路径（<dataDir>/services/<serviceId>.serve.patch.yml）。 */
     private patchPath;
     private spawnChild;
+    /**
+     * 崩溃标记落盘（best-effort 双线护栏：内存条目注销已表达「进程已死」，磁盘标记供跨进程与重启可见）。
+     *
+     * 为什么要重试：写路径是真实原子写 + fsync，Windows 上 open('wx')/rename 会被杀软扫描、索引器等
+     * 短暂占用而抛 EPERM/EBUSY；一次失败就放弃会让文档永久停在 running——界面显示「运行中」而进程
+     * 早已退出，除轮询落盘外无人能发现这种与事实相悖的状态。
+     * 为什么有上界：后台等待必须有界；退避耗尽后告警，不吞错、不伪装成功。
+     */
+    private persistCrash;
     /** 更新服务文档的运行时字段（读最新磁盘值后合并写）。 */
     private persistRuntime;
 }

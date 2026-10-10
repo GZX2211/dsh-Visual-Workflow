@@ -7,6 +7,8 @@
 // 失败信息会退化成 "Test timed out in 5000ms"（指向测试文件顶部，看不出是哪一步），
 // 而不是清晰的断言失败。已观测到 host/service/manager.test.ts 的 crashed 回写、
 // watchdog 的落盘等待、cordis-patch 的 5s 动态 import 三处偶发此现象。
+// 其中 crashed 回写的上界由磁盘锁获取上限（30s）决定，20s 整体上限覆盖不了，故该用例自带
+// 预算与上限（见 tests/host/service/manager.test.ts 的 CRASH_WAIT_MS / CRASH_TEST_TIMEOUT_MS）。
 //
 // 口径（重要）：**放宽的是用例整体上限，不是断言强度**。所有用例的等待条件、断言与数据
 // 原样保留；只有「单个用例最多跑多久」从 5s 提到 20s，使内部等待（含 vi.waitFor）能先于

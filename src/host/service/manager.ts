@@ -64,6 +64,10 @@ const SERVICE_ID_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/
 /** SIGTERM 后的强制终止宽限期（架构：SIGTERM → 5s → SIGKILL）。 */
 export const STOP_GRACE_MS = 5_000
 
+/** 崩溃标记落盘的重试上界与退避（依据见 persistCrash；瞬时占用为毫秒级，故退避取短）。 */
+const CRASH_PERSIST_ATTEMPTS = 3
+const CRASH_PERSIST_BACKOFF_MS = [50, 150]
+
 /** 日志缝。 */
 export interface ManagerLogger {
   info?(message: string): void
@@ -209,7 +213,7 @@ export class ServiceManager {
     child.once('error', (error) => {
       this.log().warn?.(`[service:${id}] 进程错误：${error.message}`)
       this.forget(id)
-      void this.persistRuntime(id, { status: 'crashed', lastStoppedAt: this.isoNow() }).catch(() => {})
+      void this.persistCrash(id)
     })
     child.once('exit', (code, signal) => {
       const entry = this.children.get(id)
@@ -218,7 +222,7 @@ export class ServiceManager {
       this.forget(id)
       if (entry.stopping) return // 主动停止：文档状态已置 stopped
       this.log().warn?.(`[service:${id}] 进程意外退出（code=${code ?? ''} signal=${signal ?? ''}），标记 crashed`)
-      void this.persistRuntime(id, { status: 'crashed', lastStoppedAt: this.isoNow() }).catch(() => {})
+      void this.persistCrash(id)
     })
 
     try {
@@ -412,6 +416,33 @@ export class ServiceManager {
     })
   }
 
+  /**
+   * 崩溃标记落盘（best-effort 双线护栏：内存条目注销已表达「进程已死」，磁盘标记供跨进程与重启可见）。
+   *
+   * 为什么要重试：写路径是真实原子写 + fsync，Windows 上 open('wx')/rename 会被杀软扫描、索引器等
+   * 短暂占用而抛 EPERM/EBUSY；一次失败就放弃会让文档永久停在 running——界面显示「运行中」而进程
+   * 早已退出，除轮询落盘外无人能发现这种与事实相悖的状态。
+   * 为什么有上界：后台等待必须有界；退避耗尽后告警，不吞错、不伪装成功。
+   */
+  private async persistCrash(serviceId: string): Promise<void> {
+    for (let attempt = 1; attempt <= CRASH_PERSIST_ATTEMPTS; attempt += 1) {
+      try {
+        await this.persistRuntime(serviceId, { status: 'crashed', lastStoppedAt: this.isoNow() })
+        return
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error)
+        if (attempt === CRASH_PERSIST_ATTEMPTS) {
+          this.log().warn?.(
+            `[service:${serviceId}] 崩溃状态落盘失败（已重试 ${attempt - 1} 次，文档可能仍显示 running）：${detail}`,
+          )
+          return
+        }
+        this.log().warn?.(`[service:${serviceId}] 崩溃状态落盘第 ${attempt} 次失败，将重试：${detail}`)
+        await sleep(CRASH_PERSIST_BACKOFF_MS[attempt - 1] ?? 0)
+      }
+    }
+  }
+
   /** 更新服务文档的运行时字段（读最新磁盘值后合并写）。 */
   private async persistRuntime(serviceId: string, patch: Partial<{ status: string; port: number; lastStartedAt: string; lastStoppedAt: string; apiKeyHash: string | undefined }>): Promise<void> {
     const current = await this.deps.store.getServiceById(serviceId)
@@ -423,6 +454,11 @@ export class ServiceManager {
     }
     await this.deps.store.saveService(next as never, current.sessionId)
   }
+}
+
+/** 重试退避等待（唯一用途：崩溃标记落盘的有限重试）。 */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolveSleep) => setTimeout(resolveSleep, ms))
 }
 
 /** serviceId 消毒（拒绝非法字符，防命令注入）。 */

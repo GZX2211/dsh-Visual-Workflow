@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FlowStore } from '../../../src/host/storage/flow-store.js'
 import { ServiceManager, resolveDshCommand, SERVICE_ERR, STOP_GRACE_MS } from '../../../src/host/service/index.js'
+import type { ManagerLogger } from '../../../src/host/service/index.js'
 import type { ServiceState } from '../../../src/host/shared/types.js'
 import type { RoleNode, StageNode, WorkflowDocument, Line } from '../../../src/host/shared/graph-model.js'
 import { stageLabel } from '../../../src/host/graph/index.js'
@@ -20,9 +21,17 @@ const cleanups: Array<() => Promise<void>> = []
 
 // 并行负载下的显式等待预算（口径见 vitest.config.ts）：本仓库以 --pool=threads 并行跑大量带
 // 真实磁盘/子进程/构建副作用的用例，5s 的 vi.waitFor 会与用例整体上限互相竞争，表现为本文件
-// 「crashed 回写」「内存条目清理」两处偶发超时（单独跑必过）。放宽的只是「最多等多久」，
+// 「内存条目清理」等处的偶发超时（单独跑必过）。放宽的只是「最多等多久」，
 // 等待条件与断言原样保留，任何真实挂起或逻辑回归仍会失败。
+// 「crashed 回写」的预算另见 CRASH_WAIT_MS：它的上界由磁盘锁决定，比本值更大。
 const WAIT_MS = 15_000
+
+// 崩溃标记落盘的等待预算：必须覆盖被测路径的有界最坏情形（磁盘锁获取上限 30s + 有限重试退避）。
+// 为什么不能沿用 WAIT_MS：预算小于该上界时，「落盘慢」与「落盘永久失败」在测试层面不可区分，
+// 断言只会看到 running——此前 15s 预算与 30s 磁盘锁上限错配，正是 CI 偶发失败的成因之一。
+const CRASH_WAIT_MS = 35_000
+/** 承载上面等待的用例整体上限（须大于 CRASH_WAIT_MS，并显式覆盖默认 20s）。 */
+const CRASH_TEST_TIMEOUT_MS = 45_000
 
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((fn) => fn()))
@@ -120,7 +129,7 @@ interface ManagerHarness {
   ports: number[]
 }
 
-function makeManager(store: FlowStore, dataDir: string, options: { ports?: number[] } = {}): ManagerHarness {
+function makeManager(store: FlowStore, dataDir: string, options: { ports?: number[]; logger?: ManagerLogger } = {}): ManagerHarness {
   const spawns: SpawnRecord[] = []
   const children: FakeChild[] = []
   const ports = options.ports ?? [17860]
@@ -129,6 +138,7 @@ function makeManager(store: FlowStore, dataDir: string, options: { ports?: numbe
     dataDir,
     config: { servicePortBase: 17860, apiKey: null, maxConcurrentPerService: 50 },
     dshCommand: 'C:\\dsh\\dsh.cmd',
+    ...(options.logger ? { logger: options.logger } : {}),
     findPort: async () => ports.length > 0 ? ports.shift()! : 17860,
     spawn: ((command: string, args: string[], spawnOptions: { cwd: string; shell: boolean; stdio: readonly ('ignore' | 'pipe')[] }) => {
       spawns.push({ command, args, options: spawnOptions })
@@ -286,9 +296,45 @@ describe('ServiceManager 生命周期', () => {
       const saved = await store.getServiceById('svc-1')
       expect(saved?.status).toBe('crashed')
       expect(saved?.lastStoppedAt).toBeTruthy()
-    }, { timeout: WAIT_MS })
+    }, { timeout: CRASH_WAIT_MS })
     // crashed 后可重启
     await expect(h.manager.start('svc-1')).resolves.toMatchObject({ status: 'running' })
+  }, CRASH_TEST_TIMEOUT_MS)
+
+  it('崩溃落盘遇瞬时失败 → 有限重试后仍标记 crashed（不再永久停在 running）', async () => {
+    const store = await makeStore()
+    await store.saveService(makeService('svc-1', validFlow('svc-1')), 'session-1')
+    const h = makeManager(store, store.root)
+    await h.manager.start('svc-1')
+    // 瞬时失败：Windows 上原子写的 open('wx')/rename 会被杀软扫描、索引器等短暂占用
+    const original = store.saveService.bind(store)
+    const saveSpy = vi.fn(original)
+    ;(store as unknown as { saveService: unknown }).saveService = saveSpy.mockRejectedValueOnce(
+      new Error('EPERM: file is temporarily unavailable'),
+    ) as never
+    h.children[0].emitExit(1)
+    await vi.waitFor(async () => {
+      expect((await store.getServiceById('svc-1'))?.status).toBe('crashed')
+    }, { timeout: WAIT_MS })
+    // 首次失败 + 重试成功 = 两次写入尝试（一次失败即放弃是修复前的行为）
+    expect(saveSpy).toHaveBeenCalledTimes(2)
+  })
+
+  it('崩溃落盘持续失败 → 有限重试后告警（不静默、不无界重试）', async () => {
+    const store = await makeStore()
+    await store.saveService(makeService('svc-1', validFlow('svc-1')), 'session-1')
+    const warnings: string[] = []
+    const h = makeManager(store, store.root, { logger: { warn: (message) => warnings.push(message) } })
+    await h.manager.start('svc-1')
+    const saveSpy = vi.fn(() => Promise.reject(new Error('disk full')))
+    ;(store as unknown as { saveService: unknown }).saveService = saveSpy as never
+    h.children[0].emitExit(1)
+    await vi.waitFor(() => {
+      expect(warnings.some((warning) => warning.includes('崩溃状态落盘失败'))).toBe(true)
+    }, { timeout: WAIT_MS })
+    // 上界：3 次尝试后停止（不是无限重试），且耗尽原因可见（可诊断，不再静默）
+    expect(saveSpy).toHaveBeenCalledTimes(3)
+    expect(warnings.some((warning) => warning.includes('已重试 2 次') && warning.includes('disk full'))).toBe(true)
   })
 
   it('stop：SIGTERM + 文档 stopped；exit 后不覆盖 crashed', async () => {
@@ -343,12 +389,12 @@ describe('ServiceManager 生命周期', () => {
     await h.manager.start('svc-1')
     expect(await h.manager.status('svc-1')).toMatchObject({ serviceId: 'svc-1', status: 'running', port: 17860, pid: 4242 })
     h.children[0].emitExit(1)
-    // 等待文档落盘为 crashed（真实原子写 + fsync；并行负载下实测可达数秒，故显式放宽上限）
+    // 等待文档落盘为 crashed（真实原子写 + fsync；预算口径见 CRASH_WAIT_MS）
     await vi.waitFor(async () => {
       expect((await h.manager.status('svc-1')).status).toBe('crashed')
-    }, { timeout: 15_000 })
+    }, { timeout: CRASH_WAIT_MS })
     await expect(h.manager.status('nope')).rejects.toMatchObject({ code: SERVICE_ERR.NOT_FOUND })
-  })
+  }, CRASH_TEST_TIMEOUT_MS)
 
   it('dispose：全部子进程 SIGTERM', async () => {
     const store = await makeStore()
