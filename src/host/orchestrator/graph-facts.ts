@@ -12,7 +12,7 @@ import { ctxInEdges, dbInEdges, nodeById, nodeParticipatesInFlow, validateFlow }
 import type { DatabaseNode, GraphNode, GroupNode, RoleNode, WorkflowDocument } from '../shared/graph-model.js'
 import type { RunSnapshot } from '../shared/types.js'
 import { teammateNameOf } from '../team/index.js'
-import { truncateText } from './snapshot.js'
+import { hasProducedOutput, truncateText } from './snapshot.js'
 import { WfError } from './errors.js'
 
 /** 数据库访问工具的使用说明（面向模型中文，精简；不随节点变化的三模式描述部分。工具名保留英文 W-03）。 */
@@ -135,8 +135,10 @@ export function buildNodeContextFacts(input: {
   // 上游上下文（ctx-in 显式连线）：
   //   - file 节点：文本直通（截断）/ 受管文件路径索引；
   //   - agent/parent 角色节点（含虚拟节点引用）：注入运行快照中该节点的最终
-  //     产出（status=ok/react-capped，截断；其余状态无产出不注入）——需求
-  //     明确「上游最终输出作为上下文传入下游；不连接则不传」。
+  //     产出（hasProducedOutput 为真：ok/react-capped/armed，截断；其余状态无
+  //     产出不注入）——需求明确「上游最终输出作为上下文传入下游；不连接则不传」。
+  //     armed 必须算数：协作组成员回合结束即落 armed，排除它会使其产出永远传不到
+  //     下游（组内信息静默断链）。判定与产出回写共用 snapshot.hasProducedOutput。
   const upstreamContext: Array<{ source: string; content: string }> = []
   const filePaths: string[] = []
   for (const edge of ctxInEdges(flow, node.id)) {
@@ -184,7 +186,7 @@ export function buildNodeContextFacts(input: {
     const resolved = src.kind === 'proxy' ? nodeById(flow, src.proxySourceId) : src
     if (!resolved || (resolved.kind !== 'agent' && resolved.kind !== 'parent')) continue
     const entry = input.snapshot.nodes.find((n) => n.nodeId === resolved.id)
-    if (!entry || (entry.status !== 'ok' && entry.status !== 'react-capped')) continue
+    if (!entry || !hasProducedOutput(entry.status)) continue
     const output = String(entry.output ?? '').trim()
     if (!output) continue
     upstreamContext.push({

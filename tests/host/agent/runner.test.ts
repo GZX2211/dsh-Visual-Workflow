@@ -27,10 +27,11 @@ import {
   type ToolsView,
 } from '../../../src/host/agent/runner.js'
 import type { ReactGuardBridge } from '../../../src/host/agent/guards.js'
-import type { ModelSelectionSetup } from '../../../src/host/agent/model-selection.js'
-import type { ChildPromptSetup } from '../../../src/host/agent/prompt-setup.js'
-import type { ChildToolFilterSetup } from '../../../src/host/agent/child-tool-filter.js'
-import type { NodeStartInput } from '../../../src/host/orchestrator/index.js'
+import { createChildToolFilterSetup, type ChildToolFilterSetup } from '../../../src/host/agent/child-tool-filter.js'
+import { createModelSelectionSetup, type ModelSelectionSetup } from '../../../src/host/agent/model-selection.js'
+import { createChildPromptSetup, type ChildPromptSetup } from '../../../src/host/agent/prompt-setup.js'
+import type { AgentTeamsServiceLike, TeamMemberViewLike } from '../../../src/host/team/index.js'
+import type { GroupStartInput, NodeStartInput } from '../../../src/host/orchestrator/index.js'
 import type { RoleNode, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
 import { CHILD_AGENT_HIDDEN_TOOLS } from '../../../src/host/shared/protocol.js'
 
@@ -877,5 +878,85 @@ describe('CordisToolsView / preset standing scope（acquireScope 租约）', () 
 
     expect((await view.visibleToolNames()).sort()).toEqual(['glob', 'read', 'write'])
     expect(released).toBe(2)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 协作组路径：成员护栏登记的持有与释放
+// ---------------------------------------------------------------------------
+// 为什么锁定此处：组成员由官方 Team 直接创建（spawnTeammate），不经 ensureNodeChild，
+// 因此其 childId 不会进入本类的登记集合——dispose 时 drop 不到，护栏的 limits/cappedFlags
+// 条目在宿主生命周期内只增不减。成员状态必须有释放条件与上界（agent 模块规则）。
+
+describe('协作组路径：成员 childId 随宿主 dispose 释放', () => {
+  /** 协作组 harness：官方 Team 可用性可控，成员逐个创建并返回新的 childId。 */
+  async function makeGroupHarness(options: { teams?: boolean } = {}): Promise<{ runner: NodeAgentRunner; drop: ReturnType<typeof vi.fn> }> {
+    const dir = await mkdtemp(join(tmpdir(), 'vw-runner-group-'))
+    cleanups.push(() => rm(dir, { recursive: true, force: true }))
+    const store = new FlowStore(dir)
+    await store.init()
+    // 成员节点的 presetId 指向真实组合：工具白名单解析需要组合存在（与节点路径同源）
+    await store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read'], mcpServers: [] })
+    const subagents = new FakeSubagents()
+    const agents = new FakeAgentsService()
+    agents.parents.set('session-1', { id: 'session-1' })
+    const react = { setLimit: vi.fn(), drop: vi.fn(), consumeCapped: vi.fn(() => false) }
+    let seq = 0
+    const teams: AgentTeamsServiceLike = {
+      listMembers: () => [],
+      sendMessage: async () => ({ messageId: 'msg-1', status: 'accepted' }),
+      spawnTeammate: async (_caller, request) => {
+        seq += 1
+        const member: TeamMemberViewLike = { id: `member-child-${seq}`, name: request.name, role: 'teammate', status: 'inactive' }
+        return { member }
+      },
+    }
+    const runner = new NodeAgentRunner({
+      store,
+      agents: () => agents,
+      subagents: () => subagents,
+      teams: () => ((options.teams ?? true) ? teams : null),
+      toolsView: new FakeToolsView(),
+      toolFilter: createChildToolFilterSetup(),
+      react: react as unknown as ReactGuardBridge,
+      modelSelection: createModelSelectionSetup(),
+      promptSetup: createChildPromptSetup(),
+    })
+    return { runner, drop: react.drop }
+  }
+
+  function groupStartInput(): GroupStartInput {
+    return {
+      sessionId: 'session-1',
+      flowId: 'flow-1',
+      mode: 'mode1',
+      groupId: 'n-g',
+      collabPrompt: '组内协作',
+      members: [
+        { node: agentNode('n-m1'), blocks: blocks('任务1') },
+        { node: agentNode('n-m2'), blocks: blocks('任务2') },
+      ],
+      signal: new AbortController().signal,
+    }
+  }
+
+  it('整组启动创建的成员 childId 一并登记，dispose 时全部释放', async () => {
+    const h = await makeGroupHarness()
+    const result = await h.runner.startGroupTask(groupStartInput())
+    expect(result?.members.map((member) => member.childId)).toEqual(['member-child-1', 'member-child-2'])
+
+    h.runner.dispose()
+
+    expect(h.drop).toHaveBeenCalledWith('member-child-1')
+    expect(h.drop).toHaveBeenCalledWith('member-child-2')
+  })
+
+  it('官方 Team 不可用（返回 null）：不产生成员登记，dispose 无残留释放动作', async () => {
+    const h = await makeGroupHarness({ teams: false })
+    expect(await h.runner.startGroupTask(groupStartInput())).toBeNull()
+
+    h.runner.dispose()
+
+    expect(h.drop).not.toHaveBeenCalled()
   })
 })

@@ -63,6 +63,45 @@ describe('snapshot 纯函数', () => {
     expect(snapshot.nodes.every((n) => n.nodeId !== 'no-such')).toBe(true)
   })
 
+  it('setNodeStatus：armed（协作组成员待命）记录本回合产出与摘要，回合明细随之追记', () => {
+    const snapshot = createRunSnapshot({ runId: 'run-1', flow: makeFlow(), sessionId: 'session-1', mode: 'mode1', now: 1000 })
+    setNodeStatus(snapshot, 'n-a1', 'running', { now: 1000 })
+    setNodeStatus(snapshot, 'n-a1', 'armed', {
+      output: '成员本回合结论',
+      stopReason: 'completed',
+      recordTurn: true,
+      now: 2000,
+    })
+    const entry = snapshot.nodes.find((n) => n.nodeId === 'n-a1')!
+    // armed 仍是「可被唤醒、非终态」，但本回合确实产出了：产出事实必须落盘，
+    // 否则下游 ctx 注入只能读到空串（协作组信息断链）。
+    expect(entry.status).toBe('armed')
+    expect(entry.output).toBe('成员本回合结论')
+    expect(entry.outputSummary).toBe('成员本回合结论')
+    expect(entry.endedAt).toBe(new Date(2000).toISOString())
+    const turns = entry.turns ?? []
+    expect(turns).toHaveLength(1)
+    expect(turns[turns.length - 1]?.outputSummary).toBe('成员本回合结论')
+  })
+
+  it('turns 记录本回合自身的产出摘要：失败回合不沿用上一回合的旧摘要', () => {
+    const snapshot = createRunSnapshot({ runId: 'run-1', flow: makeFlow(), sessionId: 'session-1', mode: 'mode1', now: 1000 })
+    setNodeStatus(snapshot, 'n-a1', 'ok', { output: '第一回合产出', stopReason: 'completed', recordTurn: true, now: 1000 })
+    setNodeStatus(snapshot, 'n-a1', 'fail', { output: '失败回合的残留文本', stopReason: 'error', recordTurn: true, now: 2000 })
+
+    const entry = snapshot.nodes.find((n) => n.nodeId === 'n-a1')!
+    const turns = entry.turns ?? []
+    expect(turns).toHaveLength(2)
+    expect(turns[0]?.outputSummary).toBe('第一回合产出')
+    expect(turns[0]?.stopReason).toBe('completed')
+    // 失败回合没有可交接产出：不得把上一回合的摘要记到本回合名下（否则每个失败回合
+    // 都「看起来有产出」，审计与父代理判读都会被误导）。
+    expect(turns[1]?.outputSummary).toBe('')
+    expect(turns[1]?.stopReason).toBe('error')
+    // 节点级产出保持「最近一次被接受的产出」：失败回合的残留文本不污染下游读取源。
+    expect(entry.output).toBe('第一回合产出')
+  })
+
   it('terminalizeNodes：pending→skipped、running→fail、ok 保留', () => {
     const snapshot = createRunSnapshot({ runId: 'run-1', flow: makeFlow(), sessionId: 'session-1', mode: 'mode1', now: 1000 })
     setNodeStatus(snapshot, 'n-a1', 'ok', { now: 1000 })

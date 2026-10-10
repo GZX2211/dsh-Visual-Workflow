@@ -543,7 +543,7 @@ export interface NodeAgentRunnerDeps {
 export class NodeAgentRunner implements NodeRunner {
   /** 子代理表：复用键 → { childId, signature }。 */
   private readonly nodeChildren = new Map<string, { childId: string; signature: string }>()
-  /** 已创建 childId 集合（dispose 清理护栏登记用）。 */
+  /** 本类持有护栏登记的全部 childId（节点路径 + 协作组路径）；dispose 据此释放。 */
   private readonly childIds = new Set<string>()
   /** 软截停消费适配（NodeRunner 契约）。 */
   readonly consumeReactCapped: NonNullable<NodeRunner['consumeReactCapped']>
@@ -582,7 +582,17 @@ export class NodeAgentRunner implements NodeRunner {
 
   /** 把整个协作组启动为官方 Agent Team（不可用时返回 null，由编排器回退）。 */
   async startGroupTask(input: GroupStartInput): Promise<GroupStartResult | null> {
-    return this.groups.start(input)
+    const result = await this.groups.start(input)
+    // 组成员由官方 Team 直接创建（不经 ensureNodeChild），其 childId 必须在此补登记：
+    // 否则 dispose 遍历 childIds 时永远 drop 不到它们，护栏登记（limits/cappedFlags）
+    // 在宿主生命周期内只增不减——每子代理状态必须有释放条件与上界。
+    // 复用成员一并登记（Set 幂等），使组路径与节点路径的释放语义完全一致。
+    if (result) {
+      for (const member of result.members) {
+        if (member.childId) this.childIds.add(member.childId)
+      }
+    }
+    return result
   }
 
   // ---- NodeRunner 契约 -------------------------------------------------------

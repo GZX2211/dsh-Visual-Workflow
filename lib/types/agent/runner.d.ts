@@ -224,7 +224,7 @@ export declare class NodeAgentRunner implements NodeRunner {
     private readonly deps;
     /** 子代理表：复用键 → { childId, signature }。 */
     private readonly nodeChildren;
-    /** 已创建 childId 集合（dispose 清理护栏登记用）。 */
+    /** 本类持有护栏登记的全部 childId（节点路径 + 协作组路径）；dispose 据此释放。 */
     private readonly childIds;
     /** 软截停消费适配（NodeRunner 契约）。 */
     readonly consumeReactCapped: NonNullable<NodeRunner['consumeReactCapped']>;

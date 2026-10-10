@@ -5,11 +5,37 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OrchestratorRuntime, type NodeRunner } from '../../../src/host/orchestrator/index.js'
-import { type GraphNode, type RoleNode } from '../../../src/host/shared/graph-model.js'
+import { type GraphNode, type RoleNode, type WorkflowDocument } from '../../../src/host/shared/graph-model.js'
 import { agent, makeFlow, makeHarness, caller, start, cleanupTempDirs } from './fixtures/harness.js'
 
 // 临时目录：makeHarness 登记，文件结束统一清理
 afterEach(cleanupTempDirs)
+
+/**
+ * 流程变体：n-a1 入组为协作组成员（成员无流程连线，仅组卡片有 flow 出入），n-a2 保持普通 agent。
+ * 供「组成员回合结束」相关用例共用，避免同一图在多个用例里重复拼装。
+ */
+function flowWithGroupMember(): WorkflowDocument {
+  const flow = makeFlow()
+  flow.nodes = flow.nodes.map((n): GraphNode =>
+    n.id === 'n-a1'
+      ? { ...n, data: { ...(n as RoleNode).data, groupId: 'n-group' } } as RoleNode
+      : n,
+  )
+  flow.nodes.push({
+    id: 'n-group',
+    kind: 'group',
+    position: { x: 0, y: 0 },
+    data: { label: '协作组', collabPrompt: '', memberIds: ['n-a1'] },
+  })
+  // 移除 a1 的流程连线（组内成员不能连流程线），改由组卡片 flow 出入
+  flow.lines = flow.lines.filter((l) => l.source !== 'n-a1' && l.target !== 'n-a1')
+  flow.lines.push(
+    { id: 'lg1', source: 'n-start', target: 'n-group', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+    { id: 'lg2', source: 'n-group', target: 'n-pause', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+  )
+  return flow
+}
 
 describe('subagent/end 迟到缓冲（wait:true 死锁回归）', () => {
   it('事件早于 childIndex 登记到达：缓冲重试后 wait 等待器仍被唤醒', async () => {
@@ -204,26 +230,7 @@ describe('subagent/end 观察回写（§8 #21）', () => {
 
   it('P0-1 组成员回合结束落 armed（非终态 ok）；非组内 agent 落 ok；armed 终态化收敛为 ok', async () => {
     const h = await makeHarness()
-    const flow = makeFlow()
-    // a1 入组（协作组成员，组内成员无流程连线——仅组卡片 flow 出入），a2 保持普通 agent
-    flow.nodes = flow.nodes.map((n): GraphNode =>
-      n.id === 'n-a1'
-        ? { ...n, data: { ...(n as RoleNode).data, groupId: 'n-group' } } as RoleNode
-        : n,
-    )
-    flow.nodes.push({
-      id: 'n-group',
-      kind: 'group',
-      position: { x: 0, y: 0 },
-      data: { label: '协作组', collabPrompt: '', memberIds: ['n-a1'] },
-    })
-    // 移除 a1 的流程连线（组内成员不能连流程线），改由组卡片 flow 出入
-    flow.lines = flow.lines.filter((l) => l.source !== 'n-a1' && l.target !== 'n-a1')
-    flow.lines.push(
-      { id: 'lg1', source: 'n-start', target: 'n-group', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
-      { id: 'lg2', source: 'n-group', target: 'n-pause', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
-    )
-    const { entry } = await start(h, flow)
+    const { entry } = await start(h, flowWithGroupMember())
     // 组内成员 n-a1 完成 → armed（待命，非终态 ok）
     await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
     await h.runtime.handleSubagentEnd({ id: 'child-1', stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: 'A' }] })
@@ -231,5 +238,18 @@ describe('subagent/end 观察回写（§8 #21）', () => {
     // 运行收尾终态化：armed → ok（已产出一轮，非失败）
     await h.runtime.wfFinish(caller, { status: 'completed', summary: '完毕' })
     expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-a1')!.status).toBe('ok')
+  })
+
+  it('P0-1 组成员回合结束落 armed 时，本回合产出必须落盘（下游 ctx 注入的读取源）', async () => {
+    const h = await makeHarness()
+    const { entry } = await start(h, flowWithGroupMember())
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    await h.runtime.handleSubagentEnd({ id: 'child-1', stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: '成员产出A' }] })
+    const member = entry.snapshot.nodes.find((n) => n.nodeId === 'n-a1')!
+    // armed 只是「可被唤醒」的中间态，不代表没有产出：产出落盘失败的后果是
+    // 下游节点拿到空串（实验 run 中分诊节点收到零注入）。
+    expect(member.status).toBe('armed')
+    expect(member.output).toBe('成员产出A')
+    expect(member.outputSummary).toBe('成员产出A')
   })
 })

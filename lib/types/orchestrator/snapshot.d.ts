@@ -45,12 +45,20 @@ export interface SetNodeStatusOptions {
     recordTurn?: boolean;
 }
 /**
+ * 该节点状态是否携带**本回合产出**。
+ * 产出回写（setNodeStatus）与下游 ctx 注入（graph-facts）共用同一判定：两处若各写一份
+ * 谓词，一旦口径漂移就会静默形成信息断链（协作组成员产出传不到下游）。
+ * react-capped 是软截停的正常产出（T-022）；armed 是协作组成员回合结束的待命态
+ * （仍可被唤醒，但本回合结论已产出）；fail/skipped 没有可交接的产出。
+ */
+export declare function hasProducedOutput(status: NodeRunStatus): boolean;
+/**
  * 更新快照中某节点的运行状态（与旧项目 setNodeStatus 同语义，扩展 armed/回合明细）：
  *   - running 且无 startedAt → 补开始时间；
- *   - armed（待命，协作组成员回合结束但仍可被唤醒）：记结束时间、刷新 endedAt，但不写 output；
- *   - ok/fail/skipped/react-capped 且无 endedAt → 补结束时间；
- *   - ok 与 react-capped（软截停正常产出，T-022）均回写完整输出（output）与展示摘要
- *     （outputSummary）——react-capped 不是失败，产出与 ok 同等对待；
+ *   - hasProducedOutput 为真的三种状态（ok/react-capped/armed）均回写完整输出（output）与
+ *     展示摘要（outputSummary）——丢掉产出会让下游 ctx 注入读到空串，静默形成信息断链；
+ *   - fail/skipped 不写产出：本回合没有可交接的产出，失败事实由 stopReason 表达；
+ *   - 终态与 armed 一并刷新 endedAt（最近结束时间）；
  *   - recordTurn=true 时追记回合明细，endedAt 随最近回合刷新（P0-2，不再冻结）。
  */
 export declare function setNodeStatus(snapshot: RunSnapshot, nodeId: string, status: NodeRunStatus, options?: SetNodeStatusOptions): void;

@@ -6,10 +6,10 @@
 // BUG 修复回归：此前 DB_TOOL_HINT 只描述三模式、不携带 dataId，子代理只能凭猜测
 // 的 id 调用 → WF_DB_BAD_DATA「数据节点不存在或已从画布移除」。
 import { describe, expect, it } from 'vitest'
-import { buildNodeBlocks, dbToolHintOf, missingStageLabels, validateFlowForRun } from '../../../src/host/orchestrator/index.js'
+import { buildNodeBlocks, buildNodeContextFacts, dbToolHintOf, missingStageLabels, validateFlowForRun } from '../../../src/host/orchestrator/index.js'
 import { stageLabel } from '../../../src/host/graph/index.js'
 import type { DatabaseNode, RoleNode, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
-import type { RunSnapshot } from '../../../src/host/shared/types.js'
+import type { NodeRunStatus, RunSnapshot } from '../../../src/host/shared/types.js'
 
 /** 数据库节点。 */
 function dbNode(id: string, label: string): DatabaseNode {
@@ -129,5 +129,66 @@ describe('运行前完整性检查（missingStageLabels / validateFlowForRun）'
     const error = validateFlowForRun(invalid)
     expect(error?.code).toBe('WF_FLOW_INVALID')
     expect(validateFlowForRun(withStages(['start', 'end']))).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 上游产出注入（buildNodeContextFacts）
+// ---------------------------------------------------------------------------
+// 为什么锁定此处：协作组成员的回合结束落 armed（仍可被唤醒，非终态）。若注入谓词只认
+// ok/react-capped，成员产出永远传不到下游——实验 run 中分诊节点有 3 条成员 ctx 入线，
+// 却一条都没注入（静默信息断链，父代理据此在缺输入的情况下继续推进）。
+
+describe('上游产出注入（buildNodeContextFacts）', () => {
+  /** 流程：成员节点 a1 —ctx-out→ a2。 */
+  function ctxFlow(): WorkflowDocument {
+    return {
+      id: 'flow-ctx',
+      sessionId: 'session-1',
+      mode: 'mode1',
+      name: '上下文流程',
+      description: '',
+      revision: 1,
+      nodes: [role('a1', 'agent', '成员一'), role('a2', 'agent', '下游节点')],
+      lines: [{ id: 'l-ctx', source: 'a1', target: 'a2', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' }],
+    }
+  }
+
+  /** 只含上游 a1 记录的快照。 */
+  function snapshotWithA1(status: NodeRunStatus, output: string): RunSnapshot {
+    return {
+      ...emptySnapshot,
+      nodes: [{ nodeId: 'a1', status, attempts: 1, startedAt: null, endedAt: null, output, outputSummary: output }],
+    }
+  }
+
+  /** 取 a2 的上游注入内容。 */
+  function upstreamOf(status: NodeRunStatus, output: string): Array<{ source: string; content: string }> {
+    const flow = ctxFlow()
+    return buildNodeContextFacts({
+      flow,
+      node: role('a2', 'agent', '下游节点'),
+      snapshot: snapshotWithA1(status, output),
+      documentTextLimit: 20000,
+    }).upstreamContext
+  }
+
+  it('上游为 armed（协作组成员待命）且已产出：注入其产出（组内信息不断链）', () => {
+    expect(upstreamOf('armed', '成员产出B')).toEqual([{ source: '成员一', content: '成员产出B' }])
+  })
+
+  it('上游为 ok / react-capped：注入其产出（既有行为不变）', () => {
+    expect(upstreamOf('ok', '正常产出')).toEqual([{ source: '成员一', content: '正常产出' }])
+    expect(upstreamOf('react-capped', '软截停产出')).toEqual([{ source: '成员一', content: '软截停产出' }])
+  })
+
+  it('上游未产出（pending/running/fail/skipped）：不注入（无产出即无上下文）', () => {
+    for (const status of ['pending', 'running', 'fail', 'skipped'] as const) {
+      expect(upstreamOf(status, '不该被注入的文本')).toEqual([])
+    }
+  })
+
+  it('上游产出为空白串：不注入（有状态但无内容不构成上下文）', () => {
+    expect(upstreamOf('armed', '   ')).toEqual([])
   })
 })
