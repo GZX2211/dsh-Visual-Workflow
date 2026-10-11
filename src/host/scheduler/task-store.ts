@@ -3,7 +3,9 @@
 // 定时任务持久化（scheduler-tasks.json 单文件，与 combos.json 同模式）：
 //   - 文件形态：{ tasks: ScheduledTask[], runtimes: Record<taskId, PersistedRuntime> }
 //   - 全部写操作经 withJsonLock + atomicWriteJson（临时文件 + fsync + 原子发布）；
-//   - 任务全局共享（跨会话可见，与工作流模板一致）；runtimes 为引擎内存态的
+//   - 任务全局共享（跨会话可见，与工作流模板一致；K1 用户裁决）：本文件是任务事实源，
+//     不按会话分区存储；端点层同样不做归属校验（见 api/scheduler.ts 的 K1 说明），
+//     因此「任意会话可见并可管理全部任务」是设计意图而非越权；runtimes 为引擎内存态的
 //     关键字段落盘（窗口暂停续跑/触发消费点跨重启保持）。
 //
 // 单一职责：只做 list/save/delete 与运行时字段的读写，调度决策见 engine.ts。

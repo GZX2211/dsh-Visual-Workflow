@@ -88,7 +88,120 @@ describe('路由注册与错误映射', () => {
     expect(registered).toBeNull()
   })
 
-  it('registerRoutes：webServer 缺失 → 告警并返回 no-op disposer（不抛错、不注册）', async () => {
+  it('请求流错误 → 400（调用方请求未完整送达，不得坍缩为 500 内部故障）', async () => {
+    const h = await makeHarness()
+    let handler: ((req: unknown, res: unknown) => Promise<void>) | null = null
+    const fakeWebServer = {
+      register(route: { handler: (req: unknown, res: unknown) => Promise<void> }) {
+        handler = route.handler
+        return () => {}
+      },
+    }
+    h.ctx.services.set('webServer', fakeWebServer)
+    registerRoutes({ get: (name) => h.ctx.get(name), logger: { warn: () => {} } }, h.host)
+
+    const sent: Array<{ status: number; body: string }> = []
+    const res = {
+      writeHead(status: number) { sent.push({ status, body: '' }) },
+      end(body: string) { if (sent.length > 0) sent[sent.length - 1].body = body },
+    }
+    const errorReq = {
+      method: 'POST',
+      url: '/visual-workflow/toolCombos',
+      on(event: string, listener: (chunk?: unknown) => void) {
+        if (event === 'error') listener(new Error('socket hang up'))
+        return this
+      },
+      destroy() {},
+    }
+    await handler!(errorReq, res)
+    expect(sent[0].status).toBe(400)
+    expect(JSON.parse(sent[0].body)).toMatchObject({ ok: false })
+  })
+})
+
+describe('GUI 边界来源校验与按端点 body 上限（K2）', () => {
+  /** 注册前缀路由并返回 handler（本组用例独立装配，不依赖其它 describe 的状态）。 */
+  async function registerGui(): Promise<(req: unknown, res: unknown) => Promise<void>> {
+    const h = await makeHarness()
+    let handler: ((req: unknown, res: unknown) => Promise<void>) | null = null
+    h.ctx.services.set('webServer', {
+      register(route: { handler: (req: unknown, res: unknown) => Promise<void> }) {
+        handler = route.handler
+        return () => {}
+      },
+    })
+    registerRoutes({ get: (name) => h.ctx.get(name), logger: { warn: () => {} } }, h.host)
+    return handler!
+  }
+
+  function responseSink() {
+    const sent: Array<{ status: number; body: string }> = []
+    return {
+      sent,
+      writeHead(status: number) { sent.push({ status, body: '' }) },
+      end(body: string) { if (sent.length > 0) sent[sent.length - 1].body = body },
+    }
+  }
+
+  function requestOf(url: string, body: string, headers: Record<string, string> = {}) {
+    return {
+      method: 'POST',
+      url,
+      headers,
+      on(event: string, listener: (chunk?: unknown) => void) {
+        if (event === 'data' && body !== '') listener(Buffer.from(body))
+        if (event === 'end') listener()
+        return this
+      },
+      destroy() {},
+    }
+  }
+
+  it('跨站来源发起的写请求 → 403；本地同源请求放行', async () => {
+    const handler = await registerGui()
+    const res = responseSink()
+
+    await handler(requestOf('/visual-workflow/toolCombos', '{"args":{}}', {
+      'sec-fetch-site': 'cross-site',
+      origin: 'https://evil.example',
+      host: '127.0.0.1:19387',
+    }), res)
+    expect(res.sent.at(-1)?.status).toBe(403)
+    expect(JSON.parse(res.sent.at(-1)!.body)).toMatchObject({ ok: false })
+
+    await handler(requestOf('/visual-workflow/toolCombos', '{"args":{}}', {
+      'sec-fetch-site': 'same-origin',
+      origin: 'http://127.0.0.1:19387',
+      host: '127.0.0.1:19387',
+    }), res)
+    expect(res.sent.at(-1)?.status).toBe(200)
+
+    // 无来源头的本机客户端（curl/脚本）按「仅本机可信」定位放行
+    await handler(requestOf('/visual-workflow/toolCombos', '{"args":{}}'), res)
+    expect(res.sent.at(-1)?.status).toBe(200)
+  })
+
+  it('无参端点超过小上限 → 413（不再被强制收满 64MB）', async () => {
+    const handler = await registerGui()
+    const res = responseSink()
+    const oversized = JSON.stringify({ args: { pad: 'x'.repeat(32 * 1024) } })
+    await handler(requestOf('/visual-workflow/toolCombos', oversized), res)
+    expect(res.sent.at(-1)?.status).toBe(413)
+  })
+
+  it('导入端点保留 64MB 档：3MB 体积不被按常规档拒绝', async () => {
+    const handler = await registerGui()
+    const res = responseSink()
+    const body = JSON.stringify({ args: { json: 'x'.repeat(3 * 1024 * 1024) } })
+    await handler(requestOf('/visual-workflow/importWorkflow', body), res)
+    // 体积合法（不 413），内容不是合法 bundle → 400 领域码
+    expect(res.sent.at(-1)?.status).toBe(400)
+  })
+})
+
+describe('registerRoutes：webServer 缺失', () => {
+  it('告警并返回 no-op disposer（不抛错、不注册）', async () => {
     const h = await makeHarness()
     const warns: string[] = []
     const dispose = registerRoutes({ get: (name) => h.ctx.get(name), logger: { warn: (message) => warns.push(message) } }, h.host)

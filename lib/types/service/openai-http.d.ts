@@ -12,6 +12,14 @@ export declare function completionJson(id: string, model: string, content: strin
 /** 错误响应体。 */
 export declare function errorJson(error: OpenAiError): Record<string, unknown>;
 /**
+ * 非 OpenAiError 异常 → OpenAI 兼容错误（本层唯一的错误映射点，纯函数）。
+ * 分类口径（稳定语义，D05-01）：
+ *   - 请求流异常（RequestStreamError）→ 400 invalid_request_error：客户端请求体未完整送达；
+ *   - AbortError / TimeoutError → 499 client_error：请求已被取消；
+ *   - 其余未知异常 → 500 server_error/internal_error（内部故障，供监控区分）。
+ */
+export declare function openAiErrorOf(error: unknown): OpenAiError;
+/**
  * 注册 OpenAI 兼容路由（webServer 可用时挂载；disposer 随 fiber 注销）。
  * 端点：POST /v1/chat/completions、GET /v1/models。
  */

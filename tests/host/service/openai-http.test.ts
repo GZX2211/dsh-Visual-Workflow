@@ -36,22 +36,23 @@ describe('SSE 纯函数', () => {
   })
 })
 
-describe('registerOpenAiApi（路由薄壳）', () => {
-  function routeHarness() {
-    const routes: Array<{ kind: string; path: string; handler(req: unknown, res: unknown): Promise<void> }> = []
-    const webServer = {
-      register: (route: { kind: string; path: string; handler(req: unknown, res: unknown): Promise<void> }) => {
-        routes.push(route)
-        return () => {}
-      },
-    }
-    const ctx = {
-      get: (name: string) => (name === 'webServer' ? webServer : null),
-      logger: { warn() {} },
-    }
-    return { ctx, routes }
+/** 记录 exact 路由注册的 webServer 假体（两个 describe 共用）。 */
+function routeHarness() {
+  const routes: Array<{ kind: string; path: string; handler(req: unknown, res: unknown): Promise<void> }> = []
+  const webServer = {
+    register: (route: { kind: string; path: string; handler(req: unknown, res: unknown): Promise<void> }) => {
+      routes.push(route)
+      return () => {}
+    },
   }
+  const ctx = {
+    get: (name: string) => (name === 'webServer' ? webServer : null),
+    logger: { warn() {} },
+  }
+  return { ctx, routes }
+}
 
+describe('registerOpenAiApi（路由薄壳）', () => {
   it('注册 /v1/chat/completions 与 /v1/models 两个 exact 路由', () => {
     const h = makeHarness()
     const { ctx, routes } = routeHarness()
@@ -149,5 +150,68 @@ describe('registerOpenAiApi（路由薄壳）', () => {
     // models GET
     await models({ method: 'GET' }, res)
     expect(sent.at(-1)?.status).toBe(200)
+  })
+})
+
+describe('非 OpenAiError 的稳定语义分类（D05-01）', () => {
+  /** 可注入失败与自定义 req 事件的聊天端点半成品。 */
+  function chatHarness(options: { bodyEvents?: Array<{ event: string; chunk?: unknown }> } = {}) {
+    const h = makeHarness()
+    const { ctx, routes } = routeHarness()
+    registerOpenAiApi(ctx as never, h.api)
+    const chat = routes.find((r) => r.path === '/v1/chat/completions')!.handler
+    const sent: Array<{ status: number; body: string }> = []
+    const res = {
+      writeHead(status: number) { sent.push({ status, body: '' }) },
+      end(body: string) { if (sent.length > 0) sent[sent.length - 1].body = body },
+    }
+    const body = JSON.stringify({ messages: [{ role: 'user', content: '问题' }], user_id: 'u-1' })
+    const events = options.bodyEvents ?? [{ event: 'data', chunk: Buffer.from(body) }, { event: 'end' }]
+    const makeReq = () => ({
+      method: 'POST',
+      headers: {} as Record<string, string>,
+      on(event: string, listener: (chunk?: unknown) => void) {
+        for (const item of events) {
+          if (item.event === event) listener(item.chunk)
+        }
+        return this
+      },
+      destroy() {},
+    })
+    return { h, chat, sent, res, makeReq }
+  }
+
+  it('请求流错误 → 400（客户端请求体未完整送达，不是服务端故障）', async () => {
+    const t = chatHarness({ bodyEvents: [{ event: 'error', chunk: new Error('socket hang up') }] })
+    await t.chat(t.makeReq(), t.res)
+    expect(t.sent.at(-1)?.status).toBe(400)
+    expect(JSON.parse(t.sent.at(-1)!.body).error.type).toBe('invalid_request_error')
+  })
+
+  it('AbortError → 499（请求已取消，不得报 500）', async () => {
+    const t = chatHarness()
+    t.h.orchestrator.startRun = async () => {
+      throw Object.assign(new Error('aborted'), { name: 'AbortError' })
+    }
+    await t.chat(t.makeReq(), t.res)
+    expect(t.sent.at(-1)?.status).toBe(499)
+  })
+
+  it('未知内部异常 → 500 server_error（回归锚点，不被 400 吞掉）', async () => {
+    const t = chatHarness()
+    t.h.orchestrator.startRun = async () => {
+      throw new TypeError('boom')
+    }
+    await t.chat(t.makeReq(), t.res)
+    expect(t.sent.at(-1)?.status).toBe(500)
+    const payload = JSON.parse(t.sent.at(-1)!.body)
+    expect(payload.error.type).toBe('server_error')
+    expect(payload.error.code).toBe('internal_error')
+  })
+
+  it('模式二请求体上限保持 16MB（不得与 GUI 的 64MB 统一）', async () => {
+    const t = chatHarness({ bodyEvents: [{ event: 'data', chunk: Buffer.from('x'.repeat(16 * 1024 * 1024 + 1)) }, { event: 'end' }] })
+    await t.chat(t.makeReq(), t.res)
+    expect(t.sent.at(-1)?.status).toBe(413)
   })
 })

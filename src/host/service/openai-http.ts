@@ -9,9 +9,10 @@
 // 编排语义一律在 ./openai-api.ts 的核心中，本层不含业务判断。
 
 import { webServerOf } from '../web-server.js'
+import { isRequestStreamError, readRequestBody, sendJsonResponse } from '../http-io.js'
 import { CLIENT_CLOSED_CODE, failureText, OpenAiApi, OpenAiError, parseChatRequest, type ParsedChatRequest } from './openai-api.js'
 
-/** 请求体上限（16MB，聊天文本足够）。 */
+/** 请求体上限（16MB，聊天文本足够）。与 GUI 边界（64MB）不同，按各自边界注入，不统一。 */
 const BODY_LIMIT = 16 * 1024 * 1024
 
 /** SSE 文本块最大长度（打字机分块粒度；超长文本分多块）。 */
@@ -56,9 +57,44 @@ export function errorJson(error: OpenAiError): Record<string, unknown> {
 }
 
 function sendJson(res: { writeHead(status: number, headers: Record<string, string>): unknown; end(body: string): unknown }, status: number, payload: unknown): void {
-  const body = JSON.stringify(payload)
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
-  res.end(body)
+  sendJsonResponse(res, status, payload)
+}
+
+/** 读取请求体（16MB 上限；超限映射为 OpenAI 兼容 413）。 */
+function readBody(req: { on(event: string, listener: (chunk?: unknown) => void): unknown; destroy?(): void }): Promise<string> {
+  return readRequestBody(req, {
+    limit: BODY_LIMIT,
+    errorOf: (limit) => new OpenAiError(413, 'invalid_request_error', 'body_too_large', `request body too large (limit ${limit} bytes)`),
+  })
+}
+
+/** 消息文本归一（错误对象/字符串都取可读文本）。 */
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+/** AbortError / TimeoutError：请求被取消（客户端断开或超时），不是服务端故障。 */
+function isAbortLike(error: unknown): boolean {
+  const name = (error as { name?: unknown } | null | undefined)?.name
+  return name === 'AbortError' || name === 'TimeoutError'
+}
+
+/**
+ * 非 OpenAiError 异常 → OpenAI 兼容错误（本层唯一的错误映射点，纯函数）。
+ * 分类口径（稳定语义，D05-01）：
+ *   - 请求流异常（RequestStreamError）→ 400 invalid_request_error：客户端请求体未完整送达；
+ *   - AbortError / TimeoutError → 499 client_error：请求已被取消；
+ *   - 其余未知异常 → 500 server_error/internal_error（内部故障，供监控区分）。
+ */
+export function openAiErrorOf(error: unknown): OpenAiError {
+  if (error instanceof OpenAiError) return error
+  if (isRequestStreamError(error)) {
+    return new OpenAiError(400, 'invalid_request_error', 'invalid_request', `invalid request body: ${messageOf(error)}`)
+  }
+  if (isAbortLike(error)) {
+    return new OpenAiError(499, 'client_error', 'request_aborted', 'request aborted before completion')
+  }
+  return new OpenAiError(500, 'server_error', 'internal_error', messageOf(error))
 }
 
 /**
@@ -116,7 +152,8 @@ export function registerOpenAiApi(
         } catch (error) {
           // 客户端已断开：不写任何响应
           if (error instanceof OpenAiError && error.code === CLIENT_CLOSED_CODE) return
-          sendJson(res as never, error instanceof OpenAiError ? error.status : 500, errorJson(error instanceof OpenAiError ? error : new OpenAiError(500, 'server_error', 'internal_error', String(error instanceof Error ? error.message : error))))
+          const mapped = openAiErrorOf(error)
+          sendJson(res as never, mapped.status, errorJson(mapped))
         }
       },
     }),
@@ -196,25 +233,6 @@ async function streamResponse(
     release()
   }
   res.end()
-}
-
-/** 读取请求体（JSON 文本；超限 413 由调用方映射）。 */
-function readBody(req: { on(event: string, listener: (chunk?: unknown) => void): unknown; destroy?(): void }, limit = BODY_LIMIT): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = []
-    let size = 0
-    req.on('data', (chunk) => {
-      size += Buffer.byteLength(String(chunk ?? ''))
-      if (size > limit) {
-        reject(new OpenAiError(413, 'invalid_request_error', 'body_too_large', 'request body too large'))
-        req.destroy?.()
-        return
-      }
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk ?? '')))
-    })
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
-    req.on('error', reject)
-  })
 }
 
 /** header 取值归一（数组取首个）。 */
