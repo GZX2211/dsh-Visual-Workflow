@@ -45,6 +45,14 @@ import { rankRecallCandidates, type RecallRankingCandidate } from "./retrieval-r
 import { resolveExperienceSubject, type ExperienceSubject } from "./subject.js"
 import { validateExperienceCandidates, validateExperiencePatch } from "./validation.js"
 
+/**
+ * 模型可见错误的统一出口（docs/model-facing-surface-rules §3）：稳定码必须写进 message 文本，
+ * 因为 error.code 不会投影给模型；本域所有错误一律经此构造，避免个别调用点漏掉码或语言。
+ */
+function fail(code: string, message: string): WfError {
+  return new WfError(`${code}: ${message}`, code)
+}
+
 /** 服务依赖（宿主在组合根装配；端口形状见 ./ports.js）。 */
 export interface ExperienceServiceDeps {
   store: ExperienceStorePort
@@ -98,7 +106,7 @@ function createDuplicateJudge(): ExperienceDuplicateJudge {
     return {
       duplicate: true,
       reason: `decision-vector similarity ${similarity.toFixed(3)} with existing experience ${existing.id} >= ${DUPLICATE_SIMILARITY_THRESHOLD}: treated as a near duplicate and not added;`
-        + "如需保留差异，请改写 decision_domain / principle / recommended_action 后重新提交。",
+        + " if the difference matters, rewrite decision_domain / principle / recommended_action and submit again.",
     }
   }
 }
@@ -129,10 +137,9 @@ export class ExperienceService {
     const subject = resolveExperienceSubject({ caller: input.caller, type: input.type, runtime: this.deps.runtime })
     const initialization = this.state.readInitialized(subject.sessionId, subject.subjectId, input.type)
     if (!initialization) {
-      throw new WfError(
-        `尚未初始化 ${input.type} 经验生成 Prompt：请先调用 wf_experience_learn 并传空数组（type=${input.type}）取得生成 Prompt，`
-          + "再按 Prompt 产出候选并重新提交。",
+      throw fail(
         ERR_EXPERIENCE_NOT_INITIALIZED,
+        `the ${input.type} generation prompt was not fetched in this run yet; call wf_experience_learn with an empty experiences array (type=${input.type}) to get it, then produce candidates from that prompt and submit again.`,
       )
     }
     const drafts = validateExperienceCandidates(input.candidates, input.type)
@@ -151,19 +158,19 @@ export class ExperienceService {
     const subject = resolveExperienceSubject({ caller: input.caller, type: input.type, runtime: this.deps.runtime })
     const ids = input.ids
     if (ids !== undefined && ids.length === 0) {
-      throw new WfError("ids must not be an empty array: pass candidate ids from the first stage, or use query for candidate recall.", ERR_EXPERIENCE_BAD_ARGS)
+      throw fail(ERR_EXPERIENCE_BAD_ARGS, "ids must not be an empty array: pass candidate ids from the first stage, or use query for candidate recall.")
     }
     // 超限必须停在业务边界：ids 会变成 IN (…) 的绑定变量并逐条写入使用事实，无上限时
     // 底层 SQLite 会以「too many SQL variables」失败，模型拿不到可行动的修正提示。
     const idsLimitProblem = ids ? recallIdsLimitProblem(ids.length) : null
     if (idsLimitProblem !== null) {
-      throw new WfError(idsLimitProblem, ERR_EXPERIENCE_BAD_ARGS)
+      throw fail(ERR_EXPERIENCE_BAD_ARGS, idsLimitProblem)
     }
     const query = (input.query ?? "").trim()
     if (ids === undefined && !query) {
-      throw new WfError(
-        "经验召回需要 query（第一阶段取候选摘要）或 ids（第二阶段取完整内容）：请提供其中之一后重新调用。",
+      throw fail(
         ERR_EXPERIENCE_BAD_ARGS,
+        "recall needs either query (first stage: candidate summaries) or ids (second stage: full entries); provide one of them and call again.",
       )
     }
     try {
@@ -182,9 +189,9 @@ export class ExperienceService {
       return { kind: "candidates", hits, source }
     } catch (error) {
       if (error instanceof WfError) throw error
-      throw new WfError(
-        `经验召回失败（${messageOf(error)}）：请稍后重试；若持续失败请检查经验库与嵌入服务是否可用。`,
+      throw fail(
         ERR_EXPERIENCE_RECALL_FAILED,
+        `recall failed (${messageOf(error)}); retry shortly, and if it keeps failing check that the experience store and the embedding service are available.`,
       )
     }
   }
@@ -208,7 +215,7 @@ export class ExperienceService {
     const rows = await this.deps.store.getRows([input.experienceId], { activeOnly: false })
     const current = rows[0]
     if (!current) {
-      throw new WfError(`experience does not exist or has been cleaned up: ${input.experienceId}; refresh the experience list and retry.`, ERR_EXPERIENCE_NOT_FOUND)
+      throw fail(ERR_EXPERIENCE_NOT_FOUND, `experience does not exist or has been cleaned up: ${input.experienceId}; refresh the experience list and retry.`)
     }
     const validated = validateExperiencePatch(current, input.patch)
     const projection = buildRetrievalProjection(validated.fields)
@@ -237,7 +244,7 @@ export class ExperienceService {
   /** 列表（活跃 + 归档；上限由调用方给出，存储侧负责实际截断）。 */
   async list(input: { limit: number }): Promise<ExperienceEntry[]> {
     if (!Number.isFinite(input.limit) || input.limit < 1) {
-      throw new WfError(`the list limit must be an integer >= 1 (received ${String(input.limit)}); pass a positive integer limit and retry.`, ERR_EXPERIENCE_BAD_ARGS)
+      throw fail(ERR_EXPERIENCE_BAD_ARGS, `the list limit must be an integer >= 1 (received ${String(input.limit)}); pass a positive integer limit and retry.`)
     }
     return this.deps.store.listRows(Math.floor(input.limit))
   }
@@ -261,9 +268,9 @@ export class ExperienceService {
   private async requireActivePrompt(type: ExperienceType): Promise<ExperienceGenerationPromptEntry> {
     const prompt = await this.deps.store.getActivePrompt(type)
     if (!prompt) {
-      throw new WfError(
-        `没有 ${type} 类型的生效经验生成 Prompt：生成策略尚未就绪，请确认资产库已写入三类 Prompt 种子后重试。`,
+      throw fail(
         ERR_EXPERIENCE_NOT_FOUND,
+        `there is no active generation prompt for the ${type} experience type: the generation strategy is not ready, so check that the asset store has its two prompt seeds and retry.`,
       )
     }
     return prompt
@@ -284,22 +291,22 @@ export class ExperienceService {
       const reason = embedding.degradeReason?.trim()
       throw embeddingUnavailable(
         reason
-          ? `语义嵌入能力不可用（当前为 BM25 词法检索；原因：${reason}）`
-          : "语义嵌入能力不可用（当前为 BM25 词法检索）",
+          ? `semantic embedding is unavailable (falling back to BM25 lexical retrieval; reason: ${reason})`
+          : "semantic embedding is unavailable (falling back to BM25 lexical retrieval)",
       )
     }
     let vectors: Float64Array[]
     try {
       vectors = await embedding.embed(texts)
     } catch (error) {
-      throw embeddingUnavailable(`语义嵌入调用失败（${messageOf(error)}）`)
+      throw embeddingUnavailable(`the semantic embedding call failed (${messageOf(error)})`)
     }
     if (vectors.length !== texts.length) {
-      throw embeddingUnavailable(`语义嵌入返回数量不符（期望 ${texts.length}，实际 ${vectors.length}）`)
+      throw embeddingUnavailable(`the semantic embedding returned ${vectors.length} vectors for ${texts.length} texts`)
     }
     for (const vector of vectors) {
       if (vector.length !== embedding.dimension) {
-        throw embeddingUnavailable(`语义嵌入维度与端口声明不符（期望 ${embedding.dimension}，实际 ${vector.length}）`)
+        throw embeddingUnavailable(`the semantic embedding dimension does not match the port declaration (expected ${embedding.dimension}, got ${vector.length})`)
       }
     }
     return vectors
@@ -418,8 +425,8 @@ export class ExperienceService {
 
 /** 语义嵌入不可用的统一错误：消息必须说明「本次未写入」，调用方才知道可以稍后重试。 */
 function embeddingUnavailable(reason: string): WfError {
-  return new WfError(
-    `${reason}：经验入库要求语义去重，本次未写入任何内容；请确认嵌入服务可用后重试。`,
+  return fail(
     ERR_EXPERIENCE_EMBEDDING_UNAVAILABLE,
+    `${reason}; storing an experience requires semantic deduplication, so nothing was written — retry once the embedding service is available.`,
   )
 }

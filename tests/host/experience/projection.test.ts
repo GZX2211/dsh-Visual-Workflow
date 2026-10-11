@@ -57,14 +57,14 @@ describe("buildTaskRetrievalText", () => {
 })
 
 describe("buildDecisionRetrievalText", () => {
-  it("test_决策侧投影_四个数组元素用分号连接在同一行", () => {
+  it("test_决策侧投影_四个数组元素用 ASCII 分号连接在同一行", () => {
     const text = buildDecisionRetrievalText(fields({ exclusions: ["条件甲", "条件乙"] }))
 
     expect(text).toBe([
       "decision_domain: 任务分解",
       "principle: 前置条件未稳定时并行会放大返工",
       "recommended_action: 先建立显式完成闸门再并行",
-      "exclusions: 条件甲；条件乙",
+      "exclusions: 条件甲; 条件乙",
     ].join("\n"))
   })
 
@@ -115,5 +115,37 @@ describe("buildRecallSummary", () => {
 
     expect(summary.includes("principle")).toBe(false)
     expect(summary.includes("recommended_action")).toBe(false)
+  })
+})
+
+describe("投影文本的模型可见语言面", () => {
+  /** 全 ASCII 字段值：此时投影文本的非 ASCII 字符只可能来自系统的标签/占位/分隔符。 */
+  function asciiFields(overrides: Partial<ExperienceSemanticFields> = {}): ExperienceSemanticFields {
+    return fields({
+      responsibility: "own the correctness of the node task",
+      taskType: "software-development",
+      decisionDomain: "task decomposition",
+      situation: "two nodes share an unstable precondition",
+      trigger: "about to start several nodes in parallel",
+      principle: "parallelism amplifies rework while a shared precondition is unstable",
+      recommendedAction: "establish an explicit completion gate before parallelizing",
+      exclusions: ["precondition already stable"],
+      evidence: ["one parallel run was reworked"],
+      ...overrides,
+    })
+  }
+
+  it("test_空列表占位符_为 ASCII 文本", () => {
+    expect(PROJECTION_EMPTY_VALUE).toMatch(/^[\x20-\x7e]+$/)
+  })
+
+  it("test_全 ASCII 字段_投影文本不含非 ASCII 字符", () => {
+    const texts = [
+      buildTaskRetrievalText(asciiFields()),
+      buildDecisionRetrievalText(asciiFields({ exclusions: [] })),
+      buildRecallSummary(asciiFields({ exclusions: ["first condition", "second condition"] })),
+    ]
+
+    for (const text of texts) expect(text).toMatch(/^[\x00-\x7f]*$/)
   })
 })

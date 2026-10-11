@@ -96,7 +96,8 @@ describe("submitExperienceFeedback 准入", () => {
     expect(result.skipped).toHaveLength(1)
     expect(result.skipped[0].experienceId).toBe("ex-1")
     expect(result.skipped[0].reason.includes(FEEDBACK_ADMISSION_REJECTED_REASON)).toBe(true)
-    expect(result.skipped[0].reason.includes("请先用")).toBe(false)
+    // 跳过原因不得引导「先召回再评价」：那会把未真正使用过的经验洗成合法评价对象
+    expect(result.skipped[0].reason.includes("wf_experience_recall")).toBe(false)
     expect(result.skipped[0].reason.includes("ids")).toBe(false)
   })
 
@@ -304,15 +305,16 @@ describe("submitExperienceFeedback 写入与失败隔离（§24 / §35）", () =
   it("test_评价写入失败_归一为反馈失败并保留原始原因与恢复动作", async () => {
     const world = seedInjectedWorld()
     world.store.insertEvaluationsChecked = async () => {
-      throw new Error("磁盘写入失败")
+      throw new Error("disk write failed")
     }
     const { deps } = createDeps(world)
 
     const error = await errorOf(() => submitExperienceFeedback(deps, { caller: ROOT_CALLER, type: "agent", evaluations: [evaluation()] }))
 
     expect(error.code).toBe(ERR_EXPERIENCE_FEEDBACK_FAILED)
-    expect(error.message.includes("磁盘写入失败")).toBe(true)
-    expect(error.message.includes("重试")).toBe(true)
+    // 契约：底层原因原样保留（否则调用方无从定位），且消息给出可执行的恢复动作
+    expect(error.message.includes("disk write failed")).toBe(true)
+    expect(error.message).toMatch(/retry/i)
   })
 
   it("test_反馈写入_不修改经验本体字段", async () => {

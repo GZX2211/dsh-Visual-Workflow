@@ -10,6 +10,7 @@
 //   - embedding：分块向量与查询向量做归一化内积 Top-K（余弦相似度）；
 //   - bm25：模型不可用时降级——token 倒排 + BM25 打分（中文按单字符、
 //     英文按单词），结果标注 source='bm25'，界面呈现「相似度检索（非语义）」。
+// 结果事实：source（检索通道，降级可辨）与 truncated（请求 topK 超上限且被上限卡住）。
 //
 // 查询缺失/索引未建时返回 null（调用方给明确错误提示）。
 
@@ -50,10 +51,15 @@ export interface SearchHit {
   rowKey?: string
 }
 
+/** 检索返回条数上限：请求的 topK 超过该值只按上限返回（调用方据此上报截断）。 */
+export const SEARCH_TOP_K_MAX = 50
+
 /** 检索结果。 */
 export interface SearchResult {
   hits: SearchHit[]
   source: 'embedding' | 'bm25'
+  /** 结果被上限截断：请求的 topK 超上限且返回条数达到上限（未达到则不存在被上限挡掉的候选）。 */
+  truncated: boolean
 }
 
 /**
@@ -213,8 +219,12 @@ export class VectorIndex {
   ): Promise<SearchResult | null> {
     const file = await this.load()
     if (!file || file.chunks.length === 0) return null
-    const limit = Math.max(1, Math.min(50, topK || 5))
+    const requested = Math.max(1, Math.floor(topK || 5))
+    const limit = Math.min(SEARCH_TOP_K_MAX, requested)
     const threshold = Number(options?.threshold ?? 0) || 0
+    // 上限真的卡住结果才算截断：命中数达到上限说明还有候选被上限挡住；命中不足上限时
+    // 排序单调 + 阈值过滤保证不存在「被上限挡掉的更高分命中」，故不误报。
+    const capped = (hits: SearchHit[]): boolean => requested > SEARCH_TOP_K_MAX && hits.length >= limit
     if (file.source === 'embedding' && engine) {
       // 判定前先确保就绪（仅当索引声明为向量索引、确实需要向量时才付出加载代价）：
       // 否则「引擎尚未加载」会被当作「已降级」，把向量检索永久降为词法检索。
@@ -241,7 +251,7 @@ export class VectorIndex {
             }))
             .sort((a, b) => b.score - a.score)
           const hits = scored.slice(0, limit).filter((hit) => hit.score > threshold)
-          return { hits, source: 'embedding' }
+          return { hits, source: 'embedding', truncated: capped(hits) }
         } catch {
           // 查询嵌入失败 → 降级 BM25（标注）
         }
@@ -249,7 +259,7 @@ export class VectorIndex {
     }
     const all = bm25Search(file.chunks, tokenizeText(query), limit)
     const hits = all.filter((hit) => hit.score > threshold)
-    return { hits, source: 'bm25' }
+    return { hits, source: 'bm25', truncated: capped(hits) }
   }
 
   /** 删除索引文件（数据节点删除时清理，无垃圾残留）。 */

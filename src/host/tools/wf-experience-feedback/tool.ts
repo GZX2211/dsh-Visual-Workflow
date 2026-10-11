@@ -105,7 +105,7 @@ export function registerWfExperienceFeedback(
         // 没有稳定码的意外异常对模型只有「反馈没成功」一种语义；经验本体不受影响是设计保证
         // （§35），因此恢复动作是重试而不是「先确认经验是否被改坏」。
         throw new WfError(
-          `评价提交失败（${messageOf(error)}）：经验本体未被改动，可稍后重试；若持续失败请检查经验库可用性。`,
+          `${ERR_EXPERIENCE_FEEDBACK_FAILED}: submitting the evaluations failed (${messageOf(error)}); the experiences themselves are untouched, so retry later, and if it keeps failing check that the experience store is available.`,
           ERR_EXPERIENCE_FEEDBACK_FAILED,
         )
       }

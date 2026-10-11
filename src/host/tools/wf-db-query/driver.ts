@@ -12,6 +12,22 @@ import { WfError } from '../../orchestrator/index.js'
 import type { DatabaseNode } from '../../shared/graph-model.js'
 import type { DatabaseDriver, QueryResult, ServerConnection, TableInfo } from './types.js'
 
+/** 表清单条数上限：本地 SQLite 与服务器 MySQL/PostgreSQL 共用同一本体（大库表名列表不灌满上下文）。 */
+export const SCHEMA_TABLE_LIMIT = 200
+
+/**
+ * 表清单查询语句（三通道共用同一上限本体；语句与上限单点维护）。
+ * 多取一行用于精确判定是否被上限截断——结果集返回前仍截到 SCHEMA_TABLE_LIMIT。
+ */
+export function schemaQuery(kind: 'sqlite' | 'mysql' | 'postgresql'): string {
+  const probe = SCHEMA_TABLE_LIMIT + 1
+  if (kind === 'mysql') return `SHOW TABLES LIMIT ${probe}`
+  if (kind === 'postgresql') {
+    return `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name LIMIT ${probe}`
+  }
+  return `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name LIMIT ${probe}`
+}
+
 /** 本地 SQLite 驱动：node:sqlite 只读模式（物理防写）。 */
 export class SqliteDriver implements DatabaseDriver {
   private db: DatabaseSync | null = null
@@ -39,10 +55,14 @@ export class SqliteDriver implements DatabaseDriver {
   }
 
   async schema(): Promise<TableInfo[]> {
-    const rows = this.open()
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
-      .all() as Array<Record<string, unknown>>
-    return rows.map((row) => ({ name: String(row.name ?? '') }))
+    return (await this.schemaPage()).tables
+  }
+
+  /** 表清单页：+1 行探测判定截断，返回前截到上限（对外不超过上限）。 */
+  async schemaPage(): Promise<{ tables: TableInfo[]; truncated: boolean }> {
+    const rows = this.open().prepare(schemaQuery('sqlite')).all() as Array<Record<string, unknown>>
+    const tables = rows.slice(0, SCHEMA_TABLE_LIMIT).map((row) => ({ name: String(row.name ?? '') }))
+    return { tables, truncated: rows.length > SCHEMA_TABLE_LIMIT }
   }
 
   close(): void {
@@ -137,14 +157,16 @@ export class ServerDriver implements DatabaseDriver {
   }
 
   async schema(): Promise<TableInfo[]> {
-    if (this.conn.dbKind === 'mysql') {
-      const result = await this.queryMysql('SHOW TABLES LIMIT 200')
-      return result.rows.map((row) => ({ name: row[0] ?? '' }))
-    }
-    const result = await this.queryPostgres(
-      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name LIMIT 200",
-    )
-    return result.rows.map((row) => ({ name: row[0] ?? '' }))
+    return (await this.schemaPage()).tables
+  }
+
+  /** 表清单页：+1 行探测判定截断，返回前截到上限（对外不超过上限）。 */
+  async schemaPage(): Promise<{ tables: TableInfo[]; truncated: boolean }> {
+    const result = this.conn.dbKind === 'mysql'
+      ? await this.queryMysql(schemaQuery('mysql'))
+      : await this.queryPostgres(schemaQuery('postgresql'))
+    const tables = result.rows.slice(0, SCHEMA_TABLE_LIMIT).map((row) => ({ name: row[0] ?? '' }))
+    return { tables, truncated: result.rows.length > SCHEMA_TABLE_LIMIT }
   }
 
   close(): void {

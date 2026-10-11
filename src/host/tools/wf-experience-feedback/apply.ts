@@ -40,9 +40,9 @@ const EVALUATION_FIELDS = [
   'evidence',
 ] as const
 
-/** 参数错误的统一构造：错误码是跨模块契约，消息必须能指名失败字段与合法取值。 */
+/** 参数错误的统一构造：错误码是跨模块契约，稳定码写进 message（模型看不到 error.code），消息指名失败字段与合法取值。 */
 function badArgs(message: string): WfError {
-  return new WfError(message, ERR_EXPERIENCE_BAD_ARGS)
+  return new WfError(`${ERR_EXPERIENCE_BAD_ARGS}: ${message}`, ERR_EXPERIENCE_BAD_ARGS)
 }
 
 /** 取值描述（用于错误消息回显模型实际传了什么；undefined 与 null 必须可区分）。 */
@@ -60,8 +60,8 @@ function scoreOf(record: Record<string, unknown>, field: string, at: string): Ex
   const value = record[field]
   if (!isScoreAnchor(value)) {
     throw badArgs(
-      `${at}.${field} 必须是五级锚点 ${anchorList(SCORE_ANCHORS)} 之一（收到 ${describeValue(value)}）：`
-      + '不允许连续小数，请选择最接近的语义锚点后重新提交',
+      `${at}.${field} must be one of the five semantic anchors ${anchorList(SCORE_ANCHORS)} (received ${describeValue(value)}):`
+      + ' continuous decimals are not accepted, so pick the closest semantic anchor and resubmit',
     )
   }
   return value
@@ -72,8 +72,8 @@ function decisionEffectOf(record: Record<string, unknown>, at: string): Experien
   const value = record.decision_effect
   if (!isDecisionEffectAnchor(value)) {
     throw badArgs(
-      `${at}.decision_effect 必须是决策效果锚点 ${anchorList(DECISION_EFFECT_ANCHORS)} 之一（收到 ${describeValue(value)}）：`
-      + '负值表示该经验带来负面影响，0 表示与不使用它相比没有可归因差异',
+      `${at}.decision_effect must be one of the decision-effect anchors ${anchorList(DECISION_EFFECT_ANCHORS)} (received ${describeValue(value)}):`
+      + ' a negative value means the experience pushed the decision the wrong way, and 0 means no attributable difference from not using it',
     )
   }
   return value
@@ -85,7 +85,7 @@ function experienceIdOf(record: Record<string, unknown>, at: string): string {
   const experienceId = typeof raw === 'string' ? raw.trim() : ''
   if (!experienceId) {
     throw badArgs(
-      `${at}.experience_id 必须是非空字符串（收到 ${describeValue(raw)}）：请填本次已经实际使用的经验 id`,
+      `${at}.experience_id must be a non-empty string (received ${describeValue(raw)}): fill in an experience id you actually used in this call`,
     )
   }
   return experienceId
@@ -96,11 +96,11 @@ function evidenceOf(record: Record<string, unknown>, at: string): string | undef
   const value = record.evidence
   if (value === undefined) return undefined
   if (typeof value !== 'string') {
-    throw badArgs(`${at}.evidence 必须是字符串（收到 ${describeValue(value)}）：请用文字说明支撑本次评价的事实`)
+    throw badArgs(`${at}.evidence must be a string (received ${describeValue(value)}): describe the facts that support this rating as text`)
   }
   if (value.length > EVALUATION_EVIDENCE_LIMIT) {
     throw badArgs(
-      `${at}.evidence 超过 ${EVALUATION_EVIDENCE_LIMIT} 字符上限（实际 ${value.length} 字符）：请压缩到关键事实`,
+      `${at}.evidence is ${value.length} characters, over the limit of ${EVALUATION_EVIDENCE_LIMIT}: compress it to the key facts`,
     )
   }
   return value
@@ -112,34 +112,34 @@ function evidenceOf(record: Record<string, unknown>, at: string): string | undef
  */
 export function parseFeedbackEvaluations(raw: unknown): ExperienceFeedbackInput[] {
   if (!Array.isArray(raw)) {
-    throw badArgs('evaluations 必须是评价数组：形如 [{ experience_id, fit, decision_effect, information_gain, causal_confidence, evidence? }]')
+    throw badArgs('evaluations must be an array of evaluations, e.g. [{ experience_id, fit, decision_effect, information_gain, causal_confidence, evidence? }]')
   }
   if (raw.length === 0) {
-    throw badArgs('evaluations 不能是空数组：本工具用于提交已使用经验的使用结果，本次没有可评价的经验时不要调用')
+    throw badArgs('evaluations must not be an empty array: this tool submits the outcome of experiences you already used, so do not call it when this unit of work has nothing to rate')
   }
   if (raw.length > MAX_EVALUATIONS_PER_CALL) {
     throw badArgs(
-      `evaluations 一次最多 ${MAX_EVALUATIONS_PER_CALL} 条（收到 ${raw.length} 条）：请拆成多次提交本次实际使用的经验`,
+      `evaluations accepts at most ${MAX_EVALUATIONS_PER_CALL} entries per call (received ${raw.length}): split the experiences you actually used into several calls`,
     )
   }
   const seen = new Set<string>()
   return raw.map((item, index) => {
     const at = `evaluations[${index}]`
     if (!item || typeof item !== 'object' || Array.isArray(item)) {
-      throw badArgs(`${at} 必须是评价对象（收到 ${describeValue(item)}）`)
+      throw badArgs(`${at} must be an evaluation object (received ${describeValue(item)})`)
     }
     const record = item as Record<string, unknown>
     const unknownFields = Object.keys(record).filter((field) => !(EVALUATION_FIELDS as readonly string[]).includes(field))
     if (unknownFields.length > 0) {
       throw badArgs(
-        `${at} 含未知字段 ${unknownFields.join(' / ')}：合法字段只有 ${EVALUATION_FIELDS.join(' / ')}`,
+        `${at} contains unknown fields ${unknownFields.join(' / ')}: the only allowed fields are ${EVALUATION_FIELDS.join(' / ')}`,
       )
     }
     const experienceId = experienceIdOf(record, at)
     // 同一经验在一次调用里只允许一条评价：重复项会让「本次到底评了几次」不可解释，
     // 而跨调用的重复评价是合法历史（每次都是独立使用事件）。
     if (seen.has(experienceId)) {
-      throw badArgs(`${at}.experience_id "${experienceId}" 在同一次调用中重复：同一经验一次只提交一条评价`)
+      throw badArgs(`${at}.experience_id "${experienceId}" is duplicated in this call: submit one evaluation per experience per call`)
     }
     seen.add(experienceId)
     const evidence = evidenceOf(record, at)

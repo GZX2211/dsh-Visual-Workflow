@@ -110,7 +110,7 @@ export function validateEvaluationScores(input: EvaluationScoreCandidate): Evalu
       ok: false,
       field,
       reason: `${FIELD_LABELS[field]} must be one of the five semantic anchors: ${domain} (received ${String(value)});`
-        + "请从锚点中选择最接近本次实际情形的一项后重新提交。",
+        + " choose the anchor closest to what actually happened and resubmit.",
     }
   }
   return {

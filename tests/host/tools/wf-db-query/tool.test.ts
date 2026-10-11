@@ -10,7 +10,9 @@ import { DatabaseSync } from 'node:sqlite'
 import type { EmbeddingEngine } from '../../../../src/host/embedding/engine.js'
 import type { DatabaseNode, WorkflowDocument } from '../../../../src/host/shared/graph-model.js'
 import { WF_DB_QUERY } from '../../../../src/host/shared/protocol.js'
+import { SEARCH_TOP_K_MAX } from '../../../../src/host/embedding/indexer.js'
 import type { JsonSchemaNode } from '../../../../src/host/tools/infrastructure/define-tool.js'
+import { SCHEMA_TABLE_LIMIT } from '../../../../src/host/tools/wf-db-query/driver.js'
 import { indexPathOf } from '../../../../src/host/tools/wf-db-query/service.js'
 import { registerWfDbQuery, QUERY_CELL_MAX_LENGTH } from '../../../../src/host/tools/wf-db-query/tool.js'
 import type { WfDbQueryHost } from '../../../../src/host/tools/wf-db-query/types.js'
@@ -26,6 +28,18 @@ import {
 } from '../fixtures/tool-harness.js'
 
 afterEach(cleanupTempDirs)
+
+/** 建一个含 count 张表的临时 SQLite 库（schema 上限边界用）。 */
+function makeTableDb(file: string, count: number): void {
+  const db = new DatabaseSync(file)
+  try {
+    for (let i = 0; i < count; i += 1) {
+      db.exec(`CREATE TABLE t${String(i).padStart(4, '0')} (id INTEGER PRIMARY KEY)`)
+    }
+  } finally {
+    db.close()
+  }
+}
 
 /** 降级引擎替身（bm25：不做嵌入）。 */
 const engine: EmbeddingEngine = { source: 'bm25', dimension: 0, async ensureReady() {}, async embed() { throw new Error('bm25 only') }, dispose() {} }
@@ -70,6 +84,14 @@ describe('wf_db_query 注册与 schema', () => {
     expect((def.parameters.properties ?? {}).mode).toMatchObject({ enum: ['search', 'query', 'schema'] })
   })
 
+  it('topK 参数说明：取值域上限与 SEARCH_TOP_K_MAX 同源（数字随常量走，不漂移）', async () => {
+    const h = await makeHarness()
+    const def = h.tools.definitions.get(WF_DB_QUERY)!
+    const description = String((def.parameters.properties ?? {}).topK?.description ?? '')
+    // 同源断言：取值域里的上限数字必须来自检索上限常量本体（不锁定整句文案）
+    expect(description).toContain(String(SEARCH_TOP_K_MAX))
+  })
+
   it('output.schema：对象 additionalProperties=false、required 提取、mode 枚举保留', async () => {
     const h = await makeHarness()
     const schema = h.tools.definitions.get(WF_DB_QUERY)!.output.schema as JsonSchemaNode
@@ -102,6 +124,20 @@ describe('wf_db_query 工具执行', () => {
     expect(tables).toEqual(['notes', 'products'])
     await expect(def.execute({ mode: 'schema' }, execOf(rootAgent))).rejects.toMatchObject({ code: 'WF_BAD_ARGS' })
     await expect(def.execute({ dataId: 'd1', mode: 'bad' }, execOf(rootAgent))).rejects.toMatchObject({ code: 'WF_BAD_ARGS' })
+  })
+
+  it('无法识别调用方会话 → WF_BAD_CALLER（唯一稳定码，码写进模型可见 message）', async () => {
+    const h = await makeHarness()
+    await h.store.saveWorkflow(makeDbFlow(h.dbFile), 'session-1', { force: true })
+    const def = h.tools.definitions.get(WF_DB_QUERY)!
+    // 官方 ToolExecLike.agent 可选：无会话身份的调用在入口被拒。
+    // 同一事实只允许一个稳定码（会话可解耦出流程，但流程定位不了调用方）。
+    const error = await (def.execute({ dataId: 'd1', mode: 'schema' }, execOf({ id: '', session: { header: {} } })) as Promise<unknown>).then(
+      () => null,
+      (e: unknown) => e as { code?: string; message?: string },
+    )
+    expect(error?.code).toBe('WF_BAD_CALLER')
+    expect(String(error?.message)).toContain('WF_BAD_CALLER')
   })
 
   it('无运行态：本会话无实例 → WF_NO_INSTANCE；子代理无运行态仍被拒绝', async () => {
@@ -265,5 +301,50 @@ describe('wf_db_query 工具执行', () => {
     expect(rows[0][2].endsWith('…')).toBe(true)
     // 短值不受影响
     expect(rows[1][2]).toBe('short')
+  })
+
+  it('search 模式：请求 topK 超过检索上限且被上限卡住 → truncated 上报；未卡住不误报', async () => {
+    const h = await makeHarness()
+    const file = join(h.dataDir, 'many-rows.db')
+    {
+      const db = new DatabaseSync(file)
+      db.exec('CREATE TABLE docs (id INTEGER PRIMARY KEY, content TEXT)')
+      const stmt = db.prepare('INSERT INTO docs (content) VALUES (?)')
+      for (let i = 0; i < SEARCH_TOP_K_MAX + 10; i += 1) stmt.run(`水果 第${i}条 内容`)
+      db.close()
+    }
+    await start(h, makeDbFlow(file))
+    await h.runtime.wfRunNode({ isChild: false, sessionId: 'session-1' }, { nodeId: 'a1' })
+    const def = h.tools.definitions.get(WF_DB_QUERY)!
+    // 请求 100 > 上限 50 且返回条数达到上限 → 上限真的卡住了结果，如实上报
+    const clamped = await def.execute({ dataId: 'd1', mode: 'search', query: '水果', topK: 100 }, execOf(childAgent))
+    expect(clamped).toMatchObject({ dataId: 'd1', mode: 'search', truncated: true })
+    expect((clamped as { hits: unknown[] }).hits).toHaveLength(SEARCH_TOP_K_MAX)
+    // 请求在上限内 → 不出现 truncated 字段（沿用 query 模式的「有才报」风格）
+    const within = await def.execute({ dataId: 'd1', mode: 'search', query: '水果', topK: 3 }, execOf(childAgent))
+    expect((within as { hits: unknown[] }).hits).toHaveLength(3)
+    expect((within as { truncated?: boolean }).truncated).toBeUndefined()
+  })
+
+  it('schema 模式：表数正好达到上限 → 不误报 truncated（精确口径，与 search 一致）', async () => {
+    const h = await makeHarness()
+    const file = join(h.dataDir, 'exact-cap.db')
+    makeTableDb(file, SCHEMA_TABLE_LIMIT)
+    await h.store.saveWorkflow(makeDbFlow(file), 'session-1', { force: true })
+    const def = h.tools.definitions.get(WF_DB_QUERY)!
+    const result = await def.execute({ dataId: 'd1', mode: 'schema' }, execOf(rootAgent))
+    expect((result as { tables: unknown[] }).tables).toHaveLength(SCHEMA_TABLE_LIMIT)
+    expect((result as { truncated?: boolean }).truncated).toBeUndefined()
+  })
+
+  it('schema 模式：表数超过上限一张 → truncated 上报，且只返回上限数量（大库不灌满上下文）', async () => {
+    const h = await makeHarness()
+    const file = join(h.dataDir, 'many-tables.db')
+    makeTableDb(file, SCHEMA_TABLE_LIMIT + 1)
+    await h.store.saveWorkflow(makeDbFlow(file), 'session-1', { force: true })
+    const def = h.tools.definitions.get(WF_DB_QUERY)!
+    const result = await def.execute({ dataId: 'd1', mode: 'schema' }, execOf(rootAgent))
+    expect(result).toMatchObject({ dataId: 'd1', mode: 'schema', truncated: true })
+    expect((result as { tables: unknown[] }).tables).toHaveLength(SCHEMA_TABLE_LIMIT)
   })
 })

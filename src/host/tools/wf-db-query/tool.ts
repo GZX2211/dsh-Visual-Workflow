@@ -19,7 +19,7 @@ import { WF_DB_QUERY } from '../../shared/protocol.js'
 import type { DatabaseNode, RoleNode, WorkflowDocument } from '../../shared/graph-model.js'
 import { dbInEdges } from '../../graph/index.js'
 import { WfError, type CallerInfo, type OrchestratorRuntime, type RunEntry } from '../../orchestrator/index.js'
-import { VectorIndex } from '../../embedding/indexer.js'
+import { SEARCH_TOP_K_MAX, VectorIndex } from '../../embedding/indexer.js'
 import { callerOf } from '../infrastructure/caller.js'
 import { defineTool, type ToolDefinitionLike, type ToolExecLike } from '../infrastructure/define-tool.js'
 import { textRender } from '../infrastructure/text-render.js'
@@ -69,6 +69,7 @@ function resolveActiveRun(
  *   - 无激活运行时（主代理直接在对话里问数据库）：按**实例绑定的会话**定位工作流实例
  *     （一个会话一个实例，取最新；`listWorkflows` 即按 updatedAt 倒序），不需要运行、
  *     不影响任何运行状态。子代理仍要求运行态（其节点身份与 db-in 校验都以 run 为前提）。
+ * 前置条件：caller.sessionId 非空——不可识别的调用方在 execute 入口按 WF_BAD_CALLER 拒绝。
  */
 async function resolveDataQueryContext(
   host: WfDbQueryHost,
@@ -76,12 +77,11 @@ async function resolveDataQueryContext(
   exec: ToolExecLike,
 ): Promise<{ flow: WorkflowDocument; callerNodeId: string; run: RunEntry | null }> {
   if (!caller.isChild) {
-    const run = caller.sessionId ? host.orchestrator.activeRunForSession(caller.sessionId) : null
+    const run = host.orchestrator.activeRunForSession(caller.sessionId)
     if (run) {
       const flow = await host.orchestrator.currentResolvedFlow(run)
       return { flow, callerNodeId: callerNodeIdOf(flow, caller, ''), run }
     }
-    if (!caller.sessionId) throw new WfError('WF_BAD_CALLER: cannot identify the caller session', 'WF_BAD_CALLER')
     const instances = await host.store.listWorkflows(caller.sessionId)
     const flow = instances[0] ?? null
     if (!flow) throw new WfError('WF_NO_INSTANCE: this session has no workflow instance; create one on the workbench and connect a database node first', 'WF_NO_INSTANCE')
@@ -122,7 +122,7 @@ export function registerWfDbQuery(ctx: { get(name: string): unknown }, host: WfD
       mode: { type: 'string', required: true, enum: ['search', 'query', 'schema'] as const, description: 'search: vector retrieval; query: read-only SELECT; schema: table list.' },
       query: { type: 'string', description: 'Free-text query for mode "search" (required there).' },
       sql: { type: 'string', description: 'Read-only SQL (single SELECT with LIMIT) for mode "query" (required there).' },
-      topK: { type: 'number', description: 'Top hits for mode "search" (default 5, max 50).' },
+      topK: { type: 'number', description: `Top hits for mode "search" (default 5, max ${SEARCH_TOP_K_MAX}).` },
     },
     output: {
       schema: {
@@ -157,7 +157,7 @@ export function registerWfDbQuery(ctx: { get(name: string): unknown }, host: WfD
               properties: { name: { type: 'string', required: true, description: 'Table name.' } },
             },
           },
-          truncated: { type: 'boolean', description: 'True when the result set was capped or long cell values were truncated.' },
+          truncated: { type: 'boolean', description: 'True when results were capped (rows, hits, or tables) or long cell values were truncated.' },
         },
       },
       render: textRender,
@@ -165,7 +165,7 @@ export function registerWfDbQuery(ctx: { get(name: string): unknown }, host: WfD
     async execute(args, exec) {
       const caller = callerOf(exec)
       const sessionId = caller.sessionId
-      if (!sessionId) throw new WfError('WF_BAD_ARGS: cannot identify the caller session', 'WF_BAD_ARGS')
+      if (!sessionId) throw new WfError('WF_BAD_CALLER: cannot identify the caller session', 'WF_BAD_CALLER')
       const dataId = String(args?.dataId ?? '').trim()
       if (!dataId) throw new WfError('WF_BAD_ARGS: wf_db_query requires dataId', 'WF_BAD_ARGS')
       const mode = String(args?.mode ?? '')
@@ -173,8 +173,8 @@ export function registerWfDbQuery(ctx: { get(name: string): unknown }, host: WfD
         throw new WfError(`WF_BAD_ARGS: wf_db_query mode must be search/query/schema (received ${mode})`, 'WF_BAD_ARGS')
       }
 
-      // 归属校验（运行态解耦）：主代理在运行中走运行上下文，不在运行中走实例定位；
-      // 子代理仍严格要求归属当前运行（节点身份 + db-in 双校验）。
+      // 归属校验（运行态解耦）：入口先校验会话身份（不可识别只报 WF_BAD_CALLER，同一事实一个码），
+      // 再分派运行上下文 / 实例定位；子代理仍严格要求归属当前运行（节点身份 + db-in 双校验）。
       const { flow, callerNodeId, run } = await resolveDataQueryContext(host, caller, exec)
       const dataNode = flow.nodes.find((node): node is DatabaseNode => node.id === dataId && node.kind === 'database')
       if (!dataNode) throw new WfError(`WF_DB_BAD_DATA: database node not found or removed from the canvas: ${dataId}`, 'WF_DB_BAD_DATA')
@@ -206,7 +206,8 @@ export function registerWfDbQuery(ctx: { get(name: string): unknown }, host: WfD
           { threshold: Number(dataNode.data?.vectorOptions?.scoreThreshold) || 0 },
         )
         if (!result) throw new WfError('WF_DB_INDEX_MISSING: no searchable index for this database; confirm the source has indexable content', 'WF_DB_INDEX_MISSING')
-        return { dataId, mode: 'search', source: result.source, hits: result.hits }
+        // 检索事实如实透传：source 表达通道（bm25 = 非语义降级），truncated 表达上限截断
+        return { dataId, mode: 'search', source: result.source, hits: result.hits, ...(result.truncated ? { truncated: true } : {}) }
       }
 
       if (mode === 'query') {
@@ -237,8 +238,9 @@ export function registerWfDbQuery(ctx: { get(name: string): unknown }, host: WfD
       // mode === 'schema'
       const driver = createDatabaseDriver(dataNode)
       try {
-        const tables = await driver.schema()
-        return { dataId, mode: 'schema', tables }
+        // 驱动内部多取一行精确判定：正好满上限不算截断（与 search 的 truncated 判据同一口径）
+        const { tables, truncated } = await driver.schemaPage()
+        return { dataId, mode: 'schema', tables, ...(truncated ? { truncated: true } : {}) }
       } finally {
         driver.close()
       }

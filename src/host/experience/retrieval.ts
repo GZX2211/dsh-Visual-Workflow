@@ -165,7 +165,7 @@ export async function recallActiveHits(input: ExperienceRecallInput): Promise<Ex
     try {
       const vectors = await input.embedding.embed([input.query])
       const queryVector = vectors[0]
-      if (!queryVector) throw new Error("嵌入服务未返回查询向量")
+      if (!queryVector) throw new Error("the embedding service returned no query vector")
       return { scored: rankByEmbedding(input.rows, queryVector, CANDIDATE_POOL_SIZE), source: "semantic" }
     } catch {
       // 语义路径不可用即降级词法检索：宁可给词法命中并标注来源，也不要静默返回空结果

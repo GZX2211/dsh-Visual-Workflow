@@ -22,9 +22,9 @@
 
 | # | 事项 | 状态 |
 |---|---|---|
-| G1 | **画布所有字段的禁令句**（`retryLimit / reactLimit / promptFilePath / injectSystemPrompt / injectToolSections / sourceAssetId`）：`wf_org_catalog` 描述里的那句已删除（commit `e48e4bb`）；`graph-op-contract.ts` 的 `ROLE_NODE_DATA_CONTRACT` 里的同义句**待用户确认后一并删除** | 待执行 |
+| G1 | **画布所有字段的禁令句**（`retryLimit / reactLimit / promptFilePath / injectSystemPrompt / injectToolSections / sourceAssetId`）：`wf_org_catalog` 描述里的那句已删除（`e48e4bb`）；`ROLE_NODE_DATA_CONTRACT` 的**后果句已删除**（`cannot be configured through the graph tool: they are ignored when passed on create and preserved on update`），**字段枚举保留**为 `… are not configurable here.`——依据：该枚举在契约其它句零提及，整句删除即信息缺口，且「这些字段不归图工具管」属「怎么调用」而非冗余复述 | ✅ 已执行（保留枚举，偏差已备案） |
 | G2 | `reports/audit/VERIFY-ROUND2.md:272` 曾以「模型被明确告知不要传」为依据判定某条不构成契约漏洞；若 G1 的第二句也删掉，该依据失效（`apply.ts` 的 `PARENT_UNCONFIGURABLE_ROLE_FIELDS` 行为不变，结论实质不受影响） | 已告知 Team |
-| G3 | 同一事实两个错误码：`wf_db_query` 的 `WF_BAD_CALLER`（tool.ts:84）与 `WF_BAD_ARGS`（tool.ts:168） | 待执行（见 §4.1） |
+| G3 | 同一事实两个错误码：`wf_db_query` 的 `WF_BAD_CALLER`（不可达死防御）与 `WF_BAD_ARGS`（入口守卫） | ✅ 已执行：删死防御，`WF_BAD_CALLER` 唯一码（见 §4.1） |
 | G4 | **错误消息清点口径**：必须按「出口」找（`WfError` 构造点 + 所有封装构造函数如 `invalid(...)`），只扫字面量会漏（本轮已漏过 experience 域，见 §6.6） | 已写入治理规则 §3 |
 
 ---
@@ -72,7 +72,7 @@
 
 | 顺序 | 工具 | 状态 |
 |---|---|---|
-| 1 | `wf_db_query` | 已复核（发现：#2 `truncated` 仅 query 置位、#3 SQLite schema 无上限、#4 实例定位未写明、#5 双错误码 → 记入 §4） |
+| 1 | `wf_db_query` | ✅ 已复核并修复（四项：双错误码、`truncated` 语义、SQLite 表数上限、实例定位判定 → 见 §4） |
 | 2 | `wf_org_catalog` | 已复核（见 §2） |
 | 3 | `wf_graph_patch` | 已复核（见 §5） |
 | 4 | 经验三工具 | `wf_experience_learn` 已复核并整改（§6）；`wf_experience_recall` 已复核（§7）；`wf_experience_feedback` 已复核并整改（§8） |
@@ -82,18 +82,21 @@
 
 ## 4. `wf_db_query` 复核发现（补齐索引）
 
-### 4.1 错误码重复（对应通则 G3）
+### 4.1 错误码重复（对应通则 G3）— ✅ 已修复
 
-- `tool.ts:84`：`WF_BAD_CALLER: cannot identify the caller session`
-- `tool.ts:168`：`WF_BAD_ARGS: cannot identify the caller session`
+- 原 `tool.ts:84`：`WF_BAD_CALLER: cannot identify the caller session`（`resolveDataQueryContext` 内）
+- 原 `tool.ts:168`：`WF_BAD_ARGS: cannot identify the caller session`（`execute` 入口守卫）
 
-同一条件、两个码。**分析结论**：`execute` 已在第 167-168 行校验 `sessionId` 非空，因此 `resolveDataQueryContext` 里的第 84 行检查**不可达**（死防御）。建议：删除第 84 行的重复检查，保留 `WF_BAD_CALLER` 作为唯一码；`ToolExecLike.agent` 在官方工具执行上下文里是可选的，所以第 168 行的防御分支本身应保留。
+**可达性取证**：`resolveDataQueryContext` 为模块私有、全仓仅一处调用且在入口守卫之后，两者读同一个 `caller` 实参 ⇒ 第 84 行**必不可达**。
+**处置**：删除该死防御；入口守卫（`ToolExecLike.agent` 可选，确实可达）改用 `WF_BAD_CALLER`，与 `wf_graph_patch` / `wf_org_catalog` 同码同文案。全仓已无 `WF_BAD_ARGS: cannot identify the caller session`；测试同时断言 `code` 与 message 含码。
 
-### 4.2 其它（暂不改）
+### 4.2 其它 — ✅ 已修复（本轮）
 
-- `truncated` 仅在 `query` 模式置位；`search` 的 hits 被 clamp（`indexer.ts:216` `Math.min(50, topK||5)`）或降级 BM25 时无标记。
-- `schema` 表数上限：MySQL/PG 为 `LIMIT 200`，**SQLite 无上限**（大库会一次性灌入表名列表）。
-- 主代理无运行编排时按「本会话最新实例」定位（`listWorkflows[0]`），描述未写明。
+- **`truncated` 语义补全**：clamp 本体上移到产出层单点（`src/host/embedding/indexer.ts` 导出 `SEARCH_TOP_K_MAX`，替换原 `Math.min(50, topK||5)` 字面量），`SearchResult` 增 `truncated`；判据为「请求超上限**且** hits 达上限」（精确）；通道降级沿用既有 `source` 字段，未新造语义。
+- **`schema` 表数上限**：新增 `SCHEMA_TABLE_LIMIT = 200` 单一本体，SQLite / MySQL / PG 三通道共用；driver 内以 `LIMIT 上限+1` 探针实现**精确**判定（`schemaPage()`），`schema()` 对外形状不变（恒 ≤ 上限），消费方无需改动。
+- **三处 `truncated` 口径统一**：query（行数 / 单元格）、search、schema 一律「被上限**真**截断才为 true」，不再有「正好满也报」的保守误报。
+- **实例定位语义**：按常驻准入标准判定**不写进 description**——模型无参数可影响实例选择，「取最新实例」不改变它传什么、调不调；定位失败已有可行动稳定错误（`WF_DB_BAD_DATA` / `WF_NO_INSTANCE`）承载，属 §1.3「内部实现说明」。
+- **`topK` 的 `max 50` 保留**（参数取值域，属 §1.2 准入），但数字改为与 `SEARCH_TOP_K_MAX` **同源插值**，并以同源断言锁定防漂移。
 
 ---
 
@@ -109,14 +112,17 @@
 
 常驻面：**641 → 539 tokens**（desc 932→525 字符 / 142→84 词）。
 
-### 5.2 待重做：属「写图 / 规划方法论」而非工具调用（记录，暂不改）
+### 5.2 描述精简的收尾 — ✅ 已执行（本轮 2026-10-11）
 
-| 条目 | 位置 | 说明 |
-|---|---|---|
-| DAG / 返工建模指导 | `org-sop.ts` → `ORG_SOP_L1_GRAPH_SEMANTICS` 第五节（"流程必须保持无环 DAG：返工不得回指上游节点，要改成前向 fail 分支 → 修复节点 → 下游重新汇合"） | 已从工具常驻描述移除（5.1），规则本体保留在按需召回的 SOP 段；后期与 SOP 一起重做 |
-| 描述里仍复述的契约条款（**按同一标准应继续精简**） | `wf_graph_patch/tool.ts` description | ① `ops are grouped … one patch uses one group` 与 `PATCH_SUBMISSION_RULES` 第 1 条重复；② `The patch is atomic …` 与第 2 条**逐字级**重复；③ `mark group: mark_node completes the CURRENT milestone gate only …` 与 `GATE_MARKING_SEMANTICS` 第 1-2 条重复。**均属"移除后不影响调用"（契约里已有）**，待批量执行 |
-| 新建模板的返回字段说明 | 同上 | `newTemplate=true and the new targetId are returned` — `output.schema` 在 native 模式不注入，故这条**有独立价值**，建议保留 |
-| 批次级错误码的选择规则 | `tool.ts` 注释 / `ERROR_CODE_SEMANTICS` | 全参数错 → `WF_BAD_ARGS`；含任一条图语义错 → `WF_GRAPH_INVALID`。描述与契约都未写明，模型可能预期错配；建议在 `ERROR_CODE_SEMANTICS` 补一句 |
+| 条目 | 处置 |
+|---|---|
+| `ops are grouped … one patch uses one group` | **删除**：`PATCH_SUBMISSION_RULES` 第 1 条逐概念等价承载 |
+| `The patch is atomic … its own code` | **删除**：第 2 条是其**超集**（多出 in order / resubmit），且 `ops` 参数描述已含「one group」 |
+| `mark group: mark_node completes the CURRENT milestone gate only (a proxy-driven gate with data.role=milestone)` | **部分删除**：删掉被契约承载的复述部分，**保留调用相位提示** `mark group: use mark_node only to complete the current gate of this turn.`——整仓无第二处定义「什么是闸门」，而「何时可用 mark group」属 §1.2 准入内容 |
+| 新建模板的返回字段说明 | 删去 `newTemplate=true and the new targetId are returned` 半句（由 `output.schema` 承载），主句保留 |
+| 批次级错误码选择规则 | **已补入** `ERROR_CODE_SEMANTICS`：`WF_BAD_ARGS` only when every failure is an argument-layer error, `WF_GRAPH_INVALID` as soon as any failure is a graph-semantics error。与实现（`tool.ts` 的 `errors.every(...)` 取码）核对**一致**，并有行为用例锁定 |
+
+**结果**：`wf_graph_patch` description **525 → 243 字符（−53.7%）**、**84 → 42 词（−50%）**。
 
 ### 5.3 复核确认无问题
 
@@ -169,7 +175,7 @@
 
 | 项 | 说明 |
 |---|---|
-| 三份生成 Prompt 正文 | 属**方法论**（是否值得生成、如何抽象、边界与证据要求），且与工具 description 在「何时不要提交」上有重复表述；它已在常驻面之外（按需注入，符合「额外情况以其他形式注入」），但**语言为中文**，与英文常驻面混排 → 后期统一语言并明确「方法论 vs 工具契约」的分界 |
+| 两份生成 Prompt 正文 | 属**方法论**（是否值得生成、如何抽象、边界与证据要求），且与工具 description 在「何时不要提交」上有重复表述；它已在常驻面之外（按需注入，符合「额外情况以其他形式注入」），但**语言为中文**，与英文常驻面混排 → **用户本轮定案：暂不动（保留）**，后期再统一语言并明确「方法论 vs 工具契约」的分界 |
 | 字段预算的传达方式 | 现为「每字段一句 `Aim for at most N characters; the cap is M`」（模板生成）→ 可考虑统一在一处说明 + 仅标 cap，减少重复句式 |
 
 ### 6.5 复核确认无问题
@@ -180,28 +186,27 @@
 - 失败码齐全且进文本：`WF_EXPERIENCE_BAD_ARGS` / `WF_EXPERIENCE_VALIDATION` / `WF_EXPERIENCE_NOT_INITIALIZED` / `WF_EXPERIENCE_WRONG_TYPE` / `WF_EXPERIENCE_EMBEDDING_UNAVAILABLE`；
 - experience 域**无中文残留**（本轮统一后已确认）。
 
-### 6.6 ⚠️ 更正：experience 域仍有中文残留（上轮遗漏，待修）
+### 6.6 ⚠️ 更正：experience 域曾有中文残留（上轮遗漏）— ✅ 本轮已全量清理
 
-上轮的扫描口径只覆盖 `new WfError(` / `reason:` / `message:` / `error:` 字面量，**漏掉了经辅助构造函数生成的错误**，因此 6.5 最后一条结论**是错误的**，此处更正。
+上轮的扫描口径只覆盖 `new WfError(` / `reason:` / `message:` / `error:` 字面量，**漏掉了经辅助构造函数生成的错误**，因此 6.5 最后一条结论**是错误的**。
 
-已确认（可直接定位）：
+**2026-10-11（team 退役轮）**：`subject.ts`、`infrastructure/experience-contract.ts` 已英文化；`team-context.ts` 随模块删除。
 
-- `src/host/experience/validation.ts` 定义 `function invalid(message) { return new WfError(message, ERR_EXPERIENCE_VALIDATION) }`，其 **19 条消息全部为中文**：字段非字符串 / 空白 / 超长、数组元素类型与空白、未知字段、同字段两种写法、九个字段总长超限、缺必填字段、`experience_type` 非法或与提交类型不一致、载荷顶层未知字段、单次候选数超限、候选非对象、候选与前面重复、必填字段被置空……
-  这是**经验学习/评估最高频的失败路径**（模型最常撞到的错误面）。
+**2026-10-11（本轮缺陷清理）**：按「出口」清点后**全量英文化**——本域 6 类封装构造函数（`invalid` / `badArgs` / `fail` / `codecError` / `feedbackFailed` / `embeddingUnavailable`）+ 直连 `new WfError` 全覆盖，共 11 个源文件、约 73 处出口：
 
-按「非注释行且含中文」精确统计（含少量行尾注释，需逐条筛）：
-
-| 文件 | 行数 |
+| 文件 | 出口数 |
 |---|---|
-| `experience/validation.ts` | 26 |
-| `experience/service.ts` | 17 |
-| `experience/feedback.ts` | 8 |
-| `experience/embedding-codec.ts` | 7 |
-| `experience/retrieval.ts` / `projection.ts` / `scoring.ts` | 各 1 |
-| 三工具 `apply.ts`（learn / recall / feedback） | 13 / 2 / 3 |
-| 三工具 `tool.ts` | 2 / 3 / 2 |
+| `experience/validation.ts` | 24（含 `where` 标签与 `ALLOWED_FIELD_TEXT`） |
+| `experience/service.ts` | 14（含「三类 Prompt 种子」→ `two prompt seeds` 的过时措辞修正） |
+| `tools/wf-experience-feedback/apply.ts` | 11 |
+| `experience/embedding-codec.ts` / `feedback.ts` | 各 7 |
+| `projection` / `retrieval` / `scoring` / 三工具 `tool.ts` / `experience-contract` | 合计 10（另含 `experience-contract.ts` 的 `EXPERIENCE_TYPE_NOTE` 值残留） |
 
-**2026-10-11 更新（team 退役轮）**：`subject.ts` 与 `infrastructure/experience-contract.ts` 已在本轮按规范英文化（`{CODE}: english message`）；`team-context.ts` 随模块整文件删除；`subject.ts` 由 19 行降到 0。上表其余文件**仍待英文化**（最高优先项不变）。
+**保留中文的例外（逐项受众判定，共 6 处非注释行）**：3 处宿主日志诊断（`deps.logger.warn`，全仓日志统一中文）+ 3 处工具注册期装配错误（模型不可达；仓库 11 工具逐字统一措辞）。**模型可见出口 0 残留**。
+
+**顺带完成的判断项**：`projection.ts` 的 `（无）` → `(none)`、全角分号 `；` → `; `（模型可见投影文本的语言面统一；已落盘的旧行保留旧分隔符，不影响任何判定）。
+
+**测试治理升级**：新增 `tests/host/experience/fixtures/assertions.ts` 的 `modelFacingProblemOf(error)`——把「`{CODE}: ` 前缀 + 引号外散文无 CJK」绑进**唯一出口** `errorOf`，三工具本地 `failureOf` 同样升级；此后任何经该出口的错误自动受规范门禁保护。这修掉了「规范没绑在出口上」这一根因。
 
 **治理规则补充（已写入 §3）**：错误消息必须按「出口」清点——`WfError` 构造点 **+ 所有封装构造函数**（`invalid(...)`、`fail(...)` 等），不能只扫字面量；否则会得出「已全英文」的错误结论。
 
@@ -345,9 +350,38 @@
 **通过，无阻断级问题**。复核发现 3 个重要项（迁移判据只看一张表、`protocol.ts` 错误码契约注释过期、`runtime-base.ts` 死方法）与 1 处强绑定
 （`onRunTerminal → clearSession`），均已修正并回归验证；迁移真实性、四处取值域一致性、护栏正反边界、`lib/` 残留均经独立探针取证。
 
-### 9.4 遗留（仍未做）
+### 9.4 遗留（本轮已大部分清掉，见 §10）
 
-- experience 域其余中文错误消息（§6.6 表内除 `subject.ts` / `experience-contract.ts` 之外的文件）；
-- `wf_db_query` 小缺陷（§4）、通则 G1 / G3、`wf_graph_patch` 剩余精简（§5.2）、`org-sop.ts` 与方法论语言统一（§2.1）；
+- ~~experience 域其余中文错误消息~~ → 已在 §10.1 全量清理；
+- ~~`wf_db_query` 小缺陷~~、~~通则 G1 / G3~~、~~`wf_graph_patch` 剩余精简~~ → 已在 §10.2 / §10.3 完成；
+- `org-sop.ts` 与方法论语言统一（§2.1）、两份生成 Prompt 正文语言 → **用户本轮定案：暂不动（保留）**；
 - codec 侧 `EXPERIENCE_TYPE_VALUES` 仍是平行白名单（有「DDL CHECK ⇄ 白名单」一致性测试锁定，但无编译期穷尽）。
+
+---
+
+## 10. 本轮缺陷清理（2026-10-11，第二轮）
+
+用户定案范围：**修已知缺陷；方法论与提示词正文不动**。三条并行流（各自写入范围互不重叠）+ Lead 收口。
+
+### 10.1 experience 域模型可见错误消息全量英文化（§6.6 收口）
+
+- 覆盖 11 个源文件、约 73 处出口，统一为 `{CODE}: english message`；稳定码语义不变、无同条件两码；
+- 出口全覆盖：`invalid` / `badArgs` / `fail` / `codecError` / `feedbackFailed` / `embeddingUnavailable` + 直连 `new WfError`；
+- **模型可见出口 0 中文残留**；保留中文的例外仅 6 处非注释行（3 处宿主日志 + 3 处装配期注册错误，见治理规则 §3.3 新增的两行语言边界）；
+- 顺带：`projection.ts` 的 `（无）` → `(none)`、全角分号 → `; `（模型可见投影语言面统一）；
+- 测试治理升级：`modelFacingProblemOf(error)` 绑进**唯一出口** `errorOf`，规范从此自动生效（治理规则 §3.4 第 7 条）。
+
+### 10.2 `wf_db_query` 四项缺陷（§4 收口）
+
+见 §4.1 / §4.2：双错误码收敛为 `WF_BAD_CALLER`；`truncated` 三处口径统一为「被上限**真**截断」；`SCHEMA_TABLE_LIMIT = 200` 单一本体 + `LIMIT 上限+1` 精确探针；实例定位经准入判定不写 description。`topK` 的 `max 50` 保留但改为与 `SEARCH_TOP_K_MAX` 同源插值。
+
+### 10.3 `wf_graph_patch` 精简与错误码规则（§5.2 + 通则 G1 收口）
+
+见 §5.2：2 句契约复述删除、1 句只删复述部分（保留调用相位提示）；批次级取码规则补入 `ERROR_CODE_SEMANTICS` 并与实现核对一致；G1 的后果句删除、字段枚举保留。
+
+### 10.4 验证与留痕
+
+- 本团队范围：**37 文件 / 697 用例**全绿；全仓 **220 文件 / 2709 用例**全绿；`pnpm typecheck` 0 error；
+- 新增/改造的测试均带**红相或变异证据**（描述删句、取码规则、字段剥离、`truncated` 边界、topK 同源、注入链反向断言）；
+- 提交按**本团队路径**显式暂存（工作区同时存在另一并行团队的改动；`lib/` 待两团队收工后统一重建，避免把他人中间态打进分发包）。
 

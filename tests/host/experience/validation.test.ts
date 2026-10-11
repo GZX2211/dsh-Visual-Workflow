@@ -55,6 +55,13 @@ describe("validateExperienceCandidates 载荷形状", () => {
     expect(error.message.includes("type")).toBe(true)
   })
 
+  it("test_候选元素不是对象_拒绝并给出可用字段面", async () => {
+    const error = await errorOf(() => validateExperienceCandidates(["不是对象"], "agent"))
+
+    expect(error.code).toBe(ERR_EXPERIENCE_VALIDATION)
+    expect(error.message.includes("responsibility")).toBe(true)
+  })
+
   it("test_空候选数组_WF_EXPERIENCE_BAD_ARGS_并要求改用初始化调用", async () => {
     const error = await errorOf(() => validateExperienceCandidates([], "agent"))
 
@@ -230,6 +237,16 @@ describe("validateExperienceCandidates 运行时护栏", () => {
     expect(error.message.includes("exclusions")).toBe(true)
   })
 
+  it("test_数组元素不是字符串_拒绝并指名元素位置", async () => {
+    const error = await errorOf(() => validateExperienceCandidates([
+      createCandidatePayload({ exclusions: ["条件甲", 42] }),
+    ], "agent"))
+
+    expect(error.code).toBe(ERR_EXPERIENCE_VALIDATION)
+    expect(error.message.includes("exclusions")).toBe(true)
+    expect(error.message).toMatch(/\b2\b/)
+  })
+
   it("test_单条文本总长达 8000_通过", () => {
     const drafts = validateExperienceCandidates([createCandidatePayload({
       responsibility: "甲".repeat(100),
@@ -270,8 +287,9 @@ describe("validateExperienceCandidates 运行时护栏", () => {
     ], "agent"))
 
     expect(error.code).toBe(ERR_EXPERIENCE_VALIDATION)
-    expect(error.message.includes("第 2 条")).toBe(true)
-    expect(error.message.includes("第 1 条")).toBe(true)
+    // 只断言「消息指名了重复的两条候选位置」（序号标记属结构信息），不锁定整句文案
+    expect(error.message).toMatch(/\b1\b/)
+    expect(error.message).toMatch(/\b2\b/)
   })
 
   it("test_批内仅证据不同_视为不同候选通过", () => {

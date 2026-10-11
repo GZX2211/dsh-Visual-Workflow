@@ -5,16 +5,31 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import type { DatabaseNode } from '../../../../src/host/shared/graph-model.js'
 import {
+  SCHEMA_TABLE_LIMIT,
   SqliteDriver,
   createDatabaseDriver,
+  schemaQuery,
   testDatabaseConnection,
 } from '../../../../src/host/tools/wf-db-query/driver.js'
 import { makeSqliteDb } from '../fixtures/db-fixture.js'
 import { cleanupTempDirs, tempDir } from '../fixtures/tool-harness.js'
 
 afterEach(cleanupTempDirs)
+
+/** 建一个含 count 张表的临时 SQLite 库（schema 上限边界用）。 */
+function makeTableDb(file: string, count: number): void {
+  const db = new DatabaseSync(file)
+  try {
+    for (let i = 0; i < count; i += 1) {
+      db.exec(`CREATE TABLE t${String(i).padStart(4, '0')} (id INTEGER PRIMARY KEY)`)
+    }
+  } finally {
+    db.close()
+  }
+}
 
 describe('SqliteDriver', () => {
   it('query/schema/testConnection 只读访问正常', async () => {
@@ -49,6 +64,54 @@ describe('SqliteDriver', () => {
     const driver = new SqliteDriver(join(dir, 'missing.db'))
     try {
       await expect(driver.testConnection()).rejects.toThrow()
+    } finally {
+      driver.close()
+    }
+  })
+
+  it('schema 查询语句：三通道共用同一上限本体（探测取上限+1 行，契约为 200）', () => {
+    expect(SCHEMA_TABLE_LIMIT).toBe(200)
+    for (const kind of ['sqlite', 'mysql', 'postgresql'] as const) {
+      expect(schemaQuery(kind).endsWith(`LIMIT ${SCHEMA_TABLE_LIMIT + 1}`), kind).toBe(true)
+    }
+  })
+
+  it('schema：表数超过上限时只返回上限数量（大库表名列表不灌满上下文）', async () => {
+    const dir = await tempDir('vw-drv-')
+    const file = join(dir, 'many-tables.db')
+    makeTableDb(file, SCHEMA_TABLE_LIMIT + 5)
+    const driver = new SqliteDriver(file)
+    try {
+      const tables = await driver.schema()
+      expect(tables).toHaveLength(SCHEMA_TABLE_LIMIT)
+    } finally {
+      driver.close()
+    }
+  })
+
+  it('schemaPage 精确口径：正好上限张 → truncated=false（不把「正好满」误报为截断）', async () => {
+    const dir = await tempDir('vw-drv-')
+    const file = join(dir, 'exact-cap.db')
+    makeTableDb(file, SCHEMA_TABLE_LIMIT)
+    const driver = new SqliteDriver(file)
+    try {
+      const page = await driver.schemaPage()
+      expect(page.tables).toHaveLength(SCHEMA_TABLE_LIMIT)
+      expect(page.truncated).toBe(false)
+    } finally {
+      driver.close()
+    }
+  })
+
+  it('schemaPage 精确口径：超过上限一张 → truncated=true 且清单截到上限', async () => {
+    const dir = await tempDir('vw-drv-')
+    const file = join(dir, 'over-cap.db')
+    makeTableDb(file, SCHEMA_TABLE_LIMIT + 1)
+    const driver = new SqliteDriver(file)
+    try {
+      const page = await driver.schemaPage()
+      expect(page.tables).toHaveLength(SCHEMA_TABLE_LIMIT)
+      expect(page.truncated).toBe(true)
     } finally {
       driver.close()
     }

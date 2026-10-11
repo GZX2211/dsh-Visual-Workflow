@@ -130,13 +130,13 @@ export function registerWfExperienceRecall(
       // 两个阶段的取数语义不同（模糊检索 vs 精确取回），混用会让「返回什么」不可预测
       if (query && ids.length > 0) {
         throw new WfError(
-          '本工具是两阶段调用：先用 query 取候选摘要，再用 ids 取回完整内容；两者不要在同一次调用中混用',
+          'WF_EXPERIENCE_BAD_ARGS: this tool is a two-stage call: query returns candidate summaries and ids returns full entries; do not mix them in one call',
           ERR_EXPERIENCE_BAD_ARGS,
         )
       }
       if (!query && ids.length === 0) {
         throw new WfError(
-          '请传 query（第一阶段取候选摘要）或非空 ids（第二阶段取完整经验）：两者都不传时无法召回任何经验',
+          'WF_EXPERIENCE_BAD_ARGS: pass query (stage one: candidate summaries) or a non-empty ids array (stage two: full entries); with neither there is nothing to recall',
           ERR_EXPERIENCE_BAD_ARGS,
         )
       }
@@ -159,7 +159,7 @@ export function registerWfExperienceRecall(
         // 稳定错误码是跨模块契约：domain 抛出的错误原样上抛；其它失败对模型只有
         // 「召回失败」一种语义，归一到稳定码并保留原始消息以便诊断。
         if (error instanceof WfError) throw error
-        throw new WfError(messageOf(error), ERR_EXPERIENCE_RECALL_FAILED)
+        throw new WfError(`${ERR_EXPERIENCE_RECALL_FAILED}: ${messageOf(error)}`, ERR_EXPERIENCE_RECALL_FAILED)
       }
     },
   })

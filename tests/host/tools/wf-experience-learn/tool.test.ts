@@ -16,6 +16,7 @@ import {
 import { FIELD_BUDGETS, FIELD_LIMITS } from '../../../../src/host/experience/index.js'
 import { WfError } from '../../../../src/host/orchestrator/index.js'
 import { registerWfExperienceLearn } from '../../../../src/host/tools/wf-experience-learn/tool.js'
+import { modelFacingProblemOf } from '../../experience/fixtures/assertions.js'
 import type { JsonSchemaNode } from '../../../../src/host/tools/infrastructure/define-tool.js'
 import {
   childAgent,
@@ -65,9 +66,14 @@ async function execute(h: Harness, args: Record<string, unknown>, agent: unknown
   return await def.execute(args, execOf(agent))
 }
 
-/** 取执行失败的错误（含非 WfError）。 */
+/** 取执行失败的错误（含非 WfError）；WfError 额外校验模型可见面规范（稳定码写进 message + 英文）。 */
 async function failureOf(promise: Promise<unknown>): Promise<unknown> {
-  return await promise.catch((reason: unknown) => reason)
+  const reason = await promise.catch((error: unknown) => error)
+  if (reason instanceof WfError) {
+    const problem = modelFacingProblemOf(reason)
+    if (problem !== null) throw new Error(problem)
+  }
+  return reason
 }
 
 /** 描述里英文字母与空格占比（官方标准英文提示词：英文散文为主，不夹中文说明）。 */
@@ -246,7 +252,7 @@ describe('wf_experience_learn：提交态', () => {
 
   it('未知字段原样抵达 domain（工具层不得静默丢弃，否则 WF_EXPERIENCE_VALIDATION 永不触发）', async () => {
     const h = await makeHarness()
-    h.host.submitFail = new WfError('候选含未知字段 insight', ERR_EXPERIENCE_VALIDATION)
+    h.host.submitFail = new WfError('WF_EXPERIENCE_VALIDATION: unknown field "insight" in the candidate', ERR_EXPERIENCE_VALIDATION)
 
     const failure = await failureOf(execute(h, { experiences: [candidate({ insight: '旧字段' })], type: 'agent' }))
 
@@ -259,7 +265,7 @@ describe('wf_experience_learn：提交态', () => {
 
   it('形状非法的候选元素原样抵达 domain（由 domain 报出可诊断的校验错误）', async () => {
     const h = await makeHarness()
-    h.host.submitFail = new WfError('候选必须是对象', ERR_EXPERIENCE_VALIDATION)
+    h.host.submitFail = new WfError('WF_EXPERIENCE_VALIDATION: each candidate must be an object', ERR_EXPERIENCE_VALIDATION)
 
     const failure = await failureOf(execute(h, { experiences: ['不是对象', null], type: 'agent' }))
 
@@ -269,7 +275,7 @@ describe('wf_experience_learn：提交态', () => {
 
   it('未取生成 Prompt 直接提交：透传 WF_EXPERIENCE_NOT_INITIALIZED（消息原样抵达模型），不产生入库结果', async () => {
     const h = await makeHarness()
-    const guidance = '请先调用 wf_experience_learn 并传空 experiences 数组取得生成 Prompt'
+    const guidance = 'WF_EXPERIENCE_NOT_INITIALIZED: fetch the generation prompt first by passing an empty experiences array'
     h.host.submitFail = new WfError(guidance, ERR_EXPERIENCE_NOT_INITIALIZED)
 
     const failure = await failureOf(execute(h, { experiences: [candidate()], type: 'agent' }))
@@ -282,7 +288,7 @@ describe('wf_experience_learn：提交态', () => {
 
   it('语义嵌入不可用（退化 BM25）：透传 WF_EXPERIENCE_EMBEDDING_UNAVAILABLE，不伪装成功', async () => {
     const h = await makeHarness()
-    h.host.submitFail = new WfError('嵌入服务退化到 BM25，未写入任何经验', ERR_EXPERIENCE_EMBEDDING_UNAVAILABLE)
+    h.host.submitFail = new WfError('WF_EXPERIENCE_EMBEDDING_UNAVAILABLE: semantic embedding is unavailable, so nothing was written', ERR_EXPERIENCE_EMBEDDING_UNAVAILABLE)
 
     const failure = await failureOf(execute(h, { experiences: [candidate()], type: 'agent' }))
 

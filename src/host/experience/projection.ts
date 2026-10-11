@@ -11,10 +11,10 @@ import { normalizeWhitespace } from "./constants.js"
 import type { ExperienceSemanticFields } from "./validation.js"
 
 /** 空列表的稳定占位（不因空数组缺行）。 */
-export const PROJECTION_EMPTY_VALUE = "（无）"
+export const PROJECTION_EMPTY_VALUE = "(none)"
 
-/** 列表字段元素之间的固定分隔符。 */
-export const PROJECTION_LIST_SEPARATOR = "；"
+/** 列表字段元素之间的固定分隔符（ASCII：投影文本会原样进入模型上下文）。 */
+export const PROJECTION_LIST_SEPARATOR = "; "
 
 /** 单行 label-value 渲染（值内部换行会被折叠，保证一段一行）。 */
 function line(label: string, value: string): string {

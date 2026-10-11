@@ -8,7 +8,7 @@ import { existsSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { VectorIndex, bm25Search, tokenizeText } from '../../../src/host/embedding/indexer.js'
+import { VectorIndex, SEARCH_TOP_K_MAX, bm25Search, tokenizeText } from '../../../src/host/embedding/indexer.js'
 import { normalizeVector, type EmbeddingEngine } from '../../../src/host/embedding/engine.js'
 
 const cleanups: Array<() => Promise<void>> = []
@@ -219,6 +219,33 @@ describe('VectorIndex 重建与检索', () => {
     }
   })
 
+  it('search 降级上报：查询嵌入失败回退 BM25 时仍标注 source=bm25（通道事实不丢）', async () => {
+    const dir = await tempDir('vw-idx-')
+    const index = new VectorIndex(join(dir, 'idx.json'))
+    await index.rebuild({
+      dataId: 'db-1',
+      records: [
+        { text: '水果 甘甜', source: 't1' },
+        { text: '汽车 轰鸣', source: 't2' },
+      ],
+      engine: fakeEngine(),
+    })
+    // 索引是向量索引，但查询期嵌入失败 → 回退 BM25：通道事实必须如实标注（两个返回点都带 truncated）
+    const failing: EmbeddingEngine = {
+      source: 'local',
+      dimension: 4,
+      async ensureReady() {},
+      async embed() {
+        throw new Error('embed down')
+      },
+      dispose() {},
+    }
+    const result = await index.search('水果', 5, failing)
+    expect(result?.source).toBe('bm25')
+    expect(result?.hits.length).toBeGreaterThan(0)
+    expect(result?.truncated).toBe(false)
+  })
+
   it('search 对 bm25 索引自动走 BM25 打分并标注 source=bm25', async () => {
     const dir = await tempDir('vw-idx-')
     const index = new VectorIndex(join(dir, 'idx.json'))
@@ -235,6 +262,40 @@ describe('VectorIndex 重建与检索', () => {
     expect(result?.source).toBe('bm25')
     expect(result?.hits.length).toBe(2)
     expect(result?.hits[0].text).toContain('北京')
+  })
+
+  it('search 截断上报：请求 topK 超上限且被上限卡住才置 truncated', async () => {
+    const dir = await tempDir('vw-idx-')
+    const index = new VectorIndex(join(dir, 'idx.json'))
+    const records = Array.from({ length: SEARCH_TOP_K_MAX + 10 }, (_, i) => ({ text: `水果 第${i}条 内容`, source: 't1' }))
+    await index.rebuild({ dataId: 'db-1', records, engine: null })
+
+    // 请求超上限、候选足够 → 上限真的卡住了结果
+    const clamped = await index.search('水果', SEARCH_TOP_K_MAX + 50)
+    expect(clamped?.hits).toHaveLength(SEARCH_TOP_K_MAX)
+    expect(clamped?.truncated).toBe(true)
+
+    // 请求在上限内（Top-K 语义）→ 不算截断
+    const within = await index.search('水果', 10)
+    expect(within?.hits).toHaveLength(10)
+    expect(within?.truncated).toBe(false)
+
+    // 请求超上限但命中本来就少 → 不是被上限卡住，不得误报截断
+    const few = await index.search('不存在的词', SEARCH_TOP_K_MAX + 50)
+    expect(few?.hits).toHaveLength(0)
+    expect(few?.truncated).toBe(false)
+  })
+
+  it('search 截断上报：embedding 通道同样按上限判据置 truncated', async () => {
+    const dir = await tempDir('vw-idx-')
+    const index = new VectorIndex(join(dir, 'idx.json'))
+    const records = Array.from({ length: SEARCH_TOP_K_MAX + 10 }, (_, i) => ({ text: `水果 第${i}条 内容`, source: 't1' }))
+    await index.rebuild({ dataId: 'db-1', records, engine: fakeEngine() })
+
+    const clamped = await index.search('水果', SEARCH_TOP_K_MAX + 50, fakeEngine())
+    expect(clamped?.source).toBe('embedding')
+    expect(clamped?.hits).toHaveLength(SEARCH_TOP_K_MAX)
+    expect(clamped?.truncated).toBe(true)
   })
 
   it('search 命中回传 rowKey（记录 → 分块 → 命中）', async () => {

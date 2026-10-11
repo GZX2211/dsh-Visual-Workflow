@@ -1495,6 +1495,12 @@ describe('wf_graph_patch · 工具注册面回归', () => {
     expect(description).not.toContain('rules.patchContract')
     expect(description).not.toContain('submission rules')
     expect(ops).toContain('rules.patchContract')
+    // 契约条款的复述句由 rules.patchContract 单点承载，常驻描述不再重复
+    expect(description).not.toMatch(/ops are grouped/i)
+    expect(description).not.toMatch(/atomic/i)
+    // 但调用相位提示保留：mark_node 只在闸门回合有意义（写图契约不承载「何时调用本工具」）
+    expect(description).toContain('mark group')
+    expect(description).not.toContain('CURRENT milestone gate')
     // 起手可用的最小示例保留（漏写 node 包装 / 端点字段名是历史高频错因）
     expect(ops).toContain('"op": "connect"')
     expect(ops).toContain('"node"')
@@ -1614,6 +1620,69 @@ describe('wf_graph_patch · 参数层契约守卫', () => {
       ops: [{ op: 'connect', source: 's', target: 'a1', condition: { label: '通过' } } as never],
     }), 'WF_BAD_ARGS')
     expect(err.message).toContain('condition.type')
+  })
+
+  it('批次级聚合码与契约一致：全参数层错 → WF_BAD_ARGS；含任一条图语义错 → WF_GRAPH_INVALID', async () => {
+    // 契约 ERROR_CODE_SEMANTICS 写明的取码规则与实现 throwPatchErrors 的聚合行为同源；
+    // 本用例锁定实现侧口径（预设 id 不存在属参数层，未知节点种类属图语义层）。
+    const { host, storeState } = makeHost()
+    storeState.workflows.set('wf-1', makeFlow())
+
+    await expectWfError(() => executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [{ op: 'update_node_data', nodeId: 'a1', data: { presetId: 'combo-does-not-exist' } } as never],
+    }), 'WF_BAD_ARGS')
+
+    const mixed = await expectWfError(() => executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [
+        { op: 'update_node_data', nodeId: 'a1', data: { presetId: 'combo-does-not-exist' } },
+        { op: 'create_node', node: { kind: 'not-a-kind', id: 'bad-1' } },
+      ] as never,
+    }), 'WF_GRAPH_INVALID')
+    expect(mixed.message).toContain('WF_BAD_ARGS') // 每条失败仍带自己的码
+  })
+
+  it('画布字段的提交后果不变：update 剥离传入值并保留节点现值（G1 只删提示文本）', async () => {
+    // G1 只删契约提示文本，不改变校验与剥离行为（PARENT_UNCONFIGURABLE_ROLE_FIELDS 语义冻结）；
+    // 单元级剥离行为由 apply.test.ts 覆盖，此处锁定工具全路径仍不把画布字段写进画布。
+    const { host, storeState } = makeHost()
+    storeState.templates.set('tpl-canvas-1', {
+      id: 'tpl-canvas-1',
+      name: '画布字段探针',
+      mode: 'mode1',
+      revision: 0,
+      nodes: [stageNode('s', 'start'), roleNode('a1'), stageNode('e', 'end')],
+      lines: [flowLine('l1', 's', 'a1'), flowLine('l2', 'a1', 'e')],
+    } as never)
+
+    const nodeOf = (id: string) => (storeState.templates.get('tpl-canvas-1') as { nodes: Array<{ id: string; data: Record<string, unknown> }> }).nodes.find((node) => node.id === id)!
+    const before = { ...nodeOf('a1').data }
+
+    // update：传入画布字段被剥离，节点现值一律不被覆盖
+    await executeGraphPatch(host, 'session-1', {
+      scope: 'template',
+      targetId: 'tpl-canvas-1',
+      ops: [{
+        op: 'update_node_data',
+        nodeId: 'a1',
+        data: { label: '改后标签', retryLimit: 9, promptFilePath: 'D:/x.md', injectSystemPrompt: false, injectToolSections: true, sourceAssetId: 'asset-x' },
+      }] as never,
+    })
+    const after = nodeOf('a1').data
+    expect(after.label).toBe('改后标签')
+    // 补丁传入值与现值可区分，故「保持现值」可证剥离确实生效
+    expect(before.retryLimit).not.toBe(9)
+    expect(after.retryLimit).toBe(before.retryLimit)
+    expect(after.reactLimit).toBe(before.reactLimit)
+    // 现值缺失的两个开关：归一化后回到系统默认，而非补丁想要的值
+    expect(after.injectSystemPrompt).toBe(true)
+    expect(after.injectToolSections).toBe(true)
+    // 节点现值没有的键不得被补丁创建出来
+    expect(after).not.toHaveProperty('promptFilePath')
+    expect(after).not.toHaveProperty('sourceAssetId')
   })
 
   it('set_group_members 缺 memberIds：WF_BAD_ARGS（不再静默清空全组成员）', async () => {

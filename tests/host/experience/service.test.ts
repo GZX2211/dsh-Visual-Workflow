@@ -17,7 +17,7 @@ import {
   ERR_EXPERIENCE_VALIDATION,
   ERR_EXPERIENCE_WRONG_TYPE,
 } from "../../../src/host/shared/protocol.js"
-import { buildRecallSummary, buildRetrievalProjection } from "../../../src/host/experience/projection.js"
+import { buildRecallSummary, buildRetrievalProjection, PROJECTION_EMPTY_VALUE } from "../../../src/host/experience/projection.js"
 import { CANDIDATE_POOL_SIZE, MAX_RECALL_IDS, NEUTRAL_STATS, TRUST_ADJUSTMENT_BETA } from "../../../src/host/experience/constants.js"
 import type { ExperienceCaller } from "../../../src/host/experience/ports.js"
 import { ExperienceService } from "../../../src/host/experience/service.js"
@@ -267,7 +267,7 @@ describe("ExperienceService.submit 事务边界与 provenance", () => {
 
   it("test_嵌入降级且带原因_拒绝写入并回显原因", async () => {
     const world = createExperienceWorld({ embeddingSource: "bm25" })
-    world.embedding.degradeReason = "本地嵌入模型资产缺失：/nope"
+    world.embedding.degradeReason = "local embedding model asset missing: /nope"
     seedPrompts(world)
     const { service } = createService(world)
     await service.initializePrompt({ caller: ROOT_CALLER, type: "agent" })
@@ -275,7 +275,7 @@ describe("ExperienceService.submit 事务边界与 provenance", () => {
     const error = await errorOf(() => service.submit({ caller: ROOT_CALLER, type: "agent", candidates: [createCandidatePayload()] }))
 
     expect(error.code).toBe(ERR_EXPERIENCE_EMBEDDING_UNAVAILABLE)
-    expect(error.message).toContain("本地嵌入模型资产缺失：/nope")
+    expect(error.message).toContain("local embedding model asset missing: /nope")
     expect(world.entries.size).toBe(0)
   })
 
@@ -300,7 +300,7 @@ describe("ExperienceService.submit 事务边界与 provenance", () => {
   it("test_嵌入调用抛错_拒绝写入", async () => {
     const world = createExperienceWorld({
       embed: async () => {
-        throw new Error("外部嵌入端点不可用")
+        throw new Error("external embedding endpoint unavailable")
       },
     })
     seedPrompts(world)
@@ -627,20 +627,20 @@ describe("ExperienceService.recall", () => {
   it("test_检索通道不可用_返回 WF_EXPERIENCE_RECALL_FAILED", async () => {
     const world = seedRecallWorld()
     world.store.listActiveEmbeddings = async () => {
-      throw new Error("经验库读取失败")
+      throw new Error("experience store read failed")
     }
     const { service } = createService(world)
 
     const error = await errorOf(() => service.recall({ caller: ROOT_CALLER, type: "agent", query: "并行启动" }))
 
     expect(error.code).toBe(ERR_EXPERIENCE_RECALL_FAILED)
-    expect(error.message.includes("经验库读取失败")).toBe(true)
+    expect(error.message.includes("experience store read failed")).toBe(true)
   })
 
   it("test_按 id 阶段读取失败_同样返回 WF_EXPERIENCE_RECALL_FAILED", async () => {
     const world = seedRecallWorld()
     world.store.getRows = async () => {
-      throw new Error("经验库读取失败")
+      throw new Error("experience store read failed")
     }
     const { service } = createService(world)
 
@@ -673,7 +673,7 @@ describe("ExperienceService.update", () => {
     const updated = await service.update({ experienceId: "ex-1", patch: { exclusions: null } })
 
     expect(updated.exclusions).toEqual([])
-    expect(world.lastUpdate?.next.decisionRetrievalText.includes("exclusions: （无）")).toBe(true)
+    expect(world.lastUpdate?.next.decisionRetrievalText.includes(`exclusions: ${PROJECTION_EMPTY_VALUE}`)).toBe(true)
   })
 
   it("test_嵌入不可用_拒绝保存且不落库", async () => {

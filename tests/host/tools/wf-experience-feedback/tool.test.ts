@@ -15,6 +15,7 @@ import {
 import { WfError } from '../../../../src/host/orchestrator/index.js'
 import { EVALUATION_EVIDENCE_LIMIT, MAX_EVALUATIONS_PER_CALL, renderAnchorGlossary } from '../../../../src/host/experience/index.js'
 import { registerWfExperienceFeedback } from '../../../../src/host/tools/wf-experience-feedback/tool.js'
+import { modelFacingProblemOf } from '../../experience/fixtures/assertions.js'
 import type { JsonSchemaNode } from '../../../../src/host/tools/infrastructure/define-tool.js'
 import {
   childAgent,
@@ -60,8 +61,14 @@ async function execute(h: Harness, args: Record<string, unknown>, agent: unknown
   return await def.execute(args, execOf(agent))
 }
 
+/** 取执行失败的错误（含非 WfError）；WfError 额外校验模型可见面规范（稳定码写进 message + 英文）。 */
 async function failureOf(promise: Promise<unknown>): Promise<unknown> {
-  return await promise.catch((reason: unknown) => reason)
+  const reason = await promise.catch((error: unknown) => error)
+  if (reason instanceof WfError) {
+    const problem = modelFacingProblemOf(reason)
+    if (problem !== null) throw new Error(problem)
+  }
+  return reason
 }
 
 /** 描述里英文字母与空格占比（官方标准英文提示词：英文散文为主，不夹中文说明）。 */
@@ -254,7 +261,7 @@ describe('wf_experience_feedback：提交与映射', () => {
 
   it('test_skipped_逐字透传域层原因且不追加引导语', async () => {
     const h = await makeHarness()
-    const reason = '没有使用的经验，不能评价'
+    const reason = 'an experience that was not used cannot be rated'
     h.host.feedbackAccepted = []
     h.host.feedbackSkipped = [{ experienceId: 'ex-9', reason }]
 
@@ -262,7 +269,7 @@ describe('wf_experience_feedback：提交与映射', () => {
 
     expect(result).toEqual({ accepted: [], skipped: [{ experienceId: 'ex-9', reason }] })
     // 工具层不得补上「先召回再评价」这类引导：跳过是域层的准入结论，不是调用姿势提示
-    expect((result as { skipped: Array<{ reason: string }> }).skipped[0].reason).not.toContain('召回')
+    expect((result as { skipped: Array<{ reason: string }> }).skipped[0].reason).not.toContain('wf_experience_recall')
   })
 
   it('test_子代理调用_透传childId（域层靠它定位所属运行）', async () => {
@@ -490,27 +497,28 @@ describe('wf_experience_feedback：身份与失败语义', () => {
 
   it('test_域层透出的WF_EXPERIENCE_BAD_ARGS_原样透传', async () => {
     const h = await makeHarness()
-    h.host.feedbackFail = new WfError('evaluations 为空', ERR_EXPERIENCE_BAD_ARGS)
+    const domainMessage = 'WF_EXPERIENCE_BAD_ARGS: evaluations must not be empty'
+    h.host.feedbackFail = new WfError(domainMessage, ERR_EXPERIENCE_BAD_ARGS)
 
     const failure = await failureOf(execute(h, { type: 'agent', evaluations: [evaluation()] }))
 
     expect((failure as WfError).code).toBe(ERR_EXPERIENCE_BAD_ARGS)
-    expect((failure as WfError).message).toBe('evaluations 为空')
+    expect((failure as WfError).message).toBe(domainMessage)
   })
 
   it('test_非稳定错误_归一为FEEDBACK_FAILED并保留原始消息', async () => {
     const h = await makeHarness()
-    h.host.feedbackFail = new Error('评价表写入失败：数据库被锁')
+    h.host.feedbackFail = new Error('feedback table write failed: database is locked')
 
     const failure = await failureOf(execute(h, { type: 'agent', evaluations: [evaluation()] }))
 
     expect((failure as WfError).code).toBe(ERR_EXPERIENCE_FEEDBACK_FAILED)
-    expect((failure as WfError).message).toContain('评价表写入失败：数据库被锁')
+    expect((failure as WfError).message).toContain('feedback table write failed: database is locked')
   })
 
   it('test_域层已抛FEEDBACK_FAILED_不再二次包裹', async () => {
     const h = await makeHarness()
-    const message = '评价写入失败：经验本体未被改动，可稍后重试'
+    const message = 'WF_EXPERIENCE_FEEDBACK_FAILED: the evaluation was not written; retry later'
     h.host.feedbackFail = new WfError(message, ERR_EXPERIENCE_FEEDBACK_FAILED)
 
     const failure = await failureOf(execute(h, { type: 'agent', evaluations: [evaluation()] }))

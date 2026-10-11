@@ -724,10 +724,9 @@ export function registerWfGraphPatch(
     // wf_org_catalog 的 rules.patchContract 单点承载（指针在 ops 参数描述里），
     // 常驻文本只保留影响「是否/如何调用本工具」的内容。
     description:
-      'Apply one patch to a workflow template or the running instance; ops are grouped (graph structure | run-state marking) and one patch uses one group. ' +
-      'For a NEW template pass scope=template with create and a complete graph (start + executable units + end); newTemplate=true and the new targetId are returned. ' +
-      'The patch is atomic: if any op fails nothing is persisted, and every failure is reported with its own code. ' +
-      'mark group: mark_node completes the CURRENT milestone gate only (a proxy-driven gate with data.role=milestone).',
+      'Apply one patch to a workflow template or the running instance. ' +
+      'For a NEW template pass scope=template with create and a complete graph (start + executable units + end). ' +
+      'mark group: use mark_node only to complete the current gate of this turn.',
     parameters: {
       scope: { type: 'string', required: true, enum: ['template', 'instance'] as const, description: 'template: plan a reusable workflow template; instance: adjust the current running instance.' },
       targetId: { type: 'string', description: 'Workflow template id (scope=template) or workflow/instance id (scope=instance). Required unless create is given; with create you may omit it to let the server mint a new id.' },

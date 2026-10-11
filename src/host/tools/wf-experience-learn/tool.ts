@@ -106,7 +106,7 @@ export function registerWfExperienceLearn(
       const raw = args?.experiences
       if (!Array.isArray(raw)) {
         throw new WfError(
-          'experiences 必须是候选数组：要取得生成 Prompt 请传空数组；本次没有值得长期保留的经验时不要调用本工具',
+          'WF_EXPERIENCE_BAD_ARGS: experiences must be a candidate array: pass an empty array to fetch the generation prompt, and do not call this tool when this unit of work produced nothing worth keeping',
           ERR_EXPERIENCE_BAD_ARGS,
         )
       }

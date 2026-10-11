@@ -15,6 +15,7 @@ import {
 import { WfError } from '../../../../src/host/orchestrator/index.js'
 import { MAX_RECALL_IDS } from '../../../../src/host/experience/constants.js'
 import { registerWfExperienceRecall } from '../../../../src/host/tools/wf-experience-recall/tool.js'
+import { modelFacingProblemOf } from '../../experience/fixtures/assertions.js'
 import type { JsonSchemaNode } from '../../../../src/host/tools/infrastructure/define-tool.js'
 import {
   childAgent,
@@ -51,8 +52,14 @@ async function execute(h: Harness, args: Record<string, unknown>, agent: unknown
   return await def.execute(args, execOf(agent))
 }
 
+/** 取执行失败的错误（含非 WfError）；WfError 额外校验模型可见面规范（稳定码写进 message + 英文）。 */
 async function failureOf(promise: Promise<unknown>): Promise<unknown> {
-  return await promise.catch((reason: unknown) => reason)
+  const reason = await promise.catch((error: unknown) => error)
+  if (reason instanceof WfError) {
+    const problem = modelFacingProblemOf(reason)
+    if (problem !== null) throw new Error(problem)
+  }
+  return reason
 }
 
 function englishRatio(text: string): number {
@@ -189,7 +196,9 @@ describe('wf_experience_recall：参数与身份校验', () => {
 
     const mixed = await failureOf(execute(h, { type: 'agent', query: 'q', ids: ['ex-1'] }))
     expect((mixed as WfError).code).toBe(ERR_EXPERIENCE_BAD_ARGS)
-    expect((mixed as WfError).message).toContain('两阶段')
+    // 只断言消息指名了两个阶段参数（结构信息），不锁定整句文案
+    expect((mixed as WfError).message).toContain('query')
+    expect((mixed as WfError).message).toContain('ids')
 
     const neither = await failureOf(execute(h, { type: 'agent' }))
     expect((neither as WfError).code).toBe(ERR_EXPERIENCE_BAD_ARGS)
@@ -296,21 +305,22 @@ describe('wf_experience_recall：参数与身份校验', () => {
 describe('wf_experience_recall：失败语义', () => {
   it('domain 抛稳定错误码：原样透传（码与消息都不改写）', async () => {
     const h = await makeHarness()
-    h.host.recallFail = new WfError('经验不存在或已被清理：ex-404', ERR_EXPERIENCE_NOT_FOUND)
+    const domainMessage = 'WF_EXPERIENCE_NOT_FOUND: experience ex-404 does not exist or has been cleaned up'
+    h.host.recallFail = new WfError(domainMessage, ERR_EXPERIENCE_NOT_FOUND)
 
     const failure = await failureOf(execute(h, { type: 'agent', ids: ['ex-404'] }))
 
     expect((failure as WfError).code).toBe(ERR_EXPERIENCE_NOT_FOUND)
-    expect((failure as WfError).message).toBe('经验不存在或已被清理：ex-404')
+    expect((failure as WfError).message).toBe(domainMessage)
   })
 
   it('非稳定错误的检索失败：归一为 WF_EXPERIENCE_RECALL_FAILED 并保留原始消息', async () => {
     const h = await makeHarness()
-    h.host.recallFail = new Error('嵌入索引损坏')
+    h.host.recallFail = new Error('embedding index corrupted')
 
     const failure = await failureOf(execute(h, { type: 'agent', query: 'q' }))
 
     expect((failure as WfError).code).toBe(ERR_EXPERIENCE_RECALL_FAILED)
-    expect((failure as WfError).message).toContain('嵌入索引损坏')
+    expect((failure as WfError).message).toContain('embedding index corrupted')
   })
 })
