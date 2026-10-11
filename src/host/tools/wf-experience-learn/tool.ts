@@ -17,7 +17,7 @@ import { ERR_EXPERIENCE_BAD_ARGS, WF_EXPERIENCE_LEARN } from '../../shared/proto
 import { WfError } from '../../orchestrator/index.js'
 import { experienceCallerOf } from '../infrastructure/caller.js'
 import { defineTool, type ToolDefinitionLike, type ToolExecLike } from '../infrastructure/define-tool.js'
-import { assertExperienceTypeOwnership, parseExperienceType, type WfExperienceHost } from '../infrastructure/experience-contract.js'
+import { EXPERIENCE_TYPE_PARAM_DESCRIPTION, assertExperienceTypeOwnership, parseExperienceType, type WfExperienceHost } from '../infrastructure/experience-contract.js'
 import { textRender } from '../infrastructure/text-render.js'
 import { mapExperienceCandidates } from './apply.js'
 import type { LearnResult } from './types.js'
@@ -83,7 +83,7 @@ export function registerWfExperienceLearn(
         type: 'string',
         enum: ['agent', 'team', 'orchestrator'],
         required: true,
-        description: 'Subject type of the experience: "agent" for an execution subject (including child agents), "team" for a collaboration group, "orchestrator" for the orchestrating parent. A child agent may only pass "agent".',
+        description: EXPERIENCE_TYPE_PARAM_DESCRIPTION,
       },
     },
     output: {

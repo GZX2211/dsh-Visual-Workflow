@@ -220,17 +220,28 @@
 
 运行时：无额外注入（返回体按需：候选摘要或完整条目）。
 
-### 7.2 按现行标准应移出（待裁决）
+### 7.2 已按用户裁决执行（2026-10-11）
 
-| # | 内容 | 位置 | 为什么不常驻 |
-|---|---|---|---|
-| R1 | `A candidate score is semantic relevance adjusted by a bounded trust correction of at most ±20%; trust can never outweigh relevance, …` 里的 **±20%** | description | **内部算法权重**，模型不需要知道（与「硬上限不让模型知晓」同一原则）；保留「优先选更相关而非高信任但弱相关」的行为指引即可 |
-| R2 | `the ranking is never recalculated here` | description | 内部实现说明，不影响调用 |
-| R3 | `or more than ${MAX_RECALL_IDS} ids in the second stage` | description | **硬上限**（50，来自 `MAX_RECALL_IDS`）不应出现在模型可见面；超限时 `recallIdsLimitProblem` 已返回可行动错误 |
-| R4 | `type` 参数说明（217 字符）与 `learn`(206) / `feedback`(221) 的同一参数**三处措辞各写一遍** | parameters | 跨工具重复且措辞漂移；建议统一为同一常量措辞 |
-| R5 | `After you use recalled experiences, rate them with wf_experience_feedback in the final completion stage …` | description | 与 `feedback` 自身的描述重复（工具间导航，可保留一句更短的） |
+| # | 项 | 处置 |
+|---|---|---|
+| R1 | 候选得分句里的 `of at most ±20%` | **删除**（内部信任权重不进模型可见面）；保留「信任不压过相关度、优先选更相关」的行为指引 |
+| R2 | `the ranking is never recalculated here` | **删除**（内部实现说明） |
+| R3 | `or more than ${MAX_RECALL_IDS} ids in the second stage` | **保留**（用户裁决：与 learn 的字符上限不同——这里没有别处写过数量上限，模型需要知道 ids 的单次上限） |
+| R4 | `type` 参数说明三工具各写一遍 | **提升为共享常量** `EXPERIENCE_TYPE_PARAM_DESCRIPTION`（`infrastructure/experience-contract.ts`），learn / recall / feedback 三处引用，消除措辞漂移 |
+| R5 | `, the wrap-up stage shared with wf_experience_learn` | **删除** |
+| — | `Use wf_org_catalog instead to survey reusable organization assets …` 整句 | **删除**（用户裁决：工具分工信息不属于本工具常驻面） |
+| — | `Content is never modified and the ranking is never recalculated here.` | **删除** |
+| — | 阶段句与两段式句 | **合并**为用户给定表述（"Recall happens at the start of a task or while it is running. It is a two-stage call: query returns ranked candidate summaries [{id, score, summary, source}], then ids returns the full experience entries."） |
 
-> 附带：`output.schema` 的说明里也有 `bounded trust correction`（native 不注入，优先级最低）。
+**结果**：recall 常驻 2619→**2167** 字符（description 1730→1307、params 889→860）≈ **655→542 tokens**（−113）；learn 与 feedback 的 `type` 说明同步统一（learn 3587、feedback 1193）。
+
+### 7.5 待裁决：`source` 句是否有指导价值
+
+现句：`source is "semantic" for embedding search or "bm25" for the lexical fallback.`
+
+- **它确实携带可行动信息**：`bm25` 表示嵌入模型不可用、走了词法降级 → 语义召回能力下降，模型不应把「没召回 = 没有相关经验」当成结论，可换更贴近原文的关键词再试一次。
+- **但当前措辞只解释字段含义，没有给出「见到 bm25 该怎么做」**，所以从模型侧看更像字段说明而非操作指引。
+- 两个方向（待用户裁决）：**①保留并补一句行动指引**（把"含义"升级为"行动"）；**②删除整句**（若认为模型无需据此调整行为）。
 
 ### 7.3 复核确认保留（影响调用）
 

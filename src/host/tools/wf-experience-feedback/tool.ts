@@ -20,7 +20,7 @@ import { ERR_EXPERIENCE_FEEDBACK_FAILED, WF_EXPERIENCE_FEEDBACK } from '../../sh
 import { WfError, messageOf } from '../../orchestrator/index.js'
 import { experienceCallerOf } from '../infrastructure/caller.js'
 import { defineTool, type ToolDefinitionLike, type ToolExecLike } from '../infrastructure/define-tool.js'
-import { assertExperienceTypeOwnership, parseExperienceType, type WfExperienceHost } from '../infrastructure/experience-contract.js'
+import { EXPERIENCE_TYPE_PARAM_DESCRIPTION, assertExperienceTypeOwnership, parseExperienceType, type WfExperienceHost } from '../infrastructure/experience-contract.js'
 import { textRender } from '../infrastructure/text-render.js'
 import { parseFeedbackEvaluations, projectFeedbackResult } from './apply.js'
 import type { FeedbackResult } from './types.js'
@@ -52,7 +52,7 @@ export function registerWfExperienceFeedback(
         type: 'string',
         enum: ['agent', 'team', 'orchestrator'],
         required: true,
-        description: 'Subject type whose experiences you are rating: "agent" for an execution subject (including child agents), "team" for a collaboration group, "orchestrator" for the orchestrating parent. A child agent may only pass "agent".',
+        description: EXPERIENCE_TYPE_PARAM_DESCRIPTION,
       },
       evaluations: {
         type: 'array',

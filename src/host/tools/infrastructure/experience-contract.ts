@@ -57,6 +57,14 @@ const EXPERIENCE_TYPE_NOTE: Record<ExperienceType, string> = {
   orchestrator: '编排父代理完成组织任务后的组织经验',
 }
 
+/**
+ * 经验三工具共用的 subject type 参数说明（措辞单一来源）。
+ * 为什么提升到基础设施层：learn / recall / feedback 各写一遍必然出现措辞漂移，
+ * 而三者描述的是同一个取值域与同一条「子代理只能 agent」的工具层事实。
+ */
+export const EXPERIENCE_TYPE_PARAM_DESCRIPTION =
+  'Subject type: "agent" for an execution subject (including child agents), "team" for a collaboration group, "orchestrator" for the orchestrating parent. A child agent may only pass "agent".'
+
 /** 解析并收窄模型侧 type 参数；未知取值抛 WF_EXPERIENCE_BAD_ARGS（消息给出合法取值）。 */
 export function parseExperienceType(raw: unknown): ExperienceType {
   if (typeof raw === 'string' && Object.hasOwn(EXPERIENCE_TYPE_NOTE, raw)) return raw as ExperienceType

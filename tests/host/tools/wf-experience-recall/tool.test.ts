@@ -87,13 +87,12 @@ describe('wf_experience_recall：注册与 schema', () => {
     expect(schema.required).toBeUndefined()
   })
 
-  it('description 为官方标准英文，说明阶段分工、有界信任修正与使用事实副作用', async () => {
+  it('description 为官方标准英文，说明阶段分工、候选排序与使用事实副作用', async () => {
     const h = await makeHarness()
     const description = h.tools.definitions.get(WF_EXPERIENCE_RECALL)!.description
     expect(description.length).toBeGreaterThan(200)
     expect(description).not.toMatch(/[\u4e00-\u9fff]/)
     expect(englishRatio(description)).toBeGreaterThan(0.85)
-    expect(description).toContain('wf_org_catalog')
     for (const code of [ERR_EXPERIENCE_WRONG_TYPE, ERR_EXPERIENCE_BAD_ARGS, ERR_EXPERIENCE_RECALL_FAILED]) {
       expect(description).toContain(code)
     }
@@ -101,11 +100,12 @@ describe('wf_experience_recall：注册与 schema', () => {
     expect(description).toContain('at the start of a task or while it is running')
     expect(description).toContain('final completion stage')
     expect(description).toContain('wf_experience_feedback')
-    expect(description).toContain('wf_experience_learn')
-    // 候选得分是「语义相关性 × 有界信任修正」，影响幅度有上限
-    expect(description).toContain('semantic relevance')
+    // 候选排序指引保留；内部信任修正幅度（±20%）不进模型可见面
+    expect(description).toContain('relevance')
     expect(description).toContain('trust')
-    expect(description).toContain('20%')
+    expect(description).not.toContain('20%')
+    // 工具分工说明已移出常驻面（属工具选择信息，由各工具自身描述承载）
+    expect(description).not.toContain('wf_org_catalog')
     // ids 阶段会记录「这些经验被使用过」这一事实（副作用不得被描述成完全只读）
     expect(description).toContain('count as used')
   })
