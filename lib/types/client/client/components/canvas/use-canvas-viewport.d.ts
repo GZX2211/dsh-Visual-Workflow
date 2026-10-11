@@ -4,11 +4,6 @@ export interface CanvasApi {
         padding?: number;
         nodes?: CanvasNode[];
     }): void;
-    focusNode(id: string, options?: {
-        zoom?: number;
-    }): void;
-    zoomIn(): void;
-    zoomOut(): void;
     screenToWorld(clientX: number, clientY: number): {
         x: number;
         y: number;

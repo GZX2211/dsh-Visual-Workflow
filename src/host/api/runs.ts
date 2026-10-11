@@ -1,13 +1,12 @@
 // src/host/api/runs.ts
 //
 // GUI API 运行、数据库与导入导出端点组（RunEndpoints）：运行启停/状态/历史/断点续跑、
-// 数据库连接测试/表结构/检索预览、v2 bundle 导入导出与角色模板往返（导入导出领域
-// 逻辑归 transfer 模块，端点只做参数校验与响应映射）。
+// 数据库连接测试、v2 bundle 导入导出与角色模板往返（导入导出领域逻辑归 transfer 模块，
+// 端点只做参数校验与响应映射）。
 
 import type { DatabaseNode } from '../shared/graph-model.js'
 import { findResumableRun } from '../orchestrator/index.js'
-import { buildIndexForDatabase, createDatabaseDriver, indexPathOf, testDatabaseConnection } from '../tools/index.js'
-import { VectorIndex } from '../embedding/indexer.js'
+import { testDatabaseConnection } from '../tools/index.js'
 import { exportAgentTemplate, exportWorkflowBundle, importAgentTemplate, importWorkflowBundle } from '../transfer/bundle.js'
 import { httpError } from './http.js'
 import { presentationOf, VisualWorkflowApiBase } from './boundary.js'
@@ -107,40 +106,6 @@ export class RunEndpoints extends VisualWorkflowApiBase {
     return testDatabaseConnection(node)
   }
 
-  /** 表结构预览（只读）。 */
-  async dbSchema(args: { node?: unknown }): Promise<unknown> {
-    const node = args?.node as DatabaseNode | null | undefined
-    if (!node || node.kind !== 'database') throw httpError(400, 'requires a database node')
-    const driver = createDatabaseDriver(node)
-    try {
-      return await driver.schema()
-    } finally {
-      driver.close()
-    }
-  }
-
-  /**
-   * 检索预览：命中索引直接检索；索引缺失或 rebuild=true 时先构建（本地库）。
-   * 嵌入不可用时索引自动落 BM25（结果标注 source）。
-   */
-  async dbSearchPreview(args: { dataId?: unknown; query?: unknown; topK?: unknown; node?: unknown; rebuild?: unknown }): Promise<unknown> {
-    const dataId = String(args?.dataId ?? '')
-    const query = String(args?.query ?? '').trim()
-    if (!dataId) throw httpError(400, 'requires dataId')
-    const node = args?.node as DatabaseNode | null | undefined
-    const vectorOptions = node?.data?.vectorOptions
-    const topK = Number(args?.topK ?? 5) || Number(vectorOptions?.topK) || 5
-    const index = new VectorIndex(indexPathOf(this.host.dataDir, dataId))
-    if (args?.rebuild === true || (await index.load()) === null) {
-      if (!node || node.kind !== 'database') {
-        throw httpError(422, presentationOf(this.host, '索引不存在且未提供数据库节点，无法构建', 'The index does not exist and no database node was provided; cannot build'))
-      }
-      await buildIndexForDatabase(this.host.dataDir, node, this.host.engine)
-    }
-    if (!query) return { dataId, hits: [] }
-    const result = await index.search(query, topK, this.host.engine, { threshold: Number(vectorOptions?.scoreThreshold) || 0 })
-    return { dataId, ...(result ?? { hits: [] }) }
-  }
   // ---------- 导入导出（v2 bundle） ----------
 
   async exportWorkflow(args: { sessionId?: unknown; id?: unknown }): Promise<unknown> {

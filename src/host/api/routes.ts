@@ -30,6 +30,7 @@ import { ExperienceEndpoints } from './experiences.js'
 import { EcosystemEndpoints } from './ecosystem.js'
 import { CatalogEndpoints } from './catalog.js'
 import { RunEndpoints } from './runs.js'
+import { RuntimeEndpoints } from './runtime.js'
 import { SchedulerEndpoints } from './scheduler.js'
 
 /** GUI API 最终类：全部端点方法由端点组汇聚（端点白名单由共享协议常量派生）。 */
@@ -43,6 +44,7 @@ mixInEndpointGroups(VisualWorkflowApi, [
   EcosystemEndpoints,
   CatalogEndpoints,
   RunEndpoints,
+  RuntimeEndpoints,
   SchedulerEndpoints,
 ])
 

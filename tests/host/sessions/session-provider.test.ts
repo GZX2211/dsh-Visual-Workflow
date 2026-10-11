@@ -70,7 +70,7 @@ describe('CordisSessionProvider.createSession 预设装配', () => {
     const presets = fakePresets({ id: 'standard' })
     const provider = new CordisSessionProvider(fakeCtx({ agents: agents.service, agentPresets: presets.service }))
 
-    const sessionId = await provider.createSession({ label: '工作流：测试', agentPreset: 'standard', cwd: 'D:\\work' })
+    const sessionId = await provider.createSession({ agentPreset: 'standard', cwd: 'D:\\work' })
 
     expect(sessionId).toMatch(/^sched-[0-9a-f]{16}$/)
     expect(presets.calls.resolve).toEqual(['standard'])
@@ -95,7 +95,7 @@ describe('CordisSessionProvider.createSession 预设装配', () => {
     const presets = fakePresets({ id: 'standard' })
     const provider = new CordisSessionProvider(fakeCtx({ agents: agents.service, agentPresets: presets.service }))
 
-    await provider.createSession({ label: '定时任务：x' })
+    await provider.createSession({})
     expect(presets.calls.resolve).toEqual(['standard'])
     expect(agents.calls[0].meta?.agentPreset).toBe('standard')
   })
@@ -104,7 +104,7 @@ describe('CordisSessionProvider.createSession 预设装配', () => {
     const agents = fakeAgents()
     const provider = new CordisSessionProvider(fakeCtx({ agents: agents.service }))
 
-    await provider.createSession({ label: '无预设部署', cwd: 'D:\\work' })
+    await provider.createSession({ cwd: 'D:\\work' })
 
     const createCall = agents.calls[0]
     expect(createCall.setup).toBeUndefined()
@@ -115,7 +115,7 @@ describe('CordisSessionProvider.createSession 预设装配', () => {
   it('agents 服务缺失：抛出明确错误', async () => {
     const provider = new CordisSessionProvider(fakeCtx({}))
     await expect(
-      provider.createSession({ label: 'x', agentPreset: 'standard' }),
+      provider.createSession({ agentPreset: 'standard' }),
     ).rejects.toThrow(/agents 服务不支持创建会话/)
   })
 })

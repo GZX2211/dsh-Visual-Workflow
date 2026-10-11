@@ -33,16 +33,6 @@ export class TemplateEndpoints extends VisualWorkflowApiBase {
     return this.host.store.saveTemplate(kind as 'role' | 'file' | 'database' | 'group', { ...template } as never)
   }
 
-  /** 删除预览：模板与画布节点深拷贝解耦，删除模板不影响任何已有节点。 */
-  async deleteTemplatePreview(args: { kind?: unknown; id?: unknown }): Promise<unknown> {
-    const kind = String(args?.kind ?? '')
-    if (kind !== 'role' && kind !== 'file' && kind !== 'database' && kind !== 'group') {
-      throw httpError(400, 'requires kind: role|file|database|group')
-    }
-    if (!String(args?.id ?? '').trim()) throw httpError(400, 'requires a template id')
-    return { affectedNodes: 0, detached: true }
-  }
-
   async deleteTemplate(args: { kind?: unknown; id?: unknown }): Promise<unknown> {
     const kind = String(args?.kind ?? '')
     const id = String(args?.id ?? '')

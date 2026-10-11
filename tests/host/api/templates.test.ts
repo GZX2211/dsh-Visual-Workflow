@@ -1,7 +1,7 @@
 // tests/host/api/templates.test.ts
 //
 // 模板与工作流模板端点的边界职责（api/templates.ts）：kind 参数校验（400）、
-// 删除 404、revision 乐观锁（409）、删除预览的解耦语义。
+// 删除 404、revision 乐观锁（409）。
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanupAll, makeHarness } from './fixtures/api-harness.js'
@@ -9,7 +9,7 @@ import { cleanupAll, makeHarness } from './fixtures/api-harness.js'
 afterEach(cleanupAll)
 
 describe('模板端点（角色/文件/数据库）', () => {
-  it('模板 CRUD 与删除预览（解耦语义：受影响节点恒为 0）', async () => {
+  it('模板 CRUD：kind 校验 400、保存/列表往返、删除 404', async () => {
     const h = await makeHarness()
     await expect(h.api.handle('listTemplates', { kind: 'bad' })).rejects.toMatchObject({ status: 400 })
     const saved = (await h.api.handle('putTemplate', {
@@ -19,9 +19,6 @@ describe('模板端点（角色/文件/数据库）', () => {
     expect(saved.id).toBe('role-1')
     const list = (await h.api.handle('listTemplates', { kind: 'role' })) as unknown[]
     expect(list).toHaveLength(1)
-
-    const preview = await h.api.handle('deleteTemplatePreview', { kind: 'role', id: 'role-1' })
-    expect(preview).toEqual({ affectedNodes: 0, detached: true })
 
     const deleted = await h.api.handle('deleteTemplate', { kind: 'role', id: 'role-1' })
     expect(deleted).toEqual({ deleted: true })

@@ -1,17 +1,16 @@
 // src/host/api/ecosystem.ts
 //
-// GUI API 生态枚举端点组（EcosystemEndpoints）：agent preset 模式 / 全局可见工具 /
-// 可选模型（含思考强度档位）。
+// GUI API 生态枚举端点组（EcosystemEndpoints）：agent preset 模式 / 可选模型
+// （含思考强度档位）。
 //
 // preset 与模型的官方服务投影归 host 根横切契约（../ecosystem-directory.js）：
 // 同一批官方能力也被自主编排勘察工具消费，两处不得各建一份结构守卫与字段映射。
 
-import { RESERVED_TRANSPORT_TOOL } from '../shared/protocol.js'
 import { listAgentPresets, listEcosystemModels } from '../ecosystem-directory.js'
 import { presentationOf, VisualWorkflowApiBase } from './boundary.js'
 
 export class EcosystemEndpoints extends VisualWorkflowApiBase {
-  // ---------- 生态枚举（presets / tools / models） ----------
+  // ---------- 生态枚举（presets / models） ----------
 
   /** agent preset 模式列表（agentPresets 服务缺失时返回空列表）。 */
   async presets(): Promise<unknown> {
@@ -20,24 +19,6 @@ export class EcosystemEndpoints extends VisualWorkflowApiBase {
       throw new Error(presentationOf(this.host, `preset 列表读取失败：${detail}`, `Failed to read the preset list: ${detail}`))
     })
     return presets ?? []
-  }
-
-  /** 全局层可见工具清单（供组合勾选）。 */
-  async tools(): Promise<unknown> {
-    const tools = this.ctx.get('tools') as { schemas?: (scope?: unknown) => unknown } | null | undefined
-    if (!tools || typeof tools.schemas !== 'function') return []
-    try {
-      const schemas = (tools.schemas() ?? []) as unknown[]
-      return (Array.isArray(schemas) ? schemas : [])
-        .map((schema) => {
-          const entry = schema as { name?: unknown; title?: unknown; description?: unknown }
-          return { name: entry.name ?? entry.title ?? '', description: entry.description ?? '' }
-        })
-        .filter((item) => item.name && item.name !== RESERVED_TRANSPORT_TOOL)
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error)
-      throw new Error(presentationOf(this.host, `工具清单读取失败：${detail}`, `Failed to read the tool list: ${detail}`))
-    }
   }
 
   /** 可选模型列表（llm 服务缺失返回空列表；单 provider 失败跳过）。 */

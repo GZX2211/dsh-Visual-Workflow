@@ -3,12 +3,10 @@ import type { Context } from '@deepseek-ai/cordis';
 export interface SessionProvider {
     /**
      * 创建新会话（含根 Agent）并返回会话 id。
-     * @param options.label 会话来源标识（写入用途说明；元信息可追溯）
      * @param options.agentPreset 官方预设 id（缺省 standard：父代理具备官方标准工具集）
      * @param options.cwd 可选工作目录（继承创建者会话；解析不到时省略）
      */
     createSession(options: {
-        label: string;
         agentPreset?: string;
         cwd?: string;
     }): Promise<string>;
@@ -18,7 +16,6 @@ export declare class CordisSessionProvider implements SessionProvider {
     private readonly ctx;
     constructor(ctx: Context);
     createSession(options: {
-        label: string;
         agentPreset?: string;
         cwd?: string;
     }): Promise<string>;

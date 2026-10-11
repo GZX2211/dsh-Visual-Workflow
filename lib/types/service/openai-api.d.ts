@@ -33,7 +33,6 @@ export interface OpenAiApiDeps {
      * 缺省时回退 resolveSession（现有复用会话语义）。
      */
     createSession?(options: {
-        label: string;
         agentPreset?: string;
         cwd?: string;
     }): Promise<string>;

@@ -37,7 +37,6 @@ export function createInitialState(sessionId: string): StudioState {
     templates: { role: [], file: [], database: [], group: [] },
     combos: [],
     presets: [],
-    tools: [],
     models: [],
     currentId: null,
     currentKind: null,

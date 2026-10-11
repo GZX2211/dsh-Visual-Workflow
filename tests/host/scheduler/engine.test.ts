@@ -117,9 +117,9 @@ class FakeOrchestrator implements SchedulerOrchestrator {
 
 /** 会话提供 fake：记录创建调用；可注入失败。 */
 class FakeSessionProvider {
-  created: Array<{ label: string; agentPreset?: string; cwd?: string }> = []
+  created: Array<{ agentPreset?: string; cwd?: string }> = []
   fail: unknown = null
-  async createSession(options: { label: string; agentPreset?: string; cwd?: string }): Promise<string> {
+  async createSession(options: { agentPreset?: string; cwd?: string }): Promise<string> {
     if (this.fail) throw this.fail instanceof Error ? this.fail : new Error(String(this.fail))
     this.created.push(options)
     return `sched-${this.created.length}`
@@ -165,7 +165,7 @@ describe('调度引擎', () => {
     const h = await makeHarness(makeTask())
     await h.engine.sweep()
     expect(h.sessions.created).toHaveLength(1)
-    expect(h.sessions.created[0]).toMatchObject({ label: '定时任务：测试任务', agentPreset: 'standard' })
+    expect(h.sessions.created[0]).toMatchObject({ agentPreset: 'standard' })
     expect(h.orche.startCalls).toHaveLength(1)
     const start = h.orche.startCalls[0]
     expect(start.sessionId).toBe('sched-1')

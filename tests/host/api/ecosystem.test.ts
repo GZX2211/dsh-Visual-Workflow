@@ -25,10 +25,9 @@ afterEach(async () => {
 })
 
 describe('生态端点', () => {
-  it('presets/tools/models：fake 服务解析；缺失返回空', async () => {
+  it('presets/models：fake 服务解析；缺失返回空', async () => {
     const h = await makeHarness()
     expect(await h.api.handle('presets', {})).toEqual([])
-    expect(await h.api.handle('tools', {})).toEqual([])
     expect(await h.api.handle('models', {})).toEqual([])
 
     h.ctx.services.set('agentPresets', {
@@ -41,12 +40,6 @@ describe('生态端点', () => {
     const presets = (await h.api.handle('presets', {})) as Array<{ id?: string }>
     expect(presets).toHaveLength(1)
     expect(presets[0].id).toBe('standard')
-
-    h.ctx.services.set('tools', {
-      schemas: () => [{ name: 'read', description: 'Read a file.' }, { title: 'write' }],
-    })
-    const tools = (await h.api.handle('tools', {})) as Array<{ name?: string }>
-    expect(tools.map((t) => t.name).sort()).toEqual(['read', 'write'])
 
     h.ctx.services.set('llm', {
       listProviders: () => ['p1'],

@@ -13,12 +13,16 @@ import { cleanupAll, cleanups, makeFlow, makeHarness } from './fixtures/api-harn
 afterEach(cleanupAll)
 
 describe('工作流端点', () => {
-  it('create/list/get/put/delete 全链路；参数缺失 400、不存在 404', async () => {
+  it('put/list/get/delete 全链路；参数缺失 400、不存在 404', async () => {
     const h = await makeHarness()
     // 工作台全局化：listWorkflows 无 sessionId = 列出全部会话实例（不再 400）
     expect((await h.api.handle('listWorkflows', {})) as unknown[]).toHaveLength(0)
-    const created = (await h.api.handle('createWorkflow', { sessionId: 'session-1', name: '新流程' })) as WorkflowDocument
-    expect(created.id).toBeTruthy()
+    // 创建 = putWorkflow 落新文档（id 由前端生成；createWorkflow 端点已退役）
+    const created = (await h.api.handle('putWorkflow', {
+      sessionId: 'session-1',
+      flow: { ...makeFlow(), id: 'flow-new-1', name: '新流程', revision: 0 },
+    })) as WorkflowDocument
+    expect(created.id).toBe('flow-new-1')
     expect(created.name).toBe('新流程')
 
     const list = (await h.api.handle('listWorkflows', { sessionId: 'session-1' })) as WorkflowDocument[]
@@ -64,27 +68,34 @@ describe('工作流端点', () => {
 
   it('createSession：「开启新会话」一次性动作——显式工作区校验直传 / 缺省继承创建者 cwd / 能力缺失 501', async () => {
     const h = await makeHarness()
-    const calls: Array<{ label: string; agentPreset?: string; cwd?: string }> = []
+    const calls: Array<{ agentPreset?: string; cwd?: string }> = []
     h.host.sessionProvider = {
       async createSession(options) {
         calls.push(options)
         return 'session-new-1'
       },
     }
-    // 显式工作区 → 校验存在为目录并直传（agentPreset=standard，标签可追溯）
+    // 显式工作区 → 校验存在为目录并直传（agentPreset=standard）
     const ws = await mkdtemp(join(tmpdir(), 'vw-sess-ws-'))
     cleanups.push(() => rm(ws, { recursive: true, force: true }))
     const created = (await h.api.handle('createSession', {
       sessionId: 'session-1',
       workspacePath: ws,
-      label: '工作流实例：测试模板',
     })) as { sessionId?: unknown }
     expect(created.sessionId).toBe('session-new-1')
-    expect(calls[0]).toMatchObject({ cwd: ws, agentPreset: 'standard', label: '工作流实例：测试模板' })
+    expect(calls[0]).toMatchObject({ cwd: ws, agentPreset: 'standard' })
+    // label 已从端点契约退役：请求体携带旧字段也不得流入能力缝（旧客户端向后兼容）
+    const legacy = (await h.api.handle('createSession', {
+      sessionId: 'session-1',
+      workspacePath: ws,
+      label: '工作流实例：测试模板',
+    })) as { sessionId?: unknown }
+    expect(legacy.sessionId).toBe('session-new-1')
+    expect(calls[1]).not.toHaveProperty('label')
     // 缺省工作区 → 继承创建者会话 cwd（sessionCwdOf 解析）
     h.host.sessionCwdOf = async () => 'D:\\work\\owner'
     await h.api.handle('createSession', { sessionId: 'session-1' })
-    expect(calls[1]?.cwd).toBe('D:\\work\\owner')
+    expect(calls[2]?.cwd).toBe('D:\\work\\owner')
     // 不存在的显式路径 → 400
     await expect(
       h.api.handle('createSession', { sessionId: 'session-1', workspacePath: 'D:\\no-such-dir-xyz\\abc' }),

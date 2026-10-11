@@ -385,7 +385,6 @@ export declare const zh: {
     overwriteInstanceConfirm: string;
     toastInstanceOverwritten: string;
     toastServiceRunningCannotOverwrite: string;
-    sessionLabelWorkflowPrefix: string;
     combos: string;
     comboManager: string;
     comboTabDsh: string;

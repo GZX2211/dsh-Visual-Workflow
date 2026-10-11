@@ -7,11 +7,6 @@ export declare class TemplateEndpoints extends VisualWorkflowApiBase {
         kind?: unknown;
         template?: unknown;
     }): Promise<unknown>;
-    /** 删除预览：模板与画布节点深拷贝解耦，删除模板不影响任何已有节点。 */
-    deleteTemplatePreview(args: {
-        kind?: unknown;
-        id?: unknown;
-    }): Promise<unknown>;
     deleteTemplate(args: {
         kind?: unknown;
         id?: unknown;

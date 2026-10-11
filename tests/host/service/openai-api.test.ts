@@ -125,7 +125,7 @@ describe('OpenAiApi.runChat', () => {
     }
     // 断点存在也不续跑（新会话模式每请求全新会话）
     h.store.runs.push(pausedRun('run-old'))
-    const created: Array<{ label?: string; cwd?: string }> = []
+    const created: Array<{ cwd?: string }> = []
     const api = new OpenAiApi({
       store: h.store as never,
       orchestrator: h.orchestrator as never,

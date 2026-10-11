@@ -9,6 +9,7 @@ import type { WorkflowTemplate } from '../../host/shared/graph-model.js'
 import type { Drafted, StudioAction, CanvasNode, CanvasEdge } from '../studio/studio-state.js'
 import type { RemoteFace } from './useRemote.js'
 import { EP } from '../lib/remote.js'
+import { serializeFlow } from '../lib/graph-serialize.js'
 
 export interface ServiceControlFace {
   /** 加载服务实例列表（全部会话）；返回加载的条目。 */
@@ -82,27 +83,7 @@ export function useServiceControl(dispatch: Dispatch<StudioAction>, remote: Remo
   }, [dispatch])
 
   const saveService = useCallback(async (service: ServiceState, nodes: CanvasNode[], edges: CanvasEdge[]): Promise<ServiceState | null> => {
-    const serialized = {
-      ...service,
-      nodes: nodes.map((node) => ({
-        id: node.id,
-        kind: node.kind,
-        position: node.position,
-        data: node.data,
-        // 虚拟节点顶层 proxySourceId 保留（Bug 2）
-        ...((node as { proxySourceId?: unknown }).proxySourceId !== undefined
-          ? { proxySourceId: (node as { proxySourceId?: string }).proxySourceId }
-          : {}),
-      })) as ServiceState['nodes'],
-      lines: edges.map((edge) => ({
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        sourceHandle: edge.sourceHandle,
-        targetHandle: edge.targetHandle,
-        ...(edge.condition ? { condition: edge.condition } : {}),
-      })),
-    }
+    const serialized = serializeFlow(service, nodes, edges)
     const saved = await remote.call(EP.EP_PUT_SERVICE, {
       sessionId: service.sessionId,
       service: serialized,

@@ -375,7 +375,6 @@ export function StudioLayout(props: StudioLayoutProps) {
           width={state.panels.rightWidth}
           editorData={editorData}
           presets={state.presets}
-          tools={state.tools}
           models={state.models}
           combos={state.combos as Array<{ id: string; name: string; tools?: string[]; mcpServers?: string[] }>}
           flowMeta={{ nodeCount: state.canvas.nodes.length, revision: Number((currentFlow ?? currentService)?.revision ?? 0) }}

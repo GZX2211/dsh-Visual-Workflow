@@ -32,14 +32,12 @@ export class WorkflowEndpoints extends VisualWorkflowApiBase {
    *   - workspacePath 缺省时继承创建者会话（sessionId）的 cwd（与定时任务 new-session 一致）；
    *   - cwd 解析不到时省略（官方会话默认工作区）。
    */
-  async createSession(args: { sessionId?: unknown; workspacePath?: unknown; label?: unknown }): Promise<unknown> {
+  async createSession(args: { sessionId?: unknown; workspacePath?: unknown }): Promise<unknown> {
     const provider = this.host.sessionProvider
     if (!provider || typeof provider.createSession !== 'function') {
       throw httpError(501, presentationOf(this.host, '会话创建能力未装配', 'Session creation is unavailable'), 'WF_AGENT_UNAVAILABLE')
     }
     const creatorSessionId = String(args?.sessionId ?? '')
-    const defaultLabel = presentationOf(this.host, '工作流实例', 'Workflow instance')
-    const label = String(args?.label ?? defaultLabel).trim() || defaultLabel
     // 工作区输入校验在此处完成（HTTP 端点是用户输入的校验责任者）；cwd 决策
     // （显式路径优先 → 否则继承创建者）归 sessions 模块的唯一实现 resolveNewSessionCwd。
     const explicit = String(args?.workspacePath ?? '').trim()
@@ -50,7 +48,6 @@ export class WorkflowEndpoints extends VisualWorkflowApiBase {
       sessionCwdOf: this.host.sessionCwdOf,
     })
     const sessionId = await provider.createSession({
-      label,
       agentPreset: 'standard',
       ...(cwd ? { cwd } : {}),
     })
@@ -64,24 +61,6 @@ export class WorkflowEndpoints extends VisualWorkflowApiBase {
     const flow = await this.host.store.getWorkflow(sessionId, id)
     if (!flow) throw httpError(404, presentationOf(this.host, `工作流不存在：${id}`, `Workflow not found: ${id}`))
     return flow
-  }
-
-  async createWorkflow(args: { sessionId?: unknown; name?: unknown; description?: unknown }): Promise<unknown> {
-    const sessionId = String(args?.sessionId ?? '')
-    if (!sessionId) throw httpError(400, 'requires sessionId')
-    return this.putWorkflow({
-      sessionId,
-      flow: {
-        id: `wf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-        sessionId,
-        mode: 'mode1',
-        name: String(args?.name ?? '').trim() || presentationOf(this.host, '未命名工作流', 'Untitled workflow'),
-        description: String(args?.description ?? ''),
-        revision: 0,
-        nodes: [],
-        lines: [],
-      },
-    })
   }
 
   async putWorkflow(args: { sessionId?: unknown; flow?: unknown }): Promise<unknown> {

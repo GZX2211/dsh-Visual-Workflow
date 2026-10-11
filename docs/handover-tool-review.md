@@ -73,7 +73,7 @@ pnpm typecheck && pnpm test && pnpm build
 > 因此本次提交**按本团队路径显式暂存**，且**未重建 `lib/`**——待两团队收工后统一 `pnpm build` 并提交分发包。
 
 **跨工具统一（已做）**：
-- 可见性元数据事实修正（`PARENT_AGENT_VISIBLE_TOOLS` 移除 `wf_ask_agent`）；
+- 可见性元数据事实修正（`PARENT_AGENT_VISIBLE_TOOLS` 移除 `wf_ask_agent`；该常量已在后续技术债清理中退役）；
 - 配置键名迁移 `wfAskAgentTimeoutMs → wfAskAgentTtlMs`（新键为主 + 旧键读取兼容 + 单测）；
 - `EXPERIENCE_TYPE_PARAM_DESCRIPTION` 共享常量（三工具统一措辞）；
 - orchestrator 工具路径 + 工具层 + 写图契约 + 图检查器 + validate 的错误文本英文+码；

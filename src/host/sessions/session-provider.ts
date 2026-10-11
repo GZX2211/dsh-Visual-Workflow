@@ -37,18 +37,17 @@ interface AgentPresetsLike {
 export interface SessionProvider {
   /**
    * 创建新会话（含根 Agent）并返回会话 id。
-   * @param options.label 会话来源标识（写入用途说明；元信息可追溯）
    * @param options.agentPreset 官方预设 id（缺省 standard：父代理具备官方标准工具集）
    * @param options.cwd 可选工作目录（继承创建者会话；解析不到时省略）
    */
-  createSession(options: { label: string; agentPreset?: string; cwd?: string }): Promise<string>
+  createSession(options: { agentPreset?: string; cwd?: string }): Promise<string>
 }
 
 /** Cordis 实现：经 ctx.agents.create 创建会话与根 Agent（工厂缺失时抛出明确错误）。 */
 export class CordisSessionProvider implements SessionProvider {
   constructor(private readonly ctx: Context) {}
 
-  async createSession(options: { label: string; agentPreset?: string; cwd?: string }): Promise<string> {
+  async createSession(options: { agentPreset?: string; cwd?: string }): Promise<string> {
     const agents = this.ctx.get('agents') as AgentsCreateLike | null | undefined
     if (!agents || typeof agents.create !== 'function') {
       throw new Error('agents 服务不支持创建会话（agent 工厂未安装），无法执行「新会话」模式')

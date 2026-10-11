@@ -189,8 +189,6 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       return { ...state, combos: action.items }
     case 'PRESETS_LOADED':
       return { ...state, presets: action.items }
-    case 'TOOLS_LOADED':
-      return { ...state, tools: action.items }
     case 'MODELS_LOADED':
       return { ...state, models: action.items }
     case 'OPEN_FLOW': {

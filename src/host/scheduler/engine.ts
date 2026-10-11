@@ -55,7 +55,7 @@ export interface SchedulerEngineDeps {
   taskStore: SchedulerTaskStore
   flowStore: SchedulerFlowStore
   orchestrator: SchedulerOrchestrator
-  sessionProvider: { createSession(options: { label: string; agentPreset?: string; cwd?: string }): Promise<string> }
+  sessionProvider: { createSession(options: { agentPreset?: string; cwd?: string }): Promise<string> }
   /** 解析会话工作目录（新会话继承用；不可用时省略）。 */
   sessionCwdOf?(sessionId: string): Promise<string | undefined>
   /** 时钟注入（测试可控）。 */
@@ -325,7 +325,6 @@ export class SchedulerEngine {
       const sessionId = task.sessionMode === 'current-session'
         ? task.ownerSessionId
         : await this.deps.sessionProvider.createSession({
-            label: `定时任务：${task.name}`,
             // 官方 standard 预设：父代理具备官方标准工具集（用户裁决：standard 预设+可追溯）
             agentPreset: 'standard',
             ...(cwd ? { cwd } : {}),

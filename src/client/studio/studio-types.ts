@@ -37,8 +37,6 @@ export interface GraphSnapshot {
 
 /** 生态枚举条目（对齐后端 presets 端点返回结构）。 */
 export interface PresetItem { id: string; name?: string; description?: string; trust?: string }
-/** 生态枚举条目（对齐后端 tools 端点返回结构）。 */
-export interface ToolItem { name: string; description: string }
 /** 生态模型条目（对齐后端 models 端点返回结构：provider/model + 思考强度档位）。 */
 export interface ModelItem { provider: string; model: string; efforts?: Array<{ id: string; name: string }> }
 
@@ -158,7 +156,6 @@ export interface StudioState {
   templates: Record<TemplateKind, Array<RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate>>
   combos: ToolCombo[]
   presets: PresetItem[]
-  tools: ToolItem[]
   models: ModelItem[]
   /** 当前画布对象（工作流/服务实例，或工作流模板，或工作流资产文档）。 */
   currentId: string | null

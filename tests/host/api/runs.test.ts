@@ -1,14 +1,12 @@
 // tests/host/api/runs.test.ts
 //
 // 运行、数据库与导入导出端点组的边界职责（api/runs.ts）：会话归属校验（400/404）、
-// 断点续跑语义、数据库面板三端点、导入导出的参数校验与领域码透传
+// 断点续跑语义、数据库连接测试端点、导入导出的参数校验与领域码透传
 // （导入导出领域行为见 tests/host/transfer/bundle.test.ts）。
 
 import { afterEach, describe, expect, it } from 'vitest'
-import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { indexPathOf } from '../../../src/host/tools/index.js'
 import { cleanupAll, databaseNode, makeFlow, makeHarness, saveFlow } from './fixtures/api-harness.js'
 
 afterEach(cleanupAll)
@@ -109,7 +107,7 @@ describe('运行端点', () => {
 // ---------------------------------------------------------------------------
 
 describe('数据库端点', () => {
-  it('dbTest/dbSchema/dbSearchPreview：本地 sqlite 全链路（缺索引自动构建）', async () => {
+  it('dbTest：本地 sqlite 连接测试（返回可展示消息）；入参非法 400', async () => {
     const h = await makeHarness()
     const dbFile = join(h.dataDir, 'test.db')
     const sqlite = new DatabaseSync(dbFile)
@@ -121,40 +119,8 @@ describe('数据库端点', () => {
     const test = await h.api.handle('dbTest', { node })
     expect(test).toEqual({ ok: true, message: '连接成功' })
 
-    const schema = (await h.api.handle('dbSchema', { node })) as Array<{ name?: string }>
-    expect(schema.some((t) => t.name === 'docs')).toBe(true)
-
-    // 缺索引 → 自动构建后检索：断言「命中了什么」而不是「有 hits 这个属性」
-    // （`toBeTruthy` 对空数组同样为真，检索失败与命中 1 条在它眼里没有区别）。
-    const preview = (await h.api.handle('dbSearchPreview', { dataId: 'n-db1', query: '断点续跑', node })) as {
-      hits: Array<{ text: string }>
-      source?: string
-    }
-    expect(preview.hits).toHaveLength(1)
-    expect(preview.hits[0].text).toContain('断点续跑')
-    // 夹具引擎恒为 bm25 降级态：本用例只覆盖词法通道，语义通道需真实嵌入引擎才可覆盖。
-    expect(preview.source).toBe('bm25')
-
-    // 空 query（含纯空白）走提前返回：有 dataId 但无检索结果
-    const blankQuery = (await h.api.handle('dbSearchPreview', { dataId: 'n-db1', query: '   ', node })) as { hits: unknown[] }
-    expect(blankQuery.hits).toEqual([])
-
-    // rebuild=true：把索引改成「文件存在但 chunks 为空」——这种索引在检索侧等价于不可用，
-    // 只有真的执行了重建才能恢复命中。本用例据此同时锁定响应体与重建的落盘事实。
-    const indexFile = indexPathOf(h.dataDir, 'n-db1')
-    await writeFile(indexFile, JSON.stringify({ version: 1, dataId: 'n-db1', source: 'bm25', dimension: 0, chunkSize: 384, overlap: 128, updatedAt: '', chunks: [] }))
-    const rebuilt = (await h.api.handle('dbSearchPreview', { dataId: 'n-db1', query: '报告', node, rebuild: true })) as {
-      hits: Array<{ text: string }>
-      source?: string
-    }
-    expect(rebuilt).toMatchObject({ source: 'bm25' })
-    expect(rebuilt.hits).toHaveLength(1)
-    expect(rebuilt.hits[0].text).toContain('报告')
-    // 落盘事实：空索引被真实重建结果覆盖（而不只是内存里的返回值好看）
-    const persisted = JSON.parse(await readFile(indexFile, 'utf8')) as { chunks: unknown[] }
-    expect(persisted.chunks).toHaveLength(1)
-
-    await expect(h.api.handle('dbSearchPreview', { dataId: 'nope', query: 'x' })).rejects.toMatchObject({ status: 422 })
+    // 缺 node / 非 database 节点 → 400（连接测试只接受数据库节点）
+    await expect(h.api.handle('dbTest', {})).rejects.toMatchObject({ status: 400 })
   })
 })
 

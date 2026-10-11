@@ -13,10 +13,6 @@ export interface SizedNodeLike {
 }
 export declare const GRAPH_NODE_WIDTH = 208;
 export declare const GRAPH_NODE_HEIGHT = 116;
-export declare const GRAPH_NODE_SIZE: {
-    w: number;
-    h: number;
-};
 /** 阶段节点（启动/结束/暂停）紧凑卡片：流程门无需大卡，避免占用画布空间。 */
 export declare const GRAPH_STAGE_WIDTH = 168;
 export declare const GRAPH_STAGE_HEIGHT = 88;

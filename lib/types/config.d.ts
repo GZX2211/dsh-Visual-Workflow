@@ -21,7 +21,7 @@ export interface Config {
     wfAskAgentTimeoutMs?: number;
     /** 运行空闲超时毫秒数（无 in-flight 看护门限）。 */
     runIdleTimeoutMs: number;
-    /** 运行状态回显轮询间隔毫秒数。 */
+    /** 运行状态回显轮询间隔毫秒数（经 runtimeConfig 端点下发前端，由前端自持 600ms 缺省回退）。 */
     runPollMs: number;
     /** ReAct 迭代次数默认上限（软截停强制收尾）。 */
     reactIterationLimitDefault: number;

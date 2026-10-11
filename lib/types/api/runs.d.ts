@@ -41,21 +41,6 @@ export declare class RunEndpoints extends VisualWorkflowApiBase {
     dbTest(args: {
         node?: unknown;
     }): Promise<unknown>;
-    /** 表结构预览（只读）。 */
-    dbSchema(args: {
-        node?: unknown;
-    }): Promise<unknown>;
-    /**
-     * 检索预览：命中索引直接检索；索引缺失或 rebuild=true 时先构建（本地库）。
-     * 嵌入不可用时索引自动落 BM25（结果标注 source）。
-     */
-    dbSearchPreview(args: {
-        dataId?: unknown;
-        query?: unknown;
-        topK?: unknown;
-        node?: unknown;
-        rebuild?: unknown;
-    }): Promise<unknown>;
     exportWorkflow(args: {
         sessionId?: unknown;
         id?: unknown;

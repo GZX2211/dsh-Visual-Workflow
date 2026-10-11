@@ -11,7 +11,5 @@ export interface FlowTemplatesFace {
     deleteFlowTemplate(id: string): Promise<void>;
     openFlowTemplate(template: WorkflowTemplate): void;
 }
-/** 画布 → 模板序列化（与 serializeWorkflow 同构）。 */
-export declare function serializeFlowTemplate(template: WorkflowTemplate, nodes: CanvasNode[], edges: CanvasEdge[]): WorkflowTemplate;
 /** 工作流模板列表面（远端失败抛错，由调用方 toast）。 */
 export declare function useFlowTemplates(dispatch: Dispatch<StudioAction>, remote: RemoteFace): FlowTemplatesFace;

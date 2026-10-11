@@ -9,7 +9,6 @@ export interface InspectorProps {
         id: string;
         name?: string;
     }>;
-    tools: unknown[];
     models: Array<{
         provider: string;
         model: string;

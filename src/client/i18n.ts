@@ -405,7 +405,6 @@ export const zh = {
   overwriteInstanceConfirm: '覆盖',
   toastInstanceOverwritten: '已覆盖实例',
   toastServiceRunningCannotOverwrite: '该会话的服务实例正在运行，请先停止服务后再覆盖',
-  sessionLabelWorkflowPrefix: '工作流实例：',
   // 组合管理
   combos: '组合',
   comboManager: '组合管理',
@@ -903,7 +902,6 @@ export const en: Dict = {
   overwriteInstanceConfirm: 'Overwrite',
   toastInstanceOverwritten: 'Instance overwritten',
   toastServiceRunningCannotOverwrite: 'The service instance of this session is running; stop it before overwriting',
-  sessionLabelWorkflowPrefix: 'Workflow instance: ',
   combos: 'Combos',
   comboManager: 'Combo Manager',
   comboTabDsh: 'Tools',

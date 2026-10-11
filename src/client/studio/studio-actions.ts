@@ -6,7 +6,7 @@
 
 import type {
   LibTab, LibSelKind, TemplateKind, CanvasNode, CanvasEdge, EditorRef,
-  PanelLayout, ToastItem, PresetItem, ToolItem, ModelItem, GraphSnapshot, ConfirmState, LibrarySource,
+  PanelLayout, ToastItem, PresetItem, ModelItem, GraphSnapshot, ConfirmState, LibrarySource,
 } from './studio-types.js'
 import type { WorkflowDocument, WorkflowTemplate } from '../../host/shared/graph-model.js'
 import type {
@@ -70,7 +70,6 @@ export type StudioAction =
   | { type: 'TEMPLATE_REMOVED'; kind: TemplateKind; id: string }
   | { type: 'COMBOS_LOADED'; items: ToolCombo[] }
   | { type: 'PRESETS_LOADED'; items: PresetItem[] }
-  | { type: 'TOOLS_LOADED'; items: ToolItem[] }
   | { type: 'MODELS_LOADED'; items: ModelItem[] }
   | { type: 'OPEN_FLOW'; flow: WorkflowDocument }
   | { type: 'OPEN_SERVICE'; service: ServiceState }

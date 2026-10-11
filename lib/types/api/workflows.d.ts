@@ -18,16 +18,10 @@ export declare class WorkflowEndpoints extends VisualWorkflowApiBase {
     createSession(args: {
         sessionId?: unknown;
         workspacePath?: unknown;
-        label?: unknown;
     }): Promise<unknown>;
     getWorkflow(args: {
         sessionId?: unknown;
         id?: unknown;
-    }): Promise<unknown>;
-    createWorkflow(args: {
-        sessionId?: unknown;
-        name?: unknown;
-        description?: unknown;
     }): Promise<unknown>;
     putWorkflow(args: {
         sessionId?: unknown;

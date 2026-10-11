@@ -49,7 +49,6 @@ export interface SchedulerEngineDeps {
     orchestrator: SchedulerOrchestrator;
     sessionProvider: {
         createSession(options: {
-            label: string;
             agentPreset?: string;
             cwd?: string;
         }): Promise<string>;

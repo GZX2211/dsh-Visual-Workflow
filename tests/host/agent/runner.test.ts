@@ -296,6 +296,25 @@ describe('resolveAgentTools 白名单解析（§4.2 L219）', () => {
     expect(tools).toContain('read')
   })
 
+  it('经验三工具：经组合勾选才下发子代理；未勾选不下发', async () => {
+    const h = await makeHarness()
+    // 经验三工具属「每个主体自己可用」，不在 CHILD_AGENT_HIDDEN_TOOLS；此处显式补齐可见面
+    h.toolsView.visible = [...h.toolsView.visible, 'wf_experience_learn', 'wf_experience_recall', 'wf_experience_feedback']
+    await saveCombo(h, 'combo-exp-on', ['read', 'wf_experience_learn', 'wf_experience_recall'])
+    const checked = await resolveAgentTools({
+      store: h.store, toolsView: h.toolsView, sessionId: 'session-1', flowId: 'flow-1',
+      node: agentNode('n-a1', { presetId: 'combo-exp-on' }),
+    })
+    expect(checked.sort()).toEqual(['read', 'wf_experience_learn', 'wf_experience_recall'])
+
+    await saveCombo(h, 'combo-exp-off', ['read'])
+    const unchecked = await resolveAgentTools({
+      store: h.store, toolsView: h.toolsView, sessionId: 'session-1', flowId: 'flow-1',
+      node: agentNode('n-a1', { presetId: 'combo-exp-off' }),
+    })
+    expect(unchecked).toEqual(['read'])
+  })
+
   it('官方 preset：standing scope 工具名；服务缺失回退全部可见', async () => {
     const h = await makeHarness()
     h.toolsView.presets.set('standard', ['read', 'edit'])

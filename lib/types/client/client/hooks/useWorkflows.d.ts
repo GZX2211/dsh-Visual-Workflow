@@ -18,7 +18,7 @@ export interface WorkflowsFace {
     deleteWorkflow(flow: WorkflowDocument): Promise<void>;
     openFlow(flow: WorkflowDocument): void;
 }
-/** 画布 → 文档序列化（节点/连线直接映射；P12 图模型接管完整归一化）。 */
+/** 画布 → 文档序列化（薄委托：唯一本体在 lib/graph-serialize.ts 的 serializeFlow）。 */
 export declare function serializeWorkflow(flow: WorkflowDocument, nodes: CanvasNode[], edges: CanvasEdge[]): WorkflowDocument;
 /** 工作流列表面（远端失败抛错，由调用方 toast）。 */
 export declare function useWorkflows(dispatch: Dispatch<StudioAction>, remote: RemoteFace): WorkflowsFace;

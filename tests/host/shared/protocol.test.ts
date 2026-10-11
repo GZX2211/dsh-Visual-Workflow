@@ -32,14 +32,9 @@ import {
   EXECUTABLE_UNIT_KINDS,
   MODES,
   NODE_STATUSES,
-  OPTIONAL_INJECT_TOOLS,
-  PARENT_AGENT_VISIBLE_TOOLS,
   RUN_STATUSES,
-  TEAM_CHILD_AVAILABLE_TOOLS,
-  TEAM_LEAD_ONLY_TOOLS,
   TEAM_SPAWN_TEAMMATE,
   TEAM_TOOL_NAMES,
-  TOOL_VISIBILITY,
   WF_ASK,
   WF_ASK_AGENT,
   WF_DB_QUERY,
@@ -65,28 +60,34 @@ function readShared(name: string): string {
 // protocol.ts 端点清单逐字比对（架构文档 §4.6 全部端点 + 图2 交互改造新增
 // 工作流模板 3 端点 + 定时任务 3 端点 + 工具开关 3 端点 + 会话 1 端点；
 // 新功能端点以 prompt/定时任务开发.md 为准，不改写 docs/ 既有文档）
+//
+// 已退役（B13-9 用户裁决，有实现无入口、客户端零调用）：
+// createWorkflow / deleteTemplatePreview / tools / mcpList / toolSwitches /
+// dbSchema / dbSearchPreview——不得重新登记。
 // ---------------------------------------------------------------------------
 const EXPECTED_ENDPOINTS: string[] = [
   // 工作流
-  'listWorkflows', 'getWorkflow', 'putWorkflow', 'deleteWorkflow', 'createWorkflow',
+  'listWorkflows', 'getWorkflow', 'putWorkflow', 'deleteWorkflow',
   // 会话（工作台全局化：「开启新会话」一次性动作——创建实例时新建主会话）
   'createSession',
   // 服务
   'listServices', 'getService', 'putService', 'deleteService', 'serviceStart', 'serviceStop', 'serviceStatus', 'serviceDebug',
   // 模板
-  'listTemplates', 'putTemplate', 'deleteTemplate', 'deleteTemplatePreview', 'fileUpload',
+  'listTemplates', 'putTemplate', 'deleteTemplate', 'fileUpload',
   // 工作流模板（图2 交互改造：模板库全局共享）
   'listFlowTemplates', 'putFlowTemplate', 'deleteFlowTemplate',
-  // 预设/工具/模型
-  'presets', 'tools', 'models',
-  // 工具组合 / 插件 / MCP
-  'toolCombos', 'toolComboPut', 'toolComboDelete', 'pluginCatalog', 'mcpList', 'mcpPut', 'mcpDelete', 'mcpToggle',
+  // 预设/模型（工具目录端点 tools 已退役：无入口）
+  'presets', 'models',
+  // 工具组合 / 插件 / MCP（MCP 列表端点 mcpList 已退役：无入口）
+  'toolCombos', 'toolComboPut', 'toolComboDelete', 'pluginCatalog', 'mcpPut', 'mcpDelete', 'mcpToggle',
   // 全局工具开关（父代理工具白名单「关闭」侧；全局即时生效）
-  'toolSwitches', 'toolSwitchPut', 'toolSwitchPutMany',
+  'toolSwitchPut', 'toolSwitchPutMany',
   // 运行
   'run', 'runStatus', 'activeRuns', 'runStop', 'runHistory', 'runResume',
-  // 数据库
-  'dbTest', 'dbSchema', 'dbSearchPreview',
+  // 运行期配置下发（host 配置 → 前端可调参数，如 runPollMs）
+  'runtimeConfig',
+  // 数据库（表结构与检索预览两端点已退役：无入口）
+  'dbTest',
   // 导入导出 v2
   'exportWorkflow', 'importWorkflow', 'exportAgentTemplate', 'importAgentTemplate',
   // 定时任务（新功能本阶段；需求见 prompt/定时任务开发.md）
@@ -100,7 +101,7 @@ const EXPECTED_ENDPOINTS: string[] = [
 
 /**
  * 从 protocol.ts 源文本提取全部 `EP_* = '<endpoint>'` 常量值。
- * 不另起 import（避免在测试里手工枚举 52 个 EP_ 常量造成与实现重复/遗漏），
+ * 不另起 import（避免在测试里手工枚举 59 个 EP_ 常量造成与实现重复/遗漏），
  * 以文本正则抽取实现中的端点名，再与期望清单做**双向**比对。
  */
 function readProtocolEndpoints(): string[] {
@@ -113,10 +114,10 @@ function readProtocolEndpoints(): string[] {
 }
 
 describe('shared/protocol 端点清单', () => {
-  it('端点常量定义 65 个且无重复', () => {
+  it('端点常量定义 59 个且无重复', () => {
     const eps = readProtocolEndpoints()
-    expect(eps).toHaveLength(65)
-    expect(new Set(eps).size).toBe(65) // 65 端点名全部唯一（无重复常量）
+    expect(eps).toHaveLength(59)
+    expect(new Set(eps).size).toBe(59) // 59 端点名全部唯一（无重复常量）
   })
 
   it('端点名逐字覆盖 §4.6 清单（正反向双向一致）', () => {
@@ -144,61 +145,22 @@ describe('shared/protocol 工具名常量与可见性', () => {
   it('wf_run_node / wf_finish 在子代理永久隐藏集（§4.5 规则）', () => {
     expect(CHILD_AGENT_HIDDEN_TOOLS).toContain('wf_run_node')
     expect(CHILD_AGENT_HIDDEN_TOOLS).toContain('wf_finish')
-    expect(TOOL_VISIBILITY.childHidden).toContain('wf_run_node')
-    expect(TOOL_VISIBILITY.childHidden).toContain('wf_finish')
   })
 
-  it('自主编排两工具（wf_org_catalog / wf_graph_patch）：子代理永久隐藏 + 默认开启（§4.5 规则）', () => {
+  it('自主编排两工具（wf_org_catalog / wf_graph_patch）：子代理永久隐藏（§4.5 规则）', () => {
     // 架构文档 §4.5 父子可见性表：子代理行必须包含这两个工具（改图是父代理的组织权限）。
     // 历史 BUG：runner 内联三工具名单漏了它们，组合勾选后子代理会拿到必然抛 WF_NOT_ROOT
     // 的工具；现 runner 直接引用本常量（allow 剔除 + restrict deny 双保险）。
     expect(CHILD_AGENT_HIDDEN_TOOLS).toContain('wf_org_catalog')
     expect(CHILD_AGENT_HIDDEN_TOOLS).toContain('wf_graph_patch')
-    expect(TOOL_VISIBILITY.orgAuthoring).toEqual(['wf_org_catalog', 'wf_graph_patch'])
-    // 父代理专属工具不得出现在可选注入集（勾选即进子代理）里
-    expect(OPTIONAL_INJECT_TOOLS).not.toContain('wf_org_catalog')
-    expect(OPTIONAL_INJECT_TOOLS).not.toContain('wf_graph_patch')
   })
 
-  it('wf_ask / wf_ask_agent 在可选注入集（§4.5 规则）', () => {
-    expect(OPTIONAL_INJECT_TOOLS).toContain('wf_ask')
-    expect(OPTIONAL_INJECT_TOOLS).toContain('wf_ask_agent')
-    expect(TOOL_VISIBILITY.optionalInject).toContain('wf_ask')
-    expect(TOOL_VISIBILITY.optionalInject).toContain('wf_ask_agent')
-  })
-
-  it('wf_db_query 在可选注入集（有 db-in 连线时注入）', () => {
-    expect(OPTIONAL_INJECT_TOOLS).toContain('wf_db_query')
-  })
-
-  it('父代理默认可用集含 wf_run_node / wf_finish；不含仅子代理可用的 wf_ask_agent', () => {
-    expect(PARENT_AGENT_VISIBLE_TOOLS).toContain('wf_run_node')
-    expect(PARENT_AGENT_VISIBLE_TOOLS).toContain('wf_finish')
-    // 事实修正（2026.10）：wf_ask_agent 的 ask/reply 均仅子代理可用（父代理调用必被
-    // WF_NOT_CHILD 拒绝），resolve 退役后它不再有父代理用途，故不在本集中。
-    expect(PARENT_AGENT_VISIBLE_TOOLS).not.toContain('wf_ask_agent')
-  })
-
-  it('子代理永久隐藏集不含任何可选注入工具（互斥）', () => {
-    for (const t of CHILD_AGENT_HIDDEN_TOOLS) {
-      expect(OPTIONAL_INJECT_TOOLS).not.toContain(t)
-    }
-  })
-
-  it('元编排自进化工具（wf_experience_learn / wf_experience_recall / wf_experience_feedback）：所有代理可用，进可选注入集', () => {
+  it('元编排自进化工具（wf_experience_learn / wf_experience_recall / wf_experience_feedback）：值逐字固定，且不被子代理永久隐藏', () => {
     // 经验学习、经验召回与经验反馈都是「当前主体的自主判断」：子代理也有自己的 agent 经验，
-    // 因此三者不与自主编排工具同口径隐藏，而是进可选注入集（子代理经组合勾选才注入）。
+    // 因此三者不与自主编排工具同口径隐藏；子代理侧是否携带由组合勾选决定。
     expect(WF_EXPERIENCE_LEARN).toBe('wf_experience_learn')
     expect(WF_EXPERIENCE_RECALL).toBe('wf_experience_recall')
     expect(WF_EXPERIENCE_FEEDBACK).toBe('wf_experience_feedback')
-    expect(TOOL_VISIBILITY.metaEvolution).toEqual([
-      WF_EXPERIENCE_LEARN,
-      WF_EXPERIENCE_RECALL,
-      WF_EXPERIENCE_FEEDBACK,
-    ])
-    expect(OPTIONAL_INJECT_TOOLS).toContain(WF_EXPERIENCE_LEARN)
-    expect(OPTIONAL_INJECT_TOOLS).toContain(WF_EXPERIENCE_RECALL)
-    expect(OPTIONAL_INJECT_TOOLS).toContain(WF_EXPERIENCE_FEEDBACK)
     expect(CHILD_AGENT_HIDDEN_TOOLS).not.toContain(WF_EXPERIENCE_LEARN)
     expect(CHILD_AGENT_HIDDEN_TOOLS).not.toContain(WF_EXPERIENCE_RECALL)
     expect(CHILD_AGENT_HIDDEN_TOOLS).not.toContain(WF_EXPERIENCE_FEEDBACK)
@@ -207,37 +169,31 @@ describe('shared/protocol 工具名常量与可见性', () => {
   it('经验工具不残留旧名 wf_experience（改名后无兼容别名）', () => {
     const allNames: readonly string[] = [
       ...CHILD_AGENT_HIDDEN_TOOLS,
-      ...OPTIONAL_INJECT_TOOLS,
-      ...PARENT_AGENT_VISIBLE_TOOLS,
-      ...TOOL_VISIBILITY.metaEvolution,
-      ...TOOL_VISIBILITY.orgAuthoring,
+      WF_RUN_NODE,
+      WF_FINISH,
+      WF_ASK,
+      WF_ASK_AGENT,
+      WF_DB_QUERY,
+      WF_EXPERIENCE_LEARN,
+      WF_EXPERIENCE_RECALL,
+      WF_EXPERIENCE_FEEDBACK,
     ]
     expect(allNames).not.toContain('wf_experience')
   })
 
-  it('官方 Agent Team 工具集：9 个齐全、Lead 专属与子代理可用子集互补且不重叠', () => {
+  it('官方 Agent Team 工具集：9 个齐全且无重复', () => {
     expect(TEAM_TOOL_NAMES).toHaveLength(9)
     expect(new Set(TEAM_TOOL_NAMES).size).toBe(9)
-    // 子代理可用子集 = 全量 − Lead 专属（互补，无遗漏无多余）
-    expect([...TEAM_LEAD_ONLY_TOOLS, ...TEAM_CHILD_AVAILABLE_TOOLS].sort()).toEqual([...TEAM_TOOL_NAMES].sort())
-    for (const t of TEAM_LEAD_ONLY_TOOLS) expect(TEAM_CHILD_AVAILABLE_TOOLS).not.toContain(t)
-    // 元数据表引用同一本体
-    expect(TOOL_VISIBILITY.officialTeam).toEqual(TEAM_TOOL_NAMES)
-    expect(TOOL_VISIBILITY.officialTeamChildAvailable).toEqual(TEAM_CHILD_AVAILABLE_TOOLS)
-    expect(TOOL_VISIBILITY.officialTeamLeadOnly).toEqual(TEAM_LEAD_ONLY_TOOLS)
   })
 
-  it('官方 Team 工具不得进入任何插件侧 restrict 名单（不可限制的自身层注册工具）', () => {
+  it('官方 Team 工具不得进入子代理永久隐藏集（不可限制的自身层注册工具）', () => {
     for (const t of TEAM_TOOL_NAMES) {
       expect(CHILD_AGENT_HIDDEN_TOOLS).not.toContain(t)
-      expect(OPTIONAL_INJECT_TOOLS).not.toContain(t)
-      expect(PARENT_AGENT_VISIBLE_TOOLS).not.toContain(t)
     }
   })
 
   it('首次安装默认关闭清单只含官方成员创建工具（默认关闭的唯一目的：阻止模型自行拉人）', () => {
     expect(DEFAULT_DISABLED_ON_FIRST_INSTALL).toEqual([TEAM_SPAWN_TEAMMATE])
-    expect(TEAM_LEAD_ONLY_TOOLS).toContain(TEAM_SPAWN_TEAMMATE)
   })
 })
 

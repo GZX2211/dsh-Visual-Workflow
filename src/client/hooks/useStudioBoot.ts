@@ -1,7 +1,7 @@
 // src/client/hooks/useStudioBoot.ts
 //
 // 工作台初始化加载（工作台全局化改版）：并行拉取**全部会话**的工作流/服务
-// 实例、模板，补齐内置父代理模板，拉取生态枚举（presets/tools/models/combos）
+// 实例、模板，补齐内置父代理模板，拉取生态枚举（presets/models/combos）
 // 与**全部会话**的活跃 run；随后按「当前主会话」自动选中实例（规则见
 // pickInitialInstanceForSession：当前会话实例运行中 > 暂停 > 最新；当前会话无
 // 实例则保持空白画布——不再回退到其他会话的实例）。
@@ -10,7 +10,7 @@
 
 import { useEffect, useRef } from 'react'
 import type { Dispatch } from 'react'
-import type { ModelItem, PresetItem, StudioAction, StudioState, ToolItem } from '../studio/studio-state.js'
+import type { ModelItem, PresetItem, StudioAction, StudioState } from '../studio/studio-state.js'
 import type { WorkflowDocument } from '../../host/shared/graph-model.js'
 import type { ServiceState } from '../../host/shared/types.js'
 import type { RemoteFace } from './useRemote.js'
@@ -99,15 +99,13 @@ export function useStudioBoot(
         if (!cancelled) toastError(error)
       }
       const enums = async (): Promise<void> => {
-        const [presets, tools, models, combos] = await Promise.all([
+        const [presets, models, combos] = await Promise.all([
           remote.call(EP.EP_PRESETS).catch(() => []),
-          remote.call(EP.EP_TOOLS).catch(() => []),
           remote.call(EP.EP_MODELS).catch(() => []),
           remote.call(EP.EP_TOOL_COMBOS).catch(() => []),
         ])
         if (cancelled) return
         dispatch({ type: 'PRESETS_LOADED', items: Array.isArray(presets) ? presets as PresetItem[] : [] })
-        dispatch({ type: 'TOOLS_LOADED', items: Array.isArray(tools) ? tools as ToolItem[] : [] })
         dispatch({ type: 'MODELS_LOADED', items: Array.isArray(models) ? models as ModelItem[] : [] })
         dispatch({ type: 'COMBOS_LOADED', items: Array.isArray(combos) ? combos : [] })
       }

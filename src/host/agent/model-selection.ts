@@ -153,9 +153,8 @@ export function createModelSelectionSetup(): ModelSelectionSetup {
 
   // 父代理（根 Agent）按 sessionId 的绑定表：每会话只注册一次，更新走 selection.current。
   // 【释放路径】监听器注册在根 Agent 的 ctx 上，随该 ctx 的 fiber 卸载自动移除；
-  // 本表只保留调用入口引用，随宿主实例一起回收（宿主持有本装配对象，不单独释放）。
+  // 本表只保留装配期的状态引用，随宿主实例一起回收（宿主持有本装配对象，不单独释放）。
   const parentRefs = new Map<string, ModelSelectionRefLike>()
-  const parentDisposers = new Map<string, () => void>()
 
   const contribution = (rawChildCtx: unknown): (() => void) => {
     const childCtx = rawChildCtx as SelectionChildContext
@@ -198,7 +197,7 @@ export function createModelSelectionSetup(): ModelSelectionSetup {
     if (!ref) {
       ref = { current: undefined, assembled: undefined }
       parentRefs.set(sessionId, ref)
-      parentDisposers.set(sessionId, installModelSelectionLike(ctx as SelectionChildContext, ref))
+      installModelSelectionLike(ctx as SelectionChildContext, ref)
     }
     ref.current = { ...selection }
   }

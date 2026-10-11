@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { ToolSwitchStore } from '../../../src/host/tools/infrastructure/tool-switches.js'
+import { listMcpServers } from '../../../src/host/mcp/registry.js'
 import { registerRoutes } from '../../../src/host/api/index.js'
 import { DEFAULT_DISABLED_ON_FIRST_INSTALL } from '../../../src/host/shared/protocol.js'
 import { cleanupAll, makeHarness, snapshotDshHome } from './fixtures/api-harness.js'
@@ -74,46 +75,43 @@ describe('全局工具开关批量端点', () => {
     await expect(h.api.handle('toolSwitchPutMany', { names: ['read'], disabled: true })).rejects.toThrow(/tool switches unavailable/)
   })
 
-  it('toolSwitches/pluginCatalog：生效态口径一致（跨进程刷新，含自主编排两工具默认开启）', async () => {
+  it('pluginCatalog：生效态口径一致（跨进程刷新，含自主编排两工具默认开启）', async () => {
     const h = await makeHarness()
     await markToolSwitchesInstalled(h.dataDir)
     h.host.toolSwitches = new ToolSwitchStore(h.dataDir)
     await h.host.toolSwitches.load()
     // 既有环境（文件已存在）：不被首次安装播种覆盖；自主编排两工具默认开启
     // （历史 BUG：界面显示已开启、上下文被隐藏）
-    const initial = (await h.api.handle('toolSwitches', {})) as { disabled?: string[] }
-    expect(initial.disabled).toEqual([])
+    const initial = (await h.api.handle('pluginCatalog', {})) as { disabledTools?: string[] }
+    expect(initial.disabledTools).toEqual([])
     // 另一进程（同一 dataDir 的第二个 store 实例）关闭 wf_graph_patch：
-    // 本进程端点必须经 effectiveDisabled 先刷新，再返回，不得返回过期快照
+    // 本进程读取必须经 effectiveDisabled 先刷新，再返回，不得返回过期快照
     const other = new ToolSwitchStore(h.dataDir)
     await other.load()
     await other.setDisabled('wf_graph_patch', true)
     expect(h.host.toolSwitches.currentDisabled().has('wf_graph_patch')).toBe(false)
-    const after = (await h.api.handle('toolSwitches', {})) as { disabled?: string[] }
-    expect(after.disabled).toEqual(['wf_graph_patch'])
+    const after = (await h.api.handle('pluginCatalog', {})) as { disabledTools?: string[] }
+    expect(after.disabledTools).toEqual(['wf_graph_patch'])
     expect(h.host.toolSwitches.currentDisabled().has('wf_graph_patch')).toBe(true)
-    // pluginCatalog 的 disabledTools 与 toolSwitches 同源（同一生效态读取路径）
-    const catalog = (await h.api.handle('pluginCatalog', {})) as { disabledTools?: string[] }
-    expect(catalog.disabledTools).toEqual(['wf_graph_patch'])
   })
 
-  it('首次安装：端点返回播种后的默认关闭清单（磁盘唯一权威，界面与生效同源）', async () => {
+  it('首次安装：pluginCatalog 返回播种后的默认关闭清单（磁盘唯一权威，界面与生效同源）', async () => {
     const h = await makeHarness()
     h.host.toolSwitches = new ToolSwitchStore(h.dataDir)
     await h.host.toolSwitches.load()
 
-    const state = (await h.api.handle('toolSwitches', {})) as { disabled?: string[] }
-    expect(state.disabled).toEqual([...DEFAULT_DISABLED_ON_FIRST_INSTALL])
+    const state = (await h.api.handle('pluginCatalog', {})) as { disabledTools?: string[] }
+    expect(state.disabledTools).toEqual([...DEFAULT_DISABLED_ON_FIRST_INSTALL])
     expect(await h.host.toolSwitches.readDisabled()).toEqual([...DEFAULT_DISABLED_ON_FIRST_INSTALL])
     // 用户可在组合管理页手动开启（默认值不是不可逆约束）
     await h.api.handle('toolSwitchPut', { name: DEFAULT_DISABLED_ON_FIRST_INSTALL[0], disabled: false })
-    const reopened = (await h.api.handle('toolSwitches', {})) as { disabled?: string[] }
-    expect(reopened.disabled).toEqual([])
+    const reopened = (await h.api.handle('pluginCatalog', {})) as { disabledTools?: string[] }
+    expect(reopened.disabledTools).toEqual([])
   })
 })
 
 describe('MCP 端点', () => {
-  it('mcpPut/mcpList/mcpToggle/mcpDelete：托管区读写往返', async () => {
+  it('mcpPut/mcpToggle/mcpDelete：托管区读写往返', async () => {
     const h = await makeHarness()
     const mcpDir = join(h.dataDir, 'dsh-home')
     process.env.DSH_HOME = mcpDir
@@ -130,7 +128,8 @@ describe('MCP 端点', () => {
       ? ['/d', '/c', 'npx', '-y', 'demo-server', '--port', '9000']
       : ['-y', 'demo-server', '--port', '9000'])
 
-    const list = (await h.api.handle('mcpList', {})) as Array<{ id?: string }>
+    // 读侧经 mcp 模块公共入口（原 mcpList 端点的读取路径）
+    const list = await listMcpServers()
     expect(list).toHaveLength(1)
 
     // 托管区已写入 profile（YAML 单引号标量：反斜杠/路径字面量，避免双重转义事故）
@@ -139,12 +138,12 @@ describe('MCP 端点', () => {
     expect(text).toContain("serverName: 'demo'")
 
     await h.api.handle('mcpToggle', { id: 'mcp-demo', disabled: true })
-    const toggled = (await h.api.handle('mcpList', {})) as Array<{ disabled?: boolean }>
+    const toggled = await listMcpServers()
     expect(toggled[0].disabled).toBe(true)
 
     const removed = await h.api.handle('mcpDelete', { id: 'mcp-demo' })
     expect(removed).toEqual({ deleted: true })
-    expect(await h.api.handle('mcpList', {})).toEqual([])
+    expect(await listMcpServers()).toEqual([])
   })
 
   it('D01-01：mcpPut 收到含换行的注入式 id → 拒绝（稳定错误码）且不写盘', async () => {
@@ -190,7 +189,7 @@ describe('MCP 端点', () => {
     expect(JSON.parse(responses[0].body)).toMatchObject({ ok: false, error: { code: 'WF_BAD_ARGS' } })
   })
 
-  it('D01-02：streamable-http + headers 写盘后 mcpList 往返一致，且切换其他项后 headers 仍在', async () => {
+  it('D01-02：streamable-http + headers 写盘后读侧往返一致，且切换其他项后 headers 仍在', async () => {
     const h = await makeHarness()
     const mcpDir = join(h.dataDir, 'dsh-home-headers')
     process.env.DSH_HOME = mcpDir
@@ -207,7 +206,7 @@ describe('MCP 端点', () => {
     })
 
     const headersDemo = async (): Promise<Record<string, string>> => {
-      const list = (await h.api.handle('mcpList', {})) as Array<{ id?: string; headers?: Record<string, string> }>
+      const list = await listMcpServers()
       return list.find((row) => row.id === 'mcp-http')?.headers ?? {}
     }
 

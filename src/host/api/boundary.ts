@@ -103,6 +103,15 @@ export interface ExperienceDomainFace {
   restore(input: { experienceId: string }): Promise<ExperienceEntry>
 }
 
+/**
+ * 运行期配置下发载荷（host 插件配置 → 前端可调参数）。
+ * 只表达事实：缺失时的降级（消费方回退自持缺省）由调用方决定，本层不决定降级语义。
+ */
+export interface RuntimeConfigDownlink {
+  /** 运行状态回显轮询间隔毫秒数。 */
+  runPollMs: number
+}
+
 /** 宿主能力缝（index.ts 装配；单测 fake）。 */
 export interface ApiHost {
   orchestrator: OrchestratorRuntime
@@ -110,7 +119,7 @@ export interface ApiHost {
   dataDir: string
   engine: EmbeddingEngine
   /** 新会话创建缝（「开启新会话」一次性动作：从模板创建实例时先新建主会话；缺失时建会话端点 501）。 */
-  sessionProvider?: { createSession(options: { label: string; agentPreset?: string; cwd?: string }): Promise<string> }
+  sessionProvider?: { createSession(options: { agentPreset?: string; cwd?: string }): Promise<string> }
   /** 解析某会话记录的工作目录（新会话继承创建者 cwd 用；不可用时省略）。 */
   sessionCwdOf?(sessionId: string): Promise<string | undefined>
   /** 模式二服务管理器（服务管理阶段装配；缺失时服务端点返回 501）。 */
@@ -136,6 +145,8 @@ export interface ApiHost {
    * 只表达事实：缺失时的呈现降级由 presentationOf 决定，本层不决定降级语义。
    */
   systemLanguage?: () => string
+  /** 运行期配置下发能力缝（缺失时下发端点返回 501，由消费方回退自持缺省）。 */
+  runtimeConfig?: () => RuntimeConfigDownlink
 }
 
 /**

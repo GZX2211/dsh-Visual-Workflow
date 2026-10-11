@@ -5,14 +5,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CanvasNode } from '../../studio/studio-state.js'
-import { GRAPH_NODE_SIZE, nodeSizeOf } from '../../lib/card-geometry.js'
+import { nodeSizeOf } from '../../lib/card-geometry.js'
 import { GRAPH_MAX_ZOOM, GRAPH_MIN_ZOOM, clamp } from './geometry.js'
 
 export interface CanvasApi {
   fitView(options?: { padding?: number; nodes?: CanvasNode[] }): void
-  focusNode(id: string, options?: { zoom?: number }): void
-  zoomIn(): void
-  zoomOut(): void
   screenToWorld(clientX: number, clientY: number): { x: number; y: number }
 }
 
@@ -56,7 +53,7 @@ export function useCanvasViewport(nodes: CanvasNode[], onInit: (api: CanvasApi) 
     if (!root || nodes.length === 0) return
     const rect = root.getBoundingClientRect()
     if (!rect.width || !rect.height) return
-    const requestedIds = new Set((options.nodes ?? []).map((node) => typeof node === 'string' ? node : node.id).filter(Boolean))
+    const requestedIds = new Set((options.nodes ?? []).map((node) => node.id).filter(Boolean))
     const visibleNodes = requestedIds.size > 0 ? nodes.filter((node) => requestedIds.has(node.id)) : nodes
     if (visibleNodes.length === 0) return
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
@@ -75,19 +72,6 @@ export function useCanvasViewport(nodes: CanvasNode[], onInit: (api: CanvasApi) 
     updateViewport({
       x: (rect.width - (maxX - minX) * zoom) / 2 - minX * zoom,
       y: (rect.height - (maxY - minY) * zoom) / 2 - minY * zoom,
-      zoom,
-    })
-  }, [nodes, updateViewport])
-
-  const focusNode = useCallback((id: string, options: { zoom?: number } = {}): void => {
-    const root = rootRef.current
-    const node = nodes.find((candidate) => candidate.id === id)
-    if (!root || !node) return
-    const rect = root.getBoundingClientRect()
-    const zoom = clamp(Number(options.zoom ?? Math.max(viewportRef.current.zoom, 0.96)), GRAPH_MIN_ZOOM, 1.15)
-    updateViewport({
-      x: rect.width / 2 - (node.position.x + GRAPH_NODE_SIZE.w / 2) * zoom,
-      y: rect.height / 2 - (node.position.y + GRAPH_NODE_SIZE.h / 2) * zoom,
       zoom,
     })
   }, [nodes, updateViewport])
@@ -114,8 +98,8 @@ export function useCanvasViewport(nodes: CanvasNode[], onInit: (api: CanvasApi) 
   }, [])
 
   useEffect(() => {
-    onInit({ fitView, focusNode, zoomIn: () => zoomBy(1.2), zoomOut: () => zoomBy(1 / 1.2), screenToWorld })
-  }, [onInit, fitView, focusNode, zoomBy, screenToWorld])
+    onInit({ fitView, screenToWorld })
+  }, [onInit, fitView, screenToWorld])
 
   // ---- 画布平移 ----
   const beginPan = useCallback((event: React.PointerEvent): void => {

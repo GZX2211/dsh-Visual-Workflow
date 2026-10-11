@@ -29,7 +29,6 @@ export interface InspectorProps {
   width: number
   editorData: EditorData | null
   presets: Array<{ id: string; name?: string }>
-  tools: unknown[]
   models: Array<{ provider: string; model: string; efforts?: Array<{ id: string; name: string }> }>
   combos: Array<{ id: string; name: string; tools?: string[]; mcpServers?: string[] }>
   flowMeta: { nodeCount: number; revision: number }
@@ -63,12 +62,11 @@ export interface InspectorProps {
 
 export function Inspector(props: InspectorProps) {
   const {
-    copy: t, open, width, editorData, presets, tools, models, combos, flowMeta,
+    copy: t, open, width, editorData, presets, models, combos, flowMeta,
     onPatch, onDelete, onSave, onSaveAsTemplate, onPromote, promoteLocked, onOpenVersions, onRollbackVersion, onCloseVersions, assetVersions,
     onCopyProxy, onRemoveMember, onFileSelect, onLoadMd, onLoadGroupMd, onTestDb,
     saveDisabled, importBusy,
   } = props
-  void tools
   // 版本上拉列表的展开/收起属瞬时渲染态（数据面在状态机；收起不丢业务事实）。
   // 记住「为哪个资产展开」：切换编辑对象后列表自动视为收起，避免展示上一个资产的版本。
   const [versionsAssetId, setVersionsAssetId] = useState<string | null>(null)

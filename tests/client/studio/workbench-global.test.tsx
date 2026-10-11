@@ -200,6 +200,8 @@ describe('工作台全局化：「开启新会话」仅模板态 + 创建/覆盖
     expect(sessionCall).toBeTruthy()
     expect(sessionCall?.args.sessionId).toBe('s-1')
     expect(sessionCall?.args.workspacePath).toBe('D:\\work\\project')
+    // label 已退役：请求体只携带会话与工作区（宿主会话标题不由客户端定义）
+    expect(sessionCall?.args).not.toHaveProperty('label')
     const put = calls.find((call) => call.endpoint === EP.EP_PUT_WORKFLOW)
     expect(put).toBeTruthy()
     expect(put?.args.sessionId).toBe('session-new-1')

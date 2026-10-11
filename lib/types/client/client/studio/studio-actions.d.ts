@@ -1,4 +1,4 @@
-import type { LibTab, LibSelKind, TemplateKind, CanvasNode, CanvasEdge, EditorRef, PanelLayout, ToastItem, PresetItem, ToolItem, ModelItem, GraphSnapshot, ConfirmState, LibrarySource } from './studio-types.js';
+import type { LibTab, LibSelKind, TemplateKind, CanvasNode, CanvasEdge, EditorRef, PanelLayout, ToastItem, PresetItem, ModelItem, GraphSnapshot, ConfirmState, LibrarySource } from './studio-types.js';
 import type { WorkflowDocument, WorkflowTemplate } from '../../host/shared/graph-model.js';
 import type { ServiceState, RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate, ToolCombo, RunSnapshot } from '../../host/shared/types.js';
 import type { AssetKind, AssetVersionEntry, ExperienceEntry, RoleAssetDetail, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../../host/shared/asset-types.js';
@@ -162,9 +162,6 @@ export type StudioAction = {
 } | {
     type: 'PRESETS_LOADED';
     items: PresetItem[];
-} | {
-    type: 'TOOLS_LOADED';
-    items: ToolItem[];
 } | {
     type: 'MODELS_LOADED';
     items: ModelItem[];

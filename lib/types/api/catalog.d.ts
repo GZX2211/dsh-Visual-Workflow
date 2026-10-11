@@ -22,8 +22,6 @@ export declare class CatalogEndpoints extends VisualWorkflowApiBase {
      * 命令行为用户配置数据，两种语言都原样嵌入，不翻译。
      */
     private mcpCardDescription;
-    /** MCP 服务器：列表 / 增删改 / 启停（写入 profile 托管区，重启生效）。 */
-    mcpList(): Promise<unknown>;
     mcpPut(args: {
         server?: unknown;
     }): Promise<unknown>;
@@ -34,13 +32,6 @@ export declare class CatalogEndpoints extends VisualWorkflowApiBase {
         id?: unknown;
         disabled?: unknown;
     }): Promise<unknown>;
-    /**
-     * 全局工具开关列表（被关闭 = 父代理上下文不可见；独立于工作流运行状态）。
-     * 生效态口径与 system-prompt/assemble 瀑布完全一致（effectiveDisabled 先做跨进程
-     * 刷新再取内存快照）——历史上这里读「磁盘用户项」曾与生效态分叉，导致组合管理
-     * 把被默认种子隐藏的工具显示成「已开启」（界面说谎 → 用户以为开关失灵）。
-     */
-    toolSwitches(): Promise<unknown>;
     /** 设置单个工具开/关状态（全局即时生效；返回更新后的完整关闭清单）。 */
     toolSwitchPut(args: {
         name?: unknown;

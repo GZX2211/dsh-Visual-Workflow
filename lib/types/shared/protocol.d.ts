@@ -7,8 +7,6 @@ export declare const EP_GET_WORKFLOW = "getWorkflow";
 export declare const EP_PUT_WORKFLOW = "putWorkflow";
 /** 删除工作流。 */
 export declare const EP_DELETE_WORKFLOW = "deleteWorkflow";
-/** 创建工作流（与 putWorkflow 并存属于端点白名单）。 */
-export declare const EP_CREATE_WORKFLOW = "createWorkflow";
 /** 服务列表端点名。 */
 export declare const EP_LIST_SERVICES = "listServices";
 /** 获取单个服务。 */
@@ -33,7 +31,8 @@ export declare const EP_SERVICE_DEBUG = "serviceDebug";
 /**
  * 创建会话端点名（「开启新会话」一次性动作：从模板创建实例时先新建主会话，
  * 实例绑定该新会话 id——官方 agents.create 不传 parentSession 即无父根会话）。
- * 参数 { sessionId?, workspacePath?, label? }，返回 { sessionId }。
+ * 参数 { sessionId?, workspacePath? }，返回 { sessionId }。
+ * 会话标题不在此定义：官方 agents.create 的会话元信息不接受自定义字段，故不带 label 入参。
  */
 export declare const EP_CREATE_SESSION = "createSession";
 /** 模板列表端点名（角色/文件/数据库三类共用）。 */
@@ -48,14 +47,10 @@ export declare const EP_LIST_FLOW_TEMPLATES = "listFlowTemplates";
 export declare const EP_PUT_FLOW_TEMPLATE = "putFlowTemplate";
 /** 删除工作流模板。 */
 export declare const EP_DELETE_FLOW_TEMPLATE = "deleteFlowTemplate";
-/** 删除模板预览（角色/文件/数据库）。 */
-export declare const EP_DELETE_TEMPLATE_PREVIEW = "deleteTemplatePreview";
 /** 受管文件上传端点名（非文本文件：base64 内容 → data/files/ 受管拷贝）。 */
 export declare const EP_FILE_UPLOAD = "fileUpload";
 /** 官方预设列表端点名。 */
 export declare const EP_PRESETS = "presets";
-/** 工具目录列表端点名（组合管理工具勾选清单用）。 */
-export declare const EP_TOOLS = "tools";
 /** 模型列表端点名（思考强度列表来自适配器公布的 reasoning efforts）。 */
 export declare const EP_MODELS = "models";
 /** 工具组合列表端点名。 */
@@ -66,16 +61,12 @@ export declare const EP_TOOL_COMBO_PUT = "toolComboPut";
 export declare const EP_TOOL_COMBO_DELETE = "toolComboDelete";
 /** 插件目录列表端点名（组合管理用）。 */
 export declare const EP_PLUGIN_CATALOG = "pluginCatalog";
-/** MCP 服务器列表端点名。 */
-export declare const EP_MCP_LIST = "mcpList";
 /** 保存 MCP 服务器。 */
 export declare const EP_MCP_PUT = "mcpPut";
 /** 删除 MCP 服务器。 */
 export declare const EP_MCP_DELETE = "mcpDelete";
 /** 切换 MCP 服务器启用状态。 */
 export declare const EP_MCP_TOGGLE = "mcpToggle";
-/** 全局工具开关列表端点名（父代理工具白名单「关闭」侧；关闭后所有会话的代理上下文中不可见）。 */
-export declare const EP_TOOL_SWITCHES = "toolSwitches";
 /** 设置单个工具开/关状态端点名（全局即时生效）。 */
 export declare const EP_TOOL_SWITCH_PUT = "toolSwitchPut";
 /** 批量设置一组工具开/关状态端点名（组合管理「标签一键开关」用；全局即时生效）。 */
@@ -92,12 +83,13 @@ export declare const EP_RUN_STOP = "runStop";
 export declare const EP_RUN_HISTORY = "runHistory";
 /** 断点续跑端点名。 */
 export declare const EP_RUN_RESUME = "runResume";
+/**
+ * 运行期配置下发端点名（host 插件配置 → 前端可调参数；前端不得自读 host config）。
+ * 响应 `{ runPollMs }`：运行状态回显轮询间隔毫秒数——消费方在缺失/非法时回退自持缺省（600ms）。
+ */
+export declare const EP_RUNTIME_CONFIG = "runtimeConfig";
 /** 数据库连接测试端点名。 */
 export declare const EP_DB_TEST = "dbTest";
-/** 数据库表结构端点名。 */
-export declare const EP_DB_SCHEMA = "dbSchema";
-/** 数据库检索预览端点名。 */
-export declare const EP_DB_SEARCH_PREVIEW = "dbSearchPreview";
 /** 导出工作流端点名（v2 bundle）。 */
 export declare const EP_EXPORT_WORKFLOW = "exportWorkflow";
 /** 导入工作流端点名（v2 bundle）。 */
@@ -162,8 +154,8 @@ export declare const WF_GRAPH_PATCH = "wf_graph_patch";
 /**
  * 经验学习工具名（所有代理可用；单工具双态：空集取当前主体类型的生成 Prompt，
  * 传候选即校验后入库）。
- * 与自主编排工具不同：经验是「每个主体自己的学习」，子代理同样需要，
- * 因此经 OPTIONAL_INJECT_TOOLS 允许进入子代理工具集（由组合勾选决定）。
+ * 与自主编排工具不同：经验是「每个主体自己的学习」，子代理同样需要——
+ * 是否进入子代理工具集由组合勾选决定（runner.resolveAgentTools 的 combo ∩ 可见）。
  */
 export declare const WF_EXPERIENCE_LEARN = "wf_experience_learn";
 /**
@@ -180,14 +172,6 @@ export declare const WF_EXPERIENCE_RECALL = "wf_experience_recall";
  */
 export declare const WF_EXPERIENCE_FEEDBACK = "wf_experience_feedback";
 /**
- * 父代理（主会话 Agent）默认可用的插件编排工具集（静态元数据，无运行时消费者）。
- *
- * 事实修正（2026.10）：wf_ask_agent 已移出——它的 ask/reply 均仅子代理可用
- * （父代理调用必被 WF_NOT_CHILD 拒绝），resolve 退役后它不再有任何父代理用途，
- * 列在本表中与运行时事实矛盾。
- */
-export declare const PARENT_AGENT_VISIBLE_TOOLS: readonly ["wf_run_node", "wf_run_node_wait", "wf_finish"];
-/**
  * 子代理永久隐藏工具集（双保险：resolveAgentTools 的 allow 名单剔除 +
  * child scope `tools.restrict({ deny })` 显式隐藏，两处均直接引用本常量）：
  * wf_run_node / wf_run_node_wait / wf_finish（仅父代理可调度）+ wf_org_catalog /
@@ -198,27 +182,6 @@ export declare const PARENT_AGENT_VISIBLE_TOOLS: readonly ["wf_run_node", "wf_ru
  * 每个主体都有自己的经验，子代理经可选注入集勾选后方可使用。
  */
 export declare const CHILD_AGENT_HIDDEN_TOOLS: readonly ["wf_run_node", "wf_run_node_wait", "wf_finish", "wf_org_catalog", "wf_graph_patch"];
-/**
- * 元编排自进化工具集（所有代理可用）：经验学习、经验召回与经验反馈。
- * 与 ORG_AUTHORING_TOOLS 的差别——后者是父代理的组织权限（永久隐藏于子代理），
- * 本集合是「主体自身的学习、回忆与复盘」，因此同时存在于 OPTIONAL_INJECT_TOOLS
- * （子代理经组合勾选才注入；父代理默认可见）。
- *
- * 三者的阶段语义：召回发生在任务开始或执行途中；学习与反馈都发生在**任务最终完成阶段**。
- */
-export declare const META_EVOLUTION_TOOLS: readonly ["wf_experience_learn", "wf_experience_recall", "wf_experience_feedback"];
-/**
- * 自主编排工具集（**默认开启**，与其他工具同口径；由用户在组合管理中按需关闭）：
- * 勘察/改图属「组织权限」，但**父代理专属**——子代理经 CHILD_AGENT_HIDDEN_TOOLS
- * 永久隐藏（resolveAgentTools 的 allow 剔除 + child scope tools.restrict 双保险），
- * 工具内另有调用者身份二次校验（WF_NOT_ROOT）。
- *
- * 历史（用户裁决 2026.09）：早期版本把本集合做成「默认关闭种子」
- * （ToolSwitchStore.DEFAULT_DISABLED_TOOLS），造成磁盘权威清单（用户项）与内存生效
- * 快照（用户项 ∪ 种子）两套状态并存——组合管理显示「已开启」而上下文里其实被隐藏。
- * 该种子已删除（默认关闭属方案错误），本常量保留为可见性元数据。
- */
-export declare const ORG_AUTHORING_TOOLS: readonly ["wf_org_catalog", "wf_graph_patch"];
 /** 创建 teammate 工具名（Lead 专属）。 */
 export declare const TEAM_SPAWN_TEAMMATE = "spawn_teammate";
 /** 向其他成员发送一条持久消息工具名。 */
@@ -239,13 +202,6 @@ export declare const TEAM_TASK_GET = "team_task_get";
 export declare const TEAM_TASK_UPDATE = "team_task_update";
 /** 官方 Team 工具全量清单（9 个；组合管理页展示与全局开关的目标集）。 */
 export declare const TEAM_TOOL_NAMES: readonly ["spawn_teammate", "send_message", "list_agents", "wait_agent", "interrupt_agent", "team_task_create", "team_task_list", "team_task_get", "team_task_update"];
-/** Lead 专属官方 Team 工具（子代理调用被拒；不进成员协作所需集）。 */
-export declare const TEAM_LEAD_ONLY_TOOLS: readonly ["spawn_teammate", "interrupt_agent"];
-/**
- * 子代理侧协作所需的官方 Team 工具集（Lead 专属之外的全部）。
- * 用途：校验「成员是否具备官方协作通道」；不作为 allow 名单内容（见本段顶部机制事实）。
- */
-export declare const TEAM_CHILD_AVAILABLE_TOOLS: readonly ["send_message", "list_agents", "wait_agent", "team_task_create", "team_task_list", "team_task_get", "team_task_update"];
 /**
  * 首次安装（tool-switches.json 尚不存在）时写入磁盘的默认关闭清单。
  *
@@ -262,40 +218,6 @@ export declare const DEFAULT_DISABLED_ON_FIRST_INSTALL: readonly ["spawn_teammat
  *  - 因此组合管理可选列表必须剔除、resolveAgentTools 的 allow 名单必须剔除（双保险）。
  */
 export declare const RESERVED_TRANSPORT_TOOL = "run_code";
-/**
- * 可选注入工具集（默认不注入子代理，仅勾选/存在连线时按需进入子代理工具集）。
- *  - wf_ask：组合/白名单勾选时注入
- *  - wf_ask_agent：组合/白名单勾选时注入（协作组内通信）
- *  - wf_db_query：存在数据库连线（db-in）时按连线自动注入
- *  - wf_experience_learn / wf_experience_recall / wf_experience_feedback：
- *    组合勾选时注入（每个主体自己的学习、回忆与复盘反馈）
- */
-export declare const OPTIONAL_INJECT_TOOLS: readonly ["wf_ask", "wf_ask_agent", "wf_db_query", "wf_experience_learn", "wf_experience_recall", "wf_experience_feedback"];
-/**
- * 工具可见性元数据总表：以「工具名 → 可见性描述」的统一视图汇总各规则，
- * 供测试做关键规则断言与消费侧做静态判定（as const，零运行时 import）。
- */
-export declare const TOOL_VISIBILITY: {
-    /** 父代理默认可用集（wf_run_node / wf_run_node_wait / wf_finish；静态元数据，无运行时消费者）。 */
-    readonly parentVisible: readonly ["wf_run_node", "wf_run_node_wait", "wf_finish"];
-    /** 子代理永久隐藏集（wf_run_node / wf_run_node_wait / wf_finish + 自主编排两工具）。 */
-    readonly childHidden: readonly ["wf_run_node", "wf_run_node_wait", "wf_finish", "wf_org_catalog", "wf_graph_patch"];
-    /** 可选注入集（wf_ask / wf_ask_agent / wf_db_query / 经验三工具）。 */
-    readonly optionalInject: readonly ["wf_ask", "wf_ask_agent", "wf_db_query", "wf_experience_learn", "wf_experience_recall", "wf_experience_feedback"];
-    /** 自主编排工具集（wf_org_catalog / wf_graph_patch；默认开启、父代理专属，可经全局工具开关关闭）。 */
-    readonly orgAuthoring: readonly ["wf_org_catalog", "wf_graph_patch"];
-    /** 元编排自进化工具集（wf_experience_learn / wf_experience_recall / wf_experience_feedback；所有代理可用，进可选注入集）。 */
-    readonly metaEvolution: readonly ["wf_experience_learn", "wf_experience_recall", "wf_experience_feedback"];
-    /**
-     * 官方 Agent Team 工具集（9 个）：由官方包注册在 Team 成员作用域，插件不注册、不转写；
-     * 插件只把它作为「全局工具开关」与组合管理列表的目标集。禁止进入任何 restrict allow/deny 名单。
-     */
-    readonly officialTeam: readonly ["spawn_teammate", "send_message", "list_agents", "wait_agent", "interrupt_agent", "team_task_create", "team_task_list", "team_task_get", "team_task_update"];
-    /** 子代理侧协作所需的官方 Team 工具集（Lead 专属之外）。 */
-    readonly officialTeamChildAvailable: readonly ["send_message", "list_agents", "wait_agent", "team_task_create", "team_task_list", "team_task_get", "team_task_update"];
-    /** Lead 专属官方 Team 工具集（子代理调用被官方拒绝）。 */
-    readonly officialTeamLeadOnly: readonly ["spawn_teammate", "interrupt_agent"];
-};
 /**
  * 运行状态枚举（RUN_STATUSES）：与 run-types.js 的 RunStatus 逐字一致（六态）。
  * running <-> paused -> completed / failed / stopped；宿主重启后

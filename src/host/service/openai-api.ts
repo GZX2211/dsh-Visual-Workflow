@@ -92,7 +92,7 @@ export interface OpenAiApiDeps {
    * 独立会话运行，cwd=服务工作区路径；弱化同一 userId 的跨请求连续性）。
    * 缺省时回退 resolveSession（现有复用会话语义）。
    */
-  createSession?(options: { label: string; agentPreset?: string; cwd?: string }): Promise<string>
+  createSession?(options: { agentPreset?: string; cwd?: string }): Promise<string>
   /** 按会话取/建根 Agent（服务进程内装配）。 */
   ensureRootAgent(sessionId: string): Promise<{ agent: unknown; provider?: string; model?: string }>
   /** watchdog 单次推进（回合终态/空闲判定）。 */
@@ -231,7 +231,6 @@ export class OpenAiApi {
     const sessionId = startNewSession
       ? this.deps.createSession
         ? await this.deps.createSession({
-            label: `服务请求：${input.userId}`,
             agentPreset: 'standard',
             ...(workspacePath ? { cwd: workspacePath } : {}),
           })
@@ -255,10 +254,9 @@ export class OpenAiApi {
       : await this.deps.orchestrator.startRun({ sessionId, flowId: this.deps.serviceId, mode: 'mode2', question: input.question })
     const runId = started.runId
 
-    // 父代理回合事件增量推进（assistant/message 累计文本；turn/end 标记）
+    // 父代理回合事件增量推进（assistant/message 累计文本）
     let baseSeq = Number(agentLike.session?.seq ?? 0)
     let text = ''
-    let turnEnded = false
     const pollMs = this.deps.pollMs ?? OPENAI_POLL_MS
     // 等待上界（需求 §5：SSE 超时；Bug 22——之前无限轮询，超时后停止运行并抛错）
     const timeoutMs = options.timeoutMs ?? this.deps.sseTimeoutMs ?? DEFAULT_SSE_TIMEOUT_MS
@@ -294,8 +292,6 @@ export class OpenAiApi {
             text = joined
             if (delta && onDelta) onDelta(delta)
           }
-        } else if (event.type === 'turn/end') {
-          turnEnded = true
         }
       }
       baseSeq = eventLength
@@ -310,9 +306,7 @@ export class OpenAiApi {
           ...(status !== 'completed' ? { error: failureText(status, snapshot?.summary ?? '') } : {}),
         }
       }
-      if (turnEnded && status === 'running') {
-        // 回合已结束但 run 未终态：等待 wf_finish 收尾/看护兜底（继续轮询）
-      }
+      // 回合结束但 run 未终态时，继续等待 wf_finish 收尾/看护兜底（继续轮询）
       await sleep(pollMs)
     }
   }

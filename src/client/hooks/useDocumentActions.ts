@@ -247,7 +247,6 @@ export function useDocumentActions(
         const created = await remote.call(EP.EP_CREATE_SESSION, {
           sessionId: state.sessionId,
           ...(String(workspacePath ?? '').trim() ? { workspacePath: String(workspacePath).trim() } : {}),
-          label: `${t.sessionLabelWorkflowPrefix}${template.name ?? ''}`,
         }) as { sessionId?: unknown }
         targetSessionId = String(created?.sessionId ?? '')
         if (!targetSessionId) throw new Error(t.sessionCreateFailed)

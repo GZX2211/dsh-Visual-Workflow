@@ -19,7 +19,12 @@ import {
   type FilterContextLike,
   type PromptAssemblyLike,
 } from '../../../../src/host/tools/infrastructure/tool-switches.js'
-import { DEFAULT_DISABLED_ON_FIRST_INSTALL, ORG_AUTHORING_TOOLS, TEAM_SPAWN_TEAMMATE } from '../../../../src/host/shared/protocol.js'
+import {
+  DEFAULT_DISABLED_ON_FIRST_INSTALL,
+  TEAM_SPAWN_TEAMMATE,
+  WF_GRAPH_PATCH,
+  WF_ORG_CATALOG,
+} from '../../../../src/host/shared/protocol.js'
 
 const cleanups: Array<() => Promise<void>> = []
 
@@ -130,17 +135,16 @@ describe('ToolSwitchStore', () => {
     // 用户环境已存在清单：空清单保持为空，不被默认关闭清单覆盖
     expect([...store.currentDisabled()]).toEqual([])
     expect(await store.effectiveDisabled()).toEqual([])
-    for (const name of ORG_AUTHORING_TOOLS) {
-      expect(store.currentDisabled().has(name)).toBe(false)
-    }
+    expect(store.currentDisabled().has(WF_ORG_CATALOG)).toBe(false)
+    expect(store.currentDisabled().has(WF_GRAPH_PATCH)).toBe(false)
     // 用户仍可显式关闭（组合管理统一开关）
-    await store.setDisabled(ORG_AUTHORING_TOOLS[0], true)
-    expect(store.currentDisabled().has(ORG_AUTHORING_TOOLS[0])).toBe(true)
-    expect(await store.effectiveDisabled()).toEqual([ORG_AUTHORING_TOOLS[0]])
+    await store.setDisabled(WF_ORG_CATALOG, true)
+    expect(store.currentDisabled().has(WF_ORG_CATALOG)).toBe(true)
+    expect(await store.effectiveDisabled()).toEqual([WF_ORG_CATALOG])
     // 播种不复发：再次 load（文件已存在）仍以磁盘为准
     const reloaded = new ToolSwitchStore(dir)
     await reloaded.load()
-    expect([...reloaded.currentDisabled()]).toEqual([ORG_AUTHORING_TOOLS[0]])
+    expect([...reloaded.currentDisabled()]).toEqual([WF_ORG_CATALOG])
   })
 
   it('历史文件兼容：遗留 enabled 记账键被忽略，且下一次写入自然清除', async () => {

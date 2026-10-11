@@ -15,6 +15,7 @@ import type { WorkflowDocument, WorkflowTemplate } from '../../host/shared/graph
 import type { Drafted, StudioAction, CanvasNode, CanvasEdge } from '../studio/studio-state.js'
 import type { RemoteFace } from './useRemote.js'
 import { EP } from '../lib/remote.js'
+import { serializeFlow } from '../lib/graph-serialize.js'
 
 export interface WorkflowsFace {
   /** 加载工作流实例列表（全部会话）；返回加载的条目（供「进入工作台自动选中实例」复用）。 */
@@ -33,30 +34,9 @@ export interface WorkflowsFace {
   openFlow(flow: WorkflowDocument): void
 }
 
-/** 画布 → 文档序列化（节点/连线直接映射；P12 图模型接管完整归一化）。 */
+/** 画布 → 文档序列化（薄委托：唯一本体在 lib/graph-serialize.ts 的 serializeFlow）。 */
 export function serializeWorkflow(flow: WorkflowDocument, nodes: CanvasNode[], edges: CanvasEdge[]): WorkflowDocument {
-  return {
-    ...flow,
-    nodes: nodes.map((node) => ({
-      id: node.id,
-      kind: node.kind,
-      position: node.position,
-      data: node.data,
-      // 虚拟节点顶层 proxySourceId 保留（Bug 2）：与画布投影对称，
-      // 保存后后端 validateFlow 不再报 proxySourceMissing。
-      ...((node as { proxySourceId?: unknown }).proxySourceId !== undefined
-        ? { proxySourceId: (node as { proxySourceId?: string }).proxySourceId }
-        : {}),
-    })) as WorkflowDocument['nodes'],
-    lines: edges.map((edge) => ({
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      sourceHandle: edge.sourceHandle,
-      targetHandle: edge.targetHandle,
-      ...(edge.condition ? { condition: edge.condition } : {}),
-    })),
-  }
+  return serializeFlow(flow, nodes, edges)
 }
 
 /** 待补发的最新画布内容（在途保存期间到达的后一次保存）。 */

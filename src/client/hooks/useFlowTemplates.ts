@@ -11,6 +11,7 @@ import type { WorkflowTemplate } from '../../host/shared/graph-model.js'
 import type { Drafted, StudioAction, CanvasNode, CanvasEdge } from '../studio/studio-state.js'
 import type { RemoteFace } from './useRemote.js'
 import { EP } from '../lib/remote.js'
+import { serializeFlow } from '../lib/graph-serialize.js'
 
 export interface FlowTemplatesFace {
   loadFlowTemplates(): Promise<void>
@@ -20,30 +21,6 @@ export interface FlowTemplatesFace {
   saveFlowTemplate(template: WorkflowTemplate, nodes: CanvasNode[], edges: CanvasEdge[]): Promise<WorkflowTemplate | null>
   deleteFlowTemplate(id: string): Promise<void>
   openFlowTemplate(template: WorkflowTemplate): void
-}
-
-/** 画布 → 模板序列化（与 serializeWorkflow 同构）。 */
-export function serializeFlowTemplate(template: WorkflowTemplate, nodes: CanvasNode[], edges: CanvasEdge[]): WorkflowTemplate {
-  return {
-    ...template,
-    nodes: nodes.map((node) => ({
-      id: node.id,
-      kind: node.kind,
-      position: node.position,
-      data: node.data,
-      ...((node as { proxySourceId?: unknown }).proxySourceId !== undefined
-        ? { proxySourceId: (node as { proxySourceId?: string }).proxySourceId }
-        : {}),
-    })) as WorkflowTemplate['nodes'],
-    lines: edges.map((edge) => ({
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      sourceHandle: edge.sourceHandle,
-      targetHandle: edge.targetHandle,
-      ...(edge.condition ? { condition: edge.condition } : {}),
-    })),
-  }
 }
 
 /** 工作流模板列表面（远端失败抛错，由调用方 toast）。 */
@@ -76,7 +53,7 @@ export function useFlowTemplates(dispatch: Dispatch<StudioAction>, remote: Remot
     nodes: CanvasNode[],
     edges: CanvasEdge[],
   ): Promise<WorkflowTemplate | null> => {
-    const serialized = serializeFlowTemplate(template, nodes, edges)
+    const serialized = serializeFlow(template, nodes, edges)
     const saved = await remote.call(EP.EP_PUT_FLOW_TEMPLATE, {
       template: serialized,
     }) as WorkflowTemplate
