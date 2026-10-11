@@ -1,38 +1,57 @@
-// T-003 构建产物测试：beforeAll 真实构建一次（execFileSync + stdio inherit，规避 pipe EPERM），
-// 随后断言 client/host 两半产物并存、client 产物含 __ModuleLoader__ 包装与 style[data-plugin]
-// 注入、sourcemap 存在、exports["./client"].types 指向的 lib/types/client/index.d.ts 真实可命中。
+// T-003 构建产物测试：**只读**校验已构建产物（本门禁不执行构建，D11C-02）。
+//
+// 为什么不在测试进程内构建：lib/ 受版本控制，而 scripts/build.mjs 第零步会整体
+// rmSync(lib/types) 并回收 lib/ 幽灵条目。测试内真实构建会带来四类后果：
+//   ① 与同一 pool 内动态 import lib/index.js 的 cordis-patch.test.ts 争用同一目录树，
+//      并行 import 可能读到瞬时缺失的模块（全量并行时该用例超时的真因）；
+//   ② 与并发 `pnpm build` 互删互写（两边都先清空 lib/types）；
+//   ③ 改写工作区 lib/** 的内容与 mtime，覆盖他人未提交的产物改动；
+//   ④ 每次 `pnpm test` 多付一次 tsc×3 + tsdown 的 CPU 成本（并行饥饿的放大器）。
+//
+// 「源码改了但 lib/ 未重建」的漂移不能靠测试内构建来兜——那种构建会让断言恒绿、
+// 把漂移掩盖成本次运行内的假一致。故漂移分两层兜：
+//   - CI（逐字节，唯一能发现「原地改内容未重建」的机械门禁）：`pnpm check` 的 build
+//     步骤之后执行 `git diff --exit-code --stat -- lib`（见 .github/workflows/check.yml）；
+//   - 本地（文件级）：本文件「产物与源码模块图一一对应」两条断言，暴露新增/改名/删除
+//     模块却未重建的漂移，并给出可操作的失败信息。
+// 产物缺失时失败信息显式提示先执行 `pnpm build`（lib/ 已入库，全新检出即带产物）。
 //
 // 层级归属：断言对象是构建链路对发布包的产出（跨 host/client 两半与构建脚本），
 // 不对应任何 src 模块，故属 tests/contract（包与构建契约门禁）。
 // 运行环境：node（host 测试默认）。构建产物断言与 P01 的 package-contract.test.ts 互补：
 // 前者校验 package.json 静态契约，本测试校验 P01/P02 构建链路产出的真实文件。
-import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 // 项目根目录（package.json 所在目录）。
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 
-/** 读取产物文件内容（附加「文件缺失」上下文）。 */
+/** 读取产物文件内容（附加「文件缺失」上下文与修复指引）。 */
 function readArtifact(rel: string): string {
   const p = resolve(root, rel)
-  expect(existsSync(p), `产物缺失：${rel}`).toBe(true)
+  expect(existsSync(p), `产物缺失：${rel}（本门禁只读校验，不执行构建；请先运行 pnpm build）`).toBe(true)
   return readFileSync(p, 'utf8')
 }
 
-// 真实构建一次：以 inherit stdio 直接执行 build.mjs（node -- <file> 直接 spawn，
-// 不捕获 pipe），规避 Windows 沙箱下 named pipe 被禁导致的 EPERM（见 SKILL §6）。
-// 放在 beforeAll 中，使本测试不依赖外部「先跑过 build」的隐式前提。
-// hook 超时放宽：全量并行时构建（host 双发射 + client 声明 + tsdown）可能超过
-// vitest 默认 hook 超时（10s），构建是重操作而非测试逻辑问题。
-beforeAll(() => {
-  execFileSync(process.execPath, [resolve(root, 'scripts/build.mjs')], {
-    cwd: root,
-    stdio: 'inherit',
-  })
-}, 120_000)
+/** host 源码目录与产物目录（模块图映射的两端）。 */
+const hostSrcDir = resolve(root, 'src/host')
+const libDir = resolve(root, 'lib')
+
+/** client bundle 由 tsdown 从 src/client/entry.ts 产出，不属 host 模块图。 */
+const clientBundleEntry = 'client.js'
+
+/** 递归列出目录下的文件（返回相对该目录的正斜杠路径）。 */
+function listFiles(dir: string, base = ''): string[] {
+  const found: string[] = []
+  for (const entry of readdirSync(join(dir, base), { withFileTypes: true })) {
+    const rel = base === '' ? entry.name : `${base}/${entry.name}`
+    if (entry.isDirectory()) found.push(...listFiles(dir, rel))
+    else if (entry.isFile()) found.push(rel)
+  }
+  return found
+}
 
 describe('T-003 构建链路（client bundle + host/client 并存）', () => {
   it('lib/client.js 存在且含 __ModuleLoader__.load 包装', () => {
@@ -46,11 +65,13 @@ describe('T-003 构建链路（client bundle + host/client 并存）', () => {
   })
 
   it('lib/index.js（host 产物）仍存在（client build 未清空 host 输出）', () => {
-    expect(existsSync(resolve(root, 'lib/index.js'))).toBe(true)
+    const message = 'host 产物缺失：lib/index.js（请先运行 pnpm build）'
+    expect(existsSync(resolve(root, 'lib/index.js')), message).toBe(true)
   })
 
   it('lib/client.js.map（sourcemap）存在', () => {
-    expect(existsSync(resolve(root, 'lib/client.js.map'))).toBe(true)
+    const message = 'sourcemap 缺失：lib/client.js.map（请先运行 pnpm build）'
+    expect(existsSync(resolve(root, 'lib/client.js.map')), message).toBe(true)
   })
 
   it('lib/types/client/index.d.ts 存在（exports["./client"].types 契约真实可命中）', () => {
@@ -79,5 +100,32 @@ describe('T-003 构建链路（client bundle + host/client 并存）', () => {
     expect(code).not.toContain('wf-frame-content')
     // 用户验收批注：不得在 conversation.view 注册插件入口
     expect(code).not.toContain('conversation.view')
+  })
+})
+
+// 漂移门禁（本地可读的那一层）：产物必须与源码模块图一一对应。
+// 映射规则即 build.mjs 的发射契约——src/host/**/*.ts 逐个发射 lib/<rel>.js 与
+// lib/types/<rel>.d.ts；lib/ 下凡无 src/host 对应物的 JS 即幽灵产物（源码改名/删除后
+// 的残留）。.d.ts 源码是手写声明、不参与发射。
+describe('T-003 产物与源码模块图同步（lib/ 必须随源码一起提交）', () => {
+  it('每个 src/host 模块都有对应 lib/*.js 与 lib/types/*.d.ts 产物', () => {
+    const sourceFiles = listFiles(hostSrcDir).filter((file) => file.endsWith('.ts') && !file.endsWith('.d.ts'))
+    // 防真空通过：目录遍历口径变化（glob/相对路径）时本用例必须失败而不是「零模块全绿」。
+    expect(sourceFiles).toContain('index.ts')
+    const modules = sourceFiles.map((file) => file.slice(0, -'.ts'.length))
+
+    const missingJs = modules.filter((module) => !existsSync(join(libDir, `${module}.js`)))
+    const missingDts = modules.filter((module) => !existsSync(join(libDir, 'types', `${module}.d.ts`)))
+    expect(missingJs, '有源码模块但缺 JS 产物（lib/ 未随源码重建）').toEqual([])
+    expect(missingDts, '有源码模块但缺声明产物（lib/types 未随源码重建）').toEqual([])
+  })
+
+  it('lib/ 下没有无源码对应的幽灵 JS 产物', () => {
+    const ghosts = listFiles(libDir)
+      .filter((file) => file.endsWith('.js') && file !== clientBundleEntry)
+      .filter((file) => !existsSync(join(hostSrcDir, `${file.slice(0, -'.js'.length)}.ts`)))
+    // 子目录内的残留不受 build.mjs 第零步回收（它只按 lib/ 顶层条目清理），故修复动作是
+    // 删除该文件本身，而非重跑构建。
+    expect(ghosts, 'lib/ 存在无源码对应的残留产物（源码已改名/删除，需删除该文件）').toEqual([])
   })
 })
