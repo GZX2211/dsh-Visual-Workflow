@@ -78,13 +78,13 @@ export declare const ORCH_HARD_CONSTRAINTS: {
      * 节点完成判定（双重汇报防治，一句话）：子代理主动 report ≠ 完成；
      * 只有 DSH 自动送达的结算通知才是节点完成的权威信号。
      */
-    readonly nodeSettledSignal: "节点判定：收到结算通知（Background subagent … finished …）后，仍须依据运行快照的结算状态与声明产物判断业务完成；请求补充输入或回复文件路径不等于成功";
+    readonly nodeSettledSignal: "节点判定：收到结算通知（Background subagent … finished …）后，依据运行快照、声明产物和任务要求判断；请求输入或回复路径不等于成功。证据明确后执行合法工具动作：推进、有依据重试、等待未结算节点/外部事件、请求补充，或按完成条件收尾；不要无新证据、无工具动作地反复论证同一结论";
     readonly inputBindings: "输入由运行时绑定并在 wf_run_node 首次任务中交付；不使用原生 send_message 补充工作流输入，不使用 wf_graph_patch 保存临时运行数据。输入缺失时报告具体节点，通过宿主允许的用户交互或工作台绑定尚未派发节点；附件上传不等于输入绑定，不能猜路径或搜索文件。显式 ctx 优先，auto 仅交接唯一已结算上游，遇到歧义需明确绑定";
-    readonly safeTermination: "无法安全继续时调用 wf_finish，status 为 failed，释放运行锁；不得无限重试或自行声称节点成功；沙箱后端故障按真实原因报告，不绕过工具守卫或沙箱";
+    readonly safeTermination: "达到有效重试上限不再调用同一节点，不以错误结果推进下游；有合法用户修复路径可请求干预，无法继续时调用 wf_finish(status=failed)，说明失败节点、原因和已完成节点。工具返回错误须如实处理，未获成功返回不能声称锁已释放；沙箱故障按真实原因报告，不绕过守卫或沙箱";
     /** 收尾协议：wf_finish 幂等收尾、释放锁。 */
     readonly finishIdempotent: "收尾时调用 wf_finish （只调用一次，幂等，释放运行锁）";
     /** 失败语义：节点失败需显式处置，不静默跳过。 */
-    readonly failureSemantics: "绝不静默跳过失败节点";
+    readonly failureSemantics: "绝不静默跳过失败节点；重试前核对真实结算、产物验证、未满足的任务要求、retryLimit 和新的修复依据；无新依据不原样重复派发，允许次数继续遵守既有 retryLimit";
     /** 条件连线语义：条件分支由父代理按上游实际产出语义判断。 */
     readonly conditionSemantics: "条件分支由你依据上游节点的实际产出进行语义判断";
     /** 情况2 执行者模式核心短语：你本人也是执行节点，先执行自身任务再调度。 */

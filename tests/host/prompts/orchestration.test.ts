@@ -21,6 +21,7 @@ import {
   buildHybridPrompt,
   buildOrchestratorPrompt,
   buildParentTaskSpec,
+  buildResumeOrchestrationPrompt,
 } from '../../../src/host/prompts/index.js'
 import { TEAM_SPAWN_TEAMMATE, WF_RUN_NODE } from '../../../src/host/shared/protocol.js'
 import { nodeFacts, orchFacts } from './fixtures/prompt-facts.js'
@@ -121,5 +122,18 @@ describe("输入缺失与业务结算约束", () => {
       expect(head).toContain(constraint)
       expect(tail).toContain(constraint)
     }
+  })
+
+  it.each([buildOrchestratorPrompt, buildHybridPrompt, buildResumeOrchestrationPrompt])("test_prompt_retry_and_failed_finish_keep_existing_constraints_and_anchors", (build) => {
+    const output = build({ facts: orchFacts, dynamic: { isResume: true, resumeFromNodeId: "node-b" } })
+    const head = output.slice(0, output.indexOf(TAIL_MARKER))
+    const tail = output.slice(output.indexOf(TAIL_MARKER))
+    for (const constraint of [ORCH_HARD_CONSTRAINTS.nodeSettledSignal, ORCH_HARD_CONSTRAINTS.failureSemantics, ORCH_HARD_CONSTRAINTS.conditionSemantics]) expect(head).toContain(constraint)
+    expect(tail).toContain(ORCH_HARD_CONSTRAINTS.safeTermination)
+    expect(tail).toContain(ORCH_HARD_CONSTRAINTS.finishIdempotent)
+    if (build !== buildResumeOrchestrationPrompt) expect(tail).toContain(TAIL_RESTATE_MARKER)
+    expect(output).toContain(WF_RUN_NODE)
+    expect(output).toContain("retryLimit")
+    expect(output).toContain("wf_finish(status=failed)")
   })
 })
