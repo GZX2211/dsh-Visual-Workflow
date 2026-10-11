@@ -4,8 +4,10 @@
 
 // tests/client/components/panels/inspector/role-form.test.tsx
 //
-// 角色表单（T-048 验收 2）：子代理「模式」下拉 = preset + 自定义组合（组合分组）；
-// 父代理仅 preset（allowCombos=false 无组合分组）；选中组合显示工具数摘要。
+// 角色表单（T-048 验收 2 / B10）：子代理「模式」下拉 = preset + 自定义组合（组合分组）；
+// 父代理仅官方 preset（showCombos 默认随 isParent=false）；选中组合显示工具数摘要。
+// B10 语义：presetId 下拉对父/子代理都可编辑（运行前选择才生效），
+// 「谁可见 combo」与「谁可编辑 presetId」是两件独立的事（前者由 showCombos 控制）。
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { act } from 'react'
@@ -62,22 +64,32 @@ describe('角色表单模式下拉', () => {
     expect(placeholders.slice(-2)).toEqual([en.inputSchemaExample, en.outputSchemaExample])
   })
 
-  it('子代理：preset + 自定义组合（optgroup 分组）都在下拉中', async () => {
+  it('子代理：preset + 自定义组合（optgroup 分组）都在下拉中，且下拉可编辑', async () => {
     await renderRoleForm()
     const select = Array.from(document.querySelectorAll<HTMLSelectElement>('select')).find((item) => item.value === 'standard')
     expect(select).toBeTruthy()
+    expect(select!.disabled).toBe(false)
     const options = Array.from(select!.querySelectorAll('option')).map((item) => item.textContent)
     expect(options).toEqual(expect.arrayContaining(['标准', '极简', '团队模式', '纯工具']))
     const groups = Array.from(select!.querySelectorAll('optgroup')).map((item) => item.label)
     expect(groups).toEqual([zh.combos])
   })
 
-  it('父代理：仅 preset，无自定义组合分组', async () => {
-    await renderRoleForm({ isParent: true, allowCombos: false })
+  it('父代理：仅官方 preset（无自定义组合分组），但 presetId 下拉可编辑', async () => {
+    await renderRoleForm({ isParent: true })
     const select = Array.from(document.querySelectorAll<HTMLSelectElement>('select')).find((item) => item.value === 'standard')
     expect(select?.querySelectorAll('optgroup').length).toBe(0)
     const options = Array.from(select!.querySelectorAll('option')).map((item) => item.textContent)
     expect(options).toEqual(['标准', '极简'])
+    // 用户裁决：运行中改 preset 不影响行为、运行前选择才生效 → 不再锁死下拉
+    expect(select!.disabled).toBe(false)
+  })
+
+  it('组合可见性由 showCombos 决定，与 presetId 是否可编辑无关（子代理也可隐藏组合）', async () => {
+    await renderRoleForm({ showCombos: false })
+    const select = Array.from(document.querySelectorAll<HTMLSelectElement>('select')).find((item) => item.value === 'standard')
+    expect(select!.querySelectorAll('optgroup').length).toBe(0)
+    expect(select!.disabled).toBe(false)
   })
 
   it('选中组合：显示工具 + MCP 数量摘要', async () => {

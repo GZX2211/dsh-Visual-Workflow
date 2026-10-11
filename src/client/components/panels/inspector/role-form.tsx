@@ -1,7 +1,9 @@
 // src/client/components/panels/inspector/role-form.tsx
 //
-// 角色表单（父/子代理；父代理模式仅 preset + 高级项只含 ReAct/重试）：
+// 角色表单（父/子代理；父代理高级项只含 ReAct/重试，无输入/输出 Schema）：
 // System Prompt + 开关 + Provider/模型/模式/思考强度 + 高级项。
+// 模式（presetId）语义：父/子代理都可编辑——官方只在工作流运行开始前读取该选择，
+// 运行中改动不影响行为，故不下拉锁死；组合（combo）只给子代理，父代理只见官方 preset。
 
 import type { Dict } from '../../../i18n.js'
 import type { PresetItem, ModelItem } from '../../../studio/studio-state.js'
@@ -22,7 +24,7 @@ const FALLBACK_EFFORTS: Array<{ id: string; name: string }> = [
   { id: 'max', name: 'Max' },
 ]
 
-export function RoleForm({ data, copy, presets, models, combos, onPatch, onLoadMd, isParent = false, allowCombos = true }: {
+export function RoleForm({ data, copy, presets, models, combos, onPatch, onLoadMd, isParent = false, showCombos = !isParent }: {
   data: Record<string, unknown>
   copy: Dict
   presets: PresetLike[]
@@ -31,17 +33,22 @@ export function RoleForm({ data, copy, presets, models, combos, onPatch, onLoadM
   onPatch(patch: Record<string, unknown>): void
   onLoadMd(): void
   isParent?: boolean
-  allowCombos?: boolean
+  /**
+   * 是否在模式下拉中提供 combo 分组。谁可编辑 presetId（父/子都可）与谁可见 combo
+   * （仅子代理）是两件独立的事，故单独成参而不复用 isParent 的其余语义；
+   * 缺省随 isParent（父代理只见官方 preset），避免调用方漏传时把 combo 泄给父代理。
+   */
+  showCombos?: boolean
 }) {
   const providers = [...new Set(models.map((entry) => entry.provider))].filter(Boolean)
   const modelsForProvider = models.filter((entry) => entry.provider === String(data.provider ?? ''))
   const presetId = String(data.presetId ?? 'standard')
-  const selectedCombo = allowCombos ? combos.find((combo) => combo.id === presetId) ?? null : null
+  const selectedCombo = showCombos ? combos.find((combo) => combo.id === presetId) ?? null : null
   const toolCount = selectedCombo
     ? (selectedCombo.tools?.length ?? 0) + (selectedCombo.mcpServers?.length ?? 0)
     : null
   const modeOptions = (presets ?? []).map((preset) => ({ value: preset.id, label: preset.name ?? preset.id }))
-  const modeGroups = allowCombos && (combos ?? []).length > 0
+  const modeGroups = showCombos && (combos ?? []).length > 0
     ? [{ label: copy.combos, options: (combos ?? []).map((combo) => ({ value: combo.id, label: combo.name })) }]
     : []
   const hasMode = modeOptions.length > 0 || modeGroups.length > 0
@@ -124,7 +131,7 @@ export function RoleForm({ data, copy, presets, models, combos, onPatch, onLoadM
       <div className={hasMode ? 'wf-form-grid-2' : 'wf-form-grid-1'}>
         {hasMode ? (
           <Field label={copy.modeLabel}>
-            <select value={presetId} disabled={isParent} onChange={(event) => onPatch({ presetId: event.target.value })}>
+            <select value={presetId} onChange={(event) => onPatch({ presetId: event.target.value })}>
               {modeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               {modeGroups.map((group) => (
                 <optgroup key={group.label} label={group.label}>

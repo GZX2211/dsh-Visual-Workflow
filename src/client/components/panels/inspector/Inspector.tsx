@@ -84,9 +84,11 @@ export function Inspector(props: InspectorProps) {
         content = <WorkflowForm data={data} copy={t} isService={editorData.kind === 'service'} flowMeta={flowMeta} onPatch={onPatch} />
         break
       case 'role':
-        // 父代理属性（D-20）：**模板层全面可编辑**（含 presetId/工具组合），不再显示
-        // 「父代理模板无独立属性」空态；画布上的父代理节点同样可编辑，但运行期 preset
-        // 仍按引擎口径固定 —— 故只有「模板来源」的编辑才放开组合(preset)下拉。
+        // 父代理属性（D-20）：模板层与画布节点都可编辑属性，不再显示「父代理模板无独立属性」空态。
+        // 模式（presetId）下拉对父/子代理一律可编辑：官方只在工作流运行开始前读取该选择，
+        // 运行中改动不影响行为（用户裁决），故不锁死。两件独立的事：
+        //   - 谁可编辑 presetId：父代理与子代理都可编辑；
+        //   - 谁可见 combo（工具组合）：只有子代理（父代理只能用官方 preset）。
         content = (
           <RoleForm
             data={data}
@@ -97,7 +99,7 @@ export function Inspector(props: InspectorProps) {
             onPatch={onPatch}
             onLoadMd={onLoadMd}
             isParent={editorData.isParent === true}
-            allowCombos={editorData.isParent !== true || editorData.template === true}
+            showCombos={editorData.isParent !== true}
           />
         )
         break

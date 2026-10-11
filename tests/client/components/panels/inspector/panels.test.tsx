@@ -61,6 +61,14 @@ function footerButton(label: string): HTMLButtonElement | undefined {
     .find((item) => item.textContent === label)
 }
 
+/**
+ * 角色表单的 presetId（模式）下拉：值等于当前选中 preset（夹具为 'standard'）。
+ * B10 语义：谁可编辑 presetId（父/子都可）与谁可见 combo（仅子代理）是两件独立的事。
+ */
+function presetIdSelect(): HTMLSelectElement | undefined {
+  return Array.from(container!.querySelectorAll<HTMLSelectElement>('select')).find((item) => item.value === 'standard')
+}
+
 describe('P4 父代理模板可编辑（Inspector，D-20）', () => {
   const common = {
     copy: zh,
@@ -92,16 +100,35 @@ describe('P4 父代理模板可编辑（Inspector，D-20）', () => {
     const text = container!.textContent ?? ''
     expect(text).not.toContain('父代理模板无独立属性')
     expect(text).toContain(zh.nodeKinds.parent)
-    expect(container!.querySelectorAll('select').length).toBeGreaterThan(0)
+    // B10：模板态父代理的 presetId 下拉可编辑（运行前选择才生效），但看不到 combo 组合
+    const preset = presetIdSelect()
+    expect(preset).toBeTruthy()
+    expect(preset!.disabled).toBe(false)
+    expect(preset!.querySelectorAll('optgroup').length).toBe(0)
+    expect(Array.from(preset!.querySelectorAll('option')).map((item) => item.textContent)).toEqual(['标准', '极简'])
   })
 
-  it('画布父代理节点同样可编辑（isParent 且非模板）', async () => {
+  it('画布父代理节点同样可编辑（isParent 且非模板）：presetId 可编辑、无 combo', async () => {
     await render(React.createElement(Inspector, {
       ...common,
       editorData: { kind: 'role', data: { presetId: 'standard', label: 'CEO' }, name: 'CEO', isParent: true, nodeId: 'n-p1' } as never,
     } as never))
     expect(container!.textContent).not.toContain('父代理模板无独立属性')
-    expect(container!.querySelectorAll('select').length).toBeGreaterThan(0)
+    const preset = presetIdSelect()
+    expect(preset!.disabled).toBe(false)
+    expect(preset!.querySelectorAll('optgroup').length).toBe(0)
+  })
+
+  it('子代理对照：presetId 可编辑且能看到 combo 组合分组', async () => {
+    await render(React.createElement(Inspector, {
+      ...common,
+      editorData: { kind: 'role', data: { presetId: 'standard', label: '研究员' }, name: '研究员', nodeId: 'n-1' } as never,
+    } as never))
+    const preset = presetIdSelect()
+    expect(preset!.disabled).toBe(false)
+    expect(Array.from(preset!.querySelectorAll('optgroup')).map((item) => item.label)).toEqual([zh.combos])
+    expect(Array.from(preset!.querySelectorAll('option')).map((item) => item.textContent))
+      .toEqual(['标准', '极简', '团队模式'])
   })
 
   it('阶段节点：不渲染保存按钮（只读属性）', async () => {
