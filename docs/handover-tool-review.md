@@ -24,11 +24,12 @@
 pnpm typecheck && pnpm test && pnpm build
 ```
 
-**当前状态**：11 个 `wf_*` 工具中 **8 个已复核**（其中 7 个已整改），**5 个待复核**；
-experience 域仍有一批**已确认的中文错误消息残留**（最高优先级待办，见 §2-A）。
+**当前状态**：11 个 `wf_*` 工具中 **8 个已复核**（其中 8 个已整改），**5 个待复核**；
+**已知缺陷类待办已全部清零**（experience 域中文错误消息、`wf_db_query` 四项、通则 G1/G3、`wf_graph_patch` 精简）。
+剩余：**B 结构类**（方法论 / 生成 Prompt 正文——用户定案暂不动）、**C 测试治理**、**D 五个未复核工具**。
 
-**本阶段另有一轮架构变更**（`team` 类型退役 + 经验体系与运行时解绑），见 §1.1 与 [backlog §9](./tool-context-review-backlog.md)。
-它不属于「工具文本优化」这条线，但改动了经验三工具的 `type` 取值域与调用护栏——接手前必须先读。
+**本阶段有两轮大改动**：架构变更（`team` 类型退役 + 经验体系与运行时解绑，见 §1.1 与 [backlog §9](./tool-context-review-backlog.md)）
+与本轮缺陷清理（见 §1.2 与 [backlog §10](./tool-context-review-backlog.md)）。两者都不属于「工具文本优化」这条线，接手前必须先读。
 
 ---
 
@@ -39,9 +40,9 @@ experience 域仍有一批**已确认的中文错误消息残留**（最高优�
 | `wf_ask` | ✅ 已改 | 对所有代理开放（删除「仅子代理」「必须活跃运行」护栏，改为身份自动分派）；错误消息英文+码；新增 `WF_NO_ASK_TARGET` |
 | `wf_run_node` / `wf_run_node_wait` / `wf_finish` | ✅ 已改 | 描述精简（删内部实现说明、子代理拒绝声明、泛泛失败清单）；`wf_db_query` 的 139 词偏差收敛回 ≤130 词门禁 |
 | `wf_ask_agent` | ✅ 已改 | 文案精简；**修真实缺陷**：过期 ask 不再永久阻塞协作组聚合；删除只写不读的 `PendingAsk.audit`；修正「阻塞/三态/resolve」过时声明 |
-| `wf_db_query` | ✅ 已复核（小缺陷待修） | 见 backlog §4（双错误码、`truncated` 只 query 置位、SQLite schema 无上限） |
-| `wf_org_catalog` | ✅ 已改 | 删除字段禁令句与「仅父代理可调用」；`ids` 报错统一；**记录 SOP 中文与方法论待重做**（backlog §2） |
-| `wf_graph_patch` | ✅ 已改 | 按新标准删 3 句（契约指针、DAG 建模、坐标禁令）；`PATCH_CONTRACT_POINTER` 常量随之删除 |
+| `wf_db_query` | ✅ 已复核并修复 | 四项缺陷清零（双错误码 / `truncated` 三处口径统一 / SQLite 表数上限 / 实例定位判定），见 backlog §4 |
+| `wf_org_catalog` | ✅ 已改 | 删除字段禁令句与「仅父代理可调用」；`ids` 报错统一；**记录 SOP 中文与方法论待重做**（backlog §2）——用户定案暂不动 |
+| `wf_graph_patch` | ✅ 已改 | 首轮删 3 句（契约指针、DAG 建模、坐标禁令）；本轮再删 2 句契约复述 + mark 句只留相位提示，并补写批次级取码规则；description 525 → 243 字符 |
 | `wf_experience_learn` | ✅ 已改 | 删字段名罗列、元描述、理由句；**硬上限全部退出模型可见面**（只留生成预算）；1077→901 tokens |
 | `wf_experience_recall` | ✅ 已改 | 删工具分工句、±20% 内部权重、实现说明、`source` 解释句；`type` 说明提为共享常量；655→522 tokens |
 | `wf_experience_feedback` | ✅ 已改 | 删工具间导航句与重复的 evidence 说明；Side effects 整句改写为一句不可逆警示；1193→1109 tokens |
@@ -56,6 +57,21 @@ experience 域仍有一批**已确认的中文错误消息残留**（最高优�
 | 经验体系解绑运行时 | 初始化态不再随运行终态清空（`onRunTerminal` 通知链整链删除），改为宿主 `dispose()` 整体清空 |
 | 验证 | `pnpm typecheck` 0 error；`pnpm test` **218 文件 / 2684 用例全绿**；`pnpm build` 已重建 `lib/`；独立复核（多轮对抗性取证）结论「通过、无阻断」 |
 
+### 1.2 本轮缺陷清理（2026-10-11 第二轮，Lead + Agent Team 执行）
+
+用户定案范围：**只修已知缺陷；方法论与提示词正文不动**。三条并行流 + Lead 收口。
+
+| 项 | 结果 |
+|---|---|
+| experience 域错误消息英文化 | 按**出口**清点后覆盖 11 个源文件、约 73 处出口，统一 `{CODE}: english message`；**模型可见出口 0 中文残留**（保留例外仅 6 处：宿主日志 3 + 装配期注册错误 3）；`projection` 占位与分隔符 ASCII 化 |
+| `wf_db_query` 四项 | 双错误码收敛 `WF_BAD_CALLER`；`truncated` 三处口径统一为「被上限**真**截断」；`SCHEMA_TABLE_LIMIT=200` 单一本体 + `LIMIT 上限+1` 精确探针；实例定位经准入判定不写 description；`topK` 上限改为与常量同源 |
+| `wf_graph_patch` + G1 | 删 2 句契约复述、mark 句只留相位提示；`ERROR_CODE_SEMANTICS` 补批次级取码规则（与实现核对一致）；G1 删后果句、保留字段枚举 |
+| 测试治理升级 | `modelFacingProblemOf(error)` 绑进领域测试的**唯一错误出口**，规范自动生效（治理规则 §3.4 第 7 条） |
+| 验证 | 本团队范围 **37 文件 / 697 用例**全绿；全仓 **220 文件 / 2709 用例**全绿；`pnpm typecheck` 0 error；关键改动均带红相/变异证据 |
+
+> ⚠️ 本轮工作区**同时存在另一并行技术债团队的改动**（`shared/**`、`client/**`、`api/**`、`storage/**`、`vitest.config.ts` 等）。
+> 因此本次提交**按本团队路径显式暂存**，且**未重建 `lib/`**——待两团队收工后统一 `pnpm build` 并提交分发包。
+
 **跨工具统一（已做）**：
 - 可见性元数据事实修正（`PARENT_AGENT_VISIBLE_TOOLS` 移除 `wf_ask_agent`）；
 - 配置键名迁移 `wfAskAgentTimeoutMs → wfAskAgentTtlMs`（新键为主 + 旧键读取兼容 + 单测）；
@@ -67,17 +83,12 @@ experience 域仍有一批**已确认的中文错误消息残留**（最高优�
 
 ## 2. 待办（按优先级）
 
-### A. 代码修复类（高优先，清单有详细记录）
+### A. 代码修复类 — ✅ 已全部清零（2026-10-11 第二轮）
 
-1. **`experience` 域中文错误消息残留**（backlog §6.6）——**最高优先**：
-   - `experience/validation.ts` 的 `invalid()` 封装产出 **19 条中文**（字段类型/空白/超长、未知字段、重复候选、候选数上限、顶层未知字段…）——即经验学习/评估**最高频失败路径**；
-   - 另：`feedback.ts`（含 `评价表写入失败：…`，测试 `tool.test.ts:484` 正锁定它）、`service.ts` / `embedding-codec.ts` / `projection.ts` / `recall/tool.ts` 等；
-   - ✅ 已在本轮修完：`subject.ts`、`infrastructure/experience-contract.ts`（随 team 退役轮一并英文化）；`team-context.ts` 已整文件删除；
-   - **扫描口径**：必须按「出口」找（`WfError` 构造点 **+ 所有封装构造函数**），不要只扫字面量（上次就是这么漏的，见治理规则 §3.6）；
-   - 改完须同步对应测试断言（这些断言本身就违反"不硬编码文案"规则，可顺手改造为码断言）。
-2. **`wf_db_query` 小缺陷**（backlog §4）：同一事实两个码（`WF_BAD_CALLER` vs `WF_BAD_ARGS`）；`truncated` 仅 query 置位；SQLite `schema()` 无表数上限；无运行编排时的实例定位未写进描述。
-3. **通则 G1**：`graph-op-contract.ts` 的 `ROLE_NODE_DATA_CONTRACT` 里「Canvas-owned fields …」同义句——用户已判定可删，**等指令一起执行**。
-4. **`wf_graph_patch` 剩余精简**（backlog §5.2）：描述里仍复述契约的 3 条（一组一次 / 原子性 / mark 时机）——按标准应继续删除；批次级错误码选择规则未写进契约。
+1. ~~`experience` 域中文错误消息残留~~ → ✅ **已完成**（backlog §6.6 / §10.1）：按「出口」清点覆盖 11 个源文件、约 73 处出口；模型可见出口 0 中文残留；`modelFacingProblemOf` 已绑进唯一错误出口。
+2. ~~`wf_db_query` 小缺陷~~ → ✅ **四项全部修复**（backlog §4 / §10.2）。
+3. ~~通则 G1~~ → ✅ **已执行**：删后果句、保留字段枚举（偏差已备案，见 backlog §1 的 G1 行）。
+4. ~~`wf_graph_patch` 剩余精简~~ → ✅ **已执行**（backlog §5.2 / §10.3）：2 句删除 + mark 句只留相位提示 + 批次级取码规则补写。
 
 ### B. 结构类（待用户统一安排，已记录）
 
@@ -140,5 +151,6 @@ experience 域仍有一批**已确认的中文错误消息残留**（最高优�
 | `ebd530d` | `recall`：删 `source` 解释句 + 记录 `feedback` 复核 |
 | （本轮） | `feedback`：删工具间导航与重复说明，Side effects 改写为不可逆警示 |
 | `d1c3e3a` | **架构变更**：`team` 类型退役 + 父代理护栏永久移除 + 经验体系与运行时解绑（含独立复核发现项的修正、`lib/` 重建） |
+| `e5e904a` | **缺陷清理**：experience 域错误消息全量英文化 + `wf_db_query` 四项缺陷 + `wf_graph_patch` 精简与取码规则 + 通则 G1/G3（33 文件；仅按本团队路径暂存，`lib/` 待统一重建） |
 
 > 工作区中 `reports/` 属另一会话的 Agent Team 审查产物，**不要触碰、不要提交**。
