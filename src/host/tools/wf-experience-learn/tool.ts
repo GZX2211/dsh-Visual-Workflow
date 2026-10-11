@@ -12,7 +12,7 @@
 // 会发生什么 / 是否产生副作用」，并逐字段给出字数预算（数字取自经验域 FIELD_BUDGETS，
 // 措辞只在工具层维护）：预算是生成引导而非校验规则，模型据此自我约束即可。
 
-import { FIELD_BUDGETS } from '../../experience/index.js'
+import { EXPERIENCE_TYPES, FIELD_BUDGETS } from '../../experience/index.js'
 import { ERR_EXPERIENCE_BAD_ARGS, WF_EXPERIENCE_LEARN } from '../../shared/protocol.js'
 import { WfError } from '../../orchestrator/index.js'
 import { experienceCallerOf } from '../infrastructure/caller.js'
@@ -81,7 +81,8 @@ export function registerWfExperienceLearn(
       },
       type: {
         type: 'string',
-        enum: ['agent', 'team', 'orchestrator'],
+        // 取值域与域层同源（类型联合 / constants 表 / 工具 enum 三处一处本体）
+        enum: [...EXPERIENCE_TYPES],
         required: true,
         description: EXPERIENCE_TYPE_PARAM_DESCRIPTION,
       },

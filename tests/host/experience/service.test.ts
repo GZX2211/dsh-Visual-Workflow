@@ -21,7 +21,6 @@ import { buildRecallSummary, buildRetrievalProjection } from "../../../src/host/
 import { CANDIDATE_POOL_SIZE, MAX_RECALL_IDS, NEUTRAL_STATS, TRUST_ADJUSTMENT_BETA } from "../../../src/host/experience/constants.js"
 import type { ExperienceCaller } from "../../../src/host/experience/ports.js"
 import { ExperienceService } from "../../../src/host/experience/service.js"
-import { TEAM_EXPERIENCE_CONTEXT_HEADING } from "../../../src/host/experience/team-context.js"
 import type { ExperienceSemanticFields } from "../../../src/host/experience/validation.js"
 import type { FakeExperienceWorld } from "./fixtures/ports.js"
 import {
@@ -53,7 +52,7 @@ const DEFAULT_CORE: ExperienceSemanticFields = {
   evidence: ["一次并行执行返工"],
 }
 
-/** 服务 + 告警收集缝（teamExperienceContext 的诊断信息只能经日志缝观察）。 */
+/** 服务 + 告警收集缝（辅助路径的诊断信息只能经日志缝观察）。 */
 function createService(world: FakeExperienceWorld): { service: ExperienceService; warnings: string[] } {
   const warnings: string[] = []
   const service = new ExperienceService({
@@ -106,15 +105,38 @@ describe("ExperienceService.initializePrompt", () => {
     expect(error.code).toBe(ERR_EXPERIENCE_NOT_FOUND)
   })
 
-  it("test_职责不符_先拒绝再读 Prompt", async () => {
+  it("test_无运行事实_父代理仍可取 orchestrator 生成 Prompt（护栏已永久移除）", async () => {
     const world = createExperienceWorld()
     seedPrompts(world)
     const { service } = createService(world)
 
-    const error = await errorOf(() => service.initializePrompt({ caller: ROOT_CALLER, type: "orchestrator" }))
+    const result = await service.initializePrompt({ caller: ROOT_CALLER, type: "orchestrator" })
+
+    expect(result.prompt).toMatchObject({ id: "ep-orchestrator", experienceType: "orchestrator" })
+    expect(world.calls.includes("store.getActivePrompt")).toBe(true)
+  })
+
+  it("test_有活动运行时_父代理按此刻执行内容自选类型_两种类型都被接受", async () => {
+    const world = createExperienceWorld()
+    seedPrompts(world)
+    seedActiveRun(world, "session-1")
+    const { service } = createService(world)
+
+    const asAgent = await service.initializePrompt({ caller: ROOT_CALLER, type: "agent" })
+    const asOrchestrator = await service.initializePrompt({ caller: ROOT_CALLER, type: "orchestrator" })
+
+    expect(asAgent.prompt.experienceType).toBe("agent")
+    expect(asOrchestrator.prompt.experienceType).toBe("orchestrator")
+  })
+
+  it("test_已退役的 team 类型_先被类型边界拒绝且不读 Prompt", async () => {
+    const world = createExperienceWorld()
+    seedPrompts(world)
+    const { service } = createService(world)
+
+    const error = await errorOf(() => service.initializePrompt({ caller: ROOT_CALLER, type: "team" as never }))
 
     expect(error.code).toBe(ERR_EXPERIENCE_WRONG_TYPE)
-    expect(world.calls.includes("store.getActivePrompt")).toBe(false)
   })
 })
 
@@ -161,16 +183,17 @@ describe("ExperienceService.submit 前置校验", () => {
     expect(world.calls.includes("store.insertChecked")).toBe(false)
   })
 
-  it("test_提交时职责已变化_拒绝", async () => {
-    const world = createExperienceWorld()
+  it("test_父代理在活动运行期提交编排经验_类型与来源运行都取自入参与运行事实", async () => {
+    const world = createExperienceWorld({ embed: embedPairs([{ task: new Float64Array([0, 1]), decision: new Float64Array([1, 0]) }]) })
     seedPrompts(world)
+    seedActiveRun(world, "session-1", "run-7")
     const { service } = createService(world)
-    await service.initializePrompt({ caller: ROOT_CALLER, type: "agent" })
-    seedActiveRun(world, "session-1")
+    await service.initializePrompt({ caller: ROOT_CALLER, type: "orchestrator" })
 
-    const error = await errorOf(() => service.submit({ caller: ROOT_CALLER, type: "agent", candidates: [createCandidatePayload()] }))
+    const result = await service.submit({ caller: ROOT_CALLER, type: "orchestrator", candidates: [createCandidatePayload()] })
 
-    expect(error.code).toBe(ERR_EXPERIENCE_WRONG_TYPE)
+    expect(result.inserted).toHaveLength(1)
+    expect(world.lastInsert?.rows[0]).toMatchObject({ experienceType: "orchestrator", sourceRunId: "run-7" })
   })
 
   it("test_两个子代理的初始化态_互相独立", async () => {
@@ -447,8 +470,22 @@ describe("ExperienceService.submit 判重", () => {
   })
 })
 
+describe("ExperienceService.submit 父代理无门禁（护栏永久移除）", () => {
+  it("test_无任何运行事实_提交 orchestrator 成功且来源运行为空", async () => {
+    const world = createExperienceWorld({ embed: embedPairs([{ task: new Float64Array([0, 1]), decision: new Float64Array([1, 0]) }]) })
+    seedPrompts(world)
+    const { service } = createService(world)
+    await service.initializePrompt({ caller: ROOT_CALLER, type: "orchestrator" })
+
+    const result = await service.submit({ caller: ROOT_CALLER, type: "orchestrator", candidates: [createCandidatePayload()] })
+
+    expect(result.inserted).toHaveLength(1)
+    expect(world.lastInsert?.rows[0]).toMatchObject({ experienceType: "orchestrator", sourceRunId: "" })
+  })
+})
+
 describe("ExperienceService.recall", () => {
-  /** 摆好一条 agent 经验与一条 team 经验的受控世界。 */
+  /** 摆好一条 agent 经验与一条 orchestrator 经验的受控世界。 */
   function seedRecallWorld() {
     const world = createExperienceWorld({ embed: async () => [new Float64Array([1, 0])] })
     seedEntry(world, {
@@ -458,7 +495,7 @@ describe("ExperienceService.recall", () => {
       decisionDomain: "任务分解",
     }, { decisionVector: new Float64Array([1, 0]), taskVector: new Float64Array([0, 1]) })
     seedEntry(world, { id: "ex-agent-archived", experienceType: "agent", active: false })
-    seedEntry(world, { id: "ex-team-1", experienceType: "team" }, { decisionVector: new Float64Array([1, 0]) })
+    seedEntry(world, { id: "ex-orchestrator-1", experienceType: "orchestrator" }, { decisionVector: new Float64Array([1, 0]) })
     return world
   }
 
@@ -567,23 +604,24 @@ describe("ExperienceService.recall", () => {
     const world = seedRecallWorld()
     const { service } = createService(world)
 
-    // 写入侧此刻只允许 agent（无运行实例、未改图），但读取侧应按 type 取池子
-    const result = await service.recall({ caller: ROOT_CALLER, type: "team", query: "协作" })
+    // 写入侧此刻无任何运行事实，但读取侧只按 type 取池子，不由身份反推
+    const result = await service.recall({ caller: ROOT_CALLER, type: "orchestrator", query: "编排" })
 
     if (result.kind !== "candidates") throw new Error("期望候选阶段结果")
-    expect(result.hits.map((hit) => hit.id)).toEqual(["ex-team-1"])
-    expect(world.listActiveEmbeddingsCalls).toEqual(["team"])
+    expect(result.hits.map((hit) => hit.id)).toEqual(["ex-orchestrator-1"])
+    expect(world.listActiveEmbeddingsCalls).toEqual(["orchestrator"])
   })
 
-  it("test_改过图的父代理召回 agent 经验_不再被自身身份挡住（D-09）", async () => {
+  it("test_有活动运行的父代理召回 agent 经验_不被自身身份挡住（D-09）", async () => {
     const world = seedRecallWorld()
-    world.runtimeFacts.graphPatchedSessions.add(ROOT_CALLER.sessionId)
+    seedActiveRun(world, "session-1", "run-3")
     const { service } = createService(world)
 
     const result = await service.recall({ caller: ROOT_CALLER, type: "agent", query: "并行启动" })
 
     if (result.kind !== "candidates") throw new Error("期望候选阶段结果")
     expect(result.hits.map((hit) => hit.id)).toEqual(["ex-agent-1"])
+    expect(world.listActiveEmbeddingsCalls).toEqual(["agent"])
   })
 
   it("test_检索通道不可用_返回 WF_EXPERIENCE_RECALL_FAILED", async () => {
@@ -723,90 +761,16 @@ describe("ExperienceService 生命周期与列表", () => {
     expect(error.code).toBe(ERR_EXPERIENCE_BAD_ARGS)
   })
 
-  it("test_终态清理_清理后需重新初始化才能提交", async () => {
+  it("test_整体清空初始化态_清空后需重新取生成 Prompt 才能提交", async () => {
     const world = createExperienceWorld({ embed: embedPairs([{ task: new Float64Array([0, 1]), decision: new Float64Array([1, 0]) }]) })
     seedPrompts(world)
     const { service } = createService(world)
     await service.initializePrompt({ caller: ROOT_CALLER, type: "agent" })
 
-    service.clearSession({ sessionId: "session-1" })
+    service.clearAllSessions()
 
     const error = await errorOf(() => service.submit({ caller: ROOT_CALLER, type: "agent", candidates: [createCandidatePayload()] }))
     expect(error.code).toBe(ERR_EXPERIENCE_NOT_INITIALIZED)
-  })
-})
-
-describe("ExperienceService.teamExperienceContext", () => {
-  /** 摆好「运行中 + 已启动协作组 + 一条 team 经验」的受控世界。 */
-  function seedTeamWorld() {
-    const world = createExperienceWorld({ embed: async () => [new Float64Array([1, 0])] })
-    seedActiveRun(world, "session-1", "run-1")
-    world.runtimeFacts.teamRuns.add("session-1")
-    seedEntry(world, {
-      id: "ex-team-1",
-      experienceType: "team",
-      responsibility: "对协作交付负责",
-      principle: "先对齐接口再并行",
-      recommendedAction: "启动前同步接口契约",
-    }, { decisionVector: new Float64Array([1, 0]) })
-    return world
-  }
-
-  const INPUT = { sessionId: "session-1", flowId: "flow-1", groupId: "group-1", query: "协作任务查询" }
-
-  it("test_有 team 经验_渲染稳定共享文本且两次调用字节相同", async () => {
-    const world = seedTeamWorld()
-    const { service, warnings } = createService(world)
-
-    const text = await service.teamExperienceContext(INPUT)
-    const again = await service.teamExperienceContext(INPUT)
-
-    expect(text?.includes(TEAM_EXPERIENCE_CONTEXT_HEADING)).toBe(true)
-    expect(text?.includes("ex-team-1")).toBe(true)
-    expect(again).toBe(text)
-    expect(warnings).toEqual([])
-  })
-
-  it("test_无 team 经验_返回 null 且不发起嵌入", async () => {
-    const world = createExperienceWorld()
-    seedActiveRun(world, "session-1")
-    world.runtimeFacts.teamRuns.add("session-1")
-    const { service } = createService(world)
-
-    expect(await service.teamExperienceContext(INPUT)).toBeNull()
-    expect(world.embedCalls).toEqual([])
-  })
-
-  it("test_尚未启动协作组但池中有 team 经验_仍可注入（读取侧不再走职责门禁）", async () => {
-    const world = createExperienceWorld({ embed: async () => [new Float64Array([1, 0])] })
-    seedActiveRun(world, "session-1")
-    // 注意：协作组上下文是在「启动协作组之前」查询的，此刻 hasTeam 必然还是 false——
-    // 旧实现因此恒被自身判据挡掉（隐藏缺陷），读取侧放开后该路径才成立。
-    seedEntry(world, { id: "ex-team-early", experienceType: "team" }, { decisionVector: new Float64Array([1, 0]) })
-    const { service, warnings } = createService(world)
-
-    const text = await service.teamExperienceContext(INPUT)
-
-    expect(text?.includes("ex-team-early")).toBe(true)
-    expect(warnings).toEqual([])
-  })
-
-  it("test_经验库读取失败_返回 null 而不抛给调用方", async () => {
-    const world = seedTeamWorld()
-    world.store.listActiveEmbeddings = async () => {
-      throw new Error("资产库不可用")
-    }
-    const { service, warnings } = createService(world)
-
-    expect(await service.teamExperienceContext(INPUT)).toBeNull()
-    expect(warnings[0].includes("资产库不可用")).toBe(true)
-  })
-
-  it("test_查询文本为空_返回 null 不做无意义召回", async () => {
-    const world = seedTeamWorld()
-    const { service } = createService(world)
-
-    expect(await service.teamExperienceContext({ ...INPUT, query: "   " })).toBeNull()
   })
 })
 

@@ -251,7 +251,7 @@ export interface Harness {
 /** 装配：临时目录真实 FlowStore + fake 依赖 + 可控时钟与 id 生成。 */
 export async function makeHarness(
   config?: Partial<OrchestratorConfig>,
-  deps?: Partial<Pick<OrchestratorDeps, 'teamExperienceContext' | 'onRunTerminal' | 'promptSetup' | 'modelSelection' | 'resolveRolePrompt'>>,
+  deps?: Partial<Pick<OrchestratorDeps, 'promptSetup' | 'modelSelection' | 'resolveRolePrompt'>>,
 ): Promise<Harness> {
   const dir = await mkdtemp(join(tmpdir(), 'vw-orch-'))
   cleanups.push(() => rm(dir, { recursive: true, force: true }))
@@ -287,8 +287,6 @@ export async function makeHarness(
       uuidSeq.n += 1
       return `uuid-${uuidSeq.n}`
     },
-    ...(deps?.teamExperienceContext ? { teamExperienceContext: deps.teamExperienceContext } : {}),
-    ...(deps?.onRunTerminal ? { onRunTerminal: deps.onRunTerminal } : {}),
     ...(deps?.promptSetup ? { promptSetup: deps.promptSetup } : {}),
     ...(deps?.modelSelection ? { modelSelection: deps.modelSelection } : {}),
     ...(deps?.resolveRolePrompt ? { resolveRolePrompt: deps.resolveRolePrompt } : {}),

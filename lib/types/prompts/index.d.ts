@@ -7,4 +7,3 @@ export { buildOrchestrationChangeText, ORCH_CHANGE_MARKER, type OrchestrationCha
 export { buildOrgBudgetText } from './org-budget.js';
 export { ORG_SOP_L1_GRAPH_SEMANTICS, ORG_SOP_DESIGN_METHOD } from './org-sop.js';
 export { buildOrgPlanPrompt, ORG_PLAN_HARD_CONSTRAINTS, ORG_RULES_SOURCE_NOTE, type OrgPlanPromptParams, type OrgPlanTargetKind, } from './org-plan.js';
-export { buildTeamExperienceBlock, TEAM_EXPERIENCE_MARKER } from './team-experience.js';

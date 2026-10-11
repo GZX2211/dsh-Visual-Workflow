@@ -158,13 +158,11 @@ describe("submitExperienceFeedback 准入", () => {
 
   it("test_其他经验类型的注入记录_不能作为本类型准入依据", async () => {
     const world = createExperienceWorld()
-    seedEntry(world, { id: "ex-team", experienceType: "team" })
-    seedActiveRun(world, "session-1")
-    world.runtimeFacts.teamRuns.add("session-1")
-    seedInjected(world, { subjectId: "session-1", experienceId: "ex-team" })
+    seedEntry(world, { id: "ex-orchestrator", experienceType: "orchestrator" })
+    seedInjected(world, { subjectId: "session-1", experienceId: "ex-orchestrator" })
     const { deps } = createDeps(world)
 
-    const result = await submitExperienceFeedback(deps, { caller: ROOT_CALLER, type: "orchestrator", evaluations: [evaluation({ experienceId: "ex-team" })] })
+    const result = await submitExperienceFeedback(deps, { caller: ROOT_CALLER, type: "agent", evaluations: [evaluation({ experienceId: "ex-orchestrator" })] })
 
     expect(result.skipped).toHaveLength(1)
     expect(result.accepted).toEqual([])
@@ -249,11 +247,39 @@ describe("submitExperienceFeedback 参数与职责校验", () => {
     expect(error.code).toBe(ERR_EXPERIENCE_BAD_ARGS)
   })
 
-  it("test_主体职责不符_拒绝且不读使用事实", async () => {
+  it("test_父代理以 orchestrator 类型提交_无门禁且准入与落库照常", async () => {
+    const world = createExperienceWorld()
+    seedEntry(world, { id: "ex-orchestrator", experienceType: "orchestrator" })
+    seedInjected(world, { subjectId: "session-1", experienceId: "ex-orchestrator" })
+    const { deps } = createDeps(world)
+
+    const result = await submitExperienceFeedback(deps, {
+      caller: ROOT_CALLER,
+      type: "orchestrator",
+      evaluations: [evaluation({ experienceId: "ex-orchestrator" })],
+    })
+
+    expect(result.accepted).toHaveLength(1)
+    expect(result.skipped).toEqual([])
+    expect(world.calls.includes("store.listInjectedIds")).toBe(true)
+    expect(world.insertEvaluationsCalls).toHaveLength(1)
+  })
+
+  it("test_父代理以 agent 类型提交_同样受理（类型按此刻执行内容自选）", async () => {
     const world = seedInjectedWorld()
     const { deps } = createDeps(world)
 
-    const error = await errorOf(() => submitExperienceFeedback(deps, { caller: ROOT_CALLER, type: "orchestrator", evaluations: [evaluation()] }))
+    const result = await submitExperienceFeedback(deps, { caller: ROOT_CALLER, type: "agent", evaluations: [evaluation()] })
+
+    expect(result.accepted).toHaveLength(1)
+  })
+
+  it("test_子代理提交 orchestrator 评价_拒绝且不读使用事实", async () => {
+    const world = seedInjectedWorld()
+    seedChildRun(world, "child-1", { sessionId: "session-1" })
+    const { deps } = createDeps(world)
+
+    const error = await errorOf(() => submitExperienceFeedback(deps, { caller: CHILD_CALLER, type: "orchestrator", evaluations: [evaluation()] }))
 
     expect(error.code).toBe(ERR_EXPERIENCE_WRONG_TYPE)
     expect(world.calls.includes("store.listInjectedIds")).toBe(false)

@@ -91,7 +91,7 @@ export interface ExperienceStorePort {
 /**
  * 运行事实端口（由编排器适配）。
  *
- * 语义固定为「当前运行实例内」：会话的活跃 run、子代理所属 run、本 run 内是否启动过协作组。
+ * 语义固定为「当前运行实例内」：会话的活跃 run 与子代理所属 run。
  */
 export interface ExperienceRuntimePort {
     activeRunForSession(sessionId: string): {
@@ -105,16 +105,6 @@ export interface ExperienceRuntimePort {
         sessionId: string;
         nodeId: string;
     } | null;
-    hasTeamInCurrentRun(sessionId: string): boolean;
-    hasActiveRun(sessionId: string): boolean;
-    /**
-     * 本会话是否曾成功提交过图结构补丁（「改过图」）。
-     *
-     * 为什么需要它：编排职责的判据不能只看「当前有没有运行中的实例」——规划期（尚未启动运行）
-     * 与运行结束后的复盘同样在履行编排职责，此时只按运行事实判定会把编排者误判成执行主体，
-     * 从而拒绝沉淀编排经验。改过图是编排行为的直接证据，且该事实跨进程存活。
-     */
-    hasGraphPatch(sessionId: string): boolean;
     /**
      * 调用方当前使用的模型名（评价的评分者模型，用于未来的评分者校准）。
      *

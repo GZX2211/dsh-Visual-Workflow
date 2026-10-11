@@ -273,3 +273,273 @@ export function flowLine(id: string, source: string, target: string, sourceHandl
 export function orgMeta(): OrgMeta {
   return { nodeMax: 12 }
 }
+
+// ---------------------------------------------------------------------------
+// team 主体类型退役迁移的遗留库夹具
+//
+// 为什么按合法旧形状整体构造、而不复用 src 的 DDL 常量做字符串替换：迁移判据读的是
+// sqlite_master 的原文，若夹具由当前源码 DDL 派生，「遗留库能否被识别」会随源码改动
+// 自动变成恒真，迁移判定就再也测不到。这里刻意手写冻结副本。
+// ---------------------------------------------------------------------------
+
+/** 退役前的 experience_prompts 形状（experience_type 仍含 'team'）。 */
+export const LEGACY_TEAM_PROMPTS_DDL = `
+CREATE TABLE experience_prompts (
+  id TEXT PRIMARY KEY,
+  experience_type TEXT NOT NULL CHECK (experience_type IN ('agent','team','orchestrator')),
+  name TEXT NOT NULL,
+  description TEXT,
+  prompt TEXT NOT NULL,
+  prompt_version TEXT NOT NULL,
+  is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+)`
+
+/** 退役前的 experiences 形状（experience_type 仍含 'team'）。 */
+export const LEGACY_TEAM_EXPERIENCES_DDL = `
+CREATE TABLE experiences (
+  id TEXT PRIMARY KEY,
+  experience_type TEXT NOT NULL CHECK (experience_type IN ('agent','team','orchestrator')),
+  responsibility TEXT NOT NULL,
+  task_type TEXT NOT NULL,
+  decision_domain TEXT NOT NULL,
+  situation TEXT NOT NULL,
+  trigger TEXT NOT NULL,
+  principle TEXT NOT NULL,
+  recommended_action TEXT NOT NULL,
+  exclusions TEXT NOT NULL CHECK (json_valid(exclusions)),
+  evidence TEXT NOT NULL CHECK (json_valid(evidence)),
+  task_retrieval_text TEXT NOT NULL,
+  task_embedding BLOB,
+  decision_retrieval_text TEXT NOT NULL,
+  decision_embedding BLOB,
+  embedding_model TEXT,
+  embedding_dimension INTEGER,
+  source_run_id TEXT NOT NULL,
+  generation_prompt_id TEXT NOT NULL REFERENCES experience_prompts(id),
+  generation_prompt_version TEXT NOT NULL,
+  is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+)`
+
+/** 遗留库的 Prompt 行：agent / orchestrator / team 三类各一活跃，另加一条归档版本。 */
+export const LEGACY_TEAM_PROMPT_ROWS = [
+  `INSERT INTO experience_prompts (id, experience_type, name, description, prompt, prompt_version, is_active, created_at, updated_at)
+     VALUES ('ep-agent-v1', 'agent', 'Agent Experience Generation Prompt', '遗留 agent 描述', '遗留 agent 正文', 'V1', 1, 1000, 1000)`,
+  `INSERT INTO experience_prompts (id, experience_type, name, description, prompt, prompt_version, is_active, created_at, updated_at)
+     VALUES ('ep-orchestrator-v1', 'orchestrator', 'Orchestration Experience Generation Prompt', '遗留编排描述', '遗留编排正文', 'V1', 1, 1000, 1000)`,
+  `INSERT INTO experience_prompts (id, experience_type, name, description, prompt, prompt_version, is_active, created_at, updated_at)
+     VALUES ('ep-team-v1', 'team', 'Team Experience Generation Prompt', '遗留 team 描述', '遗留 team 正文', 'V1', 1, 1000, 1000)`,
+  `INSERT INTO experience_prompts (id, experience_type, name, description, prompt, prompt_version, is_active, created_at, updated_at)
+     VALUES ('ep-agent-v0', 'agent', '旧版 Agent Prompt', '遗留归档描述', '遗留归档正文', 'V0', 0, 900, 900)`,
+]
+
+/** 遗留库的经验行：agent 活跃 / agent 归档 / orchestrator 活跃 / team 活跃。 */
+export const LEGACY_TEAM_EXPERIENCE_ROWS = [
+  experienceRowSql("ex-agent", "agent", "ep-agent-v1", "ex-agent 决策侧", 1),
+  experienceRowSql("ex-agent-archived", "agent", "ep-agent-v1", "已归档的 agent", 0),
+  experienceRowSql("ex-orch", "orchestrator", "ep-orchestrator-v1", "ex-orch 决策侧", 1),
+  experienceRowSql("ex-team", "team", "ep-team-v1", "ex-team 决策侧", 1),
+]
+
+/**
+ * 遗留库的「评价闭环」子行：给每条经验各配一行使用 / 评价 / 统计。
+ * 为什么每条经验都要配全：迁移必须先清子行再删父行，只给 team 配子行时无法证明
+ * 「agent/orchestrator 的子行没被连带删掉」；而 ex-team 统计行的 recalled_count 刻意取 9，
+ * 便于断言「team 的统计行确实消失」而不是「恰好被重建成同值」。
+ */
+export const LEGACY_TEAM_CHILD_ROWS = [
+  `INSERT INTO experience_usage (id, experience_id, run_id, subject_id, created_at) VALUES
+     ('xus-agent', 'ex-agent', 'run-1', 'session-1', 1000),
+     ('xus-agent-archived', 'ex-agent-archived', 'run-1', 'session-1', 1000),
+     ('xus-orch', 'ex-orch', 'run-1', 'session-2', 1000),
+     ('xus-team', 'ex-team', 'run-1', 'session-3', 1000)`,
+  `INSERT INTO experience_evaluation (id, experience_id, run_id, fit_score, decision_effect, information_gain, causal_confidence, evidence, evaluator_subject_id, evaluator_model, created_at) VALUES
+     ('xev-agent', 'ex-agent', 'run-1', 0.75, 0.5, 0.75, 0.75, 'agent 证据', 'session-1', 'model-1', 1000),
+     ('xev-agent-archived', 'ex-agent-archived', 'run-1', 0.75, 0.5, 0.75, 0.75, 'agent 归档证据', 'session-1', 'model-1', 1000),
+     ('xev-orch', 'ex-orch', 'run-1', 0.5, 0.5, 0.5, 0.5, '编排证据', 'session-2', 'model-1', 1000),
+     ('xev-team', 'ex-team', 'run-1', 1, 0.5, 1, 1, 'team 证据', 'session-3', 'model-1', 1000)`,
+  `INSERT INTO experience_stats (experience_id, effective_sample_count, recalled_count, used_count, fit_mean, empirical_value, variance, stability, evidence_strength, harm_count, harm_rate, harm_severity, quality_signal, trust, updated_at) VALUES
+     ('ex-agent', 2, 1, 1, 0.75, 0.5, 0, 0.5, 0.5, 0, 0, 0, 0.25, 0.725, 1000),
+     ('ex-agent-archived', 2, 1, 1, 0.75, 0.5, 0, 0.5, 0.5, 0, 0, 0, 0.25, 0.725, 1000),
+     ('ex-orch', 2, 1, 1, 0.5, 0.5, 0, 0.5, 0.5, 0, 0, 0, 0.25, 0.725, 1000),
+     ('ex-team', 1, 9, 1, 1, 0.5, 0, 0.5, 0.5, 0, 0, 0, 0.25, 0.725, 1000)`,
+]
+
+/** 遗留库引用的索引名（与 src DDL 同名：迁移后的重建必须把它们全部恢复）。 */
+export const LEGACY_TEAM_INDEX_NAMES = [
+  'idx_experience_prompts_active_type',
+  'idx_experience_prompts_type',
+  'idx_experiences_decision_domain',
+  'idx_experiences_generation_prompt',
+  'idx_experiences_source_run',
+  'idx_experiences_task_type',
+  'idx_experiences_type_active',
+  'idx_experience_usage_experience',
+  'idx_experience_usage_subject',
+  'idx_experience_evaluation_created',
+  'idx_experience_evaluation_experience',
+  'idx_experience_stats_harm',
+  'idx_experience_stats_trust',
+]
+
+/** 一条经验行的 INSERT 语句（向量落 BLOB 与维度 3 一致，读侧才不会判为不可用）。 */
+function experienceRowSql(
+  id: string,
+  experienceType: string,
+  generationPromptId: string,
+  decisionRetrievalText: string,
+  isActive: number,
+): string {
+  return `INSERT INTO experiences (
+    id, experience_type, responsibility, task_type, decision_domain, situation, trigger,
+    principle, recommended_action, exclusions, evidence, task_retrieval_text, task_embedding,
+    decision_retrieval_text, decision_embedding, embedding_model, embedding_dimension,
+    source_run_id, generation_prompt_id, generation_prompt_version, is_active, created_at, updated_at
+  ) VALUES (
+    '${id}', '${experienceType}', '职责说明', '软件开发', '决策域', '情境', '触发条件',
+    '原则', '建议行动', '["一次性脚本"]', '["证据一"]', '任务侧检索文本', x'0000000000000000',
+    '${decisionRetrievalText}', x'0000000000000000', 'legacy-embed', 3,
+    'run-1', '${generationPromptId}', 'V1', ${isActive}, 1000, 1000
+  )`
+}
+
+/**
+ * 建一个「team 类型退役前」的完整遗留库（两张表均为含 'team' 的旧 CHECK 形状）。
+ *
+ * 为什么先建新形状再删表回退、而不是从零手写全部 DDL：其余五张表的形状与本次迁移无关，
+ * 复用 initSchema 建好后只回退两张目标表，夹具的体积与漂移面都最小；同时索引保持同名，
+ * 能顺带验证迁移后的索引恢复。
+ */
+export async function makeLegacyTeamRoot(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-assets-legacy-team-'))
+  const raw = await openRawDb(root)
+  try {
+    const { initSchema } = await import('../../../../src/host/assets/schema.js')
+    initSchema(raw, () => 1000)
+    // 回退期间两表互有外键（experiences → experience_prompts），且要丢掉既有索引
+    raw.exec('PRAGMA foreign_keys = OFF')
+    try {
+      raw.exec("DROP TABLE experience_stats")
+      raw.exec("DROP TABLE experience_evaluation")
+      raw.exec("DROP TABLE experience_usage")
+      raw.exec("DROP TABLE experiences")
+      raw.exec("DROP TABLE experience_prompts")
+      raw.exec(LEGACY_TEAM_PROMPTS_DDL)
+      raw.exec(LEGACY_TEAM_EXPERIENCES_DDL)
+      for (const statement of LEGACY_TEAM_PROMPT_ROWS) raw.exec(statement)
+      for (const statement of LEGACY_TEAM_EXPERIENCE_ROWS) raw.exec(statement)
+      raw.exec(`CREATE TABLE experience_usage (
+        id TEXT PRIMARY KEY,
+        experience_id TEXT NOT NULL REFERENCES experiences(id),
+        run_id TEXT NOT NULL,
+        subject_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      )`)
+      raw.exec(`CREATE TABLE experience_evaluation (
+        id TEXT PRIMARY KEY,
+        experience_id TEXT NOT NULL REFERENCES experiences(id),
+        run_id TEXT NOT NULL,
+        fit_score REAL NOT NULL CHECK(fit_score IN (0,0.25,0.5,0.75,1)),
+        decision_effect REAL NOT NULL CHECK(decision_effect IN (-1,-0.5,0,0.5,1)),
+        information_gain REAL NOT NULL CHECK(information_gain IN (0,0.25,0.5,0.75,1)),
+        causal_confidence REAL NOT NULL CHECK(causal_confidence IN (0,0.25,0.5,0.75,1)),
+        evidence TEXT NOT NULL DEFAULT '',
+        evaluator_subject_id TEXT NOT NULL,
+        evaluator_model TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL
+      )`)
+      raw.exec(`CREATE TABLE experience_stats (
+        experience_id TEXT PRIMARY KEY REFERENCES experiences(id),
+        effective_sample_count REAL NOT NULL,
+        recalled_count INTEGER NOT NULL,
+        used_count INTEGER NOT NULL,
+        fit_mean REAL NOT NULL,
+        empirical_value REAL NOT NULL,
+        variance REAL NOT NULL,
+        stability REAL NOT NULL,
+        evidence_strength REAL NOT NULL,
+        harm_count INTEGER NOT NULL,
+        harm_rate REAL NOT NULL,
+        harm_severity REAL NOT NULL,
+        quality_signal REAL NOT NULL,
+        trust REAL NOT NULL,
+        updated_at INTEGER NOT NULL
+      )`)
+      for (const statement of LEGACY_TEAM_CHILD_ROWS) raw.exec(statement)
+    } finally {
+      raw.exec('PRAGMA foreign_keys = ON')
+    }
+  } finally {
+    raw.close()
+  }
+  return root
+}
+
+/**
+ * 建一个「混合态」库：experiences 已收窄，experience_prompts 仍是含 'team' 的宽 CHECK，
+ * 且库里还留着 team Prompt 行。
+ *
+ * 为什么必须有这个夹具：真实升级路径上两张表可能先后被收窄（例如旧版本只迁移了一张表、
+ * 或人工补过数据），迁移判据若只看一张表就会漏掉另一张的 team 行与宽约束。
+ */
+export async function makeMixedTeamShapeRoot(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-assets-mixed-team-'))
+  const raw = await openRawDb(root)
+  try {
+    const { EXPERIENCE_PROMPTS_DDL, EXPERIENCES_DDL, initSchema } = await import(
+      '../../../../src/host/assets/schema.js'
+    )
+    initSchema(raw, () => 1000)
+    raw.exec('PRAGMA foreign_keys = OFF')
+    try {
+      raw.exec('DROP TABLE experience_prompts')
+      raw.exec(LEGACY_TEAM_PROMPTS_DDL)
+      for (const statement of LEGACY_TEAM_PROMPT_ROWS) raw.exec(statement)
+      // experiences 换成已收窄的形状：即「只有 prompts 表还是宽 CHECK」的混合态
+      raw.exec('DROP TABLE experiences')
+      raw.exec(EXPERIENCES_DDL)
+      raw.exec(`INSERT INTO experiences (
+        id, experience_type, responsibility, task_type, decision_domain, situation, trigger,
+        principle, recommended_action, exclusions, evidence, task_retrieval_text, task_embedding,
+        decision_retrieval_text, decision_embedding, embedding_model, embedding_dimension,
+        source_run_id, generation_prompt_id, generation_prompt_version, is_active, created_at, updated_at
+      ) VALUES
+        ('ex-agent', 'agent', '职责', '软件开发', '决策域', '情境', '触发', '原则', '行动', '["一次性脚本"]',
+         '["证据一"]', '任务侧', x'0000000000000000', 'agent 决策侧', x'0000000000000000', 'legacy-embed', 3,
+         'run-1', 'ep-agent-v1', 'V1', 1, 1000, 1000),
+        ('ex-orch', 'orchestrator', '职责', '软件开发', '决策域', '情境', '触发', '原则', '行动', '["一次性脚本"]',
+         '["证据一"]', '任务侧', x'0000000000000000', 'orchestrator 决策侧', x'0000000000000000', 'legacy-embed', 3,
+         'run-1', 'ep-orchestrator-v1', 'V1', 1, 1000, 1000)`)
+    } finally {
+      raw.exec('PRAGMA foreign_keys = ON')
+    }
+  } finally {
+    raw.close()
+  }
+  return root
+}
+
+/**
+ * 建一个「旧表多出一个未知列」的遗留库：用于验证重建前的列集合校验。
+ *
+ * 为什么需要它：换表重建会按当前列清单搬迁，旧表多出的列会被静默丢弃；
+ * 这种库来自未知形状，宁可报可行动错误也不该悄悄删列。
+ */
+export async function makeUnexpectedColumnTeamRoot(): Promise<string> {
+  const root = await makeLegacyTeamRoot()
+  const raw = await openRawDb(root)
+  try {
+    raw.exec('PRAGMA foreign_keys = OFF')
+    try {
+      raw.exec('ALTER TABLE experiences ADD COLUMN legacy_note TEXT')
+    } finally {
+      raw.exec('PRAGMA foreign_keys = ON')
+    }
+  } finally {
+    raw.close()
+  }
+  return root
+}

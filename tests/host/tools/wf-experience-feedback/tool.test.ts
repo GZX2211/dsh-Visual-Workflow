@@ -89,7 +89,8 @@ describe('wf_experience_feedback：注册与 schema', () => {
     const properties = def.parameters.properties ?? {}
 
     expect(def.parameters.required).toEqual(['type', 'evaluations'])
-    expect((properties.type as JsonSchemaNode).enum).toEqual(['agent', 'team', 'orchestrator'])
+    // 取值域是契约：断言两值集合（实现层与域层 EXPERIENCE_TYPES 同源，此处独立锁定）
+    expect((properties.type as JsonSchemaNode).enum).toEqual(['agent', 'orchestrator'])
     expect((properties.evaluations as JsonSchemaNode).type).toBe('array')
   })
 
@@ -438,14 +439,32 @@ describe('wf_experience_feedback：身份与失败语义', () => {
     expect(h.host.feedbackCalls).toEqual([])
   })
 
+  it('test_已退役的team取值_拒绝且不触碰域层', async () => {
+    const h = await makeHarness()
+
+    const failure = await failureOf(execute(h, { type: 'team', evaluations: [evaluation()] }))
+
+    expect((failure as WfError).code).toBe(ERR_EXPERIENCE_BAD_ARGS)
+    expect((failure as WfError).message).toContain('orchestrator')
+    expect(h.host.feedbackCalls).toEqual([])
+  })
+
+  it('test_父代理提交orchestrator评价_工具层无门禁原样透传', async () => {
+    const h = await makeHarness()
+
+    await execute(h, { type: 'orchestrator', evaluations: [evaluation()] })
+
+    expect(h.host.feedbackCalls[0].type).toBe('orchestrator')
+    expect(h.host.feedbackCalls[0].caller).toEqual({ isChild: false, sessionId: 'session-1' })
+  })
+
   it('test_子代理声明非agent类型_在抵达域层前拒绝', async () => {
     const h = await makeHarness()
 
-    for (const type of ['team', 'orchestrator']) {
-      const failure = await failureOf(execute(h, { type, evaluations: [evaluation()] }, childAgent))
-      expect((failure as WfError).code).toBe(ERR_EXPERIENCE_WRONG_TYPE)
-      expect((failure as WfError).message).toContain('agent')
-    }
+    const failure = await failureOf(execute(h, { type: 'orchestrator', evaluations: [evaluation()] }, childAgent))
+
+    expect((failure as WfError).code).toBe(ERR_EXPERIENCE_WRONG_TYPE)
+    expect((failure as WfError).message).toContain('agent')
     expect(h.host.feedbackCalls).toEqual([])
   })
 
@@ -460,7 +479,7 @@ describe('wf_experience_feedback：身份与失败语义', () => {
 
   it('test_域层稳定错误码_原样透传码与消息', async () => {
     const h = await makeHarness()
-    const message = '当前父代理正在承担编排职责，不能提交 agent 经验的评价'
+    const message = 'WF_EXPERIENCE_WRONG_TYPE: the selected type does not match what the caller is doing right now'
     h.host.feedbackFail = new WfError(message, ERR_EXPERIENCE_WRONG_TYPE)
 
     const failure = await failureOf(execute(h, { type: 'agent', evaluations: [evaluation()] }))

@@ -189,12 +189,12 @@ export interface WorkflowAssetDetail {
 export type AssetDetail = WorkflowAssetDetail | RoleAssetDetail
 
 /**
- * 经验主体类型：经验必须对应主体实际承担的工作职责。
- *   - agent：一个执行主体（含子代理、以及未承担编排职责的父代理）完成实际任务后的经验；
- *   - team：一个团队（协作组）完成协作任务后的协作经验；
- *   - orchestrator：编排父代理完成组织/编排任务后的组织经验。
+ * 经验类型：按调用方**此刻正在执行的内容**选择，而不是按它自认为的主体身份选择
+ * （代理无法可靠判断自己的主体类型，执行内容是它可直接观察到的事实）。
+ *   - agent：正在亲自执行具体任务时沉淀的执行经验（子代理恒为此类）；
+ *   - orchestrator：正在作为父代理编排工作流时沉淀的组织经验（编排只有父代理可执行）。
  */
-export type ExperienceType = 'agent' | 'team' | 'orchestrator'
+export type ExperienceType = 'agent' | 'orchestrator'
 
 /**
  * 经验条目（磁盘行的对外投影）。

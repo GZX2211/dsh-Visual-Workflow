@@ -69,12 +69,13 @@ describe('wf_experience_recall：注册与 schema', () => {
     expect(h.tools.unregistered.has(WF_EXPERIENCE_RECALL)).toBe(true)
   })
 
-  it('参数：type 必填（三值枚举）；query / ids / topK 可选', async () => {
+  it('参数：type 必填（两值枚举）；query / ids / topK 可选', async () => {
     const h = await makeHarness()
     const def = h.tools.definitions.get(WF_EXPERIENCE_RECALL)!
     expect(def.parameters.required).toEqual(['type'])
     const properties = def.parameters.properties ?? {}
-    expect((properties.type as JsonSchemaNode).enum).toEqual(['agent', 'team', 'orchestrator'])
+    // 取值域是契约：断言两值集合（实现层与域层 EXPERIENCE_TYPES 同源，此处独立锁定）
+    expect((properties.type as JsonSchemaNode).enum).toEqual(['agent', 'orchestrator'])
     expect((properties.query as JsonSchemaNode).type).toBe('string')
     expect((properties.ids as JsonSchemaNode).type).toBe('array')
     expect((properties.topK as JsonSchemaNode).type).toBe('integer')
@@ -168,6 +169,18 @@ describe('wf_experience_recall：两阶段调用', () => {
 
     expect(h.host.recallCalls[0].caller).toEqual({ isChild: true, sessionId: 'session-1', childId: 'child-1' })
   })
+
+  it('父代理召回 orchestrator 经验：工具层无门禁，类型原样透传', async () => {
+    const h = await makeHarness()
+
+    await execute(h, { type: 'orchestrator', query: '编排策略' })
+
+    expect(h.host.recallCalls[0]).toEqual({
+      caller: { isChild: false, sessionId: 'session-1' },
+      type: 'orchestrator',
+      query: '编排策略',
+    })
+  })
 })
 
 describe('wf_experience_recall：参数与身份校验', () => {
@@ -247,10 +260,20 @@ describe('wf_experience_recall：参数与身份校验', () => {
     expect(h.host.recallCalls).toEqual([])
   })
 
+  it('已退役的 team 取值 → WF_EXPERIENCE_BAD_ARGS（不再属于合法取值域，未抵达 domain）', async () => {
+    const h = await makeHarness()
+
+    const failure = await failureOf(execute(h, { type: 'team', query: 'q' }))
+
+    expect((failure as WfError).code).toBe(ERR_EXPERIENCE_BAD_ARGS)
+    expect((failure as WfError).message).toContain('orchestrator')
+    expect(h.host.recallCalls).toEqual([])
+  })
+
   it('子代理声明非 agent 类型 → WF_EXPERIENCE_WRONG_TYPE（在抵达 domain 前就拒绝）', async () => {
     const h = await makeHarness()
 
-    const failure = await failureOf(execute(h, { type: 'team', query: 'q' }, childAgent))
+    const failure = await failureOf(execute(h, { type: 'orchestrator', query: 'q' }, childAgent))
 
     expect((failure as WfError).code).toBe(ERR_EXPERIENCE_WRONG_TYPE)
     expect(h.host.recallCalls).toEqual([])

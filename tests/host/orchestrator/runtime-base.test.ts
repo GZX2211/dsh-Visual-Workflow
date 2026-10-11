@@ -538,12 +538,10 @@ describe('父代理执行者模式', () => {
 })
 
 describe('Experience 最小运行事实 seam（只读语义化查询）', () => {
-  it('无活跃 run：四个 seam 全部给出「无」结果，不抛错', async () => {
+  it('无活跃 run：seam 全部给出「无」结果，不抛错', async () => {
     const h = await makeHarness()
     expect(h.runtime.activeExperienceRunForSession('session-1')).toBeNull()
     expect(h.runtime.experienceRunForChild('child-1')).toBeNull()
-    expect(h.runtime.hasTeamInCurrentRun('session-1')).toBe(false)
-    expect(h.runtime.hasActiveRunForSession('session-1')).toBe(false)
   })
 
   it('活跃 run：按会话给出 run 归属三元组（runId/flowId/sessionId）', async () => {
@@ -555,8 +553,8 @@ describe('Experience 最小运行事实 seam（只读语义化查询）', () => 
       flowId: 'flow-1',
       sessionId: 'session-1',
     })
-    expect(h.runtime.hasActiveRunForSession('session-1')).toBe(true)
-    expect(h.runtime.hasActiveRunForSession('session-2')).toBe(false)
+    expect(h.runtime.activeRunForSession('session-1')).not.toBeNull()
+    expect(h.runtime.activeRunForSession('session-2')).toBeNull()
     expect(h.runtime.activeExperienceRunForSession('session-2')).toBeNull()
   })
 
@@ -586,13 +584,13 @@ describe('Experience 最小运行事实 seam（只读语义化查询）', () => 
     expect(h.runtime.experienceRunForChild('child-2')).toMatchObject({ runId: 'run-1', nodeId: 'n-a1' })
   })
 
-  it('paused run 不算活跃：hasActiveRunForSession 为 false', async () => {
+  it('paused run 不算活跃：activeRunForSession 为 null', async () => {
     const h = await makeHarness()
     await start(h, makeFlow())
     await h.runtime.wfRunNode(caller, { nodeId: 'n-pause' })
 
     expect(h.runtime.pausedRun('session-1', 'flow-1')).not.toBeNull()
-    expect(h.runtime.hasActiveRunForSession('session-1')).toBe(false)
+    expect(h.runtime.activeRunForSession('session-1')).toBeNull()
   })
 
   it('run 结束后不再给出归属：终态条目已释放', async () => {
@@ -603,7 +601,7 @@ describe('Experience 最小运行事实 seam（只读语义化查询）', () => 
 
     expect(h.runtime.activeExperienceRunForSession('session-1')).toBeNull()
     expect(h.runtime.experienceRunForChild('child-1')).toBeNull()
-    expect(h.runtime.hasActiveRunForSession('session-1')).toBe(false)
+    expect(h.runtime.activeRunForSession('session-1')).toBeNull()
   })
 })
 

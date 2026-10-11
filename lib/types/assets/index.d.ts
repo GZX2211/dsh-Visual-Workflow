@@ -9,6 +9,7 @@ export { AssetError } from './errors.js';
 export type { AssetErrorCode } from './errors.js';
 export { contentFingerprint, stableStringify } from './fingerprint.js';
 export { decodeEmbedding, encodeEmbedding, type EmbeddingDecode } from './embedding-blob.js';
+export { EXPERIENCE_TYPE_VALUES } from './experience-codec.js';
 export type { ExperienceEmbeddingRow, ExperienceInsertCheckedResult } from './experiences.js';
 export type { ExperienceEvaluationsCheckedResult } from './experience-evaluations.js';
 export { EXPERIENCE_LIST_MAX_LIMIT } from './experiences.js';

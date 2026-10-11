@@ -53,7 +53,6 @@ export {
   type StartRunOptions,
   type StartRunResult,
   type SubagentEndInfo,
-  type TeamExperienceContextInput,
   type TerminateOptions,
   type Waiter,
 } from './run-entry.js'
@@ -121,17 +120,3 @@ export { lineKeyOf, nodeConfigKeyOf, summarizeFlowChange, type FlowChangeSummary
 
 // 运行看护与宿主重启对账
 export { WATCHDOG_INTERVAL_MS, reconcileStaleRuns, scheduleIdleWatchdog, sweepWatchdogOnce } from './watchdog.js'
-
-// 协作组 Team 经验召回查询（组任务上下文摘要纯函数；注入缝 teamExperienceContext 由宿主装配）
-export {
-  buildTeamExperienceQuery,
-  TEAM_EXPERIENCE_CAUTION_FIELD,
-  TEAM_EXPERIENCE_FIELD_LIMIT,
-  TEAM_EXPERIENCE_MEMBER_LIMIT,
-  TEAM_EXPERIENCE_MEMBERS_FIELD,
-  TEAM_EXPERIENCE_QUERY_DIGEST_MARKER,
-  TEAM_EXPERIENCE_QUERY_MARKER,
-  TEAM_EXPERIENCE_QUERY_NONE,
-  type TeamExperienceMemberTask,
-  type TeamExperienceQueryInput,
-} from './team-experience.js'

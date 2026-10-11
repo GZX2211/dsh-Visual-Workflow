@@ -58,19 +58,6 @@ export abstract class RuntimeBase {
   protected readonly adopting = new Map<string, Promise<RunEntry | null>>()
   /** flowId 级续跑去重（同会话多 flow 交错时的二次收口）。 */
   protected readonly resuming = new Map<string, Promise<ResumeResult | null>>()
-  /**
-   * 已启动过协作组的 runId 集合（Team 经验类型判定与组级召回用）：
-   * 确认要启动协作组时登记、组未能建立时回滚，随 run 生命周期回收
-   * （终态释放内存条目时删除，见 releaseRunMemory）。
-   */
-  private readonly teamStartedRuns = new Set<string>()
-  /**
-   * 已通知过终态的 runId 集合（run 级幂等）：
-   * 同一次终态收尾里 notifyRunTerminal 可能被多个收尾路径触及，该表保证只通知一次；
-   * 表项在释放内存条目时随 run 回收（releaseRunMemory），故每个 runId 至多驻留一条，
-   * 不随运行次数无限增长。
-   */
-  private readonly terminalNotified = new Set<string>()
   /** dispose 标记：置位后迟到事件缓冲不再重试（插件卸载清理彻底）。 */
   protected disposed = false
 
@@ -298,35 +285,6 @@ export abstract class RuntimeBase {
     const entry = this.runForChild(childId)
     if (!entry) return null
     return { runId: entry.snapshot.id, flowId: meta.flowId, sessionId: meta.sessionId, nodeId: meta.nodeId }
-  }
-
-  /**
-   * 某会话**当前运行内**是否启动过协作组（Team 经验类型判定用）。
-   * 组结束后仍为 true：Team 经验由父代理在组任务结束后生成；run 终止即随之回收。
-   */
-  hasTeamInCurrentRun(sessionId: string): boolean {
-    const entry = this.activeRunForSession(sessionId)
-    return entry !== null && this.teamStartedRuns.has(entry.snapshot.id)
-  }
-
-  /** 某会话是否存在活跃（running）运行（Experience 域判定 orchestrator 类型用）。 */
-  hasActiveRunForSession(sessionId: string): boolean {
-    return this.activeRunForSession(sessionId) !== null
-  }
-
-  /**
-   * 标记本次运行已启动过协作组（runGroupNode 在确认要启动协作组后立即调用）。
-   * 为什么必须先置位再召回经验：置位语义是「父代理此刻已承担 Team Leader 职责并正在
-   * 建立团队」，本组自己的 Team 经验召回也要能看到该事实；只对在编运行有意义——
-   * 标记随条目释放回收，故登记与查询都以活跃 run 的 id 为准。
-   */
-  protected markTeamStarted(entry: RunEntry): void {
-    this.teamStartedRuns.add(entry.snapshot.id)
-  }
-
-  /** 回滚「已启动过协作组」标记（组最终未能建立：启动抛错或返回不可用）。 */
-  protected unmarkTeamStarted(entry: RunEntry): void {
-    this.teamStartedRuns.delete(entry.snapshot.id)
   }
 
   // ---- 运行上下文自动接续（工具层用） ------------------------------------------
@@ -707,41 +665,15 @@ export abstract class RuntimeBase {
     this.childIndex.clear()
     this.adopting.clear()
     this.resuming.clear()
-    this.teamStartedRuns.clear()
-    this.terminalNotified.clear()
   }
 
   // ---- 内部辅助 ---------------------------------------------------------------
 
   /**
-   * 释放某运行的内存条目（终态收尾路径唯一入口）：清运行表项并回收其运行级标记
-   * （已启动过协作组、终态已通知）。为什么收敛为一个操作：标记与条目必须同生共死，
-   * 分散在两处删除会让标记随 runId 复用而泄漏到后续运行。
+   * 释放某运行的内存条目（终态收尾路径唯一入口）：清运行表项。
    */
   protected releaseRunMemory(runId: string): void {
     this.runs.delete(runId)
-    this.teamStartedRuns.delete(runId)
-    this.terminalNotified.delete(runId)
-  }
-
-  /**
-   * 通知宿主「本次运行已进入终态」（run 级幂等、best-effort）。
-   * 只有 completed / failed / stopped 会走到这里：paused 与 interrupted 可续跑，
-   * 其失效边界是续跑后的终态。去重表在调用**之前**登记，缝抛错时也不重复通知。
-   * 失败语义：只告警，绝不抛出——终态收尾与资源释放不得被辅助路径阻断。
-   */
-  protected notifyRunTerminal(entry: RunEntry): void {
-    const snapshot = entry.snapshot
-    const runId = snapshot.id
-    if (!runId || this.terminalNotified.has(runId)) return
-    this.terminalNotified.add(runId)
-    const notify = this.deps.onRunTerminal
-    if (typeof notify !== 'function') return
-    try {
-      notify({ sessionId: snapshot.sessionId, runId, status: String(snapshot.status) })
-    } catch (error) {
-      this.log().warn(`[visual-workflow] 运行终态通知失败：${messageOf(error)}`)
-    }
   }
 
   /** 拒绝某运行的全部阻塞等待器（终止/卸载路径）。 */

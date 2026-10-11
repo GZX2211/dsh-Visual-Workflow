@@ -133,9 +133,9 @@ describe("validateExperienceCandidates 字段协议", () => {
       recommended_action: "行动",
       exclusions: [],
       evidence: [],
-    }], "team")
+    }], "orchestrator")
 
-    expect(drafts[0]).toMatchObject({ taskType: "软件开发", decisionDomain: "任务分解", recommendedAction: "行动", experienceType: "team" })
+    expect(drafts[0]).toMatchObject({ taskType: "软件开发", decisionDomain: "任务分解", recommendedAction: "行动", experienceType: "orchestrator" })
   })
 
   it("test_同一字段两种写法同时出现_判歧义拒绝", async () => {
@@ -148,6 +148,15 @@ describe("validateExperienceCandidates 字段协议", () => {
   })
 
   it("test_候选内 experience_type 与本次类型不一致_拒绝", async () => {
+    const error = await errorOf(() => validateExperienceCandidates([
+      createCandidatePayload({ experience_type: "orchestrator" }),
+    ], "agent"))
+
+    expect(error.code).toBe(ERR_EXPERIENCE_VALIDATION)
+    expect(error.message.includes("experience_type")).toBe(true)
+  })
+
+  it("test_候选内 experience_type 为已退役的 team 取值_按非法取值拒绝", async () => {
     const error = await errorOf(() => validateExperienceCandidates([
       createCandidatePayload({ experience_type: "team" }),
     ], "agent"))

@@ -8,7 +8,7 @@ export interface ExperienceServiceDeps {
     embedding: ExperienceEmbeddingPort;
     /** 时钟缝（初始化状态时间戳；缺省 Date.now）。 */
     now?: () => number;
-    /** 诊断缝：辅助路径（协作组共享上下文召回）失败时留下可诊断信息，不向调用方抛错。 */
+    /** 诊断缝：辅助路径（统计读取、使用事实写入）失败时留下可诊断信息，不向调用方抛错。 */
     logger?: {
         warn(message: string): void;
     };
@@ -95,23 +95,8 @@ export declare class ExperienceService {
     rebuildStats(): Promise<{
         experienceCount: number;
     }>;
-    /** 释放某会话的初始化状态（run 终态 / 插件卸载；幂等，失败不应阻断终态流程）。 */
-    clearSession(input: {
-        sessionId: string;
-    }): void;
-    /**
-     * 协作组共享上下文：按 type="team" 召回一次并渲染为同一份文本（无命中返回 null）。
-     *
-     * 完整职责校检仍然执行（父代理此刻已承担 Team Leader 职责，标记由编排器在调用前落位）。
-     * 失败不向调用方抛错——这是 best-effort 辅助路径，绝不阻断协作组启动；失败原因经日志缝
-     * 留下可诊断信息（会话/工作流/组 + 具体错误）。
-     */
-    teamExperienceContext(input: {
-        sessionId: string;
-        flowId: string;
-        groupId: string;
-        query: string;
-    }): Promise<string | null>;
+    /** 释放全部初始化状态（插件卸载；幂等）。 */
+    clearAllSessions(): void;
     /** 取生效生成 Prompt；缺失属配置事实，给出可行动错误。 */
     private requireActivePrompt;
     /**

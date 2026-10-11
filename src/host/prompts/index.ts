@@ -76,6 +76,3 @@ export {
   type OrgPlanPromptParams,
   type OrgPlanTargetKind,
 } from './org-plan.js'
-
-// Team 经验共享上下文块（协作组启动前追加给每个成员的独立文本块；由 orchestrator 消费）。
-export { buildTeamExperienceBlock, TEAM_EXPERIENCE_MARKER } from './team-experience.js'

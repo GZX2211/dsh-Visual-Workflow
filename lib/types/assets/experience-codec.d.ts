@@ -1,8 +1,16 @@
 import type { ExperienceEntry, ExperienceEvaluationScores, ExperienceGenerationPromptEntry, ExperienceType } from "../shared/asset-types.js";
 /**
+ * 经验主体类型取值（与 DDL 的 CHECK 约束同域，两处必须一致：schema.test.ts 有一条
+ * 从 sqlite_master 原文解析取值域并与本常量比对的门禁，防止两边各自漂移）。
+ *
+ * 为什么导出：取值域属对外契约（列表过滤、召回过滤、工具 enum 都按它取值），
+ * 调用方与门禁必须引用同一本体，而不是各写一份字面量。
+ */
+export declare const EXPERIENCE_TYPE_VALUES: readonly ExperienceType[];
+/**
  * 列值 → 主体类型。
- * CHECK 约束保证取值合法，非法值只在库被外部改坏时出现；此时回落到 agent 而不是抛错，
- * 保证界面列表与召回读不会因单行损坏整次失败（损坏只影响该行的分类精度）。
+ * CHECK 约束保证取值合法，非法值只在库被外部改坏时出现（含已退役的 'team'）；此时回落到
+ * agent 而不是抛错，保证界面列表与召回读不会因单行损坏整次失败（损坏只影响该行的分类精度）。
  */
 export declare function asExperienceType(value: unknown): ExperienceType;
 /** JSON 数组列读取（缺失、非法 JSON 或非数组一律读成空数组）。 */

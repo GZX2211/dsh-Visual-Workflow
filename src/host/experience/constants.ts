@@ -14,7 +14,7 @@ import type {
 } from "../shared/asset-types.js"
 
 /**
- * 三类主体的运行期清单（唯一本体）。
+ * 两类主体的运行期清单（唯一本体）。
  *
  * 为什么用「键为联合类型的表 + 取键」而不是字面量数组：表的键少一个（联合类型新增取值）
  * 或多一个（拼错）都会编译失败，从而把「类型层与运行期取值域双向穷尽」变成编译期事实；
@@ -22,7 +22,6 @@ import type {
  */
 const EXPERIENCE_TYPE_TABLE: Record<ExperienceType, true> = {
   agent: true,
-  team: true,
   orchestrator: true,
 }
 

@@ -67,11 +67,11 @@ describe("ExperienceExecutionState 标记与读取", () => {
 
     state.markInitialized(markInput())
     state.markInitialized(markInput({ subjectId: "subject-2" }))
-    state.markInitialized(markInput({ experienceType: "team" }))
+    state.markInitialized(markInput({ experienceType: "orchestrator" }))
 
     expect(state.recordCount).toBe(3)
     expect(state.readInitialized("session-1", "subject-2", "agent")).not.toBeNull()
-    expect(state.readInitialized("session-1", "subject-1", "team")).not.toBeNull()
+    expect(state.readInitialized("session-1", "subject-1", "orchestrator")).not.toBeNull()
   })
 
   it("test_读取结果被外部改动_不影响内部状态", () => {
@@ -86,23 +86,19 @@ describe("ExperienceExecutionState 标记与读取", () => {
 })
 
 describe("ExperienceExecutionState 释放与上界", () => {
-  it("test_按会话清理_该会话全部记录被释放并返回条数", () => {
+  it("test_整体清空_全部会话记录被释放且重复调用幂等", () => {
     const state = new ExperienceExecutionState()
     state.markInitialized(markInput())
     state.markInitialized(markInput({ subjectId: "subject-2" }))
     state.markInitialized(markInput({ sessionId: "session-2" }))
 
-    const cleared = state.clearBySession("session-1")
+    state.clearAll()
+    state.clearAll()
 
-    expect(cleared).toBe(2)
+    expect(state.sessionCount).toBe(0)
+    expect(state.recordCount).toBe(0)
     expect(state.readInitialized("session-1", "subject-1", "agent")).toBeNull()
-    expect(state.readInitialized("session-2", "subject-1", "agent")).not.toBeNull()
-  })
-
-  it("test_清理不存在的会话_幂等无副作用", () => {
-    const state = new ExperienceExecutionState()
-
-    expect(state.clearBySession("session-x")).toBe(0)
+    expect(state.readInitialized("session-2", "subject-1", "agent")).toBeNull()
   })
 
   it("test_会话数超过上界_逐出最早会话以保持有界", () => {

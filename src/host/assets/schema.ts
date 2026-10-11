@@ -139,15 +139,19 @@ export const WORKFLOW_ASSET_ACTIVE_INDEXES_DDL = [
 ]
 
 /**
- * 经验生成 Prompt 表：每个主体类型**至多一行活跃**，历史版本以 is_active = 0 保留。
+ * 经验生成 Prompt 表的建表语句（表名可参数化，供迁移建同形新表复用）。
  *
  * 为什么活跃唯一性必须由数据库保证：并发写入、外部工具改库、补数据脚本都会绕过本模块的
  * 代码路径，只有部分唯一索引是任何写入者都绕不开的边界（TS 侧约定只能约束自家调用点）。
+ *
+ * `experience_type` 的取值域曾在退役 team 类型时收窄（'team' 永久移除），
+ * 存量库由 retireTeamExperienceType 重建本表。
  */
-export const EXPERIENCE_PROMPTS_DDL = `
-CREATE TABLE IF NOT EXISTS experience_prompts (
+function experiencePromptsDdl(tableName: string): string {
+  return `
+CREATE TABLE IF NOT EXISTS ${tableName} (
   id TEXT PRIMARY KEY,
-  experience_type TEXT NOT NULL CHECK (experience_type IN ('agent','team','orchestrator')),
+  experience_type TEXT NOT NULL CHECK (experience_type IN ('agent','orchestrator')),
   name TEXT NOT NULL,
   description TEXT,
   prompt TEXT NOT NULL,
@@ -156,11 +160,58 @@ CREATE TABLE IF NOT EXISTS experience_prompts (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 )`
+}
+
+export const EXPERIENCE_PROMPTS_DDL = experiencePromptsDdl('experience_prompts')
 
 export const EXPERIENCE_PROMPTS_INDEXES_DDL = [
   'CREATE INDEX IF NOT EXISTS idx_experience_prompts_type ON experience_prompts(experience_type)',
   'CREATE UNIQUE INDEX IF NOT EXISTS idx_experience_prompts_active_type ON experience_prompts(experience_type) WHERE is_active = 1',
 ]
+
+/**
+ * 两张表的列清单（顺序即 DDL 声明顺序）。
+ *
+ * 为什么需要它：迁移搬数据时按列名显式搬迁，`SELECT *` 一旦遇到列序漂移就会静默搬错值。
+ * 这里只声明列名（迁移只需列名），不复制列类型——类型仍以 DDL 为唯一本体。
+ */
+const EXPERIENCE_PROMPT_COLUMNS = [
+  'id',
+  'experience_type',
+  'name',
+  'description',
+  'prompt',
+  'prompt_version',
+  'is_active',
+  'created_at',
+  'updated_at',
+] as const
+
+const EXPERIENCE_COLUMNS = [
+  'id',
+  'experience_type',
+  'responsibility',
+  'task_type',
+  'decision_domain',
+  'situation',
+  'trigger',
+  'principle',
+  'recommended_action',
+  'exclusions',
+  'evidence',
+  'task_retrieval_text',
+  'task_embedding',
+  'decision_retrieval_text',
+  'decision_embedding',
+  'embedding_model',
+  'embedding_dimension',
+  'source_run_id',
+  'generation_prompt_id',
+  'generation_prompt_version',
+  'is_active',
+  'created_at',
+  'updated_at',
+] as const
 
 /**
  * 经验表：没有版本控制（无历史表、也没有 Active 指针表），状态只有 is_active 两态。
@@ -169,11 +220,15 @@ export const EXPERIENCE_PROMPTS_INDEXES_DDL = [
  *
  * 向量两列以 BLOB 存真实数值（Float64 字节序列），维度单独成列：SQLite 无向量类型，
  * 而维度与字节长度互为校验，读侧据此判定一行是否真的可用于语义召回。
+ *
+ * `experience_type` 的取值域曾在退役 team 类型时收窄（'team' 永久移除），
+ * 存量库由 retireTeamExperienceType 重建本表。
  */
-export const EXPERIENCES_DDL = `
-CREATE TABLE IF NOT EXISTS experiences (
+function experiencesDdl(tableName: string): string {
+  return `
+CREATE TABLE IF NOT EXISTS ${tableName} (
   id TEXT PRIMARY KEY,
-  experience_type TEXT NOT NULL CHECK (experience_type IN ('agent','team','orchestrator')),
+  experience_type TEXT NOT NULL CHECK (experience_type IN ('agent','orchestrator')),
   responsibility TEXT NOT NULL,
   task_type TEXT NOT NULL,
   decision_domain TEXT NOT NULL,
@@ -196,6 +251,9 @@ CREATE TABLE IF NOT EXISTS experiences (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 )`
+}
+
+export const EXPERIENCES_DDL = experiencesDdl('experiences')
 
 export const EXPERIENCES_INDEXES_DDL = [
   'CREATE INDEX IF NOT EXISTS idx_experiences_type_active ON experiences(experience_type, is_active)',
@@ -312,11 +370,16 @@ export const SCHEMA_STATEMENTS: string[] = [
  *
  * 经验索引不放进 SCHEMA_STATEMENTS：旧形状的 experiences 还没有 experience_type 列，
  * 先建索引会因「no such column」失败，必须等形状迁移完成后再建。
+ *
+ * 迁移顺序：旧形状 experiences 先换成带 experience_type 的形状，team 退役迁移再在其上
+ * 按相同的今形状重建（两表 DDL 都已被收窄），最后才是索引与播种——播种排在迁移之后，
+ * 退役类型的旧 Prompt 行已删除，不会再被判定为「该类型已有行」。
  */
 export function initSchema(db: DatabaseSync, now: () => number = Date.now): void {
   for (const statement of SCHEMA_STATEMENTS) db.exec(statement)
   retireJsonSchemaCheck(db)
   migrateLegacyExperienceTable(db)
+  retireTeamExperienceType(db)
   for (const statement of EXPERIENCE_PROMPTS_INDEXES_DDL) db.exec(statement)
   for (const statement of EXPERIENCES_INDEXES_DDL) db.exec(statement)
   seedExperiencePrompts(db, now)
@@ -383,7 +446,167 @@ function migrateLegacyExperienceTable(db: DatabaseSync): void {
 }
 
 /**
- * 播种三类经验生成 Prompt 的 V1 正文。
+ * 已退役主体类型的判定文本。
+ *
+ * 为什么判定表定义原文而不用版本号：既有库可能在任意历史版本被创建且无版本记账，
+ * sqlite_master 里的原文是唯一可信事实；判定是幂等的（重建后原文即不再含 'team'）。
+ */
+const RETIRED_EXPERIENCE_TYPE = 'team'
+
+/** 重建用的临时表名（只在迁移事务内存在；固定名字便于中断后人工排查）。 */
+const EXPERIENCE_PROMPTS_REBUILD_TABLE = 'experience_prompts__rebuild'
+const EXPERIENCES_REBUILD_TABLE = 'experiences__rebuild'
+
+/**
+ * team 主体类型退役迁移：物理删除存量 team 数据，并把两张表的 CHECK 收窄为两个主体类型。
+ *
+ * 用户裁决（2026-10-11）：team 类型从架构中永久移除，存量数据真删、不留备份表。
+ *
+ * 判定为什么看**两张表任一**：真实升级路径上两表可能先后被收窄（旧版本只迁移其中一张、
+ * 或人工补过数据），只看 experiences 会让「prompts 表仍是宽 CHECK + 库里还有 team Prompt 行」
+ * 的混合态静默留存——磁盘形状没有全部收窄，存量 team 数据也没删干净。
+ *
+ * 为什么必须重建表而不是只删行：CHECK 是任何写入者（并发写入、外部工具、补数据脚本）
+ * 都绕不开的边界，只删行会让这些写入者仍能把 team 行插回来，磁盘形状也就没有真正收窄；
+ * SQLite 不支持 DROP CONSTRAINT，因此只能按官方流程换表（参照本文件既有的
+ * retireJsonSchemaCheck / role_asset_history 重建范式）。
+ *
+ * 为什么只重建仍含 'team' 的那张表：已收窄的表再换一次表没有任何收益，只会平白多一次
+ * DROP + RENAME 的风险窗口；删除语句则对两张表都执行（对已收窄表无匹配行，幂等且安全）。
+ *
+ * 为什么先删子行再删父行：experience_usage / experience_evaluation / experience_stats
+ * 都以 `experience_id REFERENCES experiences(id)` 引用经验表且没有 ON DELETE CASCADE，
+ * 先删父行会留下指向不存在经验的孤儿子行（外键关闭时不会被拦下）。
+ *
+ * 为什么先关外键：`PRAGMA foreign_keys` 在事务内无效，而删行 + 重建 + 恢复索引
+ * 必须整体原子。重建顺序照旧：建同形新表 → 搬数据 → 丢旧表 → 改名回原名。
+ */
+function retireTeamExperienceType(db: DatabaseSync): void {
+  const pending = [
+    { table: 'experience_prompts', rebuildTable: EXPERIENCE_PROMPTS_REBUILD_TABLE },
+    { table: 'experiences', rebuildTable: EXPERIENCES_REBUILD_TABLE },
+  ].filter((entry) => tableDefinitionContains(db, entry.table, RETIRED_EXPERIENCE_TYPE))
+  if (pending.length === 0) return
+
+  db.exec('PRAGMA foreign_keys = OFF')
+  try {
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      db.exec('PRAGMA legacy_alter_table = ON')
+      db.exec(`DELETE FROM experience_usage WHERE experience_id IN (
+        SELECT id FROM experiences WHERE experience_type = '${RETIRED_EXPERIENCE_TYPE}'
+      )`)
+      db.exec(`DELETE FROM experience_evaluation WHERE experience_id IN (
+        SELECT id FROM experiences WHERE experience_type = '${RETIRED_EXPERIENCE_TYPE}'
+      )`)
+      db.exec(`DELETE FROM experience_stats WHERE experience_id IN (
+        SELECT id FROM experiences WHERE experience_type = '${RETIRED_EXPERIENCE_TYPE}'
+      )`)
+      db.exec(`DELETE FROM experiences WHERE experience_type = '${RETIRED_EXPERIENCE_TYPE}'`)
+      db.exec(`DELETE FROM experience_prompts WHERE experience_type = '${RETIRED_EXPERIENCE_TYPE}'`)
+
+      for (const entry of pending) {
+        rebuildNarrowedTable(db, {
+          table: entry.table,
+          rebuildTable: entry.rebuildTable,
+          ddl: narrowedDdlOf(entry.rebuildTable),
+          insertColumns: expectedColumnsOf(entry.table),
+          indexes: entry.table === 'experience_prompts' ? EXPERIENCE_PROMPTS_INDEXES_DDL : EXPERIENCES_INDEXES_DDL,
+        })
+      }
+      db.exec('COMMIT')
+    } catch (error) {
+      try {
+        db.exec('ROLLBACK')
+      } catch {
+        // SQLite 可能已因错误自动回滚，此处只保证不覆盖原始错误
+      }
+      throw error
+    } finally {
+      db.exec('PRAGMA legacy_alter_table = OFF')
+    }
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON')
+  }
+}
+
+/** 重建单表所需的全部事实（表名、临时表名、临时表建表语句、列清单、索引语句）。 */
+interface NarrowedTableRebuild {
+  table: string
+  rebuildTable: string
+  ddl: string
+  insertColumns: readonly string[]
+  indexes: readonly string[]
+}
+
+/** 临时表名 → 该表的当前形状建表语句（只有本文件的表名常量可传入）。 */
+function narrowedDdlOf(rebuildTable: string): string {
+  if (rebuildTable === EXPERIENCE_PROMPTS_REBUILD_TABLE) return experiencePromptsDdl(rebuildTable)
+  if (rebuildTable === EXPERIENCES_REBUILD_TABLE) return experiencesDdl(rebuildTable)
+  throw new Error(`未知的重建临时表名：${rebuildTable}`)
+}
+
+/** 表名 → 该表的当前列清单（只有本文件的表名常量可传入）。 */
+function expectedColumnsOf(table: string): readonly string[] {
+  if (table === 'experience_prompts') return EXPERIENCE_PROMPT_COLUMNS
+  if (table === 'experiences') return EXPERIENCE_COLUMNS
+  throw new Error(`未知的经验表名：${table}`)
+}
+
+/**
+ * 换表收窄单张表：校验列集合 → 建同形新表 → 只搬合法行 → 丢旧表 → 改名回原名 → 建索引。
+ *
+ * 为什么先校验列集合：换表只按当前列清单搬迁，旧表多出的列会被**静默丢弃**（被删的列
+ * 无从恢复）。列集合不符说明库来自未知形状，宁可报可行动错误也不悄悄删数据，
+ * 与 retireJsonSchemaCheck 的列校验同口径。此处抛错时整笔事务尚未提交，调用方回滚后
+ * 库保持原状（错误信息里也写明这点，避免使用者误以为已迁移成功）。
+ *
+ * 为什么用显式列名而不是 `SELECT *`：新旧形状的列集合本应一致，但列序一旦不同，`SELECT *`
+ * 会把值搬错列且不报错（迁移最危险的静默失败）；逐列列出后，任何列序漂移都会立即报错。
+ * 搬迁条件再挡一层退役取值，即使前面的 DELETE 因未知形状漏掉行，违规行也进不了新表。
+ *
+ * 为什么开 legacy_alter_table：默认改名会连带改写其它表定义里对该表的引用，
+ * 关掉它才能让 experience_usage 等表的外键继续指向重建后的同名表（与既有重建同范式）。
+ */
+function rebuildNarrowedTable(db: DatabaseSync, rebuild: NarrowedTableRebuild): void {
+  const previous = tableColumns(db, rebuild.table)
+  const expected = [...rebuild.insertColumns]
+  const missing = expected.filter((column) => !previous.includes(column))
+  const unexpected = previous.filter((column) => !expected.includes(column))
+  if (missing.length > 0 || unexpected.length > 0) {
+    throw new Error(
+      `${rebuild.table} 列集合与当前形状不符（缺少：${missing.join('、') || '无'}；多出：${
+        unexpected.join('、') || '无'
+      }）。请备份后人工迁移；本次初始化未提交任何改动，库保持原状`,
+    )
+  }
+
+  const columns = expected.join(', ')
+  db.exec(rebuild.ddl)
+  db.exec(
+    `INSERT INTO ${rebuild.rebuildTable} (${columns}) SELECT ${columns} FROM ${rebuild.table}
+      WHERE experience_type <> '${RETIRED_EXPERIENCE_TYPE}'`,
+  )
+  // 旧索引随旧表一起消失（DROP TABLE 会带走本表全部索引）
+  db.exec(`DROP TABLE ${rebuild.table}`)
+  db.exec(`ALTER TABLE ${rebuild.rebuildTable} RENAME TO ${rebuild.table}`)
+  for (const statement of rebuild.indexes) db.exec(statement)
+}
+
+/**
+ * 表定义原文是否含判定文本。
+ * 为什么读 sqlite_master 而不是 PRAGMA：PRAGMA 给不出 CHECK 表达式原文，
+ * 而「取值域是否已收窄」只能从建表语句本身判断。
+ */
+function tableDefinitionContains(db: DatabaseSync, table: string, text: string): boolean {
+  const definition = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(table) as Record<string, unknown> | undefined
+  return Boolean(definition) && String(definition?.sql ?? '').includes(text)
+}
+
+/**
+ * 播种两类经验生成 Prompt 的 V1 正文。
  *
  * 判定条件是「该主体类型一行都没有」而不是「没有活跃行」：用户可以把某类型的 Prompt
  * 全部归档（等于显式关闭该类型的经验生成），此时再播种既覆盖用户意图，又会与固定种子

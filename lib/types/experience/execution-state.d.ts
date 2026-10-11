@@ -39,9 +39,7 @@ export declare class ExperienceExecutionState {
     readInitialized(sessionId: string, subjectId: string, experienceType: ExperienceType): ExperienceInitializationRecord | null;
     /** 标记初始化（幂等：同一键重复标记只刷新，不新增记录）。 */
     markInitialized(input: ExperienceInitializationInput): ExperienceInitializationRecord;
-    /** 释放某会话的全部记录（run 终态清理）；返回释放条数（幂等）。 */
-    clearBySession(sessionId: string): number;
-    /** 释放全部记录（插件卸载）。 */
+    /** 释放全部记录（插件卸载）；幂等。 */
     clearAll(): void;
     /** 当前会话数（诊断与上界断言用）。 */
     get sessionCount(): number;

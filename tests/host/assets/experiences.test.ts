@@ -14,7 +14,7 @@ import type {
   ExperienceRetrievalUpdate,
 } from "../../../src/host/shared/asset-types.js"
 import { decodeEmbedding } from "../../../src/host/assets/embedding-blob.js"
-import { asExperienceType, parseJsonArray } from "../../../src/host/assets/experience-codec.js"
+import { asExperienceType, EXPERIENCE_TYPE_VALUES, parseJsonArray } from "../../../src/host/assets/experience-codec.js"
 import { AssetStore, EXPERIENCE_LIST_MAX_LIMIT } from "../../../src/host/assets/index.js"
 import { readExperiencesByIds, RECALL_IN_QUERY_BATCH } from "../../../src/host/assets/experiences.js"
 import { experienceRow, keepAllJudge, makeStore, neutralStatsFixture, openRawDb, removeTempRoot, usageRow, vector } from "./fixtures/asset-fixture.js"
@@ -146,12 +146,16 @@ describe("经验批量判重写入", () => {
     const result = await store.insertChecked({
       rows: [
         experienceRow("ex-agent", { decisionRetrievalText: "跨主体相同文本" }),
-        experienceRow("ex-team", { experienceType: "team", generationPromptId: "ep-team-v1", decisionRetrievalText: "跨主体相同文本" }),
+        experienceRow("ex-orch", {
+          experienceType: "orchestrator",
+          generationPromptId: "ep-orchestrator-v1",
+          decisionRetrievalText: "跨主体相同文本",
+        }),
       ],
       duplicateOf: byDecisionText,
     })
 
-    expect(result.inserted.map((entry) => entry.id)).toEqual(["ex-agent", "ex-team"])
+    expect(result.inserted.map((entry) => entry.id)).toEqual(["ex-agent", "ex-orch"])
     expect(result.skipped).toEqual([])
   })
 
@@ -259,12 +263,14 @@ describe("活跃向量读盘（召回输入）", () => {
 
   it("test_读向量_按主体类型与活跃态过滤", async () => {
     await insertOne(experienceRow("ex-agent"))
-    await insertOne(experienceRow("ex-team", { experienceType: "team", generationPromptId: "ep-team-v1" }))
+    await insertOne(
+      experienceRow("ex-orch", { experienceType: "orchestrator", generationPromptId: "ep-orchestrator-v1" }),
+    )
     await insertOne(experienceRow("ex-archived"))
     await store.setActive("ex-archived", false)
 
     expect((await store.listActiveExperienceEmbeddings("agent")).map((item) => item.id)).toEqual(["ex-agent"])
-    expect((await store.listActiveExperienceEmbeddings("team")).map((item) => item.id)).toEqual(["ex-team"])
+    expect((await store.listActiveExperienceEmbeddings("orchestrator")).map((item) => item.id)).toEqual(["ex-orch"])
   })
 
   it("test_读向量_维度与字节长度不符或长度非8倍数_跳过该行而不抛错", async () => {
@@ -309,6 +315,14 @@ describe("活跃向量读盘（召回输入）", () => {
     // CHECK 约束让损坏 JSON 与未知主体类型写不进库，这两条降级分支只能直接验证
     expect(parseJsonArray("不是 JSON")).toEqual([])
     expect(asExperienceType("bogus")).toBe("agent")
+  })
+
+  it("test_编解码_已退役的team取值_降级读为agent而不抛错", () => {
+    // 收窄后的 CHECK 让 'team' 再也写不进库，但外部改过的旧库仍可能有该值：
+    // 降级方向锁定为 agent，保证单行残留不会让整次列表读或召回失败
+    expect(asExperienceType("team")).toBe("agent")
+    expect(EXPERIENCE_TYPE_VALUES).toEqual(["agent", "orchestrator"])
+    expect(EXPERIENCE_TYPE_VALUES).not.toContain("team")
   })
 })
 

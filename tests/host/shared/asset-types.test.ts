@@ -38,8 +38,8 @@ const _scoreAnchors: readonly ExperienceScoreAnchor[] = [0, 0.25, 0.5, 0.75, 1]
 /** 决策效果锚点（唯一跨零维度）。 */
 const _effectAnchors: readonly ExperienceDecisionEffectAnchor[] = [-1, -0.5, 0, 0.5, 1]
 
-/** 经验主体类型取值域（三类主体，与文档「agent / team / orchestrator」逐字一致）。 */
-const _experienceTypes: readonly ExperienceType[] = ['agent', 'team', 'orchestrator']
+/** 经验类型取值域（两类：正在执行任务 / 正在执行编排）。 */
+const _experienceTypes: readonly ExperienceType[] = ['agent', 'orchestrator']
 
 /** 完整经验条目最小形状（磁盘行的对外投影）。 */
 const _entry: ExperienceEntry = {
@@ -66,7 +66,7 @@ const _entry: ExperienceEntry = {
 
 /** 候选经验最小形状（模型提交侧；provenance 由系统补充，不在 draft 内）。 */
 const _draft: ExperienceInsertDraft = {
-  experienceType: 'team',
+  experienceType: 'orchestrator',
   responsibility: '对协作结果负责',
   taskType: '软件开发',
   decisionDomain: '协作同步',
@@ -207,8 +207,8 @@ const _neutral: NeutralStatsValues = {
 }
 
 describe('shared/asset-types Experience V1 契约形态', () => {
-  it('经验主体类型只有三类（agent / team / orchestrator）', () => {
-    expect(_experienceTypes).toEqual(['agent', 'team', 'orchestrator'])
+  it('经验类型只有两类（agent / orchestrator）', () => {
+    expect(_experienceTypes).toEqual(['agent', 'orchestrator'])
     expect(_entry.experienceType).toBe('agent')
   })
 
@@ -272,13 +272,13 @@ describe('shared/asset-types Experience V1 契约形态', () => {
 
   it('判重判据由调用方注入且返回可直接呈现的原因', () => {
     const verdict = _checked.duplicateOf(
-      { experienceType: 'team', decisionEmbedding: new Float64Array([1, 0]), decisionRetrievalText: 'a' },
+      { experienceType: 'orchestrator', decisionEmbedding: new Float64Array([1, 0]), decisionRetrievalText: 'a' },
       { id: 'ex-9', decisionEmbedding: new Float64Array([1, 0]), decisionRetrievalText: 'b' },
     )
     expect(verdict.duplicate).toBe(true)
     if (verdict.duplicate) expect(verdict.reason).toBeTruthy()
     const notDuplicate = _checked.duplicateOf(
-      { experienceType: 'team', decisionEmbedding: new Float64Array([0, 1]), decisionRetrievalText: 'a' },
+      { experienceType: 'orchestrator', decisionEmbedding: new Float64Array([0, 1]), decisionRetrievalText: 'a' },
       { id: 'ex-9', decisionEmbedding: new Float64Array([1, 0]), decisionRetrievalText: 'b' },
     )
     expect(notDuplicate.duplicate).toBe(false)

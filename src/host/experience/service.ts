@@ -42,8 +42,7 @@ import { buildRecallSummary, buildRetrievalProjection } from "./projection.js"
 import { rebuildExperienceStats } from "./rebuild.js"
 import { normalizeTopK, recallActiveHits, type ExperienceScoredId, type ExperienceScoredRow } from "./retrieval.js"
 import { rankRecallCandidates, type RecallRankingCandidate } from "./retrieval-ranking.js"
-import { resolveExperienceReaderSubject, resolveExperienceSubject, type ExperienceSubject } from "./subject.js"
-import { renderTeamExperienceContext } from "./team-context.js"
+import { resolveExperienceSubject, type ExperienceSubject } from "./subject.js"
 import { validateExperienceCandidates, validateExperiencePatch } from "./validation.js"
 
 /** 服务依赖（宿主在组合根装配；端口形状见 ./ports.js）。 */
@@ -53,7 +52,7 @@ export interface ExperienceServiceDeps {
   embedding: ExperienceEmbeddingPort
   /** 时钟缝（初始化状态时间戳；缺省 Date.now）。 */
   now?: () => number
-  /** 诊断缝：辅助路径（协作组共享上下文召回）失败时留下可诊断信息，不向调用方抛错。 */
+  /** 诊断缝：辅助路径（统计读取、使用事实写入）失败时留下可诊断信息，不向调用方抛错。 */
   logger?: { warn(message: string): void }
 }
 
@@ -148,8 +147,8 @@ export class ExperienceService {
    * 否则按 query 取候选摘要——候选阶段只读、幂等，不写任何事实。
    */
   async recall(input: { caller: ExperienceCaller; type: ExperienceType; query?: string; ids?: string[]; topK?: number }): Promise<ExperienceRecallResult> {
-    // 读取侧：不要求类型属于当前职责（用户裁决 2026-10-10；见 resolveExperienceReaderSubject）
-    const subject = resolveExperienceReaderSubject({ caller: input.caller, type: input.type, runtime: this.deps.runtime })
+    // 读取侧与写入侧共用同一解析入口：类型只决定候选池，不要求与此刻职责对应
+    const subject = resolveExperienceSubject({ caller: input.caller, type: input.type, runtime: this.deps.runtime })
     const ids = input.ids
     if (ids !== undefined && ids.length === 0) {
       throw new WfError("ids must not be an empty array: pass candidate ids from the first stage, or use query for candidate recall.", ERR_EXPERIENCE_BAD_ARGS)
@@ -253,43 +252,9 @@ export class ExperienceService {
     return rebuildExperienceStats({ store: this.deps.store })
   }
 
-  /** 释放某会话的初始化状态（run 终态 / 插件卸载；幂等，失败不应阻断终态流程）。 */
-  clearSession(input: { sessionId: string }): void {
-    if (!input.sessionId) return
-    this.state.clearBySession(input.sessionId)
-  }
-
-  /**
-   * 协作组共享上下文：按 type="team" 召回一次并渲染为同一份文本（无命中返回 null）。
-   *
-   * 完整职责校检仍然执行（父代理此刻已承担 Team Leader 职责，标记由编排器在调用前落位）。
-   * 失败不向调用方抛错——这是 best-effort 辅助路径，绝不阻断协作组启动；失败原因经日志缝
-   * 留下可诊断信息（会话/工作流/组 + 具体错误）。
-   */
-  async teamExperienceContext(input: { sessionId: string; flowId: string; groupId: string; query: string }): Promise<string | null> {
-    const where = `session=${input.sessionId} flow=${input.flowId} group=${input.groupId}`
-    // 该路径不得抛错，因此入参缺失也按「无查询文本」处理，而不是任其成为 TypeError
-    const query = (input.query ?? "").trim()
-    if (!query) {
-      this.deps.logger?.warn(`[visual-workflow] Team 经验共享上下文缺少查询文本（${where}）：已跳过注入。`)
-      return null
-    }
-    try {
-      // 读取侧：协作组启动前的上下文查询会早于「本运行内是否启动过协作组」这一事实成立，
-      // 故不能走写入侧的职责门禁（否则 team 经验注入恒被自身判据挡掉）
-      const subject = resolveExperienceReaderSubject({
-        caller: { isChild: false, sessionId: input.sessionId },
-        type: "team",
-        runtime: this.deps.runtime,
-      })
-      const { pairs } = await this.recallScoredEntries({ subject, query })
-      if (pairs.length === 0) return null
-      const text = renderTeamExperienceContext(pairs.map((pair) => pair.entry))
-      return text.length > 0 ? text : null
-    } catch (error) {
-      this.deps.logger?.warn(`[visual-workflow] Team 经验共享上下文召回失败（${where}）：${messageOf(error)}`)
-      return null
-    }
+  /** 释放全部初始化状态（插件卸载；幂等）。 */
+  clearAllSessions(): void {
+    this.state.clearAll()
   }
 
   /** 取生效生成 Prompt；缺失属配置事实，给出可行动错误。 */

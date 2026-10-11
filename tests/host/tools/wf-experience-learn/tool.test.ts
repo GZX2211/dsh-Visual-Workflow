@@ -104,7 +104,8 @@ describe('wf_experience_learn：注册与 schema', () => {
     expect(experiences.maxItems).toBeUndefined()
     expect((experiences.items as JsonSchemaNode).additionalProperties).toBe(true)
     const type = (def.parameters.properties ?? {}).type as JsonSchemaNode
-    expect(type.enum).toEqual(['agent', 'team', 'orchestrator'])
+    // 取值域是契约：断言两值集合（实现层与域层 EXPERIENCE_TYPES 同源，此处独立锁定）
+    expect(type.enum).toEqual(['agent', 'orchestrator'])
   })
 
   it('输出 schema 宽松（不给宿主校验制造把成功调用变错误的机会）', async () => {
@@ -291,11 +292,11 @@ describe('wf_experience_learn：提交态', () => {
   it('多条候选按模型给出的顺序映射（数组顺序是语义）', async () => {
     const h = await makeHarness()
 
-    await execute(h, { experiences: [candidate({ principle: 'P1' }), candidate({ principle: 'P2' })], type: 'team' })
+    await execute(h, { experiences: [candidate({ principle: 'P1' }), candidate({ principle: 'P2' })], type: 'orchestrator' })
 
     const sent = h.host.submitCalls[0].candidates as Array<Record<string, unknown>>
     expect(sent.map((item) => item.principle)).toEqual(['P1', 'P2'])
-    expect(sent.map((item) => item.experienceType)).toEqual(['team', 'team'])
+    expect(sent.map((item) => item.experienceType)).toEqual(['orchestrator', 'orchestrator'])
   })
 })
 
@@ -323,20 +324,38 @@ describe('wf_experience_learn：参数与身份校验', () => {
     expect(h.host.initializeCalls).toEqual([])
   })
 
+  it('已退役的 team 取值 → WF_EXPERIENCE_BAD_ARGS（不再属于合法取值域，未抵达 domain）', async () => {
+    const h = await makeHarness()
+
+    const failure = await failureOf(execute(h, { experiences: [], type: 'team' }))
+
+    expect((failure as WfError).code).toBe(ERR_EXPERIENCE_BAD_ARGS)
+    expect((failure as WfError).message).toContain('orchestrator')
+    expect(h.host.initializeCalls).toEqual([])
+    expect(h.host.submitCalls).toEqual([])
+  })
+
   it('子代理声明非 agent 类型 → WF_EXPERIENCE_WRONG_TYPE（在抵达 domain 前就拒绝）', async () => {
     const h = await makeHarness()
 
-    for (const type of ['team', 'orchestrator']) {
-      const failure = await failureOf(execute(h, { experiences: [], type }, childAgent))
-      expect((failure as WfError).code).toBe(ERR_EXPERIENCE_WRONG_TYPE)
-      expect((failure as WfError).message).toContain('agent')
-    }
+    const failure = await failureOf(execute(h, { experiences: [], type: 'orchestrator' }, childAgent))
+    expect((failure as WfError).code).toBe(ERR_EXPERIENCE_WRONG_TYPE)
+    expect((failure as WfError).message).toContain('agent')
     expect(h.host.initializeCalls).toEqual([])
   })
 
-  it('父代理声明与自身职责不符的类型由 domain 裁决，工具只做透传', async () => {
+  it('父代理提交 agent 经验：工具层无门禁，原样透传给 domain', async () => {
     const h = await makeHarness()
-    h.host.submitFail = new WfError('当前父代理正在承担编排职责，不能提交 agent 经验', ERR_EXPERIENCE_WRONG_TYPE)
+
+    await execute(h, { experiences: [candidate()], type: 'agent' })
+
+    expect(h.host.submitCalls[0].type).toBe('agent')
+    expect(h.host.submitCalls[0].caller).toEqual({ isChild: false, sessionId: 'session-1' })
+  })
+
+  it('域层拒绝的类型判据由 domain 裁决，工具只做透传', async () => {
+    const h = await makeHarness()
+    h.host.submitFail = new WfError('WF_EXPERIENCE_WRONG_TYPE: the selected type does not match what the caller is doing right now', ERR_EXPERIENCE_WRONG_TYPE)
 
     const failure = await failureOf(execute(h, { experiences: [candidate()], type: 'agent' }))
 

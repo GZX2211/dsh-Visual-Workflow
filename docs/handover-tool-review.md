@@ -24,8 +24,11 @@
 pnpm typecheck && pnpm test && pnpm build
 ```
 
-**当前状态**：11 个 `wf_*` 工具中 **8 个已复核**（其中 6 个已整改），**5 个待复核**；
-experience 域有一批**已确认的中文错误消息残留**（最高优先级待办，见 §2-A）。
+**当前状态**：11 个 `wf_*` 工具中 **8 个已复核**（其中 7 个已整改），**5 个待复核**；
+experience 域仍有一批**已确认的中文错误消息残留**（最高优先级待办，见 §2-A）。
+
+**本阶段另有一轮架构变更**（`team` 类型退役 + 经验体系与运行时解绑），见 §1.1 与 [backlog §9](./tool-context-review-backlog.md)。
+它不属于「工具文本优化」这条线，但改动了经验三工具的 `type` 取值域与调用护栏——接手前必须先读。
 
 ---
 
@@ -43,6 +46,16 @@ experience 域有一批**已确认的中文错误消息残留**（最高优先�
 | `wf_experience_recall` | ✅ 已改 | 删工具分工句、±20% 内部权重、实现说明、`source` 解释句；`type` 说明提为共享常量；655→522 tokens |
 | `wf_experience_feedback` | ✅ 已改 | 删工具间导航句与重复的 evidence 说明；Side effects 整句改写为一句不可逆警示；1193→1109 tokens |
 
+### 1.1 本轮架构变更（2026-10-11，Lead + Agent Team 执行）
+
+| 项 | 结果 |
+|---|---|
+| `team` 经验类型退役 | `ExperienceType` 收窄两值；两表 CHECK 收窄 + 幂等迁移（换表重建、混合态收口、列校验）；存量 team 行与 `ep-team-v1` 物理删除 |
+| 父代理护栏永久移除 | 类型由调用方按「此刻执行的内容」自选；子代理护栏保留（只能用 `agent`），且不再要求身处编排运行实例内 |
+| Team 经验注入链删除 | 「召回一次 → 追加给每个成员」整链 + 三个源文件 + 旧护栏事实链（`markTeamStarted` / `graphPatched` / `GraphPatchLogStore` / `recordGraphPatch` / `graph-patches` 死目录）全部移除 |
+| 经验体系解绑运行时 | 初始化态不再随运行终态清空（`onRunTerminal` 通知链整链删除），改为宿主 `dispose()` 整体清空 |
+| 验证 | `pnpm typecheck` 0 error；`pnpm test` **218 文件 / 2684 用例全绿**；`pnpm build` 已重建 `lib/`；独立复核（多轮对抗性取证）结论「通过、无阻断」 |
+
 **跨工具统一（已做）**：
 - 可见性元数据事实修正（`PARENT_AGENT_VISIBLE_TOOLS` 移除 `wf_ask_agent`）；
 - 配置键名迁移 `wfAskAgentTimeoutMs → wfAskAgentTtlMs`（新键为主 + 旧键读取兼容 + 单测）；
@@ -58,7 +71,8 @@ experience 域有一批**已确认的中文错误消息残留**（最高优先�
 
 1. **`experience` 域中文错误消息残留**（backlog §6.6）——**最高优先**：
    - `experience/validation.ts` 的 `invalid()` 封装产出 **19 条中文**（字段类型/空白/超长、未知字段、重复候选、候选数上限、顶层未知字段…）——即经验学习/评估**最高频失败路径**；
-   - 另：`parseExperienceType` / `assertExperienceTypeOwnership`（`infrastructure/experience-contract.ts`）、`feedback.ts`（含 `评价表写入失败：…`，测试 `tool.test.ts:484` 正锁定它）、`subject.ts` / `service.ts` / `team-context.ts` / `embedding-codec.ts` 等；
+   - 另：`feedback.ts`（含 `评价表写入失败：…`，测试 `tool.test.ts:484` 正锁定它）、`service.ts` / `embedding-codec.ts` / `projection.ts` / `recall/tool.ts` 等；
+   - ✅ 已在本轮修完：`subject.ts`、`infrastructure/experience-contract.ts`（随 team 退役轮一并英文化）；`team-context.ts` 已整文件删除；
    - **扫描口径**：必须按「出口」找（`WfError` 构造点 **+ 所有封装构造函数**），不要只扫字面量（上次就是这么漏的，见治理规则 §3.6）；
    - 改完须同步对应测试断言（这些断言本身就违反"不硬编码文案"规则，可顺手改造为码断言）。
 2. **`wf_db_query` 小缺陷**（backlog §4）：同一事实两个码（`WF_BAD_CALLER` vs `WF_BAD_ARGS`）；`truncated` 仅 query 置位；SQLite `schema()` 无表数上限；无运行编排时的实例定位未写进描述。
@@ -68,7 +82,7 @@ experience 域有一批**已确认的中文错误消息残留**（最高优先�
 ### B. 结构类（待用户统一安排，已记录）
 
 1. **`org-sop.ts` 的 SOP**（backlog §2）：`rules.designMethod`（规划方法论、中文）、`graphSemantics` 第四节（选择判据）与 kind 语义描述——属方法论/已过时（含 `wf_ask_agent` 旧说法，官方 Team 通道应为 `send_message`）；`dynamic.userSop` 注入点**从未落地**。
-2. **三份生成 Prompt 正文**（`assets/experience-seeds.ts`，1681/2369/2070 字符，**中文**）：属方法论（按需注入合规），但与英文常驻面混排 → 统一语言 + 明确方法论/契约分界。
+2. **两份生成 Prompt 正文**（`assets/experience-seeds.ts`，1681 / 2369 字符，**中文**）：属方法论（按需注入合规），但与英文常驻面混排 → 统一语言 + 明确方法论/契约分界。（原第三份 `team` 已随类型退役删除。）
 3. **契约正文语言**：`graph-op-contract.ts` 已英文 ✅；`invariants-rules-*` / `validate.ts` 已英文 ✅（本轮完成）。
 
 ### C. 测试治理类
@@ -98,6 +112,7 @@ experience 域有一批**已确认的中文错误消息残留**（最高优先�
 | 用途 | 路径 |
 |---|---|
 | 判定标准 + 错误码规范 | [docs/model-facing-surface-rules.md](./model-facing-surface-rules.md) |
+| 架构原则（含「经验体系独立于运行时」） | [docs/architecture.md](./architecture.md) §2.2 第 7 条 |
 | 复核记录 + 待办总表 | [docs/tool-context-review-backlog.md](./tool-context-review-backlog.md) |
 | 工具注册 DSL / 输出渲染 | `src/host/tools/infrastructure/{define-tool,text-render}.ts` |
 | 写图契约（英文，单一事实源） | `src/host/tools/infrastructure/graph-op-contract.ts` |

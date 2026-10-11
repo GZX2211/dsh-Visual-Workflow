@@ -25,7 +25,6 @@ import {
   type ExperienceStorePort,
 } from "../../src/host/experience/index.js"
 import type { ExperienceInsertRow } from "../../src/host/shared/asset-types.js"
-import { ERR_EXPERIENCE_WRONG_TYPE } from "../../src/host/shared/protocol.js"
 
 const cleanups: Array<() => Promise<void>> = []
 
@@ -68,9 +67,6 @@ function fakeRuntime(overrides: Partial<ExperienceRuntimePort> = {}): Experience
   return {
     activeRunForSession: () => null,
     runForChild: () => null,
-    hasTeamInCurrentRun: () => false,
-    hasActiveRun: () => false,
-    hasGraphPatch: () => false,
     // 默认「无法确定模型名」：集成测试不依赖真实模型路由，需要时由用例覆盖
     modelForCaller: () => "",
     ...overrides,
@@ -188,7 +184,6 @@ describe("经验闭环（真实资产库 + 真实经验域）", () => {
   it("test_父代理承担编排_按运行事实写入orchestrator经验", async () => {
     const runtime = fakeRuntime({
       activeRunForSession: (sessionId) => ({ runId: "run-9", flowId: "flow-1", sessionId }),
-      hasActiveRun: () => true,
     })
     const { service } = await makeWorld(runtime)
 
@@ -205,22 +200,25 @@ describe("经验闭环（真实资产库 + 真实经验域）", () => {
     expect(result.inserted[0].experienceType).toBe("orchestrator")
   })
 
-  it("test_父代理承担编排_提交agent经验_以职责不符拒绝", async () => {
+  it("test_父代理承担编排_提交agent经验_按此刻执行内容被接受（护栏已永久移除）", async () => {
     const runtime = fakeRuntime({
       activeRunForSession: (sessionId) => ({ runId: "run-9", flowId: "flow-1", sessionId }),
-      hasActiveRun: () => true,
     })
     const { service } = await makeWorld(runtime)
+    const caller = { isChild: false, sessionId: "session-1" }
 
-    await expect(
-      service.initializePrompt({ caller: { isChild: false, sessionId: "session-1" }, type: "agent" }),
-    ).rejects.toMatchObject({ code: ERR_EXPERIENCE_WRONG_TYPE })
+    await service.initializePrompt({ caller, type: "agent" })
+    const result = await service.submit({ caller, type: "agent", candidates: [candidate()] })
+
+    expect(result.inserted).toHaveLength(1)
+    expect(result.inserted[0].experienceType).toBe("agent")
+    // 来源运行仍取自运行事实（模型无法伪造），与类型选择无关
+    expect(result.inserted[0].sourceRunId).toBe("run-9")
   })
 
   it("test_子代理提交agent经验_来源取所属运行", async () => {
     const runtime = fakeRuntime({
       runForChild: (childId) => ({ runId: "run-child", flowId: "flow-1", sessionId: "session-1", nodeId: childId }),
-      hasActiveRun: () => true,
     })
     const { service } = await makeWorld(runtime)
     const caller = { isChild: true, sessionId: "session-1", childId: "child-7" }
@@ -230,6 +228,20 @@ describe("经验闭环（真实资产库 + 真实经验域）", () => {
 
     expect(result.inserted).toHaveLength(1)
     expect(result.inserted[0].sourceRunId).toBe("run-child")
+  })
+
+  it("test_子代理不属于任何编排运行_仍可提交agent经验且来源为空", async () => {
+    // 官方 Agent Team 的 teammate 不属于本插件的编排运行；护栏只保留「子代理只能传 agent」，
+    // 否则这类主体永远无法沉淀经验。
+    const { service } = await makeWorld()
+    const caller = { isChild: true, sessionId: "session-1", childId: "child-outside" }
+
+    await service.initializePrompt({ caller, type: "agent" })
+    const result = await service.submit({ caller, type: "agent", candidates: [candidate()] })
+
+    expect(result.inserted).toHaveLength(1)
+    expect(result.inserted[0].experienceType).toBe("agent")
+    expect(result.inserted[0].sourceRunId).toBe("")
   })
 
   it("test_同类型活跃经验语义重合_第二次提交被0.8阈值拦截", async () => {
@@ -255,7 +267,6 @@ describe("经验闭环（真实资产库 + 真实经验域）", () => {
     // 运行事实按会话区分：session-1 是编排管理者，session-2 未承担编排职责
     const runtime = fakeRuntime({
       activeRunForSession: (sessionId) => (sessionId === "session-1" ? { runId: "run-9", flowId: "flow-1", sessionId } : null),
-      hasActiveRun: (sessionId) => sessionId === "session-1",
     })
     const { service } = await makeWorld(runtime)
     const caller = { isChild: false, sessionId: "session-1" }

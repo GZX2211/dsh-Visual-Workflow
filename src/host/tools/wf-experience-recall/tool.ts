@@ -13,7 +13,7 @@
 // 会发生什么 / 是否产生副作用」。
 
 import { ERR_EXPERIENCE_BAD_ARGS, ERR_EXPERIENCE_RECALL_FAILED, WF_EXPERIENCE_RECALL } from '../../shared/protocol.js'
-import { MAX_RECALL_IDS, recallIdsLimitProblem } from '../../experience/constants.js'
+import { EXPERIENCE_TYPES, MAX_RECALL_IDS, recallIdsLimitProblem } from '../../experience/constants.js'
 import { WfError, messageOf } from '../../orchestrator/index.js'
 import { experienceCallerOf } from '../infrastructure/caller.js'
 import { defineTool, type ToolDefinitionLike, type ToolExecLike } from '../infrastructure/define-tool.js'
@@ -77,7 +77,8 @@ export function registerWfExperienceRecall(
     parameters: {
       type: {
         type: 'string',
-        enum: ['agent', 'team', 'orchestrator'],
+        // 取值域与域层同源（类型联合 / constants 表 / 工具 enum 三处一处本体）
+        enum: [...EXPERIENCE_TYPES],
         required: true,
         description: EXPERIENCE_TYPE_PARAM_DESCRIPTION,
       },

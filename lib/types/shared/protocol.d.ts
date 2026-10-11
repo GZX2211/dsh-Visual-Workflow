@@ -399,8 +399,9 @@ export declare const ERR_EXPERIENCE_VALIDATION = "WF_EXPERIENCE_VALIDATION";
  */
 export declare const ERR_EXPERIENCE_EMBEDDING_UNAVAILABLE = "WF_EXPERIENCE_EMBEDDING_UNAVAILABLE";
 /**
- * 经验主体类型与当前实际职责不符（如编排父代理填 agent、未启动过 Team 却填 team）。
- * 消费方语义：只能提交与自身职责对应的经验，错误消息给出当前实际职责与可选类型。
+ * 经验类型越界：子代理只能使用 agent 类型（该码当前唯一触发者）。
+ * 消费方语义：拒绝本次调用并要求改用 "agent"；父代理按此刻执行的内容自选类型，不受此码约束
+ * （父代理侧职责门禁已按用户裁决永久移除）。
  */
 export declare const ERR_EXPERIENCE_WRONG_TYPE = "WF_EXPERIENCE_WRONG_TYPE";
 /** 经验召回失败（检索通道不可用且词法回退亦失败）。 */

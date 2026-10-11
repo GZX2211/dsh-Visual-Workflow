@@ -4,10 +4,11 @@
 // 装配与测试替身见 fixtures/harness.ts（共享，不在本文件内重复）。
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { GLOBAL_RUN_CALL_LIMIT, OUTPUT_SUMMARY_LIMIT } from '../../../src/host/orchestrator/index.js'
+import { GLOBAL_RUN_CALL_LIMIT, OUTPUT_SUMMARY_LIMIT, buildNodeBlocks } from '../../../src/host/orchestrator/index.js'
+import { DEFAULT_SYSTEM_LANGUAGE } from '../../../src/host/system-language.js'
 import { HEAD_MARKER, MID_MARKER, TAIL_MARKER } from '../../../src/host/prompts/index.js'
 import { TEAM_SEND_MESSAGE, WF_ASK_AGENT } from '../../../src/host/shared/protocol.js'
-import type { WorkflowDocument } from '../../../src/host/shared/graph-model.js'
+import type { RoleNode, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
 import { agent, fileNode, groupNode, makeFlow, stage, type Harness, makeHarness, caller, childCaller, start, cleanupTempDirs } from './fixtures/harness.js'
 
 // 临时目录：makeHarness 登记，文件结束统一清理
@@ -450,6 +451,69 @@ describe('wfRunNode 协作组路径（官方 Agent Team）', () => {
     expect(text).toContain(TEAM_SEND_MESSAGE)
     expect(text).toContain('m-n-dev')
     expect(text).not.toContain(WF_ASK_AGENT)
+  })
+
+  it('成员任务块不附带任何额外文本：与同一节点走 buildNodeBlocks 的结构等价', async () => {
+    const h = await makeHarness()
+    h.runner.teamEnabled = true
+    await start(h, groupFlow())
+    const entry = h.runtime.activeRunForSession('session-1')!
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-g1' })
+
+    // 实现读的是落盘后的最新画布：以同一份事实为基准重算，保证「结构等价」是真的同输入比较
+    const saved = (await h.store.getWorkflow('session-1', 'flow-g'))!
+    for (const member of h.runner.groupCalls[0].members) {
+      const node = saved.nodes.find((n): n is RoleNode => n.id === member.node.id)!
+      const expected = buildNodeBlocks({
+        flow: saved,
+        node,
+        snapshot: entry.snapshot,
+        // 与 harness 装配的 config.documentTextLimit 同值（makeHarness 默认 200）
+        documentTextLimit: 200,
+        systemLanguage: DEFAULT_SYSTEM_LANGUAGE,
+        collabChannel: 'official',
+      })
+      // 整组仅一个文本块，且与构建器输出逐字节相同 = 没有任何额外追加的段
+      expect(member.blocks).toEqual(expected)
+      expect(member.blocks).toHaveLength(1)
+    }
+  })
+
+  it('组启动通道抛错：组卡片置 fail，不留下 running 组卡片', async () => {
+    const h = await makeHarness()
+    h.runner.teamEnabled = true
+    h.runner.groupStartFail = new Error('启动通道不可用')
+    const { entry } = await start(h, groupFlow())
+
+    await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-g1' })).rejects.toThrow('启动通道不可用')
+
+    expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-g1')!.status).toBe('fail')
+  })
+
+  it('组启动返回 null（官方 Team 瞬间不可用）：组卡片置 fail 并给出可行动错误', async () => {
+    const h = await makeHarness()
+    h.runner.teamEnabled = true
+    h.runner.groupStartUnavailable = true
+    const { entry } = await start(h, groupFlow())
+
+    await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-g1' })).rejects.toMatchObject({ code: 'WF_TEAM_UNAVAILABLE' })
+
+    expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-g1')!.status).toBe('fail')
+  })
+
+  it('成员校验失败（成员不是角色节点）：组卡片保持 pending，未被误置为 running', async () => {
+    const h = await makeHarness()
+    h.runner.teamEnabled = true
+    await start(h, groupFlow())
+    // 双向同步：运行中改图后再次调度读最新快照（模拟绕过保存期校验的改动）
+    const mutated = groupFlow()
+    ;(mutated.nodes.find((n) => n.id === 'n-g1')!.data as { memberIds: string[] }).memberIds = ['n-start']
+    await h.store.saveWorkflow(mutated, 'session-1', { force: true })
+
+    await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-g1' })).rejects.toMatchObject({ code: 'WF_NODE_KIND' })
+
+    const entry = h.runtime.activeRunForSession('session-1')!
+    expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-g1')!.status).toBe('pending')
   })
 
   it('成员完成回写成员节点（组内成员落 armed 待命），全部产出后组卡片聚合为 ok', async () => {

@@ -44,8 +44,6 @@ export class RuntimeLifecycle extends RuntimeObserve {
     // 4. 释放内存条目（终态记录已持久化；幂等基于 snapshot.status，删除后
     //    重复 terminateRun(entry) 仍返回 false）
     this.releaseRunMemory(snapshot.id)
-    // 5. 终态写盘且锁已释放之后通知宿主（best-effort：失败只告警，不影响终止结果）
-    this.notifyRunTerminal(entry)
     return true
   }
 

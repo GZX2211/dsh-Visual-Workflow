@@ -39,7 +39,7 @@ import {
 } from "../../../src/host/experience/constants.js"
 
 /** 编译期穷尽守卫：联合类型取值必须全在运行期清单内（缺一个即编译失败）。 */
-const TYPE_COVERAGE: Record<ExperienceType, true> = { agent: true, team: true, orchestrator: true }
+const TYPE_COVERAGE: Record<ExperienceType, true> = { agent: true, orchestrator: true }
 
 describe("normalizeWhitespace", () => {
   it("test_归一化_首尾空白与连续空白_折叠为单空格", () => {

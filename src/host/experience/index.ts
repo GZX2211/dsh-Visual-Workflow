@@ -79,11 +79,10 @@ export {
 } from "./retrieval.js"
 
 export type {
-  ExperienceCallerInput,
   ExperienceSubject,
   ExperienceSubjectInput,
 } from "./subject.js"
-export { allowedExperienceTypes, resolveExperienceReaderSubject, resolveExperienceSubject } from "./subject.js"
+export { resolveExperienceSubject } from "./subject.js"
 
 export type {
   AnchorDefinition,
@@ -152,16 +151,6 @@ export type {
   ExperienceInitializationRecord,
 } from "./execution-state.js"
 export { ExperienceExecutionState } from "./execution-state.js"
-
-export type { TeamExperienceContextEntry } from "./team-context.js"
-export {
-  TEAM_EXPERIENCE_CONTEXT_EMPTY_LIST,
-  TEAM_EXPERIENCE_CONTEXT_HEADING,
-  TEAM_EXPERIENCE_CONTEXT_INTRO,
-  TEAM_EXPERIENCE_CONTEXT_ITEM_MARKER,
-  TEAM_EXPERIENCE_CONTEXT_LIST_SEPARATOR,
-  renderTeamExperienceContext,
-} from "./team-context.js"
 
 export type {
   ExperienceRecallResult,

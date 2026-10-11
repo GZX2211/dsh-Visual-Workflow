@@ -73,15 +73,15 @@ export interface WfExperienceHost {
  * 为什么提升到基础设施层：learn / recall / feedback 各写一遍必然出现措辞漂移，
  * 而三者描述的是同一个取值域与同一条「子代理只能 agent」的工具层事实。
  */
-export declare const EXPERIENCE_TYPE_PARAM_DESCRIPTION = "Subject type: \"agent\" for an execution subject (including child agents), \"team\" for a collaboration group, \"orchestrator\" for the orchestrating parent. A child agent may only pass \"agent\".";
+export declare const EXPERIENCE_TYPE_PARAM_DESCRIPTION = "Which experience pool this call reads or writes, decided by what you are doing right now: \"agent\" when you are executing a concrete task yourself, \"orchestrator\" when you are orchestrating a workflow as its parent agent. A child agent may only pass \"agent\".";
 /** 解析并收窄模型侧 type 参数；未知取值抛 WF_EXPERIENCE_BAD_ARGS（消息给出合法取值）。 */
 export declare function parseExperienceType(raw: unknown): ExperienceType;
 /**
  * 主体类型归属校验。
  *
  * 为什么只有「子代理只能是 agent」这一条在工具层：调用方是不是子代理是工具层独有的事实
- * （来自官方会话 header），而父代理是否正在承担编排/Team 职责需要运行事实，由 domain 的
- * 主体解析裁决——工具层不复制那部分判断，避免同一规则两处维护后不一致。
+ * （来自官方会话 header），而父代理按此刻执行内容自选类型**没有门禁**——工具层不得再用运行
+ * 事实反推父代理身份，也不复制域层的类型判定，避免同一规则两处维护后不一致。
  */
 export declare function assertExperienceTypeOwnership(caller: {
     isChild: boolean;

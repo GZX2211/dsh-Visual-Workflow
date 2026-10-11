@@ -13,6 +13,7 @@
 
 import {
   DECISION_EFFECT_ANCHORS,
+  EXPERIENCE_TYPES,
   SCORE_ANCHORS,
   renderAnchorGlossary,
 } from '../../experience/index.js'
@@ -50,7 +51,8 @@ export function registerWfExperienceFeedback(
     parameters: {
       type: {
         type: 'string',
-        enum: ['agent', 'team', 'orchestrator'],
+        // 取值域与域层同源（类型联合 / constants 表 / 工具 enum 三处一处本体）
+        enum: [...EXPERIENCE_TYPES],
         required: true,
         description: EXPERIENCE_TYPE_PARAM_DESCRIPTION,
       },

@@ -75,7 +75,7 @@
 | 1 | `wf_db_query` | 已复核（发现：#2 `truncated` 仅 query 置位、#3 SQLite schema 无上限、#4 实例定位未写明、#5 双错误码 → 记入 §4） |
 | 2 | `wf_org_catalog` | 已复核（见 §2） |
 | 3 | `wf_graph_patch` | 已复核（见 §5） |
-| 4 | 经验三工具 | `wf_experience_learn` 已复核并整改（§6）；`wf_experience_recall` 已复核（§7）；`feedback` 待复核 |
+| 4 | 经验三工具 | `wf_experience_learn` 已复核并整改（§6）；`wf_experience_recall` 已复核（§7）；`wf_experience_feedback` 已复核并整改（§8） |
 | 5 | `wf_ask` / `wf_run_node` / `wf_run_node_wait` / `wf_finish` / `wf_ask_agent` | 待复核 |
 
 ---
@@ -144,11 +144,11 @@
 |---|---|---|---|---|
 | `agent` | `src/host/assets/experience-seeds.ts` → `EXPERIENCE_PROMPT_SEEDS[ep-agent-v1]` | 1681 / 128 | 420 | **中文**（CJK 1081） |
 | `orchestrator` | 同上 `ep-orchestrator-v1` | 2369 / 195 | 592 | **中文**（CJK 1306） |
-| `team` | 同上 `ep-team-v1` | 2070 / 179 | 518 | **中文**（CJK 1206） |
-| 三份合计 | — | 6120 | 1530 | 中文 |
+| 两份合计 | — | 4050 | 1012 | 中文 |
 
-> 单次调用按主体类型只返回其中一份（agent→420 / orchestrator→592 / team→518 tokens）。
+> 单次调用按主体类型只返回其中一份（agent→420 / orchestrator→592 tokens）。
 > 播种条件为「该类型没有任何行」，已存在的行（含用户改写正文）不被覆盖。
+> 原第三份 `team`（2070 字符 / 518 tokens）已随类型退役整份删除（见 §9）。
 
 ### 6.3 已按用户裁决执行（本轮，2026-10-11）
 
@@ -194,14 +194,14 @@
 | 文件 | 行数 |
 |---|---|
 | `experience/validation.ts` | 26 |
-| `experience/subject.ts` | 19 |
 | `experience/service.ts` | 17 |
-| `experience/team-context.ts` | 11 |
 | `experience/feedback.ts` | 8 |
 | `experience/embedding-codec.ts` | 7 |
 | `experience/retrieval.ts` / `projection.ts` / `scoring.ts` | 各 1 |
 | 三工具 `apply.ts`（learn / recall / feedback） | 13 / 2 / 3 |
 | 三工具 `tool.ts` | 2 / 3 / 2 |
+
+**2026-10-11 更新（team 退役轮）**：`subject.ts` 与 `infrastructure/experience-contract.ts` 已在本轮按规范英文化（`{CODE}: english message`）；`team-context.ts` 随模块整文件删除；`subject.ts` 由 19 行降到 0。上表其余文件**仍待英文化**（最高优先项不变）。
 
 **治理规则补充（已写入 §3）**：错误消息必须按「出口」清点——`WfError` 构造点 **+ 所有封装构造函数**（`invalid(...)`、`fail(...)` 等），不能只扫字面量；否则会得出「已全英文」的错误结论。
 
@@ -312,4 +312,42 @@
 - `decision_effect is not how much you like the experience.`；
 - `unknown fields are rejected.` / 失败语义与三个稳定码；
 - `Ratings are permanent …`（不可逆性，以行为指引形式）。
+
+---
+
+## 9. 本轮架构变更：`team` 类型退役 + 经验体系与运行时解绑（2026-10-11）
+
+用户裁决：经验类型 `team` 从架构中**永久移除**；父代理侧「必须正在编排 / 改过图才能提交编排经验」的护栏**永久取消**；
+类型改由调用方按「此刻正在执行的内容」自选（执行具体任务 → `agent`；父代理执行编排 → `orchestrator`）；子代理恒为 `agent`。
+
+### 9.1 已执行
+
+| 层 | 变更 |
+|---|---|
+| 类型域 | `ExperienceType` 收窄为 `'agent' \| 'orchestrator'`；类型联合 / `EXPERIENCE_TYPE_TABLE` / codec 白名单 / 三工具 `type.enum` 四处取值域对齐（enum 直接引用 `EXPERIENCE_TYPES`） |
+| 数据库 | 两表 CHECK 收窄为 `('agent','orchestrator')`；新增幂等迁移 `retireTeamExperienceType`（先删 usage/evaluation/stats 子行 → 删父行 → **换表重建**并保留 agent/orchestrator 数据）；判据为「两表任一建表原文含 `'team'`」，混合态同样收口；重建前校验旧表列集合，不符即整笔回滚 |
+| 数据 | 存量 team 经验行、其子行与 `ep-team-v1` 生成 Prompt 行**物理删除**（真删、不留备份表） |
+| 护栏 | 父代理侧职责门禁全部删除；子代理护栏保留（工具层 + 域层双保险，只能 `agent`），且**不再要求**子代理处于编排运行实例内 |
+| 解析入口 | 写入/读取合并为单一 `resolveExperienceSubject`（原差异只剩被取消的那条子代理门禁） |
+| 端口 | `ExperienceRuntimePort` 删 `hasTeamInCurrentRun` / `hasGraphPatch` / `hasActiveRun`；宿主 `graphPatchedSessions` / `GraphPatchLogStore` / `recordGraphPatch` 与 `DIRS` 的 `graph-patches` 死目录整链移除 |
+| 注入链 | 「team 经验召回一次 → 渲染同一段文本追加给协作组每个成员」整链删除（`orchestrator/team-experience.ts`、`prompts/team-experience.ts`、`experience/team-context.ts` 及全部消费点） |
+| 生命周期 | 经验初始化态**不再随运行终态清空**（`onRunTerminal` seam 与其通知链整链删除），改为宿主 `dispose()` 时整体清空 |
+
+### 9.2 新增治理原则（用户裁决，已固化）
+
+见 [architecture.md](./architecture.md) §2.2 第 7 条、§10 第 8 条 与 [model-facing-surface-rules.md](./model-facing-surface-rules.md) §4.8：
+
+> 经验体系独立于工作流运行时：经验工具不得以运行事实为调用前提；运行事实仅用于溯源，缺失按「无来源」表达；
+> 经验状态的生命周期不得以运行终态为边界。
+
+### 9.3 独立复核结论
+
+**通过，无阻断级问题**。复核发现 3 个重要项（迁移判据只看一张表、`protocol.ts` 错误码契约注释过期、`runtime-base.ts` 死方法）与 1 处强绑定
+（`onRunTerminal → clearSession`），均已修正并回归验证；迁移真实性、四处取值域一致性、护栏正反边界、`lib/` 残留均经独立探针取证。
+
+### 9.4 遗留（仍未做）
+
+- experience 域其余中文错误消息（§6.6 表内除 `subject.ts` / `experience-contract.ts` 之外的文件）；
+- `wf_db_query` 小缺陷（§4）、通则 G1 / G3、`wf_graph_patch` 剩余精简（§5.2）、`org-sop.ts` 与方法论语言统一（§2.1）；
+- codec 侧 `EXPERIENCE_TYPE_VALUES` 仍是平行白名单（有「DDL CHECK ⇄ 白名单」一致性测试锁定，但无编译期穷尽）。
 

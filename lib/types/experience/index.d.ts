@@ -6,8 +6,8 @@ export { PROJECTION_EMPTY_VALUE, PROJECTION_LIST_SEPARATOR, buildDecisionRetriev
 export { decodeEmbedding, encodeEmbedding } from "./embedding-codec.js";
 export type { ExperienceRecallInput, ExperienceRecallOutcome, ExperienceScoredId, ExperienceScoredRow, } from "./retrieval.js";
 export { bm25Scores, normalizeTopK, rankByBm25, rankByEmbedding, recallActiveHits, tokenizeForLexical, } from "./retrieval.js";
-export type { ExperienceCallerInput, ExperienceSubject, ExperienceSubjectInput, } from "./subject.js";
-export { allowedExperienceTypes, resolveExperienceReaderSubject, resolveExperienceSubject } from "./subject.js";
+export type { ExperienceSubject, ExperienceSubjectInput, } from "./subject.js";
+export { resolveExperienceSubject } from "./subject.js";
 export type { AnchorDefinition, EvaluationDimension, EvaluationDimensionDefinition, } from "./anchor-definitions.js";
 export { EVALUATION_DIMENSION_DEFINITIONS, renderAnchorGlossary } from "./anchor-definitions.js";
 export type { EvaluationScoreCandidate, EvaluationScoreField, EvaluationScoreValidation } from "./scoring.js";
@@ -24,7 +24,5 @@ export type { ExperienceStatsRebuildDeps } from "./rebuild.js";
 export { rebuildExperienceStats } from "./rebuild.js";
 export type { ExperienceExecutionStateOptions, ExperienceInitializationInput, ExperienceInitializationRecord, } from "./execution-state.js";
 export { ExperienceExecutionState } from "./execution-state.js";
-export type { TeamExperienceContextEntry } from "./team-context.js";
-export { TEAM_EXPERIENCE_CONTEXT_EMPTY_LIST, TEAM_EXPERIENCE_CONTEXT_HEADING, TEAM_EXPERIENCE_CONTEXT_INTRO, TEAM_EXPERIENCE_CONTEXT_ITEM_MARKER, TEAM_EXPERIENCE_CONTEXT_LIST_SEPARATOR, renderTeamExperienceContext, } from "./team-context.js";
 export type { ExperienceRecallResult, ExperienceServiceDeps, ExperienceSubmitResult, } from "./service.js";
 export { ExperienceService } from "./service.js";

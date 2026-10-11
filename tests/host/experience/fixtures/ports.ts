@@ -37,16 +37,13 @@ import type {
 /** 受控世界的固定时钟：用例断言时间戳时无需关心真实时间。 */
 export const FIXED_NOW = 1_700_000_000_000
 
-/** 三类经验主体（与协议常量同域；fixture 自带便于建表与遍历）。 */
-export const FIXTURE_TYPES: readonly ExperienceType[] = ["agent", "team", "orchestrator"]
+/** 两类经验主体（与协议常量同域；fixture 自带便于建表与遍历）。 */
+export const FIXTURE_TYPES: readonly ExperienceType[] = ["agent", "orchestrator"]
 
 /** 运行事实 fake 的内部状态（用例直接摆放事实，不经过业务方法）。 */
 export interface FakeRuntimeFacts {
   activeRuns: Map<string, { runId: string; flowId: string; sessionId: string }>
   childRuns: Map<string, { runId: string; flowId: string; sessionId: string; nodeId: string }>
-  teamRuns: Set<string>
-  /** 曾成功改过图的会话（编排职责判据之一；D-05）。 */
-  graphPatchedSessions: Set<string>
   /** 主体身份 → 模型名（缺省回落 defaultModel；空串表达「无法确定」）。 */
   models: Map<string, string>
   /** 未登记模型名时的回落值。 */
@@ -206,8 +203,6 @@ export function createExperienceWorld(options: FakeWorldOptions = {}): FakeExper
   const runtimeFacts: FakeRuntimeFacts = {
     activeRuns: new Map(),
     childRuns: new Map(),
-    teamRuns: new Set(),
-    graphPatchedSessions: new Set(),
     models: new Map(),
     defaultModel: options.defaultModel ?? "fixture-model",
   }
@@ -406,18 +401,6 @@ export function createExperienceWorld(options: FakeWorldOptions = {}): FakeExper
     runForChild(childId: string): { runId: string; flowId: string; sessionId: string; nodeId: string } | null {
       calls.push("runtime.runForChild")
       return runtimeFacts.childRuns.get(childId) ?? null
-    },
-    hasTeamInCurrentRun(sessionId: string): boolean {
-      calls.push("runtime.hasTeamInCurrentRun")
-      return runtimeFacts.teamRuns.has(sessionId)
-    },
-    hasActiveRun(sessionId: string): boolean {
-      calls.push("runtime.hasActiveRun")
-      return runtimeFacts.activeRuns.has(sessionId)
-    },
-    hasGraphPatch(sessionId: string): boolean {
-      calls.push("runtime.hasGraphPatch")
-      return runtimeFacts.graphPatchedSessions.has(sessionId)
     },
     modelForCaller(caller): string {
       calls.push("runtime.modelForCaller")
