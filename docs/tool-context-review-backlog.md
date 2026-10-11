@@ -75,7 +75,7 @@
 | 1 | `wf_db_query` | 已复核（发现：#2 `truncated` 仅 query 置位、#3 SQLite schema 无上限、#4 实例定位未写明、#5 双错误码 → 记入 §4） |
 | 2 | `wf_org_catalog` | 已复核（见 §2） |
 | 3 | `wf_graph_patch` | 已复核（见 §5） |
-| 4 | 经验三工具 | `wf_experience_learn` 已复核（见 §6）；`recall` / `feedback` 待复核 |
+| 4 | 经验三工具 | `wf_experience_learn` 已复核并整改（§6）；`wf_experience_recall` 已复核（§7）；`feedback` 待复核 |
 | 5 | `wf_ask` / `wf_run_node` / `wf_run_node_wait` / `wf_finish` / `wf_ask_agent` | 待复核 |
 
 ---
@@ -204,4 +204,52 @@
 | 三工具 `tool.ts` | 2 / 3 / 2 |
 
 **治理规则补充（已写入 §3）**：错误消息必须按「出口」清点——`WfError` 构造点 **+ 所有封装构造函数**（`invalid(...)`、`fail(...)` 等），不能只扫字面量；否则会得出「已全英文」的错误结论。
+
+---
+
+## 7. `wf_experience_recall` 复核发现
+
+### 7.1 常驻面（实测）
+
+| 项 | 实测 |
+|---|---|
+| description | 1730 字符 / **258 词** ≈ 433 tokens |
+| `parameters` | 889 字符 ≈ 222 tokens（`type` 217 / `query` 146 / `ids` 130 / `topK` 103） |
+| 合计 | 2619 字符 ≈ **655 tokens**（首轮 792 → 已省 137） |
+| `output.schema` | 302 字符（native 不注入） |
+
+运行时：无额外注入（返回体按需：候选摘要或完整条目）。
+
+### 7.2 按现行标准应移出（待裁决）
+
+| # | 内容 | 位置 | 为什么不常驻 |
+|---|---|---|---|
+| R1 | `A candidate score is semantic relevance adjusted by a bounded trust correction of at most ±20%; trust can never outweigh relevance, …` 里的 **±20%** | description | **内部算法权重**，模型不需要知道（与「硬上限不让模型知晓」同一原则）；保留「优先选更相关而非高信任但弱相关」的行为指引即可 |
+| R2 | `the ranking is never recalculated here` | description | 内部实现说明，不影响调用 |
+| R3 | `or more than ${MAX_RECALL_IDS} ids in the second stage` | description | **硬上限**（50，来自 `MAX_RECALL_IDS`）不应出现在模型可见面；超限时 `recallIdsLimitProblem` 已返回可行动错误 |
+| R4 | `type` 参数说明（217 字符）与 `learn`(206) / `feedback`(221) 的同一参数**三处措辞各写一遍** | parameters | 跨工具重复且措辞漂移；建议统一为同一常量措辞 |
+| R5 | `After you use recalled experiences, rate them with wf_experience_feedback in the final completion stage …` | description | 与 `feedback` 自身的描述重复（工具间导航，可保留一句更短的） |
+
+> 附带：`output.schema` 的说明里也有 `bounded trust correction`（native 不注入，优先级最低）。
+
+### 7.3 复核确认保留（影响调用）
+
+- **两阶段调用**（`query` 取候选摘要 → `ids` 取完整条目）——核心调用语义；
+- **`Pass either query or ids, never both`**（两处参数说明各一次，互斥条件）；
+- **`reading full entries by ids is what makes them count as used`**——决定后续能否被 `feedback` 评价，属关键后果；
+- **阶段指引**：任务开始前用 `query`、执行中情形变化用 `ids`；收尾阶段配合 `feedback`；
+- **`source` 语义**（`semantic` / `bm25` 降级标注）——影响对结果可信度的判断；
+- **与 `wf_org_catalog` 的分工**——影响选哪个工具；
+- **失败码**：`WF_EXPERIENCE_BAD_ARGS` / `WF_EXPERIENCE_NOT_FOUND` / `WF_EXPERIENCE_RECALL_FAILED` / `WF_EXPERIENCE_WRONG_TYPE`；
+- 纯只读、无副作用（可安全重复调用）。
+
+### 7.4 参数与上限实测
+
+| 常量 | 值 | 模型是否被告知 |
+|---|---|---|
+| `DEFAULT_RECALL_TOP_K` | 15 | 未告知（描述未提默认值） |
+| `MAX_RECALL_TOP_K` | 50 | 未告知 |
+| `MAX_RECALL_IDS` | 50 | **被写进 description（R3，建议删）** |
+
+超限时的错误文案（`recallIdsLimitProblem`）已是英文 + 可行动：`at most 50 ids may be recalled per call (received N); submit further batches`。
 
