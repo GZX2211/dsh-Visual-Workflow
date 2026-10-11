@@ -4,7 +4,7 @@
 // 协作组卡片悬停高亮，落点在画布内放置节点 / 落点在协作组卡片表面入组。
 // 返回 beginLibraryDrag 与拖拽状态（dragPreview / dropGroupId）。
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DragPayload } from '../components/sidebar/LeftPanel.js'
 import type { CanvasApi } from '../components/canvas/GraphCanvas.js'
 import { groupSurfaceUnderPoint } from '../lib/dom-hit-test.js'
@@ -22,9 +22,16 @@ export function useLibraryDrag(
 ): LibraryDragFace {
   // 拖拽现场（payload + 起点 + 预览位置）；指针事件期间唯一权威源
   const dragRef = useRef<{ payload: DragPayload; startX: number; startY: number; preview: { x: number; y: number } | null } | null>(null)
+  // 当前手势的监听解绑器：卸载与新手势开始时都要调用（谁注册谁释放，幂等）
+  const detachGestureRef = useRef<(() => void) | null>(null)
+  useEffect(() => () => {
+    detachGestureRef.current?.()
+  }, [])
   const [dropGroupId, setDropGroupId] = useState<string | null>(null)
   const beginLibraryDrag = useCallback((event: React.PointerEvent, payload: DragPayload) => {
     if (event.button !== undefined && event.button !== 0) return
+    // 上一次手势若未收尾（重复 pointerdown / 多点触控），先解绑，保证 window 上只有一组监听
+    detachGestureRef.current?.()
     dragRef.current = {
       payload,
       startX: event.clientX,
@@ -48,13 +55,18 @@ export function useLibraryDrag(
       // 只有角色模板（含 onDropIntoGroup）才提示，其他卡片（文件/数据库/阶段）不显示悬浮提示、不能入组
       setDropGroupId(payload.onDropIntoGroup ? groupSurfaceUnderPoint(moveEvent.clientX, moveEvent.clientY) : null)
     }
-    const onUp = (): void => {
-      const drag = dragRef.current
-      dragRef.current = null
+    // 只解绑监听与清理现场：卸载走这里，不得触发 onClick/落点放置（手势被中断，不是用户点击）
+    const detach = (): void => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
       window.removeEventListener('blur', onUp)
+      detachGestureRef.current = null
+    }
+    const onUp = (): void => {
+      const drag = dragRef.current
+      dragRef.current = null
+      detach()
       setDragPreview(null)
       setDropGroupId(null)
       if (!drag?.preview) {
@@ -79,6 +91,7 @@ export function useLibraryDrag(
         y: Math.round((position?.y ?? 80) - 58),
       })
     }
+    detachGestureRef.current = detach
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
     // 鼠标移出浏览器窗口/失焦时 pointerup 可能不触发（Bug 7 同款兜底），

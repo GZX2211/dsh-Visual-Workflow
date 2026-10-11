@@ -6,7 +6,8 @@
 //
 // usePanelLayout（hooks/usePanelLayout.ts）单测：几何与折叠态的 localStorage 记忆落点——
 //   ① mode 变化时写一次 LAYOUT_KEYS.mode；初始渲染（恢复值）不回写；
-//   ② 拖拽结束（pointerup）写对应方向的几何键；拖拽期间是 dispatch、不写存储。
+//   ② 拖拽结束（pointerup）写对应方向的几何键；拖拽期间是 dispatch、不写存储；
+//   ③ 拖拽中卸载：window 监听与 body 光标/选择态一并释放，卸载后不再 dispatch。
 // 断言可观察结果（存储键值），不断言内部实现。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -114,5 +115,24 @@ describe('usePanelLayout 几何持久化（拖拽结束写对应键）', () => {
     })
 
     expect(localStorage.getItem(LAYOUT_KEYS.bottomHeight)).toBe(String(base.panels.bottomHeight + 40))
+  })
+})
+
+describe('usePanelLayout 拖拽中卸载的清理', () => {
+  it('拖拽中卸载：卸载后的 pointermove 不再 dispatch，body 光标与 userSelect 复原', async () => {
+    const base = createInitialState('s-1')
+    const { face, dispatch } = await renderFace(base)
+
+    act(() => { face.beginResize('left', { button: 0, clientX: 0, clientY: 0 }) })
+    expect(document.body.style.cursor).toBe('col-resize')
+
+    act(() => { root!.unmount(); root = null })
+    act(() => { window.dispatchEvent(pointer('pointermove', 120, 0)) })
+
+    expect(dispatch).not.toHaveBeenCalled()
+    expect(document.body.style.cursor).toBe('')
+    expect(document.body.style.userSelect).toBe('')
+    // 卸载即中止本次拖拽：不落存储（与「pointerup 才写」的语义一致）
+    expect(localStorage.getItem(LAYOUT_KEYS.leftWidth)).toBeNull()
   })
 })

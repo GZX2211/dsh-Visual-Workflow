@@ -33,6 +33,11 @@ export function usePanelLayout(
 ): PanelLayoutFace {
   /** 已持久化的折叠态：只在 mode 真正变化时写一次（初始恢复值不再回写，避免无谓写入）。 */
   const persistedModeRef = useRef(state.panels.mode)
+  // 拖拽期间的 window 监听与 body 样式改写的解绑器；组件卸载（面板被关掉）时同样必须释放
+  const detachResizeRef = useRef<(() => void) | null>(null)
+  useEffect(() => () => {
+    detachResizeRef.current?.()
+  }, [])
   useEffect(() => {
     if (persistedModeRef.current === state.panels.mode) return
     persistedModeRef.current = state.panels.mode
@@ -49,6 +54,8 @@ export function usePanelLayout(
   }) => {
     if (event.button !== undefined && event.button !== 0) return
     event.preventDefault?.()
+    // 上一次拖拽若未收尾（重复 pointerdown），先解绑，保证 window 上只有一组监听
+    detachResizeRef.current?.()
     const panels = state.panels
     const isBottom = side === 'bottom'
     const base = side === 'left' ? panels.leftWidth : side === 'right' ? panels.rightWidth : panels.bottomHeight
@@ -81,7 +88,8 @@ export function usePanelLayout(
           : { bottomHeight: lastValue }
       dispatch({ type: 'PANELS_SET', panels: next })
     }
-    const onUp = (): void => {
+    // 解绑监听并还原拖拽期间改写的文档级样式（卸载与正常收尾共用同一释放路径）
+    const detach = (): void => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
@@ -89,9 +97,14 @@ export function usePanelLayout(
       splitter?.classList?.remove('is-dragging')
       document.body.style.cursor = oldCursor
       document.body.style.userSelect = oldSelect
+      detachResizeRef.current = null
+    }
+    const onUp = (): void => {
+      detach()
       const final = Math.max(1, lastValue)
       keepPanelSize(window.localStorage, side, final)
     }
+    detachResizeRef.current = detach
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
     // Bug 7：鼠标移出浏览器窗口后松开时 pointerup 可能不触发（取决于 OS），

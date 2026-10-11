@@ -342,10 +342,35 @@ describe('T-011 no-clobber：并发创建仅一方成功', () => {
       atomicReplaceFile(file, Buffer.from('AAA')),
       atomicReplaceFile(file, Buffer.from('BBB')),
     ])
-    // 至少一方成功（Windows 下瞬时 rename 锁竞争可能使一方获 EPERM/EBUSY，可接受）。
-    expect(results.some((r) => r.status === 'fulfilled')).toBe(true)
+    // 至少一方成功，且失败方必须是**具名的竞争错误**（Windows 下瞬时 rename 锁竞争可能给出
+    // EPERM/EBUSY/EACCES）：两方都失败会让读侧以 ENOENT 掩盖真实原因；失败原因若是 ENOENT
+    // 则说明「目标已存在」这一前提被误判，属真实行为回归。
+    const fulfilled = results.filter((r): r is PromiseFulfilledResult<void> => r.status === 'fulfilled')
+    expect(fulfilled.length, '不允许两方都失败（否则读侧会以 ENOENT 掩盖真实原因）').toBeGreaterThanOrEqual(1)
+    for (const rejected of results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')) {
+      expect(rejected.reason).toBeInstanceOf(Error)
+      expect((rejected.reason as NodeJS.ErrnoException).code, '失败原因不能是 ENOENT（目标已存在）').not.toBe('ENOENT')
+    }
     const text = await readFile(file, 'utf8')
     expect(['AAA', 'BBB']).toContain(text)
+  })
+})
+
+// ── 7b. 原子替换的失败路径：不留临时文件残留 ──────────────────────────────
+
+describe('T-011 原子替换失败路径', () => {
+  it('rename 发布失败（目标为目录）时清理临时文件，不留 .tmp 残留', async () => {
+    const dir = makeTmpDir()
+    // 目标是一个已存在的目录：临时文件能建、rename 必然失败（win32 EPERM / 其他平台 EISDIR），
+    // 从而确定性地走到失败分支（并发竞争导致的失败是环境相关的，不能用来锁定清理契约）。
+    const target = join(dir, 'occupied-dir')
+    mkdirSync(target, { recursive: true })
+
+    await expect(atomicReplaceFile(target, Buffer.from('X'))).rejects.toBeInstanceOf(Error)
+    // 失败路径必须清理：`storage/AGENTS.md`「失败路径无临时文件与锁残留」
+    await expectNoTmpResidue(dir)
+    // 目标目录未被替换成文件（失败不半途生效）
+    expect((await readdir(dir)).includes('occupied-dir')).toBe(true)
   })
 })
 

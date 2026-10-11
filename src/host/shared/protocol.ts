@@ -1,3 +1,5 @@
+// src/host/shared/protocol.ts
+//
 // Host + Client 共享协议常量与类型（protocol.ts）。
 //
 // 本文件集中定义 GUI API 端点名常量、wf_* 工具名常量、工具可见性元数据、

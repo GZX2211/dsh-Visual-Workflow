@@ -8,7 +8,7 @@
 // 断言与测试名保持原样。
 
 import { describe, expect, it } from 'vitest'
-import { GRAPH_STAGE_SIZE, nodeSizeOf } from '../../../src/client/lib/card-geometry.js'
+import { nodeSizeOf } from '../../../src/client/lib/card-geometry.js'
 import type { CanvasNode } from '../../../src/client/studio/studio-state.js'
 
 function nodeOf(id: string, kind: CanvasNode['kind'], extra: Record<string, unknown> = {}): CanvasNode {
@@ -17,9 +17,9 @@ function nodeOf(id: string, kind: CanvasNode['kind'], extra: Record<string, unkn
 
 describe('画布几何（协作组/阶段）', () => {
   it('阶段节点使用紧凑尺寸；角色/组使用各自尺寸', () => {
-    expect(nodeSizeOf(nodeOf('s', 'start'))).toEqual(GRAPH_STAGE_SIZE)
-    expect(nodeSizeOf(nodeOf('e', 'end'))).toEqual(GRAPH_STAGE_SIZE)
-    expect(nodeSizeOf(nodeOf('p', 'pause'))).toEqual(GRAPH_STAGE_SIZE)
+    expect(nodeSizeOf(nodeOf('s', 'start'))).toEqual({ w: 168, h: 88 })
+    expect(nodeSizeOf(nodeOf('e', 'end'))).toEqual({ w: 168, h: 88 })
+    expect(nodeSizeOf(nodeOf('p', 'pause'))).toEqual({ w: 168, h: 88 })
     expect(nodeSizeOf(nodeOf('a', 'agent'))).toEqual({ w: 208, h: 116 })
   })
 })

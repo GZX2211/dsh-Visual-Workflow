@@ -30,7 +30,7 @@ const WAIT_MS = 30_000
 // 为什么不能沿用 WAIT_MS：预算小于该上界时，「落盘慢」与「落盘永久失败」在测试层面不可区分，
 // 断言只会看到 running——此前 15s 预算与 30s 磁盘锁上限错配，正是 CI 偶发失败的成因之一。
 const CRASH_WAIT_MS = 70_000
-/** 承载上面等待的用例整体上限（须大于 CRASH_WAIT_MS，并显式覆盖默认 20s）。 */
+/** 承载上面等待的用例整体上限（须大于 CRASH_WAIT_MS，并显式覆盖 vitest.config.ts 的 60s 全局上限）。 */
 const CRASH_TEST_TIMEOUT_MS = 100_000
 
 afterEach(async () => {

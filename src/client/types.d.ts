@@ -1,3 +1,5 @@
+// src/client/types.d.ts
+//
 // Client 侧全局声明（P01 最小集）。
 //
 // 提供 CSS module 声明，使 import styles from './x.module.css' 在 client

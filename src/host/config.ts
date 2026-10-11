@@ -14,7 +14,8 @@ export const name = 'dsh-visual-workflow'
 export const inject: string[] = []
 
 // ── Config schema ────────────────────────────────────────────────────────
-// 与 cordis.patch.yml 的 13 个配置键一一对应，默认值逐字一致。默认值收敛在
+// 与 cordis.patch.yml 的 13 个配置键逐键对应，默认值逐字一致；schema 另有 1 个退役只读键
+// wfAskAgentTimeoutMs（@deprecated，仅读取兼容），不出现在 patch 中（patch 并非 schema 全集）。默认值收敛在
 // schema：任何部署可能需要改变的值都应成为配置而非源码常量。
 
 /** Host 插件的全部可配置键（已含默认值，应用后为必填）。 */

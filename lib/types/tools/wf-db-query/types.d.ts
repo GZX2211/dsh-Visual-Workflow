@@ -18,11 +18,19 @@ export interface QueryResult {
 export interface TableInfo {
     name: string;
 }
-/** 数据库驱动接口（testConnection/query/schema/close）。 */
+/** 数据库驱动接口（testConnection/query/schema/schemaPage/close）。 */
 export interface DatabaseDriver {
     testConnection(): Promise<void>;
     query(sql: string): Promise<QueryResult>;
     schema(): Promise<TableInfo[]>;
+    /**
+     * 表清单页：查询取「上限+1」行，返回截到上限的清单与精确截断事实（是否还有更多表）。
+     * 与 schema() 同源同顺序；需要判断表清单是否被上限截断时用本方法。
+     */
+    schemaPage(): Promise<{
+        tables: TableInfo[];
+        truncated: boolean;
+    }>;
     close(): void;
 }
 /** 服务器连接信息（mysql/postgresql 共用）。 */

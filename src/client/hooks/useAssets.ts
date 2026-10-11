@@ -125,8 +125,12 @@ export function useAssets(
   const detailSeq = useRef(0)
   /** 版本列表请求序号（与详情装载各自独立，互不取消）。 */
   const versionsSeq = useRef(0)
-  useEffect(() => () => {
-    mounted.current = false
+  useEffect(() => {
+    // StrictMode 双调用（mount → unmount → mount）后必须重新置为有效，否则守卫永久失效、静默早退
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
   }, [])
   /** 状态引用：回调闭包读最新状态（回滚后是否重投影画布等归属判定）。 */
   const stateRef = useRef(state)

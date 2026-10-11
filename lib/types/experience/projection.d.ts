@@ -1,8 +1,8 @@
 import type { ExperienceSemanticFields } from "./validation.js";
 /** 空列表的稳定占位（不因空数组缺行）。 */
-export declare const PROJECTION_EMPTY_VALUE = "\uFF08\u65E0\uFF09";
-/** 列表字段元素之间的固定分隔符。 */
-export declare const PROJECTION_LIST_SEPARATOR = "\uFF1B";
+export declare const PROJECTION_EMPTY_VALUE = "(none)";
+/** 列表字段元素之间的固定分隔符（ASCII：投影文本会原样进入模型上下文）。 */
+export declare const PROJECTION_LIST_SEPARATOR = "; ";
 /** 任务侧检索文本（responsibility + task_type + situation + trigger）。 */
 export declare function buildTaskRetrievalText(fields: ExperienceSemanticFields): string;
 /** 决策侧检索文本（decision_domain + principle + recommended_action + exclusions）。 */

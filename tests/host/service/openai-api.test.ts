@@ -240,10 +240,21 @@ describe('OpenAiApi.runChat', () => {
     expect(result.error).toBeTruthy()
   })
 
-  it('每轮轮询推进 watchdog（sweep 被调用）', async () => {
-    const h = makeHarness()
-    await h.api.runChat({ userId: 'user-1', question: 'q', stream: false })
-    expect(h.sweeps.count).toBeGreaterThan(0)
+  it('每轮轮询推进 watchdog：轮询次数 N ⇒ sweep 调用 N 次（与终态判定配对）', async () => {
+    const h = makeHarness({ status: 'running' })
+    // 让轮询次数成为受控事实：前 2 次快照仍在运行，第 3 次给出终态。
+    // 原用例只断言 `sweeps.count > 0`——夹具终态本就是 completed，循环只跑一轮，
+    // 该断言退化成「sweep 这个函数被执行过」，无法发现「某轮忘记推进 watchdog」的回归。
+    const pollRounds = 3
+    let snapshotCalls = 0
+    h.orchestrator.runSnapshot = () => {
+      snapshotCalls += 1
+      return { status: snapshotCalls < pollRounds ? 'running' : 'completed', summary: '摘要' }
+    }
+    const result = await h.api.runChat({ userId: 'user-1', question: 'q', stream: false })
+    expect(snapshotCalls).toBe(pollRounds)
+    expect(h.sweeps.count).toBe(pollRounds)
+    expect(result).toMatchObject({ status: 'completed', runId: 'run-1' })
   })
 
   it('Bug 22：runChat 等待超时（默认 5 分钟起步，可配置）→ 终止运行并抛 generation_timeout', async () => {

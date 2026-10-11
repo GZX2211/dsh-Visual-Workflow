@@ -5,8 +5,10 @@
 // （导入导出领域行为见 tests/host/transfer/bundle.test.ts）。
 
 import { afterEach, describe, expect, it } from 'vitest'
+import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { indexPathOf } from '../../../src/host/tools/wf-db-query/service.js'
 import { cleanupAll, databaseNode, makeFlow, makeHarness, saveFlow } from './fixtures/api-harness.js'
 
 afterEach(cleanupAll)
@@ -122,13 +124,36 @@ describe('数据库端点', () => {
     const schema = (await h.api.handle('dbSchema', { node })) as Array<{ name?: string }>
     expect(schema.some((t) => t.name === 'docs')).toBe(true)
 
-    // 缺索引 → 自动构建后检索
-    const preview = (await h.api.handle('dbSearchPreview', { dataId: 'n-db1', query: '断点续跑', node })) as { hits?: unknown[] }
-    expect(preview.hits).toBeTruthy()
+    // 缺索引 → 自动构建后检索：断言「命中了什么」而不是「有 hits 这个属性」
+    // （`toBeTruthy` 对空数组同样为真，检索失败与命中 1 条在它眼里没有区别）。
+    const preview = (await h.api.handle('dbSearchPreview', { dataId: 'n-db1', query: '断点续跑', node })) as {
+      hits: Array<{ text: string }>
+      source?: string
+    }
+    expect(preview.hits).toHaveLength(1)
+    expect(preview.hits[0].text).toContain('断点续跑')
+    // 夹具引擎恒为 bm25 降级态：本用例只覆盖词法通道，语义通道需真实嵌入引擎（见 REVISE 的 D10-03）
+    expect(preview.source).toBe('bm25')
 
-    // rebuild=true 强制重建
-    const rebuilt = (await h.api.handle('dbSearchPreview', { dataId: 'n-db1', query: '', node, rebuild: true })) as { hits?: unknown[] }
-    expect(rebuilt.hits).toEqual([])
+    // 空 query（含纯空白）走提前返回：有 dataId 但无检索结果
+    const blankQuery = (await h.api.handle('dbSearchPreview', { dataId: 'n-db1', query: '   ', node })) as { hits: unknown[] }
+    expect(blankQuery.hits).toEqual([])
+
+    // rebuild=true：把索引改成「文件存在但 chunks 为空」——这种索引在检索侧等价于不可用，
+    // 只有真的执行了重建才能恢复命中。原用例用 query:'' 触发重建，重建确实执行了，
+    // 但结果永远看不到（重建副作用此前没有任何观察点）。
+    const indexFile = indexPathOf(h.dataDir, 'n-db1')
+    await writeFile(indexFile, JSON.stringify({ version: 1, dataId: 'n-db1', source: 'bm25', dimension: 0, chunkSize: 384, overlap: 128, updatedAt: '', chunks: [] }))
+    const rebuilt = (await h.api.handle('dbSearchPreview', { dataId: 'n-db1', query: '报告', node, rebuild: true })) as {
+      hits: Array<{ text: string }>
+      source?: string
+    }
+    expect(rebuilt).toMatchObject({ source: 'bm25' })
+    expect(rebuilt.hits).toHaveLength(1)
+    expect(rebuilt.hits[0].text).toContain('报告')
+    // 落盘事实：空索引被真实重建结果覆盖（而不只是内存里的返回值好看）
+    const persisted = JSON.parse(await readFile(indexFile, 'utf8')) as { chunks: unknown[] }
+    expect(persisted.chunks).toHaveLength(1)
 
     await expect(h.api.handle('dbSearchPreview', { dataId: 'nope', query: 'x' })).rejects.toMatchObject({ status: 422 })
   })

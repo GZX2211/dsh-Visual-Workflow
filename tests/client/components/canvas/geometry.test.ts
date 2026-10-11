@@ -4,7 +4,7 @@
 // 组卡片流程接点居中。
 //
 // 注（治理）：卡片尺寸常量与尺寸解析的唯一本体是 lib/card-geometry.ts（含
-// GRAPH_STAGE_SIZE / nodeSizeOf），因此该部分用例按源文件归属移至
+// GRAPH_NODE_SIZE / GRAPH_STAGE_WIDTH / GRAPH_STAGE_HEIGHT / nodeSizeOf），因此该部分用例按源文件归属移至
 // tests/client/lib/card-geometry.test.ts；DOM 命中检测（groupSurfaceFromElements /
 // connectionTargetAt）归 lib/dom-hit-test.ts，其用例移至 tests/client/lib/dom-hit-test.test.ts。
 // 本文件只覆盖组件层 geometry.ts 的渲染几何原语。

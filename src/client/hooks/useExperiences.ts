@@ -82,8 +82,12 @@ export function useExperiences(
   const mounted = useRef(true)
   /** 列表请求序号（只有最新一次刷新可写状态）。 */
   const listSeq = useRef(0)
-  useEffect(() => () => {
-    mounted.current = false
+  useEffect(() => {
+    // StrictMode 双调用（mount → unmount → mount）后必须重新置为有效，否则守卫永久失效、静默早退
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
   }, [])
   /** 状态引用：回调闭包读最新列表（打开经验时取当前条目）。 */
   const stateRef = useRef(state)

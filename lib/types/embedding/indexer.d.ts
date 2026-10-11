@@ -29,10 +29,14 @@ export interface SearchHit {
     /** 源记录主键值（命中映射回整行用；无则缺省）。 */
     rowKey?: string;
 }
+/** 检索返回条数上限：请求的 topK 超过该值只按上限返回（调用方据此上报截断）。 */
+export declare const SEARCH_TOP_K_MAX = 50;
 /** 检索结果。 */
 export interface SearchResult {
     hits: SearchHit[];
     source: 'embedding' | 'bm25';
+    /** 结果被上限截断：请求的 topK 超上限且返回条数达到上限（未达到则不存在被上限挡掉的候选）。 */
+    truncated: boolean;
 }
 /**
  * 简易中英混合分词（BM25 词袋）：

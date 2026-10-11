@@ -1,3 +1,5 @@
+// src/host/shared/types.ts
+//
 // Host + Client 共享契约（type-only barrel）：Host 半区与 Client 半区共用的契约入口。
 //
 // 为什么是本文件：对外契约路径（`from './types.js'`）遍布 host 与 client 两侧，

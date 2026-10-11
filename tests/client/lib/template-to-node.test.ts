@@ -1,13 +1,9 @@
 // tests/client/lib/template-to-node.test.ts
 //
-// 模板 → 画布节点（§4.2.1 深拷贝解耦）：三类模板映射与字段投影。
+// 模板 → 画布节点（§4.2.1 深拷贝解耦）：模板字段投影到节点 data。
 
 import { describe, expect, it } from 'vitest'
-import {
-  templatesToMaps,
-  templateToNodeData,
-  templateKindOfNode,
-} from '../../../src/client/lib/template-to-node.js'
+import { templateToNodeData } from '../../../src/client/lib/template-to-node.js'
 import type { RoleTemplate, FileTemplate, DatabaseTemplate } from '../../../src/host/shared/types.js'
 
 const roleTemplate: RoleTemplate = {
@@ -20,13 +16,6 @@ const dbTemplate: DatabaseTemplate = {
 }
 
 describe('模板 → 节点深拷贝（§4.2.1）', () => {
-  it('templatesToMaps：三类映射', () => {
-    const maps = templatesToMaps([roleTemplate], [fileTemplate], [dbTemplate])
-    expect(maps.role.get('r-1')?.name).toBe('研究')
-    expect((maps.file.get('f-1') as FileTemplate).fileKind).toBe('text')
-    expect((maps.database.get('d-1') as DatabaseTemplate).dbType).toBe('local')
-  })
-
   it('role 模板 → 节点 data（name→label；presetId 保留）', () => {
     const data = templateToNodeData('role', roleTemplate) as Record<string, unknown>
     expect(data.label).toBe('研究')
@@ -67,14 +56,5 @@ describe('模板 → 节点深拷贝（§4.2.1）', () => {
     const data = templateToNodeData('database', dbTemplate) as Record<string, unknown>
     expect(data.dbType).toBe('local')
     expect(data.vectorSource).toBe('embedding')
-  })
-
-  it('templateKindOfNode：角色/文件/数据库有模板，其余无', () => {
-    expect(templateKindOfNode('agent')).toBe('role')
-    expect(templateKindOfNode('parent')).toBe('role')
-    expect(templateKindOfNode('file')).toBe('file')
-    expect(templateKindOfNode('database')).toBe('database')
-    expect(templateKindOfNode('group')).toBeNull()
-    expect(templateKindOfNode('proxy')).toBeNull()
   })
 })

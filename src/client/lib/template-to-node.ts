@@ -1,25 +1,12 @@
 // src/client/lib/template-to-node.ts
 //
-// 模板 → 画布节点（深拷贝解耦，需求 §4.2.1）：模板映射与字段投影。
+// 模板 → 画布节点（深拷贝解耦，需求 §4.2.1）：模板字段投影到节点 data。
 // 拖入即快照，此后节点与模板无引用关系。
 
 import type { RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate } from '../../host/shared/types.js'
 
 export type TemplateKind = 'role' | 'file' | 'database'
 export type TemplateMap = Map<string, RoleTemplate | FileTemplate | DatabaseTemplate>
-
-/** 模板映射：{ role: Map, file: Map, database: Map }（id → 模板）。 */
-export function templatesToMaps(
-  roleTemplates: RoleTemplate[] | null | undefined,
-  fileTemplates: FileTemplate[] | null | undefined,
-  databaseTemplates: DatabaseTemplate[] | null | undefined,
-): Record<TemplateKind, TemplateMap> {
-  return {
-    role: new Map((roleTemplates ?? []).map((template) => [template.id, template])),
-    file: new Map((fileTemplates ?? []).map((template) => [template.id, template])),
-    database: new Map((databaseTemplates ?? []).map((template) => [template.id, template])),
-  }
-}
 
 /** 模板字段 → 节点 data（深拷贝快照；模板 name → 节点 label，共享类型逐字段对齐）。
  *  kind 限定 role/file/database；传入 GroupTemplate 时按 None 处理（协作组模板走
@@ -77,12 +64,4 @@ export function templateToNodeData(
     conn: db.conn ? { ...db.conn } : undefined,
     vectorSource: db.vectorSource === 'bm25' ? 'bm25' : 'embedding',
   }
-}
-
-/** 画布节点 kind → 模板 kind（parent/agent → role；proxy/stage/group 无模板）。 */
-export function templateKindOfNode(nodeKind: string): TemplateKind | null {
-  if (nodeKind === 'parent' || nodeKind === 'agent') return 'role'
-  if (nodeKind === 'file') return 'file'
-  if (nodeKind === 'database') return 'database'
-  return null
 }

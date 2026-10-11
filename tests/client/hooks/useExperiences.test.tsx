@@ -9,7 +9,8 @@
 //      的调用与参数，以及列表 / 详情状态写入；
 //   ② 保存载荷投影（experiencePatchOf）：只回传可编辑字段，null 表达清空；
 //   ③ 错误码分支：ERR_EXPERIENCE_NOT_FOUND → 提示 + 刷新经验列表；
-//   ④ 竞态与卸载：迟到的列表响应不覆盖最新一次；卸载后不再 dispatch。
+//   ④ 竞态与卸载：迟到的列表响应不覆盖最新一次；卸载后不再 dispatch；
+//      StrictMode 双挂载（mount → unmount → mount）后写状态仍然有效。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, useEffect } from 'react'
@@ -127,8 +128,8 @@ interface HarnessResult {
   errors: unknown[]
 }
 
-/** 渲染 useExperiences（dispatch/notify 记录，state 由调用方给出）。 */
-async function renderExperiences(remote: RemoteFace, state: StudioState = createInitialState('s-1')): Promise<HarnessResult> {
+/** 渲染 useExperiences（dispatch/notify 记录，state 由调用方给出；strict = 包 StrictMode）。 */
+async function renderExperiences(remote: RemoteFace, state: StudioState = createInitialState('s-1'), strict = false): Promise<HarnessResult> {
   const dispatched: Array<{ type: string; [key: string]: unknown }> = []
   const toasts: Array<{ kind: string; text: string }> = []
   const errors: unknown[] = []
@@ -143,7 +144,7 @@ async function renderExperiences(remote: RemoteFace, state: StudioState = create
   }
   await act(async () => {
     root = createRoot(container!)
-    root.render(React.createElement(Harness))
+    root.render(strict ? React.createElement(React.StrictMode, null, React.createElement(Harness)) : React.createElement(Harness))
   })
   return { face: face!, dispatched, toasts, errors }
 }
@@ -348,6 +349,15 @@ describe('useExperiences：竞态与卸载', () => {
     })
 
     expect(dispatched).toEqual([])
+  })
+
+  it('test_StrictMode双挂载_刷新仍写入列表（mounted 守卫不得停留在失效态）', async () => {
+    const { remote } = makeRemote(() => [entry()])
+    const { face, dispatched } = await renderExperiences(remote, createInitialState('s-1'), true)
+
+    await act(async () => { await face.refresh() })
+
+    expect(dispatched.map((item) => item.type)).toEqual(['EXPERIENCES_LOADED'])
   })
 })
 

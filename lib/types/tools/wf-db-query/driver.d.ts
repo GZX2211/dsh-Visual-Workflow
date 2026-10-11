@@ -1,5 +1,12 @@
 import type { DatabaseNode } from '../../shared/graph-model.js';
 import type { DatabaseDriver, QueryResult, ServerConnection, TableInfo } from './types.js';
+/** 表清单条数上限：本地 SQLite 与服务器 MySQL/PostgreSQL 共用同一本体（大库表名列表不灌满上下文）。 */
+export declare const SCHEMA_TABLE_LIMIT = 200;
+/**
+ * 表清单查询语句（三通道共用同一上限本体；语句与上限单点维护）。
+ * 多取一行用于精确判定是否被上限截断——结果集返回前仍截到 SCHEMA_TABLE_LIMIT。
+ */
+export declare function schemaQuery(kind: 'sqlite' | 'mysql' | 'postgresql'): string;
 /** 本地 SQLite 驱动：node:sqlite 只读模式（物理防写）。 */
 export declare class SqliteDriver implements DatabaseDriver {
     private readonly filePath;
@@ -9,6 +16,11 @@ export declare class SqliteDriver implements DatabaseDriver {
     testConnection(): Promise<void>;
     query(sql: string): Promise<QueryResult>;
     schema(): Promise<TableInfo[]>;
+    /** 表清单页：+1 行探测判定截断，返回前截到上限（对外不超过上限）。 */
+    schemaPage(): Promise<{
+        tables: TableInfo[];
+        truncated: boolean;
+    }>;
     close(): void;
 }
 /**
@@ -24,6 +36,11 @@ export declare class ServerDriver implements DatabaseDriver {
     testConnection(): Promise<void>;
     query(sql: string): Promise<QueryResult>;
     schema(): Promise<TableInfo[]>;
+    /** 表清单页：+1 行探测判定截断，返回前截到上限（对外不超过上限）。 */
+    schemaPage(): Promise<{
+        tables: TableInfo[];
+        truncated: boolean;
+    }>;
     close(): void;
 }
 /** 按数据库节点创建驱动（本地/服务器；配置缺失给明确错误）。 */

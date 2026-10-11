@@ -9,7 +9,8 @@
 //      listAssetVersions / rollbackAsset / retireAsset）的调用与参数；
 //   ② 错误码分支：ERR_ASSET_DUPLICATE → 「重复入库已取消」且不刷新；
 //      ERR_ASSET_NOT_FOUND → 提示 + 刷新资产列表；
-//   ③ 竞态与卸载：迟到的详情响应不覆盖当前资产；卸载后不再 dispatch。
+//   ③ 竞态与卸载：迟到的详情响应不覆盖当前资产；卸载后不再 dispatch；
+//      StrictMode 双挂载（mount → unmount → mount）后写状态仍然有效。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useEffect } from 'react'
@@ -75,8 +76,8 @@ interface HarnessResult {
   errors: unknown[]
 }
 
-/** 渲染 useAssets（dispatch/notify 记录，state 由调用方给出）。 */
-async function renderAssets(remote: RemoteFace, state: StudioState = createInitialState('s-1')): Promise<HarnessResult> {
+/** 渲染 useAssets（dispatch/notify 记录，state 由调用方给出；strict = 包 StrictMode）。 */
+async function renderAssets(remote: RemoteFace, state: StudioState = createInitialState('s-1'), strict = false): Promise<HarnessResult> {
   const dispatched: Array<{ type: string; [key: string]: unknown }> = []
   const toasts: Array<{ kind: string; text: string }> = []
   const errors: unknown[] = []
@@ -91,7 +92,7 @@ async function renderAssets(remote: RemoteFace, state: StudioState = createIniti
   }
   await act(async () => {
     root = createRoot(container!)
-    root.render(React.createElement(Harness))
+    root.render(strict ? React.createElement(React.StrictMode, null, React.createElement(Harness)) : React.createElement(Harness))
   })
   return { face: face!, dispatched, toasts, errors }
 }
@@ -368,6 +369,16 @@ describe('useAssets：竞态与卸载', () => {
       await inflight
     })
     expect(dispatched).toEqual([])
+  })
+
+  it('StrictMode 双挂载后：refresh 仍能写状态（mounted 守卫不得停留在失效态）', async () => {
+    const { remote, calls } = makeRemote(() => ({ workflows: [{ assetId: 'a-1' }], roles: [] }))
+    const { face, dispatched } = await renderAssets(remote, createInitialState('s-1'), true)
+
+    await act(async () => { await face.refresh() })
+
+    expect(calls).toEqual([{ endpoint: EP.EP_LIST_ASSETS, args: {} }])
+    expect(dispatched.map((item) => item.type)).toEqual(['ASSETS_LOADED'])
   })
 })
 

@@ -23,7 +23,6 @@ export const GRAPH_NODE_SIZE = { w: GRAPH_NODE_WIDTH, h: GRAPH_NODE_HEIGHT }
 /** 阶段节点（启动/结束/暂停）紧凑卡片：流程门无需大卡，避免占用画布空间。 */
 export const GRAPH_STAGE_WIDTH = 168
 export const GRAPH_STAGE_HEIGHT = 88
-export const GRAPH_STAGE_SIZE = { w: GRAPH_STAGE_WIDTH, h: GRAPH_STAGE_HEIGHT }
 export const GRAPH_GROUP_WIDTH = 300
 export const GRAPH_GROUP_HEIGHT = 220
 /** 组内成员行高/列表起始（与 GroupCard 布局一致，连线锚点用；成员为迷你角色卡，略高于纯文本行）。 */

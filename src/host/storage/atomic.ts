@@ -1,3 +1,5 @@
+// src/host/storage/atomic.ts
+//
 // 原子存储原语（T-011）——T-012（FlowStore）与后续所有持久化的地基。
 //
 // 本模块提供六个能力，全部纯 Node 内建模块（W-05：零 @deepseek-ai/* 运行时依赖）：

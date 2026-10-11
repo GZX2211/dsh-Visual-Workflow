@@ -1,6 +1,7 @@
 // vitest 全局配置（测试超时与并发契约的唯一承接点）。
 //
-// 为什么需要它：本仓库在 `--pool=threads` 下执行 220 个测试文件（`tests/**/*.test.ts{,x}` 实测计数），
+// 为什么需要它：本仓库在 `--pool=threads` 下执行 `tests/**/*.test.ts{,x}` 的全量测试文件（数量会随开发增减，
+// 不是契约；观测值 218 仅供勾稽现状，取证 `pnpm exec vitest list --filesOnly`），
 // 其中大量用例带真实副作用（真实磁盘锁与 fsync、真实定时器与 5s 宽限期、动态 import、
 // tsdown 构建产物断言、ONNX 嵌入模型加载、可选数据库驱动）。默认 testTimeout = 5000ms 与用例内
 // `vi.waitFor(..., { timeout: 5000 })` 同为 5s，两者互相竞争：并行负载放大任一等待时，

@@ -1,3 +1,5 @@
+// src/client/components/panels/inspector/experience-form.tsx
+//
 // 经验表单（资产态「数据」Tag 以「经验」呈现时，属性栏的编辑面）。
 //
 // 字段与顺序（用户裁决，自上而下）：责任范围 → 任务类型 → 决策领域 → 情境 →

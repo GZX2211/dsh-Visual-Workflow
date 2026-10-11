@@ -1,3 +1,5 @@
+// src/host/shared/scheduler-types.ts
+//
 // Host + Client 共享契约：定时任务（纯类型，零运行时依赖）。
 //
 // 职责：定义定时任务的持久化实体与内存派生运行态的**形状**。

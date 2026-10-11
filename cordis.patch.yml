@@ -2,7 +2,8 @@
 #
 # T-002：insert 块声明插件行。id 是配置树中稳定的行身份（后层按 id 覆盖前层），
 # name 是 Cordis Loader 可解析的 Node 包名（对应本包 main 入口 lib/index.js）。
-# config 的 13 个键与 src/host/index.ts 导出的 Config schema 一一对应（默认值一致），
+# config 的 13 个键是 patch 层实际暴露的全部键，与 src/host/index.ts 导出的 Config schema 逐键对应
+# （默认值一致）；schema 另有 1 个退役只读键 wfAskAgentTimeoutMs，不出现在本文件。
 # 键义逐条见下方中文注释；形态与架构文档 §2.2 逐字一致。
 - insert:
     - id: visual-workflow
