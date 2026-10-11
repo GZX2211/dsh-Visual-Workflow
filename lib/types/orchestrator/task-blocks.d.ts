@@ -14,11 +14,12 @@ export declare function inputContractOf(node: RoleNode): string;
  * （buildNodeContextFacts 读快照 nodes[].output）；若上游节点没有声明输出结构，
  * 管道虽然接通、两端却没有协议，下游只能面对一段自由文本。因此：
  *   - 该节点**存在 ctx-out 出线**（确有下游要读它）且未配置 outputSchema → 注入默认结构；
- *   - 无 ctx-out 出线的终端节点 → 不注入（不给它添无关约束）；
+ *   - auto 运行的简单 Flow 消费者沿用同一默认契约；显式绑定/ctx/复杂图不补充；
+ *   - 无消费方的终端节点 → 不注入（不给它添无关约束）；
  *   - 已配置 outputSchema → 以配置为准，默认结构作为「至少包含」的补充。
  * 纯函数；不做任何结构校验（用户裁决 A3：柔性文本契约）。
  */
-export declare function outputContractOf(flow: WorkflowDocument, node: RoleNode): {
+export declare function outputContractOf(flow: WorkflowDocument, node: RoleNode, snapshot?: RunSnapshot): {
     text: string;
     defaulted: boolean;
 };

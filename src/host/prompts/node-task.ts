@@ -17,6 +17,7 @@
 import { HEAD_MARKER, MID_MARKER, TAIL_MARKER, TAIL_RESTATE_MARKER } from './markers.js'
 import { systemLanguageRule } from './prompt-rules.js'
 import type { CollabChannel } from './collab.js'
+import type { HandoffPolicy } from "../shared/runtime-types.js"
 
 /**
  * 节点任务块的入参（中文注释每个字段）。
@@ -45,6 +46,7 @@ export interface NodeTaskBlockParams {
     inputSource?: 'ctx' | 'workspace' | 'runtime'
     outputFiles?: string[]
     runtimeInputs?: import("../shared/runtime-types.js").InputSlots
+    handoffPolicy?: HandoffPolicy
     /**
      * 数据库工具说明：存在 db-in 连线时说明 wf_db_query 三模式（search/query/schema，
      * 只读）用法；无 db-in 连线时为空字符串。
@@ -68,12 +70,12 @@ export interface NodeTaskBlockParams {
     inputContract: string
     /**
      * 交接契约（节点配置 data.outputSchema，或系统的默认结构）：该子代理的最终回复
-     * 会被下游 ctx 连线节点**直接读取**，故须按此结构组织。为空则不组装该段。
+     * 会被下游 ctx 或合法 auto 消费者直接读取，故须按此结构组织。为空则不组装该段。
      * 注意这是**柔性文本契约**（用户裁决 A3：不做结构校验），只影响提示词，不参与校验。
      */
     outputContract: string
     /**
-     * 交接契约是否来自系统默认结构（节点未配置 outputSchema，且该节点存在 ctx-out 出线）。
+     * 交接契约是否来自系统默认结构（节点未配置 outputSchema，且存在 ctx 或合法 auto 消费者）。
      * true 时声明中提到「本结构由系统默认给出」，便于模型区分用户定制与默认。
      */
     outputContractDefaulted: boolean
@@ -94,6 +96,7 @@ export const NODE_HARD_CONSTRAINTS = {
   collabAskOnly: '与组内成员的一切协作消息必须使用 wf_ask_agent（ask / reply）',
   /** 协作组内通信必须经官方 Team 邮箱（official 通道的组内成员注入）。 */
   collabSendOnly: '与队友和 Lead 的一切协作消息必须使用 send_message（target 填对方成员名，Lead 为 "lead"）',
+  declaredOutputFiles: "必须真实生成声明文件，内容供消费者实际读取；最终回复给出实际文件路径，只回复路径不等于文件已生成",
 } as const
 
 /** 按协作通道取组内通信约束（未标注通道按 legacy 处理，保持既有文案）。 */
@@ -181,7 +184,10 @@ export function buildNodeTaskBlock(params: NodeTaskBlockParams): string {
   }
   if (facts.workingDirectory) midParts.push('', `本次会话工作目录：${facts.workingDirectory}`)
   if (facts.inputSource) midParts.push(`声明的输入来源：${facts.inputSource}。流程线只表示执行顺序，输入数据以显式 ctx、工作区文件或运行绑定为准。`)
-  if (facts.outputFiles?.length) midParts.push('', '声明的输出文件（完成时由运行时核验实际文件）：', ...facts.outputFiles.map((path) => `- ${path}`))
+  if (facts.outputFiles?.length) {
+    midParts.push('', '声明的输出文件（完成时由运行时核验实际文件）：', ...facts.outputFiles.map((path) => `- ${path}`))
+    if (facts.handoffPolicy === "auto") midParts.push(NODE_HARD_CONSTRAINTS.declaredOutputFiles)
+  }
 
   if (facts.inputContract.trim()) {
     midParts.push('', '输入结构（你应当收到的输入）：', facts.inputContract.trim())

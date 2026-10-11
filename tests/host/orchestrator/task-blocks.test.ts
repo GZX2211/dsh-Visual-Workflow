@@ -10,8 +10,9 @@
 // 断言策略：不断言提示词具体文案（提示词属长期优化项），只断言「注入/不注入」与段位归属，
 // 契约字段清单经 DEFAULT_OUTPUT_CONTRACT 常量引用。
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from "node:fs"
 import { buildNodeBlocks, inputContractOf, outputContractOf } from '../../../src/host/orchestrator/index.js'
-import { DEFAULT_OUTPUT_CONTRACT, HEAD_MARKER, MID_MARKER, TAIL_MARKER } from '../../../src/host/prompts/index.js'
+import { DEFAULT_OUTPUT_CONTRACT, HEAD_MARKER, MID_MARKER, NODE_HARD_CONSTRAINTS, TAIL_MARKER } from '../../../src/host/prompts/index.js'
 import type { RoleNode, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
 import type { RunSnapshot } from '../../../src/host/shared/types.js'
 
@@ -65,6 +66,82 @@ const emptySnapshot: RunSnapshot = {
   summary: '',
   nodes: [],
 }
+
+function autoFlow(): WorkflowDocument {
+  const flow = makeFlow(false)
+  flow.lines = [{ id: "f1", source: "a1", target: "a2", sourceHandle: "flow-out", targetHandle: "flow-in" }]
+  return flow
+}
+
+describe("auto Flow-only 输出合同", () => {
+  const snapshot: RunSnapshot = { ...emptySnapshot, handoffPolicy: "auto" }
+  it("test_auto_unique_direct_consumer_gets_existing_soft_contract", () => {
+    const flow = autoFlow()
+    expect(outputContractOf(flow, flow.nodes[0] as RoleNode, snapshot)).toEqual({ text: DEFAULT_OUTPUT_CONTRACT, defaulted: true })
+    expect(buildNodeBlocks({ flow, node: flow.nodes[0] as RoleNode, snapshot, documentTextLimit: 20000, systemLanguage: "中文" })[0].text).toContain(DEFAULT_OUTPUT_CONTRACT)
+    expect(outputContractOf(flow, flow.nodes[1] as RoleNode, snapshot)).toEqual({ text: "", defaulted: false })
+  })
+
+  it("test_auto_configured_schema_remains_exact_and_does_not_add_default_fields", () => {
+    const flow = autoFlow()
+    const node = flow.nodes[0] as RoleNode
+    node.data.outputSchema = "最终只给自然语言结论"
+    expect(outputContractOf(flow, node, snapshot)).toEqual({ text: node.data.outputSchema, defaulted: false })
+  })
+
+  it.each(["multiple", "conditional", "source-group", "target-group", "cycle", "ctx", "proxy-ctx", "declared-ctx", "binding", "workflow-binding", "dangling", "invalid-handle", "end"])("test_auto_%s_consumer_does_not_expand_handoff_semantics", (kind) => {
+    const flow = autoFlow()
+    const source = flow.nodes[0] as RoleNode
+    const target = flow.nodes[1] as RoleNode
+    const run = structuredClone(snapshot)
+    if (kind === "multiple") { flow.nodes.push(role("a3")); flow.lines.push({ ...flow.lines[0], id: "other", source: "a3" }) }
+    if (kind === "conditional") flow.lines[0].condition = { type: "pass" }
+    if (kind === "source-group") source.data.groupId = "g"
+    if (kind === "target-group") target.data.groupId = "g"
+    if (kind === "cycle") flow.lines.push({ ...flow.lines[0], id: "back", source: "a2", target: "a1" })
+    if (kind === "ctx" || kind === "proxy-ctx") {
+      flow.nodes.push(role("a3"), { id: "p2", kind: "proxy", proxySourceId: "a2", position: { x: 0, y: 0 } })
+      flow.lines.push({ id: "context", source: "a3", target: kind === "ctx" ? "a2" : "p2", sourceHandle: "ctx-out", targetHandle: "ctx-in" })
+    }
+    if (kind === "declared-ctx") target.data.execution = { inputSource: "ctx" }
+    if (kind === "binding") run.runtimeInputs = { workflowInputs: {}, nodeInputs: { a2: { source: [{ kind: "text", value: "explicit" }] } } }
+    if (kind === "workflow-binding") { run.workflowInputNodeId = "a2"; run.runtimeInputs = { workflowInputs: { source: [{ kind: "text", value: "explicit" }] }, nodeInputs: {} } }
+    if (kind === "dangling") flow.lines[0].target = "unknown"
+    if (kind === "invalid-handle") flow.lines[0].targetHandle = "ctx-in"
+    if (kind === "end") { flow.nodes.push({ id: "end", kind: "end", position: { x: 0, y: 0 }, data: { label: "结束" } }); flow.lines[0].target = "end" }
+    expect(outputContractOf(flow, source, run)).toEqual({ text: "", defaulted: false })
+  })
+
+  it("test_auto_proxy_edges_resolve_canonical_consumer_without_mutating_graph", () => {
+    const flow = autoFlow()
+    flow.nodes.push({ id: "p1", kind: "proxy", proxySourceId: "a1", position: { x: 0, y: 0 } }, { id: "p2", kind: "proxy", proxySourceId: "a2", position: { x: 0, y: 0 } })
+    flow.lines[0].source = "p1"
+    flow.lines[0].target = "p2"
+    const before = structuredClone(flow)
+    expect(outputContractOf(flow, flow.nodes[0] as RoleNode, snapshot)).toEqual({ text: DEFAULT_OUTPUT_CONTRACT, defaulted: true })
+    expect(flow).toEqual(before)
+  })
+
+  it("test_auto_output_files_add_delivery_hint_without_forcing_undeclared_files", () => {
+    const flow = autoFlow()
+    const node = flow.nodes[0] as RoleNode
+    node.data.execution = { outputFiles: ["output/result.json"] }
+    const text = buildNodeBlocks({ flow, node, snapshot: { ...snapshot, workingDirectory: "/test/workspace" }, documentTextLimit: 20000, systemLanguage: "中文" })[0].text
+    expect(text).toContain("/test/workspace/output/result.json")
+    expect(text).toContain(NODE_HARD_CONSTRAINTS.declaredOutputFiles)
+    delete node.data.execution
+    expect(buildNodeBlocks({ flow, node, snapshot, documentTextLimit: 20000, systemLanguage: "中文" })[0].text).not.toContain(NODE_HARD_CONSTRAINTS.declaredOutputFiles)
+  })
+
+  it.each(["ctx-default", "ctx-custom-files", "flow-only", "terminal"])("test_explicit_%s_task_block_matches_merged_main_bytes", (key) => {
+    const fixture = JSON.parse(readFileSync(new URL("../../fixtures/explicit-task-blocks.json", import.meta.url), "utf8")) as { baseline: string; expected: Record<string, Array<{ type: string; text: string }>> }
+    const flow = key === "flow-only" ? autoFlow() : makeFlow(key.startsWith("ctx"))
+    const node = flow.nodes[0] as RoleNode
+    if (key === "ctx-custom-files") Object.assign(node.data, { inputSchema: "上游纪要", outputSchema: "自定义交付", execution: { outputFiles: ["output/result.json"] } })
+    expect(buildNodeBlocks({ flow, node, snapshot: { ...emptySnapshot, handoffPolicy: "explicit", workingDirectory: "/test/workspace" }, documentTextLimit: 20000, systemLanguage: "中文" })).toEqual(fixture.expected[key])
+    expect(outputContractOf(flow, node)).toEqual(outputContractOf(flow, node, { ...emptySnapshot, handoffPolicy: "explicit" }))
+  })
+})
 
 describe('交接契约解析（outputContractOf / inputContractOf）', () => {
   it('有 ctx-out 出线且未配置 outputSchema → 注入默认结构并标记 defaulted', () => {
