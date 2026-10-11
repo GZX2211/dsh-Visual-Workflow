@@ -291,14 +291,25 @@
 | `Failure semantics:`（`WF_EXPERIENCE_BAD_ARGS` / `WF_EXPERIENCE_WRONG_TYPE` / `WF_EXPERIENCE_FEEDBACK_FAILED`） | 失败语义与稳定码 |
 | `ratings can never be edited or deleted` | 不可逆性直接影响提交决策 |
 
-### 8.3 按现行标准应移出（待裁决）
+### 8.3 已按用户裁决执行（2026-10-11）
 
-| # | 内容 | 理由 |
+| # | 项 | 处置 |
 |---|---|---|
-| F1 | 阶段句尾 `: recall happens at the start of a task or while it is running, and rating what was used belongs to the end` | **工具间导航**（与 `recall` 描述重复）；建议压成 `Call it in the final completion stage of a task, together with wf_experience_learn.` |
-| F2 | `evidence is optional facts behind the rating, not a run log;` | 与 `parameters.evidence` 的字段说明**同义重复**（`Optional facts that support this rating; not a run log.`） |
-| F3 | Side effects 句里的 `immediately re-aggregate that experience statistics, which the next recall uses as a bounded trust adjustment of at most ±20%` 与 `the experience content itself is never modified` | **内部机制 + ±20%**（同 `recall` 的 R1：内部权重不进模型可见面）；建议压成 `Side effects: accepted evaluations are permanent (never edited or deleted) and immediately affect future recall ranking.` |
-| F4 | `parameters.experience_id` 的说明 | 与 description 的 Preconditions 轻度重复；可保留（字段级就地可读），低优先 |
+| F1 | 阶段句尾 `: recall happens at the start of a task or while it is running, and rating what was used belongs to the end` | **删除**（工具间导航，与 `recall` 描述重复）→ 压成 `Call it in the final completion stage of a task, together with wf_experience_learn.` |
+| F2 | `evidence is optional facts behind the rating, not a run log;` | **删除**（与 `parameters.evidence` 字段说明同义重复） |
+| F3 | 整句 `Side effects: …` | **改写为一句行为指引**（用户裁决：该句本质是「提交前想清楚，因为不可逆」，不需要罗列内部副作用）→ `Ratings are permanent and can never be edited or deleted — rate deliberately: submit only what you actually used and can justify.` |
+| F4 | `parameters.experience_id` 说明与 Preconditions 轻度重复 | 未动（字段级就地可读，低优先） |
 
-**预估**：F1+F2+F3 合计约 300 字符 ≈ 75 tokens（glossary 不动）。
+**结果**：feedback 常驻 4773→**4437** 字符（description 3249→2913、params 1524）≈ **1193→1109 tokens**（−84）；实测 `±20%` 与 `re-aggregate` 已不在模型可见面。
+
+**测试同步**：把「断言含召回时机句」改为 `not.toContain('at the start of a task or while it is running')`，并新增 `not.toContain('±20%')` / `not.toContain('re-aggregate')` 门禁 + `toContain('can never be edited or deleted')`（不可逆须以行为指引形式保留）。
+
+### 8.4 复核确认保留（影响调用，不得外移）
+
+- **glossary（449 tokens）**：评分的唯一判据（四维 × 五级行为定义）；
+- 前置条件（只能评价通过 `wf_experience_recall` 注入过的经验）；
+- `Score each evaluation by choosing a semantic anchor level, never an arbitrary decimal.`；
+- `decision_effect is not how much you like the experience.`；
+- `unknown fields are rejected.` / 失败语义与三个稳定码；
+- `Ratings are permanent …`（不可逆性，以行为指引形式）。
 

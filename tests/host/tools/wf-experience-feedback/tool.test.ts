@@ -135,11 +135,16 @@ describe('wf_experience_feedback：注册与 schema', () => {
     for (const code of [ERR_EXPERIENCE_BAD_ARGS, ERR_EXPERIENCE_WRONG_TYPE, ERR_EXPERIENCE_FEEDBACK_FAILED]) {
       expect(description).toContain(code)
     }
-    // 反馈与学习同属任务最终完成阶段，召回发生在任务开始或执行途中
+    // 反馈与学习同属任务最终完成阶段；跨工具的阶段导航（召回时机等）不进本工具常驻面
     expect(description).toContain('wf_experience_learn')
     expect(description).toContain('wf_experience_recall')
     expect(description).toContain('final completion stage')
-    expect(description).toContain('at the start of a task or while it is running')
+    expect(description).not.toContain('at the start of a task or while it is running')
+    // 内部机制（统计重算、信任修正幅度）与「经验内容不被修改」等说明不进常驻面
+    expect(description).not.toContain('±20%')
+    expect(description).not.toContain('re-aggregate')
+    // 不可逆后果须以行为指引的形式保留（提交前想清楚）
+    expect(description).toContain('can never be edited or deleted')
   })
 
   it('test_description_逐级注入四维行为锚点_使评分者按行为而非数字打分', async () => {
