@@ -235,22 +235,12 @@
 
 **结果**：recall 常驻 2619→**2167** 字符（description 1730→1307、params 889→860）≈ **655→542 tokens**（−113）；learn 与 feedback 的 `type` 说明同步统一（learn 3587、feedback 1193）。
 
-### 7.5 待裁决：`source` 句是否有指导价值
-
-现句：`source is "semantic" for embedding search or "bm25" for the lexical fallback.`
-
-- **它确实携带可行动信息**：`bm25` 表示嵌入模型不可用、走了词法降级 → 语义召回能力下降，模型不应把「没召回 = 没有相关经验」当成结论，可换更贴近原文的关键词再试一次。
-- **但当前措辞只解释字段含义，没有给出「见到 bm25 该怎么做」**，所以从模型侧看更像字段说明而非操作指引。
-- 两个方向（待用户裁决）：**①保留并补一句行动指引**（把"含义"升级为"行动"）；**②删除整句**（若认为模型无需据此调整行为）。
-
 ### 7.3 复核确认保留（影响调用）
 
 - **两阶段调用**（`query` 取候选摘要 → `ids` 取完整条目）——核心调用语义；
 - **`Pass either query or ids, never both`**（两处参数说明各一次，互斥条件）；
 - **`reading full entries by ids is what makes them count as used`**——决定后续能否被 `feedback` 评价，属关键后果；
 - **阶段指引**：任务开始前用 `query`、执行中情形变化用 `ids`；收尾阶段配合 `feedback`；
-- **`source` 语义**（`semantic` / `bm25` 降级标注）——影响对结果可信度的判断；
-- **与 `wf_org_catalog` 的分工**——影响选哪个工具；
 - **失败码**：`WF_EXPERIENCE_BAD_ARGS` / `WF_EXPERIENCE_NOT_FOUND` / `WF_EXPERIENCE_RECALL_FAILED` / `WF_EXPERIENCE_WRONG_TYPE`；
 - 纯只读、无副作用（可安全重复调用）。
 
@@ -260,7 +250,55 @@
 |---|---|---|
 | `DEFAULT_RECALL_TOP_K` | 15 | 未告知（描述未提默认值） |
 | `MAX_RECALL_TOP_K` | 50 | 未告知 |
-| `MAX_RECALL_IDS` | 50 | **被写进 description（R3，建议删）** |
+| `MAX_RECALL_IDS` | 50 | **被写进 description——按用户裁决保留**（此处无别处写过数量上限） |
 
 超限时的错误文案（`recallIdsLimitProblem`）已是英文 + 可行动：`at most 50 ids may be recalled per call (received N); submit further batches`。
+
+### 7.5 `source` 句：**已删除**（用户裁决）
+
+用户裁决：删除 `source is "semantic" for embedding search or "bm25" for the lexical fallback.` ——
+**语义检索是该工具可用性的前提**，一旦回退 BM25，召回质量使其几乎不可用，因此向模型解释 `source` 取值没有操作价值。
+
+事实核对（[retrieval.ts:153-174](src/host/experience/retrieval.ts#L153)）：语义不可用（端口退化 bm25 或嵌入调用失败）时确实会回退 `rankByBm25` 并仍返回候选（`source: "bm25"`）——即**功能仍可用、召回质量显著受限**，与用户判断方向一致。
+
+结果：recall 常驻 2167→**2089** 字符 ≈ 542→**522 tokens**；`source` 字段仍出现在返回体里（只是不再解释取值）。
+
+---
+
+## 8. `wf_experience_feedback` 复核发现（经验三工具最后一个）
+
+### 8.1 常驻面（实测）
+
+| 项 | 实测 |
+|---|---|
+| description | **3249 字符 / 520 词** ≈ 813 tokens |
+| └ 其中锚点定义（glossary） | **1796 字符 ≈ 449 tokens（占 description 的 55%）** |
+| `parameters` | **1524 字符** ≈ 381 tokens（`type` 188 / `evaluations` 132 / 6 个字段说明 526） |
+| 合计 | **4773 字符 ≈ 1193 tokens**（经验三工具中最大） |
+| `output.schema` | 双态说明（accepted / skipped）——native 不注入 |
+
+运行时：无额外注入（`accepted` / `skipped` 直接来自提交结果）。
+
+### 8.2 复核确认**必须保留**的部分
+
+| 项 | 理由 |
+|---|---|
+| **glossary（四维 × 五级行为定义，449 tokens）** | 评分的**唯一判据**：每个维度每一级都是可判定的行为描述。删掉=模型失去锚点，只能在 0.75 与 1 之间凭感觉挑数字——属「影响调用」的核心内容，**不得外移** |
+| `Preconditions: every experience_id must be one this subject had injected … through wf_experience_recall; experiences never used cannot be rated and come back in skipped.` | 决定**能否提交** |
+| `Score each evaluation by choosing a semantic anchor level, never an arbitrary decimal.` | 决定**怎么给分** |
+| `decision_effect is not how much you like the experience.` | 防最常见误用（把好感度当效果） |
+| `unknown fields are rejected.` | 参数形状 |
+| `Failure semantics:`（`WF_EXPERIENCE_BAD_ARGS` / `WF_EXPERIENCE_WRONG_TYPE` / `WF_EXPERIENCE_FEEDBACK_FAILED`） | 失败语义与稳定码 |
+| `ratings can never be edited or deleted` | 不可逆性直接影响提交决策 |
+
+### 8.3 按现行标准应移出（待裁决）
+
+| # | 内容 | 理由 |
+|---|---|---|
+| F1 | 阶段句尾 `: recall happens at the start of a task or while it is running, and rating what was used belongs to the end` | **工具间导航**（与 `recall` 描述重复）；建议压成 `Call it in the final completion stage of a task, together with wf_experience_learn.` |
+| F2 | `evidence is optional facts behind the rating, not a run log;` | 与 `parameters.evidence` 的字段说明**同义重复**（`Optional facts that support this rating; not a run log.`） |
+| F3 | Side effects 句里的 `immediately re-aggregate that experience statistics, which the next recall uses as a bounded trust adjustment of at most ±20%` 与 `the experience content itself is never modified` | **内部机制 + ±20%**（同 `recall` 的 R1：内部权重不进模型可见面）；建议压成 `Side effects: accepted evaluations are permanent (never edited or deleted) and immediately affect future recall ranking.` |
+| F4 | `parameters.experience_id` 的说明 | 与 description 的 Preconditions 轻度重复；可保留（字段级就地可读），低优先 |
+
+**预估**：F1+F2+F3 合计约 300 字符 ≈ 75 tokens（glossary 不动）。
 
