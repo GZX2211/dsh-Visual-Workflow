@@ -35,6 +35,7 @@ const ARGS_FREE_ENDPOINTS = new Set<string>([
   EP.EP_LIST_EXPERIENCES,
   EP.EP_LIST_FLOW_TEMPLATES,
   EP.EP_SCHEDULER_TASKS,
+  EP.EP_RUNTIME_CONFIG,
 ])
 
 /** 整份文档端点（文档随 args 整体上送）。 */

@@ -19,7 +19,7 @@ describe('按端点的请求体上限（K2）', () => {
   })
 
   it('无参端点取无参档（列表/状态类端点不再允许 64MB）', () => {
-    for (const endpoint of ['presets', 'models', 'toolCombos', 'schedulerTasks']) {
+    for (const endpoint of ['presets', 'models', 'toolCombos', 'schedulerTasks', 'runtimeConfig']) {
       expect(guiBodyLimitOf(endpoint), endpoint).toBe(GUI_BODY_LIMIT.argsFree)
     }
   })
