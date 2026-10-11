@@ -81,7 +81,7 @@ export async function executeOrgCatalog(
   const ids = normalizeAssetIds(args?.ids)
   if (ids === null) {
     throw new WfError(
-      `ids 必须是字符串数组（只看资产索引请省略该参数）——收到 ${JSON.stringify(args?.ids ?? null)}`,
+      `WF_BAD_ARGS: ids must be an array of strings (omit it to get the asset index only) - received ${JSON.stringify(args?.ids ?? null)}`,
       'WF_BAD_ARGS',
     )
   }
