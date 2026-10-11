@@ -25,7 +25,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  root?.unmount()
+  if (root) act(() => { root!.unmount() })
   root = null
   container?.remove()
   container = null

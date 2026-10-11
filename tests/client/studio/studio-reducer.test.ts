@@ -3,13 +3,14 @@
 // 状态机历史栈契约（studio-reducer.ts / studio-initial.ts / studio-snapshot.ts）：
 //   ① 跨文档撤销：历史栈严格绑定当前文档，切文档后旧文档的 past/future 都不可被应用；
 //   ② 栈上限淘汰：past 到达 HISTORY_LIMIT 后每多一条就淘汰最旧一条，且被淘汰者不可撤销回来；
-//   ③ 快照相等判定：graphSnapshotsEqual 是 dirty 判定的唯一判据（内容相等即相等，
-//      节点/连线顺序与嵌套字段差异即不相等）。
+//   ③ 快照相等判定：UNDO/REDO 两条恢复路径上，dirty 由 graphSnapshotsEqual 判定（内容相等即
+//      相等，节点/连线顺序与嵌套字段差异即不相等）；其余分支的 dirty 来自构造赋值或
+//      GRAPH_REPLACED 的 action.dirty。
 //
 // 与 tests/client/studio/studio-state.test.ts 的分工：那里是 P0 跨文档污染的回归套件
 // （切文档后 past 清空 + UNDO 不复活旧图），本文件补 future 栈路径、栈上限与判据本体。
-// 注：「等价快照不重复入栈」在本实现中**不是**契约——HISTORY_PUSH 一律入栈，判重由调用方
-// （每次语义变更调用一次 remember）负责，故此处不锁定该假想行为。
+// 注：「等价快照不重复入栈」在本实现中**不是**契约——HISTORY_PUSH 无条件入栈，调用方没有
+// 值级判重，只有调用点上的频次控制（每次语义变更调用一次 remember），故此处不锁定该假想行为。
 
 import { describe, expect, it } from 'vitest'
 import { studioReducer } from '../../../src/client/studio/studio-reducer.js'
@@ -118,7 +119,7 @@ describe('历史栈上限（HISTORY_LIMIT）', () => {
   })
 })
 
-describe('graphSnapshotsEqual：dirty 判定的唯一判据', () => {
+describe('graphSnapshotsEqual：UNDO/REDO 恢复路径上的 dirty 判据', () => {
   it('内容相同但对象实例不同 → 相等（撤销/重做回已保存态不误报未保存）', () => {
     const a = snapshotOf('n1')
     const b = snapshotOf('n1')

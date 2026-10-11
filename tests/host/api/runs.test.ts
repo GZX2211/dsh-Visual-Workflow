@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { indexPathOf } from '../../../src/host/tools/wf-db-query/service.js'
+import { indexPathOf } from '../../../src/host/tools/index.js'
 import { cleanupAll, databaseNode, makeFlow, makeHarness, saveFlow } from './fixtures/api-harness.js'
 
 afterEach(cleanupAll)
@@ -132,7 +132,7 @@ describe('数据库端点', () => {
     }
     expect(preview.hits).toHaveLength(1)
     expect(preview.hits[0].text).toContain('断点续跑')
-    // 夹具引擎恒为 bm25 降级态：本用例只覆盖词法通道，语义通道需真实嵌入引擎（见 REVISE 的 D10-03）
+    // 夹具引擎恒为 bm25 降级态：本用例只覆盖词法通道，语义通道需真实嵌入引擎才可覆盖。
     expect(preview.source).toBe('bm25')
 
     // 空 query（含纯空白）走提前返回：有 dataId 但无检索结果
@@ -140,8 +140,7 @@ describe('数据库端点', () => {
     expect(blankQuery.hits).toEqual([])
 
     // rebuild=true：把索引改成「文件存在但 chunks 为空」——这种索引在检索侧等价于不可用，
-    // 只有真的执行了重建才能恢复命中。原用例用 query:'' 触发重建，重建确实执行了，
-    // 但结果永远看不到（重建副作用此前没有任何观察点）。
+    // 只有真的执行了重建才能恢复命中。本用例据此同时锁定响应体与重建的落盘事实。
     const indexFile = indexPathOf(h.dataDir, 'n-db1')
     await writeFile(indexFile, JSON.stringify({ version: 1, dataId: 'n-db1', source: 'bm25', dimension: 0, chunkSize: 384, overlap: 128, updatedAt: '', chunks: [] }))
     const rebuilt = (await h.api.handle('dbSearchPreview', { dataId: 'n-db1', query: '报告', node, rebuild: true })) as {

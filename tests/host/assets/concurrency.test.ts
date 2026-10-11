@@ -4,8 +4,8 @@
 //
 // 为什么单独成文件：这是「读改写不出事务」「失败不留半成品」两条硬规则的**唯一**机制承载物
 // （src/host/assets/db.ts 顶部注释自述：不加队列会让两笔并发写事务交错，一方回滚会连带回滚
-// 另一方已完成的写入），而 tests/host/assets 与 tests/host/experience 此前对
-// Promise.all / Promise.allSettled 零命中——等于这条最高危的数据一致性保证完全未被验证。
+// 另一方已完成的写入）。本文件以 Promise.all / Promise.allSettled 并发驱动同一条写路径，
+// 把该保证锁进断言：交错、吞并或回滚连带一旦发生，下列不变量即失败。
 //
 // 三个不变量：
 //   1. 并发写入互不吞并（每笔事务的行都完整存在）；
@@ -63,7 +63,8 @@ describe("并发经验写入（AssetStore.insertChecked）", () => {
     // 两笔并发写事务：先登记的必然失败（批内判重抛错 → ROLLBACK），后一笔必须正常落盘。
     // 失败批刻意放两行——判重闭包只对「已存在的同类型活跃行」调用（空库首行不判重），
     // 这样才真正走到抛错分支并让整批回滚（含批内已写入的第一行）。
-    // 若串行队列失效，失败的 ROLLBACK 会连带回滚另一笔已完成的写入（数据静默丢失）。
+    // 本用例锁定结果层不变量：失败事务不留半成品，也不带走另一笔已提交的行（库内恰为 ex-ok）；
+    // 串行队列本身是否生效由本文件下一组的 enter/exit 序列观测，此处不对它下断言。
     const failing = store.insertChecked({
       rows: [experienceRow("ex-bad-1"), experienceRow("ex-bad-2", { decisionRetrievalText: "触发判重失败" })],
       duplicateOf: throwingJudge,

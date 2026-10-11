@@ -243,8 +243,8 @@ describe('OpenAiApi.runChat', () => {
   it('每轮轮询推进 watchdog：轮询次数 N ⇒ sweep 调用 N 次（与终态判定配对）', async () => {
     const h = makeHarness({ status: 'running' })
     // 让轮询次数成为受控事实：前 2 次快照仍在运行，第 3 次给出终态。
-    // 原用例只断言 `sweeps.count > 0`——夹具终态本就是 completed，循环只跑一轮，
-    // 该断言退化成「sweep 这个函数被执行过」，无法发现「某轮忘记推进 watchdog」的回归。
+    // 本用例把「每轮都推进 watchdog」锁成等值断言：轮询 N 次 ⇒ sweep 恰好 N 次；
+    // 只断言 sweep 被执行过，无法发现「某轮忘记推进 watchdog」的回归。
     const pollRounds = 3
     let snapshotCalls = 0
     h.orchestrator.runSnapshot = () => {
@@ -264,7 +264,7 @@ describe('OpenAiApi.runChat', () => {
       undefined,
       { timeoutMs: 1 },
     )).rejects.toMatchObject({ status: 504, code: 'generation_timeout' })
-    // 后台编排运行被显式停止（此前无限轮询，运行与并发槽长期占用）
+    // 后台编排运行必须被显式停止：不停止则轮询不止，运行与并发槽被长期占用
     expect(h.orchestrator.stopCalls).toContain('run-1')
   })
 
