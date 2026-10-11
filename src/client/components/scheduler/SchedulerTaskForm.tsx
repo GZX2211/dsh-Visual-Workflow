@@ -180,9 +180,9 @@ export function SchedulerTaskForm(props: SchedulerTaskFormProps) {
               {(draft?.window.timeRanges ?? []).map((range, index) => (
                 /* eslint-disable-next-line react/no-array-index-key -- 行级编辑按索引定位 */
                 <div key={`${index}:${range.start}-${range.end}`} className="wf-sched-range-row">
-                  <TimeInput value={range.start} onChange={(value) => onPatchRange(index, { start: value })} ariaLabel={copy.schedulerRangeStart} pickerLabel={copy.schedulerTimePicker} hourLabel={copy.schedulerHour} minuteLabel={copy.schedulerMinute} />
+                  <TimeInput value={range.start} onChange={(value) => onPatchRange(index, { start: value })} placeholder={copy.schedulerTimePlaceholder} ariaLabel={copy.schedulerRangeStart} pickerLabel={copy.schedulerTimePicker} hourLabel={copy.schedulerHour} minuteLabel={copy.schedulerMinute} />
                   <span>~</span>
-                  <TimeInput value={range.end} onChange={(value) => onPatchRange(index, { end: value })} ariaLabel={copy.schedulerRangeEnd} pickerLabel={copy.schedulerTimePicker} hourLabel={copy.schedulerHour} minuteLabel={copy.schedulerMinute} />
+                  <TimeInput value={range.end} onChange={(value) => onPatchRange(index, { end: value })} placeholder={copy.schedulerTimePlaceholder} ariaLabel={copy.schedulerRangeEnd} pickerLabel={copy.schedulerTimePicker} hourLabel={copy.schedulerHour} minuteLabel={copy.schedulerMinute} />
                   <button type="button" className="wf-btn wf-iconbtn" title={copy.inspectorDelete} onClick={() => onRemoveRange(index)}>×</button>
                 </div>
               ))}
@@ -212,7 +212,7 @@ export function SchedulerTaskForm(props: SchedulerTaskFormProps) {
                 {(draft.dailyTimeConfig?.timePoints ?? []).map((point, index) => (
                   /* eslint-disable-next-line react/no-array-index-key -- 行级编辑按索引定位 */
                   <div key={`${index}:${point}`} className="wf-sched-range-row">
-                    <TimeInput value={point} onChange={(value) => onPatchTimePoint(index, value)} ariaLabel={copy.schedulerTimePoints} pickerLabel={copy.schedulerTimePicker} hourLabel={copy.schedulerHour} minuteLabel={copy.schedulerMinute} />
+                    <TimeInput value={point} onChange={(value) => onPatchTimePoint(index, value)} placeholder={copy.schedulerTimePlaceholder} ariaLabel={copy.schedulerTimePoints} pickerLabel={copy.schedulerTimePicker} hourLabel={copy.schedulerHour} minuteLabel={copy.schedulerMinute} />
                     <button type="button" className="wf-btn wf-iconbtn" title={copy.inspectorDelete} onClick={() => onRemoveTimePoint(index)}>×</button>
                   </div>
                 ))}
@@ -231,6 +231,7 @@ export function SchedulerTaskForm(props: SchedulerTaskFormProps) {
                 <TimeInput value={draft?.intervalConfig?.startFrom ?? '09:00'}
                   onChange={(value) => onPatch({ intervalConfig: { ...(draft?.intervalConfig ?? { intervalMinutes: 120, startFrom: '09:00' }), startFrom: value } })}
                   ariaLabel={copy.schedulerIntervalStartFrom}
+                  placeholder={copy.schedulerTimePlaceholder}
                   pickerLabel={copy.schedulerTimePicker}
                   hourLabel={copy.schedulerHour}
                   minuteLabel={copy.schedulerMinute} />

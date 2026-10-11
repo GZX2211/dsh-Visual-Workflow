@@ -39,9 +39,11 @@ export declare class CatalogEndpoints extends VisualWorkflowApiBase {
     }): Promise<unknown>;
     /**
      * 批量设置一组工具开/关状态（组合管理「标签一键开关」：把某标签下全部工具统一关/开）。
-     *   - names 必须非空数组；空白名忽略；官方保留传输名 run_code 静默跳过（不可关闭）；
+     *   - names 必须非空数组；空白名忽略；官方保留传输名 run_code 不可关闭；
+     *   - 被忽略的保留名**显式回报**在 `skipped`（与单值端点抛 400 的语义对齐：调用方
+     *     始终能知道名单是否被改写，界面不再把「开关失灵」当作生效）；
      *   - 单次原子落盘 + 刷新内存快照，全局即时生效。
-     * @returns 更新后的完整关闭清单。
+     * @returns 更新后的完整关闭清单 + 被忽略（保留名）的名单。
      */
     toolSwitchPutMany(args: {
         names?: unknown;

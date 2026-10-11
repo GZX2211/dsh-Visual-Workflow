@@ -1,6 +1,6 @@
 // src/client/components/panels/inspector/Inspector.tsx
 //
-// 右侧属性面板（照搬旧项目 inspector.js，TSX 化）：
+// 右侧属性面板：
 // 所见即所操作——点击模板编辑模板、点击画布节点编辑节点实例、点击连线编辑连线；
 // 底部保存/删除作用于当前选中对象；阶段无保存（只读）；虚拟节点只读。
 // 底部按钮分录（用户裁决）：模版态 = 保存/删除/入库；资产态 = 保存/归档（历史资产为
@@ -35,7 +35,7 @@ export interface InspectorProps {
   onPatch(patch: Record<string, unknown>): void
   onDelete(): void
   onSave(): void
-  /** 图2 交互改造：实例 → 模板（另存为模板；用户裁决提供入口）。 */
+  /** 实例 → 模板（另存为模板）。 */
   onSaveAsTemplate?(): void
   /** 模版 → 资产入库（工作流模版 / 角色模版；先保存模版，失败即中止）。 */
   onPromote?(): void
@@ -82,7 +82,7 @@ export function Inspector(props: InspectorProps) {
         content = <WorkflowForm data={data} copy={t} isService={editorData.kind === 'service'} flowMeta={flowMeta} onPatch={onPatch} />
         break
       case 'role':
-        // 父代理属性（D-20）：模板层与画布节点都可编辑属性，不再显示「父代理模板无独立属性」空态。
+        // 父代理属性：模板层与画布节点都可编辑属性，不再显示「父代理模板无独立属性」空态。
         // 模式（presetId）下拉对父/子代理一律可编辑：官方只在工作流运行开始前读取该选择，
         // 运行中改动不影响行为（用户裁决），故不锁死。两件独立的事：
         //   - 谁可编辑 presetId：父代理与子代理都可编辑；
@@ -152,7 +152,7 @@ export function Inspector(props: InspectorProps) {
       && (isAsset || (kind === 'role' && editorData.template !== true && nodeSourceAssetId !== ''))
     // 展开态只在「仍编辑着同一个回滚对象」时成立（编辑器切换即自动收起）
     const versionsOpen = versionsAssetId !== null && versionsAssetId === rollbackAssetId
-    // 复制按钮：画布角色节点（含父代理节点，§4.2.3.1 规则 3 可创建虚拟节点）；
+    // 复制按钮：画布角色节点（含父代理节点）可创建虚拟节点；
     // 模板与父代理模板不可复制，角色资产与经验（都不在画布上）同样不可复制
     const canCopyProxy = kind === 'role' && !editorData.template && !isAsset
     // 入库：仅工作流模版与角色模版（文件/数据库/协作组模板不显示；资产态与经验不显示）
@@ -231,7 +231,7 @@ export function Inspector(props: InspectorProps) {
         </button>,
       )
     }
-    // 图2 交互改造：实例态（工作流/服务实例）提供「另存为模板」——当前实例内容
+    // 实例态（工作流/服务实例）提供「另存为模板」——当前实例内容
     // 复制为全局共享的工作流模板（模板库 + 号也能新建空白模板，二者均可）。
     if ((kind === 'workflow' || kind === 'service') && !editorData.template && !isAsset && onSaveAsTemplate) {
       footer.push(

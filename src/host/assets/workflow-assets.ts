@@ -57,13 +57,29 @@ import {
   type RoleContentFields,
 } from './row-codec.js'
 
-/** 节点壳：角色节点只保留结构字段，内容字段由角色版本行回填。 */
+/** 角色节点的壳（只保留结构字段，内容字段由角色版本行回填）。 */
 export interface NodeShell {
   id: string
-  kind: GraphNode['kind']
+  /** 只有角色种类会落成壳；其余种类落库的是完整节点对象（见 PersistedShell）。 */
+  kind: 'parent' | 'agent'
   position: { x: number; y: number }
   groupId?: string | null
   sourceAssetId?: string
+}
+
+/**
+ * 持久化节点：非角色节点落库的是**完整节点对象**（内容自包含，无需 join），
+ * 角色节点落库的是壳（内容在角色版本行）。判别联合让写侧与读侧都不必再用
+ * 双重断言掩盖「声明窄于事实」——磁盘 JSON 形状不变。
+ */
+export type PersistedShell = NodeShell | GraphNode
+
+/**
+ * 判别联合收窄：非角色节点落库的是完整节点对象（角色节点为壳）。
+ * 与写侧的 `isRoleNode` 严格互补——两侧判据必须成对，否则读回会把壳误当完整节点。
+ */
+function isFullNodeShell(shell: PersistedShell): shell is GraphNode {
+  return shell.kind !== 'parent' && shell.kind !== 'agent'
 }
 
 /** 工作流资产版本行的内容字段（不含审计列）。 */
@@ -71,8 +87,8 @@ export interface WorkflowContentFields {
   mode: WorkflowMode
   name: string
   description: string
-  /** 节点壳数组；非角色节点为完整节点对象（晋升时已是快照）。 */
-  nodeShells: NodeShell[]
+  /** 持久化节点数组；角色节点为壳（内容在角色版本行），非角色节点为完整节点。 */
+  nodeShells: PersistedShell[]
   lines: Line[]
   meta: OrgMeta | null
   roleVersionIds: WorkflowAssetRoleRef[]
@@ -467,11 +483,11 @@ function insertWorkflowVersion(
 ): WorkflowRegistration {
   const shared = new Set<string>()
   const roleRefs: WorkflowAssetRoleRef[] = []
-  const shells: NodeShell[] = []
+  const shells: PersistedShell[] = []
   for (const node of request.nodes) {
     if (!isRoleNode(node)) {
       // 非角色节点原样落库（完整快照，无需 join）
-      shells.push(node as unknown as NodeShell)
+      shells.push(node)
       continue
     }
     // 保持原顺序遍历：roleRefs 与壳数组的角色节点顺序一致
@@ -719,7 +735,7 @@ function comparableNodeOf(node: GraphNode): unknown {
       sourceAssetId: node.data.sourceAssetId ?? null,
     }
   }
-  const record = node as unknown as Record<string, unknown>
+  const record = node as { id: string; kind: string; data?: unknown; proxySourceId?: unknown }
   return {
     id: record.id,
     kind: record.kind,
@@ -807,8 +823,8 @@ function rebuildNodes(ctx: AssetTxContext, assetId: string, row: WorkflowAssetRo
   const refs = new Map(row.roleVersionIds.map((ref) => [ref.nodeId, ref.roleVersionId]))
   const nodes: GraphNode[] = []
   for (const shell of row.nodeShells) {
-    if (shell.kind !== 'parent' && shell.kind !== 'agent') {
-      nodes.push(shell as unknown as GraphNode)
+    if (isFullNodeShell(shell)) {
+      nodes.push(shell)
       continue
     }
     const roleVersionId = refs.get(shell.id)
@@ -912,7 +928,7 @@ function workflowRowToAssetRow(row: Record<string, unknown>): WorkflowAssetRow {
     mode: row.mode === 'mode2' ? 'mode2' : 'mode1',
     name: String(row.name ?? ''),
     description: String(row.description ?? ''),
-    nodeShells: nodeShells as NodeShell[],
+    nodeShells: nodeShells as PersistedShell[],
     lines: lines as Line[],
     meta,
     roleVersionIds: (roleVersionIds as WorkflowAssetRoleRef[]).filter(

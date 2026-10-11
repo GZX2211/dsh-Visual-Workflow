@@ -10,30 +10,22 @@
 // 投影），不涉及 service 模块的生命周期/端口/HTTP 适配——故归 orchestrator 测试目录。
 
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { FlowStore } from '../../../src/host/storage/flow-store.js'
-import {
-  OrchestratorRuntime,
-  type AgentHost,
-  type CallerInfo,
-  type NodeRunner,
-  type NodeStartInput,
-  type OrchestratorConfig,
-  type RootAgentLike,
-  type RootInjectedMessage,
-  type TurnEndInfo,
-} from '../../../src/host/orchestrator/index.js'
+import type { CallerInfo, OrchestratorRuntime } from '../../../src/host/orchestrator/index.js'
 import type { ServiceState } from '../../../src/host/shared/types.js'
 import type { RoleNode, StageNode, WorkflowDocument, Line } from '../../../src/host/shared/graph-model.js'
 import { stageLabel } from '../../../src/host/graph/index.js'
+import {
+  cleanupTempDirs,
+  makeHarness as makeSharedHarness,
+  type FakeAgents,
+  type FakeRunner,
+  type Harness as SharedHarness,
+} from './fixtures/harness.js'
 
-const cleanups: Array<() => Promise<void>> = []
+afterEach(cleanupTempDirs)
 
-afterEach(async () => {
-  await Promise.all(cleanups.splice(0).map((fn) => fn()))
-})
+/** 服务模式会话 id（本文件全部用例以服务拥有者之外的运行会话运行）。 */
+const SERVICE_SESSION = 'session-user-1'
 
 function stage(id: string, kind: 'start' | 'end'): StageNode {
   return { id, kind, position: { x: 0, y: 0 }, data: { label: stageLabel(kind, 'mode2') } }
@@ -115,85 +107,25 @@ function toService(flow: WorkflowDocument): ServiceState {
   }
 }
 
-class FakeRoot implements RootAgentLike {
-  id: string
-  status = 'idle'
-  messages: RootInjectedMessage[] = []
-  session: { events: unknown[] } = { events: [] }
-  constructor(id: string) {
-    this.id = id
-  }
-}
 
-class FakeAgents implements AgentHost {
-  roots = new Map<string, FakeRoot>()
-  available(): boolean {
-    return true
-  }
-  getRootAgent(id: string): RootAgentLike | null {
-    return this.roots.get(id) ?? null
-  }
-  followupRoot(agent: RootAgentLike, message: RootInjectedMessage): void {
-    ;(agent as FakeRoot).messages.push(message)
-  }
-  latestTurnEnd(): TurnEndInfo | null {
-    return null
-  }
-  childRunning(): boolean {
-    return false
-  }
-}
-
-class FakeRunner implements NodeRunner {
-  calls: NodeStartInput[] = []
-  async startNodeTask(input: NodeStartInput): Promise<{ childId: string; created: boolean }> {
-    this.calls.push(input)
-    return { childId: `child-${this.calls.length}`, created: true }
-  }
-  async interruptChild(): Promise<void> {}
-}
-
+/** 兼容旧调用点的装配别名：统一走共享夹具（本地不再自建 fake，防「同名不同形状」漂移）。 */
 interface Harness {
   runtime: OrchestratorRuntime
-  store: FlowStore
+  store: SharedHarness['store']
   agents: FakeAgents
   runner: FakeRunner
 }
 
 async function makeHarness(): Promise<Harness> {
-  const dir = await mkdtemp(join(tmpdir(), 'vw-svcr-'))
-  cleanups.push(() => rm(dir, { recursive: true, force: true }))
-  const store = new FlowStore(dir)
-  await store.init()
-  const agents = new FakeAgents()
-  agents.roots.set('session-user-1', new FakeRoot('session-user-1'))
-  const runner = new FakeRunner()
-  const config: OrchestratorConfig = {
-    outputFullLimit: 102400,
-    documentTextLimit: 20000,
-    runIdleTimeoutMs: 60000,
-    retryLimitDefault: 3,
-    reactIterationLimitDefault: 50,
-    wfAskAgentTtlMs: 1000,
-  }
-  const runtime = new OrchestratorRuntime({
-    store,
-    runner,
-    agents,
-    config,
-    logger: { warn: () => {}, info: () => {}, debug: () => {} },
-    now: () => 1_000_000,
-    newRunId: () => 'run-svc-1',
-    uuid: () => 'msg-1',
-  })
-  return { runtime, store, agents, runner }
+  const h = await makeSharedHarness({ sessionId: SERVICE_SESSION })
+  return { runtime: h.runtime, store: h.store, agents: h.agents, runner: h.runner }
 }
 
-const caller: CallerInfo = { isChild: false, sessionId: 'session-user-1' }
+const caller: CallerInfo = { isChild: false, sessionId: SERVICE_SESSION }
 
 /** 提取注入父代理的编排指令文本。 */
 function lastDirective(h: Harness): string {
-  const root = h.agents.roots.get('session-user-1')!
+  const root = h.agents.roots.get(SERVICE_SESSION)!
   const message = root.messages[root.messages.length - 1]
   const text = message.content?.map((block) => (block.type === 'text' ? block.text : '')).join('') ?? ''
   return text
@@ -204,8 +136,8 @@ describe('startRun mode2（服务文档加载）', () => {
     const h = await makeHarness()
     await h.store.saveService(toService(serviceFlow('svc-1')), 'session-owner')
     const result = await h.runtime.startRun({ sessionId: 'session-user-1', flowId: 'svc-1', mode: 'mode2' })
-    expect(result.runId).toBe('run-svc-1')
-    const snapshot = h.runtime.runSnapshot('run-svc-1')
+    expect(result.runId).toBe('run-1')
+    const snapshot = h.runtime.runSnapshot('run-1')
     expect(snapshot?.flowId).toBe('svc-1')
     expect(snapshot?.mode).toBe('mode2')
     expect(snapshot?.sessionId).toBe('session-user-1')
@@ -231,7 +163,7 @@ describe('startRun mode2（服务文档加载）', () => {
     ]
     await h.store.saveWorkflow(flow, 'session-user-1')
     await h.runtime.startRun({ sessionId: 'session-user-1', flowId: 'flow-1', question: '忽略我' })
-    const snapshot = h.runtime.runSnapshot('run-svc-1')
+    const snapshot = h.runtime.runSnapshot('run-1')
     const input = snapshot?.nodes.find((n) => n.nodeId === 'n-in')
     expect(input?.status).toBe('pending')
   })
@@ -242,7 +174,7 @@ describe('用户问题注入', () => {
     const h = await makeHarness()
     await h.store.saveService(toService(serviceFlow('svc-1')), 'session-owner')
     await h.runtime.startRun({ sessionId: 'session-user-1', flowId: 'svc-1', mode: 'mode2', question: '今天天气如何' })
-    const snapshot = h.runtime.runSnapshot('run-svc-1')
+    const snapshot = h.runtime.runSnapshot('run-1')
     const input = snapshot?.nodes.find((n) => n.nodeId === 'n-in')
     expect(input?.status).toBe('ok')
     expect(input?.output).toBe('今天天气如何')
@@ -255,7 +187,7 @@ describe('用户问题注入', () => {
     const h = await makeHarness()
     await h.store.saveService(toService(serviceFlow('svc-1')), 'session-owner')
     await h.runtime.startRun({ sessionId: 'session-user-1', flowId: 'svc-1', mode: 'mode2' })
-    const input = h.runtime.runSnapshot('run-svc-1')?.nodes.find((n) => n.nodeId === 'n-in')
+    const input = h.runtime.runSnapshot('run-1')?.nodes.find((n) => n.nodeId === 'n-in')
     expect(input?.status).toBe('pending')
     expect(lastDirective(h)).not.toContain('User question')
   })
@@ -288,16 +220,16 @@ describe('resumeRun mode2（服务断点续跑）', () => {
     await h.store.saveService(toService(serviceFlow('svc-1')), 'session-owner')
     await h.runtime.startRun({ sessionId: 'session-user-1', flowId: 'svc-1', mode: 'mode2', question: '问题A' })
     // 模拟暂停门
-    await h.runtime.stopRun('run-svc-1') // 先停掉当前锁
-    h.runtime.runs.delete('run-svc-1')
+    await h.runtime.stopRun('run-1') // 先停掉当前锁
+    h.runtime.runs.delete('run-1')
     // 造一个磁盘 paused 记录（可恢复断点）
-    const snapshot = h.runtime.runSnapshot('run-svc-1') ?? null
+    const snapshot = h.runtime.runSnapshot('run-1') ?? null
     // stopRun 已写磁盘；这里直接构造 paused 记录
-    const prev = await h.store.getRun('run-svc-1')
+    const prev = await h.store.getRun('run-1')
     expect(prev).toBeTruthy()
     await h.store.saveRun({ ...prev!, status: 'paused', nodes: prev!.nodes.map((n) => n.nodeId === 'n-in' ? { ...n, status: 'ok', output: '问题A', outputSummary: '问题A' } : n) })
     const result = await h.runtime.resumeRun({ sessionId: 'session-user-1', flowId: 'svc-1' })
-    expect(result.resumedFromRunId).toBe('run-svc-1')
+    expect(result.resumedFromRunId).toBe('run-1')
     // 继承快照：已 ok 输入节点带产出（断点产出回填）
     const resumed = h.runtime.runSnapshot(result.runId)
     const input = resumed?.nodes.find((n) => n.nodeId === 'n-in')

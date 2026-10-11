@@ -68,15 +68,74 @@ export const NODE_HANDLES: Record<NodeKind, NodeHandleDef> = {
   proxy: { inputs: ['flow-in', 'ctx-in', 'db-in'], outputs: ['flow-out', 'ctx-out'] },
 }
 
-/** 输出连接点 → 允许的输入连接点映射（三通道互斥，§4.3 连线类型规范）。 */
+/**
+ * 通道名（三通道互斥，§4.3 连线类型规范）。
+ * 用于按通道（而非按连接点字面量）表达判定：下游规则查「这条线走哪个通道」，
+ * 不必知道连接点叫什么。
+ */
+export type HandleChannel = 'flow' | 'ctx' | 'db'
+
+/**
+ * 通道本体：三条通道各自的出/入连接点名（**唯一来源**）。
+ *
+ * 为什么收敛在此：通道判定此前散落为 `line.targetHandle === 'ctx-in'` 之类的裸字面量，
+ * 与 HANDLE_PAIRING 构成**两套口径**——任一处改名/新增通道都必然漏改。现在全模块
+ * （配对矩阵、结构校验、质量检查、拓扑查询）只允许引用本表，裸字面量只出现在这里。
+ */
+export const HANDLE_CHANNELS = {
+  flow: { out: 'flow-out', in: 'flow-in' },
+  ctx: { out: 'ctx-out', in: 'ctx-in' },
+  db: { out: 'db-out', in: 'db-in' },
+} as const
+
+/** 某通道的输入连接点。 */
+export function channelIn(channel: HandleChannel): Handle {
+  return HANDLE_CHANNELS[channel].in
+}
+
+/** 某通道的输出连接点。 */
+export function channelOut(channel: HandleChannel): Handle {
+  return HANDLE_CHANNELS[channel].out
+}
+
+/** 连接点 → 所属通道（输出侧查询；未登记返回 null）。 */
+export function channelOfOut(handle: Handle): HandleChannel | null {
+  if (handle === HANDLE_CHANNELS.flow.out) return 'flow'
+  if (handle === HANDLE_CHANNELS.ctx.out) return 'ctx'
+  if (handle === HANDLE_CHANNELS.db.out) return 'db'
+  return null
+}
+
+/** 连接点 → 所属通道（输入侧查询；未登记返回 null）。 */
+export function channelOfIn(handle: Handle): HandleChannel | null {
+  if (handle === HANDLE_CHANNELS.flow.in) return 'flow'
+  if (handle === HANDLE_CHANNELS.ctx.in) return 'ctx'
+  if (handle === HANDLE_CHANNELS.db.in) return 'db'
+  return null
+}
+
+/**
+ * 输出连接点 → 允许的输入连接点映射（三通道互斥，§4.3 连线类型规范）。
+ *
+ * 键值全部取自 HANDLE_CHANNELS：本矩阵是通道本体的投影，不是第二份口径。
+ * 查询契约：**只以输出连接点为源**（所有连线都是 out → in），故入点三键是恒等占位，
+ * 仅为 `Record<Handle, Handle>` 的类型完整性存在，永不作为查询键。
+ */
 export const HANDLE_PAIRING: Record<Handle, Handle> = {
-  'flow-out': 'flow-in',
-  'ctx-out': 'ctx-in',
-  'db-out': 'db-in',
-  // 入点不作映射源；以下三键仅为类型完整性，实际校验只查询 out→in。
-  'flow-in': 'flow-in',
-  'ctx-in': 'ctx-in',
-  'db-in': 'db-in',
+  [HANDLE_CHANNELS.flow.out]: HANDLE_CHANNELS.flow.in,
+  [HANDLE_CHANNELS.ctx.out]: HANDLE_CHANNELS.ctx.in,
+  [HANDLE_CHANNELS.db.out]: HANDLE_CHANNELS.db.in,
+  [HANDLE_CHANNELS.flow.in]: HANDLE_CHANNELS.flow.in,
+  [HANDLE_CHANNELS.ctx.in]: HANDLE_CHANNELS.ctx.in,
+  [HANDLE_CHANNELS.db.in]: HANDLE_CHANNELS.db.in,
+}
+
+/**
+ * 配对查询的单一入口（validate 与 wf_graph_patch 共用，避免各自散落 `HANDLE_PAIRING[…]`）。
+ * 未登记的源连接点回退为其自身：让调用方按「通道不匹配」报错，而不是抛类型错误。
+ */
+export function pairingTargetOf(sourceHandle: Handle): Handle {
+  return HANDLE_PAIRING[sourceHandle] ?? sourceHandle
 }
 
 /** 条件连线类型全集（§4.3 连线类型表）。 */
@@ -266,12 +325,12 @@ export function nodeHasFlowIn(flow: Partial<WorkflowDocument>, nodeId: string): 
 
 /** 某节点的 ctx-in 入边列表（上游上下文来源，§4.2.3.2 规则 5 显式连线）。 */
 export function ctxInEdges(flow: Partial<WorkflowDocument>, nodeId: string): Line[] {
-  return (flow.lines ?? []).filter((l) => l.target === nodeId && l.targetHandle === 'ctx-in')
+  return (flow.lines ?? []).filter((l) => l.target === nodeId && l.targetHandle === channelIn('ctx'))
 }
 
 /** 某节点的 db-in 入边列表（数据库服务标识来源；有边才注入 wf_db_query，§4.4.3 规则 5）。 */
 export function dbInEdges(flow: Partial<WorkflowDocument>, nodeId: string): Line[] {
-  return (flow.lines ?? []).filter((l) => l.target === nodeId && l.targetHandle === 'db-in')
+  return (flow.lines ?? []).filter((l) => l.target === nodeId && l.targetHandle === channelIn('db'))
 }
 
 /** 某节点经 ctx 连线收到的上游来源节点 id 列表（去重，供任务块组装注入上游产出）。 */

@@ -5,7 +5,9 @@ export declare const REMOTE_TIMEOUT_CODE = "REMOTE_TIMEOUT";
 export declare const REMOTE_CONNECTION_CODE = "REMOTE_CONNECTION";
 export declare const REMOTE_HTTP_STATUS_CODE = "REMOTE_HTTP_STATUS";
 export declare const REMOTE_EMPTY_STREAM_CODE = "REMOTE_EMPTY_STREAM";
-export type RemoteFailureKind = 'timeout' | 'connection' | 'http' | 'emptyStream';
+/** 成功响应（HTTP 200）的解包失败码（响应体不可解析或缺 value）。 */
+export declare const REMOTE_PARSE_CODE = "REMOTE_PARSE";
+export type RemoteFailureKind = 'timeout' | 'connection' | 'http' | 'emptyStream' | 'parse';
 /** 非流式调用默认超时：覆盖启动服务/运行/导入导出等长耗时端点，仅收敛「永久悬挂」。 */
 export declare const DEFAULT_REMOTE_TIMEOUT_MS = 120000;
 /** 轮询专用短超时：单轮请求悬挂时必须尽快释放 in-flight 位，下一轮才能继续。 */

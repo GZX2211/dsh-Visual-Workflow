@@ -18,8 +18,9 @@ export declare const GRAPH_STAGE_WIDTH = 168;
 export declare const GRAPH_STAGE_HEIGHT = 88;
 export declare const GRAPH_GROUP_WIDTH = 300;
 export declare const GRAPH_GROUP_HEIGHT = 220;
-/** 组内成员行高/列表起始（与 GroupCard 布局一致，连线锚点用；成员为迷你角色卡，略高于纯文本行）。 */
-export declare const GROUP_MEMBER_ROW_H = 38;
+/** 组内成员行节距/列表起始（连线锚点用）：节距 = 成员行 min-height + 列表 gap，
+ *  由 tests/client/components/canvas/GroupCard.test.tsx 与样式片段对锁，两处不得各自漂移。 */
+export declare const GROUP_MEMBER_ROW_H = 41;
 export declare const GROUP_MEMBER_LIST_TOP = 78;
 /** 组卡片内成员横向留白（渲染尺寸与布局坐标共用同一常量）。 */
 export declare const GROUP_MEMBER_PADDING = 10;

@@ -16,6 +16,7 @@ import {
   registerTools,
   rootAgent,
   start,
+  startService,
   type TestEnv,
 } from '../fixtures/tool-harness.js'
 
@@ -140,5 +141,15 @@ describe('wf_run_node 工具执行', () => {
     entry.controller.abort('test')
     const def = h.tools.definitions.get(WF_RUN_NODE)!
     await expect(def.execute({ nodeId: 'n-a1' }, execOf(rootAgent))).rejects.toMatchObject({ code: 'WF_CANCELLED' })
+  })
+
+  it('模式二运行下调 wf_run_node → WF_MODE_MISMATCH（指引改用 wf_run_node_wait）', async () => {
+    const h = await makeHarness()
+    await startService(h)
+    const def = h.tools.definitions.get(WF_RUN_NODE)!
+    // 错误文本是模型自我修正的唯一通道：码与可行动指引必须同时透出
+    await expect(def.execute({ nodeId: 'n-a1' }, execOf(rootAgent))).rejects.toThrow(
+      /WF_MODE_MISMATCH: wf_run_node only works in mode1/,
+    )
   })
 })

@@ -70,12 +70,17 @@ describe('watchdog 看护与陈旧记录对账', () => {
       expect(entry.snapshot.status).toBe('stopped')
     }, { timeout: 10_000 })
     dispose() // 停止后不再有副作用
-    // 等本轮扫描的持久化落盘完成，避免清理目录竞态。
-    // 该等待是**真实磁盘写**（原子写 + fsync + 目录 fsync），在 141 个测试文件并行的
-    // Windows 上实测可达数秒；故显式放宽上限（不是放宽断言——条件仍是「落盘为 stopped」）。
-    await vi.waitFor(async () => {
-      expect((await h.store.getRun('run-1'))?.status).toBe('stopped')
-    }, { timeout: 45_000 })
+    // 定时器只负责「触发扫描」；等待条件是运行快照，不受真实 fsync 抖动影响。
+    // 落盘一致性断言改为经确定的扫描 API 复现（见下条用例），此处不再重复真实磁盘等待。
+  })
+
+  it('sweepWatchdogOnce：空闲超时 → 扫描 await 完成后落盘即为 stopped（不依赖真实磁盘等待）', async () => {
+    const h = await makeHarness()
+    await start(h, makeFlow())
+    h.clock.now += 10_000
+    // terminateRun 在返回前已 await 持久化，故扫描完成即落盘完成，无需轮询磁盘
+    await sweepWatchdogOnce(h.runtime)
+    expect((await h.store.getRun('run-1'))?.status).toBe('stopped')
   })
 
   it('reconcileStaleRuns：running/paused → interrupted（running 节点回退 pending、ok 保留）；completed 不动', async () => {

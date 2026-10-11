@@ -12,14 +12,14 @@ import type { ServiceState, RoleTemplate, FileTemplate, DatabaseTemplate, GroupT
 import type { AssetKind, AssetVersionEntry, ExperienceEntry, RoleAssetDetail, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../../host/shared/asset-types.js'
 import type { CanvasEdge, CanvasNode } from '../lib/canvas-model.js'
 
-/** 左侧栏 Tab（需求 §4.5.4：工作流 / 角色 / 数据（文件+数据库）/ 其他（阶段+协作组））。
+/** 左侧栏 Tab：工作流 / 角色 / 数据（文件+数据库）/ 其他（阶段+协作组）。
  *  资产态下「数据」以「经验」呈现（同一 Tab key，语义与内容随库来源切换）。 */
 export type LibTab = 'workflow' | 'role' | 'data' | 'other'
 /** 左侧库来源：模版（可随意修改的草稿）/ 资产（带版本控制的晋升形态）。 */
 export type LibrarySource = 'template' | 'asset'
 /** 左侧库选中种类（模板 kind + 固定卡片 + 工作流模板 + 资产 + 经验）。 */
 export type LibSelKind = 'workflow' | 'service' | 'workflowTemplate' | 'role' | 'file' | 'database' | 'parentTemplate' | 'stage' | 'groupTemplate' | 'flowAsset' | 'roleAsset' | 'experience'
-/** 模板种类（与后端 listTemplates 契约一致；group 为协作组模板，需求 §4.2.5.2）。 */
+/** 模板种类（与后端 listTemplates 契约一致；group 为协作组模板）。 */
 export type TemplateKind = 'role' | 'file' | 'database' | 'group'
 
 /**
@@ -103,7 +103,7 @@ export interface PanelLayout {
 }
 
 export interface StudioState {
-  /** 绑定的会话 id（T-042：会话绑定，不提供下拉）。
+  /** 绑定的会话 id（不提供下拉）。
    *  工作台全局化改版：这是「当前主会话」（会话树根），仅用于——① 实例列表
    *  「当前」标签；② 进入工作台时画布默认选中；③ 未勾选新会话时创建实例的
    *  目标会话。**不再**作为实例列表的过滤条件（列表为全部会话实例）。 */
@@ -163,10 +163,10 @@ export interface StudioState {
   canvas: { nodes: CanvasNode[]; edges: CanvasEdge[] }
   selection: { nodeId: string | null; edgeId: string | null; lib: { kind: LibSelKind; id: string } | null }
   editor: EditorRef
-  /** 未保存修改标记（§4.5.9 未保存守卫）。 */
+  /** 未保存修改标记（未保存守卫用）。 */
   dirty: boolean
   /** 最近一次「已保存」的画布图快照：打开文档/保存成功时更新；
-   *  UNDO/REDO 用它精确判定是否回到已保存状态（Bug 17——避免撤销回初始
+   *  UNDO/REDO 用它精确判定是否回到已保存状态（避免撤销回初始
    *  保存状态仍被误判为未保存而弹确认框）。 */
   savedGraph: GraphSnapshot | null
   run: { runId: string | null; sessionId: string | null; snapshot: RunSnapshot | null }
@@ -189,7 +189,7 @@ export interface EditorData {
   name: string
   template?: boolean
   templateId?: string
-  /** 角色模板/节点是否为父代理（模式仅 preset + 高级项裁剪，§4.2.3.1）。 */
+  /** 角色模板/节点是否为父代理（模式仅 preset + 高级项裁剪）。 */
   isParent?: boolean
   /** 工作流资产来源标记（属性栏按资产语义渲染；保存/退役由 T6 接线）。 */
   asset?: boolean

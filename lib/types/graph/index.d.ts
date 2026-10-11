@@ -1,4 +1,4 @@
-export { CONDITION_TYPES, HANDLE_PAIRING, NODE_HANDLES, NODE_KINDS } from './model.js';
+export { CONDITION_TYPES, HANDLE_PAIRING, NODE_HANDLES, NODE_KINDS, pairingTargetOf } from './model.js';
 export type { NodeHandleDef } from './model.js';
 export { makeLineId, makeNodeId, newDatabaseNode, newFileNode, newGroupNode, newLine, newProxyNode, newRoleNode, newStageNode, stageLabel, } from './model.js';
 export { ctxInEdges, dbInEdges, downstreamFlowNodeIds, entryNodes, flowInEdges, flowOutEdges, lineById, nodeById, proxiesOf, upstreamCtxNodeIds, } from './model.js';

@@ -1,6 +1,6 @@
 // src/client/hooks/useLibraryDrag.ts
 //
-// 左侧库卡片拖拽（pointer 事件，照搬旧项目 beginLibraryDrag）：拖拽预览、
+// 左侧库卡片拖拽（pointer 事件）：拖拽预览、
 // 协作组卡片悬停高亮，落点在画布内放置节点 / 落点在协作组卡片表面入组。
 // 返回 beginLibraryDrag 与拖拽状态（dragPreview / dropGroupId）。
 
@@ -79,7 +79,7 @@ export function useLibraryDrag(
       if (!rect || lastClient.x < rect.left || lastClient.x > rect.right || lastClient.y < rect.top || lastClient.y > rect.bottom) {
         return
       }
-      // 左栏角色模板直接拖入协作组：仅落点为协作组卡片表面（非连接点）时生成节点并入组（§4.2.5.2 规则 1）
+      // 左栏角色模板直接拖入协作组：仅落点为协作组卡片表面（非连接点）时生成节点并入组
       const groupId = groupSurfaceUnderPoint(lastClient.x, lastClient.y) ?? ''
       if (groupId && payload.onDropIntoGroup) {
         payload.onDropIntoGroup(groupId)
@@ -94,7 +94,7 @@ export function useLibraryDrag(
     detachGestureRef.current = detach
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
-    // 鼠标移出浏览器窗口/失焦时 pointerup 可能不触发（Bug 7 同款兜底），
+    // 鼠标移出浏览器窗口/失焦时 pointerup 可能不触发，
     // pointercancel + blur 一并清理，避免 dragRef 残留与监听器泄漏。
     window.addEventListener('pointercancel', onUp)
     window.addEventListener('blur', onUp)

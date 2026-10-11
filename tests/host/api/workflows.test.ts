@@ -8,9 +8,53 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { WorkflowDocument } from '../../../src/host/shared/graph-model.js'
-import { cleanupAll, cleanups, makeFlow, makeHarness } from './fixtures/api-harness.js'
+import { registerRoutes } from '../../../src/host/api/index.js'
+import { cleanupAll, cleanups, makeFlow, makeHarness, type Harness } from './fixtures/api-harness.js'
 
 afterEach(cleanupAll)
+
+/**
+ * 经真实路由层发一个 POST（响应状态与 body 收集在 responses）。
+ * 为什么要走路由：领域错误 → HTTP 状态的映射只发生在边界（statusOf 依据稳定码）。
+ */
+function registerRouteThroughWebServer(
+  h: Harness,
+  responses: Array<{ status: number; body: string }>,
+): (endpoint: string, args: unknown) => Promise<void> {
+  let registered: { handler?: (req: unknown, res: unknown) => Promise<void> } | null = null
+  h.ctx.services.set('webServer', {
+    register(route: { handler: (req: unknown, res: unknown) => Promise<void> }) {
+      registered = route
+      return () => {
+        registered = null
+      }
+    },
+  })
+  registerRoutes({ get: (name) => h.ctx.get(name), logger: { warn: () => {} } }, h.host)
+  const res = {
+    writeHead(status: number) {
+      responses.push({ status, body: '' })
+      return this
+    },
+    end(body: string) {
+      responses[responses.length - 1]!.body = String(body ?? '')
+      return this
+    },
+  }
+  return (endpoint: string, args: unknown) => {
+    const body = JSON.stringify({ args })
+    const req = {
+      method: 'POST',
+      url: `/visual-workflow/${endpoint}`,
+      on(event: string, cb: (chunk?: unknown) => void) {
+        if (event === 'data') cb(body)
+        if (event === 'end') cb()
+      },
+      destroy() {},
+    }
+    return registered!.handler!(req, res)
+  }
+}
 
 describe('工作流端点', () => {
   it('put/list/get/delete 全链路；参数缺失 400、不存在 404', async () => {
@@ -64,6 +108,35 @@ describe('工作流端点', () => {
     const saved = (await h.api.handle('getWorkflow', { sessionId: 'session-1', id: 'flow-1' })) as WorkflowDocument
     expect(saved.startNewSession).toBeUndefined()
     expect(saved.workspacePath).toBeUndefined()
+  })
+
+  it('putWorkflow：跨会话写他人实例 → 边界映射 404（稳定码，不落成 500）', async () => {
+    const h = await makeHarness()
+    // session-1 先建立实例；session-2 用同一个 id 提交（并给出正确 revision，排除乐观锁干扰）
+    await h.store.saveWorkflow(makeFlow(), 'session-1', { force: true })
+    const before = (await h.store.getWorkflow('session-1', 'flow-1'))?.name
+
+    // 领域层：抛稳定码（不带 HTTP 语义）
+    await expect(
+      h.api.handle('putWorkflow', {
+        sessionId: 'session-2',
+        flow: { ...makeFlow(), id: 'flow-1', name: '越权覆盖', revision: 1 },
+      }),
+    ).rejects.toMatchObject({ code: 'FLOW_NOT_FOUND', name: 'FlowNotFoundError' })
+
+    // 边界层：同一错误经路由映射为 404（statusOf 依据稳定码，缺登记即退化为 500）
+    const responses: Array<{ status: number; body: string }> = []
+    const post = registerRouteThroughWebServer(h, responses)
+    await post('putWorkflow', {
+      sessionId: 'session-2',
+      flow: { ...makeFlow(), id: 'flow-1', name: '越权覆盖', revision: 1 },
+    })
+    expect(responses[0]?.status).toBe(404)
+    expect(JSON.parse(responses[0]!.body)).toMatchObject({ ok: false, error: { code: 'FLOW_NOT_FOUND' } })
+
+    // 磁盘事实不变（未被覆盖、归属未翻转）
+    expect((await h.store.getWorkflow('session-1', 'flow-1'))?.name).toBe(before)
+    expect(await h.store.getWorkflow('session-2', 'flow-1')).toBeNull()
   })
 
   it('createSession：「开启新会话」一次性动作——显式工作区校验直传 / 缺省继承创建者 cwd / 能力缺失 501', async () => {

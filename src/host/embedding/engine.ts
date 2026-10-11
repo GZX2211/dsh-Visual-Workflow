@@ -122,8 +122,18 @@ export interface EmbeddingServiceOptions {
  * - dispose() 释放本地模型（幂等，多调用安全；加载途中释放则加载完成后立即释放模型）。
  */
 export class EmbeddingService implements EmbeddingEngine {
-  readonly source: EmbeddingSource = 'bm25'
-  readonly dimension = 0
+  private sourceValue: EmbeddingSource = 'bm25'
+  private dimensionValue = 0
+
+  /** 当前嵌入来源（只读投影；就绪准备后由内部切换，外部无从改写）。 */
+  get source(): EmbeddingSource {
+    return this.sourceValue
+  }
+
+  /** 当前向量维度（只读投影；bm25 降级态为 0）。 */
+  get dimension(): number {
+    return this.dimensionValue
+  }
 
   private local: LocalExtractorLike | null = null
   /** 就绪单飞：同一实例的并发就绪/嵌入请求共享同一次加载。 */
@@ -191,8 +201,8 @@ export class EmbeddingService implements EmbeddingEngine {
   private async prepare(): Promise<EmbeddingSource> {
     if (this.disposed) return this.source
     if (this.options.endpoint) {
-      ;(this as { source: EmbeddingSource }).source = 'remote'
-      return this.source
+      this.sourceValue = 'remote'
+      return this.sourceValue
     }
 
     try {
@@ -207,8 +217,9 @@ export class EmbeddingService implements EmbeddingEngine {
         return this.source
       }
       this.local = extractor
-      ;(this as { source: EmbeddingSource }).source = 'local'
-      ;(this as { dimension: number }).dimension = 512
+      this.sourceValue = 'local'
+      // 维度由本地模型的固定投影决定（bge-small 系列 512 维；与索引文件里的向量长度一致）
+      this.dimensionValue = 512
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       // 记录降级原因并保留原日志（双通道：日志 + 可读原因），避免静默降级

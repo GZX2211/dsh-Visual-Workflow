@@ -1,6 +1,6 @@
 // src/client/lib/group-members.ts
 //
-// 协作组成员关系（需求 §4.2.5.2）：重复组节点合并、原子入组、成员入组时的流程线清理。
+// 协作组成员关系：重复组节点合并、原子入组、成员入组时的流程线清理。
 // 全部为纯函数（返回新数组，不改写入参），供左栏模板拖入与画布内节点拖入两条路径共用。
 // 入参只要求「id + data」最小形状，画布节点（CanvasNode）与任意同形投影均可直接传入。
 
@@ -73,7 +73,7 @@ export function joinNodeToGroup<T extends { id: string; data: Record<string, unk
 }
 
 /**
- * 移除指定节点的流程连线（角色拖入协作组后仅保留上下文/数据库线，§4.2.5.2 规则 4）：
+ * 移除指定节点的流程连线（角色拖入协作组后仅保留上下文/数据库线）：
  * 组内成员只有上下文/数据库连接点，无流程接点；已连的流程线在入组时自动断开。
  */
 export function dropNodeFlowLines<T extends { source: string; target: string; sourceHandle?: string; targetHandle?: string }>(lines: T[], nodeId: string): T[] {

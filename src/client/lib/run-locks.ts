@@ -13,7 +13,7 @@
 //   - enabled === false（非模式一或实例未运行）时全部解锁。
 // 纯函数：不读时钟 / 随机源，不依赖全局状态；除 import type 外零依赖。
 
-import type { CanvasEdge, CanvasNode } from '../studio/studio-state.js'
+import type { CanvasEdge, CanvasNode } from './canvas-model.js'
 
 export interface RunLockInput {
   /** 是否启用锁定（仅模式一 + 实例处于 running 时为 true）；false → 全部解锁。 */

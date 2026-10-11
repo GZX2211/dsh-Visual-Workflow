@@ -10,7 +10,7 @@
 // 依赖运行端点），用继承串联只会制造伪依赖并让模块内「谁能调用谁」不可见。各组
 // 只依赖本基座，最终类按显式清单汇聚原型方法（见 routes.ts）。
 
-import * as EP from '../shared/protocol.js'
+import { ENDPOINT_NAMES } from '../shared/protocol.js'
 import type { AssetCascadePreviewInput, AssetPromoteResult, AssetStore } from '../assets/index.js'
 import type { FlowStore } from '../storage/flow-store.js'
 import type { OrchestratorRuntime } from '../orchestrator/index.js'
@@ -207,10 +207,8 @@ export class VisualWorkflowApiBase {
     protected readonly host: ApiHost,
   ) {}
 
-  /** 端点白名单（共享协议常量表派生，与共享契约零漂移）。 */
-  static ENDPOINTS = new Set<string>(
-    (Object.values(EP) as unknown[]).filter((value): value is string => typeof value === 'string'),
-  )
+  /** 端点白名单（共享协议的显式端点清单派生——只含端点名，不再混入错误码/工具名）。 */
+  static ENDPOINTS = new Set<string>(ENDPOINT_NAMES)
 
   /** 按端点名分发；未知端点 404。 */
   async handle(endpoint: string, args: unknown): Promise<unknown> {

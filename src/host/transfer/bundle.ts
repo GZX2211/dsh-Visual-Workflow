@@ -214,20 +214,23 @@ export async function importWorkflowBundle(
   const overwriteTargetId = existing && options.conflictMode === 'overwrite' ? existing.id : undefined
   const newId = overwriteTargetId ?? `tpl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
-  // 组合并入：重名复用已有，否则创建（id 冲突换新 id）
+  // 组合并入：重名复用已有，否则创建（id 冲突换新 id）。
+  // 快照在循环外取一次并随写入推进（listToolCombos 是整文件读——逐个组合重读会 2N 次读盘，
+  // 且循环内基于过期快照判重依赖「前面已写入的组合不在快照里」这一巧合）。
   const combos = bundle.embedded?.combos ?? []
+  const existingCombos = await store.listToolCombos().catch(() => [] as ToolCombo[])
   for (const combo of combos) {
     if (!combo?.id || !String(combo.name ?? '').trim()) continue
-    const sameName = (await store.listToolCombos()).find((item) => item.name === combo.name)
-    if (sameName) continue
-    const exists = (await store.listToolCombos()).some((item) => item.id === combo.id)
+    if (existingCombos.some((item) => item.name === combo.name)) continue // 重名复用已有
+    const idTaken = existingCombos.some((item) => item.id === combo.id)
     const final: ToolCombo = {
-      id: (exists ? `combo-${Math.random().toString(36).slice(2, 8)}` : combo.id) as `combo-${string}`,
+      id: (idTaken ? `combo-${Math.random().toString(36).slice(2, 8)}` : combo.id) as `combo-${string}`,
       name: combo.name,
       tools: Array.isArray(combo.tools) ? combo.tools.filter((item) => typeof item === 'string') : [],
       mcpServers: Array.isArray(combo.mcpServers) ? combo.mcpServers.filter((item) => typeof item === 'string') : [],
     }
     await store.saveToolCombo(final)
+    existingCombos.push(final)
   }
 
   // 嵌入式模板入库（Bug 16）：roles/files/databases 随 bundle 携带，导入时

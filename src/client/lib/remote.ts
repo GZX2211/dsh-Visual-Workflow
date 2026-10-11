@@ -5,6 +5,7 @@
 //
 // 失败语义（显式区分，见 client AGENTS「数据流与数据访问边界」）：
 //   - 业务失败：后端 { ok:false, error:{ message, code } } → 抛出携带稳定 code 的 Error；
+//   - 解析失败：HTTP 200 但响应体不可解析或缺 value → 抛出 REMOTE_PARSE（不得当作成功返回 undefined）；
 //   - 传输失败带稳定分类与诊断数据；UI 注入面负责把它们映射为当前语言的提示；
 //   - 主动取消：调用方 signal 触发 → 原样抛出 AbortError（调用方按取消语义静默处理）。
 // 每个非流式调用都在超时预算内完成（timeoutMs=0 表示不设超时），悬挂请求不再永久占用调用方。
@@ -18,8 +19,10 @@ export const REMOTE_TIMEOUT_CODE = 'REMOTE_TIMEOUT'
 export const REMOTE_CONNECTION_CODE = 'REMOTE_CONNECTION'
 export const REMOTE_HTTP_STATUS_CODE = 'REMOTE_HTTP_STATUS'
 export const REMOTE_EMPTY_STREAM_CODE = 'REMOTE_EMPTY_STREAM'
+/** 成功响应（HTTP 200）的解包失败码（响应体不可解析或缺 value）。 */
+export const REMOTE_PARSE_CODE = 'REMOTE_PARSE'
 
-export type RemoteFailureKind = 'timeout' | 'connection' | 'http' | 'emptyStream'
+export type RemoteFailureKind = 'timeout' | 'connection' | 'http' | 'emptyStream' | 'parse'
 
 /** 非流式调用默认超时：覆盖启动服务/运行/导入导出等长耗时端点，仅收敛「永久悬挂」。 */
 export const DEFAULT_REMOTE_TIMEOUT_MS = 120_000
@@ -107,6 +110,29 @@ function transportFailure(error: unknown, endpoint: string, deadline: Deadline):
 
 type ErrorPayload = { error?: { message?: unknown; code?: unknown } | null } | null
 
+/** 200 响应成功包（ok !== false 时 value 必在；形状守卫见 readSuccessPayload）。 */
+type SuccessPayload = { ok?: unknown; value?: unknown; error?: { message?: unknown; code?: unknown } }
+
+/** 读取 200 响应体：非 JSON / 非对象一律返回 null（由调用方按解析失败处理）。 */
+async function readSuccessPayload(response: Response): Promise<SuccessPayload | null> {
+  try {
+    const parsed: unknown = await response.json()
+    if (parsed === null || typeof parsed !== 'object') return null
+    return parsed as SuccessPayload
+  } catch {
+    return null
+  }
+}
+
+/** 200 响应体形状不合法（不可解析或缺 value）：按失败返回，避免 undefined 被写入状态机。 */
+function parseFailure(endpoint: string): RemoteError {
+  const failure = new Error(REMOTE_PARSE_CODE) as RemoteError
+  failure.code = REMOTE_PARSE_CODE
+  failure.transportKind = 'parse'
+  failure.endpoint = endpoint
+  return failure
+}
+
 /** Keep Host error payloads outside the transport-localization path. */
 function responseError(payload: ErrorPayload, status: number): RemoteError {
   const hostError = payload?.error
@@ -156,13 +182,10 @@ export async function remoteCall(
       throw transportFailure(error, endpoint, deadline)
     }
     if (!response.ok) throw await errorFromResponse(response)
-    let payload: { ok?: unknown; value?: unknown; error?: { message?: unknown; code?: unknown } } = {}
-    try {
-      payload = (await response.json()) as typeof payload
-    } catch {
-      // 非 JSON 响应
-    }
+    const payload = await readSuccessPayload(response)
+    if (payload === null) throw parseFailure(endpoint)
     if (payload.ok === false) throw responseError(payload, response.status)
+    if (!('value' in payload)) throw parseFailure(endpoint)
     return payload.value
   } finally {
     deadline.dispose()

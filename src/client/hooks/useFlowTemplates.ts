@@ -1,6 +1,6 @@
 // src/client/hooks/useFlowTemplates.ts
 //
-// 工作流模板列表（图2 交互改造新增）：加载 / 新建草稿 / 保存 / 删除 / 打开。
+// 工作流模板列表：加载 / 新建草稿 / 保存 / 删除 / 打开。
 // 模板实体与工作流实例同构（nodes/lines 全量内联），但**全局共享、跨会话可见**，
 // 拖入画布保存后经「创建实例」转为当前会话的实例（useWorkflows.saveWorkflow）。
 // 数据模型对齐后端 WorkflowTemplate（shared/graph-model.ts）。

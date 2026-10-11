@@ -598,9 +598,18 @@ export class FakeAssetStore implements FakeAssets {
  * 伪经验域：只记录「边界传了什么」与返回可控条目，按 api 边界声明的能力缝形状实现
  * （结构兼容由 `implements FakeExperienceDomainFace` 锁定）。
  *
- * 检索投影与向量的重算属领域职责：夹具用确定性投影模拟「保存后返回新投影字段」，
- * 让边界测试只需验证透传，不必也不得在边界层实现投影。
+ * 检索投影与向量的重算是**经验域职责**：夹具不得自行实现该算法（否则边界测试比较的
+ * 是夹具自己的格式，领域算法变更时不会暴露差异）。因此写入路径把投影字段置为固定
+ * 哨兵值，边界用例据此断言「结果原样透传」；投影格式的正确性由
+ * `tests/host/experience/projection.test.ts` 对真实实现断言。
  */
+
+/** 夹具写入路径使用的检索投影哨兵值（真实重算在经验域，此处刻意不做领域判断）。 */
+export const FAKE_PROJECTION_SENTINELS = {
+  taskRetrievalText: 'FAKE-TASK-PROJECTION',
+  decisionRetrievalText: 'FAKE-DECISION-PROJECTION',
+} as const
+
 export class FakeExperienceDomain implements FakeExperienceDomainFace {
   /** 调用痕迹（断言边界传了什么）。 */
   calls: {
@@ -656,7 +665,7 @@ export class FakeExperienceDomain implements FakeExperienceDomainFace {
       if (value === undefined) continue
       ;(semantic as unknown as Record<string, unknown>)[field] = value === null ? [] : value
     }
-    const updated: ExperienceEntry = { ...semantic, ...projectRetrievalOf(semantic), updatedAt: current.updatedAt + 1 }
+    const updated: ExperienceEntry = { ...semantic, ...FAKE_PROJECTION_SENTINELS, updatedAt: current.updatedAt + 1 }
     this.experiences.set(input.experienceId, updated)
     return updated
   }
@@ -681,14 +690,6 @@ export class FakeExperienceDomain implements FakeExperienceDomainFace {
 
   private notFound(id: string): Error {
     return Object.assign(new Error(`经验 ${id} 不存在`), { code: ERR_EXPERIENCE_NOT_FOUND })
-  }
-}
-
-/** 确定性检索投影（夹具用；真实重算在经验域，边界只透传结果）。 */
-function projectRetrievalOf(entry: ExperienceEntry): Pick<ExperienceEntry, 'taskRetrievalText' | 'decisionRetrievalText'> {
-  return {
-    taskRetrievalText: [entry.responsibility, entry.taskType, entry.situation, entry.trigger].join(' / '),
-    decisionRetrievalText: [entry.decisionDomain, entry.principle, entry.recommendedAction, entry.exclusions.join('；')].join(' / '),
   }
 }
 

@@ -27,7 +27,7 @@
 // 节点字段——即它的收益已被别处覆盖、代价却是数据丢失。故删除，避免留下一份「看起来
 // 在生效、实际未接入，接入即致损」的伪契约。
 
-import { NODE_HANDLES, HANDLE_PAIRING, CONDITION_TYPES, NODE_KINDS, stageLabel } from './model.js'
+import { NODE_HANDLES, channelIn, channelOut, pairingTargetOf, CONDITION_TYPES, NODE_KINDS, stageLabel } from './model.js'
 import type { GraphNode, Line, WorkflowDocument, WorkflowMode } from '../shared/graph-model.js'
 
 // ---------------------------------------------------------------------------
@@ -84,12 +84,12 @@ export function connectionProblem(nodes: GraphNode[], line: Line): ConnectionChe
     return { valid: false, code: 'invalidHandle', message: `node ${target.kind} (${line.target}) has no input port ${line.targetHandle}` }
   }
   // 三通道配对：db-out 只能连 db-in（数据库内容绝不注入上下文，§4.2.4.2 规则 4）
-  const expectedTarget = HANDLE_PAIRING[line.sourceHandle]
+  const expectedTarget = pairingTargetOf(line.sourceHandle)
   if (line.targetHandle !== expectedTarget) {
     return { valid: false, code: 'handleMismatch', message: `${line.sourceHandle} can only connect ${expectedTarget}` }
   }
   // 条件仅流程线（§4.3 规则 4）
-  if (line.condition && line.sourceHandle !== 'flow-out') {
+  if (line.condition && line.sourceHandle !== channelOut('flow')) {
     return { valid: false, code: 'conditionOnNonFlow', message: 'conditional edges are supported on flow-out -> flow-in only' }
   }
   return { valid: true, code: 'ok', message: '' }
@@ -224,10 +224,10 @@ export function validateFlow(flow: Partial<WorkflowDocument>): ValidateResult {
     const target = nodeMap.get(line.target)
     const sourceInGroup = source && (source.kind === 'parent' || source.kind === 'agent') && Boolean(source.data.groupId)
     const targetInGroup = target && (target.kind === 'parent' || target.kind === 'agent') && Boolean(target.data.groupId)
-    if (sourceInGroup && (line.sourceHandle === 'flow-out')) {
+    if (sourceInGroup && (line.sourceHandle === channelOut('flow'))) {
       issues.push({ code: 'groupMemberFlowHandle', message: `collaboration-group member ${line.source} only has context ports, no flow-out`, id: line.id })
     }
-    if (targetInGroup && line.targetHandle === 'flow-in') {
+    if (targetInGroup && line.targetHandle === channelIn('flow')) {
       issues.push({ code: 'groupMemberFlowHandle', message: `collaboration-group member ${line.target} only has context ports, no flow-in`, id: line.id })
     }
     // 组卡片仅 flow 连接点：矩阵（NODE_HANDLES.group 只有 flow-in/flow-out）已在
@@ -236,10 +236,10 @@ export function validateFlow(flow: Partial<WorkflowDocument>): ValidateResult {
 
     // 模式差异（§4.2.5.1）：mode1 的 start 无 ctx-out；mode1 的 end 无 ctx-in
     if (mode === 'mode1') {
-      if (source && source.kind === 'start' && line.sourceHandle === 'ctx-out') {
+      if (source && source.kind === 'start' && line.sourceHandle === channelOut('ctx')) {
         issues.push({ code: 'mode1StartCtxOut', message: 'a mode1 start node has no context-out (only the mode2 input node provides one)', id: line.id })
       }
-      if (target && target.kind === 'end' && line.targetHandle === 'ctx-in') {
+      if (target && target.kind === 'end' && line.targetHandle === channelIn('ctx')) {
         issues.push({ code: 'mode1EndCtxIn', message: 'a mode1 end node has no context-in (only the mode2 output node provides one)', id: line.id })
       }
     }

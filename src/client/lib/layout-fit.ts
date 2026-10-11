@@ -1,6 +1,6 @@
 // src/client/lib/layout-fit.ts
 //
-// 自动布局判定与重叠检测（自主编排方案 §7.3 / 决策 D-15、P0-A2）：
+// 自动布局判定与重叠检测：
 //   - needsAutoLayout：节点缺坐标或坐标为哨兵 {0,0} → 需要自动布局一次；
 //   - layoutBoxesOf：**实际渲染盒子**清单——组卡片 + 独立节点（组内成员不独立渲染、
 //     不参与重叠判定，见 layout.ts 头部说明；虚拟节点已独立占位，仍参与判定）；
@@ -32,7 +32,7 @@ export interface LayoutBox {
 
 /**
  * 是否需要自动布局：任一节点坐标缺失/非有限数/为哨兵 {0,0} 即为真。
- * 语义（P0-A2）：新节点默认写哨兵坐标（或干脆不写），打开/接收文档时据此自动重排一次。
+ * 语义：新节点默认写哨兵坐标（或干脆不写），打开/接收文档时据此自动重排一次。
  */
 export function needsAutoLayout(nodes: LayoutBoxNode[] | null | undefined): boolean {
   return (nodes ?? []).some((node) => isSentinelPosition(node?.position))
@@ -53,7 +53,7 @@ export function groupMemberIdsOf(nodes: LayoutBoxNode[] | null | undefined): Set
 /**
  * 实际渲染盒子清单：组卡片 + 独立节点（组内成员不独立渲染；虚拟节点独立占位，参与判定）。
  * 为什么排除组内成员：GraphCanvas 只渲染组卡片与独立节点（组内成员以迷你卡渲染在卡片内），
- * 对它们做重叠判定会产生「永远重叠」的假告警（P0-A5）。
+ * 对它们做重叠判定会产生「永远重叠」的假告警。
  */
 export function layoutBoxesOf(
   nodes: LayoutBoxNode[] | null | undefined,
@@ -112,7 +112,7 @@ export function collapsedIdsOf(inputs: Array<{ id: string; kind: string; sourceI
 /**
  * 统一布局入口（「整理布局」按钮与自动布局共用同一实现）：
  * 「宿主节点 → 布局输入 → 分层布局 → 坐标写回」四步收敛在一处，
- * 避免两条路径各写一遍而坐实「两份布局算法漂移」（Bug 25 的教训）。
+ * 避免两条路径各写一遍而坐实「两份布局算法漂移」。
  * @param sizeOf 卡片尺寸解析（通常为 card-geometry.groupCardSizeOf）
  */
 export function tidyNodes<T extends LayoutBoxNode>(
@@ -143,9 +143,9 @@ export function applyLayout<T extends LayoutBoxNode>(nodes: T[], result: LayoutR
 }
 
 /**
- * 层次布局（「整理布局」与自动布局的共用入口）：委托给分层布局实现（自主编排方案 §7）。
+ * 层次布局（「整理布局」与自动布局的共用入口）：委托给分层布局实现。
  *
- * 为什么重写（§7.1 旧实现的 7 项缺陷）：proxy 入边计入 indegree 导致主节点被推到引用节点
+ * 为什么不复用旧实现：proxy 入边计入 indegree 导致主节点被推到引用节点
  * 之后、不看卡片实际尺寸必然重叠、组内成员不参与布局、无层内排序、孤立节点塞进流程最右列、
  * 无长边处理、无环路处理。
  *

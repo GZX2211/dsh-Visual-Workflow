@@ -53,6 +53,7 @@ function timeInputProps(value: string, onChange: (next: string) => void, copy = 
   return {
     value,
     onChange,
+    placeholder: copy.schedulerTimePlaceholder,
     ariaLabel: copy.schedulerRangeStart,
     pickerLabel: copy.schedulerTimePicker,
     hourLabel: copy.schedulerHour,

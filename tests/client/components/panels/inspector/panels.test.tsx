@@ -18,6 +18,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import React from 'react'
 import { Inspector } from '../../../../../src/client/components/panels/inspector/Inspector.js'
 import { zh } from '../../../../../src/client/i18n.js'
+import type { EditorData } from '../../../../../src/client/studio/studio-types.js'
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -94,8 +95,8 @@ describe('P4 父代理模板可编辑（Inspector，D-20）', () => {
   it('模板来源的父代理：渲染属性表单（含 preset 下拉），不再显示「无独立属性」空态', async () => {
     await render(React.createElement(Inspector, {
       ...common,
-      editorData: { kind: 'role', data: { presetId: 'standard', label: 'CEO' }, name: 'CEO', isParent: true, template: true } as never,
-    } as never))
+      editorData: { kind: 'role', data: { presetId: 'standard', label: 'CEO' }, name: 'CEO', isParent: true, template: true },
+    }))
     const text = container!.textContent ?? ''
     expect(text).not.toContain('父代理模板无独立属性')
     expect(text).toContain(zh.nodeKinds.parent)
@@ -110,8 +111,8 @@ describe('P4 父代理模板可编辑（Inspector，D-20）', () => {
   it('画布父代理节点同样可编辑（isParent 且非模板）：presetId 可编辑、无 combo', async () => {
     await render(React.createElement(Inspector, {
       ...common,
-      editorData: { kind: 'role', data: { presetId: 'standard', label: 'CEO' }, name: 'CEO', isParent: true, nodeId: 'n-p1' } as never,
-    } as never))
+      editorData: { kind: 'role', data: { presetId: 'standard', label: 'CEO' }, name: 'CEO', isParent: true, nodeId: 'n-p1' },
+    }))
     expect(container!.textContent).not.toContain('父代理模板无独立属性')
     const preset = presetIdSelect()
     expect(preset!.disabled).toBe(false)
@@ -121,8 +122,8 @@ describe('P4 父代理模板可编辑（Inspector，D-20）', () => {
   it('子代理对照：presetId 可编辑且能看到 combo 组合分组', async () => {
     await render(React.createElement(Inspector, {
       ...common,
-      editorData: { kind: 'role', data: { presetId: 'standard', label: '研究员' }, name: '研究员', nodeId: 'n-1' } as never,
-    } as never))
+      editorData: { kind: 'role', data: { presetId: 'standard', label: '研究员' }, name: '研究员', nodeId: 'n-1' },
+    }))
     const preset = presetIdSelect()
     expect(preset!.disabled).toBe(false)
     expect(Array.from(preset!.querySelectorAll('optgroup')).map((item) => item.label)).toEqual([zh.combos])
@@ -133,8 +134,8 @@ describe('P4 父代理模板可编辑（Inspector，D-20）', () => {
   it('阶段节点：不渲染保存按钮（只读属性）', async () => {
     await render(React.createElement(Inspector, {
       ...common,
-      editorData: { kind: 'stage', data: { label: '启动' }, name: '启动', nodeId: 's-1' } as never,
-    } as never))
+      editorData: { kind: 'stage', data: { label: '启动' }, name: '启动', nodeId: 's-1' },
+    }))
     const labels = Array.from(container!.querySelectorAll('button')).map((item) => item.textContent)
     expect(labels).not.toContain(zh.inspectorSave)
     expect(labels).toContain(zh.inspectorDelete)
@@ -159,16 +160,16 @@ describe('Inspector 底部按钮分录（模版态 / 资产态）', () => {
   it('工作流模版：保存 + 删除 + 入库（无回滚）', async () => {
     await render(React.createElement(Inspector, {
       ...common,
-      editorData: { kind: 'workflow', data: { name: '模版一' }, name: '模版一', template: true, templateId: 'tpl-1' } as never,
-    } as never))
+      editorData: { kind: 'workflow', data: { name: '模版一' }, name: '模版一', template: true, templateId: 'tpl-1' },
+    }))
     expect(footerLabels()).toEqual([zh.inspectorSave, zh.inspectorDelete, zh.assetPromote])
   })
 
   it('角色模版：保存 + 删除 + 入库（无回滚）', async () => {
     await render(React.createElement(Inspector, {
       ...common,
-      editorData: { kind: 'role', data: { name: '角色模版' }, name: '角色模版', template: true, templateId: 'r-1' } as never,
-    } as never))
+      editorData: { kind: 'role', data: { name: '角色模版' }, name: '角色模版', template: true, templateId: 'r-1' },
+    }))
     expect(footerLabels()).toEqual([zh.inspectorSave, zh.inspectorDelete, zh.assetPromote])
   })
 
@@ -176,8 +177,8 @@ describe('Inspector 底部按钮分录（模版态 / 资产态）', () => {
     for (const kind of ['file', 'database', 'group'] as const) {
       await render(React.createElement(Inspector, {
         ...common,
-        editorData: { kind, data: { name: '模板' }, name: '模板', template: true, templateId: 't-1' } as never,
-      } as never))
+        editorData: { kind, data: { name: '模板' }, name: '模板', template: true, templateId: 't-1' },
+      }))
       expect(footerLabels()).toEqual([zh.inspectorSave, zh.inspectorDelete])
     }
   })
@@ -185,16 +186,16 @@ describe('Inspector 底部按钮分录（模版态 / 资产态）', () => {
   it('工作流资产（flowAsset）：保存 + 归档 + 回滚（无入库、无另存为模板）', async () => {
     await render(React.createElement(Inspector, {
       ...common,
-      editorData: { kind: 'workflow', data: { name: '资产一' }, name: '资产一', asset: true, assetId: 'a-1' } as never,
-    } as never))
+      editorData: { kind: 'workflow', data: { name: '资产一' }, name: '资产一', asset: true, assetId: 'a-1' },
+    }))
     expect(footerLabels()).toEqual([zh.inspectorSave, zh.assetArchive, zh.assetRollback])
   })
 
   it('角色资产（roleAsset）：保存 + 归档 + 回滚（无复制按钮）', async () => {
     await render(React.createElement(Inspector, {
       ...common,
-      editorData: { kind: 'role', data: { name: '资产角色' }, name: '资产角色', roleAsset: true, assetId: 'a-r1' } as never,
-    } as never))
+      editorData: { kind: 'role', data: { name: '资产角色' }, name: '资产角色', roleAsset: true, assetId: 'a-r1' },
+    }))
     expect(footerLabels()).toEqual([zh.inspectorSave, zh.assetArchive, zh.assetRollback])
   })
 
@@ -205,8 +206,8 @@ describe('Inspector 底部按钮分录（模版态 / 资产态）', () => {
     ] as const) {
       await render(React.createElement(Inspector, {
         ...common,
-        editorData: editorData as never,
-      } as never))
+        editorData: editorData,
+      }))
       // 归档只生效一次：历史资产的状态按钮翻转为「恢复」（可点、非危险色、带恢复语义说明）
       const restore = footerButton(zh.assetRestore)
       expect(restore?.disabled).toBe(false)
@@ -221,8 +222,8 @@ describe('Inspector 底部按钮分录（模版态 / 资产态）', () => {
     const entry = { id: 'ex-1', active: true, responsibility: '责任一', taskType: '软件开发', principle: '经验一', createdAt: 1, updatedAt: 1 }
     await render(React.createElement(Inspector, {
       ...common,
-      editorData: { kind: 'experience', data: entry, name: entry.responsibility, experience: true, experienceId: 'ex-1' } as never,
-    } as never))
+      editorData: { kind: 'experience', data: entry, name: entry.responsibility, experience: true, experienceId: 'ex-1' },
+    }))
     expect(footerLabels()).toEqual([zh.inspectorSave, zh.assetArchive])
     expect(footerButton(zh.assetArchive)?.getAttribute('title')).toBe(zh.experienceArchiveHint)
     expect(footerLabels()).not.toContain(zh.assetRollback)
@@ -236,8 +237,8 @@ describe('Inspector 底部按钮分录（模版态 / 资产态）', () => {
         experience: true,
         experienceId: 'ex-1',
         retired: true,
-      } as never,
-    } as never))
+      },
+    }))
     expect(footerLabels()).toEqual([zh.inspectorSave, zh.assetRestore])
     expect(footerButton(zh.assetRestore)?.getAttribute('title')).toBe(zh.experienceRestoreHint)
   })
@@ -268,8 +269,8 @@ describe('Inspector 底部按钮分录（模版态 / 资产态）', () => {
     }
     await render(React.createElement(Inspector, {
       ...common,
-      editorData: { kind: 'experience', data: entry, name: entry.responsibility, experience: true, experienceId: 'ex-1' } as never,
-    } as never))
+      editorData: { kind: 'experience', data: entry, name: entry.responsibility, experience: true, experienceId: 'ex-1' },
+    }))
 
     const labels = Array.from(document.querySelectorAll('.wf-field .wf-hint')).map((node) => node.textContent)
     expect(labels).toEqual([
@@ -318,8 +319,8 @@ describe('Inspector 底部按钮分录（模版态 / 资产态）', () => {
     }
     await render(React.createElement(Inspector, {
       ...common,
-      editorData: { kind: 'experience', data: entry, name: entry.responsibility, experience: true, experienceId: 'ex-1' } as never,
-    } as never))
+      editorData: { kind: 'experience', data: entry, name: entry.responsibility, experience: true, experienceId: 'ex-1' },
+    }))
 
     // 字符字段 7 个 + 列表字段 2 个 = 9 个可编辑控件；检索投影/来源信息一律只读展示
     expect(document.querySelectorAll('.wf-field input, .wf-field textarea')).toHaveLength(9)
@@ -334,16 +335,16 @@ describe('Inspector 底部按钮分录（模版态 / 资产态）', () => {
       ...common,
       editorData: {
         kind: 'role', data: { label: '子代理' }, name: '子代理', nodeId: 'n-1', sourceAssetId: 'a-r1',
-      } as never,
-    } as never))
+      },
+    }))
     expect(footerLabels()).toEqual([zh.inspectorSave, zh.inspectorDelete, zh.assetRollback, zh.inspectorCopy])
   })
 
   it('画布角色节点：未绑定来源资产（从模版/实例拖入）不显示回滚按钮', async () => {
     await render(React.createElement(Inspector, {
       ...common,
-      editorData: { kind: 'role', data: { label: '子代理' }, name: '子代理', nodeId: 'n-1' } as never,
-    } as never))
+      editorData: { kind: 'role', data: { label: '子代理' }, name: '子代理', nodeId: 'n-1' },
+    }))
     expect(footerLabels()).toEqual([zh.inspectorSave, zh.inspectorDelete, zh.inspectorCopy])
   })
 
@@ -351,8 +352,8 @@ describe('Inspector 底部按钮分录（模版态 / 资产态）', () => {
     await render(React.createElement(Inspector, {
       ...common,
       promoteLocked: true,
-      editorData: { kind: 'workflow', data: { name: '模版一' }, name: '模版一', template: true, templateId: 'tpl-1' } as never,
-    } as never))
+      editorData: { kind: 'workflow', data: { name: '模版一' }, name: '模版一', template: true, templateId: 'tpl-1' },
+    }))
     const promote = footerButton(zh.assetPromote)
     expect(promote?.disabled).toBe(true)
     expect(promote?.getAttribute('title')).toBe(zh.assetPromoteLockedHint)
@@ -362,8 +363,8 @@ describe('Inspector 底部按钮分录（模版态 / 资产态）', () => {
     await render(React.createElement(Inspector, {
       ...common,
       promoteLocked: false,
-      editorData: { kind: 'workflow', data: { name: '模版一' }, name: '模版一', template: true, templateId: 'tpl-1' } as never,
-    } as never))
+      editorData: { kind: 'workflow', data: { name: '模版一' }, name: '模版一', template: true, templateId: 'tpl-1' },
+    }))
     const promote = footerButton(zh.assetPromote)
     expect(promote?.disabled).toBe(false)
     expect(promote?.getAttribute('title')).toBe(zh.assetPromoteHint)
@@ -373,8 +374,8 @@ describe('Inspector 底部按钮分录（模版态 / 资产态）', () => {
     for (const kind of ['workflow', 'service'] as const) {
       await render(React.createElement(Inspector, {
         ...common,
-        editorData: { kind, data: { name: '实例' }, name: '实例' } as never,
-      } as never))
+        editorData: { kind, data: { name: '实例' }, name: '实例' },
+      }))
       expect(footerLabels()).toEqual([zh.inspectorSave, zh.inspectorDelete, zh.saveAsTemplate])
     }
   })
@@ -382,14 +383,14 @@ describe('Inspector 底部按钮分录（模版态 / 资产态）', () => {
   it('画布角色节点：保存 + 删除 + 复制（回归）；连线：保存 + 删除（回归）', async () => {
     await render(React.createElement(Inspector, {
       ...common,
-      editorData: { kind: 'role', data: { label: '子代理' }, name: '子代理', nodeId: 'n-1' } as never,
-    } as never))
+      editorData: { kind: 'role', data: { label: '子代理' }, name: '子代理', nodeId: 'n-1' },
+    }))
     expect(footerLabels()).toEqual([zh.inspectorSave, zh.inspectorDelete, zh.inspectorCopy])
 
     await render(React.createElement(Inspector, {
       ...common,
-      editorData: { kind: 'edge', data: {}, name: '' } as never,
-    } as never))
+      editorData: { kind: 'edge', data: {}, name: '' },
+    }))
     expect(footerLabels()).toEqual([zh.inspectorSave, zh.inspectorDelete])
   })
 })
@@ -408,13 +409,13 @@ describe('Inspector 资产版本上拉列表接线（回滚入口）', () => {
     onLoadMd: () => {}, onLoadGroupMd: () => {}, onTestDb: () => {},
     saveDisabled: false, importBusy: false,
   }
-  const flowAsset = { kind: 'workflow', data: { name: '资产一' }, name: '资产一', asset: true, assetId: 'a-1' } as never
+  const flowAsset: EditorData = { kind: 'workflow', data: { name: '资产一' }, name: '资产一', asset: true, assetId: 'a-1' }
 
   it('点击回滚：请求打开版本列表；装载完成前显示加载中文案', async () => {
     const onOpenVersions = vi.fn()
     await render(React.createElement(Inspector, {
       ...common, onOpenVersions, assetVersions: null, editorData: flowAsset,
-    } as never))
+    }))
 
     act(() => { footerButton(zh.assetRollback)!.click() })
 
@@ -434,7 +435,7 @@ describe('Inspector 资产版本上拉列表接线（回滚入口）', () => {
     }
     await render(React.createElement(Inspector, {
       ...common, onRollbackVersion, assetVersions: versions, editorData: flowAsset,
-    } as never))
+    }))
 
     act(() => { footerButton(zh.assetRollback)!.click() })
     const items = Array.from(container!.querySelectorAll<HTMLButtonElement>('.wf-asset-versions__item'))
@@ -456,8 +457,8 @@ describe('Inspector 资产版本上拉列表接线（回滚入口）', () => {
     }
     await render(React.createElement(Inspector, {
       ...common, onCloseVersions, assetVersions: versions,
-      editorData: { kind: 'role', data: { name: '资产角色' }, name: '资产角色', roleAsset: true, assetId: 'a-r1' } as never,
-    } as never))
+      editorData: { kind: 'role', data: { name: '资产角色' }, name: '资产角色', roleAsset: true, assetId: 'a-r1' },
+    }))
 
     act(() => { footerButton(zh.assetRollback)!.click() })
     expect(container!.querySelector('.wf-asset-versions')).not.toBeNull()
@@ -479,7 +480,7 @@ describe('Inspector 资产版本上拉列表接线（回滚入口）', () => {
       kind: 'workflow' as const, assetId: 'a-1',
       items: [{ versionId: 1, rowId: 'a-1@1', name: 'v1', createdAt: 1, source: 'human' as const, active: true }],
     }
-    await render(React.createElement(Inspector, { ...common, assetVersions: versions, editorData: flowAsset } as never))
+    await render(React.createElement(Inspector, { ...common, assetVersions: versions, editorData: flowAsset }))
     act(() => { footerButton(zh.assetRollback)!.click() })
     expect(container!.querySelector('.wf-asset-versions')).not.toBeNull()
 
@@ -488,8 +489,8 @@ describe('Inspector 资产版本上拉列表接线（回滚入口）', () => {
       root!.render(React.createElement(Inspector, {
         ...common,
         assetVersions: versions,
-        editorData: { kind: 'workflow', data: { name: '资产二' }, name: '资产二', asset: true, assetId: 'a-2' } as never,
-      } as never))
+        editorData: { kind: 'workflow', data: { name: '资产二' }, name: '资产二', asset: true, assetId: 'a-2' },
+      }))
     })
 
     expect(container!.querySelector('.wf-asset-versions')).toBeNull()

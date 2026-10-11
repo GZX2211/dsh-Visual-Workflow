@@ -86,6 +86,17 @@ export function memberLabelOf(member: CanvasNode | undefined, memberId: string):
   return String((member?.data as { label?: unknown } | undefined)?.label ?? memberId)
 }
 
+/**
+ * 领域对象 → 属性栏表单数据源（EditorData.data 是字符串键表单数据）。
+ * 逐键拷贝而非 `as unknown as Record<string, unknown>` 双重断言：断言会完全绕过类型检查、
+ * 掩盖数据模型不一致（同 studio-types.ts 的 Drafted<T> 取舍）。
+ */
+function formDataOf(value: object): Record<string, unknown> {
+  const result: Record<string, unknown> = {}
+  for (const [key, item] of Object.entries(value)) result[key] = item
+  return result
+}
+
 /** 编辑器数据（右侧面板渲染源）。 */
 export function editorDataOf(state: StudioState): EditorData | null {
   const editor = state.editor
@@ -120,7 +131,7 @@ export function editorDataOf(state: StudioState): EditorData | null {
     // 角色资产详情与 RoleTemplate 字段同域：直接作为属性栏 role 表单的数据源投影
     return {
       kind: 'role',
-      data: detail as unknown as Record<string, unknown>,
+      data: formDataOf(detail),
       name: detail.name,
       isParent: detail.kind === 'parent',
       roleAsset: true,
@@ -134,7 +145,7 @@ export function editorDataOf(state: StudioState): EditorData | null {
     // 经验字段域与属性栏表单一一对应：直接作为表单数据源投影；非活跃 = 已归档（显示「恢复」）
     return {
       kind: 'experience',
-      data: entry as unknown as Record<string, unknown>,
+      data: formDataOf(entry),
       name: entry.responsibility,
       experience: true,
       experienceId: entry.id,
@@ -153,7 +164,7 @@ export function editorDataOf(state: StudioState): EditorData | null {
     const kind0 = editor.kind
     return {
       kind: kind0,
-      data: template as unknown as Record<string, unknown>,
+      data: formDataOf(template),
       name: String((template as { name?: unknown }).name ?? ''),
       templateId: template.id,
       template: true,
@@ -204,7 +215,7 @@ export function editorDataOf(state: StudioState): EditorData | null {
   }
   if (editor.source === 'edge') {
     const edge = state.canvas.edges.find((item) => item.id === editor.id)
-    return edge ? { kind: 'edge', data: edge as unknown as Record<string, unknown>, name: '' } : null
+    return edge ? { kind: 'edge', data: formDataOf(edge), name: '' } : null
   }
   return null
 }

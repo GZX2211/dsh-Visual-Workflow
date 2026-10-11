@@ -5,5 +5,5 @@ export declare function runStatusMap(snapshot: RunSnapshot | null | undefined): 
     attempts: number;
     outputSummary: string;
 }>;
-/** 运行中节点 id 列表（需求 §4.5.8「当前运行节点高亮」；画布高亮数据源，防回环只写视图）。 */
+/** 运行中节点 id 列表（「当前运行节点高亮」；画布高亮数据源，防回环只写视图）。 */
 export declare function runningNodeIds(snapshot: RunSnapshot | null | undefined): string[];

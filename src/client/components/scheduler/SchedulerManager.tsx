@@ -13,6 +13,7 @@ import type { ScheduledTask, ScheduledTaskView, TimeRangeConfig } from '../../..
 import { SCHEDULER_TIMEZONE_SUGGESTIONS } from '../../../host/shared/protocol.js'
 import type { RemoteFace } from '../../hooks/useRemote.js'
 import { useSchedulerTasks } from '../../hooks/useSchedulerTasks.js'
+import { remoteErrorMessageOf } from '../../lib/remote-error.js'
 import type { DateRangeValue } from '../date-picker/DateRangePicker.js'
 import {
   createTaskDraft, detectLocalTimezone, localDateOnly, shiftDateOnly,
@@ -38,7 +39,8 @@ export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: 
   const loadedRef = useRef(false)
   // 最近一次的选中任务 id（供加载后判定沿用/回退，避免在 setState updater 内产生副作用）
   const activeTaskIdRef = useRef<string | null>(null)
-  activeTaskIdRef.current = activeTaskId
+  // 提交后再镜像最新选中项：渲染期写 ref 在并发渲染（被丢弃的渲染/重放的 updater）下会留下未提交的值
+  useEffect(() => { activeTaskIdRef.current = activeTaskId }, [activeTaskId])
 
   /** 加载完成后确定选中项：仍存在则沿用，否则回退首个任务。 */
   const selectAfterLoad = useCallback((list: ScheduledTaskView[]) => {
@@ -59,7 +61,7 @@ export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: 
         const { views } = await load()
         selectAfterLoad(views)
       } catch (error) {
-        onToast('error', String((error as Error)?.message ?? error))
+        onToast('error', remoteErrorMessageOf(error))
       }
     })()
   }, [load, onToast, selectAfterLoad])
@@ -106,7 +108,7 @@ export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: 
       setActiveTaskId(saved.taskId)
       onToast('success', copy.schedulerSaved)
     } catch (error) {
-      onToast('error', String((error as Error)?.message ?? error))
+      onToast('error', remoteErrorMessageOf(error))
     }
   }, [copy, draft, onToast, tasks])
 

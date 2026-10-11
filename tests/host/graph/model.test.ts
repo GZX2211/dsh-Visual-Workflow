@@ -8,7 +8,11 @@
 // 断言依据：架构文档 §4.2 + 需求文档 §4.2/§4.3/§4.2.5。
 
 import { describe, expect, it } from 'vitest'
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
+  HANDLE_PAIRING,
   NODE_HANDLES,
   NODE_KINDS,
   activeMilestoneGateOf,
@@ -30,12 +34,13 @@ import {
   newStageNode,
   nodeHasFlowIn,
   nodeParticipatesInFlow,
+  pairingTargetOf,
   proxiesOf,
   proxyRoleOf,
   stageLabel,
   upstreamCtxNodeIds,
 } from '../../../src/host/graph/index.js'
-import type { GraphNode, Line, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
+import type { GraphNode, Handle, Line, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
 import { makeFlow } from './fixtures/flow-fixture.js'
 
 describe('连接点兼容矩阵（NODE_HANDLES）', () => {
@@ -240,5 +245,98 @@ describe('闸门标记目标归一化（mainNodeIdOf）', () => {
     const flow = gateFlow('milestone')
     flow.nodes = flow.nodes.filter((n) => n.id !== 'p1')
     expect(mainNodeIdOf(flow, 'm1')).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 通道配对查询：只以输出连接点为源
+// ---------------------------------------------------------------------------
+
+describe('通道配对查询（pairingTargetOf）', () => {
+  it('三个输出连接点各映射到对应入点；未登记的源回退为自身', () => {
+    expect(pairingTargetOf('flow-out')).toBe('flow-in')
+    expect(pairingTargetOf('ctx-out')).toBe('ctx-in')
+    expect(pairingTargetOf('db-out')).toBe('db-in')
+    // 入点不是合法查询源；回退为自身，供调用方按「通道不匹配」报错而不是抛类型错误
+    expect(pairingTargetOf('flow-in' as Handle)).toBe('flow-in')
+  })
+
+  it('查询契约与矩阵本体一致（validate 与 graph_patch 共用同一入口）', () => {
+    const outputs: Handle[] = ['flow-out', 'ctx-out', 'db-out']
+    for (const source of outputs) {
+      expect(pairingTargetOf(source)).toBe(HANDLE_PAIRING[source])
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 通道本体：连接点名只允许一处定义（消除「矩阵 vs 规则硬编码」两套口径）
+// ---------------------------------------------------------------------------
+
+/**
+ * 去掉注释只留代码（`//` 与块注释；字符串与模板字符串原样保留，行结构不变）。
+ * 为什么需要：通道名出现在解释性注释里是说明文字，不是判定口径；口径只认代码。
+ */
+function codeOnly(source: string): string {
+  let out = ''
+  let quote: string | null = null
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index]
+    const next = source[index + 1]
+    if (quote !== null) {
+      if (char === '\\') {
+        out += char + (next ?? '')
+        index += 1
+        continue
+      }
+      if (char === quote) quote = null
+      out += char
+      continue
+    }
+    if (char === '"' || char === "'" || char === '`') {
+      quote = char
+      out += char
+      continue
+    }
+    if (char === '/' && next === '/') {
+      while (index < source.length && source[index] !== '\n') index += 1
+      out += '\n'
+      continue
+    }
+    if (char === '/' && next === '*') {
+      index += 2
+      while (index < source.length && !(source[index] === '*' && source[index + 1] === '/')) {
+        if (source[index] === '\n') out += '\n'
+        index += 1
+      }
+      index += 1
+      continue
+    }
+    out += char
+  }
+  return out
+}
+
+describe('通道本体（HANDLE_CHANNELS）', () => {
+  it('连接点名裸字面量只允许出现在 model.ts：其余文件一律经通道本体查询', () => {
+    const graphDir = fileURLToPath(new URL('../../../src/host/graph/', import.meta.url))
+    const files = readdirSync(graphDir).filter((name) => name.endsWith('.ts') && name !== 'model.ts')
+    expect(files.length, '至少应扫到若干图模块文件，否则断言在空集上假通过').toBeGreaterThan(0)
+    const offenders: string[] = []
+    for (const file of files) {
+      const code = codeOnly(readFileSync(join(graphDir, file), 'utf8'))
+      for (const match of code.matchAll(/'(flow|ctx|db)-(in|out)'/g)) offenders.push(`${file}: ${match[0]}`)
+    }
+    expect(offenders, `以下文件仍硬编码通道名（应改用 HANDLE_CHANNELS/channelIn/channelOut 查询）：${offenders.join(', ')}`).toEqual([])
+  })
+
+  it('配对矩阵是通道本体的投影：每个通道 out→in 成对且入点恒等', () => {
+    // 本体与矩阵必须同源——本用例锁定「矩阵不是第二份口径」
+    expect(pairingTargetOf('flow-out')).toBe('flow-in')
+    expect(pairingTargetOf('ctx-out')).toBe('ctx-in')
+    expect(pairingTargetOf('db-out')).toBe('db-in')
+    expect(HANDLE_PAIRING['flow-in']).toBe('flow-in')
+    expect(HANDLE_PAIRING['ctx-in']).toBe('ctx-in')
+    expect(HANDLE_PAIRING['db-in']).toBe('db-in')
   })
 })

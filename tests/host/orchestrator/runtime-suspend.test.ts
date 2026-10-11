@@ -9,54 +9,21 @@
 // 故归 orchestrator 测试目录，而非 scheduler 或 integration。
 
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { FlowStore } from '../../../src/host/storage/flow-store.js'
 import {
-  OrchestratorRuntime,
-  type AgentHost,
-  type NodeRunner,
-  type NodeStartInput,
-  type OrchestratorConfig,
-  type RootAgentLike,
-  type RootInjectedMessage,
-  type TurnEndInfo,
   findResumableRun,
+  type OrchestratorRuntime,
 } from '../../../src/host/orchestrator/index.js'
-import { stageLabel } from '../../../src/host/graph/index.js'
-import type { RoleNode, StageNode, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
+import type { WorkflowDocument } from '../../../src/host/shared/graph-model.js'
+import {
+  agent,
+  cleanupTempDirs,
+  makeHarness,
+  stage,
+} from './fixtures/harness.js'
 
-const cleanups: Array<() => Promise<void>> = []
+afterEach(cleanupTempDirs)
 
-afterEach(async () => {
-  await Promise.all(cleanups.splice(0).map((fn) => fn()))
-})
-
-function stage(id: string, kind: 'start' | 'end' | 'pause'): StageNode {
-  return { id, kind, position: { x: 0, y: 0 }, data: { label: stageLabel(kind, 'mode1') } }
-}
-
-function agent(id: string, label: string): RoleNode {
-  return {
-    id,
-    kind: 'agent',
-    position: { x: 0, y: 0 },
-    data: {
-      label,
-      systemPrompt: `任务：${label}`,
-      provider: '',
-      model: '',
-      presetId: null,
-      retryLimit: 3,
-      reactLimit: null,
-      inputSchema: '',
-      outputSchema: '',
-      groupId: null,
-    },
-  }
-}
-
+/** 本文件的最小流程：start → a1 → end（挂起/续跑不涉及暂停门与协作组）。 */
 function makeFlow(): WorkflowDocument {
   return {
     id: 'flow-1',
@@ -73,78 +40,16 @@ function makeFlow(): WorkflowDocument {
   }
 }
 
-class FakeRoot implements RootAgentLike {
-  id: string
-  status = 'idle'
-  messages: RootInjectedMessage[] = []
-  session: { events: unknown[] } = { events: [] }
-  constructor(id: string) {
-    this.id = id
-  }
-}
-
-class FakeAgents implements AgentHost {
-  roots = new Map<string, FakeRoot>()
-  availableFlag = true
-  available(): boolean {
-    return this.availableFlag
-  }
-  getRootAgent(id: string): RootAgentLike | null {
-    return this.roots.get(id) ?? null
-  }
-  followupRoot(agent: RootAgentLike, message: RootInjectedMessage): void {
-    ;(agent as FakeRoot).messages.push(message)
-  }
-  latestTurnEnd(): TurnEndInfo | null {
-    return null
-  }
-  childRunning(): boolean {
-    return false
-  }
-}
-
-class FakeRunner implements NodeRunner {
-  async startNodeTask(_input: NodeStartInput): Promise<{ childId: string; created: boolean }> {
-    return { childId: 'child-1', created: true }
-  }
-  async interruptChild(): Promise<void> {}
-  consumeReactCapped(): boolean {
-    return false
-  }
-}
-
-async function makeRuntime(): Promise<{ runtime: OrchestratorRuntime; store: FlowStore; agents: FakeAgents; clock: { now: number } }> {
-  const dir = await mkdtemp(join(tmpdir(), 'vw-sched-orch-'))
-  cleanups.push(() => rm(dir, { recursive: true, force: true }))
-  const store = new FlowStore(dir)
-  await store.init()
-  const clock = { now: 1_000_000 }
-  const agents = new FakeAgents()
-  agents.roots.set('session-1', new FakeRoot('session-1'))
-  const runtime = new OrchestratorRuntime({
-    store,
-    runner: new FakeRunner(),
-    agents,
-    config: {
-      outputFullLimit: 400,
-      documentTextLimit: 200,
-      runIdleTimeoutMs: 500,
-      retryLimitDefault: 3,
-      reactIterationLimitDefault: 50,
-      wfAskAgentTtlMs: 500,
-    } satisfies OrchestratorConfig,
-    logger: { warn: () => {}, info: () => {}, debug: () => {} },
-    now: () => clock.now,
-    newRunId: (() => {
-      let n = 0
-      return () => {
-        n += 1
-        return `run-${n}`
-      }
-    })(),
-  })
-  await store.saveWorkflow(makeFlow(), 'session-1', { force: true })
-  return { runtime, store, agents, clock }
+/** 兼容旧调用点的装配别名：统一走共享夹具。 */
+async function makeRuntime(): Promise<{
+  runtime: OrchestratorRuntime
+  store: Awaited<ReturnType<typeof makeHarness>>['store']
+  agents: Awaited<ReturnType<typeof makeHarness>>['agents']
+  clock: { now: number }
+}> {
+  const h = await makeHarness()
+  await h.store.saveWorkflow(makeFlow(), 'session-1', { force: true })
+  return { runtime: h.runtime, store: h.store, agents: h.agents, clock: h.clock }
 }
 
 describe('suspendRun（窗口挂起）', () => {

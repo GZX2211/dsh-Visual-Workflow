@@ -253,4 +253,12 @@ describe('DateRangePicker', () => {
     await act(async () => {}) // flush 剩余被动 effect
     expect(qall<HTMLElement>('.wf-cal-month__title').map((t) => t.textContent)).toEqual(['2026年8月', '2026年9月'])
   })
+
+  it('只选定起点（end 为空）：起点格只显示「开始」，不得同时显示「结束」', async () => {
+    await render({ start: '2026-10-05', end: null }, () => {})
+    const startCell = qall<HTMLElement>('.wf-cal-cell.is-start')[0]
+    expect(startCell.querySelector('.wf-cal-cell__num')?.textContent).toBe('5')
+    // 界面与数据一致：end 为空时不存在终点，整块日历不得出现「结束」标签
+    expect(qall<HTMLElement>('.wf-cal-cell__tag').map((item) => item.textContent)).toEqual(['开始'])
+  })
 })

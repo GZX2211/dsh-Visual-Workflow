@@ -80,7 +80,7 @@ export function useServiceDebugStream(remote: RemoteFace, options: ServiceDebugO
             if (!line.startsWith('data: ')) return
             const data = line.slice(6).trim()
             if (!data || data === '[DONE]') return
-            // Bug 3：正文路径必须走 choices[0].delta.content（parseSseDelta 已兼容旧格式）
+            // 正文必须走 parseSseDelta（SSE data 行 → choices[0].delta.content，兼容旧格式）
             const delta = parseSseDelta(data)
             if (delta.error) {
               setOutput((prev) => `${prev ? `${prev}\n\n` : ''}${errorPrefix}${delta.error}`)

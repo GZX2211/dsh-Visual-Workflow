@@ -15,6 +15,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FlowStore } from '../../src/host/storage/flow-store.js'
+import { resolveConfig } from '../../src/host/config.js'
 import {
   OrchestratorRuntime,
   type AgentHost,
@@ -149,6 +150,10 @@ async function makeHarness(): Promise<Harness> {
   agents.roots.set('session-1', root)
   const runner = new FakeRunner()
   let seq = 0
+  // 默认值取自 schema（不复制清单）；仅三处显式收窄以构造场景：
+  //   - outputFullLimit/documentTextLimit：缩到 400/200 字节，使截断分支在短文本下即可触发；
+  //   - runIdleTimeoutMs：60s（远小于 schema 默认 30 分钟），避免用例等待真实空闲窗口。
+  const runDefaults = resolveConfig({ dataDir: dir })
   const runtime = new OrchestratorRuntime({
     store,
     runner,
@@ -157,8 +162,8 @@ async function makeHarness(): Promise<Harness> {
       outputFullLimit: 400,
       documentTextLimit: 200,
       runIdleTimeoutMs: 60_000,
-      retryLimitDefault: 3,
-      reactIterationLimitDefault: 50,
+      retryLimitDefault: runDefaults.retryLimitDefault,
+      reactIterationLimitDefault: runDefaults.reactIterationLimitDefault,
       wfAskAgentTtlMs: 60_000,
     },
     logger: { warn: () => {}, info: () => {}, debug: () => {} },

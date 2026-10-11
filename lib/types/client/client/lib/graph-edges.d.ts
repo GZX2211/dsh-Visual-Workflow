@@ -9,7 +9,7 @@ export interface LineLabelCopy {
     /** 内容条件的兜底文案（条件 label 为空时使用）。 */
     content: string;
 }
-/** 条件连线标签（需求 §4.3 连线类型表）：方括号包裹，内容条件截断到 12 字。 */
+/** 条件连线标签：方括号包裹，内容条件截断到 12 字。 */
 export declare function conditionLabel(condition: Line['condition'] | null | undefined, labels: LineLabelCopy): string;
 /**
  * 连线颜色 class（条件 pass|fail|content / 通道 db / ctx / 默认 flow 空串）。

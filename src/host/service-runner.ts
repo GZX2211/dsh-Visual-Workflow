@@ -21,7 +21,7 @@ import { VisualWorkflowHost } from './index.js'
 import { resolveConfig, type Config as HostPluginConfig } from './config.js'
 import { createOrGetServiceAgent } from './agent/index.js'
 import { SessionMap, OpenAiApi, registerOpenAiApi } from './service/index.js'
-import { CordisSessionProvider } from './sessions/session-provider.js'
+import { CordisSessionProvider, resolveNewSessionCwd } from './sessions/session-provider.js'
 import { sweepWatchdogOnce } from './orchestrator/index.js'
 
 /** 稳定插件名（serve.patch.yml 的 insert 行 name 解析目标）。 */
@@ -121,6 +121,10 @@ async function boot(ctx: Context, config: Config, io: RunnerIo): Promise<void> {
   if (!host) throw new Error('visualWorkflowHost 服务未激活')
   const service = await host.store.getServiceById(serviceId)
   if (!service) throw new Error(`服务不存在：${serviceId}`)
+  // 服务会话根 Agent 的工作目录：按服务文档 workspacePath 解析（唯一决策实现），
+  // 不得回退进程全局 cwd——服务进程由 manager 以 cwd=dataDir 启动，取进程 cwd 会让
+  // 节点子代理的文件类工具写进插件数据目录而不是用户工作区。
+  const serviceWorkspaceCwd = await resolveNewSessionCwd({ workspacePath: service.workspacePath })
 
   const sessions = new SessionMap({ store: host.store, serviceId })
   const api = new OpenAiApi({
@@ -132,7 +136,7 @@ async function boot(ctx: Context, config: Config, io: RunnerIo): Promise<void> {
     resolveSession: (userId) => sessions.resolve(userId),
     // 「服务级新会话」：服务文档 startNewSession=true 时每请求新建会话（cwd=工作区）
     createSession: (options) => new CordisSessionProvider(ctx).createSession(options),
-    ensureRootAgent: (sessionId) => createOrGetServiceAgent(ctx, host.store, serviceId, sessionId),
+    ensureRootAgent: (sessionId) => createOrGetServiceAgent(ctx, host.store, serviceId, sessionId, { cwd: serviceWorkspaceCwd }),
     sweep: () => sweepWatchdogOnce(host.orchestrator),
     logger: { warn: (message) => ctx.logger.warn(message) },
   })

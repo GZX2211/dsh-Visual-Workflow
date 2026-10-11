@@ -3,7 +3,7 @@
 // 启动层单测（startRun/resumeRun）：并发运行锁、启动校验、事实源写入、指令注入、运行会话归属。
 // 装配与测试替身见 fixtures/harness.ts（共享，不在本文件内重复）。
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { FlowStore } from '../../../src/host/storage/flow-store.js'
@@ -11,7 +11,7 @@ import { OrchestratorRuntime } from '../../../src/host/orchestrator/index.js'
 import { HEAD_MARKER, MID_MARKER, ORCH_HARD_CONSTRAINTS, TAIL_MARKER, TAIL_RESTATE_MARKER } from '../../../src/host/prompts/index.js'
 import type { ServiceState } from '../../../src/host/shared/types.js'
 import type { WorkflowDocument } from '../../../src/host/shared/graph-model.js'
-import { makeFlow, stage, agent, FakeRoot, makeHarness, start, cleanupTempDirs } from './fixtures/harness.js'
+import { makeFlow, stage, agent, FakeRoot, makeHarness, start, caller, cleanupTempDirs } from './fixtures/harness.js'
 
 // 临时目录：makeHarness 登记，文件结束统一清理
 afterEach(cleanupTempDirs)
@@ -49,11 +49,13 @@ describe('startRun 并发运行锁（TOCTOU 竞态回归）', () => {
 
     const p1 = slowRuntime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })
     const p2 = slowRuntime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })
-    // 等两个请求都进入闸门（都已完成锁首查且看到 null）
-    await new Promise<void>((resolve) => {
-      const tick = (): void => { if (inGate >= 2) resolve(); else setTimeout(tick, 5) }
-      tick()
-    })
+    // 等两个请求都进入闸门（都已完成锁首查且看到 null）。
+    // 必须带上限：若加锁顺序变化导致条件永不成立，应报「未进入竞态窗口」而非挂到 vitest 超时。
+    await expect(
+      vi.waitFor(() => {
+        if (inGate < 2) throw new Error(`只有 ${inGate} 个 startRun 进入闸门`)
+      }, { timeout: 2_000 }),
+    ).resolves.toBeUndefined()
     release()
 
     const results = await Promise.allSettled([p1, p2])
@@ -353,5 +355,97 @@ describe('模式二链路：服务文档 meta → 工作流视图', () => {
     const flow = await h.store.getServiceAsFlow('svc-1')
     expect(flow?.mode).toBe('mode2')
     expect(flow?.meta).toEqual({ nodeMax: 7, milestoneMax: 2 })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// resumeRun：接管旧 paused 条目时一并退役其子代理归属
+// ---------------------------------------------------------------------------
+
+/** 线性流程：start → a1 → a2 → end（两个节点，便于在旧 run 内建立两个子代理归属）。 */
+function resumeReleaseFlow(): WorkflowDocument {
+  return {
+    id: 'flow-1',
+    sessionId: 'session-1',
+    mode: 'mode1',
+    name: '测试流程',
+    description: '续跑释放',
+    revision: 1,
+    nodes: [stage('n-start', 'start'), agent('n-a1', '子任务A'), agent('n-a2', '子任务B'), stage('n-end', 'end')],
+    lines: [
+      { id: 'l1', source: 'n-start', target: 'n-a1', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+      { id: 'l2', source: 'n-a1', target: 'n-a2', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+      { id: 'l3', source: 'n-a2', target: 'n-end', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+    ],
+  }
+}
+
+/** 协作投递缝 fake：只记录投递调用（用于断言「未投递」）。 */
+function recordingDelivery(): { calls: unknown[]; deliver(input: unknown): Promise<void> } {
+  const calls: unknown[] = []
+  return {
+    calls,
+    async deliver(input: unknown): Promise<void> {
+      calls.push(input)
+    },
+  }
+}
+
+describe('resumeRun 释放旧 paused 条目', () => {
+  it('续跑后旧 paused 条目被释放：活跃摘要只剩新 run，锁指向新 run', async () => {
+    const h = await makeHarness()
+    await h.store.saveWorkflow(resumeReleaseFlow(), 'session-1', { force: true })
+    const start = await h.runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })
+    expect(await h.runtime.suspendRun(start.runId, { summary: '窗口结束' })).toBe(true)
+    expect(h.runtime.flowLockInfo('flow-1')?.status).toBe('paused')
+
+    const resumed = await h.runtime.resumeRun({ sessionId: 'session-1', flowId: 'flow-1', fromRunId: start.runId })
+    expect(resumed.runId).not.toBe(start.runId)
+
+    // 旧条目已彻底释放（不再出现在任何活跃查询里）
+    const active = h.runtime.activeRunsForSession('session-1')
+    expect(active.map((item) => item.runId)).toEqual([resumed.runId])
+    expect(active.map((item) => item.status)).toEqual(['running'])
+    // 锁已随新 run 接管
+    expect(h.runtime.flowLockInfo('flow-1')?.runId).toBe(resumed.runId)
+    // 磁盘历史照旧保留旧记录（释放的只是内存条目）
+    expect((await h.store.getRun(start.runId))?.status).toBe('paused')
+  })
+
+  it('续跑退役旧 run 的子代理归属：旧 child 不再能发起协作（判别性断言）', async () => {
+    const h = await makeHarness()
+    await h.store.saveWorkflow(resumeReleaseFlow(), 'session-1', { force: true })
+    const started = await h.runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })
+    // 在旧 run 内调度两个节点子代理 → childIndex/childByNode 各登记一份归属
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a2' })
+    await h.runtime.suspendRun(started.runId, { summary: '窗口结束' })
+
+    const resumed = await h.runtime.resumeRun({ sessionId: 'session-1', flowId: 'flow-1', fromRunId: started.runId })
+    expect(resumed.runId).not.toBe(started.runId)
+
+    // 行为判据：旧 child 的归属已随旧 run 条目释放 → 投给旧同伴的协作请求被拒。
+    // 若归属残留，同一 sessionId/flowId 会通过越权校验并把消息投给已废弃的子代理会话
+    // （目标按节点 id 经 childByNode 仍能解析到旧 child-2）。
+    const delivery = recordingDelivery()
+    await expect(
+      h.runtime.wfAskAgent(
+        { isChild: true, sessionId: 'session-1' },
+        'child-1',
+        { cmd: 'ask', targetChildId: 'n-a2', message: '还在吗' },
+        delivery as never,
+      ),
+    ).rejects.toMatchObject({ code: 'WF_ASK_FORBIDDEN' })
+    expect(delivery.calls).toEqual([])
+
+    // 状态判据：归属索引里不再残留旧 child（与运行条目同生共死）
+    const internals = h.runtime as unknown as {
+      childIndex: Map<string, { nodeId: string }>
+      childByNode: Map<string, string>
+    }
+    expect(internals.childIndex.has('child-1')).toBe(false)
+    expect(internals.childIndex.has('child-2')).toBe(false)
+    expect(internals.childByNode.has('n-a1')).toBe(false)
+    expect(internals.childByNode.has('n-a2')).toBe(false)
   })
 })

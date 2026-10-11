@@ -125,6 +125,9 @@ export declare function releaseDiskLock(info: DiskLockInfo): Promise<void>;
  * 磁盘锁路径 = `<filePath>.lock`（与数据文件同目录，崩溃残留可被 cleanupStaleTemp 一并识别）。
  * 典型用法：withJsonLock(path, async () => { const s = await readJson(path, {}); ...; await atomicWriteJson(path, s) })
  *
+ * 名字里的 JSON 是历史命名：本原语只规定「组合锁 + 临界区」，与内容类型无关——
+ * 任何单文件的发布（二进制受管文件、图/索引产物）都应复用它，不要自建第二套组合。
+ *
  * @param filePath 数据文件路径（进程内锁键与磁盘锁派生路径都基于它）。
  * @param fn 持锁执行的读改写任务。
  * @param opts 透传给 acquireDiskLock 的超时/陈旧阈值。

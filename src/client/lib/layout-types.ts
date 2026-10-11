@@ -1,6 +1,6 @@
 // src/client/lib/layout-types.ts
 //
-// 布局算法的类型契约（纯类型 + 常量；自主编排方案 §7.2）：输入节点元数据、选项、
+// 布局算法的类型契约（纯类型 + 常量）：输入节点元数据、选项、
 // 结果与告警。与 card-geometry.ts 的分工：card-geometry 负责「单个卡片尺寸/成员行尺寸」，
 // 本层负责「整图坐标」——布局只依赖传入的 width/height，不反向 import host 契约。
 

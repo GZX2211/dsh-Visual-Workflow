@@ -130,3 +130,42 @@ describe('定时任务 API 端点', () => {
     await expect(api.handle('schedulerWhatever', {})).rejects.toMatchObject({ status: 404 })
   })
 })
+
+// ---------------------------------------------------------------------------
+// 能力缝判定顺序与错误码
+// ---------------------------------------------------------------------------
+
+/** 只装配存储层、不装配 scheduler 能力缝的宿主（验证 501 的优先级）。 */
+async function makeApiWithoutStore(): Promise<{ api: VisualWorkflowApi; dir: string }> {
+  const dir = await mkdtemp(join(tmpdir(), 'vw-sched-api-'))
+  cleanups.push(() => rm(dir, { recursive: true, force: true }))
+  const flowStore = new FlowStore(dir)
+  await flowStore.init()
+  const host: ApiHost = {
+    orchestrator: {} as never,
+    store: flowStore,
+    dataDir: dir,
+    engine: {} as never,
+    scheduler: undefined,
+    schedulerTaskStore: undefined,
+  }
+  return { api: new VisualWorkflowApi({ get: () => null }, host), dir }
+}
+
+describe('schedulerTaskPut 的能力缝顺序与错误码', () => {
+  it('schedulerTaskStore 缺失 → 501 先于任何参数解析与磁盘访问（不 stat 用户路径）', async () => {
+    const { api, dir } = await makeApiWithoutStore()
+    const missingDir = join(dir, 'nope', 'not-a-real-workspace')
+    await expect(
+      api.handle('schedulerTaskPut', {
+        task: { ...makeTask('task-missing-store'), workspacePath: missingDir },
+      }),
+    ).rejects.toMatchObject({ status: 501 })
+  })
+
+  it('入参非对象（形状错误）→ 400，不得坍缩成 500', async () => {
+    const { api } = await makeApi()
+    await expect(api.handle('schedulerTaskPut', { task: 123 })).rejects.toMatchObject({ status: 400 })
+    await expect(api.handle('schedulerTaskPut', { task: 'not-an-object' })).rejects.toMatchObject({ status: 400 })
+  })
+})

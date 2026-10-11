@@ -57,6 +57,23 @@ async function listEntryNames(dir: string): Promise<string[]> {
   }
 }
 
+/**
+ * 取一个**确定已死且 pid 取值合法**的进程号（构造「持有者已崩溃」的临时文件前提）。
+ * 为什么不写死魔数：`99999999` 在 pid 上限更小的容器/命名空间里属非法取值
+ * （`process.kill` 抛 EINVAL 而非 ESRCH），魔数会把「无法判定」伪装成「已死」。
+ */
+function surelyDeadPid(): number {
+  for (let candidate = process.pid + 1; candidate < process.pid + 64; candidate += 1) {
+    try {
+      process.kill(candidate, 0)
+    } catch (error) {
+      // 仅 ESRCH（进程不存在）可断言「已死」；EPERM 表示存在但无权限，不能当作已死
+      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return candidate
+    }
+  }
+  throw new Error('无法构造「确定已死」的 pid：最近的候选进程号都被占用')
+}
+
 /** 断言目录中不存在任何 `.tmp` 开头的残留文件（崩溃恢复的核心断言之一）。 */
 async function expectNoTmpResidue(dir: string): Promise<void> {
   const names = await listEntryNames(dir)
@@ -159,10 +176,14 @@ describe('T-011 崩溃恢复：残留临时文件与锁文件', () => {
 
   it('Bug 13：持有进程存活的 .tmp 临时文件不被清理（并发写不误删）', async () => {
     const dir = makeTmpDir()
+    // 前提显式化：surelyDeadPid 已用 process.kill 校验过该 pid 不存在（ESRCH），
+    // 不是靠「99999999 一定不存在」的魔数假设。
+    const deadPid = surelyDeadPid()
+    expect(() => process.kill(deadPid, 0)).toThrowError(/ESRCH/)
     // 本测试进程即「活着」的写者：文件名带当前 pid，正等待 rename 的文件必须保留
     const alive = join(dir, `.tmp-${process.pid}-abcdef`)
     // 已死 pid 的崩溃残留 + 解析不出 pid 的畸形文件：应清理
-    const dead = join(dir, '.tmp-99999999-deadbeef')
+    const dead = join(dir, `.tmp-${deadPid}-deadbeef`)
     const odd = join(dir, '.tmp-weird-suffix')
     await writeFile(alive, 'in-flight', 'utf8')
     await writeFile(dead, 'partial', 'utf8')
@@ -181,8 +202,8 @@ describe('T-011 崩溃恢复：残留临时文件与锁文件', () => {
     const dir = makeTmpDir()
     const file = join(dir, 'state.json')
     const lockPath = `${file}.lock`
-    // 用「不可能存活」的极大 pid + 极旧 mtime 手工构造陈旧锁。
-    await writeFile(lockPath, JSON.stringify({ pid: 999999999, createdAt: 0 }), 'utf8')
+    // 用「确定已死的合法 pid」+ 极旧 mtime 手工构造陈旧锁（前提由 surelyDeadPid 显式保证）。
+    await writeFile(lockPath, JSON.stringify({ pid: surelyDeadPid(), createdAt: 0 }), 'utf8')
     // mtime 设为很久以前——但 cleanup 的回收依赖「pid 已死」+「mtime 超阈值」双条件；
     // mtime 用 utimes 强制回拨，确保超 DAC 默认 30s。
     const { utimes } = await import('node:fs/promises')

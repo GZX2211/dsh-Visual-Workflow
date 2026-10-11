@@ -25,7 +25,7 @@ import type {
 } from '../../host/shared/asset-types.js'
 import type { StudioAction, StudioState } from '../studio/studio-state.js'
 import type { RemoteFace } from './useRemote.js'
-import type { RemoteError } from '../lib/remote.js'
+import { remoteErrorCodeOf } from '../lib/remote-error.js'
 import type { ToastFace } from './useToast.js'
 import type { Dict } from '../i18n.js'
 import { EP } from '../lib/remote.js'
@@ -103,11 +103,6 @@ function normalizeList(payload: unknown): StudioState['assets'] {
   }
 }
 
-/** 远端错误的稳定码（无码 = 传输/解析失败）。 */
-function codeOf(error: unknown): string {
-  return String((error as RemoteError | null | undefined)?.code ?? '')
-}
-
 /** 资产面（远端失败已就地翻译为提示；返回值 null 表示本次调用未产生结果）。 */
 export function useAssets(
   remote: RemoteFace,
@@ -138,7 +133,7 @@ export function useAssets(
 
   /** 资产失败统一翻译（稳定码优先）；返回 true = 已按资产语义处理（调用方不再提示）。 */
   const handleAssetFailure = useCallback(async (error: unknown, reload: boolean): Promise<boolean> => {
-    const code = codeOf(error)
+    const code = remoteErrorCodeOf(error)
     if (code === EP.ERR_ASSET_DUPLICATE) {
       // 重复入库 = 内容与 Active 版本全等：不是错误，取消本次入库并保留原列表
       notify('info', t.assetDuplicateCancelled)

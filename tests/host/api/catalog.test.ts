@@ -11,7 +11,7 @@ import { join } from 'node:path'
 import { ToolSwitchStore } from '../../../src/host/tools/infrastructure/tool-switches.js'
 import { listMcpServers } from '../../../src/host/mcp/registry.js'
 import { registerRoutes } from '../../../src/host/api/index.js'
-import { DEFAULT_DISABLED_ON_FIRST_INSTALL } from '../../../src/host/shared/protocol.js'
+import { DEFAULT_DISABLED_ON_FIRST_INSTALL, RESERVED_TRANSPORT_TOOL } from '../../../src/host/shared/protocol.js'
 import { cleanupAll, makeHarness, snapshotDshHome } from './fixtures/api-harness.js'
 
 const restoreDshHome = snapshotDshHome()
@@ -248,5 +248,43 @@ describe('呈现语言（systemLanguage 能力缝）', () => {
     const catalog = (await h.api.handle('pluginCatalog', {})) as { items: Array<{ name: string; description: string }> }
     const item = catalog.items.find((entry) => entry.name === 'wf_graph_patch')
     expect(item?.description).toBe('Rewrite the workflow graph (structure / milestone marking); parent only')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 批量工具开关：被忽略的保留名必须显式回报
+// ---------------------------------------------------------------------------
+
+describe('批量工具开关的保留名回报', () => {
+  it('名单含官方保留传输名 → 返回 skipped 明示被忽略项，且不影响其余开关', async () => {
+    const h = await makeHarness()
+    h.host.toolSwitches = new ToolSwitchStore(h.dataDir)
+    await h.host.toolSwitches.load()
+
+    const result = (await h.api.handle('toolSwitchPutMany', {
+      names: ['read', RESERVED_TRANSPORT_TOOL],
+      disabled: true,
+    })) as { disabled?: string[]; skipped?: string[] }
+
+    expect(result.skipped).toEqual([RESERVED_TRANSPORT_TOOL])
+    expect(result.disabled).toContain('read')
+    expect(result.disabled).not.toContain(RESERVED_TRANSPORT_TOOL)
+  })
+
+  it('名单全部是保留名 → 仍按「无可设置项」400（不静默成功）', async () => {
+    const h = await makeHarness()
+    h.host.toolSwitches = new ToolSwitchStore(h.dataDir)
+    await h.host.toolSwitches.load()
+    await expect(
+      h.api.handle('toolSwitchPutMany', { names: [RESERVED_TRANSPORT_TOOL], disabled: true }),
+    ).rejects.toMatchObject({ status: 400 })
+  })
+
+  it('名单不含保留名 → skipped 为空数组（字段恒在，客户端无需分支判空）', async () => {
+    const h = await makeHarness()
+    h.host.toolSwitches = new ToolSwitchStore(h.dataDir)
+    await h.host.toolSwitches.load()
+    const result = (await h.api.handle('toolSwitchPutMany', { names: ['read'], disabled: true })) as { skipped?: string[] }
+    expect(result.skipped).toEqual([])
   })
 })

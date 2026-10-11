@@ -99,6 +99,7 @@ export const GRAPH_INVARIANT_CODES: readonly IssueCodeInfo[] = [
   { code: META_BELOW_MIN_CODE, level: 'warning', description: '规模低于元参数下限（仅提示，不阻断）' },
   { code: 'duplicateRoleLabel', level: 'warning', description: '多个可执行节点的名称相同或高度相似（服务「最少子代理数」）' },
   { code: 'nodeNoUpstream', level: 'warning', description: '可执行节点被流程驱动但没有任何输入通道（无 ctx / file / db 入线）' },
+  { code: 'nodeNoConsumer', level: 'warning', description: '可执行节点声明了产出契约，但其全部流程下游都未接入 ctx 出线' },
   { code: 'roleNodeNoPreset', level: 'warning', description: '角色节点未配置工具组合（presetId 为空 = 运行期零工具）' },
   { code: 'roleNodeNoPrompt', level: 'warning', description: '角色节点未配置 System Prompt' },
   { code: 'namingConvention', level: 'warning', description: '节点名称未满足元参数约定的命名规则' },

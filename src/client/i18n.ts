@@ -1,6 +1,6 @@
 // src/client/i18n.ts
 //
-// 中英双语文案（照搬旧项目 i18n.js，按新需求模型扩展：模式/服务/断点/协作组/虚拟节点/浮窗）。
+// 中英双语文案（覆盖模式/服务/断点/协作组/虚拟节点等需求模型的全部界面文案）。
 
 // 上限数值只有一处本体（画布交互约束），文案插值引用它，避免「改了上限忘了改提示」。
 import { GROUP_MEMBER_LIMIT } from './lib/group-members.js'
@@ -21,7 +21,7 @@ export const zh = {
   services: '服务',
   libTab: { workflow: '工作流', role: '角色', data: '数据', other: '其他' },
   parentMarker: "父",
-  // 图2 交互改造：左侧「工作流」Tab 双区（实例列表 + 工作流模板列表）
+  // 左侧「工作流」Tab 双区（实例列表 + 工作流模板列表）
   flowInstances: '实例',
   flowTemplates: '工作流模板',
   parentAgent: '父代理',
@@ -90,7 +90,7 @@ export const zh = {
   experienceExclusions: '不适用条件',
   experienceEvidence: '证据',
   experienceListPlaceholder: '每行一条',
-  // 只读：长期质量统计（Host 由评价历史聚合的派生事实，§34 六项；界面不可编辑）
+  // 只读：长期质量统计（Host 由评价历史聚合的派生事实，六项；界面不可编辑）
   experienceStatsTitle: '长期统计（由评价历史聚合，只读）',
   experienceStatsEmpty: '暂无统计',
   experienceStatsHint: '统计由 Host 聚合得出，界面不可编辑；信任度 0.5 表示证据不足、保持中性',
@@ -143,7 +143,7 @@ export const zh = {
   assetRetireSharedMessage: '该角色资产被 {count} 个工作流资产引用：{names}。归档后父代理不再召回它，这些工作流资产仍保留对其固定版本的引用。是否确认归档？',
   assetRetireConfirm: '确认归档',
   nodes: '节点',
-  // 工具栏（图2 交互改造：保存按钮按当前对象态动态命名）
+  // 工具栏（保存按钮按当前对象态动态命名）
   undo: '撤销',
   redo: '重做',
   clear: '清空',
@@ -172,7 +172,7 @@ export const zh = {
   serviceDebugHint: '调试请求经独立调试会话发送，与真实用户会话隔离',
   serviceDebugErrorPrefix: '[错误] ',
   history: '运行历史',
-  // 图2 交互改造：模板→实例 / 实例→模板
+  // 模板→实例 / 实例→模板
   saveAsTemplate: '另存为模板',
   toastSavedAsTemplate: '已另存为模板',
   toastCreatedInstance: '已创建实例',
@@ -183,7 +183,7 @@ export const zh = {
   // 画布左上角名称角标前缀（模板态/实例态）
   canvasCaptionTemplate: '模板：',
   canvasCaptionInstance: '实例：',
-  // 自动布局重叠提示（自主编排方案 §7.3：非阻断，尊重用户当前布局）
+  // 自动布局重叠提示（非阻断，尊重用户当前布局）
   canvasOverlapHint: '画布存在重叠节点，建议点击「整理布局」自动排布',
   fitView: '全图',
   zoomIn: '放大',
@@ -244,12 +244,12 @@ export const zh = {
   fileKind: '文件类型',
   fileContent: '文件内容',
   fileUnset: '未选择文件',
-  /** 文件多选提示（已选文件列表显示在按钮下方，用户验收标注）。 */
-  /** 协作组拖拽悬停提示（用户验收标注：放开以入组）。 */
+  /** 文件多选提示（已选文件列表显示在按钮下方）。 */
+  /** 协作组拖拽悬停提示（放开以入组）。 */
   groupDropHint: '放开以入组',
   /** 角色卡元信息「模型」前缀。 */
   nodeMetaModel: '模型',
-  /** 画布节点元信息「组合」前缀（显示选择的模式或组合，用户验收标注）。 */
+  /** 画布节点元信息「组合」前缀（显示选择的模式或组合）。 */
   nodeMetaPreset: '组合',
   description: '描述',
   descriptionHint: '数据库用途说明',
@@ -268,6 +268,7 @@ export const zh = {
   dbTest: '测试连接',
   dbTestSuccess: '数据库连接成功',
   dbLocalPath: '本地数据库文件路径',
+  dbLocalPathPlaceholder: './data/mydb.sqlite',
   dbVectorSource: '检索方式',
   dbVectorEmbedding: '语义向量检索',
   dbVectorBm25: 'BM25 相似度',
@@ -436,8 +437,11 @@ export const zh = {
   mcpTransportStdio: 'stdio（本地命令）',
   mcpTransportHttp: 'streamable-http（远程 URL）',
   mcpCommand: '启动命令（整行直接粘贴）',
+  mcpCommandPlaceholder: 'npx -y @playwright/mcp@latest --headless',
   mcpEnv: '环境变量（JSON，可选）',
+  mcpEnvPlaceholder: '{"API_KEY":"..."}',
   mcpHeaders: '请求头（JSON，可选）',
+  mcpHeadersPlaceholder: '{"Authorization":"Bearer ..."}',
   mcpCommandHint: '通用填写规范：① 本地脚本：node <脚本路径> [flags]　② npx 一行：npx -y <包名> [flags]（Windows 自动经 cmd 启动）　③ 远程服务：连接方式选 streamable-http + 填 URL。含空格的路径请用引号。',
   mcpImport: '从 mcp.json 导入',
   mcpImportApply: '导入',
@@ -448,6 +452,8 @@ export const zh = {
   mcpImportEmptyInput: '请先粘贴 mcp.json 配置',
   mcpImportServersEmpty: 'mcpServers 配置为空',
   mcpUrl: 'URL',
+  mcpUrlPlaceholder: 'https://example.com/mcp',
+  mcpImportPlaceholder: '{"mcpServers":{"codegraph":{"command":"npx","args":["-y","@colbymchenry/codegraph"]}}}',
   mcpSave: '保存服务器',
   mcpDelete: '删除',
   mcpEnabled: 'MCP 服务器已启用（重启 dsh web 后生效）',
@@ -493,6 +499,7 @@ export const zh = {
   schedulerCalendarMonthNames: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"],
   schedulerCalendarMonthTitle: "{year}年{month}月",
   schedulerTimePicker: "选择时间",
+  schedulerTimePlaceholder: 'HH:mm',
   schedulerHour: "时",
   schedulerMinute: "分",
   schedulerWindowRanges: '可执行时间段',
@@ -528,6 +535,7 @@ export const zh = {
   remoteConnection: "无法连接工作流服务：{detail}",
   remoteHttpStatus: "工作流服务错误（HTTP {status}）",
   remoteEmptyStream: "流式响应无内容",
+  remoteParse: "工作流服务返回了无法解析的响应（{endpoint}）",
 }
 
 export type Dict = typeof zh
@@ -543,7 +551,7 @@ export const en: Dict = {
   services: 'Services',
   libTab: { workflow: 'Workflows', role: 'Agents', data: 'Data', other: 'Other' },
   parentMarker: "P",
-  // 图2 交互改造：左侧「工作流」Tab 双区（实例列表 + 工作流模板列表）
+  // 左侧「工作流」Tab 双区（实例列表 + 工作流模板列表）
   flowInstances: 'Instances',
   flowTemplates: 'Workflow templates',
   parentAgent: 'Parent Agent',
@@ -609,7 +617,7 @@ export const en: Dict = {
   experienceExclusions: 'Exclusions',
   experienceEvidence: 'Evidence',
   experienceListPlaceholder: 'One item per line',
-  // Read-only: long-term quality statistics (host-aggregated from evaluation history, §34 six values; not editable here)
+  // Read-only: long-term quality statistics (host-aggregated from evaluation history, six values; not editable here)
   experienceStatsTitle: 'Long-term statistics (aggregated from evaluation history, read-only)',
   experienceStatsEmpty: 'No statistics yet',
   experienceStatsHint: 'Statistics are aggregated by the host and cannot be edited here; trust 0.5 means insufficient evidence, kept neutral',
@@ -689,7 +697,7 @@ export const en: Dict = {
   serviceDebugHint: 'Debug requests use a separate debug session, isolated from real users',
   serviceDebugErrorPrefix: '[Error] ',
   history: 'Run History',
-  // 图2 交互改造：模板→实例 / 实例→模板
+  // 模板→实例 / 实例→模板
   saveAsTemplate: 'Save as template',
   toastSavedAsTemplate: 'Saved as template',
   toastCreatedInstance: 'Instance created',
@@ -777,6 +785,7 @@ export const en: Dict = {
   dbTest: 'Test connection',
   dbTestSuccess: 'Database connection OK',
   dbLocalPath: 'Local database file path',
+  dbLocalPathPlaceholder: './data/mydb.sqlite',
   dbVectorSource: 'Retrieval mode',
   dbVectorEmbedding: 'Semantic vectors',
   dbVectorBm25: 'BM25 similarity',
@@ -932,8 +941,11 @@ export const en: Dict = {
   mcpTransportStdio: 'stdio (local command)',
   mcpTransportHttp: 'streamable-http (remote URL)',
   mcpCommand: 'Command (paste the whole line)',
+  mcpCommandPlaceholder: 'npx -y @playwright/mcp@latest --headless',
   mcpEnv: 'Environment (JSON, optional)',
+  mcpEnvPlaceholder: '{"API_KEY":"..."}',
   mcpHeaders: 'Headers (JSON, optional)',
+  mcpHeadersPlaceholder: '{"Authorization":"Bearer ..."}',
   mcpCommandHint: 'How to fill: ① Local script: node <script path> [flags]　② npx one-liner: npx -y <pkg> [flags] (auto-launched via cmd on Windows)　③ Remote: pick streamable-http + enter URL. Quote any path with spaces.',
   mcpImport: 'Import from mcp.json',
   mcpImportApply: 'Import',
@@ -944,6 +956,8 @@ export const en: Dict = {
   mcpImportEmptyInput: 'Paste an mcp.json config first',
   mcpImportServersEmpty: 'mcpServers config is empty',
   mcpUrl: 'URL',
+  mcpUrlPlaceholder: 'https://example.com/mcp',
+  mcpImportPlaceholder: '{"mcpServers":{"codegraph":{"command":"npx","args":["-y","@colbymchenry/codegraph"]}}}',
   mcpSave: 'Save server',
   mcpDelete: 'Delete',
   mcpEnabled: 'MCP server enabled (restart dsh web to apply)',
@@ -989,6 +1003,7 @@ export const en: Dict = {
   schedulerCalendarMonthNames: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
   schedulerCalendarMonthTitle: "{month} {year}",
   schedulerTimePicker: "Choose time",
+  schedulerTimePlaceholder: 'HH:mm',
   schedulerHour: "Hour",
   schedulerMinute: "Minute",
   schedulerWindowRanges: 'Executable time ranges',
@@ -1024,6 +1039,7 @@ export const en: Dict = {
   remoteConnection: "Could not connect to the workflow service: {detail}",
   remoteHttpStatus: "Workflow service error (HTTP {status})",
   remoteEmptyStream: "The streaming response was empty",
+  remoteParse: "The workflow service returned an unparseable response ({endpoint})",
 }
 
 export function text(language: string | null | undefined): Dict {

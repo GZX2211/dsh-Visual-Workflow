@@ -8,11 +8,6 @@
 //      直接把它作为 body 组件会在切标签页时被卸载、状态全丢）；
 //   4. 样式注入（style[data-plugin]）+ i18n 注册（官方 locale 服务命名空间 visualWorkflow）。
 // 卸载：样式移除、常驻容器与 root 卸载、插槽注册释放（全部经 ctx.effect）。
-//
-// 变更史（用户验收批注）：
-//   - 2026.08.25：不再注册 conversation.view 会话页 tab，仅保留入口 + 工作台；
-//   - 2026.09（本次 v0.1.5-rc.1 迁移）：删除浮窗/分栏视图模式与运行时 DOM 侧边栏注入，
-//     工作台完全改为官方右侧 Sidebar 标签页；入口按钮改为官方 sidebar.footer.action 插槽。
 
 import React from 'react'
 import { createRoot, type Root } from 'react-dom/client'

@@ -18,7 +18,7 @@ import type { Dispatch } from 'react'
 import type { ExperienceEntry, ExperiencePatch } from '../../host/shared/asset-types.js'
 import type { StudioAction, StudioState } from '../studio/studio-state.js'
 import type { RemoteFace } from './useRemote.js'
-import type { RemoteError } from '../lib/remote.js'
+import { remoteErrorCodeOf } from '../lib/remote-error.js'
 import type { ToastFace } from './useToast.js'
 import type { Dict } from '../i18n.js'
 import { EP } from '../lib/remote.js'
@@ -58,11 +58,6 @@ export function experiencePatchOf(entry: ExperienceEntry): ExperiencePatch {
   }
 }
 
-/** 远端错误的稳定码（无码 = 传输/解析失败）。 */
-function codeOf(error: unknown): string {
-  return String((error as RemoteError | null | undefined)?.code ?? '')
-}
-
 /** 远端返回的经验条目归一化（形状漂移一律当作失败，不写入半截数据）。 */
 function asEntry(payload: unknown): ExperienceEntry | null {
   const record = payload as { id?: unknown } | null | undefined
@@ -95,7 +90,7 @@ export function useExperiences(
 
   /** 经验失败统一翻译；返回 true = 已按经验语义处理（调用方不再提示）。 */
   const handleFailure = useCallback(async (error: unknown): Promise<boolean> => {
-    if (codeOf(error) !== EP.ERR_EXPERIENCE_NOT_FOUND) return false
+    if (remoteErrorCodeOf(error) !== EP.ERR_EXPERIENCE_NOT_FOUND) return false
     notify('error', t.experienceNotFound)
     try {
       const payload = await remote.call(EP.EP_LIST_EXPERIENCES, {})

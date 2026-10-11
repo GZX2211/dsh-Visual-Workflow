@@ -171,7 +171,7 @@ export declare class VisualWorkflowApiBase {
     constructor(ctx: {
         get(name: string): unknown;
     }, host: ApiHost);
-    /** 端点白名单（共享协议常量表派生，与共享契约零漂移）。 */
+    /** 端点白名单（共享协议的显式端点清单派生——只含端点名，不再混入错误码/工具名）。 */
     static ENDPOINTS: Set<string>;
     /** 按端点名分发；未知端点 404。 */
     handle(endpoint: string, args: unknown): Promise<unknown>;

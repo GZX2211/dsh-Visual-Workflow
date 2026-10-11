@@ -41,11 +41,11 @@ export function useCanvasViewport(nodes: CanvasNode[], onInit: (api: CanvasApi) 
   const [panning, setPanning] = useState<PanSession | null>(null)
 
   const updateViewport = useCallback((value: Viewport | ((current: Viewport) => Viewport)): void => {
-    setViewport((current) => {
-      const next = typeof value === 'function' ? value(current) : value
-      viewportRef.current = next
-      return next
-    })
+    // ref 与状态同步写：setState updater 内不得有副作用（并发渲染下可能被丢弃或重放），
+    // 而事件回调必须读到最新视口，故以 ref 为准解析函数式入参
+    const next = typeof value === 'function' ? value(viewportRef.current) : value
+    viewportRef.current = next
+    setViewport(next)
   }, [])
 
   const fitView = useCallback((options: { padding?: number; nodes?: CanvasNode[] } = {}): void => {

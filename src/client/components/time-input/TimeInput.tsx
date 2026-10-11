@@ -13,7 +13,8 @@ export interface TimeInputProps {
   /** 当前值（"HH:mm"；空串表示未选择）。 */
   value: string
   onChange(value: string): void
-  placeholder?: string
+  /** 输入框占位示例（由调用方从词典注入，组件不内联用户可见文案）。 */
+  placeholder: string
   ariaLabel?: string
   pickerLabel: string
   hourLabel: string
@@ -158,7 +159,7 @@ export function TimeInput({ value, onChange, placeholder, ariaLabel, pickerLabel
         type="text"
         className="wf-time__field"
         value={text}
-        placeholder={placeholder ?? 'HH:mm'}
+        placeholder={placeholder}
         aria-label={ariaLabel}
         inputMode="numeric"
         onFocus={() => { focusedRef.current = true }}

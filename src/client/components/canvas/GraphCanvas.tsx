@@ -1,6 +1,6 @@
 // src/client/components/canvas/GraphCanvas.tsx
 //
-// 自研 SVG 画布（照搬旧项目 graph-canvas.js，TSX 化 + 新模型适配）。
+// 自研 SVG 画布。
 // 节点为绝对定位 HTML 卡片（左 db/ctx/flow 入点、右 ctx/flow/db 出点），连线为
 // SVG 贝塞尔曲线；支持拖拽、平移、缩放、连线、条件标签、运行态高亮、空画布引导。
 // 协作组卡片渲染成员迷你列表（组内成员节点以迷你形态叠加于组内）。
@@ -44,7 +44,7 @@ export interface GraphCanvasProps {
   onInit(api: import('./use-canvas-viewport.js').CanvasApi): void
   onNodeDragStart(): void
   onNodeMove(id: string, position: { x: number; y: number }): void
-  /** 角色节点拖入协作组（需求 §4.2.5.2 规则 1）。 */
+  /** 角色节点拖入协作组。 */
   onNodeDropToGroup(nodeId: string, groupId: string): void
   onNodeSelect(id: string): void
   onEdgeSelect(id: string): void
@@ -202,8 +202,8 @@ export function GraphCanvas(props: GraphCanvasProps) {
     event.stopPropagation()
     const node = byId.get(nodeId)
     if (!node) return
-    // 只记录拖拽起点，不直接在回调里注册 window 监听（Bug 14 修正定位：原先
-    // addEventListener 在 callback 内、仅 onUp 移除——组件卸载/指针丢失时监听器
+    // 只记录拖拽起点，不直接在回调里注册 window 监听：在 callback 内注册、仅 onUp 移除时，
+    // 组件卸载/指针丢失时监听器
     // 残留并持续向已卸载组件回调）。监听与清理统一由下方 useEffect 管理。
     setGroupResize({
       nodeId,
@@ -225,7 +225,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
     const onUp = (): void => setGroupResize(null)
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
-    // 鼠标移出浏览器窗口/失焦时 pointerup 可能不触发（Bug 7 同款兜底），
+    // 鼠标移出浏览器窗口/失焦时 pointerup 可能不触发，
     // pointercancel + blur 一并清理，避免监听器残留与 onGroupResize 空转。
     window.addEventListener('pointercancel', onUp)
     window.addEventListener('blur', onUp)
@@ -255,7 +255,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
 
   const transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`
 
-  // 虚拟节点显示数据：label 从主节点取（不存独立配置，§4.2.3.2 规则 3）
+  // 虚拟节点显示数据：label 从主节点取（不存独立配置）
   const renderedNodes: CanvasNode[] = nodes.map((node) => {
     if (node.kind !== 'proxy') return node
     const sourceId = String(node.proxySourceId ?? '')
@@ -268,7 +268,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
   for (const group of groupNodes) {
     for (const memberId of [...new Set((group.data.memberIds as string[] | undefined) ?? [])]) memberIdsOf.add(memberId)
   }
-  // 组内成员仅在组卡片内显示迷你卡（不在画布重复渲染大卡，需求 §4.2.5.2 规则 9）
+  // 组内成员仅在组卡片内显示迷你卡（不在画布重复渲染大卡）
   const standalone = renderedNodes.filter((node) => node.kind !== 'group' && !memberIdsOf.has(node.id))
   const groupMembers = new Map<string, { id: string; label: string; status: string | null; locked: boolean }[]>()
   for (const group of groupNodes) {

@@ -10,6 +10,9 @@
 // 断言策略：只断言 code 集合与级别（不绑定中文文案——文案属可润色内容）。
 
 import { describe, expect, it } from 'vitest'
+import { readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   GRAPH_INVARIANT_CODES,
   buildFlowDag,
@@ -195,15 +198,28 @@ describe('检查器基线', () => {
     }
   })
 
-  it('输出稳定排序：error 在前，同级按 code 字典序', () => {
+  it('输出稳定排序：error 全部在前，同级按 code 字典序', () => {
+    // 该图形同时产出多个 error 与多个 warning，且规则产出顺序与字典序不同，
+    // 因此排序一旦被改成任意顺序（甚至反向），本用例必红。
     const doc = flow(
-      [stage('s', 'start'), agent('a1'), agent('a2'), stage('e', 'end')],
-      [line('l1', 's', 'a1'), line('l2', 'a2', 'e')], // a1 无出、a2 无入 → cannotReachEnd + unreachableFromStart
+      [agent('a1', '分析', { systemPrompt: '', presetId: null }), stage('e', 'end')],
+      [line('l1', 'a1', 'e')],
     )
     const issues = check({ flow: doc })
     const levels = issues.map((issue) => issue.level)
+    // 前置：夹具必须同时产出 error 与 warning，否则本用例退化为空转
+    expect(levels).toContain('error')
+    expect(levels).toContain('warning')
+    // 段序：全部 error 在前，warning 段连续到末尾
     const firstWarning = levels.indexOf('warning')
-    if (firstWarning >= 0) expect(levels.slice(firstWarning).every((level) => level === 'warning')).toBe(true)
+    expect(levels.slice(firstWarning).every((level) => level === 'warning')).toBe(true)
+    // 同级字典序：排序契约（下游 wf_graph_patch 聚合文本 #N 序号的稳定性来源）
+    const codesInLevel = (level: string): string[] => issues.filter((issue) => issue.level === level).map((issue) => issue.code)
+    for (const level of ['error', 'warning'] as const) {
+      const codes = codesInLevel(level)
+      expect(codes.length).toBeGreaterThan(1)
+      expect(codes).toEqual([...codes].sort())
+    }
   })
 })
 
@@ -726,5 +742,63 @@ describe('流程子图纯函数（dag.ts）', () => {
     expect(layers.get('s')).toBe(0)
     expect(layers.has('a1')).toBe(false)
     expect(layers.has('a2')).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 产出 code ⊆ 注册表（GRAPH_INVARIANT_CODES 是 code 级别/说明的契约载体）
+// ---------------------------------------------------------------------------
+
+/**
+ * 产出一条 nodeNoConsumer 的画布：
+ * s → a1 → a2 与 a1 → a3，a2 / a3 都汇入 e；a2 另有第二条可执行前置（a3），
+ * a1 声明了 outputSchema 但它的流程下游都没接 ctx → nodeNoConsumer。
+ * 不用自环 ctx 线：`source === targetId && targetHandle === 'ctx-in'` 会被规则视为
+ * 「该下游已经接了 ctx」而消掉本规则，自环画布反而测不到它。
+ */
+function nodeNoConsumerFlow(): WorkflowDocument {
+  return flow(
+    [stage('s', 'start'), agent('a1', 'a1', { outputSchema: '{"type":"object"}' }), agent('a2', 'a2'), agent('a3', 'a3'), stage('e', 'end')],
+    [line('l1', 's', 'a1'), line('l2', 'a1', 'a2'), line('l3', 'a1', 'a3'), line('l4', 'a2', 'e'), line('l5', 'a3', 'e')],
+  )
+}
+
+describe('检查器 code 注册表（D02-01）', () => {
+  it('nodeNoConsumer 已登记且级别为 warning', () => {
+    const info = invariantCodeInfo('nodeNoConsumer')
+    expect(info).not.toBeNull()
+    expect(info?.level).toBe('warning')
+    expect(String(info?.description ?? '').trim().length).toBeGreaterThan(0)
+  })
+
+  it('静态不变式：规则文件里产出的每个 code 字面量都已登记进 GRAPH_INVARIANT_CODES', () => {
+    const rulesDir = fileURLToPath(new URL('../../../src/host/graph/', import.meta.url))
+    const files = readdirSync(rulesDir).filter((name) => name.startsWith('invariants-rules-') && name.endsWith('.ts'))
+    expect(files.length).toBeGreaterThan(0)
+    const produced = new Set<string>()
+    for (const file of files) {
+      const text = readFileSync(join(rulesDir, file), 'utf8')
+      for (const match of text.matchAll(/code:\s*'([^']+)'/g)) produced.add(match[1]!)
+    }
+    // 反空洞：确实扫到了 code（否则空集断言会假通过）
+    expect(produced.size).toBeGreaterThan(0)
+    const unregistered = [...produced].filter((code) => invariantCodeInfo(code) === null)
+    expect(unregistered, `以下 code 产出但未登记进 GRAPH_INVARIANT_CODES：${unregistered.join(', ')}`).toEqual([])
+  })
+
+  it('运行不变式：该画布确实产出 nodeNoConsumer，且其 code 可反查', () => {
+    const issues = check({ flow: nodeNoConsumerFlow() })
+    const targets = issues.filter((issue) => issue.code === 'nodeNoConsumer')
+    expect(targets.length, '构造的画布必须触发 nodeNoConsumer，否则本用例退化为空转').toBeGreaterThan(0)
+    // a1 的产出无人消费，其全部流程下游（a2/a3）都被点名
+    expect(targets.flatMap((issue) => issue.nodeIds ?? []).sort()).toEqual(['a1', 'a2', 'a3'])
+    for (const issue of issues) {
+      expect(invariantCodeInfo(issue.code), `code 未登记进 GRAPH_INVARIANT_CODES：${issue.code}`).not.toBeNull()
+    }
+  })
+
+  it('forbiddenShapes 能把已登记的 warning 提升为 error（登记与生效同一份契约）', () => {
+    const issues = check({ flow: nodeNoConsumerFlow(), meta: { forbiddenShapes: ['nodeNoConsumer'] } })
+    expect(issues.filter((issue) => issue.code === 'nodeNoConsumer').map((issue) => issue.level)).toEqual(['error'])
   })
 })

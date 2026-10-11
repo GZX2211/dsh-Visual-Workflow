@@ -337,7 +337,7 @@ g.is-locked .wf-graph__edge-hit {
   cursor: help;
 }
 
-/* P4 闸门可视化：里程碑闸门用实线强调边框（普通虚拟节点是虚线） */
+/* 里程碑闸门用实线强调边框（普通虚拟节点是虚线） */
 .wf-node.is-gate {
   border-style: solid;
   border-color: var(--wf-brand);
@@ -492,7 +492,7 @@ g.is-locked .wf-graph__edge-hit {
   height: 220px;
 }
 
-/* 拖拽悬停入组高亮（用户验收标注：卡片插入协作组卡片区域即识别为入组） */
+/* 拖拽悬停入组高亮（卡片插入协作组卡片区域即识别为入组） */
 .wf-group-node.is-drop-target .wf-node--group {
   border-color: var(--wf-pass);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--wf-pass) 26%, transparent), 0 0 22px color-mix(in srgb, var(--wf-pass) 32%, transparent);
@@ -511,7 +511,7 @@ g.is-locked .wf-graph__edge-hit {
   pointer-events: none;
 }
 
-/* 已选文件列表（文件表单，按钮下方显示；用户验收标注） */
+/* 已选文件列表（文件表单，按钮下方显示） */
 .wf-file-list {
   display: flex;
   flex-direction: column;
@@ -553,7 +553,7 @@ g.is-locked .wf-graph__edge-hit {
   scrollbar-width: thin;
 }
 
-/* 组内成员 = 缩小版角色卡：仅名称+状态，数据库/上下文接点，无流程接点（用户批注 Q2） */
+/* 组内成员 = 缩小版角色卡：仅名称+状态，数据库/上下文接点，无流程接点（用户批注） */
 .wf-group__member {
   position: relative;
   display: flex;

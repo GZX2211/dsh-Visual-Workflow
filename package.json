@@ -56,7 +56,6 @@
   "devDependencies": {
     "@deepseek-ai/schemastery": "^3.18.1",
     "@playwright/mcp": "^0.0.79",
-    "@types/jsdom": "^28.0.3",
     "@types/node": "26.2.0",
     "@types/pg": "^8.23.1",
     "@types/react": "^19.2.8",

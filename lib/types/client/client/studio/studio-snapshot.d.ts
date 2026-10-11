@@ -9,7 +9,7 @@ import type { GraphSnapshot, CanvasNode, CanvasEdge, StudioState } from './studi
  */
 export declare function graphSnapshotOf(state: StudioState): GraphSnapshot;
 /**
- * 图快照是否一致（Bug 17 的 dirty 精确判定用）。
+ * 图快照是否一致（dirty 精确判定用）。
  * 快照元素均为「内容不可变」结构（节点位置/数据、连线/条件），
  * 直接序列化比较即可（节点/连线顺序即文档事实源顺序）。
  */

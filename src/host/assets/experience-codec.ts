@@ -128,6 +128,9 @@ export function experiencePromptRowToEntry(row: Record<string, unknown>): Experi
  *
  * 为什么直接按契约收窄而不再校验取值域：`fit_score` 等列的 CHECK 约束已经把取值锁在锚点集合内，
  * 而校验清单的唯一本体在经验域；资产库再造一份锚点表只会变成第三处口径。
+ *
+ * 注：四列均为 `NOT NULL` + `CHECK(IN …)`，故 `row.*` 在合规库上不可能为 null/undefined，
+ * `Number(null) === 0` 这条退化路径读不到——真正的形状守卫由 DDL 承担。
  */
 export function evaluationScoresFromRow(row: Record<string, unknown>): ExperienceEvaluationScores {
   return {

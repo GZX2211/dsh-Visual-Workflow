@@ -148,16 +148,16 @@ function truncate(value: unknown, limit: number): string {
   return text.length > limit ? `${text.slice(0, limit)}…` : (text || '—')
 }
 
-/** 角色模板卡副行：System Prompt 截断展示（需求 §4.2.3.1：不可编辑，超过 20 字截断；
- *  从 .md 加载时显示所选 .md 文件名——用户验收标注）。 */
+/** 角色模板卡副行：System Prompt 截断展示（不可编辑，超过 20 字截断；
+ *  从 .md 加载时显示所选 .md 文件名）。 */
 function roleSubline(template: RoleTemplate): string {
-  const source = String((template as { systemPromptSource?: unknown }).systemPromptSource ?? '').trim()
+  const source = String(template.systemPromptSource ?? '').trim()
   if (source) return source
   return truncate(String(template.systemPrompt ?? ''), 20)
 }
 
 /** 文件模板卡副行：文本类型显示内容（单行省略）；文件类型显示所选文件名列表
- *  （保留中文文件名；超出单行省略）——用户验收标注。 */
+ *  （保留中文文件名；超出单行省略）。 */
 function fileSubline(template: FileTemplate): string {
   if (template.fileKind === 'file') {
     const files = Array.isArray(template.files) && template.files.length > 0
@@ -328,7 +328,7 @@ export function buildLibraryModel(input: LibraryModelInput): LibraryModel {
       ))
     }
   } else if (libTab === 'workflow') {
-    // 图2 交互改造：左侧「工作流」Tag 拆两区——上方实例列表（无 + 号；运行中卡片
+    // 左侧「工作流」Tag 拆两区——上方实例列表（无 + 号；运行中卡片
     // 名称右侧显示运行状态；工作台全局化：全部会话实例 + 当前主会话实例「当前」标签），
     // 下方工作流模板列表（+ 号新建空白模板；全局共享）。
     sections.push({
@@ -384,8 +384,7 @@ export function buildLibraryModel(input: LibraryModelInput): LibraryModel {
               onClick: () => onSelectLib('parentTemplate', parentTemplate.id),
               onDrop: (position) => onPlaceParent(parentTemplate.id, position ?? { x: 120, y: 80 }),
             },
-            // pinned 必须为 false：父代理模板卡不是「钉住」的对象——旧代码把第 9 个位置
-            // 参数传了 true，导致 LeftPanel 常驻渲染 is-pinned 高亮（P4 修复）。
+            // pinned 必须为 false：父代理模板卡不是「钉住」的对象（传 true 会让 LeftPanel 常驻渲染 is-pinned 高亮）
             false,
           ),
         ],

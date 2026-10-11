@@ -17,7 +17,7 @@ import React from 'react'
 import { Studio } from '../../../src/client/studio/Studio.js'
 import { zh } from '../../../src/client/i18n.js'
 import type { RemoteFace } from '../../../src/client/hooks/useRemote.js'
-import { EP } from '../../../src/client/lib/remote.js'
+import { mountStudio, remoteStub } from '../fixtures/studio-harness.js'
 import {
   createInitialState, nextPanelMode, leftPanelOpenOf, bottomPanelOpenOf, inspectorOpenOf,
   type StudioState,
@@ -39,38 +39,11 @@ afterEach(() => {
   container = null
 })
 
-function remoteStub(): RemoteFace {
-  const remote: RemoteFace = {
-    stream: vi.fn(async () => undefined),
-    call: vi.fn(async (endpoint: string, args?: Record<string, unknown>) => {
-      if (endpoint === EP.EP_LIST_TEMPLATES && String(args?.kind ?? '') === 'role') {
-        return [
-          { id: 'parent', kind: 'parent', name: '父代理', systemPrompt: '' },
-          { id: 'r-1', kind: 'agent', name: '研究员', systemPrompt: '' },
-          { id: 'r-2', kind: 'agent', name: '测试工程师', systemPrompt: '' },
-        ]
-      }
-      if (endpoint === EP.EP_LIST_TEMPLATES && String(args?.kind ?? '') === 'group') {
-        return [{ id: 'g-1', name: '协作组', collabPrompt: '' }]
-      }
-      if (endpoint === EP.EP_PRESETS) return [{ id: 'standard', name: '标准' }]
-      if (endpoint === EP.EP_MODELS) return [{ provider: 'deepseek', model: 'deepseek-chat' }]
-      if (endpoint === EP.EP_ACTIVE_RUNS) return []
-      if (endpoint === EP.EP_LIST_WORKFLOWS) return []
-      if (endpoint === EP.EP_LIST_FLOW_TEMPLATES) return []
-      return []
-    }),
-  }
-  return remote
-}
 
-async function renderStudio(): Promise<void> {
-  await act(async () => {
-    root = createRoot(container!)
-    root.render(React.createElement(Studio, { t: zh, sessionId: 's-1', remote: remoteStub() }))
-  })
+/** 挂载 Studio（共享挂载器：容器与 root 由本文件持有）。 */
+async function renderStudio(remote: RemoteFace = remoteStub()): Promise<void> {
+  await mountStudio(container!, (next) => { root = next }, remote)
 }
-
 function textOf(selector: string): string[] {
   return Array.from(document.querySelectorAll(selector)).map((item) => item.textContent ?? '')
 }
@@ -254,7 +227,13 @@ describe('属性栏显隐（DOM）', () => {
   })
 
   it('父代理模板具备属性：点击父代理卡片弹出属性栏', async () => {
-    await renderStudio()
+    // 父代理模板是父代理专属项，按用例显式给桩（默认桩只含普通角色模板）
+    await renderStudio(remoteStub({
+      roleTemplates: [
+        { id: 'parent', kind: 'parent', name: '父代理', systemPrompt: '' },
+        { id: 'r-1', kind: 'agent', name: '研究员', systemPrompt: '' },
+      ],
+    }))
     await act(async () => { libTab('角色')?.click() })
     const parentCard = Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-docitem')).find((item) => item.textContent?.includes('父代理'))
     expect(parentCard).toBeTruthy()

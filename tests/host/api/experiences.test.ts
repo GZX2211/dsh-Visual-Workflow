@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { ERR_EXPERIENCE_BAD_ARGS, ERR_EXPERIENCE_NOT_FOUND } from '../../../src/host/shared/protocol.js'
 import { EXPERIENCE_LIST_MAX_LIMIT } from '../../../src/host/assets/index.js'
 import type { ExperienceStatsEntry } from '../../../src/host/shared/asset-types.js'
-import { cleanupAll, FakeExperienceDomain, makeHarness } from './fixtures/api-harness.js'
+import { cleanupAll, FAKE_PROJECTION_SENTINELS, FakeExperienceDomain, makeHarness } from './fixtures/api-harness.js'
 
 afterEach(cleanupAll)
 
@@ -123,7 +123,7 @@ describe('经验列表与状态端点', () => {
     expect(saved.evidence).toEqual(['既有证据'])
   })
 
-  it('saveExperience 返回领域重算后的检索投影与向量元信息', async () => {
+  it('saveExperience：边界的返回值取自经验域结果（检索投影与向量元信息原样透传）', async () => {
     const { h, domain } = await makeExperienceHarness()
     domain.seedExperience({
       id: 'ex-1',
@@ -136,8 +136,11 @@ describe('经验列表与状态端点', () => {
       patch: { responsibility: '负责发布链路', taskType: '插件开发', situation: '发布前发现缺陷', trigger: '再次发布', decisionDomain: '发布时机', principle: '先跑端到端', recommendedAction: '补验证' },
     })) as Record<string, unknown>
 
-    expect(saved.taskRetrievalText).toBe('负责发布链路 / 插件开发 / 发布前发现缺陷 / 再次发布')
-    expect(saved.decisionRetrievalText).toBe('发布时机 / 先跑端到端 / 补验证 / ')
+    // 投影由经验域产出（夹具用固定哨兵代表「域的计算结果」）：
+    // 边界只透传，不得自行拼装投影文本（否则领域格式变更时该用例不会失败）
+    expect(saved.taskRetrievalText).toBe(FAKE_PROJECTION_SENTINELS.taskRetrievalText)
+    expect(saved.decisionRetrievalText).toBe(FAKE_PROJECTION_SENTINELS.decisionRetrievalText)
+    expect(saved.taskRetrievalText).not.toContain('负责发布链路')
     expect(saved.embeddingModel).toBe('fake-embed')
     expect(saved.embeddingDimension).toBe(4)
     expect(saved.sourceRunId).toBe('run-1')

@@ -4,7 +4,7 @@ import type { WorkflowDocument, WorkflowTemplate } from '../shared/graph-model.j
 import type { ServiceState, ToolCombo, RunSnapshot, RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate } from '../shared/types.js';
 export type { Template, TemplateKind } from './template-model.js';
 export type { SaveOptions } from './document-policy.js';
-export { FlowRevisionConflictError } from './document-policy.js';
+export { FlowNotFoundError, FlowRevisionConflictError } from './document-policy.js';
 export declare class FlowStore {
     readonly root: string;
     /** 顶层数据目录（init 时创建；常量表供测试与外部工具断言布局）。 */
@@ -100,7 +100,7 @@ export declare class FlowStore {
     getRun(runId: string): Promise<RunSnapshot | null>;
     /** 保存 run 快照（断点持久化走同一入口；原子写保证崩溃不撕裂）。 */
     saveRun(run: RunSnapshot): Promise<RunSnapshot>;
-    /** 扫描全部 run id（reconcileStaleRuns 用，T-027）。 */
+    /** 扫描全部 run id（reconcileStaleRuns 用）。 */
     listAllRunIds(): Promise<string[]>;
     /** 列出全部工具组合（全局共享）。 */
     listToolCombos(): Promise<ToolCombo[]>;
@@ -124,6 +124,6 @@ export declare class FlowStore {
     saveOrchestration(runId: string, flow: WorkflowDocument): Promise<void>;
     /** 读取运行时流程定义。 */
     readOrchestration(runId: string): Promise<WorkflowDocument | null>;
-    /** 运行时流程定义文件的绝对路径（编排指令 facts.definitionPath 注入用，T-021）。 */
+    /** 运行时流程定义文件的绝对路径（编排指令 facts.definitionPath 注入用）。 */
     orchestrationFilePath(runId: string): string;
 }

@@ -97,7 +97,7 @@ export function useRunActions(
     const flow = currentFlowOf(state)
     if (!flow) return
     try {
-      // 会话隔离：历史查询必须携带实例归属会话（Bug 14；新逻辑即执行会话）
+      // 会话隔离：历史查询必须携带实例归属会话（即执行会话）
       const historySessionId = state.run.sessionId ?? flow.sessionId
       const items = await remote.call(EP.EP_RUN_HISTORY, { sessionId: historySessionId, flowId: flow.id }) as unknown[]
       dispatch({ type: 'RUN_HISTORY_LOADED', items: Array.isArray(items) ? items as [] : [] })

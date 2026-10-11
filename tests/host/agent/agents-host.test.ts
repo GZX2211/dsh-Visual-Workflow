@@ -115,47 +115,79 @@ function serviceStore(nodes: unknown[] | null): never {
   return { getServiceById: async (id: string) => (id === 'svc-1' && nodes ? { nodes } : null) } as never
 }
 
+/** 调用方解析出的工作目录（模拟 service-runner 按服务文档 workspacePath 解析后的值）。 */
+const SERVICE_CWD = '/srv/workspaces/demo'
+
 describe('createOrGetServiceAgent（服务会话根 Agent 取/建）', () => {
   it('agents 服务缺失或形状不完整 → 明确报错（不含糊降级）', async () => {
-    await expect(createOrGetServiceAgent(serviceCtx(undefined), serviceStore([]), 'svc-1', 'session-1')).rejects.toThrow(
-      /agents 服务不可用/,
-    )
-    await expect(createOrGetServiceAgent(serviceCtx({ get: () => undefined }), serviceStore([]), 'svc-1', 'session-1')).rejects.toThrow(
-      /agents 服务不可用/,
-    )
+    await expect(
+      createOrGetServiceAgent(serviceCtx(undefined), serviceStore([]), 'svc-1', 'session-1', { cwd: undefined }),
+    ).rejects.toThrow(/agents 服务不可用/)
+    await expect(
+      createOrGetServiceAgent(serviceCtx({ get: () => undefined }), serviceStore([]), 'svc-1', 'session-1', { cwd: undefined }),
+    ).rejects.toThrow(/agents 服务不可用/)
   })
 
   it('会话已有 Agent → 直接复用（不重复创建）', async () => {
     const existing = { id: 'session-1', followup: () => {} }
     let createCalls = 0
     const ctx = serviceCtx({ get: () => existing, create: async () => { createCalls += 1; return existing } })
-    const result = await createOrGetServiceAgent(ctx, serviceStore([{ kind: 'parent', data: { provider: 'p1', model: 'm1' } }]), 'svc-1', 'session-1')
+    const result = await createOrGetServiceAgent(
+      ctx,
+      serviceStore([{ kind: 'parent', data: { provider: 'p1', model: 'm1' } }]),
+      'svc-1',
+      'session-1',
+      { cwd: SERVICE_CWD },
+    )
     expect(result.agent).toBe(existing)
     expect(createCalls).toBe(0)
     // 父代理节点的 provider/model 仍从服务文档解析（供调用方回显）
     expect(result).toMatchObject({ provider: 'p1', model: 'm1' })
   })
 
-  it('会话无 Agent → 创建并携带父代理节点 provider/model 与会话 id', async () => {
+  it('会话无 Agent → 创建并携带父代理节点 provider/model 与会话 id，且工作目录取传入值', async () => {
     const created = { id: 'session-1' }
     const options: Array<Record<string, unknown>> = []
     const ctx = serviceCtx({ get: () => undefined, create: async (input: Record<string, unknown>) => { options.push(input); return { agent: created } } })
-    const result = await createOrGetServiceAgent(ctx, serviceStore([{ kind: 'parent', data: { provider: 'p1', model: 'm1' } }]), 'svc-1', 'session-1')
+    const result = await createOrGetServiceAgent(
+      ctx,
+      serviceStore([{ kind: 'parent', data: { provider: 'p1', model: 'm1' } }]),
+      'svc-1',
+      'session-1',
+      { cwd: SERVICE_CWD },
+    )
     expect(result.agent).toBe(created)
     expect(options).toHaveLength(1)
     expect(options[0]).toMatchObject({ sessionId: 'session-1', agentOptions: { provider: 'p1', model: 'm1' } })
-    expect((options[0].meta as { cwd?: unknown }).cwd).toBe(process.cwd())
+    // 工作目录 = 调用方显式解析值（不是进程全局 cwd——服务进程的 cwd 是插件数据目录）
+    expect((options[0].meta as { cwd?: unknown }).cwd).toBe(SERVICE_CWD)
+    expect((options[0].meta as { cwd?: unknown }).cwd).not.toBe(process.cwd())
+  })
+
+  it('未配置工作区（cwd 为 undefined）→ 省略 meta.cwd，由官方默认工作区决定（不回退进程 cwd）', async () => {
+    const options: Array<Record<string, unknown>> = []
+    const ctx = serviceCtx({ get: () => undefined, create: async (input: Record<string, unknown>) => { options.push(input); return { id: 'session-1' } } })
+    await createOrGetServiceAgent(
+      ctx,
+      serviceStore([{ kind: 'parent', data: { provider: 'p1', model: 'm1' } }]),
+      'svc-1',
+      'session-1',
+      { cwd: undefined },
+    )
+    expect(options[0]).not.toHaveProperty('meta')
   })
 
   it('服务文档缺 parent 节点（或无 provider/model）→ 创建时不带 agentOptions（官方按默认选择）', async () => {
     const options: Array<Record<string, unknown>> = []
     const ctx = serviceCtx({ get: () => undefined, create: async (input: Record<string, unknown>) => { options.push(input); return { id: 'session-1' } } })
-    await createOrGetServiceAgent(ctx, serviceStore([{ kind: 'agent', data: {} }]), 'svc-1', 'session-1')
+    await createOrGetServiceAgent(ctx, serviceStore([{ kind: 'agent', data: {} }]), 'svc-1', 'session-1', { cwd: SERVICE_CWD })
     expect(options[0].agentOptions).toBeUndefined()
   })
 
   it('create 返回空值 → 明确报错（不把 undefined 当 Agent 返回）', async () => {
     const ctx = serviceCtx({ get: () => undefined, create: async () => undefined })
-    await expect(createOrGetServiceAgent(ctx, serviceStore([]), 'svc-1', 'session-1')).rejects.toThrow(/建立失败/)
+    await expect(
+      createOrGetServiceAgent(ctx, serviceStore([]), 'svc-1', 'session-1', { cwd: SERVICE_CWD }),
+    ).rejects.toThrow(/建立失败/)
   })
 })

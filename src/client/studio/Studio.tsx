@@ -1,6 +1,6 @@
 // src/client/studio/Studio.tsx
 //
-// 工作台主组件（照搬旧项目 studio.js 的布局与交互流程，TSX 化 + 新模型装配）：
+// 工作台主组件（布局与交互流程装配）：
 //   窗口内完整工作台 = 标题顶栏（工作流设计器 + 导入/导出/模式/组合 + 关闭）
 //   + 画布控制栏 + 三栏（左侧库 / 画布 / 右侧属性面板）。
 //   本文件负责组件装配、派生数据与初始化编排；交互逻辑拆至 hooks/ 下的
@@ -112,7 +112,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
         : currentFlow
           ? `${t.canvasCaptionInstance}${currentFlow.name ?? ''}`
           : ''
-  // 运行中双向同步（需求 §4.5.8）：当前运行节点高亮 = 快照中 status=running 的节点
+  // 运行中双向同步：当前运行节点高亮 = 快照中 status=running 的节点
   // id 列表（GraphCanvas 渲染 is-highlighted；防回环：只写视图，不进保存/撤销历史）。
   const highlightedNodeIds = useMemo(() => runningNodeIds(state.run.snapshot), [state.run.snapshot])
   const runStatusByNode = useMemo(() => runStatusMap(state.run.snapshot), [state.run.snapshot])
@@ -237,7 +237,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
     pickInitialInstanceForSession,
   )
 
-  // ---------- 模式切换（未保存守卫；需求 §4.1.1） ----------
+  // ---------- 模式切换（未保存守卫） ----------
   const switchMode = useCallback((mode: 'mode1' | 'mode2') => {
     if (mode === state.mode) return
     guard.guard(() => {

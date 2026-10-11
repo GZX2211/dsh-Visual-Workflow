@@ -30,13 +30,13 @@ export function connectionProblem(nodes: CanvasNode[], lines: CanvasEdge[], conn
   if (!targetDef.inputs.includes(targetHandle)) return { valid: false, code: 'invalidHandle' }
   const channel = sourceHandle.replace(/-out$/, '')
   if (targetHandle !== `${channel}-in`) return { valid: false, code: 'channelMismatch' }
-  // 协作组成员不能连流程线（§4.2.5.2 规则 4）：角色在组内时仅 ctx/db 连接点
+  // 协作组成员不能连流程线：角色在组内时仅 ctx/db 连接点
   const memberSource = (sourceKind === 'parent' || sourceKind === 'agent') && Boolean((source as { data?: { groupId?: unknown } }).data?.groupId)
   const memberTarget = (targetKind === 'parent' || targetKind === 'agent') && Boolean((target as { data?: { groupId?: unknown } }).data?.groupId)
   if (channel === 'flow' && (memberSource || memberTarget)) return { valid: false, code: 'groupMemberFlow' }
   if (targetKind === 'start') return { valid: false, code: 'startInput' }
   if (sourceKind === 'end') return { valid: false, code: 'endOutput' }
-  // 虚拟节点与主节点：同一目标节点的同一连接点不得同时连入（防重复触发，§4.2.3.2 规则 6）
+  // 虚拟节点与主节点：同一目标节点的同一连接点不得同时连入（防重复触发）
   const relatedOf = (node: CanvasNode): CanvasNode[] => {
     if (node.kind === 'proxy') {
       return nodes.filter((item) => item.id === node.proxySourceId || (item.kind === 'proxy' && item.proxySourceId === node.proxySourceId))

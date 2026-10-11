@@ -76,8 +76,9 @@ describe('terminate / stop / dispose', () => {
     const third = await start(h, makeFlow())
     expect(third.entry.snapshot.status).toBe('running')
     // paused 运行保留内存（续跑/锁查询需要）
+    const pausedEntry = third.entry
     await h.runtime.wfRunNode(caller, { nodeId: 'n-pause' })
-    expect(h.runtime.pausedRun('session-1', 'flow-1')).not.toBeNull()
+    expect(h.runtime.runSnapshot(pausedEntry.snapshot.id)?.status).toBe('paused')
     expect(h.runtime.flowLockInfo('flow-1')).toMatchObject({ status: 'paused' })
   })
 

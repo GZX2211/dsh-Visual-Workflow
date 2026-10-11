@@ -165,7 +165,7 @@ describe('工具路径静默接续（父代理在自身回合内自行接管断�
 
   it('静默接续仍绑定父代理配置（角色 Prompt/模型），只跳过编排指令', async () => {
     const bound: string[] = []
-    const h = await makeHarness(undefined, {
+    const h = await makeHarness({}, {
       promptSetup: { bindParent: (_ctx, state, sessionId) => { bound.push(`${sessionId}:${state.systemPrompt}`) } },
       modelSelection: { bindParent: () => {} },
       resolveRolePrompt: async () => '父代理角色提示词',
@@ -589,7 +589,8 @@ describe('Experience 最小运行事实 seam（只读语义化查询）', () => 
     await start(h, makeFlow())
     await h.runtime.wfRunNode(caller, { nodeId: 'n-pause' })
 
-    expect(h.runtime.pausedRun('session-1', 'flow-1')).not.toBeNull()
+    // 暂停事实经只读快照查询（原 pausedRun 查询入口已退役）
+    expect(h.runtime.runSnapshot('run-1')?.status).toBe('paused')
     expect(h.runtime.activeRunForSession('session-1')).toBeNull()
   })
 
@@ -671,5 +672,53 @@ describe('运行活性基准刷新（touchRunForSession）', () => {
     h.clock.now += 600
     await sweepWatchdogOnce(h.runtime)
     expect(entry.snapshot.status).toBe('stopped')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 父代理执行单元的注入文案：重试预算分母必须与运行护栏同源
+// ---------------------------------------------------------------------------
+
+/**
+ * hybrid 流程（父代理被流程线连接 → 自身也是执行单元）：start → parent → a1 → end。
+ * `retryLimit` 由用例给出，用于验证注入文案里的分母随节点配置变化。
+ */
+function hybridBudgetFlow(parentRetryLimit: number): WorkflowDocument {
+  const base = parentNode('n-p', '父代理')
+  return {
+    id: 'flow-budget',
+    sessionId: 'session-1',
+    mode: 'mode1',
+    name: '父代理执行预算',
+    description: '验证注入文案里的重试预算',
+    revision: 1,
+    nodes: [
+      stage('n-start', 'start'),
+      { ...base, data: { ...base.data, retryLimit: parentRetryLimit } },
+      agent('n-a1', '子任务'),
+      stage('n-end', 'end'),
+    ],
+    lines: [
+      { id: 'l1', source: 'n-start', target: 'n-p', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+      { id: 'l2', source: 'n-p', target: 'n-a1', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+      { id: 'l3', source: 'n-a1', target: 'n-end', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+    ],
+  }
+}
+
+describe('父代理执行单元的重试预算文案', () => {
+  it('节点 retryLimit=3 → 注入 attempt N/4（与本 run 护栏 attempt > limit + 1 同源）', async () => {
+    const h = await makeHarness()
+    await start(h, hybridBudgetFlow(3))
+    const directive = h.agents.roots.get('session-1')!.messages[0].content.map((c) => c.text).join('\n')
+    expect(directive).toContain('attempt 1/4（父代理执行单元）')
+    expect(directive).not.toContain('attempt 1/1')
+  })
+
+  it('节点 retryLimit=0（不重试）→ 注入 attempt 1/1（预算真实为 1 次）', async () => {
+    const h = await makeHarness()
+    await start(h, hybridBudgetFlow(0))
+    const directive = h.agents.roots.get('session-1')!.messages[0].content.map((c) => c.text).join('\n')
+    expect(directive).toContain('attempt 1/1（父代理执行单元）')
   })
 })

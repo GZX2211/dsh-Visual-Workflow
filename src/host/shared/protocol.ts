@@ -409,6 +409,79 @@ export const EP_SCHEDULER_TASK_PUT = 'schedulerTaskPut'
 export const EP_SCHEDULER_TASK_DELETE = 'schedulerTaskDelete'
 
 /**
+ * GUI 端点名清单（**唯一端点本体**；GUI API 白名单只从它派生）。
+ *
+ * 为什么需要它：白名单原先由本文件的**全部字符串导出**派生（`Object.values(EP)`），
+ * 于是错误码常量、`wf_*` 工具名、时区建议等在 `Set` 里也被登记为「合法端点」——
+ * 白名单失去「端点集合」的语义，任何新增协议字符串都会无声扩张可路由面。
+ * 本数组是有序的端点全集；`boundary.ts` 的白名单与契约测试都以此为准。
+ *
+ * 新增端点：在对应段落新增 `EP_*` 常量后，必须把字面量同步登记到本数组
+ * （缺失即端点 404；多余项由契约测试的「白名单每个名字都有实现方法」断言拦住）。
+ */
+export const ENDPOINT_NAMES = [
+  'listWorkflows',
+  'getWorkflow',
+  'putWorkflow',
+  'deleteWorkflow',
+  'listServices',
+  'getService',
+  'putService',
+  'deleteService',
+  'serviceStart',
+  'serviceStop',
+  'serviceStatus',
+  'serviceDebug',
+  'createSession',
+  'listTemplates',
+  'putTemplate',
+  'deleteTemplate',
+  'listFlowTemplates',
+  'putFlowTemplate',
+  'deleteFlowTemplate',
+  'fileUpload',
+  'presets',
+  'models',
+  'toolCombos',
+  'toolComboPut',
+  'toolComboDelete',
+  'pluginCatalog',
+  'mcpPut',
+  'mcpDelete',
+  'mcpToggle',
+  'toolSwitchPut',
+  'toolSwitchPutMany',
+  'run',
+  'runStatus',
+  'activeRuns',
+  'runStop',
+  'runHistory',
+  'runResume',
+  'runtimeConfig',
+  'dbTest',
+  'exportWorkflow',
+  'importWorkflow',
+  'exportAgentTemplate',
+  'importAgentTemplate',
+  'listAssets',
+  'getAsset',
+  'promoteAsset',
+  'saveAssetVersion',
+  'listAssetVersions',
+  'rollbackAsset',
+  'retireAsset',
+  'previewAssetCascade',
+  'restoreAsset',
+  'listExperiences',
+  'saveExperience',
+  'retireExperience',
+  'restoreExperience',
+  'schedulerTasks',
+  'schedulerTaskPut',
+  'schedulerTaskDelete',
+] as const
+
+/**
  * 定时任务「常用时区」下拉建议列表（**唯一本体**）。
  *
  * 为什么放在共享协议层：该清单同时服务两端——host 侧的任务配置默认值/文档示例与
@@ -451,6 +524,16 @@ export const SCHEDULER_TIMEZONE_SUGGESTIONS: readonly string[] = [
 
 /** 乐观锁冲突：资源在客户端加载后已被别的写入修改（HTTP 409）。 */
 export const ERR_REVISION_CONFLICT = 'FLOW_REVISION_CONFLICT'
+
+/**
+ * 目标工作流不存在**或不属于本会话**（HTTP 404）。
+ *
+ * 为什么两义合一：写路径的归属校验必须与读/删路径同口径（不匹配按「不存在」处理），
+ * 否则「他人实例」与「不存在」可用响应码区分，等于给调用方一个存在性预言。
+ * 为什么需要稳定码而不是普通 Error：它经 GUI 边界映射状态，无码会落成 500，
+ * 违反 api/AGENTS.md「调用方错误不得被响应成 500」。
+ */
+export const ERR_FLOW_NOT_FOUND = 'FLOW_NOT_FOUND'
 
 /**
  * 资产不存在（Active 索引里没有该 asset_id / 该资产已退役），HTTP 404。

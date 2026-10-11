@@ -1,6 +1,6 @@
 // src/client/hooks/useFlowFileSync.ts
 //
-// 双向同步②「流程文件→画布」（图2 交互改造 + 用户裁决 q8）：
+// 双向同步②「流程文件→画布」：
 // 实例文件被外部修改（如经授权的代理编辑 workflows/<flowId>.json）后，画布
 // 轮询检测 revision 变化并响应：
 //   - 无未保存修改（dirty=false）：自动重载最新文档并刷新画布（防回环：只更新

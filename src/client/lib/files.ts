@@ -1,6 +1,6 @@
 // src/client/lib/files.ts
 //
-// Client 文件与浏览器工具（照搬旧项目 src/client/lib/files.js，TS 化）：
+// Client 文件与浏览器工具：
 // 文件读取（文本/Base64）与下载。
 // localStorage 读写不在此处：界面布局等持久化统一走 lib/storage.ts 的 StorageLike
 // 注入面（调用方负责传入具体存储），避免 lib 直接依赖 window。

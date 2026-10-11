@@ -11,6 +11,7 @@
 // 纯函数：不读时钟/随机源，不改写入参，节点顺序稳定（同输入同输出）。
 
 import type { GraphNode, Line } from '../shared/graph-model.js'
+import { channelIn, channelOut } from './model.js'
 
 /** 流程子图（仅包含画布内合法端点的 flow 线）。 */
 export interface FlowDag {
@@ -33,7 +34,7 @@ export interface FlowDag {
  * 流程子图（本文件构建的 DAG）口径分裂。本函数是 host 侧**流程线判定的唯一本体**。
  */
 export function isFlowLine(line: Line): boolean {
-  return line?.sourceHandle === 'flow-out' && line?.targetHandle === 'flow-in'
+  return line?.sourceHandle === channelOut('flow') && line?.targetHandle === channelIn('flow')
 }
 
 /** 构建流程子图（忽略端点缺失的线，避免悬空引用影响判定）。 */

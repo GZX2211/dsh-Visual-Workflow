@@ -246,3 +246,25 @@ describe('validateFlow 全量校验', () => {
     expect(codes(makeFlow([g2, f]))).toContain('groupMemberKind')
   })
 })
+
+// ---------------------------------------------------------------------------
+// 通道配对：全量校验与单连线检测走同一查询入口
+// ---------------------------------------------------------------------------
+
+describe('validateFlow 的通道配对判定', () => {
+  it('ctx-out → flow-in 在全量校验里同样报 handleMismatch（判定不只存在于单连线检测）', () => {
+    const a = newRoleNode('agent', 'a')
+    const b = newRoleNode('agent', 'b')
+    const issue = validateFlow(makeFlow([a, b], [newLine(a.id, b.id, 'ctx-out', 'flow-in')])).issues.find(
+      (entry) => entry.code === 'handleMismatch',
+    )
+    // 文案由配对查询结果拼出（末尾附带 a → b 定位）
+    expect(issue?.message).toContain('ctx-out can only connect ctx-in')
+  })
+
+  it('正确配对（ctx-out → ctx-in）不产生假阳性 handleMismatch', () => {
+    const a = newRoleNode('agent', 'a')
+    const b = newRoleNode('agent', 'b')
+    expect(codes(makeFlow([a, b], [newLine(a.id, b.id, 'ctx-out', 'ctx-in')]))).not.toContain('handleMismatch')
+  })
+})

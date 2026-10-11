@@ -25,6 +25,7 @@ import {
 import { useAssets, type AssetsFace } from '../../../src/client/hooks/useAssets.js'
 import { useExperiences } from '../../../src/client/hooks/useExperiences.js'
 import { useUnsavedGuard, type UnsavedGuardFace } from '../../../src/client/hooks/useUnsavedGuard.js'
+import { flushAsync, waitForCondition } from '../fixtures/async-flush.js'
 import { createInitialState } from '../../../src/client/studio/studio-initial.js'
 import { studioReducer } from '../../../src/client/studio/studio-reducer.js'
 import { zh } from '../../../src/client/i18n.js'
@@ -33,6 +34,13 @@ import type { RemoteError } from '../../../src/client/lib/remote.js'
 import type { RemoteFace } from '../../../src/client/hooks/useRemote.js'
 import type { CanvasNode, StudioState } from '../../../src/client/studio/studio-types.js'
 import type { StudioAction } from '../../../src/client/studio/studio-actions.js'
+import type { ToastFace } from '../../../src/client/hooks/useToast.js'
+import type { WorkflowsFace } from '../../../src/client/hooks/useWorkflows.js'
+import type { FlowTemplatesFace } from '../../../src/client/hooks/useFlowTemplates.js'
+import type { TemplatesFace } from '../../../src/client/hooks/useTemplates.js'
+import type { ExperiencesFace } from '../../../src/client/hooks/useExperiences.js'
+import type { SelectionFace } from '../../../src/client/hooks/useSelection.js'
+import type { DocumentActionsFace } from '../../../src/client/hooks/useDocumentActions.js'
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -68,14 +76,16 @@ const unlocked = { enabled: false, nodes: [], edges: [], statusByNode: {}, locke
  * 钩子内部用 ref 跟踪最新 state，因此「回调读到的」以最后一次渲染为准。
  */
 async function renderFace(state: StudioState, deps: {
-  workflows?: unknown
-  flowTemplates?: unknown
-  templates?: unknown
-  assets?: unknown
-  experiences?: unknown
-  selection?: unknown
-  remote?: unknown
-  saveCanvas?: unknown
+  // 本文件只消费依赖面的少数成员，故按 Partial 收窄：装配点统一补空实现并标注
+  // 「最小替身」，调用点不再逐个 `as never`（保留参数名与成员名的编译期约束）。
+  workflows?: Partial<WorkflowsFace>
+  flowTemplates?: Partial<FlowTemplatesFace>
+  templates?: Partial<TemplatesFace>
+  assets?: Partial<AssetsFace>
+  experiences?: Partial<ExperiencesFace>
+  selection?: Partial<SelectionFace>
+  remote?: Partial<RemoteFace>
+  saveCanvas?: DocumentActionsFace['saveCanvas']
 } = {}): Promise<{
   face: EditorActionsFace
   dispatched: StudioAction[]
@@ -86,24 +96,32 @@ async function renderFace(state: StudioState, deps: {
   const toasts: Array<{ kind: string; text: string }> = []
   let face: EditorActionsFace | null = null
   function Probe({ current }: { current: StudioState }): null {
+    // 依赖面替身：只实现本文件断言涉及的成员，其余用空实现；后者以 `Partial<X> as X`
+    // 显式标注「这是最小替身」，而不是逐个 `as never`（那会让参数顺序/类型完全不受约束）。
+    const notify: ToastFace['toast'] = (kind, text) => { toasts.push({ kind, text }) }
+    const toastError: ToastFace['toastError'] = () => {}
+    const noop = (): void => {}
+    const saveCanvas: DocumentActionsFace['saveCanvas'] =
+      typeof deps.saveCanvas === 'function' ? deps.saveCanvas : async () => null
     face = useEditorActions(
       current,
-      ((action: StudioAction) => { dispatched.push(action) }) as never,
-      ((kind: 'info' | 'success' | 'error', text: string) => { toasts.push({ kind, text }) }) as never,
-      (() => {}) as never,
+      (action: StudioAction) => { dispatched.push(action) },
+      notify,
+      toastError,
       zh,
-      (deps.workflows ?? {}) as never,
-      (deps.flowTemplates ?? {}) as never,
-      (deps.templates ?? {}) as never,
-      (deps.assets ?? {}) as never,
-      (deps.experiences ?? {}) as never,
-      (deps.selection ?? {}) as never,
-      (deps.remote ?? {}) as never,
-      (deps.saveCanvas ?? (async () => null)) as never,
-      (() => {}) as never,
-      (() => {}) as never,
-      (() => {}) as never,
-      (() => {}) as never,
+      // 装配点唯一一次显式补全：调用方给的是最小替身，这里按生产接口类型收口
+      (deps.workflows ?? {}) as unknown as WorkflowsFace,
+      (deps.flowTemplates ?? {}) as unknown as FlowTemplatesFace,
+      (deps.templates ?? {}) as unknown as TemplatesFace,
+      (deps.assets ?? {}) as unknown as AssetsFace,
+      (deps.experiences ?? {}) as unknown as ExperiencesFace,
+      (deps.selection ?? {}) as unknown as SelectionFace,
+      (deps.remote ?? {}) as unknown as RemoteFace,
+      saveCanvas,
+      noop,
+      noop,
+      noop,
+      noop,
       unlocked,
     )
     return null
@@ -194,13 +212,14 @@ describe('删除在途切文档：画布归属校验（不清新文档画布）'
     const stateB: StudioState = { ...stateOnA(), currentId: 'wf-b', editor: { source: 'workflow', id: 'wf-b' }, canvas: { nodes: [], edges: [] } }
     await rerender(stateB)
 
-    await act(async () => {
-      pending.resolve()
-      await Promise.resolve()
-      await Promise.resolve()
+    pending.resolve()
+    await flushAsync(2)
+    // 显式等待删除结果落定（归属校验必须在此之后判定）
+    await waitForCondition(() => {
+      expect(deleteWorkflow).toHaveBeenCalledWith(flowA)
+      expect(dispatched.some((action) => action.type === 'WORKFLOW_REMOVED')).toBe(true)
     })
 
-    expect(deleteWorkflow).toHaveBeenCalledWith(flowA)
     // 归属校验：被删的 A 已不是当前文档 → 绝不清 B 的画布（新文档内容不被误清）
     expect(dispatched.some((action) => action.type === 'CLEAR_CANVAS')).toBe(false)
     // 列表项仍按删除结果移除（删除本身照常生效）
@@ -213,11 +232,8 @@ describe('删除在途切文档：画布归属校验（不清新文档画布）'
 
     await act(async () => { await face.deleteEditor() })
     const confirm = lastConfirm(dispatched)
-    await act(async () => {
-      confirm!.onConfirm?.()
-      await Promise.resolve()
-      await Promise.resolve()
-    })
+    act(() => { confirm!.onConfirm?.() })
+    await flushAsync(2)
 
     expect(deleteWorkflow).toHaveBeenCalledWith(flowA)
     expect(dispatched.filter((action) => action.type === 'CLEAR_CANVAS')).toHaveLength(1)
@@ -251,19 +267,14 @@ describe('删除在途切文档：画布归属校验（不清新文档画布）'
     await act(async () => { await first.face.deleteEditor() })
     const switched: StudioState = { ...base, currentKind: 'flowTemplate', currentId: 't-2', editor: { source: 'flowTemplate', id: 't-2' } }
     await first.rerender(switched)
-    await act(async () => {
-      firstPending.resolve()
-      await Promise.resolve()
-    })
+    firstPending.resolve()
+    await flushAsync(1)
     expect(first.dispatched.some((action) => action.type === 'CLEAR_CANVAS')).toBe(false)
 
     // ② 未切走（仍是当前模板）
     const second = await renderFace(base, { flowTemplates: { deleteFlowTemplate: vi.fn(async () => {}) } })
-    await act(async () => {
-      await second.face.deleteEditor()
-      await Promise.resolve()
-      await Promise.resolve()
-    })
+    await second.face.deleteEditor()
+    await flushAsync(2)
     expect(second.dispatched.filter((action) => action.type === 'CLEAR_CANVAS')).toHaveLength(1)
   })
 
@@ -285,10 +296,8 @@ describe('删除在途切文档：画布归属校验（不清新文档画布）'
     const confirm = lastConfirm(dispatched)
     act(() => { confirm!.onConfirm?.() })
     await rerender({ ...serviceState, currentKind: 'workflow', currentId: 'wf-b', editor: { source: 'workflow', id: 'wf-b' } })
-    await act(async () => {
-      pending.resolve()
-      await Promise.resolve()
-    })
+    pending.resolve()
+    await flushAsync(1)
 
     expect(call).toHaveBeenCalledTimes(1)
     expect(dispatched.some((action) => action.type === 'CLEAR_CANVAS')).toBe(false)
@@ -736,10 +745,8 @@ describe('资产态保存（登记新版本）', () => {
     expect(confirm?.title).toBe(zh.assetCascadeTitle)
     expect(confirm?.message).toBe(zh.assetCascadeWorkflowMessage.replace('{names}', '别的流程'))
 
-    await act(async () => {
-      confirm!.onConfirm?.()
-      for (let i = 0; i < 6; i += 1) await Promise.resolve()
-    })
+    act(() => { confirm!.onConfirm?.() })
+    await flushAsync(6)
 
     expect(calls.map((call) => call.endpoint)).toEqual([
       EP.EP_PREVIEW_ASSET_CASCADE,
@@ -981,11 +988,8 @@ describe('资产退役（二次确认 + 级联提示）', () => {
     expect(confirm?.title).toBe(zh.assetRetireTitle)
     expect(confirm?.message).toBe(zh.assetRetireMessage)
 
-    await act(async () => {
-      confirm!.onConfirm?.()
-      await Promise.resolve()
-      await Promise.resolve()
-    })
+    act(() => { confirm!.onConfirm?.() })
+    await flushAsync(2)
 
     expect(calls.map((call) => call.endpoint)).toEqual([EP.EP_RETIRE_ASSET, EP.EP_LIST_ASSETS])
     expect(calls[0]!.args).toEqual({ kind: 'workflow', assetId: 'a-1' })
@@ -1006,11 +1010,8 @@ describe('资产退役（二次确认 + 级联提示）', () => {
     expect(confirm?.message).not.toContain('{count}')
     expect(confirm?.message).not.toContain('{names}')
 
-    await act(async () => {
-      confirm!.onConfirm?.()
-      await Promise.resolve()
-      await Promise.resolve()
-    })
+    act(() => { confirm!.onConfirm?.() })
+    await flushAsync(2)
 
     expect(calls[0]).toEqual({ endpoint: EP.EP_RETIRE_ASSET, args: { kind: 'role', assetId: 'a-r1' } })
     expect(harness.dispatched).toContainEqual({ type: 'ASSET_CLOSED', assetId: 'a-r1' })

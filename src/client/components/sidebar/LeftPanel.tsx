@@ -1,6 +1,6 @@
 // src/client/components/sidebar/LeftPanel.tsx
 //
-// 左侧模板库（照搬旧项目 left-panel.js，TSX 化，按需求 §4.5.4 适配）：
+// 左侧模板库：
 // 四 Tag：工作流 / 角色（父代理模板置顶）/ 数据（文件 + 数据库分区）/ 其他（阶段 + 协作组）。
 // 本次改动：四 Tag 由文字改为「图标」展示（图片批注：Tag 区以图标显示，不显示文字，
 // 共 4 个 tag；切换到不同 Tag 时下方列表内容随动，适配角色/数据/其他节点）。
@@ -58,7 +58,7 @@ export interface LeftPanelProps {
   workflows: Array<{ id: string; name: string; description?: string; nodes?: unknown[]; runStatus?: string | null; sessionId?: string }>
   /** 当前主会话 id（会话树根）：实例列表中 sessionId 与之匹配的实例打「当前」标签。 */
   currentSessionId: string
-  /** 工作流模板列表（全局共享；按当前 mode 过滤后传入；图2 交互改造）。 */
+  /** 工作流模板列表（全局共享；按当前 mode 过滤后传入）。 */
   flowTemplates: WorkflowTemplate[]
   /** 资产列表（活跃 + 历史（已归档）；资产态左栏数据源）。 */
   assets: {

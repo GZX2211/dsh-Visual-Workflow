@@ -4,14 +4,12 @@
 // （用户裁决）：
 //   - instanceOptions 是「从模板创建实例」的一次性临时选项：创建实例时**消费**
 //     （读取 newSession/workspacePath 决定目标会话），**不持久化到模板/实例文档**
-//     （需求 §4.5.3）；代码中唯一的重置发生在 OPEN_FLOW_TEMPLATE（打开模板时回到
+//     代码中唯一的重置发生在 OPEN_FLOW_TEMPLATE（打开模板时回到
 //     「不新开会话」默认值），实例创建路径不回写该状态。
 //   - 但它属于用户界面记忆——「开启新会话」复选框与工作区路径必须做到重复
 //     进入工作台不丢失。工作台保持挂载已覆盖打开/关闭循环；此处再把值落盘
 //     localStorage，即使宿主重建/页面刷新也能恢复（双保险）。
 //   - 纯函数 + StorageLike 注入（极简存储抽象，便于单测）。
-//     说明：StorageLike 原定义在 studio/useWorkbenchView.ts 内；该模块随浮窗/分栏视图模式
-//     一并删除，类型已迁至 client/lib/storage.ts。
 
 import type { StorageLike } from '../lib/storage.js'
 

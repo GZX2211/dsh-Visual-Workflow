@@ -1,4 +1,4 @@
-import type { CanvasEdge, CanvasNode } from '../studio/studio-state.js';
+import type { CanvasEdge, CanvasNode } from './canvas-model.js';
 export interface RunLockInput {
     /** 是否启用锁定（仅模式一 + 实例处于 running 时为 true）；false → 全部解锁。 */
     enabled: boolean;

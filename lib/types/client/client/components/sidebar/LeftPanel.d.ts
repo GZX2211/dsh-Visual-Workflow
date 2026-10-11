@@ -49,7 +49,7 @@ export interface LeftPanelProps {
     }>;
     /** 当前主会话 id（会话树根）：实例列表中 sessionId 与之匹配的实例打「当前」标签。 */
     currentSessionId: string;
-    /** 工作流模板列表（全局共享；按当前 mode 过滤后传入；图2 交互改造）。 */
+    /** 工作流模板列表（全局共享；按当前 mode 过滤后传入）。 */
     flowTemplates: WorkflowTemplate[];
     /** 资产列表（活跃 + 历史（已归档）；资产态左栏数据源）。 */
     assets: {

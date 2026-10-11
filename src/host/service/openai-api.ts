@@ -14,6 +14,7 @@
 // HTTP/SSE 是 webServer 官方契约的适配层（路由注册、响应序列化、请求体读取）——
 // 两者的变化依据不同（编排契约 vs webServer 契约）。
 
+import { createHash, timingSafeEqual } from 'node:crypto'
 import type { FlowStore } from '../storage/flow-store.js'
 import { findResumableRun, type OrchestratorRuntime } from '../orchestrator/index.js'
 import { resolveNewSessionCwd } from '../sessions/session-provider.js'
@@ -194,7 +195,11 @@ export class OpenAiApi {
     if (!key) return
     const header = String(authorization ?? '').trim()
     const expected = `Bearer ${key}`
-    if (header !== expected) {
+    // 恒定时间比较：普通 !== 会在首个不同字节短路，暴露「已匹配前缀长度」这一时序侧信道。
+    // 先各自 sha256 到 32 字节再比，长度恒等，故无需先比长度。
+    const provided = createHash('sha256').update(header).digest()
+    const wanted = createHash('sha256').update(expected).digest()
+    if (!timingSafeEqual(provided, wanted)) {
       throw new OpenAiError(401, 'authentication_error', 'invalid_api_key', 'API Key 无效')
     }
   }

@@ -14,6 +14,7 @@
 // 不依赖远端真实实现；锁定规则本体见 tests/client/run-locks.test.ts。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushAsync, waitForCondition } from '../fixtures/async-flush.js'
 import { useEffect } from 'react'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -219,7 +220,7 @@ describe('运行中保存实例的二次确认（需求 b）', () => {
       .find((action) => action.type === 'CONFIRM_SET' && action.confirm)?.confirm
     await act(async () => {
       confirm?.onConfirm?.()
-      await Promise.resolve()
+      await flushAsync(1)
     })
 
     expect(saveWorkflow).toHaveBeenCalledTimes(1)
@@ -308,8 +309,7 @@ describe('运行中保存实例的二次确认（需求 b）', () => {
 
     await act(async () => {
       confirm?.onConfirm?.()
-      await Promise.resolve()
-      await Promise.resolve()
+      await flushAsync(2)
     })
     expect(saveWorkflow).toHaveBeenCalledTimes(1)
     expect(onSaved).toHaveBeenCalledTimes(1)
@@ -332,8 +332,7 @@ describe('运行中保存实例的二次确认（需求 b）', () => {
 
     await act(async () => {
       confirm?.onConfirm?.()
-      await Promise.resolve()
-      await Promise.resolve()
+      await flushAsync(2)
     })
     expect(saveWorkflow).toHaveBeenCalledTimes(1)
     expect(onSaved).not.toHaveBeenCalled()
@@ -363,9 +362,9 @@ describe('纯 XY 拖动 / 组卡片缩放：防抖自动保存（需求 2 补充
 
     await act(async () => {
       vi.advanceTimersByTime(GEOMETRY_AUTOSAVE_DEBOUNCE_MS)
-      await Promise.resolve()
     })
-    expect(saveCanvas).toHaveBeenCalledTimes(1)
+    await waitForCondition(() => { expect(saveCanvas).toHaveBeenCalledTimes(1) })
+
     expect(saveCanvas).toHaveBeenCalledWith({ auto: true })
   })
 
@@ -382,9 +381,9 @@ describe('纯 XY 拖动 / 组卡片缩放：防抖自动保存（需求 2 补充
     })
     await act(async () => {
       vi.advanceTimersByTime(GEOMETRY_AUTOSAVE_DEBOUNCE_MS)
-      await Promise.resolve()
     })
-    expect(saveCanvas).toHaveBeenCalledTimes(1)
+    await waitForCondition(() => { expect(saveCanvas).toHaveBeenCalledTimes(1) })
+
   })
 
   it('协作组卡片缩放 → 同样防抖自动保存', async () => {
@@ -398,9 +397,9 @@ describe('纯 XY 拖动 / 组卡片缩放：防抖自动保存（需求 2 补充
     })
     await act(async () => {
       vi.advanceTimersByTime(GEOMETRY_AUTOSAVE_DEBOUNCE_MS)
-      await Promise.resolve()
     })
-    expect(saveCanvas).toHaveBeenCalledTimes(1)
+    await waitForCondition(() => { expect(saveCanvas).toHaveBeenCalledTimes(1) })
+
   })
 
   it('草稿态（_draft）拖动：不自动落库（须手动保存/创建实例）', async () => {
@@ -419,7 +418,7 @@ describe('纯 XY 拖动 / 组卡片缩放：防抖自动保存（需求 2 补充
     })
     await act(async () => {
       vi.advanceTimersByTime(GEOMETRY_AUTOSAVE_DEBOUNCE_MS)
-      await Promise.resolve()
+      await flushAsync(1)
     })
     expect(saveCanvas).not.toHaveBeenCalled()
   })
@@ -573,9 +572,9 @@ describe('运行中画布锁定（需求 c）', () => {
     await act(async () => { face.tidyGraph() })
     await act(async () => {
       vi.advanceTimersByTime(GEOMETRY_AUTOSAVE_DEBOUNCE_MS)
-      await Promise.resolve()
     })
-    expect(saveCanvas).toHaveBeenCalledTimes(1)
+    await waitForCondition(() => { expect(saveCanvas).toHaveBeenCalledTimes(1) })
+
   })
 })
 
@@ -620,7 +619,7 @@ describe('取消二次确认：模板删除直接执行（用户裁决 2026-02�
 
     await act(async () => {
       await face.deleteEditor()
-      await Promise.resolve()
+      await flushAsync(1)
     })
     expect(dispatch.mock.calls.some(([action]) => (action as { type: string }).type === 'CONFIRM_SET')).toBe(false)
     expect(deleteFlowTemplate).toHaveBeenCalledWith('t-1')

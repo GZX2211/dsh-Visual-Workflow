@@ -247,7 +247,8 @@ describe('客户端样式门禁（设计 token）', () => {
 describe('客户端样式门禁（注入契约）', () => {
   it('不使用 CSS Modules，且 .css 直接导入只允许 entry.ts 的注入占位', () => {
     const offenders: string[] = []
-    for (const file of listSourceFiles('src/client')) {
+    // 显式带上 .css：样式文件本身也受本门禁约束，不得成为扫描面之外的飞地。
+    for (const file of listSourceFiles('src/client', ['.ts', '.tsx', '.css'])) {
       for (const ref of importsOf(file)) {
         if (ref.specifier.endsWith('.module.css')) offenders.push(`${file}:${ref.line} ${ref.specifier}`)
         else if (ref.specifier.endsWith('.css') && file !== 'src/client/entry.ts') {

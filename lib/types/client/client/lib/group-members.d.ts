@@ -28,7 +28,7 @@ export declare function joinNodeToGroup<T extends {
     data: Record<string, unknown>;
 }>(nodes: T[], nodeId: string, groupId: string): T[];
 /**
- * 移除指定节点的流程连线（角色拖入协作组后仅保留上下文/数据库线，§4.2.5.2 规则 4）：
+ * 移除指定节点的流程连线（角色拖入协作组后仅保留上下文/数据库线）：
  * 组内成员只有上下文/数据库连接点，无流程接点；已连的流程线在入组时自动断开。
  */
 export declare function dropNodeFlowLines<T extends {

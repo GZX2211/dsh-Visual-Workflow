@@ -305,7 +305,10 @@ export class RuntimeLaunch extends RuntimeBase {
 
     await this.persistWarn(entry)
 
-    // 释放同工作流的旧 paused 内存条目（磁盘历史保留；锁随新 run 接管）
+    // 释放同工作流的旧 paused 内存条目（磁盘历史保留；锁随新 run 接管）。
+    // 为什么走 releaseRunMemory 而不是裸 this.runs.delete：终态/接管收尾只允许一个入口
+    // ——它同时退役该 run 的 childIndex/childByNode 归属；否则旧 child 会因
+    // sessionId/flowId 与新 run 相同而继续通过协作越权校验（投递到已废弃的子代理会话）。
     for (const [oldId, oldEntry] of [...this.runs]) {
       const old = oldEntry.snapshot
       if (oldId !== runId && old.sessionId === sessionId && old.flowId === flowId && old.status === 'paused') {
@@ -316,7 +319,7 @@ export class RuntimeLaunch extends RuntimeBase {
         }
         this.rejectWaiters(oldEntry)
         this.rejectAsks(oldEntry)
-        this.runs.delete(oldId)
+        this.releaseRunMemory(oldId)
       }
     }
     return { runId, defPath, resumedFromRunId: prev.id }

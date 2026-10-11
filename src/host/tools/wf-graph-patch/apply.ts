@@ -8,12 +8,12 @@
 
 import {
   CONDITION_TYPES,
-  HANDLE_PAIRING,
   NODE_HANDLES,
   NODE_KINDS,
   makeLineId,
   makeNodeId,
   newRoleNode,
+  pairingTargetOf,
   stageLabel,
 } from '../../graph/index.js'
 import { WfError } from '../../orchestrator/index.js'
@@ -425,7 +425,7 @@ export function applyGraphOps(input: {
         // 把「handle 没写」误诊成「图缺线」，真因被完全掩盖。
         const sourceHandle = resolveHandle(String(opc.sourceHandle ?? '').trim() || 'flow-out', sourceNode.kind, 'out')
         const targetHandle = resolveHandle(String(opc.targetHandle ?? '').trim() || 'flow-in', targetNode.kind, 'in')
-        const expectedTarget = HANDLE_PAIRING[sourceHandle]
+        const expectedTarget = pairingTargetOf(sourceHandle)
         if (targetHandle !== expectedTarget) {
           throw new WfError(`WF_GRAPH_INVALID: connect: ${sourceHandle} can only connect ${expectedTarget} (received ${targetHandle})`, 'WF_GRAPH_INVALID')
         }

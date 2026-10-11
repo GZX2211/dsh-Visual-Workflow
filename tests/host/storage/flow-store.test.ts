@@ -519,3 +519,77 @@ describe('FlowStore · P4 lastPatch（用户保存清除，补丁路径保留）
     expect((await store.getFlowTemplate('tpl-mark-b') as { lastPatch?: unknown } | null)?.lastPatch).toEqual(patch)
   })
 })
+
+// ---------------------------------------------------------------------------
+// 写路径的会话归属校验（读/删两侧早有，写侧补齐）
+// ---------------------------------------------------------------------------
+
+describe('saveWorkflow 的会话归属校验', () => {
+  it('跨会话写同一 flowId → 拒绝（稳定码），且磁盘归属与内容保持不变', async () => {
+    await store.saveWorkflow(makeFlow('flow-1', 'session-1'), 'session-1', { force: true })
+
+    await expect(
+      store.saveWorkflow(makeFlow('flow-1', 'session-2', '他人的改名'), 'session-2', { force: true }),
+    ).rejects.toMatchObject({ code: 'FLOW_NOT_FOUND' })
+
+    const still = await store.getWorkflow('session-1', 'flow-1')
+    expect(still?.name).toBe('流程')
+    expect(still?.sessionId).toBe('session-1')
+    // 覆盖者会话读不到该文档（归属未被翻转）
+    expect(await store.getWorkflow('session-2', 'flow-1')).toBeNull()
+  })
+
+  it('同会话重复保存照旧放行（归属校验不阻断正常更新）', async () => {
+    await store.saveWorkflow(makeFlow('flow-1', 'session-1'), 'session-1', { force: true })
+    const updated = await store.saveWorkflow(makeFlow('flow-1', 'session-1', '改名'), 'session-1', { force: true })
+    expect(updated.name).toBe('改名')
+    expect(updated.revision).toBe(2)
+  })
+
+  it('磁盘上不存在（current === null）视为新建：任何会话都能用新 id 创建', async () => {
+    const created = await store.saveWorkflow(makeFlow('flow-new', 'session-9'), 'session-9', { force: true })
+    expect(created.sessionId).toBe('session-9')
+    expect(await store.getWorkflow('session-9', 'flow-new')).not.toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 列表排序的确定性：一律码位序，不依赖 locale/ICU
+// ---------------------------------------------------------------------------
+
+/** 码位序期望值（与 localeCompare 不同：'A' < 'a' < '中'）。 */
+function codepointSorted(values: string[]): string[] {
+  return [...values].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+}
+
+describe('列表排序的确定性', () => {
+  it('工作流列表按 updatedAt 倒序且不丢项（排序方向与稳定性）', async () => {
+    for (let index = 0; index < 3; index += 1) {
+      await store.saveWorkflow(makeFlow(`flow-${index}`, 'session-1', `流程-${index}`), 'session-1', { force: true })
+      // 保证 updatedAt 严格递增（同毫秒会让顺序不可判别）
+      await new Promise((resolve) => setTimeout(resolve, 2))
+    }
+    const listed = await store.listWorkflows('session-1')
+    const stamps = listed.map((item) => String(item.updatedAt))
+    expect(stamps).toEqual([...stamps].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).reverse())
+    expect(new Set(stamps).size).toBe(stamps.length)
+  })
+
+  it('角色模板列表按名称码位序（不再随 locale/ICU 变化）', async () => {
+    const names = ['zeta', 'Alpha', 'alpha', '中文本']
+    for (const [index, name] of names.entries()) {
+      await store.saveTemplate('role', {
+        id: `role-${index}`,
+        kind: 'agent',
+        name,
+        systemPrompt: 'x',
+        provider: '',
+        model: '',
+        presetId: 'combo-1',
+        retryLimit: 3,
+      } as never)
+    }
+    const listed = await store.listTemplates('role')
+    expect(listed.map((item) => String((item as { name?: string }).name))).toEqual(codepointSorted(names))
+  })
+})

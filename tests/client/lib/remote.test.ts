@@ -9,11 +9,22 @@
 // 超时与主动取消（失败语义显式）/ 乐观锁冲突判定。
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   remoteCall, streamCall, EP, isRevisionConflict, DEFAULT_REMOTE_TIMEOUT_MS, POLL_REMOTE_TIMEOUT_MS,
   REMOTE_TIMEOUT_CODE, REMOTE_CONNECTION_CODE, REMOTE_HTTP_STATUS_CODE, REMOTE_EMPTY_STREAM_CODE,
   type RemoteError,
 } from '../../../src/client/lib/remote.js'
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
+
+/** protocol.ts 原文中声明的端点常量名（与运行期导出集合同一本体，非测试内副本）。 */
+function declaredEndpointNames(): string[] {
+  const protocolSource = readFileSync(resolve(root, 'src/host/shared/protocol.ts'), 'utf8')
+  return [...protocolSource.matchAll(/^export const (EP_[A-Z0-9_]+)\s*=/gm)].map((match) => match[1])
+}
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -81,11 +92,25 @@ describe('remoteCall', () => {
     })
   })
 
-  it('端点常量与后端协议表零漂移（EP 命名空间导出）', () => {
-    expect(EP.EP_RUN).toBe('run')
-    expect(EP.EP_LIST_WORKFLOWS).toBe('listWorkflows')
-    expect(EP.EP_SERVICE_START).toBe('serviceStart')
-    expect(EP.EP_PUT_TEMPLATE).toBe('putTemplate')
+  it('remote.ts 再导出 protocol.ts 的全部 EP_* 端点常量（零漂移）', () => {
+    const declared = declaredEndpointNames()
+    // 防提取器失效：protocol.ts 本体必须真的解析出全部端点常量。
+    expect(declared.length).toBeGreaterThan(30)
+    // 比较对象两侧都是运行期/源码本体：一侧是 remote.ts 再导出的模块命名空间，
+    // 另一侧是 protocol.ts 声明的常量名，都没有测试内硬编码副本。
+    const exportedEndpoints = Object.keys(EP).filter((name) => name.startsWith('EP_')).sort()
+    expect(exportedEndpoints).toEqual([...declared].sort())
+    for (const name of declared) {
+      expect(typeof (EP as unknown as Record<string, unknown>)[name]).toBe('string')
+    }
+  })
+
+  it('remote.ts 不另建端点字面量本体（只经 protocol.ts 引用）', () => {
+    const remoteSource = readFileSync(resolve(root, 'src/client/lib/remote.ts'), 'utf8')
+    expect(remoteSource).toContain("import * as EP from '../../host/shared/protocol.js'")
+    // 本地再定义 EP_* 常量即为「第二份端点本体」，必须失败。
+    expect(remoteSource).not.toMatch(/^(?:export )?const EP_[A-Z0-9_]+\s*=/m)
+    expect(remoteSource).toMatch(/^export \{ EP \}$/m)
   })
 })
 
@@ -148,7 +173,7 @@ describe('remoteCall 超时与取消（失败语义显式）', () => {
 
 describe('isRevisionConflict（乐观锁冲突判定）', () => {
   it('后端稳定码 ERR_REVISION_CONFLICT → true；其他码/无码 → false', () => {
-    expect(EP.ERR_REVISION_CONFLICT).toBe('FLOW_REVISION_CONFLICT')
+    // 该码的跨层约定（命名/前缀族）由 tests/contract/client-boundary.test.ts 从 protocol.ts 本体锁定，此处只验行为。
     expect(isRevisionConflict(Object.assign(new Error('conflict'), { code: EP.ERR_REVISION_CONFLICT }))).toBe(true)
     expect(isRevisionConflict(Object.assign(new Error('other'), { code: 'WF_LOCKED' }))).toBe(false)
     expect(isRevisionConflict(new Error('plain'))).toBe(false)

@@ -53,15 +53,19 @@ export function ComboCatalog(props: ComboCatalogProps) {
     onToggleMcpDisabled, onEditMcp, onDeleteMcp, onBulkToolDisabled,
   } = props
 
+  // 目录形状兜底：非数组一律按空目录降级（远端/宿主形状漂移不抛错，也不伪装成「没有工具」）
+  const items = Array.isArray(catalog.items) ? catalog.items : []
+  const mcpServers = Array.isArray(catalog.mcp) ? catalog.mcp : []
+
   const tabs = [
-    { key: 'plugins' as const, label: copy.comboTabDsh, count: catalog.items.length },
-    { key: 'mcp' as const, label: copy.comboTabMcp, count: catalog.mcp.length },
+    { key: 'plugins' as const, label: copy.comboTabDsh, count: items.length },
+    { key: 'mcp' as const, label: copy.comboTabMcp, count: mcpServers.length },
   ]
 
   /** 筛选标签（动态构建）：[全部] + [官方工具] + MCP 服务器 Tag（按目录首次出现顺序） */
   const toolTags: ToolTag[] = useMemo(
-    () => buildToolTags((catalog.items ?? []).map((item) => item.name), catalog.mcp),
-    [catalog.items, catalog.mcp],
+    () => buildToolTags(items.map((item) => item.name), mcpServers),
+    [items, mcpServers],
   )
 
   /**
@@ -69,8 +73,8 @@ export function ComboCatalog(props: ComboCatalogProps) {
    * 「全部」标签回退为空集（无明确批量语义，按钮禁用）。
    */
   const tagToolNames: string[] = useMemo(
-    () => (activeTag === TAG_ALL ? [] : filterToolNamesByTag((catalog.items ?? []).map((item) => item.name), activeTag)),
-    [activeTag, catalog.items],
+    () => (activeTag === TAG_ALL ? [] : filterToolNamesByTag(items.map((item) => item.name), activeTag)),
+    [activeTag, items],
   )
 
   /** 当前标签下工具是否已全部关闭（一键开关按钮目标态：全部关闭 → 显示「一键开启」）。 */
@@ -80,58 +84,49 @@ export function ComboCatalog(props: ComboCatalogProps) {
   )
 
   const cards: CatalogCard[] = useMemo(() => {
-    try {
-      const keyword = String(search ?? '').trim().toLowerCase()
-      if (tab === 'plugins') {
-        return (catalog.items ?? [])
-          // 先按激活 Tag 过滤（全部/官方工具/MCP 服务器），再按关键词过滤
-          .filter((item) => {
-            if (activeTag === TAG_ALL) return true
-            const isMcp = item.name.startsWith('mcp__')
-            if (activeTag === 'builtin') return !isMcp
-            if (activeTag.startsWith('mcp:')) return isMcp && item.name.startsWith(`mcp__${activeTag.slice(4)}__`)
-            return true
-          })
-          .filter((item) => !keyword
-            || String(item.name ?? '').toLowerCase().includes(keyword)
-            || String(item.description ?? '').toLowerCase().includes(keyword))
-          .map((item) => {
-            // 被全局关闭的工具：置灰且无法勾选（父代理不可用 → 子代理无法传入）
-            const disabledTool = disabledTools.has(item.name)
-            return {
-              key: item.key ?? `item:${item.name}`,
-              name: item.name,
-              description: item.description,
-              disabled: disabledTool,
-              checked: !disabledTool && (comboDraft.tools ?? []).includes(item.name),
-              onToggle: disabledTool ? () => {} : () => onToggleTool(item.name),
-              onToggleDisabled: () => onToggleToolDisabled(item.name, !disabledTool),
-            }
-          })
-      }
-      return (catalog.mcp ?? [])
-        .filter((server) => !keyword
-          || String(server.serverName ?? '').toLowerCase().includes(keyword)
-          || String(server.description ?? '').toLowerCase().includes(keyword))
-        .map((server) => {
-          const name = String(server.serverName ?? '').trim() || String(server.id ?? '')
+    const keyword = String(search ?? '').trim().toLowerCase()
+    if (tab === 'plugins') {
+      // 卡片显隐与一键开关共用同一标签口径（lib/tool-tags 唯一本体），避免两处判定分叉
+      const taggedNames = activeTag === TAG_ALL ? null : new Set(tagToolNames)
+      return items
+        .filter((item) => taggedNames === null || taggedNames.has(item.name))
+        .filter((item) => !keyword
+          || String(item.name ?? '').toLowerCase().includes(keyword)
+          || String(item.description ?? '').toLowerCase().includes(keyword))
+        .map((item) => {
+          // 被全局关闭的工具：置灰且无法勾选（父代理不可用 → 子代理无法传入）
+          const disabledTool = disabledTools.has(item.name)
           return {
-            key: `mcp:${server.id}`,
-            name,
-            description: server.description,
-            disabled: server.disabled === true,
-            badge: server.disabled ? copy.mcpDisabledBadge : (server.transport === 'streamable-http' ? 'HTTP' : 'stdio'),
-            checked: (comboDraft.mcpServers ?? []).includes(name),
-            onToggle: () => onToggleMcp(name),
-            onEdit: () => onEditMcp(server),
-            onToggleDisabled: () => onToggleMcpDisabled(server.id, server.disabled !== true),
-            onDelete: () => onDeleteMcp(server.id),
+            key: item.key ?? `item:${item.name}`,
+            name: item.name,
+            description: item.description,
+            disabled: disabledTool,
+            checked: !disabledTool && (comboDraft.tools ?? []).includes(item.name),
+            onToggle: disabledTool ? () => {} : () => onToggleTool(item.name),
+            onToggleDisabled: () => onToggleToolDisabled(item.name, !disabledTool),
           }
         })
-    } catch {
-      return []
     }
-  }, [activeTag, catalog.items, catalog.mcp, comboDraft.mcpServers, comboDraft.tools, copy.mcpDisabledBadge, disabledTools, onDeleteMcp, onEditMcp, onToggleMcp, onToggleMcpDisabled, onToggleTool, onToggleToolDisabled, search, tab])
+    return mcpServers
+      .filter((server) => !keyword
+        || String(server.serverName ?? '').toLowerCase().includes(keyword)
+        || String(server.description ?? '').toLowerCase().includes(keyword))
+      .map((server) => {
+        const name = String(server.serverName ?? '').trim() || String(server.id ?? '')
+        return {
+          key: `mcp:${server.id}`,
+          name,
+          description: server.description,
+          disabled: server.disabled === true,
+          badge: server.disabled ? copy.mcpDisabledBadge : (server.transport === 'streamable-http' ? 'HTTP' : 'stdio'),
+          checked: (comboDraft.mcpServers ?? []).includes(name),
+          onToggle: () => onToggleMcp(name),
+          onEdit: () => onEditMcp(server),
+          onToggleDisabled: () => onToggleMcpDisabled(server.id, server.disabled !== true),
+          onDelete: () => onDeleteMcp(server.id),
+        }
+      })
+  }, [activeTag, comboDraft.mcpServers, comboDraft.tools, copy.mcpDisabledBadge, disabledTools, items, mcpServers, onDeleteMcp, onEditMcp, onToggleMcp, onToggleMcpDisabled, onToggleTool, onToggleToolDisabled, search, tab, tagToolNames])
 
   return (
     <div className="wf-combo__catalog">
@@ -188,14 +183,24 @@ export function ComboCatalog(props: ComboCatalogProps) {
           ? <div className="wf-hint wf-combo__grid-empty">{String(search ?? '').trim() ? copy.comboSearchEmpty : copy.comboEmpty}</div>
           : cards.map((item) => (
               <div key={item.key} className={`wf-combo-card${item.checked ? ' is-checked' : ''}${item.disabled ? ' is-disabled' : ''}`}>
+                {/* 勾选框与主按钮同级：交互元素不得嵌套在 button 内（无效 HTML 与嵌套交互）；
+                    勾选态对辅助技术由主按钮的 aria-pressed 表达，此框仅作视觉呈现 */}
+                <input
+                  type="checkbox"
+                  checked={item.checked === true}
+                  disabled={item.disabled}
+                  onChange={item.onToggle}
+                  tabIndex={-1}
+                  aria-hidden="true"
+                />
                 <button
                   type="button"
                   className="wf-combo-card__main"
                   onClick={item.onToggle}
                   title={item.name}
                   disabled={item.disabled}
+                  aria-pressed={item.checked}
                 >
-                  <input type="checkbox" readOnly checked={item.checked === true} disabled={item.disabled} />
                   <span className="wf-combo-card__body">
                     <span className="wf-combo-card__name">{item.name}</span>
                     <span className="wf-combo-card__desc">{item.description}</span>

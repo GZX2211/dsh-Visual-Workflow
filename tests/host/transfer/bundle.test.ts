@@ -7,7 +7,7 @@
 // 断言对象是领域行为（bundle 形状与落库结果），不涉及 HTTP 层：领域码 → HTTP 状态
 // 的映射在 tests/host/api/routes.test.ts 覆盖。
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   exportAgentTemplate,
   exportWorkflowBundle,
@@ -291,5 +291,72 @@ describe('角色模板导出/导入（单模板 JSON）', () => {
     await expect(importAgentTemplate(store, JSON.stringify({ format: 'x' }))).rejects.toMatchObject({
       code: 'TRANSFER_INVALID_BUNDLE',
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 组合并入路径：快照只读一次（性能契约）与判重语义
+// ---------------------------------------------------------------------------
+
+/** 组装一份带 embedded.combos 的 v2 bundle（格式与导出产物同形）。 */
+function bundleWithCombos(combos: Array<Record<string, unknown>>): string {
+  const flow = makeFlow()
+  return JSON.stringify({
+    format: 'dsh-vw-bundle',
+    version: 2,
+    mode: 'mode1',
+    workflow: { name: '组合导入流程', description: '', nodes: flow.nodes, lines: flow.lines },
+    embedded: { roles: [], files: [], databases: [], groups: [], combos },
+  })
+}
+
+describe('bundle 导入的组合并入', () => {
+  it('N 个组合只读一次组合表（不再逐个组合 2N 次读盘）', async () => {
+    const store = await makeStore()
+    const spy = vi.spyOn(store, 'listToolCombos')
+    const bundle = bundleWithCombos([
+      { id: 'combo-a', name: '甲', tools: ['wf_run_node'], mcpServers: [] },
+      { id: 'combo-b', name: '乙', tools: ['wf_finish'], mcpServers: [] },
+      { id: 'combo-c', name: '丙', tools: [], mcpServers: ['mcp-x'] },
+      { id: 'combo-d', name: '丁', tools: [], mcpServers: [] },
+    ])
+
+    await importWorkflowBundle(store, bundle)
+
+    // 旧实现为 2N（每个组合两次），修复后为 1
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect((await store.listToolCombos()).map((item) => item.name).sort()).toEqual(['丁', '丙', '乙', '甲'].sort())
+  })
+
+  it('同批内同名组合只落一条；id 与已有组合冲突时换新 id（判重仍看最新快照）', async () => {
+    const store = await makeStore()
+    await store.saveToolCombo({ id: 'combo-taken', name: '已有', tools: [], mcpServers: [] })
+    const bundle = bundleWithCombos([
+      { id: 'combo-taken', name: '新甲', tools: ['wf_run_node'], mcpServers: [] },
+      { id: 'combo-dup', name: '新甲', tools: ['wf_finish'], mcpServers: [] },
+    ])
+
+    await importWorkflowBundle(store, bundle)
+
+    const combos = await store.listToolCombos()
+    const 新甲 = combos.filter((item) => item.name === '新甲')
+    expect(新甲).toHaveLength(1)
+    // id 冲突 → 换新 id（不与已有 combo-taken 撞车）；且新旧都在（不覆盖已有）
+    expect(新甲[0]?.id).not.toBe('combo-taken')
+    expect(新甲[0]?.id).toMatch(/^combo-/)
+    expect(combos.find((item) => item.id === 'combo-taken')?.name).toBe('已有')
+  })
+
+  it('组合并入不影响工作流模板落库（图结构原样保留）', async () => {
+    const store = await makeStore()
+    await importWorkflowBundle(store, bundleWithCombos([{ id: 'combo-a', name: '甲', tools: [], mcpServers: [] }]))
+    const templates = await store.listFlowTemplates()
+    expect(templates).toHaveLength(1)
+    expect(templates[0]?.name).toBe('组合导入流程')
+    const source = makeFlow()
+    expect(templates[0]?.nodes.map((node) => node.id)).toEqual(source.nodes.map((node) => node.id))
+    expect(templates[0]?.lines.map((line) => `${line.source}->${line.target}`)).toEqual(
+      source.lines.map((line) => `${line.source}->${line.target}`),
+    )
   })
 })

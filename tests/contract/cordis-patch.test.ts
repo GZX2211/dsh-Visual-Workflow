@@ -55,6 +55,32 @@ const CONFIG_KEYS: Array<[string, string]> = [
   ['embeddingEndpoint', 'null'],
 ]
 
+/** 解析 cordis.patch.yml 中 config 块的顶层键（按缩进识别，不引 yaml 运行期依赖）。 */
+function patchConfigKeysOf(text: string): string[] {
+  const lines = text.split(/\r?\n/)
+  const start = lines.findIndex((line) => /^\s*config:\s*$/.test(line))
+  if (start < 0) return []
+  const baseIndent = lines[start].match(/^(\s*)/)![1].length
+  const keys: string[] = []
+  for (let i = start + 1; i < lines.length; i += 1) {
+    const line = lines[i]
+    if (line.trim() === '') continue
+    const indent = line.match(/^(\s*)/)![1].length
+    if (indent <= baseIndent) break
+    const match = line.match(/^(\s*)([A-Za-z_][\w]*):/)
+    // 仅顶层键：config 块下缩进 = 块缩进 + 2（更深的是嵌套对象）。
+    if (match && match[1].length === baseIndent + 2) keys.push(match[2])
+  }
+  return [...new Set(keys)]
+}
+
+/** 解析 Config schema 对象的顶层键（schema 是唯一本体，键表不得只存在于测试内）。 */
+function schemaConfigKeysOf(entryText: string): string[] {
+  const start = entryText.indexOf('export const Config')
+  expect(start, 'Config schema 未找到').toBeGreaterThan(-1)
+  return [...entryText.slice(start).matchAll(/^ {2}([A-Za-z_][\w]*):\s*z\./gm)].map((match) => match[1])
+}
+
 describe('T-002 cordis.patch.yml（insert 行语义）', () => {
   it('顶层为 insert 块数组，含 id=visual-workflow 与 name=dsh-visual-workflow', () => {
     expect(patchText).toContain('- insert:')
@@ -88,6 +114,26 @@ describe('T-002 cordis.patch.yml（insert 行语义）', () => {
           : rawValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       expect(patchText, `config 键值不符：${key}`).toMatch(new RegExp(`${key}:\\s*${value}`))
     }
+  })
+
+  it('patch config 块的键集合与 schema 键集合双向一致（废弃残留键同样失败）', () => {
+    // 「齐全」必须是双向语义：只查「期望的都在」会漏掉 patch 里的废弃残留键。
+    const patchKeys = patchConfigKeysOf(patchText)
+    const schemaKeys = schemaConfigKeysOf(entryText)
+    const expected = CONFIG_KEYS.map(([key]) => key)
+    // 防解析失效导致双向比对退化为空集相等。
+    expect(patchKeys.length).toBeGreaterThan(10)
+    expect(schemaKeys.length).toBeGreaterThan(10)
+    // 测试内键表与 patch 实际顶层键必须双向一致（多一个少一个都失败）。
+    expect([...patchKeys].sort(), '测试内键表与 patch 实际键集合不一致').toEqual([...expected].sort())
+    // patch 的每个键都必须在 schema 中真实存在（patch 键在新 schema 上静默失效即失败）。
+    const unknownInPatch = patchKeys.filter((key) => !schemaKeys.includes(key))
+    expect(unknownInPatch, 'patch 中出现 schema 不认识的 config 键').toEqual([])
+    // schema 允许比 patch 多出「退役只读键」：它必须存在，且**不得**出现在 patch 中
+    // （出现即意味着又把已退役键写进部署配置）。当前唯一退役键见 src/host/config.ts 的 @deprecated。
+    expect(schemaKeys).toContain('wfAskAgentTimeoutMs')
+    expect(patchKeys).not.toContain('wfAskAgentTimeoutMs')
+    expect(schemaKeys.length - patchKeys.length).toBe(1)
   })
 })
 
@@ -146,22 +192,20 @@ describe('T-002 Host 入口契约（index/config/visual-workflow-host 拆分后�
   })
 })
 
-describe('T-002 编译产物可被 import（可选烟雾，取决于是否已构建）', () => {
-  it('lib/index.js 存在时导出 name/inject/apply/Config', async () => {
-    const libIndex = resolve(root, 'lib/index.js')
-    if (!existsSync(libIndex)) {
-      // 未构建时跳过（build 发生在验证阶段）；避免测试对构建时序产生硬依赖。
-      expect(true).toBe(true)
-      return
-    }
+// 编译产物烟雾用例只在产物存在时注册；不存在时 vitest 明确标记为 skipped，
+// 不再用 `expect(true).toBe(true)` 空转通过（跳过原因见用例名）。
+const libIndex = resolve(root, 'lib/index.js')
+const LIB_BUILT = existsSync(libIndex)
+
+describe.runIf(LIB_BUILT)('T-002 编译产物可被 import（需已构建 lib/index.js）', () => {
+  it('lib/index.js 导出 name/inject/apply/Config', async () => {
     const mod = (await import(libIndex)) as Record<string, unknown>
     expect(mod.name).toBe('dsh-visual-workflow')
     expect(Array.isArray(mod.inject)).toBe(true)
     expect(typeof mod.apply).toBe('function')
     // schemastery 的 schema 是可调用函数（z.object 返回 Schema，函数对象），非普通对象。
     expect(typeof mod.Config).toBe('function')
-    // 为什么显式放宽超时：本用例动态 import 编译产物，而 build-artifacts 用例会在同一
-    // 测试运行中并行触发真实构建——IO 竞争下模块解析可远超 vitest 默认 5s。断言与预期
-    // 不变，仅适配「测试与构建并行」这一既有事实。
+    // 为什么显式放宽超时：动态 import 编译产物在并行负载下模块解析可远超 vitest 默认 5s；
+    // 断言与预期不变，只放宽用例整体上限。
   }, 30_000)
 })

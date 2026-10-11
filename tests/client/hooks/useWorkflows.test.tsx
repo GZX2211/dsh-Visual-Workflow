@@ -23,6 +23,7 @@ import React from 'react'
 import { serializeWorkflow, useWorkflows, type WorkflowsFace } from '../../../src/client/hooks/useWorkflows.js'
 import type { RemoteFace } from '../../../src/client/hooks/useRemote.js'
 import { EP } from '../../../src/client/lib/remote.js'
+import { waitForCondition } from '../fixtures/async-flush.js'
 import type { WorkflowDocument } from '../../../src/host/shared/graph-model.js'
 
 let container: HTMLDivElement | null = null
@@ -98,7 +99,7 @@ describe('useWorkflows.saveWorkflow 并发去重（Bug 清单 P1）', () => {
     // （dispatch 为 vi.fn），无需 act 包裹。
     void face.saveWorkflow(flowA, [], [])
     savedB = face.saveWorkflow(flowB, [], [])
-    await Promise.resolve()
+    await waitForCondition(() => { expect(call.mock.calls.filter(([ep]) => ep === EP.EP_PUT_WORKFLOW)).toHaveLength(2) })
 
     // 两个工作流各自持久化一次
     const putCalls = call.mock.calls.filter(([ep]) => ep === EP.EP_PUT_WORKFLOW)
@@ -131,7 +132,7 @@ describe('useWorkflows.saveWorkflow 并发去重（Bug 清单 P1）', () => {
     //（这里用新坐标区分）必须落库。在途期间只发出一次 PUT。
     p1 = face.saveWorkflow(flowA, [], [])
     p2 = face.saveWorkflow(flowA, [{ id: 'n1', kind: 'agent', position: { x: 7, y: 9 }, data: {} }] as never, [])
-    await Promise.resolve()
+    await waitForCondition(() => { expect(call.mock.calls.filter(([ep]) => ep === EP.EP_PUT_WORKFLOW)).toHaveLength(1) })
     expect(call.mock.calls.filter(([ep]) => ep === EP.EP_PUT_WORKFLOW)).toHaveLength(1)
 
     await act(async () => {
@@ -166,7 +167,7 @@ describe('useWorkflows.saveWorkflow 并发去重（Bug 清单 P1）', () => {
 
     const p1 = face.saveWorkflow(flowA, [{ id: 'n1', kind: 'agent', position: { x: 0, y: 0 }, data: {} }] as never, [])
     const p2 = face.saveWorkflow(flowA, [{ id: 'n1', kind: 'agent', position: { x: 120, y: 64 }, data: {} }] as never, [])
-    await Promise.resolve()
+    await waitForCondition(() => { expect(call.mock.calls.filter(([ep]) => ep === EP.EP_PUT_WORKFLOW)).toHaveLength(1) })
     await act(async () => {
       dFirst.resolve({ ...flowA, revision: 1 })
       await Promise.all([p1, p2])
@@ -214,5 +215,43 @@ describe('serializeWorkflow（Bug 2 回归）', () => {
     const nodes = [{ id: 'n1', kind: 'agent', position: { x: 0, y: 0 }, data: { label: 'A' } }] as unknown as WorkflowDocument['nodes']
     const out = serializeWorkflow(flow, nodes as never, [] as never)
     expect(Object.prototype.hasOwnProperty.call(out.nodes[0], 'proxySourceId')).toBe(false)
+  })
+})
+
+describe('useWorkflows.saveWorkflow 交错保存（D08-03）', () => {
+  it('A→B→A 交错：A 的在途条目不得被 B 顶掉，A 不并发发出第二次 PUT', async () => {
+    const dA = deferred<WorkflowDocument>()
+    let putA = 0
+    const call = vi.fn((endpoint: string, args: { flow: WorkflowDocument }) => {
+      if (args.flow.id === 'flow-a') {
+        putA += 1
+        // 第一次 A 保存挂起；补发的第二次（首存返回后）立即完成
+        return putA === 1 ? dA.promise : Promise.resolve({ ...args.flow, revision: 5 })
+      }
+      return Promise.resolve({ ...args.flow, revision: 2 })
+    })
+    const remote = { call } as unknown as RemoteFace
+    const face = await renderFace(remote)
+    const flowA = makeFlow('flow-a', '工作流A')
+    const flowB = makeFlow('flow-b', '工作流B')
+
+    const firstA = face.saveWorkflow(flowA, [], [])
+    const saveB = face.saveWorkflow(flowB, [], [])
+    const secondA = face.saveWorkflow(flowA, [], [])
+    await waitForCondition(() => { expect(call.mock.calls.filter(([ep]) => ep === EP.EP_PUT_WORKFLOW)).toHaveLength(2) })
+
+    // 修复前：在途表只保存单个条目，B 顶掉 A 后 A 的第二次调用会并发发出同一旧 revision 的 PUT
+    expect(putA).toBe(1)
+    expect(call.mock.calls.filter(([ep]) => ep === EP.EP_PUT_WORKFLOW)).toHaveLength(2)
+
+    await act(async () => {
+      dA.resolve({ ...flowA, revision: 2 })
+      await Promise.all([firstA, saveB, secondA])
+    })
+
+    // 首存返回后用最新内容补发一次（顺序发生，不并发）
+    expect(putA).toBe(2)
+    expect((await secondA)?.id).toBe('flow-a')
+    expect((await saveB)?.id).toBe('flow-b')
   })
 })

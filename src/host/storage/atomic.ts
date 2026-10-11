@@ -1,8 +1,8 @@
 // src/host/storage/atomic.ts
 //
-// 原子存储原语（T-011）——T-012（FlowStore）与后续所有持久化的地基。
+// 原子存储原语——FlowStore 与后续所有持久化的地基。
 //
-// 本模块提供六个能力，全部纯 Node 内建模块（W-05：零 @deepseek-ai/* 运行时依赖）：
+// 本模块提供六个能力，全部纯 Node 内建模块（零 @deepseek-ai/* 运行时依赖）：
 //   1. atomicWriteJson       —— 同目录临时文件 + fsync + 原子发布的 JSON 写入。
 //   2. readJson<T>           —— 原子读；ENOENT 返回 fallback；损坏 JSON 抛带路径的错误。
 //   3. withFileLock          —— 进程内按路径 FIFO 互斥队列（读改写串行化）。
@@ -11,10 +11,9 @@
 //   6. atomicReplaceFile     —— 通用二进制/文本原子替换（供后续非 JSON 文件用）。
 //
 // 设计为何如此：
-//   - 官方 session-persistence-jsonl 用「link()+unlink() no-clobber」发布新文件，
-//     因为日志是 append-only 且「首次物化」必须拒绝静默覆盖（README L45、L76）。
-//     但它用「rename 覆盖」发布同单元整文件重写（storage-json README L9、atomic.ts L34），
-//     因为单写者整文件替换时 last-write-wins 是正确语义。
+//   - 官方持久化把两种发布语义分开：append-only 日志的「首次物化」必须 no-clobber
+//     （拒绝静默覆盖），而单写者的整文件重写用 rename 覆盖——后者 last-write-wins
+//     才是正确语义。
 //   - 本插件的数据形态是 FlowStore 的「整文件 JSON 重写 + 磁盘锁串行化」，属后者。
 //     因此发布采用「rename 覆盖」，但必须结合磁盘锁（acquireDiskLock）保证跨进程只有一个
 //     写者；进程内再叠 withFileLock 保证并发写串行。三者组合后，rename 的静默覆盖
@@ -25,16 +24,15 @@
 //
 // 原子发布协议（每个 API 各自注释「为什么」，这里只给总纲）：
 //   同目录临时文件（唯一后缀，避免与并发写者互踩）→ 写内容 → fsync 文件句柄
-//   → 原子发布（rename 覆盖，结合磁盘锁后无竞态）→ POSIX fsync 父目录（Windows 跳过，
-//   官方 win32.ts L1-12 说明 Windows 不暴露父目录 fsync 契约）。失败路径必定清理临时文件，
-//   绝不残留垃圾。
+//   → 原子发布（rename 覆盖，结合磁盘锁后无竞态）→ POSIX fsync 父目录（Windows 跳过：
+//   官方不暴露父目录 fsync 契约）。失败路径必定清理临时文件，绝不残留垃圾。
 
 import { randomBytes } from 'node:crypto'
 import { mkdir, open, readFile, readdir, rename, rm, stat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 
 // ── 默认参数（可经 opts 注入覆盖，便于测试）──────────────────────────────
-// 锁默认超时（SKILL §4.6「获取失败重试」；需求按「有限次数/超时后抛明确错误」）。
+// 锁默认超时：获取失败按轮询重试，超时后抛明确错误（而不是无限等待）。
 const DEFAULT_LOCK_TIMEOUT_MS = 30_000
 // 陈旧磁盘锁回收阈值（任务指定默认 30s）：锁文件 mtime 超过该阈值且持有 pid 已死才回收。
 const DEFAULT_STALE_LOCK_MS = 30_000
@@ -107,9 +105,8 @@ function isAbsent(error: unknown): boolean {
 
 /** POSIX 独有：fsync 目录，使刚 rename/link 的新目录项在掉电后仍存活。Windows 跳过。 */
 async function fsyncDirectory(dir: string): Promise<void> {
-  // Windows 不暴露父目录 fsync 契约（官方 win32.ts L1-12 的说明）；其耐久性由
-  // MoveFileExW(MOVEFILE_WRITE_THROUGH) 承担，而 Node 的 rename 在 Windows 上经 libuv
-  // 映射到 MoveFileExW（官方 atomic.ts L5-6）。故这里只在 POSIX 上补目录 fsync。
+  // Windows 不暴露父目录 fsync 契约；其耐久性由 MoveFileExW(MOVEFILE_WRITE_THROUGH) 承担，
+  // 而 Node 的 rename 在 Windows 上经 libuv 映射到该调用。故这里只在 POSIX 上补目录 fsync。
   if (process.platform === 'win32') return
   const handle = await open(dir, 'r')
   try {
@@ -462,6 +459,9 @@ export async function releaseDiskLock(info: DiskLockInfo): Promise<void> {
  * 磁盘锁路径 = `<filePath>.lock`（与数据文件同目录，崩溃残留可被 cleanupStaleTemp 一并识别）。
  * 典型用法：withJsonLock(path, async () => { const s = await readJson(path, {}); ...; await atomicWriteJson(path, s) })
  *
+ * 名字里的 JSON 是历史命名：本原语只规定「组合锁 + 临界区」，与内容类型无关——
+ * 任何单文件的发布（二进制受管文件、图/索引产物）都应复用它，不要自建第二套组合。
+ *
  * @param filePath 数据文件路径（进程内锁键与磁盘锁派生路径都基于它）。
  * @param fn 持锁执行的读改写任务。
  * @param opts 透传给 acquireDiskLock 的超时/陈旧阈值。
@@ -504,7 +504,8 @@ export async function atomicReplaceFile(
   if (resolvedTmpDir !== undefined) {
     await mkdir(resolvedTmpDir, { recursive: true })
   }
-  // 临时文件名带 target base，便于人类排查；整体落在 tmpDir（或同目录）内。
+  // 临时文件名只携带 pid 与随机段（便于区分并发写者），资源归属由所在目录定位；
+  // 整体落在注入的 tmpDir 内，未注入时与 target 同目录（同目录天然同卷）。
   const tmp = join(resolvedTmpDir ?? dirname(target), `${TEMP_PREFIX}-${process.pid}-${randomBytes(6).toString('hex')}`)
   try {
     const handle = await open(tmp, 'wx', 0o600)

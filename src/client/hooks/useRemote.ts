@@ -28,6 +28,8 @@ function messageForTransportFailure(error: RemoteError, copy: Dict): string | nu
       return copy.remoteHttpStatus.replace("{status}", String(error.status ?? ""))
     case "emptyStream":
       return copy.remoteEmptyStream
+    case "parse":
+      return copy.remoteParse.replace("{endpoint}", error.endpoint ?? "")
     default:
       return null
   }

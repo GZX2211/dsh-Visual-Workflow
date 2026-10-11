@@ -3,7 +3,7 @@
 // 工作台状态机主体（纯 reducer，可独立单测）：studioReducer 依
 // StudioAction 单向流转状态；openDocument 打开文档（重置选中/编辑器/
 // 已保存图快照/历史栈）；sanitizeSelectionAfterCanvas 校验画布恢复后的选中与
-// 编辑器引用（Bug 8）。所有变更经 dispatch(action) 流入。
+// 编辑器引用。所有变更经 dispatch(action) 流入。
 
 import type { StudioState, CanvasNode, CanvasEdge, EditorRef, LibSelKind } from './studio-types.js'
 import type { WorkflowTemplate } from '../../host/shared/graph-model.js'
@@ -242,8 +242,8 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         dirty: true,
       }
     case 'NODE_REMOVED': {
-      // 级联删除（需求 §4.2.3.2 规则 5）：删除角色主节点时同时删除其全部
-      // 虚拟引用节点，避免画布残留孤儿虚拟节点（Bug 4）。
+      // 级联删除：删除角色主节点时同时删除其全部
+      // 虚拟引用节点，避免画布残留孤儿虚拟节点。
       const removed = new Set<string>([action.id])
       const main = state.canvas.nodes.find((node) => node.id === action.id)
       if (main && (main.kind === 'parent' || main.kind === 'agent')) {
@@ -371,9 +371,9 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         canvas: { nodes: previous.nodes, edges: previous.edges },
         history: { past: state.history.past.slice(0, -1), future: [...state.history.future, graphSnapshotOf(state)] },
       }
-      // BP（Bug 17）：撤销后是否「未保存」取决于是否回到已保存快照，
+      // 撤销后是否「未保存」取决于是否回到已保存快照，
       // 而非一律 true——连续撤销回初始保存状态时不应再弹未保存确认。
-      // BP（Bug 8）：canvas 变化后校验选中/编辑器引用存在性。
+      // canvas 变化后校验选中/编辑器引用存在性。
       return { ...next, ...sanitizeSelectionAfterCanvas(next), dirty: !graphSnapshotsEqual(next.canvas, state.savedGraph) }
     }
     case 'REDO': {
@@ -384,8 +384,8 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         canvas: { nodes: next.nodes, edges: next.edges },
         history: { past: [...state.history.past, graphSnapshotOf(state)], future: state.history.future.slice(0, -1) },
       }
-      // 同 UNDO：重做后同样按「是否回到已保存状态」判定（Bug 17）与
-      // 选中/编辑器校验（Bug 8）。
+      // 同 UNDO：重做后同样按「是否回到已保存状态」判定与
+      // 选中/编辑器校验。
       return { ...applied, ...sanitizeSelectionAfterCanvas(applied), dirty: !graphSnapshotsEqual(applied.canvas, state.savedGraph) }
     }
     case 'PANELS_SET':
@@ -408,7 +408,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
 }
 
 /**
- * 画布变化后的选中/编辑器校验（Bug 8）：UNDO/REDO 恢复画布后，selection 与
+ * 画布变化后的选中/编辑器校验：UNDO/REDO 恢复画布后，selection 与
  * editor 可能仍指向已不存在的节点/连线（如 REDO 一个删除操作后选中残留），
  * 返回清理后的 selection/editor —— 引用失效的项置空，避免键盘删除误删与
  * Inspector 渲染空数据。

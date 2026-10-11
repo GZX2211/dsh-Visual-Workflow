@@ -571,7 +571,8 @@ export async function seedUsed(
   })
 }
 
-/** 摆放一条统计投影（缺行代表「证据不足」，用例据此构造有/无统计两种读侧状态）。 */export function seedStats(
+/** 摆放一条统计投影（缺行代表「证据不足」，用例据此构造有/无统计两种读侧状态）。 */
+export function seedStats(
   world: FakeExperienceWorld,
   experienceId: string,
   values: Partial<ExperienceStatsValues>,

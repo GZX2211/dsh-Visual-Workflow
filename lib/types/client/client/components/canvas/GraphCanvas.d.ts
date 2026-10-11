@@ -30,7 +30,7 @@ export interface GraphCanvasProps {
         x: number;
         y: number;
     }): void;
-    /** 角色节点拖入协作组（需求 §4.2.5.2 规则 1）。 */
+    /** 角色节点拖入协作组。 */
     onNodeDropToGroup(nodeId: string, groupId: string): void;
     onNodeSelect(id: string): void;
     onEdgeSelect(id: string): void;

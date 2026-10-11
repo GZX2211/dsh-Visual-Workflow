@@ -7,6 +7,7 @@
 // HTTP/SSE 适配层单测见 ./openai-http.test.ts。
 
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { OpenAiApi, OpenAiError, parseChatRequest } from '../../../src/host/service/index.js'
 import type { ServiceState } from '../../../src/host/shared/types.js'
 import { makeHarness, pausedRun } from './fixtures/openai-fixture.js'
@@ -66,6 +67,16 @@ describe('OpenAiApi.authorize', () => {
     } catch (error) {
       expect((error as OpenAiError).status).toBe(401)
     }
+  })
+
+  it('密钥比较走恒定时间原语（源码级守卫：timingSafeEqual + sha256 等长摘要，无直接字符串短路）', () => {
+    // 时序侧信道无法用行为断言观测，故守卫写在源码：新增/回退比较方式必须显式改这里。
+    const source = readFileSync(new URL('../../../src/host/service/openai-api.ts', import.meta.url), 'utf8')
+    expect(source).toContain('timingSafeEqual')
+    expect(source).toContain("createHash('sha256')")
+    // 修复前的写法：header !== expected —— 会在首个不同字节短路
+    expect(source).not.toMatch(/header\s*!==\s*expected/)
+    expect(source).not.toMatch(/if\s*\(\s*header\s*===/)
   })
 })
 

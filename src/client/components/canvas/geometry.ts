@@ -74,23 +74,22 @@ export function edgeGeometry(edge: CanvasEdge, byId: Map<string, CanvasNode>): E
   const targetGroup = target.kind === 'group' ? null : groupOfMember(byId, target.id)
   const sourceSwapped = swappedOf(source)
   const targetSwapped = swappedOf(target)
-  const start = sourceGroup
-    ? memberAnchor(sourceGroup, source.id, 'right')!
-    : {
-        x: source.position.x + (sourceSwapped ? 0 : sourceSize.w),
-        y: source.position.y + sourceSize.h * (source.kind === 'group' ? 0.5 : handleY(edge.sourceHandle ?? 'flow-out')),
-      }
-  const end = targetGroup
-    ? memberAnchor(targetGroup, target.id, 'left')!
-    : {
-        x: target.position.x + (targetSwapped ? targetSize.w : 0),
-        y: target.position.y + targetSize.h * (target.kind === 'group' ? 0.5 : handleY(edge.targetHandle ?? 'flow-in')),
-      }
+  // 成员锚点可能为空（组的 memberIds 与节点反查口径分叉时）：为空则回退节点自身几何，不用非空断言
+  const sourceAnchor = sourceGroup ? memberAnchor(sourceGroup, source.id, 'right') : null
+  const targetAnchor = targetGroup ? memberAnchor(targetGroup, target.id, 'left') : null
+  const start = sourceAnchor ?? {
+    x: source.position.x + (sourceSwapped ? 0 : sourceSize.w),
+    y: source.position.y + sourceSize.h * (source.kind === 'group' ? 0.5 : handleY(edge.sourceHandle ?? 'flow-out')),
+  }
+  const end = targetAnchor ?? {
+    x: target.position.x + (targetSwapped ? targetSize.w : 0),
+    y: target.position.y + targetSize.h * (target.kind === 'group' ? 0.5 : handleY(edge.targetHandle ?? 'flow-in')),
+  }
   // 端口朝向（端口所在边缘的外法向）：右缘 +1、左缘 -1。组内成员沿用固定侧
   // （成员出点=组卡片右缘、入点=组卡片左缘，见 memberAnchor）。
   // 用户批注：连线方向应当根据连接点（左缘/右缘）确定，而非默认朝右。
-  const startDir = sourceGroup ? 1 : (sourceSwapped ? -1 : 1)
-  const endDir = targetGroup ? -1 : (targetSwapped ? 1 : -1)
+  const startDir = sourceAnchor ? 1 : (sourceSwapped ? -1 : 1)
+  const endDir = targetAnchor ? -1 : (targetSwapped ? 1 : -1)
   // 控制点沿各自端口外法向延伸：出点从所在边缘向外伸出、入点从所在边缘外侧进入，
   // 从而不会穿入节点卡片体导致被遮挡。标准「左→右相对（源右缘/目标左缘）」时与旧几何一致（回归安全）。
   const bend = Math.max(54, Math.abs(end.x - start.x) * 0.46)

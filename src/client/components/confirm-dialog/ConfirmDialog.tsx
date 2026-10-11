@@ -1,6 +1,6 @@
 // src/client/components/confirm-dialog/ConfirmDialog.tsx
 //
-// 确认弹层（照搬旧项目 components/confirm-dialog.js，TSX 化）：
+// 确认弹层：
 // 三种形态：unsaved（保存/放弃/取消）/ importConflict（覆盖/改名/取消）/ confirmText（通用确认）。
 
 import type { ConfirmState } from '../../studio/studio-state.js'

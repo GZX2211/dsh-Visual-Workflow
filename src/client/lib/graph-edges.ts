@@ -16,7 +16,7 @@ export interface LineLabelCopy {
   content: string
 }
 
-/** 条件连线标签（需求 §4.3 连线类型表）：方括号包裹，内容条件截断到 12 字。 */
+/** 条件连线标签：方括号包裹，内容条件截断到 12 字。 */
 export function conditionLabel(condition: Line['condition'] | null | undefined, labels: LineLabelCopy): string {
   if (!condition) return ''
   if (condition.type === 'pass') return `[${labels.pass}]`

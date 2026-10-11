@@ -1,6 +1,6 @@
 // src/client/lib/bundle.ts
 //
-// 导入导出 v2 bundle 客户端辅助（架构文档 §6.4）：格式常量与形状判定，
+// 导入导出 v2 bundle 客户端辅助：格式常量与形状判定，
 // 供 Studio 导入/导出（title bar 按钮）与 Inspector 使用。
 
 /** 角色模板导出标识。 */

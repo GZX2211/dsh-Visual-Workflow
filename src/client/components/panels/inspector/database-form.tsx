@@ -73,7 +73,7 @@ export function DatabaseForm({ data, copy, onPatch, onTest }: {
         </div>
       ) : (
         <div className="wf-form-grid-1">
-          <InputField label={copy.dbLocalPath} value={data.localPath} placeholder="D:\data\mydb.sqlite" onChange={(value) => onPatch({ localPath: value })} />
+          <InputField label={copy.dbLocalPath} value={data.localPath} placeholder={copy.dbLocalPathPlaceholder} onChange={(value) => onPatch({ localPath: value })} />
           <Field label={copy.dbVectorSource}>
             <select value={String(data.vectorSource ?? 'embedding')} onChange={(event) => onPatch({ vectorSource: event.target.value })}>
               <option value="embedding">{copy.dbVectorEmbedding}</option>

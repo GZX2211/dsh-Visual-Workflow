@@ -138,7 +138,7 @@ export function useDocumentActions(
         try {
           const saved = await workflows.saveWorkflow(flow, nodes, edges)
           if (saved) {
-            // MARK_SAVED：同时记录「已保存图快照」，供撤销/重做精确判定 dirty（Bug 17）
+            // MARK_SAVED：同时记录「已保存图快照」，供撤销/重做精确判定 dirty
             dispatch({ type: 'MARK_SAVED' })
             // 自动保存（纯几何拖动）静默成功，避免拖动即 toast；失败仍提示
             if (!auto) notify('success', t.toastSaved)
@@ -210,7 +210,7 @@ export function useDocumentActions(
   }, [dispatch, handleSaveFailure, notify, state, workflows, flowTemplates, serviceControl, t.saveRunningConfirm, t.saveRunningMessage, t.saveRunningTitle, t.toastSaved])
 
   /**
-   * 创建实例（图2 交互改造核心；工作台全局化改版重写）：
+   * 创建实例：
    *  - 实例态：等价于保存实例（名称动态为「保存实例/保存服务」）。
    *  - 模板态 / 资产态（「创建实例」/「创建服务」按钮，或该态「运行」前置）：
    *      1. 目标会话 = 勾选「开启新会话」？新建主会话（createSession 端点，
@@ -220,8 +220,7 @@ export function useDocumentActions(
    *         按 flowId 连续可追溯）；
    *      3. 保存成功 → 切到实例态（画布绑定新实例，左栏新实例卡高亮）→
    *         afterCreate?.(saved)（「运行」入口接续启动）。
-   *  - 返回：即时创建路径返回保存的文档；弹确认框路径返回 null（后续统一经
-   *    afterCreate 回调接续，调用方不得依赖返回值判断成功）。
+   *  - 返回：恒为 null（创建结果经 afterCreate 回调接续；调用方不得依赖返回值判断成功）。
    *
    *  资产态与模板态同口径（用户裁决）：画布内容先转实例再运行；资产详情只提供
    *  模式/名称/描述/元参数，节点与连线一律取当前画布（编辑中的草稿即事实源）。
@@ -399,7 +398,7 @@ export function useDocumentActions(
   const createNew = useCallback((tab: LibTab, section?: 'file' | 'database' | 'flowTemplate' | 'group') => {
     if (tab === 'workflow') {
       if (section === 'flowTemplate') {
-        // 图2 交互改造：+ 号新建「工作流模板」（空白模板，编辑后保存回模板库；
+        // + 号新建「工作流模板」（空白模板，编辑后保存回模板库；
         // 实例只能从模板拖入画布「创建实例」后产生——实例列表无 + 号）。
         const draft = flowTemplates.createFlowTemplateDraft(state.mode, state.mode === 'mode2' ? t.untitledServiceTemplate : t.untitledFlowTemplate)
         flowTemplates.openFlowTemplate(draft)

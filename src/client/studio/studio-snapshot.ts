@@ -2,7 +2,7 @@
 //
 // 图快照工具（纯函数）：撤销重做栈元素构造与一致性比较。快照必须产出
 // 与 state.canvas 完全独立的副本（图标量而非引用），避免历史栈被后续
-// 原地修改污染；比较用于 Bug 17 的 dirty 精确判定。
+// 原地修改污染；比较用于 dirty 精确判定。
 
 import type { GraphSnapshot, CanvasNode, CanvasEdge, StudioState } from './studio-types.js'
 
@@ -29,7 +29,7 @@ export function graphSnapshotOf(state: StudioState): GraphSnapshot {
 }
 
 /**
- * 图快照是否一致（Bug 17 的 dirty 精确判定用）。
+ * 图快照是否一致（dirty 精确判定用）。
  * 快照元素均为「内容不可变」结构（节点位置/数据、连线/条件），
  * 直接序列化比较即可（节点/连线顺序即文档事实源顺序）。
  */

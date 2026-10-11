@@ -27,6 +27,7 @@ import type { StudioAction } from '../../../src/client/studio/studio-actions.js'
 import type { RemoteFace } from '../../../src/client/hooks/useRemote.js'
 import type { WorkflowTemplate } from '../../../src/host/shared/graph-model.js'
 import type { Drafted } from '../../../src/client/studio/studio-state.js'
+import { flushAsync, waitForCondition } from '../fixtures/async-flush.js'
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -54,8 +55,9 @@ function tpl(id: string, revision: number, updatedAt: string, extra: Partial<Wor
 }
 
 /**
- * 挂载一个只调用本 hook 的探针组件，并在 act 内把挂载时的首轮异步轮询冲刷干净
+ * 挂载一个只调用本 hook 的探针组件，并冲刷挂载时的首轮异步轮询
  * （否则首轮 dispatch 落在 act 之外，React 会打印 act 警告）。
+ * 首轮落定由调用方用 waitForCondition / flushAsync 显式等待。
  */
 async function mountProbe(dispatch: (a: StudioAction) => void, remote: RemoteFace): Promise<void> {
   function Probe(): null {
@@ -65,8 +67,6 @@ async function mountProbe(dispatch: (a: StudioAction) => void, remote: RemoteFac
   root = createRoot(container!)
   await act(async () => {
     root!.render(React.createElement(Probe))
-    await Promise.resolve()
-    await Promise.resolve()
   })
 }
 
@@ -113,9 +113,11 @@ describe('P2 模板列表轮询 · hook 行为', () => {
     const actions: StudioAction[] = []
     const remote = { async call(ep: string) { calls.push(ep); return [tpl('t1', 1, '2026-01-01')] } } as unknown as RemoteFace
     await mountProbe((a) => actions.push(a), remote)
-    await act(async () => { await Promise.resolve() })
-    expect(calls).toEqual([EP.EP_LIST_FLOW_TEMPLATES])
-    expect(actions).toHaveLength(1)
+    // 显式等待首轮远端调用与 dispatch 落定（不等价于「刷两次微任务」）。
+    await waitForCondition(() => {
+      expect(calls).toEqual([EP.EP_LIST_FLOW_TEMPLATES])
+      expect(actions).toHaveLength(1)
+    })
     expect(actions[0]).toMatchObject({ type: 'FLOW_TEMPLATES_SYNCED' })
   })
 
@@ -124,10 +126,10 @@ describe('P2 模板列表轮询 · hook 行为', () => {
     const actions: StudioAction[] = []
     const remote = { async call(ep: string) { calls.push(ep); return [tpl('t1', 1, '2026-01-01')] } } as unknown as RemoteFace
     await mountProbe((a) => actions.push(a), remote)
-    await act(async () => { await Promise.resolve() })
+    await waitForCondition(() => { expect(calls).toHaveLength(1) })
     await act(async () => { vi.advanceTimersByTime(FLOW_TEMPLATES_POLL_MS) })
-    await act(async () => { await Promise.resolve() })
-    expect(calls.length).toBeGreaterThanOrEqual(2)
+    await flushAsync(1)
+    await waitForCondition(() => { expect(calls.length).toBeGreaterThanOrEqual(2) })
     expect(actions).toHaveLength(1)
   })
 
@@ -136,11 +138,10 @@ describe('P2 模板列表轮询 · hook 行为', () => {
     const actions: StudioAction[] = []
     const remote = { async call() { return items } } as unknown as RemoteFace
     await mountProbe((a) => actions.push(a), remote)
-    await act(async () => { await Promise.resolve() })
+    await waitForCondition(() => { expect(actions).toHaveLength(1) })
     items = [tpl('t1', 1, '2026-01-01'), tpl('tpl-new', 1, '2026-01-05')]
     await act(async () => { vi.advanceTimersByTime(FLOW_TEMPLATES_POLL_MS) })
-    await act(async () => { await Promise.resolve() })
-    expect(actions).toHaveLength(2)
+    await waitForCondition(() => { expect(actions).toHaveLength(2) })
     const last = actions[1] as { type: string; items: WorkflowTemplate[] }
     expect(last.type).toBe('FLOW_TEMPLATES_SYNCED')
     expect(last.items.map((item) => item.id)).toContain('tpl-new')
@@ -150,6 +151,7 @@ describe('P2 模板列表轮询 · hook 行为', () => {
     const actions: StudioAction[] = []
     const remote = { async call() { throw new Error('network down') } } as unknown as RemoteFace
     await expect(mountProbe((a) => actions.push(a), remote)).resolves.toBeUndefined()
+    await flushAsync(1)
     expect(actions).toHaveLength(0)
   })
 
@@ -157,15 +159,14 @@ describe('P2 模板列表轮询 · hook 行为', () => {
     const actions: StudioAction[] = []
     const remote = { async call() { return null } } as unknown as RemoteFace
     await mountProbe((a) => actions.push(a), remote)
-    await act(async () => { await Promise.resolve() })
-    expect(actions).toHaveLength(1)
+    await waitForCondition(() => { expect(actions).toHaveLength(1) })
   })
 
   it('卸载清理定时器：不再继续轮询', async () => {
     let count = 0
     const remote = { async call() { count += 1; return [] } } as unknown as RemoteFace
     await mountProbe(() => {}, remote)
-    await act(async () => { await Promise.resolve() })
+    await waitForCondition(() => { expect(count).toBe(1) })
     const before = count
     act(() => { root!.unmount() })
     root = null

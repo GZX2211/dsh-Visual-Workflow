@@ -97,8 +97,6 @@ export declare abstract class RuntimeBase {
         runId: string;
         sessionId: string;
     }>;
-    /** 某会话+工作流的暂停 run（断点恢复入口）。 */
-    pausedRun(sessionId: string, flowId: string): RunEntry | null;
     /**
      * 某会话当前活跃运行的归属事实（Experience 域解析 subject 用）。
      * 为什么返回最小三元组而不是 RunEntry：运行表与会话/工作流的定位口径是编排器内部
@@ -237,12 +235,21 @@ export declare abstract class RuntimeBase {
     /**
      * 清理运行时资源（插件卸载/Service dispose，幂等）：
      * 中止全部运行（阻塞等待随之 reject）并清空内存表。
-     * 快照不在此写终态——磁盘上残留的 running/paused 由下次启动 reconcileStaleRuns
-     * 标记为 interrupted（可恢复）。
+     * 快照不在此写终态——**已落盘**的 running/paused 记录由下次启动 reconcileStaleRuns
+     * 标记为 interrupted（可恢复）；尚未落盘就进入 dispose 的记录（例如 resumeRun 在
+     * persistWarn 之前被中止）内存条目直接丢弃，磁盘上不留痕，故既非 interrupted 也不可恢复。
      */
     dispose(): void;
     /**
-     * 释放某运行的内存条目（终态收尾路径唯一入口）：清运行表项。
+     * 释放某运行的内存条目（终态收尾路径唯一入口）：清运行表项 + **连带退役该运行的
+     * 子代理归属索引**（childIndex / childByNode）。
+     *
+     * 为什么必须连带清子代理归属：这两张表是「子代理 id → 所属运行/节点」的全局归属事实。
+     * 只删运行表项会让旧归属永久残留，于是同一会话重新起跑（resumeRun 接管同 flowId）后：
+     *   - `childIndex` 里旧 run 的 child 因 sessionId/flowId 与新 run 相同而**通过越权校验**，
+     *     仍可发起协作消息（投递到已废弃的子代理会话）；
+     *   - `childByNode` 仍指向旧 child，节点寻址会命中过期执行者。
+     * 归属随运行条目同生共死，是这两张表唯一自洽的回收条件（宿主 dispose 另有兜底清表）。
      */
     protected releaseRunMemory(runId: string): void;
     /** 拒绝某运行的全部阻塞等待器（终止/卸载路径）。 */

@@ -96,9 +96,14 @@ class FakeSubagents implements SubagentsServiceLike {
     this.onDispatch?.()
     this.dispatches.push({ sender, targetId, content, signal: options.signal })
   }
-  async interrupt(childId: string, authority: { kind: 'user'; parentSessionId: string }): Promise<void> {
-    this.interrupts.push({ childId, authority })
-  }
+  /**
+   * 尽力中断当前回合（可选能力：与生产 SubagentsServiceLike.interrupt? 同形）。
+   * 声明为实例字段而非原型方法，使用例可显式置 undefined 覆盖「宿主未提供该能力」的旁路。
+   */
+  interrupt: ((childId: string, authority: { kind: 'user'; parentSessionId: string }) => Promise<void>) | undefined =
+    async (childId, authority) => {
+      this.interrupts.push({ childId, authority })
+    }
 }
 
 /** agents 服务 fake：父代理 + 子代理（带 ctx 供模型选择挂接）。 */
@@ -570,10 +575,33 @@ describe('NodeAgentRunner 创建/复用/派发', () => {
     expect(h.react.setLimit).toHaveBeenCalledWith('child-1', 7)
   })
 
-  it('interruptChild：官方 interrupt（kind=user/parentSessionId）；异常吞掉（已停止视为成功）', async () => {
+  it('interruptChild：官方 interrupt（kind=user/parentSessionId）', async () => {
     const h = await makeHarness()
     await h.runner.interruptChild('child-9', 'session-1')
     expect(h.subagents.interrupts).toEqual([{ childId: 'child-9', authority: { kind: 'user', parentSessionId: 'session-1' } }])
+  })
+
+  it('interruptChild：官方 interrupt 抛错时静默成功（中断尽力而为，不改写 NodeRunner 契约）', async () => {
+    const h = await makeHarness()
+    h.subagents.interrupt = () => {
+      throw new Error('target not found')
+    }
+    await expect(h.runner.interruptChild('child-9', 'session-1')).resolves.toBeUndefined()
+    expect(h.subagents.interrupts).toEqual([])
+  })
+
+  it('interruptChild：官方 interrupt 返回 rejected Promise 时同样静默成功', async () => {
+    const h = await makeHarness()
+    h.subagents.interrupt = () => Promise.reject(new Error('already stopped'))
+    await expect(h.runner.interruptChild('child-9', 'session-1')).resolves.toBeUndefined()
+  })
+
+  it('interruptChild：宿主未提供 interrupt 能力时旁路（不抛错、不记录）', async () => {
+    const h = await makeHarness()
+    // 官方能力缺失旁路：interrupt 是可选能力（与 SubagentsServiceLike.interrupt? 同形）
+    h.subagents.interrupt = undefined
+    await expect(h.runner.interruptChild('child-9', 'session-1')).resolves.toBeUndefined()
+    expect(h.subagents.interrupts).toEqual([])
   })
 
   it('consumeReactCapped 委托护栏桥；dispose 清理全部登记', async () => {

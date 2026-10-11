@@ -1,20 +1,14 @@
 // src/client/components/canvas/FlowNode.tsx
 //
-// 画布节点卡片（照搬旧项目 graph-canvas.js 的 FlowNode，TSX 化 + 新模型适配）：
-// 角色（父/子代理）/ 文件 / 数据库 / 阶段 / 虚拟节点。接点按 HANDLES 展开；
+// 画布节点卡片：角色（父/子代理）/ 文件 / 数据库 / 阶段 / 虚拟节点。接点按 HANDLES 展开；
 // 运行状态徽标（pending/running/ok/fail）回显；虚拟节点虚线边框 + 「↻ 引用」角标。
 //
-// 用户验收标注修复（2026.08.25）：
-//   - 角色卡元信息两行显示：模型：<model> / 组合：<模式或组合名>（原为单行「模式：…」）；
-//   - 文件节点卡：文本类型显示内容（不显示文件类型词、超两行省略）；文件类型显示
-//     所选文件名列表（不显示「文件」前缀、超出省略）；
-//   - 虚拟节点「↻ 引用」徽标只渲染一处（原 label 行 + 元信息行各一处 → 重复）；
-//   - 输入/输出节点只保留一个连接点（用户验收：模式二输入=flow-out、输出=flow-in）。
-//
-// 功能与优化批注（2026.08.26）：
-//   - 卡片右上角新增「交换左右连接点」按钮（交换两侧连接点位置，美化布线防交叉）；
-//     交换后出点移到左侧、入点移到右侧，再次点击恢复；状态随节点持久化（swapPorts）；
-//   - 连接点按「入口/出口」区分颜色（左/右位置由交换决定，颜色区分方向）。协作组卡片不提供该按钮。
+// 渲染约束：
+//   - 角色卡元信息两行：模型：<model> / 组合：<模式或组合名>；
+//   - 文件节点卡：文本类型显示内容（超两行省略）；文件类型显示所选文件名列表；
+//   - 虚拟节点「↻ 引用」徽标只渲染一处；
+//   - 输入/输出节点各只保留一个连接点（模式二：输入=flow-out、输出=flow-in）；
+//   - 连接点按入口/出口区分颜色；交换左右连接点（swapPorts）随节点持久化，协作组卡片不提供该按钮。
 
 import type { Dict } from '../../i18n.js'
 import type { CanvasNode } from '../../studio/studio-state.js'
@@ -44,7 +38,7 @@ interface FlowNodeProps {
 }
 
 /**
- * 连接点（按模式裁剪：输入/输出节点仅保留流程连接点，用户验收标注「应当只有一个」；
+ * 连接点（按模式裁剪：输入/输出节点仅保留流程连接点；
  * 支持交换：swapped 时出点放左侧、入点放右侧，顺序由 handleY 决定，与批注一致）。
  */
 function nodeHandles(kind: string, mode: 'mode1' | 'mode2', swapped: boolean): { left: string[]; right: string[] } {
@@ -67,7 +61,7 @@ function clip(text: string, limit: number): string {
   return value.length > limit ? `${value.slice(0, limit)}…` : value
 }
 
-/** 节点元信息行（每行独立渲染；用户验收：角色卡为「模型 / 组合」两行）。 */
+/** 节点元信息行（每行独立渲染；角色卡为「模型 / 组合」两行）。 */
 function metaLinesOf(node: CanvasNode, copy: Dict & { modeName(id: string | null | undefined): string }): string[] {
   const kind = node.kind
   const data = node.data
@@ -106,7 +100,7 @@ function metaLinesOf(node: CanvasNode, copy: Dict & { modeName(id: string | null
 export function FlowNode({ node, copy, mode, selected, highlighted, dragging, runStatus, locked, lockHint, agentPatched, onPointerDown, onHandlePointerDown, onToggleSwap }: FlowNodeProps) {
   const kind = node.kind
   const isProxy = kind === 'proxy'
-  // P4 闸门可视化：proxy.data.role='milestone' 时用里程碑样式 + 角标（label 已在名称行渲染）
+  // 里程碑闸门：proxy.data.role='milestone' 时用里程碑样式 + 角标（label 已在名称行渲染）
   const isGate = isProxy && (node.data as { role?: unknown }).role === 'milestone'
   // 名称回退：label 为空（含空白）时显示节点种类名（避免虚拟节点显示为空白卡片）
   const nodeLabel = String(node.data.label ?? '').trim() || String(copy.nodeKinds[isProxy ? 'agent' : kind] ?? '')

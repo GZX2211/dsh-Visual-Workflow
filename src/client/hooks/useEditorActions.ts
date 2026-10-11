@@ -287,7 +287,7 @@ export function useEditorActions(
       const node = state.canvas.nodes.find((item) => item.id === editor.id)
       if (!node) return
       // 画布节点的名称数据源为 label（模板才使用 name）；双写补丁在此消毒，
-      // 避免 file 节点 data 里残留多余的 name 字段（用户验收：磁盘数据被污染）
+      // 避免 file 节点 data 里残留多余的 name 字段（否则磁盘数据被污染）
       const normalized = { ...patch }
       delete normalized.name
       dispatch({ type: 'NODE_DATA_PATCH', id: editor.id, patch: normalized })
@@ -531,7 +531,7 @@ export function useEditorActions(
     if (editor.source === 'flowTemplate') {
       const template = state.flowTemplates.find((item) => item.id === editor.id)
       if (!template) return
-      // 草稿（未入库）本地直接移除；已入库模板删除**不再二次确认**（用户裁决 2026-02）：
+      // 草稿（未入库）本地直接移除；已入库模板删除**不再二次确认**（用户裁决）：
       // 直接走后端删除（成功由 deleteFlowTemplate 内部摘除列表项）并清空画布
       if ((template as { _draft?: boolean })._draft === true) {
         dispatch({ type: 'FLOW_TEMPLATE_REMOVED', id: template.id })

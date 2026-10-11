@@ -13,7 +13,7 @@
 // 再在本文件显式登记——不要为「方便」整体 re-export 内部文件。
 
 // ── 图契约：连接点矩阵、通道配对与节点种类 ─────────────────────────────────
-export { CONDITION_TYPES, HANDLE_PAIRING, NODE_HANDLES, NODE_KINDS } from './model.js'
+export { CONDITION_TYPES, HANDLE_PAIRING, NODE_HANDLES, NODE_KINDS, pairingTargetOf } from './model.js'
 export type { NodeHandleDef } from './model.js'
 
 // ── 图契约：节点/连线工厂与阶段节点硬编码名称 ───────────────────────────────

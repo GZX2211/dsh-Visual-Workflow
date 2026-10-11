@@ -153,8 +153,7 @@ export function useCanvasActions(
 
   const tidyGraph = useCallback(() => {
     history.remember()
-    // 布局统一走 lib/graph-model 的 layoutNodes（Bug 25：删除了 Studio.tsx 内
-    // 重复实现的 flowLayout，避免两份布局算法漂移）。
+    // 布局唯一本体在 lib/graph-model 的 layoutNodes：本层不得再实现第二份布局算法
     const next = layoutNodes(state.canvas.nodes, state.canvas.edges)
     dispatch({ type: 'GRAPH_REPLACED', nodes: next, edges: state.canvas.edges, dirty: true })
     // 整理布局 = 批量坐标改动（纯几何）：同样防抖自动保存（不构成编排变更）
@@ -174,10 +173,10 @@ export function useCanvasActions(
     // 运行中锁定（防御性二次拦截：调用点可能不止 removeSelected）
     if (locks.isNodeLocked(id)) return
     history.remember()
-    // 组内成员离开协作组：清除成员关系（§4.2.5.2）
+    // 组内成员离开协作组：清除成员关系
     const node = state.canvas.nodes.find((item) => item.id === id)
     const groupId = node?.kind === 'parent' || node?.kind === 'agent' ? (node.data.groupId as string | null | undefined) : null
-    // 级联删除集合：主节点 + 其全部虚拟引用节点（需求 §4.2.3.2 规则 5 / Bug 4）
+    // 级联删除集合：主节点 + 其全部虚拟引用节点
     const removed = new Set<string>([id])
     if (node && (node.kind === 'parent' || node.kind === 'agent')) {
       for (const item of state.canvas.nodes) {
@@ -221,7 +220,7 @@ export function useCanvasActions(
     notify('info', t.toastDeleted)
   }, [dispatch, history, locks, notify, t.toastDeleted])
 
-  // ---------- 画布节点放置（模板深拷贝，§4.2.1） ----------
+  // ---------- 画布节点放置（模板深拷贝） ----------
   const placeTemplateNode = useCallback((kind: 'role' | 'file' | 'database', templateId: string, position: { x: number; y: number }) => {
     if (!state.currentId) return
     const template = state.templates[kind].find((item) => item.id === templateId)
@@ -264,7 +263,7 @@ export function useCanvasActions(
     notify('success', t.toastNodeAdded)
   }, [dispatch, history, notify, state.canvas.nodes, state.currentId, t.parentDuplicatedHint, t.toastNodeAdded])
 
-  /** 放置父代理节点（每画布最多一个，§4.2.3.1 规则 5）。 */
+  /** 放置父代理节点（每画布最多一个）。 */
   const placeParentNode = useCallback((templateId: string, position: { x: number; y: number }) => {
     if (!state.currentId) return
     if (state.canvas.nodes.some((item) => item.kind === 'parent')) {
@@ -285,7 +284,7 @@ export function useCanvasActions(
     notify('success', t.toastNodeAdded)
   }, [dispatch, history, notify, state.canvas.nodes, state.currentId, state.templates.role, t.parentDuplicatedHint, t.toastNodeAdded])
 
-  /** 放置阶段节点（启动/结束各一，§4.2.5.1）。 */
+  /** 放置阶段节点（启动/结束各一）。 */
   const placeStageNode = useCallback((kind: string, position: { x: number; y: number }) => {
     if (!state.currentId) return
     if ((kind === 'start' || kind === 'end') && state.canvas.nodes.some((item) => item.kind === kind)) {
@@ -377,7 +376,7 @@ export function useCanvasActions(
     scheduleGeometryAutoSave()
   }, [dispatch, scheduleGeometryAutoSave])
 
-  /** 角色节点拖入协作组（§4.2.5.2 规则 1）：成员标记 groupId + 组 memberIds 登记（原子追加，防止不一致）。 */
+  /** 角色节点拖入协作组：成员标记 groupId + 组 memberIds 登记（原子追加，防止不一致）。 */
   const addNodeToGroup = useCallback((nodeId: string, groupId: string) => {
     // 运行中锁定：已完成/执行中节点入组会断开其原有流程连线（dropNodeFlowLines），
     // 等于改写已跑完/执行中的流程 → 直接忽略
@@ -393,7 +392,7 @@ export function useCanvasActions(
       return
     }
     history.remember()
-    // 入组时自动断开该节点原有的流程连线（组内成员仅上下文/数据库线，§4.2.5.2 规则 4）
+    // 入组时自动断开该节点原有的流程连线（组内成员仅上下文/数据库线）
     dispatch({ type: 'GRAPH_REPLACED', nodes: joinNodeToGroup(state.canvas.nodes, nodeId, groupId), edges: dropNodeFlowLines(state.canvas.edges, nodeId), dirty: true })
     notify('success', t.toastGroupMemberAdded)
   }, [dispatch, history, locks, notify, state.canvas.edges, state.canvas.nodes, t.groupMemberLimitHint, t.toastGroupMemberAdded])

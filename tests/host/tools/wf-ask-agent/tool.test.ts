@@ -184,8 +184,21 @@ interface Harness {
 
 interface HarnessOptions {
   config?: Partial<OrchestratorConfig>
-  /** 注入可控时钟（TTL 用例；缺省 Date.now）。 */
+  /** 注入可控时钟（TTL 用例；缺省用 defaultClock）。 */
   now?: () => number
+}
+
+/**
+ * 缺省可控时钟：固定起点 + 每次读取单调 +1ms。
+ * 分段计时类逻辑（如运行空闲超时）可据此推进，同时使 TTL 判断完全脱离真实墙钟；
+ * 每个 harness 独立持有，避免跨用例共享可变状态。
+ */
+function makeClock(): () => number {
+  let value = 1_000
+  return () => {
+    value += 1
+    return value
+  }
 }
 
 /** 装配：真实编排运行时 + fake 依赖 + 注册 wf_run_node 与 wf_ask_agent。 */
@@ -199,6 +212,8 @@ async function makeHarness(options?: HarnessOptions): Promise<Harness> {
   const runner = new FakeRunner()
   const infos: string[] = []
   const uuidSeq = { n: 0 }
+  // 每个 harness 独立时钟：TTL 用例传入可变时钟，其余用例用本实例的单调时钟
+  const clock = options?.now ?? makeClock()
   const runtime = new OrchestratorRuntime({
     store,
     runner,
@@ -209,13 +224,15 @@ async function makeHarness(options?: HarnessOptions): Promise<Harness> {
       runIdleTimeoutMs: 500,
       retryLimitDefault: 3,
       reactIterationLimitDefault: 50,
-      wfAskAgentTtlMs: 500,
+      // 多数用例不关心 TTL：默认放宽到 30s，使登记不会在用例执行期间意外过期
+      wfAskAgentTtlMs: 30_000,
       ...options?.config,
     },
     logger: { warn: () => {}, info: (message) => infos.push(message), debug: () => {} },
     newRunId: () => 'run-1',
     uuid: () => `uuid-${(uuidSeq.n += 1)}`,
-    ...(options?.now ? { now: options.now } : {}),
+    // 缺省注入可控时钟：不关心 TTL 的用例不受真实墙钟抖动影响；TTL 用例自行注入可变时钟
+    now: clock,
   })
   const tools = new FakeToolsRegistry()
   const followups: FollowupCall[] = []
@@ -275,7 +292,7 @@ const ASK_ARGS = { cmd: 'ask', targetChildId: 'child-2', message: '请把中间�
 
 /**
  * 发起 ask 并返回受理凭证（模拟模型从工具结果读取 askId）。
- * 默认 TTL 放宽到 30s：多数用例不关心 TTL，避免真实时钟让登记意外过期。
+ * harness 默认 TTL 为 30s 且注入可控时钟，故登记在用例执行期间不会意外过期。
  */
 async function ask(h: Harness, args: Record<string, unknown> = ASK_ARGS): Promise<AskReceipt> {
   const def = h.tools.definitions.get(WF_ASK_AGENT)!
@@ -313,6 +330,47 @@ describe('wf_ask_agent 注册与 schema', () => {
     expect(def.description).toContain('returns immediately')
     expect(def.description).toContain('does not wait')
     expect(def.description).not.toContain('blocks until')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 参数契约：逐 cmd 的必填组合必须在模型可见 description 里写明
+// ---------------------------------------------------------------------------
+
+/** 取某参数的说明文本（缺参数即抛，避免空集断言假通过）。 */
+function paramDescriptionOf(def: ToolDefinitionLike, name: string): string {
+  const node = (def.parameters.properties ?? {})[name] as { description?: unknown } | undefined
+  const description = String(node?.description ?? '')
+  if (!description) throw new Error(`参数 ${name} 缺少 description`)
+  return description
+}
+
+describe('wf_ask_agent 参数必填组合的模型可见契约', () => {
+  it('targetChildId 说明它只在 cmd=ask 时必填', async () => {
+    const h = await makeHarness()
+    const text = paramDescriptionOf(h.tools.definitions.get(WF_ASK_AGENT)!, 'targetChildId')
+    expect(text).toContain('cmd=ask')
+    expect(text.toLowerCase()).toContain('required')
+  })
+
+  it('askId 说明它只在 cmd=reply 时必填', async () => {
+    const h = await makeHarness()
+    const text = paramDescriptionOf(h.tools.definitions.get(WF_ASK_AGENT)!, 'askId')
+    expect(text).toContain('cmd=reply')
+    expect(text.toLowerCase()).toContain('required')
+  })
+
+  it('message 说明 ask 与 reply 都必填', async () => {
+    const h = await makeHarness()
+    const text = paramDescriptionOf(h.tools.definitions.get(WF_ASK_AGENT)!, 'message')
+    expect(text).toContain('cmd=ask')
+    expect(text).toContain('cmd=reply')
+    expect(text.toLowerCase()).toContain('required')
+  })
+
+  it('cmd 仍是唯一 schema 必填项（条件必填只由文档表达，未改 schema 形状）', async () => {
+    const h = await makeHarness()
+    expect(h.tools.definitions.get(WF_ASK_AGENT)!.parameters.required).toEqual(['cmd'])
   })
 })
 
@@ -614,6 +672,24 @@ describe('待回复登记 TTL 惰性清理', () => {
     await expect(
       def.execute({ cmd: 'reply', targetChildId: 'child-1', askId: first.askId, message: '旧回复' }, execOf(child2)),
     ).rejects.toMatchObject({ code: 'WF_ASK_NOT_FOUND' })
+  })
+
+  it('缺省 TTL：默认 harness 的受理窗口远大于用例时长（旧值 500ms 的墙钟依赖已消除）', async () => {
+    const h = await makeHarness()
+    await start(h)
+    const def = h.tools.definitions.get(WF_ASK_AGENT)!
+    const receipt = await ask(h)
+    const startedAt = h.runtime.now()
+
+    // 模拟并行负载下 ask → reply 之间的真实调度间隙；旧默认 TTL=500ms 且用真实时钟时该登记必然过期
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    const repliedAt = h.runtime.now()
+
+    // 可控时钟不随真实等待推进：登记窗口只由缺省 TTL 决定，故 600ms 停顿事件不会误杀登记
+    expect(repliedAt - startedAt).toBeLessThan(30_000)
+    await expect(
+      def.execute({ cmd: 'reply', targetChildId: 'child-1', askId: receipt.askId, message: 'ok' }, execOf(child2)),
+    ).resolves.toEqual({ cmd: 'reply', askId: receipt.askId, from: 'child-2', to: 'child-1' })
   })
 })
 

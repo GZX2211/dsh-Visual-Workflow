@@ -105,7 +105,7 @@ export function ExperienceForm({ data, copy, onPatch }: ExperienceFormProps) {
         minHeight={50}
         onChange={(text) => onPatch({ evidence: listOf(text) })}
       />
-      {/* 只读：长期质量统计（Host 由评价历史聚合的派生事实，§34 不允许人工编辑） */}
+      {/* 只读：长期质量统计（Host 由评价历史聚合的派生事实，不允许人工编辑） */}
       <div className="wf-form-stack">
         <span className="wf-hint">{copy.experienceStatsTitle}</span>
         {statRows === null

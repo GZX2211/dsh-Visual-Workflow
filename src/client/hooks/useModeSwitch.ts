@@ -1,7 +1,7 @@
 // src/client/hooks/useModeSwitch.ts
 //
 // 模式切换（mode1 编排执行 / mode2 后台服务）：状态级切换动作；
-// 未保存守卫与工作流持久化由调用方组合（T-046 完整切换流程）。
+// 未保存守卫与工作流持久化由调用方组合。
 
 import { useCallback } from 'react'
 import type { Dispatch } from 'react'

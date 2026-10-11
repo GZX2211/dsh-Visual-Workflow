@@ -276,33 +276,41 @@ describe('wf_graph_patch · 图结构变更组', () => {
   it('create_node：坐标不入补丁 —— 缺省写哨兵 {0,0} 交由客户端自动布局（D-16）', async () => {
     const { host, storeState } = makeHost()
     storeState.workflows.set('wf-1', makeFlow())
-    // 先建（孤立但允许：本补丁只做"记哨兵"语义），再连（第二个补丁把图连回合法）
-    await executeGraphPatch(host, 'session-1', {
+    // 合法 op 序列：新建节点后立即接回主流程，避免检查器因孤立节点阻断（本用例要断言的是工具落盘结果）
+    const result = await executeGraphPatch(host, 'session-1', {
       scope: 'instance',
       targetId: 'wf-1',
-      ops: [{ op: 'create_node', node: { id: 'a2', kind: 'agent', data: { label: '分析' } } }],
-    }).catch(() => undefined) // 检查器可能因孤立阻断；哨兵语义与是否落盘无关
-    const created = (await import('../../../../src/host/tools/wf-graph-patch/apply.js')).applyGraphOps({
-      doc: makeFlow(),
-      ops: [{ op: 'create_node', node: { id: 'a2', kind: 'agent', data: { label: '分析' } } }],
+      ops: [
+        { op: 'create_node', node: { id: 'a2', kind: 'agent', data: { label: '分析' } } },
+        { op: 'connect', source: 'a1', target: 'a2', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+        { op: 'connect', source: 'a2', target: 'e', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+        { op: 'disconnect', lineId: 'l2' },
+      ],
     })
-    const node = (created.doc.nodes as GraphNode[]).find((item) => item.id === 'a2')
+    expect(result.ok).toBe(true)
+    expect(result.created).toEqual(['a2'])
+    const saved = storeState.workflows.get('wf-1')
+    const node = saved?.nodes.find((item) => item.id === 'a2') as GraphNode | undefined
     expect(node?.position).toEqual({ x: 0, y: 0 })
   })
 
   it('create_node：阶段节点 label 由系统锁定（忽略补丁传入值）', async () => {
     const { host, storeState } = makeHost()
-    storeState.workflows.set('wf-1', makeFlow('wf-1', {
-      nodes: [stageNode('s', 'start'), roleNode('a1'), stageNode('e', 'end')],
-      lines: [flowLine('l1', 's', 'a1'), flowLine('l2', 'a1', 'e')],
-    }))
-    const applied = (await import('../../../../src/host/tools/wf-graph-patch/apply.js')).applyGraphOps({
-      doc: makeFlow('wf-1', { nodes: [roleNode('a1')], lines: [] }),
-      ops: [{ op: 'create_node', node: { id: 's', kind: 'start', data: { label: '我自己起的名字' } } }],
+    storeState.workflows.set('wf-1', makeFlow())
+    // 先删旧启动节点再重建同名阶段节点：既覆盖 label 锁定，又保持「恰好一个启动节点」的结构合法
+    const result = await executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [
+        { op: 'remove_node', nodeId: 's' },
+        { op: 'create_node', node: { id: 's', kind: 'start', data: { label: '我自己起的名字' } } },
+        { op: 'connect', source: 's', target: 'a1', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+      ],
     })
-    const node = (applied.doc.nodes as GraphNode[]).find((item) => item.id === 's') as { data?: { label?: string } }
+    expect(result.ok).toBe(true)
+    const saved = storeState.workflows.get('wf-1')
+    const node = saved?.nodes.find((item) => item.id === 's') as { data?: { label?: string } } | undefined
     expect(node?.data?.label).toBe('启动')
-    void host
   })
 
   it('create_node：a proxy node must reference an existing role node', async () => {
@@ -678,7 +686,7 @@ describe('wf_graph_patch · 聚合失败项', () => {
   it('失败项不污染后续 op 的判定基础：前一条失败后，后一条仍按原文档判定', async () => {
     const { host, storeState } = makeHost()
     storeState.workflows.set('wf-1', makeFlow())
-    // 第 exactly 1 op想删掉 a1（不存在于文档的引用），第 2 条再删一次同一节点：
+    // 第 1 条想删掉不存在的节点，第 2 条再删一次同一节点：
     // 若失败项留下中间状态，第 2 条的报错会变成"节点不存在"之外的其它形状
     const error = await expectWfError(() => executeGraphPatch(host, 'session-1', {
       scope: 'instance',
@@ -1149,7 +1157,7 @@ describe('wf_graph_patch · create 新建模板', () => {
     expect(storeState.templates.has('tpl-plan-a')).toBe(true)
   })
 
-  it('目标模板already exists：WF_PATCH_CONFLICT，且绝不覆盖既有模板', async () => {
+  it('目标模板已存在：WF_PATCH_CONFLICT，且绝不覆盖既有模板', async () => {
     const { host, storeState } = makeHost()
     storeState.templates.set('tpl-1', makeTemplate())
     const error = await expectWfError(() => executeGraphPatch(host, 'session-1', {

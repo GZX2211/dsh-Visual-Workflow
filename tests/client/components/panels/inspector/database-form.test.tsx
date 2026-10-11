@@ -11,7 +11,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import React from 'react'
 import { DatabaseForm } from '../../../../../src/client/components/panels/inspector/database-form.js'
-import { zh } from '../../../../../src/client/i18n.js'
+import { en, zh } from '../../../../../src/client/i18n.js'
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -121,5 +121,23 @@ describe('数据库口令不回显（D07-05）', () => {
     const password = container!.querySelector<HTMLInputElement>('input[type="password"]')!
     expect(password.value).toBe('')
     expect(password.placeholder).toBe(zh.dbPasswordPlaceholder)
+  })
+})
+
+describe('本地库路径示例文案（D07-09）', () => {
+  it('占位示例来自词典，且不是 Windows 专属路径', async () => {
+    await act(async () => {
+      root = createRoot(container!)
+      root.render(React.createElement(DatabaseForm, {
+        data: makeDbFormData(),
+        copy: en,
+        onPatch: () => {},
+        onTest: () => {},
+      } as Parameters<typeof DatabaseForm>[0]))
+    })
+    const fields = Array.from(container!.querySelectorAll<HTMLInputElement>('input'))
+    const localPathField = fields.find((item) => item.placeholder === en.dbLocalPathPlaceholder)
+    expect(localPathField?.placeholder).toBe(en.dbLocalPathPlaceholder)
+    expect(en.dbLocalPathPlaceholder).not.toMatch(/^[A-Za-z]:[\\/]/)
   })
 })

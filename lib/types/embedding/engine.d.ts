@@ -73,8 +73,12 @@ export interface EmbeddingServiceOptions {
  */
 export declare class EmbeddingService implements EmbeddingEngine {
     private readonly options;
-    readonly source: EmbeddingSource;
-    readonly dimension = 0;
+    private sourceValue;
+    private dimensionValue;
+    /** 当前嵌入来源（只读投影；就绪准备后由内部切换，外部无从改写）。 */
+    get source(): EmbeddingSource;
+    /** 当前向量维度（只读投影；bm25 降级态为 0）。 */
+    get dimension(): number;
     private local;
     /** 就绪单飞：同一实例的并发就绪/嵌入请求共享同一次加载。 */
     private readyPromise;

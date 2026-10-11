@@ -222,9 +222,23 @@ async function detectTargetKind(
   if (template) return 'template'
   const workflow = await host.store.getWorkflow(input.sessionId, input.targetId)
   if (workflow) return 'instance'
-  const service = await host.store.getServiceAsFlow(input.targetId)
+  const service = await ownedServiceFlow(host, input.sessionId, input.targetId)
   if (service) return 'instance'
   return 'none'
+}
+
+/**
+ * 服务实例的归属过滤读取（模式二视图）：`getServiceAsFlow` 不校验归属（服务管理器/
+ * 服务进程用），工具层不得据它把他人会话的服务实例读进补丁管线——越权在取数处即回
+ * 「不存在」，与 loadDoc 的 WF_ORG_NOT_FOUND 同口径（不再等到写盘才报中文错误）。
+ */
+async function ownedServiceFlow(
+  host: GraphPatchHost,
+  sessionId: string,
+  targetId: string,
+): Promise<WorkflowDocument | null> {
+  const service = await host.store.getServiceAsFlow(targetId)
+  return service && service.sessionId === sessionId ? service : null
 }
 
 /** 校验 scope 与目标类型匹配（§4.2 WF_SCOPE_INVALID）。 */
@@ -565,7 +579,7 @@ async function loadDoc(
   }
   const workflow = await host.store.getWorkflow(input.sessionId, input.targetId)
   if (workflow) return workflow
-  const service = await host.store.getServiceAsFlow(input.targetId)
+  const service = await ownedServiceFlow(host, input.sessionId, input.targetId)
   if (service) return service
   throw new WfError(`WF_ORG_NOT_FOUND: workflow/service instance not found or not owned by this session: ${input.targetId}`, 'WF_ORG_NOT_FOUND')
 }

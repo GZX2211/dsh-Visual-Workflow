@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { normalizeServerName, parseMcpRows, resolveSpawnCommandLine, renderCommandLine, upsertMcpServer } from '../../../src/host/mcp/registry.js'
+import { normalizeServerName, parseMcpRows, resolveSpawnCommandLine, renderCommandLine, toggleMcpServer, upsertMcpServer } from '../../../src/host/mcp/registry.js'
 import { snapshotDshHome } from '../api/fixtures/api-harness.js'
 
 describe('normalizeServerName：对齐官方 serverName 校验口径', () => {
@@ -192,5 +192,71 @@ describe('MCP headers 往返：解析两种书写形态（D01-02 读侧）', () 
     expect(blockRow?.headers).toEqual({ Authorization: 'Bearer block-secret', 'X-Trace': '2' })
     // 嵌套块结束后，同级键回到 config 顶层（深度跟踪正确复位）
     expect(blockRow?.transport).toBe('streamable-http')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 托管区写回的禁用清单口径：三条写路径共用同一实现
+// ---------------------------------------------------------------------------
+
+/** 托管区内的 insert 行数（数组元素个数）。 */
+function insertCount(text: string): number {
+  return text.split('- insert:').length - 1
+}
+
+describe('MCP 托管区：禁用清单写回口径', () => {
+  it('切换一个服务器的 disabled：另一个 streamable-http 服务器的 headers 仍在磁盘上', async () => {
+    const { root, patch } = await useTempDshHome()
+    await upsertMcpServer({
+      id: 'mcp-http',
+      serverName: 'http',
+      transport: 'streamable-http',
+      url: 'https://x/mcp',
+      headers: { Authorization: 'Bearer secret' },
+    })
+    await upsertMcpServer({ id: 'mcp-stdio', serverName: 'stdio', transport: 'stdio', commandLine: 'node a.js' })
+
+    await toggleMcpServer('mcp-stdio', true)
+
+    const text = await readFile(patch, 'utf8')
+    const rows = parseMcpRows(text)
+    expect(rows.find((row) => row.id === 'mcp-stdio')?.disabled).toBe(true)
+    expect(rows.find((row) => row.id === 'mcp-http')?.disabled).toBe(false)
+    // 未被触碰的服务器：凭据仍在磁盘上，且结构没被破坏（仍是两个 insert 行）
+    expect(rows.find((row) => row.id === 'mcp-http')?.headers).toEqual({ Authorization: 'Bearer secret' })
+    expect(insertCount(text)).toBe(2)
+    await rm(root, { recursive: true, force: true })
+  })
+
+  it('再次 upsert 已停用的服务器：停用态保留，禁用清单仍只写 disabled 行', async () => {
+    const { root, patch } = await useTempDshHome()
+    await upsertMcpServer({ id: 'mcp-a', serverName: 'a', transport: 'stdio', commandLine: 'node a.js' })
+    await upsertMcpServer({ id: 'mcp-b', serverName: 'b', transport: 'stdio', commandLine: 'node b.js' })
+    await toggleMcpServer('mcp-a', true)
+
+    await upsertMcpServer({ id: 'mcp-b', serverName: 'b', transport: 'stdio', commandLine: 'node b.js --flag' })
+
+    const rows = parseMcpRows(await readFile(patch, 'utf8'))
+    expect(rows.find((row) => row.id === 'mcp-a')?.disabled).toBe(true)
+    expect(rows.find((row) => row.id === 'mcp-b')?.disabled).toBe(false)
+    // 重新 upsert 的 commandLine 生效：args 里带上了新参数
+    expect(rows.find((row) => row.id === 'mcp-b')?.args).toContain('--flag')
+    expect(insertCount(await readFile(patch, 'utf8'))).toBe(2)
+    await rm(root, { recursive: true, force: true })
+  })
+
+  it('启停往返：toggle(false) 后禁用清单被清空，行仍可读回', async () => {
+    const { root, patch } = await useTempDshHome()
+    await upsertMcpServer({ id: 'mcp-a', serverName: 'a', transport: 'stdio', commandLine: 'node a.js' })
+    await toggleMcpServer('mcp-a', true)
+    await toggleMcpServer('mcp-a', false)
+
+    const text = await readFile(patch, 'utf8')
+    const rows = parseMcpRows(text)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.disabled).toBe(false)
+    // 启用态不写禁用行（写盘口径：只出现 disabled 行）
+    expect(text).not.toContain('disabled: true')
+    await rm(root, { recursive: true, force: true })
   })
 })

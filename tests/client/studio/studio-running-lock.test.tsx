@@ -21,6 +21,7 @@ import { Studio } from '../../../src/client/studio/Studio.js'
 import { zh } from '../../../src/client/i18n.js'
 import type { RemoteFace } from '../../../src/client/hooks/useRemote.js'
 import { EP } from '../../../src/client/lib/remote.js'
+import { waitForCondition } from '../fixtures/async-flush.js'
 import type { RunSnapshot } from '../../../src/host/shared/types.js'
 import type { WorkflowDocument } from '../../../src/host/shared/graph-model.js'
 
@@ -140,9 +141,7 @@ async function renderStudio(remote: RemoteFace): Promise<void> {
     root.render(React.createElement(Studio, { t: zh, sessionId: 's-1', remote }))
   })
   // 首轮轮询（activeRuns / runStatus）刷新一轮
-  await act(async () => {
-    await Promise.resolve()
-  })
+  await waitForCondition(() => { expect((remote.call as unknown as { mock: { calls: unknown[] } }).mock.calls.length).toBeGreaterThan(1) })
 }
 
 /** 左栏卡片拖到画布（与真实 pointer 路径一致）。 */
@@ -226,7 +225,6 @@ describe('运行中实例：清空禁用 / 画布锁定 / 保存二次确认', (
     // 确认 → 落库一次
     await act(async () => {
       Array.from(dialog!.querySelectorAll('button')).find((item) => item.textContent === zh.saveRunningConfirm)?.click()
-      await Promise.resolve()
     })
     expect(remote.calls.filter((call) => call.endpoint === EP.EP_PUT_WORKFLOW).length).toBe(putsBefore + 1)
   })

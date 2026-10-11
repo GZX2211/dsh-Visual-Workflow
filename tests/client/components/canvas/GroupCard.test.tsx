@@ -16,6 +16,8 @@ import React from 'react'
 import { GroupCard } from '../../../../src/client/components/canvas/GroupCard.js'
 import { zh } from '../../../../src/client/i18n.js'
 import { statusLabelOf } from '../../../../src/client/lib/status-label.js'
+import { GROUP_MEMBER_ROW_H } from '../../../../src/client/lib/card-geometry.js'
+import { canvasStyles } from '../../../../src/client/styles/canvas.js'
 import type { CanvasNode } from '../../../../src/client/studio/studio-state.js'
 
 let container: HTMLDivElement | null = null
@@ -107,5 +109,24 @@ describe('GroupCard 运行状态与高亮', () => {
     // 成员自身状态点（非组卡片徽标）按成员状态渲染
     expect(memberCards[0].querySelector('.wf-status-dot')?.className).toContain('is-running')
     expect(memberCards[1].querySelector('.wf-status-dot')).toBeNull()
+  })
+})
+
+/** 取某选择器首个规则块内的 px 声明值（样式片段是纯 CSS 字符串，直接解析文本）。 */
+function pxOf(css: string, selector: string, property: string): number {
+  const start = css.indexOf(`${selector} `)
+  const block = css.slice(start, css.indexOf('}', start) + 1)
+  const match = new RegExp(`${property}:\\s*(-?[\\d.]+)px`).exec(block)
+  return Number(match?.[1])
+}
+
+describe('组内成员行节距与连线锚点同口径（D07-04）', () => {
+  it('渲染行节距（min-height + gap）等于连线锚点使用的 GROUP_MEMBER_ROW_H', () => {
+    const rowMinHeight = pxOf(canvasStyles, '.wf-group__member', 'min-height')
+    const rowGap = pxOf(canvasStyles, '.wf-group__members', 'gap')
+    expect(rowMinHeight).toBeGreaterThan(0)
+    expect(rowGap).toBeGreaterThan(0)
+    // 锚点按行节距推进；两者分叉会让成员连线端点逐行偏离实际接点
+    expect(rowMinHeight + rowGap).toBe(GROUP_MEMBER_ROW_H)
   })
 })

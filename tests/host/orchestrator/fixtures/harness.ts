@@ -148,7 +148,8 @@ export class FakeAgents implements AgentHost {
   followupRoot(agent: RootAgentLike, message: RootInjectedMessage): void {
     if (this.injectFail) throw this.injectFail
     ;(agent as FakeRoot).messages.push(message)
-  }  latestTurnEnd(): TurnEndInfo | null {
+  }
+  latestTurnEnd(): TurnEndInfo | null {
     return this.turnEnd
   }
   /** 最近一条 assistant/message 文本（执行者模式回写用；沿官方事件扫描语义）。 */
@@ -246,11 +247,20 @@ export interface Harness {
   warnings: string[]
   /** 临时数据目录（直读磁盘落盘结果用）。 */
   dir: string
+  /** 本 harness 注册的根 Agent 会话 id。 */
+  sessionId: string
+}
+
+export interface HarnessOptions {
+  /** 覆盖默认 config 键（未覆盖项沿用夹具默认值）。 */
+  config?: Partial<OrchestratorConfig>
+  /** 根 Agent 会话 id（默认 session-1；多会话/服务模式用例可覆盖）。 */
+  sessionId?: string
 }
 
 /** 装配：临时目录真实 FlowStore + fake 依赖 + 可控时钟与 id 生成。 */
 export async function makeHarness(
-  config?: Partial<OrchestratorConfig>,
+  options: HarnessOptions = {},
   deps?: Partial<Pick<OrchestratorDeps, 'promptSetup' | 'modelSelection' | 'resolveRolePrompt'>>,
 ): Promise<Harness> {
   const dir = await mkdtemp(join(tmpdir(), 'vw-orch-'))
@@ -261,8 +271,9 @@ export async function makeHarness(
   const runSeq = { n: 0 }
   const uuidSeq = { n: 0 }
   const warnings: string[] = []
+  const sessionId = options.sessionId ?? 'session-1'
   const agents = new FakeAgents()
-  agents.roots.set('session-1', new FakeRoot('session-1'))
+  agents.roots.set(sessionId, new FakeRoot(sessionId))
   const runner = new FakeRunner()
   const runtime = new OrchestratorRuntime({
     store,
@@ -275,7 +286,7 @@ export async function makeHarness(
       retryLimitDefault: 3,
       reactIterationLimitDefault: 50,
       wfAskAgentTtlMs: 500,
-      ...config,
+      ...options.config,
     },
     logger: { warn: (message) => warnings.push(message), info: () => {}, debug: () => {} },
     now: () => clock.now,
@@ -291,7 +302,7 @@ export async function makeHarness(
     ...(deps?.modelSelection ? { modelSelection: deps.modelSelection } : {}),
     ...(deps?.resolveRolePrompt ? { resolveRolePrompt: deps.resolveRolePrompt } : {}),
   })
-  return { runtime, store, agents, runner, clock, warnings, dir }
+  return { runtime, store, agents, runner, clock, warnings, dir, sessionId }
 }
 
 export const caller: CallerInfo = { isChild: false, sessionId: 'session-1' }

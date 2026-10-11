@@ -98,6 +98,19 @@ export const overlaysStyles = `
   border-radius: 10px;
   background: var(--wf-layer-2);
   padding: 9px 11px;
+}
+
+/* 列表项主体（选中动作）与「恢复」同级：主体按钮铺满卡片内容区，按钮样式复位 */
+.wf-history__select {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
   cursor: pointer;
 }
 

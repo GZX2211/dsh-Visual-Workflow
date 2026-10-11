@@ -2,7 +2,7 @@ import type { GraphNode, Line } from '../../host/shared/graph-model.js';
 import type { CanvasEdge, CanvasNode } from './canvas-model.js';
 /**
  * 画布节点 → 存储节点。
- * 虚拟节点的顶层 proxySourceId 必须保留（Bug 2）：与画布投影对称，否则保存后
+ * 虚拟节点的顶层 proxySourceId 必须保留：与画布投影对称，否则保存后
  * 后端 validateFlow 报 proxySourceMissing；非虚拟节点不产出该字段。
  */
 export declare function serializeNodes(nodes: CanvasNode[]): GraphNode[];

@@ -5,7 +5,7 @@
 // 为兼容旧增量格式（delta.content）做回退取值。
 
 /**
- * 解析后端 SSE data 行的内容增量（Bug 3）。
+ * 解析后端 SSE data 行的内容增量。
  * @returns { content?, error? } 增量文本或错误消息（无匹配返回空对象）。
  */
 export function parseSseDelta(data: string): { content?: string; error?: string } {

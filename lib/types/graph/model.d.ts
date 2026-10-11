@@ -21,8 +21,54 @@ export interface NodeHandleDef {
  * （如 mode1 的 start 禁用 ctx-out、mode2 的 end 启用 ctx-in）。
  */
 export declare const NODE_HANDLES: Record<NodeKind, NodeHandleDef>;
-/** 输出连接点 → 允许的输入连接点映射（三通道互斥，§4.3 连线类型规范）。 */
+/**
+ * 通道名（三通道互斥，§4.3 连线类型规范）。
+ * 用于按通道（而非按连接点字面量）表达判定：下游规则查「这条线走哪个通道」，
+ * 不必知道连接点叫什么。
+ */
+export type HandleChannel = 'flow' | 'ctx' | 'db';
+/**
+ * 通道本体：三条通道各自的出/入连接点名（**唯一来源**）。
+ *
+ * 为什么收敛在此：通道判定此前散落为 `line.targetHandle === 'ctx-in'` 之类的裸字面量，
+ * 与 HANDLE_PAIRING 构成**两套口径**——任一处改名/新增通道都必然漏改。现在全模块
+ * （配对矩阵、结构校验、质量检查、拓扑查询）只允许引用本表，裸字面量只出现在这里。
+ */
+export declare const HANDLE_CHANNELS: {
+    readonly flow: {
+        readonly out: "flow-out";
+        readonly in: "flow-in";
+    };
+    readonly ctx: {
+        readonly out: "ctx-out";
+        readonly in: "ctx-in";
+    };
+    readonly db: {
+        readonly out: "db-out";
+        readonly in: "db-in";
+    };
+};
+/** 某通道的输入连接点。 */
+export declare function channelIn(channel: HandleChannel): Handle;
+/** 某通道的输出连接点。 */
+export declare function channelOut(channel: HandleChannel): Handle;
+/** 连接点 → 所属通道（输出侧查询；未登记返回 null）。 */
+export declare function channelOfOut(handle: Handle): HandleChannel | null;
+/** 连接点 → 所属通道（输入侧查询；未登记返回 null）。 */
+export declare function channelOfIn(handle: Handle): HandleChannel | null;
+/**
+ * 输出连接点 → 允许的输入连接点映射（三通道互斥，§4.3 连线类型规范）。
+ *
+ * 键值全部取自 HANDLE_CHANNELS：本矩阵是通道本体的投影，不是第二份口径。
+ * 查询契约：**只以输出连接点为源**（所有连线都是 out → in），故入点三键是恒等占位，
+ * 仅为 `Record<Handle, Handle>` 的类型完整性存在，永不作为查询键。
+ */
 export declare const HANDLE_PAIRING: Record<Handle, Handle>;
+/**
+ * 配对查询的单一入口（validate 与 wf_graph_patch 共用，避免各自散落 `HANDLE_PAIRING[…]`）。
+ * 未登记的源连接点回退为其自身：让调用方按「通道不匹配」报错，而不是抛类型错误。
+ */
+export declare function pairingTargetOf(sourceHandle: Handle): Handle;
 /** 条件连线类型全集（§4.3 连线类型表）。 */
 export declare const CONDITION_TYPES: ConditionType[];
 /** 全部节点种类（供校验/测试枚举）。 */

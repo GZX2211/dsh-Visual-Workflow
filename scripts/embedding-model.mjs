@@ -23,8 +23,18 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, '..')
 
-// 源码目录（只读）。绝对路径仅作为本机事实源，不写死在产物里（manifest 记录的是来源标识）。
-const SOURCE_DIR = 'D:\\AiCoding-Gzx\\models\\backend\\models\\bge-small-zh-v1.5'
+// 源码目录（只读）：本地 bge-small-zh-v1.5 原始资产所在目录。
+// 由 WF_EMBED_SOURCE_DIR 指定，不内置任何开发者机器的路径；未配置时该目录不参与运行，
+// 仅在需要重建文本资产时才要求配置（资产已就绪的常规重跑走幂等预检，不读取源码目录）。
+const SOURCE_DIR = process.env.WF_EMBED_SOURCE_DIR ? path.resolve(process.env.WF_EMBED_SOURCE_DIR) : ''
+
+/** 取本地源码目录；未配置时立即报错，避免退化为相对路径后静默读错位置。 */
+function requireSourceDir() {
+  if (!SOURCE_DIR) {
+    throw new Error('未配置本地模型源码目录：请设置环境变量 WF_EMBED_SOURCE_DIR 指向 bge-small-zh-v1.5 源码目录（仅在重建文本资产时需要）')
+  }
+  return SOURCE_DIR
+}
 
 // 目标目录（随包分发，package.json files 已含 assets/models/bge-small-zh-v1.5）。
 const TARGET_DIR = path.join(ROOT, 'assets', 'models', 'bge-small-zh-v1.5')
@@ -144,13 +154,12 @@ async function copyTextConfigs() {
   await ensureDir(TARGET_DIR)
   const results = []
   for (const name of TEXT_FILES_TO_COPY) {
-    const src = path.join(SOURCE_DIR, name)
     const dst = path.join(TARGET_DIR, name)
     if (await existsNonEmpty(dst)) {
       results.push({ name, copied: false, bytes: (await fs.stat(dst)).size })
       continue
     }
-    const data = await fs.readFile(src)
+    const data = await fs.readFile(path.join(requireSourceDir(), name))
     await fs.writeFile(dst, data)
     results.push({ name, copied: true, bytes: data.length })
   }
@@ -176,7 +185,8 @@ async function ensurePoolingConfig() {
     return { name: `${POOLING_DIR}/${POOLING_CONFIG_NAME}`, copied: false, bytes: (await fs.stat(dstPath)).size }
   }
 
-  const sourcePoolingConfig = path.join(SOURCE_DIR, POOLING_DIR, POOLING_CONFIG_NAME)
+  const sourceDir = requireSourceDir()
+  const sourcePoolingConfig = path.join(sourceDir, POOLING_DIR, POOLING_CONFIG_NAME)
   const sourceHasPooling = await existsNonEmpty(sourcePoolingConfig)
 
   let content
@@ -188,7 +198,7 @@ async function ensurePoolingConfig() {
     // 从源码 config.json 读 hidden_size 作为 word_embedding_dimension（默认 512）。
     let dim = 512
     try {
-      const rawConfig = JSON.parse(await fs.readFile(path.join(SOURCE_DIR, 'config.json'), 'utf8'))
+      const rawConfig = JSON.parse(await fs.readFile(path.join(sourceDir, 'config.json'), 'utf8'))
       if (typeof rawConfig.hidden_size === 'number') dim = rawConfig.hidden_size
     } catch {
       // 源 config.json 缺失/损坏时退回默认 512（config.json 本身会被 copyTextConfigs 复制并校验）。
@@ -407,7 +417,7 @@ async function main() {
         : null
   const manifest = {
     version: 1,
-    source: 'D:\\AiCoding-Gzx\\models\\backend\\models\\bge-small-zh-v1.5（tokenizer/配置）+ Xenova/bge-small-zh-v1.5 onnx/model_quantized.onnx（量化权重）',
+    source: 'Xenova/bge-small-zh-v1.5（tokenizer/配置）+ Xenova/bge-small-zh-v1.5 onnx/model_quantized.onnx（量化权重）',
     onnxSourceUrl,
     files: {},
   }

@@ -275,4 +275,15 @@ describe('组合管理', () => {
     expect(put).toBeTruthy()
     expect((put!.args.names as string[]).sort()).toEqual(['read', 'write'])
   })
+
+  it('组合变更后的宿主刷新失败必须显式提示，不得静默吞掉（D06-11）', async () => {
+    const { remote } = makeRemote()
+    const onToast = vi.fn()
+    const onChanged = vi.fn(async () => { throw new Error('REMOTE_PARSE') })
+    await openComboManager(remote, onToast, onChanged)
+    await clickButton(zh.inspectorSave)
+
+    expect(onChanged).toHaveBeenCalled()
+    expect(onToast).toHaveBeenCalledWith('error', 'REMOTE_PARSE')
+  })
 })

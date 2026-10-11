@@ -30,7 +30,7 @@ export interface InspectorProps {
     onPatch(patch: Record<string, unknown>): void;
     onDelete(): void;
     onSave(): void;
-    /** 图2 交互改造：实例 → 模板（另存为模板；用户裁决提供入口）。 */
+    /** 实例 → 模板（另存为模板）。 */
     onSaveAsTemplate?(): void;
     /** 模版 → 资产入库（工作流模版 / 角色模版；先保存模版，失败即中止）。 */
     onPromote?(): void;

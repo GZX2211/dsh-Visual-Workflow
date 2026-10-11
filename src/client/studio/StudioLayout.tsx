@@ -11,7 +11,7 @@
 import type { Dispatch } from 'react'
 import type { Dict } from '../i18n.js'
 import type { StudioAction, StudioState, EditorData, CanvasEdge, LibrarySource } from './studio-state.js'
-import { agentPatchedNodeIdsOf } from './studio-selectors.js'
+import { agentPatchedNodeIdsOf, isInstanceSourceKind } from './studio-selectors.js'
 import type { DocumentActionsFace } from '../hooks/useDocumentActions.js'
 import type { AssetsFace } from '../hooks/useAssets.js'
 import type { CanvasActionsFace } from '../hooks/useCanvasActions.js'
@@ -132,7 +132,7 @@ export function StudioLayout(props: StudioLayoutProps) {
     onSetLibrarySource, onSelectFlowAsset, onPlaceRoleAsset,
   } = props
 
-  // 自动布局（自主编排方案 §7.3 / D-15 方案 B）：打开/接收文档时若节点缺坐标（哨兵 {0,0}）
+  // 自动布局：打开/接收文档时若节点缺坐标（哨兵 {0,0}）
   // → 自动重排一次并静默落盘；已布局过的文档只检测重叠并提示，绝不覆盖用户手动调整。
   useAutoLayout(state, dispatch, {
     saveCanvas: doc.saveCanvas,
@@ -153,7 +153,7 @@ export function StudioLayout(props: StudioLayoutProps) {
   // 左栏（LeftPanel）与底栏（BottomPanel）共用同一份库内容 props（内容/选中/拖拽逻辑一致，
   // 本次仅显示布局不同）。仅 open/width 或 open/height 两处按各自布局传入。
   // 「实例来源态」= 模版态或资产态：二者都以「画布内容 → 新实例」为保存/运行前置（同口径）。
-  const isInstanceSource = state.currentKind === 'flowTemplate' || state.currentKind === 'flowAsset'
+  const isInstanceSource = isInstanceSourceKind(state.currentKind)
   const libraryProps = {
     libTab: state.libTab,
     onSetTab: (tab: import('../studio/studio-state.js').LibTab) => dispatch({ type: 'SET_LIB_TAB', tab }),
@@ -289,7 +289,7 @@ export function StudioLayout(props: StudioLayoutProps) {
             mode={state.mode}
             panelsCollapsed={panelsCollapsed}
             onTogglePanels={onTogglePanels}
-            // 图2 交互改造：保存按钮按当前对象态动态命名——模板态/资产态「创建实例/创建服务」
+            // 保存按钮按当前对象态动态命名——模板态/资产态「创建实例/创建服务」
             // （画布内容保存为新实例，模板/资产不变）；实例态「保存实例/保存服务」（保存到当前实例）。
             saveLabel={isInstanceSource ? (state.mode === 'mode2' ? t.createService : t.createInstance) : (state.mode === 'mode2' ? t.saveServiceInstance : t.saveInstance)}
             onUndo={history.undo}
@@ -459,7 +459,7 @@ export function StudioLayout(props: StudioLayoutProps) {
             sessionId={sessionId}
             onClose={() => dispatch({ type: 'COMBO_OPEN', open: false })}
             onToast={(kind, text) => toast(kind, text)}
-            onChanged={() => { void remote.call(EP.EP_TOOL_COMBOS).then((items) => dispatch({ type: 'COMBOS_LOADED', items: Array.isArray(items) ? items : [] })).catch(() => {}) }}
+            onChanged={() => remote.call(EP.EP_TOOL_COMBOS).then((items) => dispatch({ type: 'COMBOS_LOADED', items: Array.isArray(items) ? items : [] }))}
           />
         : null}
 

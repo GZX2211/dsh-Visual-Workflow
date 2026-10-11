@@ -41,8 +41,9 @@ export class RuntimeLifecycle extends RuntimeObserve {
     this.rejectWaiters(entry)
     this.rejectAsks(entry)
     await this.persistWarn(entry)
-    // 4. 释放内存条目（终态记录已持久化；幂等基于 snapshot.status，删除后
-    //    重复 terminateRun(entry) 仍返回 false）
+    // 4. 释放内存条目（终态记录已持久化）。幂等由入口的 snapshot.status 保证：重复传入
+    //    同一个 entry 直接返回 false；条目释放后 stopRun 从 this.runs 取不到 entry 即返回，
+    //    故不存在「重复 terminateRun 仍返回 false」之外的返回值语义。
     this.releaseRunMemory(snapshot.id)
     return true
   }

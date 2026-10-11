@@ -20,7 +20,7 @@ export interface CanvasNode {
   kind: NodeKind
   position: { x: number; y: number }
   data: Record<string, unknown>
-  /** 虚拟节点引用的主节点 id（kind='proxy' 时由文档投影保留，见 §4.2.3.2 规则 3）。 */
+  /** 虚拟节点引用的主节点 id（kind='proxy' 时由文档投影保留）。 */
   proxySourceId?: string
 }
 

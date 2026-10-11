@@ -230,12 +230,12 @@ export declare const zh: {
     fileKind: string;
     fileContent: string;
     fileUnset: string;
-    /** 文件多选提示（已选文件列表显示在按钮下方，用户验收标注）。 */
-    /** 协作组拖拽悬停提示（用户验收标注：放开以入组）。 */
+    /** 文件多选提示（已选文件列表显示在按钮下方）。 */
+    /** 协作组拖拽悬停提示（放开以入组）。 */
     groupDropHint: string;
     /** 角色卡元信息「模型」前缀。 */
     nodeMetaModel: string;
-    /** 画布节点元信息「组合」前缀（显示选择的模式或组合，用户验收标注）。 */
+    /** 画布节点元信息「组合」前缀（显示选择的模式或组合）。 */
     nodeMetaPreset: string;
     description: string;
     descriptionHint: string;
@@ -254,6 +254,7 @@ export declare const zh: {
     dbTest: string;
     dbTestSuccess: string;
     dbLocalPath: string;
+    dbLocalPathPlaceholder: string;
     dbVectorSource: string;
     dbVectorEmbedding: string;
     dbVectorBm25: string;
@@ -415,8 +416,11 @@ export declare const zh: {
     mcpTransportStdio: string;
     mcpTransportHttp: string;
     mcpCommand: string;
+    mcpCommandPlaceholder: string;
     mcpEnv: string;
+    mcpEnvPlaceholder: string;
     mcpHeaders: string;
+    mcpHeadersPlaceholder: string;
     mcpCommandHint: string;
     mcpImport: string;
     mcpImportApply: string;
@@ -427,6 +431,8 @@ export declare const zh: {
     mcpImportEmptyInput: string;
     mcpImportServersEmpty: string;
     mcpUrl: string;
+    mcpUrlPlaceholder: string;
+    mcpImportPlaceholder: string;
     mcpSave: string;
     mcpDelete: string;
     mcpEnabled: string;
@@ -469,6 +475,7 @@ export declare const zh: {
     schedulerCalendarMonthNames: string[];
     schedulerCalendarMonthTitle: string;
     schedulerTimePicker: string;
+    schedulerTimePlaceholder: string;
     schedulerHour: string;
     schedulerMinute: string;
     schedulerWindowRanges: string;
@@ -515,6 +522,7 @@ export declare const zh: {
     remoteConnection: string;
     remoteHttpStatus: string;
     remoteEmptyStream: string;
+    remoteParse: string;
 };
 export type Dict = typeof zh;
 export declare const en: Dict;

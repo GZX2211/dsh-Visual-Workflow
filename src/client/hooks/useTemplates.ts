@@ -13,7 +13,7 @@ import { EP } from '../lib/remote.js'
 export type AnyTemplate = RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate
 
 export interface TemplatesFace {
-  /** 全部模板分类并行加载；返回按 kind 聚合的结果（某类失败不影响其他类，Bug 9）。 */
+  /** 全部模板分类并行加载；返回按 kind 聚合的结果（某类失败不影响其他类）。 */
   loadTemplates(): Promise<{ role: AnyTemplate[]; file: AnyTemplate[]; database: AnyTemplate[]; group: AnyTemplate[] }>
   /** 新建本地草稿（id 正式格式；保存落库后 id 不变，画布引用不失效）。name 由调用方从词典注入。 */
   createTemplateDraft(kind: TemplateKind, name: string): AnyTemplate
@@ -49,8 +49,7 @@ function draftOf(kind: TemplateKind, name: string): AnyTemplate {
 export function useTemplates(dispatch: Dispatch<StudioAction>, remote: RemoteFace): TemplatesFace {
   const loadTemplates = useCallback(async () => {
     const kinds: TemplateKind[] = ['role', 'file', 'database', 'group']
-    // Bug 9：并行加载用 allSettled——某类模板端点失败时其余类型仍正常加载，
-    // 不因单个失败导致全部模板不可用（原先 Promise.all 一损俱损）。
+    // 并行加载必须用 allSettled：某类模板端点失败时其余类型仍正常加载（不得一损俱损）
     const results = await Promise.allSettled(
       kinds.map(async (kind) => {
         const items = await remote.call(EP.EP_LIST_TEMPLATES, { kind })

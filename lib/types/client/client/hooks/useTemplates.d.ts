@@ -4,7 +4,7 @@ import type { StudioAction, TemplateKind } from '../studio/studio-state.js';
 import type { RemoteFace } from './useRemote.js';
 export type AnyTemplate = RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate;
 export interface TemplatesFace {
-    /** 全部模板分类并行加载；返回按 kind 聚合的结果（某类失败不影响其他类，Bug 9）。 */
+    /** 全部模板分类并行加载；返回按 kind 聚合的结果（某类失败不影响其他类）。 */
     loadTemplates(): Promise<{
         role: AnyTemplate[];
         file: AnyTemplate[];

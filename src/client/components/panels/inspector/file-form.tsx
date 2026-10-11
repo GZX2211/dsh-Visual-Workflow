@@ -10,7 +10,7 @@ export function FileForm({ data, copy, onPatch, onFileSelect }: {
   data: Record<string, unknown>
   copy: Dict
   onPatch(patch: Record<string, unknown>): void
-  /** 多选文件回调（用户验收：支持多选所有类型文件）。 */
+  /** 多选文件回调（支持多选所有类型文件）。 */
   onFileSelect(files: File[]): void
 }) {
   const fileKind = String(data.fileKind ?? 'text')
@@ -45,7 +45,7 @@ export function FileForm({ data, copy, onPatch, onFileSelect }: {
               event.target.value = ''
             }}
           />
-          {/* 已选文件列表：显示在按钮下方（用户验收：不在按钮右侧/上方显示），
+          {/* 已选文件列表：显示在按钮下方（不在按钮右侧/上方显示），
               完整文件名，支持多选所有类型文件 */}
           <div className="wf-file-list">
             {selectedNames.length > 0

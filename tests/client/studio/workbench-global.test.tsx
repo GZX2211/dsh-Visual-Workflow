@@ -12,12 +12,14 @@
 
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { act } from 'react'
+import { flushAsync, waitForCondition } from '../fixtures/async-flush.js'
 import { createRoot, type Root } from 'react-dom/client'
 import React from 'react'
 import { Studio } from '../../../src/client/studio/Studio.js'
 import { zh } from '../../../src/client/i18n.js'
 import type { RemoteFace } from '../../../src/client/hooks/useRemote.js'
 import { EP } from '../../../src/client/lib/remote.js'
+import { mountStudio, remoteStub, type RemoteStub } from '../fixtures/studio-harness.js'
 import type { WorkflowDocument, WorkflowTemplate } from '../../../src/host/shared/graph-model.js'
 
 let container: HTMLDivElement | null = null
@@ -35,6 +37,27 @@ afterEach(() => {
   container?.remove()
   container = null
 })
+
+/** 本文件专用远端桩：共享全集桩 + 「实例/模板/新会话」选项与 PUT 递增 revision 语义。 */
+function wsRemoteStub(options: {
+  workflows?: WorkflowDocument[]
+  flowTemplates?: WorkflowTemplate[]
+  newSessionId?: string
+} = {}): { remote: RemoteStub; calls: RemoteStub['calls'] } {
+  const remote = remoteStub({
+    ...(options.workflows ? { workflows: options.workflows } : {}),
+    ...(options.flowTemplates ? { flowTemplates: options.flowTemplates } : {}),
+    ...(options.newSessionId ? { newSessionId: options.newSessionId } : {}),
+    handlers: {
+      [EP.EP_LIST_SERVICES]: () => [],
+      [EP.EP_PUT_WORKFLOW]: (args) => {
+        const flow = args.flow as WorkflowDocument
+        return { ...flow, revision: Number(flow.revision ?? 0) + 1 }
+      },
+    },
+  })
+  return { remote, calls: remote.calls }
+}
 
 function makeInstance(id: string, sessionId: string, name: string): WorkflowDocument {
   return {
@@ -62,44 +85,9 @@ function makeTemplate(): WorkflowTemplate {
   }
 }
 
-/** 远端桩：可指定实例/模板/会话返回；记录全部调用。 */
-function remoteStub(options: {
-  workflows?: WorkflowDocument[]
-  flowTemplates?: WorkflowTemplate[]
-  newSessionId?: string
-} = {}) {
-  const calls: Array<{ endpoint: string; args: Record<string, unknown> }> = []
-  const remote: RemoteFace = {
-    stream: vi.fn(async () => undefined),
-    call: vi.fn(async (endpoint: string, args?: Record<string, unknown>) => {
-      calls.push({ endpoint, args: args ?? {} })
-      if (endpoint === EP.EP_LIST_WORKFLOWS) return options.workflows ?? []
-      if (endpoint === EP.EP_LIST_FLOW_TEMPLATES) return options.flowTemplates ?? []
-      if (endpoint === EP.EP_LIST_SERVICES) return []
-      if (endpoint === EP.EP_ACTIVE_RUNS) return []
-      if (endpoint === EP.EP_CREATE_SESSION) return { sessionId: options.newSessionId ?? 'session-new-1' }
-      if (endpoint === EP.EP_PUT_WORKFLOW) {
-        const flow = args?.flow as WorkflowDocument
-        return { ...flow, revision: (Number(flow.revision ?? 0) + 1) }
-      }
-      return []
-    }),
-  }
-  return { remote, calls }
-}
-
 async function renderStudio(remote: RemoteFace): Promise<void> {
-  await act(async () => {
-    root = createRoot(container!)
-    root.render(React.createElement(Studio, { t: zh, sessionId: 's-1', remote }))
-  })
-  // 冲掉 boot 异步链（列表加载 → 自动选中等多级 dispatch）
-  await act(async () => {
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
-  })
+  // flushBoot：冲掉 boot 异步链（列表加载 → 自动选中等多级 dispatch）。
+  await mountStudio(container!, (next) => { root = next }, remote, { flushBoot: true })
 }
 
 /** 点击左侧「工作流」Tab 下「工作流模板」分组的模板卡（打开模板态；按分组定位，
@@ -120,15 +108,12 @@ async function clickToolbar(text: string): Promise<void> {
     Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-toolbar button'))
       .find((item) => item.textContent === text)?.click()
   })
-  await act(async () => {
-    await Promise.resolve()
-    await Promise.resolve()
-  })
+  await flushAsync(2)
 }
 
 describe('工作台全局化：「开启新会话」仅模板态 + 创建/覆盖/新会话链路', () => {
   it('模板态显示「开启新会话」复选框；创建实例后实例态不再显示', async () => {
-    const { remote } = remoteStub({ flowTemplates: [makeTemplate()] })
+    const { remote } = wsRemoteStub({ flowTemplates: [makeTemplate()] })
     await renderStudio(remote)
     // 空态/实例态初始：不显示
     expect(document.querySelector('.wf-toolbar__switch')).toBeNull()
@@ -145,7 +130,7 @@ describe('工作台全局化：「开启新会话」仅模板态 + 创建/覆盖
 
   it('模板态创建实例（当前会话已有实例）→ 弹覆盖确认；确认后复用旧实例 id 保存', async () => {
     const existing = makeInstance('wf-existing', 's-1', '旧实例')
-    const { remote, calls } = remoteStub({ workflows: [existing], flowTemplates: [makeTemplate()] })
+    const { remote, calls } = wsRemoteStub({ workflows: [existing], flowTemplates: [makeTemplate()] })
     await renderStudio(remote)
     await openTemplate()
     await clickToolbar(zh.createInstance)
@@ -156,10 +141,7 @@ describe('工作台全局化：「开启新会话」仅模板态 + 创建/覆盖
     await act(async () => {
       Array.from(confirm!.querySelectorAll('button')).find((item) => item.textContent === zh.overwriteInstanceConfirm)?.click()
     })
-    await act(async () => {
-      await Promise.resolve()
-      await Promise.resolve()
-    })
+    await flushAsync(2)
     // 覆盖确认后：复用旧实例 id（PUT sessionId=s-1、flow.id=wf-existing），不创建新会话
     const put = calls.find((call) => call.endpoint === EP.EP_PUT_WORKFLOW)
     expect(put).toBeTruthy()
@@ -179,7 +161,7 @@ describe('工作台全局化：「开启新会话」仅模板态 + 创建/覆盖
   })
 
   it('勾选「开启新会话」创建实例：先建主会话，实例保存到新会话（一次性动作）', async () => {
-    const { remote, calls } = remoteStub({ flowTemplates: [makeTemplate()], newSessionId: 'session-new-1' })
+    const { remote, calls } = wsRemoteStub({ flowTemplates: [makeTemplate()], newSessionId: 'session-new-1' })
     await renderStudio(remote)
     await openTemplate()
     // 勾选开启新会话 + 填写工作区
@@ -216,7 +198,7 @@ describe('工作台全局化：「开启新会话」仅模板态 + 创建/覆盖
       makeInstance('wf-current', 's-1', '当前会话实例'),
       makeInstance('wf-other', 'session-other', '其他会话实例'),
     ]
-    const { remote } = remoteStub({ workflows: instances })
+    const { remote } = wsRemoteStub({ workflows: instances })
     await renderStudio(remote)
     const labels = textOf('.wf-docitem__label')
     expect(labels).toContain('当前会话实例')
@@ -236,3 +218,4 @@ describe('工作台全局化：「开启新会话」仅模板态 + 创建/覆盖
 function textOf(selector: string): string[] {
   return Array.from(document.querySelectorAll(selector)).map((item) => item.textContent ?? '')
 }
+

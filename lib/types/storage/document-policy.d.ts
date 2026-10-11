@@ -18,6 +18,17 @@ export declare class FlowRevisionConflictError extends Error {
     readonly code = "FLOW_REVISION_CONFLICT";
     constructor(id: string, expectedRevision: number | null, actualRevision: number);
 }
+/**
+ * 目标资源不存在或不属于该会话（写路径归属校验失败）。
+ *
+ * 为什么与「不存在」同码同文案：归属不匹配必须按「不存在」处理，否则调用方可据响应
+ * 区分「他人资源」与「无此资源」（存在性预言）；与读取/删除路径的隔离口径一致。
+ */
+export declare class FlowNotFoundError extends Error {
+    readonly id: string;
+    readonly code = "FLOW_NOT_FOUND";
+    constructor(id: string);
+}
 /** 剥除前端快照标记（浅拷贝，不修改入参）；keepServerFields=true 时保留 lastPatch。 */
 export declare function stripClientMeta<T>(value: T, keepServerFields?: boolean): T;
 /** 保存选项 → 是否保留服务端字段（缺省 false：用户保存即清除代理标注）。 */

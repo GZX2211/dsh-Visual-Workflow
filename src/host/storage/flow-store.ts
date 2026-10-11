@@ -33,6 +33,7 @@ import {
 } from './storage-paths.js'
 import { isDatabaseTemplate, type Template, type TemplateKind } from './template-model.js'
 import {
+  FlowNotFoundError,
   keepServerFieldsOf,
   nextFlowRevision,
   stripClientMeta,
@@ -54,7 +55,7 @@ import type {
 // 模板种类判别（template-model）与保存选项/冲突错误（document-policy）。
 export type { Template, TemplateKind } from './template-model.js'
 export type { SaveOptions } from './document-policy.js'
-export { FlowRevisionConflictError } from './document-policy.js'
+export { FlowNotFoundError, FlowRevisionConflictError } from './document-policy.js'
 
 // ---------------------------------------------------------------------------
 // 列表读取容错（持久化层策略）
@@ -62,7 +63,7 @@ export { FlowRevisionConflictError } from './document-policy.js'
 
 /**
  * 列表场景逐文件读取：单个文件损坏（CorruptJsonError）时跳过该文件返回 null，
- * 不阻塞整个列表——一个损坏的 JSON 不应让同目录其他正常文件全部不可见（Bug 21）。
+ * 不阻塞整个列表——一个损坏的 JSON 不应让同目录其他正常文件全部不可见。
  * 其余读取失败（EACCES 等）仍上浮（保留可诊断性，防止把权限问题伪装成空列表）。
  * 注意：单资源读取不使用本函数——单资源读遇损坏必须抛错（见 ./AGENTS.md）。
  */
@@ -75,9 +76,19 @@ async function readListEntry<T>(dir: string, name: string): Promise<T | null> {
   }
 }
 
+/**
+ * 码位序比较（契约排序，**不用 localeCompare**）。
+ * 为什么：localeCompare 依赖运行环境的 ICU 数据与默认 locale，同一份数据在不同机器上
+ * 会得到不同顺序（全量 ICU 与 small-icu、非 en 默认 locale 下 collation 不同），
+ * 列表顺序与快照测试随之漂移。ISO 时间戳与 id/名称的确定性排序一律用码位序。
+ */
+function compareText(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0
+}
+
 /** 按 updatedAt 倒序（缺失时间戳按空串处理，稳定排序）。 */
 function byUpdatedAtDesc<T extends { updatedAt?: string }>(a: T, b: T): number {
-  return String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? ''))
+  return compareText(String(b.updatedAt ?? ''), String(a.updatedAt ?? ''))
 }
 
 // ---------------------------------------------------------------------------
@@ -138,6 +149,11 @@ export class FlowStore {
     const path = workflowPath(this.root, flow.id)
     return withJsonLock(path, async () => {
       const current = await readJson<WorkflowDocument | null>(path, null)
+      // 会话归属校验（读/删两侧已有，写侧此前缺失）：磁盘上已属于别的会话时拒绝覆盖，
+      // 否则一个错误/恶意的 sessionId 入参就能改写他人工作流内容并把归属翻走。
+      // 不存在（current === null）视为新建，照旧放行。
+      // 抛稳定码（而非普通 Error）：边界据此映射 404，不得落成 500。
+      if (current && current.sessionId !== sessionId) throw new FlowNotFoundError(flow.id)
       const revision = nextFlowRevision(flow, current, options)
       const now = new Date().toISOString()
       const saved: WorkflowDocument = {
@@ -330,7 +346,7 @@ export class FlowStore {
       if (kind === 'database' && !isDatabaseTemplate(t)) continue
       items.push(t)
     }
-    return items.sort((a, b) => String((a as { name?: string }).name ?? '').localeCompare(String((b as { name?: string }).name ?? '')))
+    return items.sort((a, b) => compareText(String((a as { name?: string }).name ?? ''), String((b as { name?: string }).name ?? '')))
   }
 
   /**
@@ -454,7 +470,8 @@ export class FlowStore {
       const run = await readListEntry<RunSnapshot>(dir, name)
       if (run && run.flowId === flowId && (sessionId === undefined || run.sessionId === sessionId)) items.push(run)
     }
-    return items.sort((a, b) => String(b.startedAt ?? '').localeCompare(String(a.startedAt ?? '')))
+    // 与工作流/模板列表同口径：码位序（localeCompare 会让顺序随运行环境 ICU 漂移）
+    return items.sort((a, b) => compareText(String(b.startedAt ?? ''), String(a.startedAt ?? '')))
   }
 
   /** 读取单个 run 快照。 */
@@ -472,7 +489,7 @@ export class FlowStore {
     })
   }
 
-  /** 扫描全部 run id（reconcileStaleRuns 用，T-027）。 */
+  /** 扫描全部 run id（reconcileStaleRuns 用）。 */
   async listAllRunIds(): Promise<string[]> {
     const dir = join(this.root, 'runs')
     try {
@@ -555,7 +572,7 @@ export class FlowStore {
     return readJson<WorkflowDocument | null>(orchestrationPath(this.root, runId), null)
   }
 
-  /** 运行时流程定义文件的绝对路径（编排指令 facts.definitionPath 注入用，T-021）。 */
+  /** 运行时流程定义文件的绝对路径（编排指令 facts.definitionPath 注入用）。 */
   orchestrationFilePath(runId: string): string {
     return orchestrationPath(this.root, runId)
   }

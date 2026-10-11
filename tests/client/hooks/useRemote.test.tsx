@@ -11,6 +11,7 @@ import { en, zh, type Dict } from "../../../src/client/i18n.js"
 import {
   REMOTE_CONNECTION_CODE,
   REMOTE_EMPTY_STREAM_CODE,
+  REMOTE_PARSE_CODE,
   REMOTE_TIMEOUT_CODE,
   type RemoteError,
 } from "../../../src/client/lib/remote.js"
@@ -106,5 +107,33 @@ describe("useRemote transport errors", () => {
       (reason: unknown) => reason as RemoteError,
     )
     expect(error).toMatchObject({ message: en.remoteEmptyStream, code: REMOTE_EMPTY_STREAM_CODE })
+  })
+})
+
+describe("useRemote 成功响应体校验", () => {
+  it("test_ok_response_with_empty_body_is_a_failure_not_undefined_success", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 200 })))
+    const remote = await renderRemote(en)
+    const error = await remote.call("saveWorkflow").then(
+      () => null,
+      (reason: unknown) => reason as RemoteError,
+    )
+    expect(error).toMatchObject({ code: REMOTE_PARSE_CODE, message: en.remoteParse.replace("{endpoint}", "saveWorkflow") })
+  })
+
+  it("test_ok_response_without_value_field_is_a_failure", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })))
+    const remote = await renderRemote(zh)
+    const error = await remote.call("saveWorkflow").then(
+      () => null,
+      (reason: unknown) => reason as RemoteError,
+    )
+    expect(error).toMatchObject({ code: REMOTE_PARSE_CODE, message: zh.remoteParse.replace("{endpoint}", "saveWorkflow") })
+  })
+
+  it("test_ok_response_with_null_value_still_resolves", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true, value: null }), { status: 200 })))
+    const remote = await renderRemote(en)
+    expect(await remote.call("deleteWorkflow")).toBeNull()
   })
 })

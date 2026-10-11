@@ -10,6 +10,7 @@
 
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { act } from 'react'
+import { flushAsync } from '../fixtures/async-flush.js'
 import { createRoot, type Root } from 'react-dom/client'
 import React from 'react'
 import { Studio } from '../../../src/client/studio/Studio.js'
@@ -17,6 +18,7 @@ import { pickInitialInstanceForSession } from '../../../src/client/hooks/useStud
 import { zh } from '../../../src/client/i18n.js'
 import type { RemoteFace } from '../../../src/client/hooks/useRemote.js'
 import { EP } from '../../../src/client/lib/remote.js'
+import { dragCardTo, libTab, mountStudio, pointerClick, remoteStub, textOf } from '../fixtures/studio-harness.js'
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -34,70 +36,13 @@ afterEach(() => {
   container = null
 })
 
-function remoteStub(): RemoteFace & { calls: Array<{ endpoint: string; args: Record<string, unknown> }> } {
-  const calls: Array<{ endpoint: string; args: Record<string, unknown> }> = []
-  const remote: RemoteFace = {
-    stream: vi.fn(async () => undefined),
-    call: vi.fn(async (endpoint: string, args?: Record<string, unknown>) => {
-      calls.push({ endpoint, args: args ?? {} })
-      if (endpoint === EP.EP_LIST_TEMPLATES && String(args?.kind ?? '') === 'role') {
-        return [
-          { id: 'r-1', kind: 'agent', name: '研究员', systemPrompt: '' },
-          { id: 'r-2', kind: 'agent', name: '测试工程师', systemPrompt: '' },
-          { id: 'r-3', kind: 'agent', name: '全栈开发工程师', systemPrompt: '' },
-        ]
-      }
-      // 协作组模板列表（用户批注：+ 新增/点击编辑；测试拖入「协作组」卡建组节点）
-      if (endpoint === EP.EP_LIST_TEMPLATES && String(args?.kind ?? '') === 'group') {
-        return [{ id: 'g-1', name: '协作组', collabPrompt: '' }]
-      }
-      if (endpoint === EP.EP_PRESETS) return [{ id: 'standard', name: '标准' }]
-      if (endpoint === EP.EP_MODELS) return [{ provider: 'deepseek', model: 'deepseek-chat' }]
-      if (endpoint === EP.EP_RUN_HISTORY) {
-        return [{ id: 'run-9', flowId: 'x', status: 'interrupted', startedAt: '2026-08-23T10:00:00.000Z', summary: '中断于节点' }]
-      }
-      if (endpoint === EP.EP_RUN_RESUME) return { runId: 'run-10' }
-      if (endpoint === EP.EP_ACTIVE_RUNS) return [] // 无活跃 run（默认）
-      if (endpoint === EP.EP_LIST_WORKFLOWS) return [] // 无实例（默认；自动选中保持空白画布）
-      if (endpoint === EP.EP_PUT_WORKFLOW || endpoint === EP.EP_PUT_FLOW_TEMPLATE) {
-        // 保存端点须回传完整文档（含 id/revision），否则调用方后续 openFlow 拿到
-        // 缺失 id 的假对象，画布无法绑定实例（图2 改造：模板→实例链路依赖此回传）
-        const doc = args?.flow ?? args?.template
-        return { ...(doc as object), revision: 1 }
-      }
-      if (endpoint === EP.EP_LIST_FLOW_TEMPLATES) return []
-      return []
-    }),
-  }
-  return { ...remote, calls }
-}
 
 async function renderStudio(): Promise<void> {
   await renderStudioWith(remoteStub())
 }
 
 async function renderStudioWith(remote: RemoteFace): Promise<void> {
-  await act(async () => {
-    root = createRoot(container!)
-    root.render(
-      React.createElement(Studio, { t: zh, sessionId: 's-1', remote }),
-    )
-  })
-}
-
-function textOf(selector: string): string[] {
-  return Array.from(document.querySelectorAll(selector)).map((item) => item.textContent ?? '')
-}
-
-/** pointer 点击（模拟左面板卡片的 pointerdown+up 点击路径）。 */
-function pointerClick(el: Element): void {
-  el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 10, clientY: 10, button: 0 }))
-  el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 10, clientY: 10, button: 0 }))
-}
-
-/** 按 aria-label 定位 Tag（已图标化，文字不显示）。 */
-function libTab(label: string): HTMLButtonElement | undefined {
-  return Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-lib-tab')).find((item) => item.getAttribute('aria-label') === label)
+  await mountStudio(container!, (next) => { root = next }, remote)
 }
 
 describe('Studio 装配', () => {
@@ -132,7 +77,7 @@ describe('Studio 装配', () => {
       Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-toolbar button')).find((item) => item.textContent === zh.createInstance)?.click()
     })
     await act(async () => {
-      await Promise.resolve()
+      await flushAsync(1)
     })
     expect(remote.calls.some((call) => call.endpoint === EP.EP_RUN)).toBe(false)
     expect(remote.calls.some((call) => call.endpoint === EP.EP_PUT_WORKFLOW)).toBe(true)
@@ -183,27 +128,6 @@ async function createDraft(): Promise<void> {
 }
 
 /** 把左侧卡片拖到画布指定屏幕位置（拖拽行进路线统一）。 */
-async function dragCardTo(cardText: string, clientX: number, clientY: number): Promise<void> {
-  const shell = document.querySelector('.wf-canvas-shell') as HTMLElement | null
-  if (shell) {
-    Object.defineProperty(shell, 'getBoundingClientRect', {
-      value: () => ({ left: 0, top: 0, right: 1000, bottom: 1000, width: 1000, height: 1000, x: 0, y: 0, toJSON: () => ({}) }),
-      configurable: true,
-    })
-  }
-  const card = Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-docitem')).find((item) => item.textContent?.includes(cardText))
-  expect(card).toBeTruthy()
-  await act(async () => {
-    card!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 10, clientY: 10, button: 0 }))
-  })
-  await act(async () => {
-    window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX, clientY }))
-  })
-  await act(async () => {
-    window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX, clientY }))
-  })
-}
-
 /** 拖拽角色模板到画布（pointer 路径与真实交互一致）。 */
 async function dragRoleToCanvas(): Promise<void> {
   await dragCardTo('研究员', 220, 220)
@@ -271,9 +195,7 @@ describe('Studio 交互', () => {
     })
     // 刷新完整微任务链（saveWorkflow → WORKFLOW_UPDATED → openFlow 多级 dispatch）
     await act(async () => {
-      await Promise.resolve()
-      await Promise.resolve()
-      await Promise.resolve()
+      await flushAsync(3)
     })
     // 实例态确认：工具栏按钮应变为「保存实例」
     expect(textOf('.wf-toolbar .wf-btn')).toContain(zh.saveInstance)
@@ -583,7 +505,7 @@ describe('资产态：卡片拖拽与打开', () => {
       const card = libraryCard('资产流程')
       if (card) pointerClick(card)
     })
-    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    await flushAsync(2)
     const getCall = remote.calls.find((call) => call.endpoint === EP.EP_GET_ASSET)
     expect(getCall?.args).toEqual({ kind: 'workflow', assetId: 'a-1' })
     expect(nodeCount()).toBe(2)
@@ -599,12 +521,12 @@ describe('资产态：卡片拖拽与打开', () => {
       const card = libraryCard('资产流程')
       if (card) pointerClick(card)
     })
-    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    await flushAsync(2)
     const before = nodeCount()
 
     await act(async () => { libTab(zh.libTab.role)?.click() })
     await dragCardTo('资产角色', 620, 300)
-    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    await flushAsync(2)
     expect(remote.calls.some((call) => call.endpoint === EP.EP_GET_ASSET && call.args.kind === 'role')).toBe(true)
     expect(nodeCount()).toBe(before + 1)
     expect(Array.from(document.querySelectorAll('.wf-graph__node .wf-node--agent')).length).toBeGreaterThan(0)
@@ -707,7 +629,7 @@ describe('组合管理：Tag 筛选与工具开关', () => {
     await act(async () => {
       Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-tabs .wf-btn')).find((item) => item.textContent === zh.combos)?.click()
     })
-    await act(async () => { await Promise.resolve() })
+    await flushAsync(1)
     return { calls }
   }
 
@@ -753,7 +675,7 @@ describe('组合管理：Tag 筛选与工具开关', () => {
       const button = Array.from(card!.querySelectorAll('button')).find((item) => item.textContent === zh.toolEnable)
       button?.click()
     })
-    await act(async () => { await Promise.resolve() })
+    await flushAsync(1)
     expect(calls.some((call) => call.endpoint === EP.EP_TOOL_SWITCH_PUT && call.args.name === 'read' && call.args.disabled === false)).toBe(true)
     // 解除关闭 → 卡片恢复可勾选
     const cardAfter = Array.from(document.querySelectorAll<HTMLElement>('.wf-combo-card'))

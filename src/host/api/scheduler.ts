@@ -14,6 +14,12 @@ import {
   validateScheduledTask,
 } from '../scheduler/index.js'
 import { resolveWorkspacePath } from '../workspace-path.js'
+import { messageOf } from '../orchestrator/index.js'
+
+/** 输入形状类异常的判定（边界统一兜底用：调用方错误一律 400，不得 500）。 */
+function isInputShapeError(error: unknown): boolean {
+  return error instanceof TypeError || error instanceof RangeError || error instanceof SyntaxError
+}
 
 /**
  * GUI API 定时任务端点组（只依赖边界基座，与其他端点组无依赖关系）。
@@ -44,11 +50,17 @@ export class SchedulerEndpoints extends VisualWorkflowApiBase {
    * K1：`ownerSessionId` 由请求体自报并原样保存（全局共享语义），本层不做归属校验。
    */
   async schedulerTaskPut(args: { task?: unknown }): Promise<unknown> {
+    // 能力缝先于任何参数解析与磁盘访问：存储未装配时不该先对用户提供的路径做 stat
+    // （与 schedulerTaskDelete 同序；空能力下「501」优先于「400」）。
+    const store = this.host.schedulerTaskStore
+    if (!store) throw httpError(501, presentationOf(this.host, '定时任务存储不可用', 'Scheduler task store is unavailable'))
     let task
     try {
       task = parseScheduledTaskInput(args?.task)
     } catch (error) {
-      if (error instanceof ScheduledTaskInputError) throw httpError(400, error.message)
+      // 边界统一兜底：形状/取值类异常（含解析器本身抛出的 SyntaxError/TypeError/RangeError）
+      // 属调用方错误，必须 400，不得坍缩成 500（api/AGENTS.md）。
+      if (error instanceof ScheduledTaskInputError || isInputShapeError(error)) throw httpError(400, messageOf(error))
       throw error
     }
     const validation = validateScheduledTask(task)
@@ -62,8 +74,6 @@ export class SchedulerEndpoints extends VisualWorkflowApiBase {
         throw httpError(400, message)
       }
     }
-    const store = this.host.schedulerTaskStore
-    if (!store) throw httpError(501, presentationOf(this.host, '定时任务存储不可用', 'Scheduler task store is unavailable'))
     const saved = await store.save(normalizeScheduledTask(task))
     return saved
   }

@@ -1,6 +1,6 @@
 // src/client/components/canvas/GroupCard.tsx
 //
-// 协作组卡片（需求 §4.2.5.2）：组标签 + 成员迷你列表（可滚动）+ 右下角拉伸把手。
+// 协作组卡片：组标签 + 成员迷你列表（可滚动）+ 右下角拉伸把手。
 // 成员节点为组内角色（data.groupId = 组 id），作为迷你卡片渲染于组内（见 GraphCanvas）；
 // 组卡片仅提供流程入/出连接点（跨组上下文连线走成员接点）。
 
@@ -74,8 +74,8 @@ export function GroupCard({ node, copy, members, selected, highlighted, runStatu
                       <span className="wf-hint">{statusLabelOf(copy, member.status)}</span>
                     </span>
                   ) : null}
-                  {/* 组内成员仅数据库/上下文接点，无流程接点（流程由组卡片承担，§4.2.5.2 规则 4）；
-                      成员为缩小版角色卡：仅名称 + 状态（用户批注，Q2） */}
+                  {/* 组内成员仅数据库/上下文接点，无流程接点（流程由组卡片承担）；
+                      成员为缩小版角色卡：仅名称 + 状态（用户批注） */}
                   {/* 左侧 db-in / ctx-in 拉大垂直间距，避免左右两个接点贴在一起（用户批注） */}
                   <span
                     className="wf-graph__handle wf-graph__handle--target wf-graph__handle--mini"

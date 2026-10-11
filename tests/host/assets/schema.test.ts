@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { EXPERIENCE_TYPE_VALUES } from "../../../src/host/assets/experience-codec.js"
 import { EXPERIENCE_PROMPT_SEEDS, EXPERIENCE_PROMPT_SEED_VERSION } from "../../../src/host/assets/experience-seeds.js"
 import { AssetStore } from "../../../src/host/assets/index.js"
-import { initSchema } from "../../../src/host/assets/schema.js"
+import { initSchema, EXPERIENCE_EVALUATION_DDL, EXPERIENCE_STATS_DDL, EXPERIENCE_USAGE_DDL } from "../../../src/host/assets/schema.js"
 import {
   evaluationRow,
   experienceRow,
@@ -149,6 +149,19 @@ const MIGRATION_ONLY_DELETE_TABLES = EXPERIENCE_TABLES_NARROWED_BY_MIGRATION.fil
 const RETIRED_TEAM_MIGRATION_FUNCTION = "retireTeamExperienceType"
 
 /**
+ * 第二处合法清理点：旧形状经验迁移（旧经验整体删除，故对子行做**无条件全表清理**）。
+ * 旧形状没有 `experience_type` 列，无从按退役类型加谓词，因此这一处的约束不是谓词，
+ * 而是「与 DROP TABLE experiences 同事务、子行先于父行」。
+ */
+const LEGACY_EXPERIENCE_MIGRATION_FUNCTION = "migrateLegacyExperienceTable"
+
+/** 只能由退役迁移按类型限定清理的父表（旧形状迁移走 DROP 重建，不出现 DELETE）。 */
+const PARENT_TABLES_TYPED_CLEANUP_ONLY = ["experiences", "experience_prompts"]
+
+/** 旧形状迁移必须清理的三张子行（外键无级联，必须显式先于父行删除）。 */
+const CHILD_TABLES_PURGED_BY_LEGACY_MIGRATION = ["experience_usage", "experience_evaluation", "experience_stats"]
+
+/**
  * 清理语句必须带的退役类型限定（源码常量形式：迁移绑定常量而不是内联 'team'）。
  * 门禁只认「按退役类型限定」这一事实，不要求某个写法；另有断言直接锁定常量的取值，
  * 防止常量被改成别的类型而门禁仍然通过。子行删除把限定写在子查询里，也算数。
@@ -192,6 +205,37 @@ async function makeLegacyExperienceRoot(): Promise<string> {
     raw.exec(LEGACY_EXPERIENCES_DDL)
     for (const statement of LEGACY_EXPERIENCES_INDEXES) raw.exec(statement)
     raw.exec(LEGACY_EXPERIENCE_ROW)
+  } finally {
+    raw.close()
+  }
+  return root
+}
+
+/**
+ * 旧形状经验库 + 三张子表各含一行（**指向旧经验**）。
+ *
+ * 为什么必须手工预置子表行：`initSchema` 先建表再迁移，运行期没有「建表后、迁移前」的
+ * 插入窗口；而这三张子表的外键都没有级联删除，旧库升级后是否残留孤儿只能这样构造。
+ * 子表用源码 DDL 建（形状即当前契约）；旧 experiences 表仍用测试内的冻结副本。
+ */
+async function makeLegacyExperienceRootWithChildRows(): Promise<string> {
+  const root = await makeLegacyExperienceRoot()
+  const raw = await openRawDb(root)
+  try {
+    raw.exec(EXPERIENCE_USAGE_DDL)
+    raw.exec(EXPERIENCE_EVALUATION_DDL)
+    raw.exec(EXPERIENCE_STATS_DDL)
+    raw.exec(`INSERT INTO experience_usage (id, experience_id, run_id, subject_id, created_at)
+      VALUES ('use-legacy', 'ex-legacy1', 'run-legacy', 'session-1', 1000)`)
+    raw.exec(`INSERT INTO experience_evaluation (
+        id, experience_id, run_id, fit_score, decision_effect, information_gain, causal_confidence,
+        evidence, evaluator_subject_id, evaluator_model, created_at)
+      VALUES ('eval-legacy', 'ex-legacy1', 'run-legacy', 0.5, 0.5, 0.5, 0.5, '', 'session-1', '', 1000)`)
+    raw.exec(`INSERT INTO experience_stats (
+        experience_id, effective_sample_count, recalled_count, used_count, fit_mean, empirical_value,
+        variance, stability, evidence_strength, harm_count, harm_rate, harm_severity, quality_signal,
+        trust, updated_at)
+      VALUES ('ex-legacy1', 1, 1, 1, 0.5, 0.5, 0, 1, 0.5, 0, 0, 0, 0.5, 0.5, 1000)`)
   } finally {
     raw.close()
   }
@@ -386,7 +430,7 @@ describe("评价闭环磁盘形状（使用事实 / 评价事实 / 统计投影�
     ])
   })
 
-  it("test_源码_整个Host半区_评价与使用历史只允许退役迁移清理删除且禁止任何UPDATE", async () => {
+  it("test_源码_整个Host半区_评价与使用历史只允许具名迁移清理删除且禁止任何UPDATE", async () => {
     const sources = await collectHostSources()
     // 反空洞：门禁必须真的扫到那几张历史表的读写文件，否则新增文件绕过门禁时测试仍会通过
     const scanned = sources.filter((file) =>
@@ -411,15 +455,21 @@ describe("评价闭环磁盘形状（使用事实 / 评价事实 / 统计投影�
       }
     }
 
-    // DELETE 的例外只有一个：退役迁移对存量数据的**一次性物理清理**。
-    // 例外刻意收窄到三处事实，缺一条门禁就形同放宽：
-    //   ① 收窄表只允许在 assets/schema.ts 被删（其它模块不得删这几张表的任何行）；
-    //   ② 每条删除必须带退役类型限定（否则就成了「按其它谓词删历史」）；
-    //   ③ 这些删除必须位于退役迁移函数体内。
-    // experience_stats 属可重建投影（experience-stats.ts 有整表覆盖写），不参与本门禁。
+    // DELETE 的例外有两类，都必须落在 assets/schema.ts 的具名迁移函数内：
+    //   ① 退役迁移（retireTeamExperienceType）：按退役类型限定清理子行与父表；
+    //   ② 旧形状迁移（migrateLegacyExperienceTable）：旧经验整体删除，故对三张子行做
+    //      **无条件全表清理**（旧形状没有 experience_type 列，无从加谓词），约束改为
+    //      「与 DROP TABLE experiences 同事务，且子行先于父行」。
+    // 共同不变式（缺一条门禁就形同放宽）：
+    //   - 收窄表只允许在 assets/schema.ts 被删（其它模块不得删这几张表的任何行）；
+    //   - 父表（experiences / experience_prompts）仍只允许 ① 清理且必须带退役类型限定；
+    //   - 每次清理都必须位于上列具名迁移函数体内。
+    // experience_stats 属可重建投影（experience-stats.ts 有整表覆盖写），不参与不可变历史门禁。
     const schemaSource = sources.find((file) => file.path === "assets/schema.ts")
     if (!schemaSource) throw new Error("门禁未扫到 assets/schema.ts")
-    const migrationRange = functionLineRange(schemaSource.text.split("\n"), RETIRED_TEAM_MIGRATION_FUNCTION)
+    const schemaLines = schemaSource.text.split("\n")
+    const migrationRange = functionLineRange(schemaLines, RETIRED_TEAM_MIGRATION_FUNCTION)
+    const legacyRange = functionLineRange(schemaLines, LEGACY_EXPERIENCE_MIGRATION_FUNCTION)
     const schemaDeletes = deleteStatementsIn(schemaSource.text)
     const narrowedDeletes = schemaDeletes.filter((entry) =>
       EXPERIENCE_TABLES_NARROWED_BY_MIGRATION.includes(entry.target),
@@ -441,27 +491,64 @@ describe("评价闭环磁盘形状（使用事实 / 评价事实 / 统计投影�
       }
     }
 
-    // 反空洞：schema.ts 里必须真的存在这几条收窄表删除，否则下面的断言会在空集上通过
-    expect(narrowedDeletes.map((entry) => entry.target).sort()).toEqual(
+    // 反空洞：schema.ts 里必须真的清理了这几张表（逐表覆盖；迁移可以多次删同一表）
+    expect([...new Set(narrowedDeletes.map((entry) => entry.target))].sort()).toEqual(
       [...EXPERIENCE_TABLES_NARROWED_BY_MIGRATION].sort(),
     )
     // 限定条件必须真的是「退役类型」：常量一旦被改成别的类型，本门禁不能再通过
     expect(schemaSource.text).toMatch(
       new RegExp(`const\\s+${RETIRED_TEAM_TYPE_CONSTANT}\\s*=\\s*${RETIRED_TEAM_TYPE_VALUE}`),
     )
-    for (const entry of narrowedDeletes) {
-      expect(
-        entry.line,
-        `${entry.target} 的删除必须位于 ${RETIRED_TEAM_MIGRATION_FUNCTION} 内`,
-      ).toBeGreaterThanOrEqual(migrationRange.start)
-      expect(entry.line).toBeLessThanOrEqual(migrationRange.end)
-    }
-    // 限定谓词必须写在同一条删除语句里（子行删除的限定在子查询行，故按整条语句判定）
+    // 逐条判定：父表只允许退役迁移（带退役类型谓词）；子行允许退役迁移或旧形状迁移
     const schemaCode = stripComments(schemaSource.text)
+    const deleteBlocks = deleteBlocksOf(schemaCode, narrowedDeletes)
+    const inRange = (line: number, range: { start: number; end: number }): boolean =>
+      line >= range.start && line <= range.end
+    narrowedDeletes.forEach((entry, index) => {
+      if (PARENT_TABLES_TYPED_CLEANUP_ONLY.includes(entry.target)) {
+        expect(
+          inRange(entry.line, migrationRange),
+          `${entry.target} 是父表，其删除只允许出现在 ${RETIRED_TEAM_MIGRATION_FUNCTION} 内`,
+        ).toBe(true)
+        expect(
+          deleteBlocks[index].includes(RETIRED_TEAM_TYPE_PREDICATE),
+          `${entry.target} 的删除必须限定 ${RETIRED_TEAM_TYPE_PREDICATE}`,
+        ).toBe(true)
+        return
+      }
+      if (inRange(entry.line, migrationRange)) {
+        expect(
+          deleteBlocks[index].includes(RETIRED_TEAM_TYPE_PREDICATE),
+          `${RETIRED_TEAM_MIGRATION_FUNCTION} 内 ${entry.target} 的删除必须限定 ${RETIRED_TEAM_TYPE_PREDICATE}`,
+        ).toBe(true)
+        return
+      }
+      expect(
+        inRange(entry.line, legacyRange),
+        `${entry.target} 的删除只允许出现在 ${RETIRED_TEAM_MIGRATION_FUNCTION} 或 ${LEGACY_EXPERIENCE_MIGRATION_FUNCTION} 内`,
+      ).toBe(true)
+    })
+
+    // 旧形状迁移的正向约束：三张子行必须清干净，且与 DROP TABLE 同事务、先于父行
+    const legacyDeletes = narrowedDeletes.filter((entry) => inRange(entry.line, legacyRange))
     expect(
-      deleteBlocksOf(schemaCode, narrowedDeletes).every((sql) => sql.includes(RETIRED_TEAM_TYPE_PREDICATE)),
-      `收窄表的删除必须限定 ${RETIRED_TEAM_TYPE_PREDICATE}`,
-    ).toBe(true)
+      legacyDeletes.map((entry) => entry.target).sort(),
+      `${LEGACY_EXPERIENCE_MIGRATION_FUNCTION} 必须清理全部三张子行`,
+    ).toEqual([...CHILD_TABLES_PURGED_BY_LEGACY_MIGRATION].sort())
+    const legacySlice = schemaLines.slice(legacyRange.start - 1, legacyRange.end)
+    const lineOfInLegacy = (needle: string): number => {
+      const offset = legacySlice.findIndex((line) => line.includes(needle))
+      expect(offset, `${LEGACY_EXPERIENCE_MIGRATION_FUNCTION} 内未找到 ${needle}`).toBeGreaterThanOrEqual(0)
+      return legacyRange.start + offset
+    }
+    const beginLine = lineOfInLegacy("BEGIN IMMEDIATE")
+    const commitLine = lineOfInLegacy("db.exec('COMMIT')")
+    const dropLine = lineOfInLegacy("DROP TABLE experiences")
+    for (const entry of legacyDeletes) {
+      expect(entry.line, `${entry.target} 的清理必须与 DROP TABLE 同事务（在 BEGIN 之后）`).toBeGreaterThan(beginLine)
+      expect(entry.line, `${entry.target} 的清理必须与 DROP TABLE 同事务（在 COMMIT 之前）`).toBeLessThan(commitLine)
+      expect(entry.line, `${entry.target} 必须先于父表 DROP 删除`).toBeLessThan(dropLine)
+    }
   })
 
   it("test_初始化_已有评价与使用事实_重复初始化不改变任何历史行", async () => {
@@ -600,6 +687,37 @@ describe("旧形状 experiences 迁移（用户裁决：旧数据直接删除）
     }
   })
 
+  it("test_迁移_旧库三张子表含数据_迁移后无孤儿子行且外键一致", async () => {
+    const legacyRoot = await makeLegacyExperienceRootWithChildRows()
+    const migrated = new AssetStore(legacyRoot, { now: fakeClock(), ids: fakeIds() })
+    try {
+      await migrated.init()
+
+      const raw = await openRawDb(legacyRoot)
+      let usage: Record<string, unknown> | undefined
+      let evaluation: Record<string, unknown> | undefined
+      let stats: Record<string, unknown> | undefined
+      let violations: Record<string, unknown>[] = []
+      try {
+        usage = raw.prepare("SELECT COUNT(*) AS total FROM experience_usage").get() as Record<string, unknown>
+        evaluation = raw.prepare("SELECT COUNT(*) AS total FROM experience_evaluation").get() as Record<string, unknown>
+        stats = raw.prepare("SELECT COUNT(*) AS total FROM experience_stats").get() as Record<string, unknown>
+        violations = raw.prepare("PRAGMA foreign_key_check").all() as Record<string, unknown>[]
+      } finally {
+        raw.close()
+      }
+
+      // 三张子表的外键都没有级联删除：迁移必须先清子行，否则旧行全成孤儿
+      expect(usage).toMatchObject({ total: 0 })
+      expect(evaluation).toMatchObject({ total: 0 })
+      expect(stats).toMatchObject({ total: 0 })
+      expect(violations).toEqual([])
+    } finally {
+      migrated.close()
+      await removeTempRoot(legacyRoot)
+    }
+  })
+
   it("test_迁移_旧库升级后_经验可写入且外键约束已恢复生效", async () => {
     const legacyRoot = await makeLegacyExperienceRoot()
     const migrated = new AssetStore(legacyRoot, { now: fakeClock(), ids: fakeIds() })
@@ -625,11 +743,12 @@ describe("旧形状 experiences 迁移（用户裁决：旧数据直接删除）
     }
   })
 
-  it("test_迁移_重建中途失败_整笔回滚保留旧表而不留半成品", async () => {
+  it("test_迁移_迁移失败时不破坏旧表（失败前不改动旧表形状与数据）", async () => {
     const legacyRoot = await makeLegacyExperienceRoot()
     const seeded = await openRawDb(legacyRoot)
     try {
-      // 索引名与表名在 SQLite 里共享命名空间：这个名字会让重建时的建索引语句失败
+      // 索引名与表名在 SQLite 里共享命名空间：这个名字会让重建事务内（DROP TABLE 与
+      // 建新表之后）的建索引语句失败——失败点确实落在事务中途，而非事务开始之前。
       seeded.exec("CREATE TABLE idx_experiences_decision_domain (blocked INTEGER)")
     } finally {
       seeded.close()
@@ -645,17 +764,72 @@ describe("旧形状 experiences 迁移（用户裁决：旧数据直接删除）
     const after = await openRawDb(legacyRoot)
     let columns: string[] = []
     let rows: Record<string, unknown> | undefined
+    let leftovers: Record<string, unknown>[] = []
     try {
       columns = (after.prepare("PRAGMA table_info(experiences)").all() as Record<string, unknown>[]).map((row) =>
         String(row.name),
       )
       rows = after.prepare("SELECT COUNT(*) AS total FROM experiences").get() as Record<string, unknown>
+      // 重建临时表名（experiences__rebuild / *_prompts__rebuild）与旧表索引名都不得残留
+      leftovers = after
+        .prepare("SELECT name FROM sqlite_master WHERE instr(name, '__') > 0")
+        .all() as Record<string, unknown>[]
     } finally {
       after.close()
     }
 
+    // ROLLBACK 生效的最小证据：旧表连数据带形状完好（新旧形状不共享列名，故列名即形状证据）
     expect(columns).toContain("insight")
+    expect(columns).not.toContain("experience_type")
     expect(rows).toMatchObject({ total: 1 })
+    expect(leftovers).toEqual([])
+    // 迁移失败时不得写入新形状索引：DB 里只应有测试预置的同名普通表
+    const kinds = await rawQuery(legacyRoot, "SELECT type, name FROM sqlite_master WHERE name = 'idx_experiences_decision_domain'")
+    expect(kinds).toEqual([{ type: "table", name: "idx_experiences_decision_domain" }])
+  })
+
+  it("test_迁移_失败点位于事务中途_回滚后旧表形状与数据完好且无重建残留", async () => {
+    const legacyRoot = await makeLegacyExperienceRoot()
+    const seeded = await openRawDb(legacyRoot)
+    try {
+      // 前四个索引可正常创建，第五个（generation_prompt）才因同名普通表失败 →
+      // 失败点在「DROP 旧表 + 建新表 + 建若干索引」之后，属真正的事务中途。
+      // 若 ROLLBACK 缺失，此刻库里已是含 experience_type 的新形状表。
+      seeded.exec("CREATE TABLE idx_experiences_generation_prompt (blocked INTEGER)")
+    } finally {
+      seeded.close()
+    }
+
+    const failing = new AssetStore(legacyRoot, { now: fakeClock(), ids: fakeIds() })
+    try {
+      await expect(failing.init()).rejects.toThrow(/already a table named idx_experiences_generation_prompt/)
+    } finally {
+      failing.close()
+    }
+
+    const after = await openRawDb(legacyRoot)
+    let columns: string[] = []
+    let rows: Record<string, unknown> | undefined
+    let leftovers: Record<string, unknown>[] = []
+    let indexes: string[] = []
+    try {
+      columns = columnsOf(after, "experiences")
+      rows = after.prepare("SELECT COUNT(*) AS total FROM experiences").get() as Record<string, unknown>
+      leftovers = after
+        .prepare("SELECT name FROM sqlite_master WHERE instr(name, '__') > 0")
+        .all() as Record<string, unknown>[]
+      indexes = indexNamesOf(after, "experiences")
+    } finally {
+      after.close()
+    }
+
+    // 回滚证据：旧形状列集与旧行都回来了（新形状独有列不存在）
+    expect(columns).toContain("insight")
+    expect(columns).not.toContain("experience_type")
+    expect(rows).toMatchObject({ total: 1 })
+    // 事务中途已建的新索引不得残留（回滚后只剩旧表自带的两个索引）
+    expect(indexes.sort()).toEqual(["idx_experiences_source_run_id", "idx_experiences_task_type"])
+    expect(leftovers).toEqual([])
   })
 
   it("test_迁移_已是新形状_重复初始化不重建且数据保留", async () => {
@@ -1073,7 +1247,8 @@ function deleteStatementsIn(source: string): SourceDelete[] {
   return statements
 }
 
-/** 剥掉 `//` 与块注释（字符串与模板字符串原样保留；行结构保持不变）。 */function stripComments(source: string): string {
+/** 剥掉 `//` 与块注释（字符串与模板字符串原样保留；行结构保持不变）。 */
+function stripComments(source: string): string {
   let out = ""
   let quote: string | null = null
   for (let index = 0; index < source.length; index += 1) {

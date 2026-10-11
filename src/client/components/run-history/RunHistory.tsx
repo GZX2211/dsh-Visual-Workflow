@@ -1,8 +1,8 @@
 // src/client/components/run-history/RunHistory.tsx
 //
-// 运行历史面板（照搬旧项目 run-view.js，TSX 化 + 断点恢复入口）：
+// 运行历史面板（断点恢复入口）：
 // 按 run 记录展示状态/起止时间/节点状态摘要；paused|interrupted|stopped 可恢复
-// （断点续跑生成新 run，resumedFromRunId 追溯继承链，需求 §4.7；stopped 可续跑为
+// （断点续跑生成新 run，resumedFromRunId 追溯继承链；stopped 可续跑为
 // 定时任务阶段用户裁决修正：停止后点「运行/恢复」断点续跑而非从头重跑）。
 
 import type { Dict } from '../../i18n.js'
@@ -50,39 +50,44 @@ export function RunHistory({ history, selectedRunId, copy, onSelect, onClose, on
             {items.map((run) => {
               const resumable = canResume && RESUMABLE.has(run.status)
               return (
-                <button
+                // 列表项与「恢复」是两级交互面：外层用 div 承载，避免交互元素嵌套（无效 HTML 与嵌套交互）
+                <div
                   key={run.id}
-                  type="button"
                   className={`wf-history__item${run.id === selectedRunId ? ' is-active' : ''}`}
-                  onClick={() => onSelect(run.id)}
                 >
-                  <span className="wf-history__title">
-                    <span className={`wf-status-dot${run.status === 'running' ? ' is-running' : ''}`} />
-                    {`${run.flowName ?? run.flowId}`}
-                    {run.resumedFromRunId ? <span className="wf-history__chain">{`${copy.resumedFrom} #${String(run.resumedFromRunId).slice(0, 8)}`}</span> : null}
-                  </span>
-                  <span className="wf-history__meta">
-                    {`${statusLabel(run.status, copy)} · ${formatTime(run.startedAt)}${run.resumeFromNodeId ? ` · ${copy.resumeFromNode} ${run.resumeFromNodeId}` : ''}${run.summary ? ` · ${run.summary}` : ''}`}
-                  </span>
-                  {run.nodes?.length
-                    ? (
-                        <span className="wf-history__meta">
-                          {run.nodes.map((node) => `${node.nodeId}:${statusLabel(node.status, copy)}`).join('  ')}
-                        </span>
-                      )
-                    : null}
+                  <button
+                    type="button"
+                    className="wf-history__select"
+                    onClick={() => onSelect(run.id)}
+                  >
+                    <span className="wf-history__title">
+                      <span className={`wf-status-dot${run.status === 'running' ? ' is-running' : ''}`} />
+                      {`${run.flowName ?? run.flowId}`}
+                      {run.resumedFromRunId ? <span className="wf-history__chain">{`${copy.resumedFrom} #${String(run.resumedFromRunId).slice(0, 8)}`}</span> : null}
+                    </span>
+                    <span className="wf-history__meta">
+                      {`${statusLabel(run.status, copy)} · ${formatTime(run.startedAt)}${run.resumeFromNodeId ? ` · ${copy.resumeFromNode} ${run.resumeFromNodeId}` : ''}${run.summary ? ` · ${run.summary}` : ''}`}
+                    </span>
+                    {run.nodes?.length
+                      ? (
+                          <span className="wf-history__meta">
+                            {run.nodes.map((node) => `${node.nodeId}:${statusLabel(node.status, copy)}`).join('  ')}
+                          </span>
+                        )
+                      : null}
+                  </button>
                   {resumable ? (
                     <span className="wf-history__resume">
                       <button
                         type="button"
                         className="wf-btn is-primary"
-                        onClick={(event) => { event.stopPropagation(); onResume(run.id) }}
+                        onClick={() => onResume(run.id)}
                       >
                         {copy.resumeRun}
                       </button>
                     </span>
                   ) : null}
-                </button>
+                </div>
               )
             })}
           </div>

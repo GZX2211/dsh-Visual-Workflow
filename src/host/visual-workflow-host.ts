@@ -354,6 +354,9 @@ export class VisualWorkflowHost extends Service {
    * `peekPending()` 为空且 `childPromptStates` 无该 id → 直接返回，无副作用。
    */
   private onAgentCreated(payload: { agent?: { id?: unknown; ctx?: unknown } }): void {
+    // 卸载后不再安装任何新贡献：dispose() 已清空 childScopeDisposers 且不再遍历，
+    // 此时安装的监听器持有 childCtx 与其子树却永远没有撤销点（泄漏到进程结束）。
+    if (this._disposed) return
     const agent = payload?.agent
     if (!agent || typeof agent !== 'object') return
     const childCtx = agent.ctx
@@ -383,6 +386,8 @@ export class VisualWorkflowHost extends Service {
    * 统一清理。
    */
   private onAgentDisposed(payload: { agent?: { id?: unknown } }): void {
+    // 与其余三个事件处理器同口径：卸载后宿主不再接收事件（dispose 已清表，重复撤销无意义）。
+    if (this._disposed) return
     const agentId = String(payload?.agent?.id ?? '')
     if (!agentId) return
     this.dropChildScope(agentId)

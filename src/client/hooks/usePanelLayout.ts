@@ -107,7 +107,7 @@ export function usePanelLayout(
     detachResizeRef.current = detach
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
-    // Bug 7：鼠标移出浏览器窗口后松开时 pointerup 可能不触发（取决于 OS），
+    // 鼠标移出浏览器窗口后松开时 pointerup 可能不触发（取决于 OS），
     // 必须用 pointercancel + 窗口失焦兜底清理，否则 body cursor 永久停留在
     // col-resize、监听器残留，用户必须刷新页面才能恢复。
     window.addEventListener('pointercancel', onUp)

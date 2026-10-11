@@ -13,6 +13,7 @@ import { RESERVED_TRANSPORT_TOOL } from '../../../host/shared/protocol.js'
 import type { RemoteFace } from '../../hooks/useRemote.js'
 import { useToolCombos, type ComboEntry } from '../../hooks/useToolCombos.js'
 import { mcpFormFromJson, mcpFormFromServer, mcpServerPayload, parseJsonObject, type McpFormState } from '../../lib/mcp-form.js'
+import { remoteErrorMessageOf } from '../../lib/remote-error.js'
 import { TAG_ALL } from '../../lib/tool-tags.js'
 import { ComboCatalog } from './ComboCatalog.js'
 import { ComboSidePanel } from './ComboSidePanel.js'
@@ -24,7 +25,8 @@ export interface ComboManagerProps {
   sessionId: string
   onClose(): void
   onToast(kind: 'info' | 'success' | 'error', text: string): void
-  onChanged(): void
+  /** 宿主侧组合快照刷新（返回的 Promise 失败时由本组件显式提示，不得静默吞掉）。 */
+  onChanged(): void | Promise<unknown>
 }
 
 /** 空组合草稿。 */
@@ -44,10 +46,6 @@ function draftOf(combo: ComboEntry | undefined): { name: string; tools: string[]
   }
 }
 
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
-
 export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChanged }: ComboManagerProps) {
   const combosFace = useToolCombos(remote, sessionId)
   const [tab, setTab] = useState<'plugins' | 'mcp'>('plugins')
@@ -62,7 +60,8 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
   const loadedRef = useRef(false)
   // 最近一次选中的组合 id（供加载后判定沿用/回退，避免在 setState updater 内产生副作用）
   const activeComboIdRef = useRef<string | null>(null)
-  activeComboIdRef.current = activeComboId
+  // 提交后再镜像最新选中项：渲染期写 ref 在并发渲染（被丢弃的渲染/重放的 updater）下会留下未提交的值
+  useEffect(() => { activeComboIdRef.current = activeComboId }, [activeComboId])
 
   /** 加载完成后确定选中项：仍存在则沿用，否则回退首个组合。 */
   const selectAfterLoad = useCallback((list: ComboEntry[]) => {
@@ -83,7 +82,7 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
         const { combos } = await load()
         selectAfterLoad(combos)
       } catch (error) {
-        onToast('error', messageOf(error))
+        onToast('error', remoteErrorMessageOf(error))
       }
     })()
   }, [load, onToast, selectAfterLoad])
@@ -96,11 +95,18 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
   ): Promise<boolean> => {
     try {
       await action()
-      if (options?.changed) onChanged?.()
+      if (options?.changed) {
+        // 宿主快照刷新失败必须显式提示：否则界面仍是旧组合，用户以为变更已生效
+        try {
+          await onChanged?.()
+        } catch (error) {
+          onToast('error', remoteErrorMessageOf(error))
+        }
+      }
       onToast('success', successText)
       return true
     } catch (error) {
-      onToast('error', messageOf(error))
+      onToast('error', remoteErrorMessageOf(error))
       return false
     }
   }, [onChanged, onToast])
@@ -137,7 +143,7 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
 
   const deleteCombo = useCallback(async (): Promise<void> => {
     if (!activeComboId) return
-    // 需求 §4.6 规则 5：删除组合二次确认（组合可能被节点引用，删除后节点回落为未选模式）
+    // 删除组合二次确认（组合可能被节点引用，删除后节点回落为未选模式）
     if (!confirmDelete) {
       setConfirmDelete(true)
       return

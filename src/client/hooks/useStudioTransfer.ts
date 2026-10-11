@@ -16,6 +16,7 @@ import type { ToastFace } from './useToast.js'
 import type { EditorActionsFace } from './useEditorActions.js'
 import type { Dict } from '../i18n.js'
 import { EP } from '../lib/remote.js'
+import { remoteErrorMessageOf } from '../lib/remote-error.js'
 import { readFileAsText, readFileAsBase64, download } from '../lib/files.js'
 import { isRoleTemplateBundle } from '../lib/bundle.js'
 
@@ -114,7 +115,7 @@ export function useStudioTransfer(
         })
         return
       }
-      // 图2 交互改造：导入一律落为「工作流模板」（全局共享，跨会话可见），
+      // 导入一律落为「工作流模板」（全局共享，跨会话可见），
       // 用户需在画布中「创建实例」后才能运行——故只刷新模板列表，不动实例列表。
       await flowTemplates.loadFlowTemplates()
       notify('success', t.toastImported)
@@ -143,7 +144,7 @@ export function useStudioTransfer(
   }, [dispatch, notify, remote, state.confirm, t.toastImported, templates, flowTemplates, toastError])
 
   // ---------- 文件选择（文件模板/节点：文本直接读；非文本读 base64 交后端受管拷贝） ----------
-  /** 角色系统提示词 .md 加载（§4.2.3.1 卡片设计）。 */
+  /** 角色系统提示词 .md 加载（卡片设计）。 */
   const loadPersonaMd = useCallback(async () => {
     personaInputRef.current?.click()
   }, [])
@@ -152,7 +153,7 @@ export function useStudioTransfer(
     if (!file) return
     try {
       const content = await readFileAsText(file)
-      // 记录来源文件名：左侧栏角色模板卡/画布角色卡展示 System Prompt 字段（用户验收标注）
+      // 记录来源文件名：左侧栏角色模板卡/画布角色卡展示 System Prompt 字段
       patchEditor({ systemPrompt: content, systemPromptSource: file.name })
       notify('success', t.toastSaved)
     } catch (error) {
@@ -189,7 +190,7 @@ export function useStudioTransfer(
         : state.canvas.nodes.find((item) => item.id === editor.id)?.data) as { fileKind?: string } | undefined
       const kind = String(fileKind?.fileKind ?? 'text')
       if (kind === 'text') {
-        // 文本类型：仅取第一个文件内容（多选仅对非文本文件生效，用户验收：可多选所有类型）
+        // 文本类型：仅取第一个文件内容（多选仅对非文本文件生效；可多选所有类型）
         const { file } = { file: picked[0] }
         const content = await readFileAsText(file)
         patchEditor({ content, fileName: file.name, files: [] })
@@ -223,20 +224,15 @@ export function useStudioTransfer(
     if (!node || node.kind !== 'database') return
     try {
       await remote.call(EP.EP_DB_TEST, { node })
-      notify('success', copyDbSuccess(t))
+      notify('success', t.dbTestSuccess)
     } catch (error) {
-      notify('error', String((error as Error)?.message ?? error))
+      notify('error', remoteErrorMessageOf(error))
     }
-  }, [notify, remote, state.canvas.nodes, state.editor])
+  }, [notify, remote, state.canvas.nodes, state.editor, t.dbTestSuccess])
 
   return {
     exportCurrent, handleImportFile, resolveImportConflict,
     loadPersonaMd, onPersonaMdSelected, loadGroupMd, onGroupMdSelected,
     onFileSelect, testDbConnection,
   }
-}
-
-/** 数据库测试成功提示文案。 */
-function copyDbSuccess(t: Dict): string {
-  return t.dbTestSuccess
 }

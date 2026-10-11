@@ -416,6 +416,11 @@ function renderConfig(config: Record<string, unknown>): string {
   return lines.length ? `\n${lines.join('\n')}` : ' {}'
 }
 
+/** 从行集推导禁用清单（写盘口径的唯一实现：只写 disabled 行，启用态不出现）。 */
+function disabledTogglesOf(rows: McpServerRow[]): Array<[string, boolean]> {
+  return rows.filter((row) => row.disabled).map((row) => [row.id, true] as [string, boolean])
+}
+
 /** 写回托管区（读全文件 → 替换 region → 原子写）。 */
 async function writeRegion(nextRows: McpServerRow[], nextToggles: Array<[string, boolean]>): Promise<void> {
   const patch = hostPatchPath()
@@ -489,7 +494,7 @@ export async function upsertMcpServer(input: unknown): Promise<McpServerRow> {
     url: String(entry.config.url ?? ''),
     disabled: existing.find((row) => row.id === entry.id)?.disabled ?? false,
   })
-  await writeRegion(next, next.filter((row) => row.disabled).map((row) => [row.id, true] as [string, boolean]))
+  await writeRegion(next, disabledTogglesOf(next))
   return next.find((row) => row.id === entry.id)!
 }
 
@@ -499,7 +504,7 @@ export async function removeMcpServer(nameOrId: string): Promise<{ deleted: bool
   const existing = await listMcpServers()
   const next = existing.filter((row) => row.id !== id)
   if (next.length === existing.length) return { deleted: false }
-  await writeRegion(next, next.filter((row) => row.disabled).map((row) => [row.id, true] as [string, boolean]))
+  await writeRegion(next, disabledTogglesOf(next))
   return { deleted: true }
 }
 
@@ -510,6 +515,6 @@ export async function toggleMcpServer(nameOrId: string, disabled: boolean): Prom
   const found = existing.find((row) => row.id === id)
   if (!found) throw new Error(`MCP 服务器不存在：${id}`)
   const next = existing.map((row) => (row.id === id ? { ...row, disabled: disabled !== false } : row))
-  await writeRegion(next, next.filter((row) => row.disabled).map((row) => [row.id, true] as [string, boolean]))
+  await writeRegion(next, disabledTogglesOf(next))
   return next.find((row) => row.id === id)!
 }

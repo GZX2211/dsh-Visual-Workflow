@@ -53,11 +53,11 @@ export function McpFormPanel(props: McpFormPanelProps) {
                 <div className="wf-mcp-form__stack">
                   <label>
                     <span className="wf-hint">{copy.mcpCommand}</span>
-                    <input value={form.commandLine ?? ''} placeholder="npx -y @playwright/mcp@latest --headless" onChange={(event) => onFormChange({ ...form, commandLine: event.target.value })} />
+                    <input value={form.commandLine ?? ''} placeholder={copy.mcpCommandPlaceholder} onChange={(event) => onFormChange({ ...form, commandLine: event.target.value })} />
                   </label>
                   <label>
                     <span className="wf-hint">{copy.mcpEnv}</span>
-                    <input value={form.env ?? ''} placeholder={'{"API_KEY":"..."}'} onChange={(event) => onFormChange({ ...form, env: event.target.value })} />
+                    <input value={form.env ?? ''} placeholder={copy.mcpEnvPlaceholder} onChange={(event) => onFormChange({ ...form, env: event.target.value })} />
                   </label>
                   {copy.mcpCommandHint
                     ? <span className="wf-hint wf-hint--block">{copy.mcpCommandHint}</span>
@@ -68,11 +68,11 @@ export function McpFormPanel(props: McpFormPanelProps) {
                 <div className="wf-mcp-form__stack">
                   <label>
                     <span className="wf-hint">{copy.mcpUrl}</span>
-                    <input value={form.url ?? ''} placeholder="https://example.com/mcp" onChange={(event) => onFormChange({ ...form, url: event.target.value })} />
+                    <input value={form.url ?? ''} placeholder={copy.mcpUrlPlaceholder} onChange={(event) => onFormChange({ ...form, url: event.target.value })} />
                   </label>
                   <label>
                     <span className="wf-hint">{copy.mcpHeaders}</span>
-                    <input value={form.headers ?? ''} placeholder={'{"Authorization":"Bearer ..."}'} onChange={(event) => onFormChange({ ...form, headers: event.target.value })} />
+                    <input value={form.headers ?? ''} placeholder={copy.mcpHeadersPlaceholder} onChange={(event) => onFormChange({ ...form, headers: event.target.value })} />
                   </label>
                 </div>
               )}
@@ -103,7 +103,7 @@ export function McpFormPanel(props: McpFormPanelProps) {
                 className="wf-mcp-import__text"
                 value={importText}
                 onChange={(event) => onImportTextChange(event.target.value)}
-                placeholder={'{"mcpServers":{"codegraph":{"command":"npx","args":["-y","@colbymchenry/codegraph"]}}}'}
+                placeholder={copy.mcpImportPlaceholder}
               />
               <div className="wf-mcp-form__row">
                 <button type="button" className="wf-btn is-primary" onClick={onImportApply} disabled={busy}>{copy.mcpImportApply}</button>

@@ -15,6 +15,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act } from 'react'
+import { transform } from 'lightningcss'
 import { apply } from '../../src/client/entry.js'
 import { getWorkbenchOpenHandler } from '../../src/client/sidebar/footer-entry.js'
 import { zh, en } from '../../src/client/i18n.js'
@@ -143,8 +144,31 @@ describe('apply 装配', () => {
     expect(css).not.toContain('.wf-titlebar__view')
   })
 
-  it('常驻容器停在隐藏 holder 内且 Studio 已挂载（无标签页 body 时也不卸载）', async () => {
-    await mount({ currentSession: 'session-9' })
+  it('注入样式可被真实 CSS 解析器解析（jsdom 解析失败的规则不再静默丢弃）', async () => {
+    await mount()
+    const tag = document.querySelector('style[data-plugin="visual-workflow"]') as HTMLStyleElement
+    const css = tag.textContent ?? ''
+    // 用真实解析器（lightningcss，devDependency）解析注入的整份样式表：语法错误会抛错。
+    // 这条断言把「jsdom 无法解析的规则被静默丢弃」变成可失败的信号；仅做子串包含无法发现它。
+    expect(() => transform({ filename: 'visual-workflow-injected.css', code: Buffer.from(css), minify: false }))
+      .not.toThrow()
+    const result = transform({ filename: 'visual-workflow-injected.css', code: Buffer.from(css), minify: false })
+    expect(result.warnings ?? []).toEqual([])
+    // 解析成功即证明样式表非空且语法有效（防止把空串当作「解析通过」）。
+    expect(result.code.length).toBeGreaterThan(10_000)
+  })
+
+  it('注入样式真的生效：holder 隐藏规则命中 computed style', async () => {
+    await mount()
+    const holder = document.getElementById('visual-workflow-workbench-holder') as HTMLElement | null
+    expect(holder).toBeTruthy()
+    expect(holder!.parentElement).toBe(document.body)
+    // 只有注入的 #visual-workflow-workbench-holder { display: none } 生效时 computed style 才是 none
+    // （常驻容器停在隐藏 holder 内是「关闭仅隐藏、重进状态原样恢复」的实现前提）。
+    expect(getComputedStyle(holder!).display).toBe('none')
+  })
+
+  it('常驻容器停在隐藏 holder 内且 Studio 已挂载（无标签页 body 时也不卸载）', async () => {    await mount({ currentSession: 'session-9' })
     const holder = document.getElementById('visual-workflow-workbench-holder')
     const host = document.getElementById('visual-workflow-workbench-host')
     expect(holder).toBeTruthy()

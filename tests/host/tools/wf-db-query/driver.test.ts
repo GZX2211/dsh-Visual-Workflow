@@ -3,7 +3,8 @@
 // 数据库驱动（driver.ts）单测：SqliteDriver 只读访问与物理防写、
 // createDatabaseDriver 配置错误路径、连接测试成功/失败。
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type { DatabaseNode } from '../../../../src/host/shared/graph-model.js'
@@ -17,7 +18,27 @@ import {
 import { makeSqliteDb } from '../fixtures/db-fixture.js'
 import { cleanupTempDirs, tempDir } from '../fixtures/tool-harness.js'
 
-afterEach(cleanupTempDirs)
+/**
+ * `mysql2` 是否已安装。
+ * 为什么用 `require.resolve` 而不是动态 `import()`：本文件的用例会用 `vi.doMock('mysql2/promise')`
+ * 模拟驱动缺失，动态 import 会被 mock 影响；`require.resolve` 走真实解析，不受 mock 干扰。
+ * 为什么静态判定：`it.skipIf` 的条件在用例收集期求值，必须在注册前拿到确定结论。
+ */
+const MYSQL2_AVAILABLE = ((): boolean => {
+  try {
+    createRequire(import.meta.url).resolve('mysql2/promise')
+    return true
+  } catch {
+    return false
+  }
+})()
+
+afterEach(async () => {
+  // 模块 mock 只在本文件内生效，用后立即解除，避免污染同进程内其他用例
+  vi.doUnmock('mysql2/promise')
+  vi.resetModules()
+  await cleanupTempDirs()
+})
 
 /** 建一个含 count 张表的临时 SQLite 库（schema 上限边界用）。 */
 function makeTableDb(file: string, count: number): void {
@@ -59,11 +80,13 @@ describe('SqliteDriver', () => {
     }
   })
 
-  it('文件不存在 → 连接测试报明确错误', async () => {
+  it('文件不存在 → 连接测试报明确错误（不可打开，而非其他失败）', async () => {
     const dir = await tempDir('vw-drv-')
     const driver = new SqliteDriver(join(dir, 'missing.db'))
     try {
-      await expect(driver.testConnection()).rejects.toThrow()
+      // 真实错误语义：node:sqlite 对缺失文件报「无法打开数据库文件」，
+      // macOS/Linux 上不退化为其他失败；断言语义而非「抛了就行」
+      await expect(driver.testConnection()).rejects.toThrow(/unable to open database file|SQLITE_CANTOPEN/i)
     } finally {
       driver.close()
     }
@@ -145,7 +168,10 @@ describe('createDatabaseDriver 与连接测试', () => {
     expect(failed.message).toContain('连接失败')
   })
 
-  it('服务器连接：未监听端口 → 连接失败（驱动可用）', async () => {
+  // 驱动是 optionalDependencies：未安装时「连接失败」用例覆盖的会是 WF_DB_DRIVER_MISSING 分支，
+  // 与真实连接回归不可区分。故用显式可见跳过代替硬失败——环境缺失在测试输出里表现为 skipped，
+  // 真实缺陷仍表现为 failed；驱动可用时本用例照常执行真实 TCP 连接（跳过不掩盖真实路径）。
+  it.skipIf(!MYSQL2_AVAILABLE)('服务器连接：未监听端口 → 连接失败（错误语义为拒绝连接）', async () => {
     const node = dbNode({
       dbType: 'server',
       dbKind: 'mysql',
@@ -153,5 +179,25 @@ describe('createDatabaseDriver 与连接测试', () => {
     })
     const result = await testDatabaseConnection(node)
     expect(result.ok).toBe(false)
+    // 区分「连接被拒」与「驱动缺失」：只有前者才是本用例要锁的语义
+    expect(result.message).toMatch(/ECONNREFUSED|ECONNRESET|ETIMEDOUT/)
+    expect(result.message).not.toContain('WF_DB_DRIVER_MISSING')
+  }, 15000)
+
+  it('MySQL 驱动缺失 → WF_DB_DRIVER_MISSING（可行动的安装提示）', async () => {
+    // 与是否安装 mysql2 无关：doMock 让惰性 import() 必然失败，因此在有无驱动的环境下语义一致
+    vi.doMock('mysql2/promise', () => {
+      throw new Error('Cannot find package mysql2')
+    })
+    const node = dbNode({
+      dbType: 'server',
+      dbKind: 'mysql',
+      conn: { host: '127.0.0.1', port: 1, user: 'u', password: 'p', db: 'd' },
+    })
+    const driver = createDatabaseDriver(node)
+    await expect(driver.query('SELECT 1')).rejects.toMatchObject({
+      code: 'WF_DB_DRIVER_MISSING',
+      message: expect.stringContaining('install mysql2') as unknown as string,
+    })
   }, 15000)
 })

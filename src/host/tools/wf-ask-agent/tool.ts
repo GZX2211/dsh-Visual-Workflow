@@ -92,9 +92,9 @@ export function registerWfAskAgent(
       'reply answers an ask by its askId and is delivered back to the asker as a new message, so the answer arrives in a later turn rather than as this call result.',
     parameters: {
       cmd: { type: 'string', required: true, enum: ['ask', 'reply'] as const, description: 'ask: send a message and return an askId; reply: answer an ask by its askId.' },
-      targetChildId: { type: 'string', description: 'Peer node id (from your collaboration block) or child session id: the ask target (ask), or the original asker to reply to (reply).' },
-      askId: { type: 'string', description: 'Ask id to answer (reply); returned as an ask result and quoted in the delivered message.' },
-      message: { type: 'string', description: 'Message text (ask/reply).' },
+      targetChildId: { type: 'string', description: 'Required with cmd=ask (and when replying is unnecessary): peer node id (from your collaboration block) or its child session id — the ask target.' },
+      askId: { type: 'string', description: 'Required with cmd=reply: the ask id to answer (returned by the ask and quoted in the delivered message).' },
+      message: { type: 'string', description: 'Required with both cmd=ask and cmd=reply: the message text.' },
     },
     output: {
       schema: {

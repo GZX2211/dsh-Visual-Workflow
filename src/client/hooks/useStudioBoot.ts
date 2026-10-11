@@ -53,30 +53,31 @@ export function useStudioBoot(
     // 用「加载返回的最新列表」而非闭包里的 state.workflows/services：
     // boot 的 effect 在挂载时执行，闭包中的 state 是首次渲染的空数组，
     // 直接读 state.workflows 会误判「无实例」而提前 return，导致重挂载/重新进入后
-    // 画布空白、运行状态不恢复（图2-6 状态消失根因）。
+    // 画布空白、运行状态不恢复。
     const bootedSessionId = () => stateRef.current.sessionId
     let loadedWorkflows: WorkflowDocument[] = []
     let loadedServices: ServiceState[] = []
     const boot = async (): Promise<void> => {
       // 全部会话实例列表（工作台全局化：端点无 sessionId 过滤——即使当前会话
       // 未激活也可加载；仅「自动选中」与「当前」标签依赖当前会话 id）
+      // 三类来源相互独立：单个端点失败不得丢弃其余来源的结果——模板端点失败时已成功
+      // 加载的实例仍须参与自动选中，否则工作台会停在空白画布（用户必须手动点实例）
+      const [flowsResult, templatesResult, servicesResult] = await Promise.allSettled([
+        workflows.loadWorkflows(),
+        flowTemplates.loadFlowTemplates(),
+        serviceControl.loadServices(),
+      ])
+      if (flowsResult.status === 'fulfilled') loadedWorkflows = flowsResult.value ?? []
+      else if (!cancelled) toastError(flowsResult.reason)
+      if (servicesResult.status === 'fulfilled') loadedServices = servicesResult.value ?? []
+      else if (!cancelled) toastError(servicesResult.reason)
+      // 模板列表由 loadFlowTemplates 自行 dispatch，这里只需上报失败
+      if (templatesResult.status === 'rejected' && !cancelled) toastError(templatesResult.reason)
       try {
-        const [flows, , services] = await Promise.all([
-          workflows.loadWorkflows(),
-          flowTemplates.loadFlowTemplates(),
-          serviceControl.loadServices(),
-        ])
-        loadedWorkflows = flows ?? []
-        loadedServices = services ?? []
-      } catch (error) {
-        if (!cancelled) toastError(error)
-      }
-      try {
-        // Bug 5：loadTemplates 直接返回三类结果（已含 role），消除重复发起的
-        // EP_LIST_TEMPLATES 叠加请求——原先查询与创建之间无同步，创建成功但
-        // 列表未刷新（部分更新）时内置父代理模板缺失。
+        // loadTemplates 直接返回三类结果（已含 role）：不得再单独发起一次 EP_LIST_TEMPLATES
+        // 查询——查询与创建之间无同步，会出现「创建成功但列表未刷新」的部分更新。
         const loaded = await templates.loadTemplates()
-        // 内置父代理模板：模板库首次启动时补齐（角色 Tab 置顶固定显示，§4.2.3.1）
+        // 内置父代理模板：模板库首次启动时补齐（角色 Tab 置顶固定显示）
         const roleItems = loaded.role ?? []
         if (!roleItems.some((item) => (item as { kind?: string }).kind === 'parent')) {
           await templates.saveTemplate('role', {
@@ -135,8 +136,8 @@ export function useStudioBoot(
         if (targetId) {
           const target = currentSessionFlows.find((f) => f.id === targetId)
           if (target) dispatch({ type: 'OPEN_FLOW', flow: target })
-          // 图2-6：退出工作台再进入状态消失——若选中实例存在活动 run，在其打开后
-          // 恢复 runId，触发 useRunPolling 重建轮询并拉回快照，画布节点/实例卡状态不再消失。
+          // 若选中实例存在活动 run，打开后立即恢复 runId：触发 useRunPolling 重建轮询并拉回快照，
+          // 画布节点/实例卡状态不再因退出后重新进入而消失。
           const active = activeRuns.find((a) => a.flowId === targetId && a.sessionId === currentSessionId)
           if (active?.runId) dispatch({ type: 'RUN_STARTED', runId: active.runId, runSessionId: active.sessionId })
         }

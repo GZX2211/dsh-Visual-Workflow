@@ -12,7 +12,7 @@
 
 import { describe, expect, it } from 'vitest'
 import ts from 'typescript'
-import { inlineCopyOf, listSourceFiles, parseSource, readText } from './fixtures/client-scan.js'
+import { inlineCopyOf, listSourceFiles, parseSource, propertyNamesOf, readText, stringLiteralsOf } from './fixtures/client-scan.js'
 
 /** 词典唯一来源（正文内允许中文，故排除在 4 号门禁之外）。 */
 const I18N_FILE = 'src/client/i18n.ts'
@@ -118,7 +118,10 @@ function renderDiff(counts: CopyCounts, other: CopyCounts): string[] {
 
 const zh = dictShapeOf(I18N_FILE, 'zh')
 const en = dictShapeOf(I18N_FILE, 'en')
-const copySource = CLIENT_FILES.map((file) => readText(file)).join('\n')
+// 键的消费点按语法收集（属性访问名 + 字符串字面量），不做跨文件文本拼接：
+// 拼接后 `.key` 子串可来自任何文件的任意位置，会把语义无关的命中当成消费点。
+const usedAsProperty = new Set(CLIENT_FILES.flatMap((file) => propertyNamesOf(file)))
+const usedAsLiteral = new Set(CLIENT_FILES.flatMap((file) => stringLiteralsOf(file)))
 
 describe('客户端文案门禁（词典本体）', () => {
   it('词典 zh 与 en 的键路径完全对称', () => {
@@ -136,10 +139,12 @@ describe('客户端文案门禁（词典本体）', () => {
 describe('客户端文案门禁（键使用率）', () => {
   it('每个顶层词典键都被 client 源码引用（无死键）', () => {
     const topLevel = zh.paths.filter((path) => !path.includes('.'))
+    // 防门禁空转：消费点集合必须真的从源码语法树收上来。
+    expect(usedAsProperty.size).toBeGreaterThan(100)
+    expect(usedAsLiteral.size).toBeGreaterThan(100)
     const dead = topLevel.filter((key) => {
       // 键被消费的两种形态：属性访问 `.key`，或作为 reason 码等字符串字面量出现。
-      const asProperty = new RegExp(`\\.${key}\\b`)
-      return !asProperty.test(copySource) && !copySource.includes(`'${key}'`) && !copySource.includes(`"${key}"`)
+      return !usedAsProperty.has(key) && !usedAsLiteral.has(key)
     })
     expect(dead).toEqual([])
   })

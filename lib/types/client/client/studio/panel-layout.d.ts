@@ -1,6 +1,6 @@
 import type { StorageLike } from '../lib/storage.js';
 import type { PanelLayout } from './studio-types.js';
-/** localStorage 键（左右宽度/底高沿用旧项目键名；mode 为折叠态新增键）。 */
+/** localStorage 键（键名与既有用户缓存兼容，不得改名；mode 为折叠态新增键）。 */
 export declare const LAYOUT_KEYS: {
     readonly mode: "visual-workflow:panel-mode";
     readonly leftWidth: "visual-workflow:left-width";

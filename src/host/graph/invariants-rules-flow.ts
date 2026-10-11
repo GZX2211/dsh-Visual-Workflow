@@ -15,6 +15,7 @@
 import type { FlowDag } from './dag.js'
 import type { CheckGraphInput, GraphIssue } from './invariants-types.js'
 import type { GraphNode } from '../shared/graph-model.js'
+import { channelOut } from './model.js'
 
 /** 可执行单元种类（流程端点判定用：agent/parent/group）。 */
 const UNIT_KINDS: readonly string[] = ['agent', 'parent', 'group']
@@ -143,7 +144,7 @@ export function ruleConditionPair({ flow }: CheckGraphInput): GraphIssue[] {
   for (const line of flow?.lines ?? []) {
     const type = line.condition?.type
     if (!type || type === 'content') continue
-    if (line.sourceHandle !== 'flow-out') continue
+    if (line.sourceHandle !== channelOut('flow')) continue
     const key = `${line.source}|${line.sourceHandle}`
     const group = groups.get(key) ?? { pass: [], fail: [], ids: [] }
     if (type === 'pass') group.pass.push(line.target)

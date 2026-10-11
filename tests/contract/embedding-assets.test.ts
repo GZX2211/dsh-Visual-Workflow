@@ -5,6 +5,8 @@
 // 2. tokenizer.json / config.json / special_tokens_map.json / 1_Pooling/config.json 存在；
 // 3. model_quantized.onnx 存在时：大小在 (10MB, 60MB) 且文件头为 ONNX 魔数（前 4 字节）；
 //    model_quantized.onnx 缺失时：README.zh.md 必须存在且包含「BM25」与「降级」字样。
+//    两条分支由 it.runIf/it.skipIf 表达（vitest 报告里 skipped 可见），
+//    不用 `if (…) return`——那会让用例名恒为通过，跳过时不留任何信号。
 //
 // 关于 sha256：与本脚本 scripts/embedding-model.mjs 使用同一 node:crypto 逻辑（测试文件
 // 独立复刻该实现，因 .mjs 脚本不便于从 .ts 测试直接 import 而复制，注释说明）。
@@ -29,10 +31,14 @@ const REQUIRED_TEXT_FILES = ['tokenizer.json', 'config.json', 'special_tokens_ma
 const POOLING_CONFIG = '1_Pooling/config.json'
 // ONNX 量化权重相对路径与大小校验区间（脚本同款区间：>10MB 且 <60MB）。
 // 说明：transformers.js v4 固定从 onnx/ 子目录加载（modeling_utils 的 subfolder="onnx"），
-// 故权重必须位于 onnx/model_quantized.onnx（而非资产根目录），否则运行时加载失败。
+// 故权重必须位于 onnx/model_quantized.onnx（而非资产目录根），否则运行时加载失败。
 const ONNX_REL = 'onnx/model_quantized.onnx'
 const ONNX_MIN_BYTES = 10 * 1024 * 1024
 const ONNX_MAX_BYTES = 60 * 1024 * 1024
+
+// 本机世界状态：权重是否随仓库分发。两条互斥分支由此在注册期二选一。
+const onnxPath = resolve(ASSET_DIR, ...ONNX_REL.split('/'))
+const ONNX_PRESENT = existsSync(onnxPath)
 
 /** 计算磁盘文件的 sha256 十六进制摘要（node:crypto，与 scripts/embedding-model.mjs 同一逻辑）。 */
 function sha256OfFile(absPath: string): string {
@@ -64,12 +70,19 @@ describe('T-004 模型资产（manifest.json 存在且齐备）', () => {
     expect(Object.keys(files).length).toBeGreaterThan(0)
     for (const rel of Object.keys(files)) {
       const abs = resolve(ASSET_DIR, ...rel.split('/'))
-      expect(existsSync(abs), `manifest 记录的文件缺失：${rel}`).toBe(true)
+      if (!existsSync(abs)) {
+        // 权重缺失属合法降级形态，且它是否入库由 ONNX 分支用例单独裁定；
+        // 其余受管文件缺失即可疑清单腐化，必须失败。
+        expect(rel === ONNX_REL, `manifest 记录的文件缺失：${rel}`).toBe(true)
+        continue
+      }
       const stat = statSync(abs)
       const diskSha = sha256OfFile(abs)
       expect(stat.size, `manifest 尺寸不符：${rel}`).toBe(files[rel].bytes)
       expect(diskSha, `manifest sha256 不符：${rel}`).toBe(files[rel].sha256)
     }
+    // 有 ONNX 时，manifest 必须把它登记为受管文件（防止「权重存在但不在清单」静默漏管）。
+    if (ONNX_PRESENT) expect(Object.keys(files)).toContain(ONNX_REL)
   })
 })
 
@@ -86,13 +99,7 @@ describe('T-004 模型资产（必备文本配置存在）', () => {
 })
 
 describe('T-004 模型资产（ONNX 权重或降级说明，二选一）', () => {
-  const onnxPath = resolve(ASSET_DIR, ...ONNX_REL.split('/'))
-
-  it('若 onnx/model_quantized.onnx 存在则大小在 (10MB,60MB) 且文件头为 ONNX 魔数', () => {
-    if (!existsSync(onnxPath)) {
-      // ONNX 缺失走降级分支的用例，本用例跳过（避免误报）。
-      return
-    }
+  it.runIf(ONNX_PRESENT)('onnx/model_quantized.onnx 大小在 (10MB,60MB) 且文件头为 ONNX 魔数', () => {
     const size = statSync(onnxPath).size
     expect(size).toBeGreaterThan(ONNX_MIN_BYTES)
     expect(size).toBeLessThan(ONNX_MAX_BYTES)
@@ -101,15 +108,15 @@ describe('T-004 模型资产（ONNX 权重或降级说明，二选一）', () =>
     expect([...head]).toEqual([0x08, 0x06, 0x12, 0x0d])
   })
 
-  it('若 onnx/model_quantized.onnx 缺失则 README.zh.md 存在且包含「BM25」与「降级」', () => {
-    if (existsSync(onnxPath)) {
-      // ONNX 已就绪，无需降级说明（本用例跳过）。
-      return
-    }
+  it.skipIf(ONNX_PRESENT)('onnx/model_quantized.onnx 缺失时 README.zh.md 存在且包含「BM25」与「降级」', () => {
     const readmePath = resolve(ASSET_DIR, 'README.zh.md')
     expect(existsSync(readmePath), 'ONNX 缺失时必须有 README.zh.md').toBe(true)
     const content = readFileSync(readmePath, 'utf8')
     expect(content).toContain('BM25')
     expect(content).toContain('降级')
+  })
+
+  it('二选一分支恰好命中一条（防止两边同时被跳过而门禁空转）', () => {
+    expect([ONNX_PRESENT, existsSync(resolve(ASSET_DIR, 'README.zh.md'))].filter(Boolean).length).toBeGreaterThanOrEqual(1)
   })
 })

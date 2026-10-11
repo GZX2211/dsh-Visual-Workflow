@@ -14,7 +14,7 @@
 // （见 ./AGENTS.md「原子性与锁」）。
 
 // 稳定错误码本体在共享协议常量（Host 产出 / Client 消费，两端零漂移）
-import { ERR_REVISION_CONFLICT } from '../shared/protocol.js'
+import { ERR_FLOW_NOT_FOUND, ERR_REVISION_CONFLICT } from '../shared/protocol.js'
 
 /** 保存选项：陈旧快照冲突保护（旧项目 nextFlowRevision 语义保留）。 */
 export interface SaveOptions {  /** 客户端加载时的 revision；与当前不一致且非 force 时抛冲突。 */
@@ -39,6 +39,20 @@ export class FlowRevisionConflictError extends Error {
   ) {
     super(`资源 "${id}" 在加载后被修改（期望 revision ${expectedRevision ?? '无'}，当前 ${actualRevision}），请刷新后合并再保存`)
     this.name = 'FlowRevisionConflictError'
+  }
+}
+
+/**
+ * 目标资源不存在或不属于该会话（写路径归属校验失败）。
+ *
+ * 为什么与「不存在」同码同文案：归属不匹配必须按「不存在」处理，否则调用方可据响应
+ * 区分「他人资源」与「无此资源」（存在性预言）；与读取/删除路径的隔离口径一致。
+ */
+export class FlowNotFoundError extends Error {
+  readonly code = ERR_FLOW_NOT_FOUND
+  constructor(readonly id: string) {
+    super(`工作流不存在或不属于该会话：${id}（请刷新实例列表后重试）`)
+    this.name = 'FlowNotFoundError'
   }
 }
 

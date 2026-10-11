@@ -226,7 +226,8 @@ describe('暂停门（§4.4.2 规则 3 / §4.7 规则 4）', () => {
 
     // 运行锁保留（§4.7 规则 4）
     expect(h.runtime.flowLockInfo('flow-1')?.status).toBe('paused')
-    expect(h.runtime.pausedRun('session-1', 'flow-1')?.snapshot.id).toBe('run-1')
+    // 暂停条目仍在内存且 id 一致（经只读快照查询；原 pausedRun 入口已退役）
+    expect(h.runtime.runSnapshot('run-1')?.status).toBe('paused')
   })
 
   it('暂停后：同会话调度静默续跑（新 run 接管锁，不注入编排指令）；startRun 仍 WF_PAUSED；跨会话 WF_LOCKED', async () => {

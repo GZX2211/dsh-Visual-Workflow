@@ -201,6 +201,8 @@ export function DateRangePicker({
           const key = dayKey(cell.year, cell.month, cell.day)
           const isStart = cell.inMonth && startKey === key
           const isEnd = cell.inMonth && (endKey === key || (startKey === key && endKey === null))
+          // 标签归属独立判定：end 为空时不存在终点，起点格不得同时出现「结束」
+          const isEndTag = cell.inMonth && endKey !== null && endKey === key
           return (
             <button
               key={cell.key}
@@ -212,7 +214,7 @@ export function DateRangePicker({
             >
               <span className="wf-cal-cell__num">{cell.day}</span>
               {isStart ? <span className="wf-cal-cell__tag">{startLabel}</span> : null}
-              {isEnd ? <span className="wf-cal-cell__tag">{endLabel}</span> : null}
+              {isEndTag ? <span className="wf-cal-cell__tag">{endLabel}</span> : null}
             </button>
           )
         })}

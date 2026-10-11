@@ -50,6 +50,7 @@ interface PendingSave {
  * 在途保存条目（按 flowId 区分；尾随合并）：
  *   - promise：本次在途的「首存 + 尾随补发」链，完成前复用给同 flowId 的后续调用；
  *   - pending：在途期间到达的最新内容，当前请求完成后用它补发一次（后到内容不会被丢弃）。
+ * 在途表是 Map<flowId, entry>：多个工作流可同时在途，互不顶替（A→B→A 交错不会为 A 并发发第二次 PUT）。
  */
 interface SaveInflightEntry {
   flowId: string
@@ -90,7 +91,7 @@ export function useWorkflows(
   }, [dispatch])
 
   /**
-   * 模板 → 实例：深拷贝模板（节点/连线全量内联，与模板完全断引用——§4.2.1 解耦语义）。
+   * 模板 → 实例：深拷贝模板（节点/连线全量内联，与模板完全断引用）。
    * 目标会话由调用方决定（当前主会话 / 新建主会话）；不继承 startNewSession/workspacePath
    * （一次性临时选项，字段已退役）。fallbackName 由调用方从词典注入（模板无名称时使用）。
    */
@@ -114,8 +115,8 @@ export function useWorkflows(
     return draft
   }, [dispatch])
 
-  /** 在途保存条目（快速双击/重复触发时合并到同一在途链，避免第二次携带旧 revision 触发 409）。 */
-  const saveInflight = useRef<SaveInflightEntry | null>(null)
+  /** 在途保存条目表（按 flowId；快速双击/切换工作流后回存都合并到同一在途链，避免携带旧 revision 触发 409）。 */
+  const saveInflight = useRef<Map<string, SaveInflightEntry>>(new Map())
 
   const saveWorkflow = useCallback(async (
     flow: WorkflowDocument,
@@ -126,8 +127,8 @@ export function useWorkflows(
     // **不得**把后一次的新内容丢掉——登记为 pending，当前请求完成后用最新内容补发
     // 一次，调用方拿到的是「包含自己内容的最终落库结果」。去重必须按 flowId 区分：
     // 否则切换工作流后保存会复用前一工作流的 Promise，新工作流内容根本没被持久化。
-    const inflight = saveInflight.current
-    if (inflight?.flowId === flow.id) {
+    const inflight = saveInflight.current.get(flow.id)
+    if (inflight) {
       inflight.pending = { flow, nodes, edges }
       return inflight.promise
     }
@@ -157,12 +158,12 @@ export function useWorkflows(
       }
       return last
     })()
-    saveInflight.current = entry
+    saveInflight.current.set(flow.id, entry)
     try {
       return await entry.promise
     } finally {
-      // 仅当仍是自己的在途条目时清空（期间切到别的工作流保存时不得覆盖其条目）
-      if (saveInflight.current === entry) saveInflight.current = null
+      // 仅当仍是自己的在途条目时清空（同 flowId 的后续保存会复用该条目，不得误删）
+      if (saveInflight.current.get(flow.id) === entry) saveInflight.current.delete(flow.id)
     }
   }, [dispatch, remote])
 

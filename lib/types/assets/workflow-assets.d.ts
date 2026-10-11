@@ -3,10 +3,11 @@ import type { GraphNode, Line, WorkflowMode } from '../shared/graph-model.js';
 import type { OrgMeta } from '../shared/org-meta.js';
 import type { AssetTxContext } from './db.js';
 import { type RolePortContext } from './role-assets.js';
-/** 节点壳：角色节点只保留结构字段，内容字段由角色版本行回填。 */
+/** 角色节点的壳（只保留结构字段，内容字段由角色版本行回填）。 */
 export interface NodeShell {
     id: string;
-    kind: GraphNode['kind'];
+    /** 只有角色种类会落成壳；其余种类落库的是完整节点对象（见 PersistedShell）。 */
+    kind: 'parent' | 'agent';
     position: {
         x: number;
         y: number;
@@ -14,13 +15,19 @@ export interface NodeShell {
     groupId?: string | null;
     sourceAssetId?: string;
 }
+/**
+ * 持久化节点：非角色节点落库的是**完整节点对象**（内容自包含，无需 join），
+ * 角色节点落库的是壳（内容在角色版本行）。判别联合让写侧与读侧都不必再用
+ * 双重断言掩盖「声明窄于事实」——磁盘 JSON 形状不变。
+ */
+export type PersistedShell = NodeShell | GraphNode;
 /** 工作流资产版本行的内容字段（不含审计列）。 */
 export interface WorkflowContentFields {
     mode: WorkflowMode;
     name: string;
     description: string;
-    /** 节点壳数组；非角色节点为完整节点对象（晋升时已是快照）。 */
-    nodeShells: NodeShell[];
+    /** 持久化节点数组；角色节点为壳（内容在角色版本行），非角色节点为完整节点。 */
+    nodeShells: PersistedShell[];
     lines: Line[];
     meta: OrgMeta | null;
     roleVersionIds: WorkflowAssetRoleRef[];

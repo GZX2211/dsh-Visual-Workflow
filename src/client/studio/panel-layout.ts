@@ -15,7 +15,7 @@ import type { PanelLayout } from './studio-types.js'
 import { defaultPanels } from './studio-initial.js'
 import { PANEL_CYCLE_LEN } from './studio-selectors.js'
 
-/** localStorage 键（左右宽度/底高沿用旧项目键名；mode 为折叠态新增键）。 */
+/** localStorage 键（键名与既有用户缓存兼容，不得改名；mode 为折叠态新增键）。 */
 export const LAYOUT_KEYS = {
   mode: 'visual-workflow:panel-mode',
   leftWidth: 'visual-workflow:left-width',

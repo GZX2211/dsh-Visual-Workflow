@@ -182,12 +182,20 @@ export class CordisAgentHost implements AgentHost {
  * 按会话取/建服务会话的根 Agent（模式二服务进程装配使用）。
  * 父代理节点声明的 provider/model 优先；会话已有 Agent 时直接复用（持久化上下文保留）。
  * 「取/建」的官方 agents 服务守卫与形状收敛归本模块——进程入口只做装配，不承载实现。
+ *
+ * @param options.cwd 根 Agent 工作目录（`string | undefined` **必填属性**：强制每个调用方
+ *   显式给出已解析的值，杜绝「忘了传就静默取进程全局」）。由调用方按服务文档 workspacePath
+ *   经 sessions 的 `resolveNewSessionCwd` 解析后传入；未配置工作区时传 `undefined`，此时
+ *   **省略** `meta.cwd`，与同进程的会话创建路径（`CordisSessionProvider.createSession`）同口径，
+ *   由官方默认工作区决定。本适配函数不得读进程全局 cwd——服务进程由 manager 以
+ *   cwd=dataDir 启动，取进程 cwd 会让交付物写进插件数据目录而不是用户工作区。
  */
 export async function createOrGetServiceAgent(
   ctx: Context,
   store: FlowStore,
   serviceId: string,
   sessionId: string,
+  options: { cwd: string | undefined },
 ): Promise<{ agent: unknown; provider?: string; model?: string }> {
   const agents = ctx.get('agents') as {
     get?(id: string): unknown
@@ -206,7 +214,9 @@ export async function createOrGetServiceAgent(
   if (!agent) {
     const created = await agents.create({
       sessionId,
-      meta: { cwd: process.cwd() },
+      // 工作目录：显式解析值才落 meta.cwd；未配置工作区时**省略**该字段（由官方默认工作区
+      // 决定），不回退进程全局 cwd——与 CordisSessionProvider.createSession 同口径。
+      ...(options.cwd ? { meta: { cwd: options.cwd } } : {}),
       ...(provider && model ? { agentOptions: { provider, model } } : {}),
     })
     agent = (created as { agent?: unknown })?.agent ?? created
