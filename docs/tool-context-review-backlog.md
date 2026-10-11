@@ -74,7 +74,7 @@
 | 1 | `wf_db_query` | 已复核（发现：#2 `truncated` 仅 query 置位、#3 SQLite schema 无上限、#4 实例定位未写明、#5 双错误码 → 记入 §4） |
 | 2 | `wf_org_catalog` | 已复核（见 §2） |
 | 3 | `wf_graph_patch` | 已复核（见 §5） |
-| 4 | 经验三工具（learn / recall / feedback） | 待复核 |
+| 4 | 经验三工具 | `wf_experience_learn` 已复核（见 §6）；`recall` / `feedback` 待复核 |
 | 5 | `wf_ask` / `wf_run_node` / `wf_run_node_wait` / `wf_finish` / `wf_ask_agent` | 待复核 |
 
 ---
@@ -123,3 +123,52 @@
 - `warnings[]` 非阻断但显式（含 `fileNodeTextOnly` 归一化提示），不静默；
 - `ops` 参数保留最小示例（`node` 包装与 `source/target` 端点名是历史高频错因）——**影响调用，保留正确**；
 - `create` / `expectRevision` / `scope` / `targetId` 的参数说明都直接决定调用方式，全部保留。
+
+---
+
+## 6. `wf_experience_learn` 复核发现
+
+### 6.1 常驻面（实测）
+
+| 项 | 实测 |
+|---|---|
+| description | 2013 字符 / **298 词** ≈ 503 tokens |
+| `parameters` | 2296 字符 ≈ 574 tokens（`experiences` 的 9 个字段说明 + 每字段预算注记、`type`） |
+| 合计 | 4309 字符 ≈ **1077 tokens**（经验三工具中最大） |
+| `output.schema` | 318 字符（native 不注入） |
+
+### 6.2 运行时注入（空数组调用取"生成 Prompt"）
+
+| 主体类型 | 正文位置 | 字符 / 行 | ≈tokens | 语言 |
+|---|---|---|---|---|
+| `agent` | `src/host/assets/experience-seeds.ts` → `EXPERIENCE_PROMPT_SEEDS[ep-agent-v1]` | 1681 / 128 | 420 | **中文**（CJK 1081） |
+| `orchestrator` | 同上 `ep-orchestrator-v1` | 2369 / 195 | 592 | **中文**（CJK 1306） |
+| `team` | 同上 `ep-team-v1` | 2070 / 179 | 518 | **中文**（CJK 1206） |
+| 三份合计 | — | 6120 | 1530 | 中文 |
+
+> 单次调用按主体类型只返回其中一份（agent→420 / orchestrator→592 / team→518 tokens）。
+> 播种条件为「该类型没有任何行」，已存在的行（含用户改写正文）不被覆盖。
+
+### 6.3 按「不影响调用即不常驻」标准可精简（待裁决）
+
+| 项 | 位置 | 可省 | 理由 |
+|---|---|---|---|
+| 9 个字段名的罗列 | description 第 3 句（`responsibility, task_type, … evidence`） | ~230 字符 | 与 `parameters` 里逐字段说明**重复**（那里已列出并带预算） |
+| 元描述句 | description 第 4 句开头（`every field below states a generation budget in characters`） | ~90 字符 | 描述的是**描述自身结构**，不影响调用 |
+| 理由说明 | description 第 5 句尾（`a shorter candidate stays retrievable and cheap to recall`） | ~70 字符 | 只解释「为什么」，不影响调用 |
+| **合计** | | **~390 字符 ≈ 98 tokens** | |
+
+### 6.4 待重做（方法论类 / 语言一致性）
+
+| 项 | 说明 |
+|---|---|
+| 三份生成 Prompt 正文 | 属**方法论**（是否值得生成、如何抽象、边界与证据要求），且与工具 description 在「何时不要提交」上有重复表述；它已在常驻面之外（按需注入，符合「额外情况以其他形式注入」），但**语言为中文**，与英文常驻面混排 → 后期统一语言并明确「方法论 vs 工具契约」的分界 |
+| 字段预算的传达方式 | 现为「每字段一句 `Aim for at most N characters; the cap is M`」（模板生成）→ 可考虑统一在一处说明 + 仅标 cap，减少重复句式 |
+
+### 6.5 复核确认无问题
+
+- **双态调用**（空数组取 Prompt / 传候选入库）在 description 与 `parameters` 中都明确——影响调用，保留；
+- **前置条件**明确（同一 run 内必须先取该类型 Prompt，否则 `WF_EXPERIENCE_NOT_INITIALIZED`）——影响调用，保留；
+- **逐字段预算**给出（影响模型填写长度）——保留；
+- 失败码齐全且进文本：`WF_EXPERIENCE_BAD_ARGS` / `WF_EXPERIENCE_VALIDATION` / `WF_EXPERIENCE_NOT_INITIALIZED` / `WF_EXPERIENCE_WRONG_TYPE` / `WF_EXPERIENCE_EMBEDDING_UNAVAILABLE`；
+- experience 域**无中文残留**（本轮统一后已确认）。
