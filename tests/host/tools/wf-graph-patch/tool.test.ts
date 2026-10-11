@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest'
 import { executeGraphPatch, registerWfGraphPatch, type GraphPatchHost } from '../../../../src/host/tools/wf-graph-patch/tool.js'
 import { WfError, type RunEntry } from '../../../../src/host/orchestrator/index.js'
 import { stageLabel } from '../../../../src/host/graph/index.js'
-import { OP_FIELD_SHAPES, PATCH_CONTRACT_POINTER } from '../../../../src/host/tools/infrastructure/graph-op-contract.js'
+import { OP_FIELD_SHAPES } from '../../../../src/host/tools/infrastructure/graph-op-contract.js'
 import type { GraphNode, Line, WorkflowDocument, WorkflowTemplate } from '../../../../src/host/shared/graph-model.js'
 import type { RunSnapshot } from '../../../../src/host/shared/types.js'
 
@@ -1490,9 +1490,11 @@ describe('wf_graph_patch · 工具注册面回归', () => {
     expect(description).not.toContain(OP_FIELD_SHAPES.set_group_members)
     expect(ops).not.toContain(OP_FIELD_SHAPES.set_group_members)
     expect(ops).not.toContain(OP_FIELD_SHAPES.connect)
-    // 但必须留下"去哪取契约"的指引，否则模型无从得知字段形状
-    expect(description).toContain(PATCH_CONTRACT_POINTER)
-    expect(description).toContain('rules.patchContract')
+    // 常驻描述不再复述提交规则/契约指针（字段形状由 ops 参数里的指引单点转达），
+    // 描述只保留影响「是否/如何调用本工具」的内容
+    expect(description).not.toContain('rules.patchContract')
+    expect(description).not.toContain('submission rules')
+    expect(ops).toContain('rules.patchContract')
     // 起手可用的最小示例保留（漏写 node 包装 / 端点字段名是历史高频错因）
     expect(ops).toContain('"op": "connect"')
     expect(ops).toContain('"node"')

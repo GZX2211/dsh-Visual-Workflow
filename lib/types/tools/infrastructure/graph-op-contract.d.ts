@@ -24,9 +24,3 @@ export declare const GATE_MARKING_SEMANTICS: string;
  * 顺序即阅读顺序：先怎么提交，再各 op 形状，再节点 data 契约，最后错误码语义。
  */
 export declare const PATCH_CONTRACT_TEXT: string;
-/**
- * 工具描述里的**契约指引**。
- * 两个工具共用同一份字面量：它点名 rules 的键名，如果键名改了，两侧一起失败而不是
- * 「描述指向一个不存在的字段」这种静默漂移。
- */
-export declare const PATCH_CONTRACT_POINTER = "Field shapes and submission rules are not repeated here: read rules.patchContract and rules.gateMarking from wf_org_catalog before your first patch.";

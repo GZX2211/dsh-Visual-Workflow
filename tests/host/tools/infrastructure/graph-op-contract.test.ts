@@ -12,7 +12,6 @@ import {
   GRAPH_OP_FIELD_TEXT,
   MARK_OP_FIELD_TEXT,
   OP_FIELD_SHAPES,
-  PATCH_CONTRACT_POINTER,
   PATCH_CONTRACT_TEXT,
   PATCH_SUBMISSION_RULES,
   ROLE_NODE_DATA_CONTRACT,
@@ -57,10 +56,5 @@ describe('写图契约（graph-op-contract）', () => {
     expect(GATE_MARKING_SEMANTICS).toContain('mark_node')
     expect(GATE_MARKING_SEMANTICS).toContain('milestone')
     expect(GATE_MARKING_SEMANTICS).toContain('exactly 1')
-  })
-
-  it('契约指引点名 catalog rules 的两个键（键名漂移会在此失败）', () => {
-    expect(PATCH_CONTRACT_POINTER).toContain('rules.patchContract')
-    expect(PATCH_CONTRACT_POINTER).toContain('rules.gateMarking')
   })
 })

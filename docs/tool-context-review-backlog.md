@@ -1,10 +1,18 @@
 # 工具模型可见面 · 复核与重做清单
 
 本清单记录**逐个工具复核**时发现的、需要在后期统一优化/重做的模型可见文本。
-判定口径（用户裁决）：
 
-- **与工具调用有关** → 保留（工具描述、字段形状、参数/错误码语义、前置条件、可见性规则、调用形态）。
-- **与工具调用无关、只与「写图 / 规划方法论」有关** → 一律进入本清单，后期统一优化或重做（其中不少内容已被后续实现取代而失效）。
+**判定口径（用户裁决，已收敛为一条可操作标准）**：
+
+> **常驻在代理上下文中的工具描述与相关文本，必须是影响「这个工具被调用」的内容。**
+> 判断方法：**把这段文字移除后，若不影响该工具被调用 —— 它就不应该常驻。**
+> 「影响被调用」= 何时调用 / 怎么调用（参数形状与取值）/ 前置条件 / 失败语义与稳定错误码 / 副作用 / 可见性规则。
+> 其余一律移出描述，改由其它形式承载（按需召回的契约段、方法论提示词段、运行期说明等）。
+
+据此的细分：
+
+- **与工具调用有关** → 保留。
+- **与工具调用无关**（写图/规划方法论、内部实现说明、本来就传不进去的字段禁令、与实现重复的规则复述）→ 进本清单，后期统一优化或重做（其中不少内容已被后续实现取代而失效）。
 
 > 复核进度见文末「已复核工具」表；每复核一个工具就在本文件追加一节。
 
@@ -65,7 +73,7 @@
 |---|---|---|
 | 1 | `wf_db_query` | 已复核（发现：#2 `truncated` 仅 query 置位、#3 SQLite schema 无上限、#4 实例定位未写明、#5 双错误码 → 记入 §4） |
 | 2 | `wf_org_catalog` | 已复核（见 §2） |
-| 3 | `wf_graph_patch` | 待复核 |
+| 3 | `wf_graph_patch` | 已复核（见 §5） |
 | 4 | 经验三工具（learn / recall / feedback） | 待复核 |
 | 5 | `wf_ask` / `wf_run_node` / `wf_run_node_wait` / `wf_finish` / `wf_ask_agent` | 待复核 |
 
@@ -85,3 +93,33 @@
 - `truncated` 仅在 `query` 模式置位；`search` 的 hits 被 clamp（`indexer.ts:216` `Math.min(50, topK||5)`）或降级 BM25 时无标记。
 - `schema` 表数上限：MySQL/PG 为 `LIMIT 200`，**SQLite 无上限**（大库会一次性灌入表名列表）。
 - 主代理无运行编排时按「本会话最新实例」定位（`listWorkflows[0]`），描述未写明。
+
+---
+
+## 5. `wf_graph_patch` 复核发现
+
+### 5.1 本轮已按「判断标准」从常驻描述中删除（commit 待记）
+
+| 删除内容 | 删除理由 |
+|---|---|
+| `Field shapes and submission rules are not repeated here: read rules.patchContract and rules.gateMarking from wf_org_catalog before your first patch.` | 与 `ops` 参数描述里的同一指引重复（"read rules.patchContract from wf_org_catalog (omit ids)"）——同一指针写两遍不增加可调用性；删除后 `PATCH_CONTRACT_POINTER` 常量已无生产者，连同其测试断言一并删除 |
+| `Keep the graph an acyclic DAG: model "review failed" as a forward branch (condition={type:"fail"}) into a repair node that rejoins downstream — back-edges are rejected with flowCycle.` | **写图规则而非工具调用规则**（用户裁决）：它教怎么建模返工，不回答"何时/怎么调用本工具"；规则本身仍保留在 `rules.patchContract` 与 `graphSemantics`（按需召回）——见 5.2 |
+| `Never pass node positions: they are view-only, re-laid out by the canvas.` | 本来就传不进去的字段禁令（`apply` 写入哨兵坐标、画布布局）；不影响调用，属冗余指令 |
+
+常驻面：**641 → 539 tokens**（desc 932→525 字符 / 142→84 词）。
+
+### 5.2 待重做：属「写图 / 规划方法论」而非工具调用（记录，暂不改）
+
+| 条目 | 位置 | 说明 |
+|---|---|---|
+| DAG / 返工建模指导 | `org-sop.ts` → `ORG_SOP_L1_GRAPH_SEMANTICS` 第五节（"流程必须保持无环 DAG：返工不得回指上游节点，要改成前向 fail 分支 → 修复节点 → 下游重新汇合"） | 已从工具常驻描述移除（5.1），规则本体保留在按需召回的 SOP 段；后期与 SOP 一起重做 |
+| 描述里仍复述的契约条款（**按同一标准应继续精简**） | `wf_graph_patch/tool.ts` description | ① `ops are grouped … one patch uses one group` 与 `PATCH_SUBMISSION_RULES` 第 1 条重复；② `The patch is atomic …` 与第 2 条**逐字级**重复；③ `mark group: mark_node completes the CURRENT milestone gate only …` 与 `GATE_MARKING_SEMANTICS` 第 1-2 条重复。**均属"移除后不影响调用"（契约里已有）**，待批量执行 |
+| 新建模板的返回字段说明 | 同上 | `newTemplate=true and the new targetId are returned` — `output.schema` 在 native 模式不注入，故这条**有独立价值**，建议保留 |
+| 批次级错误码的选择规则 | `tool.ts` 注释 / `ERROR_CODE_SEMANTICS` | 全参数错 → `WF_BAD_ARGS`；含任一条图语义错 → `WF_GRAPH_INVALID`。描述与契约都未写明，模型可能预期错配；建议在 `ERROR_CODE_SEMANTICS` 补一句 |
+
+### 5.3 复核确认无问题
+
+- 失败面：两类聚合错误都"一次列全 + 每条带 code 与修复建议"，稳定码已进文本（英文统一）；
+- `warnings[]` 非阻断但显式（含 `fileNodeTextOnly` 归一化提示），不静默；
+- `ops` 参数保留最小示例（`node` 包装与 `source/target` 端点名是历史高频错因）——**影响调用，保留正确**；
+- `create` / `expectRevision` / `scope` / `targetId` 的参数说明都直接决定调用方式，全部保留。

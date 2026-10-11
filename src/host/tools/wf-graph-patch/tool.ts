@@ -41,7 +41,6 @@ import {
 } from '../../graph/index.js'
 import { applyGraphOpsTolerant, applyMarkOp } from './apply.js'
 import { knownModelsOf, modelSelectionFailures, writtenModelSelectionsOf, type ModelCatalogEntry } from './policy.js'
-import { PATCH_CONTRACT_POINTER } from '../infrastructure/graph-op-contract.js'
 import {
   GROUP_HINTS,
   groupsOf,
@@ -731,16 +730,14 @@ export function registerWfGraphPatch(
   }
   const def = defineTool({
     name: WF_GRAPH_PATCH,
-    // 描述只写「何时调用 / 前置条件 / 失败语义 / 副作用」，字段形状与提交规则不在此重复：
-    // 常驻文本会随每次请求付费，而完整契约按需从 wf_org_catalog 的 rules 取（同一事实源）。
+    // 描述只写「何时调用 / 前置条件 / 失败语义 / 副作用」：字段形状与提交规则由
+    // wf_org_catalog 的 rules.patchContract 单点承载（指针在 ops 参数描述里），
+    // 常驻文本只保留影响「是否/如何调用本工具」的内容。
     description:
       'Apply one patch to a workflow template or the running instance; ops are grouped (graph structure | run-state marking) and one patch uses one group. ' +
-      PATCH_CONTRACT_POINTER + ' ' +
       'For a NEW template pass scope=template with create and a complete graph (start + executable units + end); newTemplate=true and the new targetId are returned. ' +
       'The patch is atomic: if any op fails nothing is persisted, and every failure is reported with its own code. ' +
-      'Keep the graph an acyclic DAG: model "review failed" as a forward branch (condition={type:"fail"}) into a repair node that rejoins downstream — back-edges are rejected with flowCycle. ' +
-      'mark group: mark_node completes the CURRENT milestone gate only (a proxy-driven gate with data.role=milestone). ' +
-      'Never pass node positions: they are view-only, re-laid out by the canvas.',
+      'mark group: mark_node completes the CURRENT milestone gate only (a proxy-driven gate with data.role=milestone).',
     parameters: {
       scope: { type: 'string', required: true, enum: ['template', 'instance'] as const, description: 'template: plan a reusable workflow template; instance: adjust the current running instance.' },
       targetId: { type: 'string', description: 'Workflow template id (scope=template) or workflow/instance id (scope=instance). Required unless create is given; with create you may omit it to let the server mint a new id.' },
