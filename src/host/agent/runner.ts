@@ -19,6 +19,7 @@ import { readFile } from 'node:fs/promises'
 import { dbInEdges, parseExecutionContract } from '../graph/index.js'
 import type { FlowStore } from '../storage/flow-store.js'
 import type { GraphNode, RoleNode } from '../shared/graph-model.js'
+import type { InputAttachmentRef } from "../shared/runtime-types.js"
 import type { NodeRunner, NodeStartInput, OrchestratorLogger, GroupStartInput, GroupStartResult } from '../orchestrator/index.js'
 import { consumeReactCappedOf, type ReactGuardBridge } from './guards.js'
 import { CHILD_AGENT_HIDDEN_TOOLS, RESERVED_TRANSPORT_TOOL, TEAM_TOOL_NAMES } from '../shared/protocol.js'
@@ -131,6 +132,14 @@ export interface AgentsServiceLike {
 }
 
 /** 子代理服务最小结构（0.1.5-rc.1 SubagentRuntime 使用面；零官方类型依赖，运行时守卫）。 */
+export type SubagentTaskBlock = { type: "text"; text: string } | { type: "file"; attachment: InputAttachmentRef; text?: never }
+
+function taskContent(input: NodeStartInput, initial = false): SubagentTaskBlock[] {
+  const blocks: SubagentTaskBlock[] = input.blocks.length || !initial ? [...input.blocks] : [{ type: "text", text: fallbackPrompt(input.node as RoleNode) }]
+  for (const { attachmentId, name, bytes } of input.attachments ?? []) blocks.push({ type: "file", attachment: { attachmentId, name, bytes } })
+  return blocks
+}
+
 export interface SubagentsServiceLike {
   /** 延续子代理 provider 名列表（旧面；新宿主改用 getProvider 按名探测）。 */
   list?(): string[]
@@ -139,7 +148,7 @@ export interface SubagentsServiceLike {
     provider: string
     label: string
     request: {
-      prompt: Array<{ type: 'text'; text: string }>
+      prompt: SubagentTaskBlock[]
       parent: unknown
       persona?: string
       toolFilter?: { allow: string[] }
@@ -148,7 +157,7 @@ export interface SubagentsServiceLike {
     signal: AbortSignal
   }): Promise<{ childId: string; messageId?: unknown }>
   /** 相邻 Agent 投递（live 父 Agent → direct child 派发下一回合）；**0.1.5 唯一推荐通道**。 */
-  sendMessage?(sender: unknown, targetId: string, content: Array<{ type: 'text'; text: string }>, options: { signal?: AbortSignal }): Promise<unknown>
+  sendMessage?(sender: unknown, targetId: string, content: SubagentTaskBlock[], options: { signal?: AbortSignal }): Promise<unknown>
   /**
    * host 协议投递（distinct child turn，durable host source）；**旧宿主兼容兜底**。
    * 【取证】当前官方公开 `SubagentRuntime`（dsh-subagent/lib/types/index.d.ts）只暴露
@@ -156,7 +165,7 @@ export interface SubagentsServiceLike {
    * `queuePrompt` 仅存在于内部 continuation manager（同包 continuation.d.ts，经符号键方法转发），
    * 故该分支在新宿主上不可达，仅作旧宿主降级路径保留（缺失时 deliverReuse 给出明确错误）。
    */
-  queuePrompt?(parent: unknown, childId: string, content: Array<{ type: 'text'; text: string }>, source?: unknown, signal?: AbortSignal): Promise<unknown>
+  queuePrompt?(parent: unknown, childId: string, content: SubagentTaskBlock[], source?: unknown, signal?: AbortSignal): Promise<unknown>
   /** 尽力中断当前回合（同步签名 interrupt(target, authority)；保留会话）。 */
   interrupt?(childId: string, authority: { kind: 'user'; parentSessionId: string }): unknown
   /** provider 按名探测（探测 provider 是否注册；未注册返回 undefined）。 */
@@ -679,7 +688,7 @@ export class NodeAgentRunner implements NodeRunner {
         // 复用子代理：相邻投递派发本轮任务（0.1.5-rc.1：sendMessage 优先，queuePrompt 兜底）
         this.assertActive(input)
         try {
-          await this.deliverReuse(subagents, parent, childId, input.blocks, input.signal)
+          await this.deliverReuse(subagents, parent, childId, taskContent(input), input.signal)
         } catch (error) {
           if (error instanceof Error) Object.assign(error, { childId })
           // 官方 0.1.6 的 SubagentError/NOT_RESUMABLE 发生于 materialize，早于 inbox 接纳。
@@ -759,7 +768,7 @@ export class NodeAgentRunner implements NodeRunner {
     subagents: SubagentsServiceLike,
     parent: unknown,
     childId: string,
-    content: Array<{ type: 'text'; text: string }>,
+    content: SubagentTaskBlock[],
     signal?: AbortSignal,
   ): Promise<void> {
     if (typeof subagents.sendMessage === 'function') {
@@ -860,7 +869,7 @@ export class NodeAgentRunner implements NodeRunner {
         request: {
           // 首条消息 = 完整任务块（任务 + 上下文），杜绝创建即空转；角色 Prompt 由
           // prompt-setup 注册为系统提示词独立段，不再经官方 request.persona 占用官方人设
-          prompt: input.blocks.length > 0 ? input.blocks : [{ type: 'text', text: fallbackPrompt(node) }],
+          prompt: taskContent(input, true),
           parent,
           ...(Object.keys(agentOptions).length > 0 ? { agentOptions } : {}),
         },

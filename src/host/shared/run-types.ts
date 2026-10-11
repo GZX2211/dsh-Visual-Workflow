@@ -1,4 +1,4 @@
-import type { RuntimeInputs, HandoffPolicy } from "./runtime-types.js"
+import type { RuntimeInputs, HandoffPolicy, NodeInputAttachment } from "./runtime-types.js"
 // Host + Client 共享契约：run 运行快照（纯类型，零运行时依赖）。
 //
 // 职责：定义一次 run 的持久化状态形状（runs/<runId>.json）与节点执行记录及其
@@ -177,6 +177,8 @@ export interface NodeAttempt {
   failure?: RunFailure
   /** 显式文件产物在本次尝试开始前的签名；null 表示原本不存在。 */
   outputBaseline?: Record<string, string | null>
+  /** 本次任务准备交付的授权引用；childId/phase 记录接纳，不代表模型已读取。 */
+  inputAttachments?: NodeInputAttachment[]
 }
 
 export interface RunTermination {

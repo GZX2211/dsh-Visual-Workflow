@@ -1,5 +1,6 @@
 import type { FlowStore } from '../storage/flow-store.js';
 import type { GraphNode, RoleNode } from '../shared/graph-model.js';
+import type { InputAttachmentRef } from "../shared/runtime-types.js";
 import type { NodeRunner, NodeStartInput, OrchestratorLogger, GroupStartInput, GroupStartResult } from '../orchestrator/index.js';
 import { type ReactGuardBridge } from './guards.js';
 import type { ModelSelectionSetup } from './model-selection.js';
@@ -36,6 +37,14 @@ export interface AgentsServiceLike {
     roots?(): unknown[];
 }
 /** 子代理服务最小结构（0.1.5-rc.1 SubagentRuntime 使用面；零官方类型依赖，运行时守卫）。 */
+export type SubagentTaskBlock = {
+    type: "text";
+    text: string;
+} | {
+    type: "file";
+    attachment: InputAttachmentRef;
+    text?: never;
+};
 export interface SubagentsServiceLike {
     /** 延续子代理 provider 名列表（旧面；新宿主改用 getProvider 按名探测）。 */
     list?(): string[];
@@ -44,10 +53,7 @@ export interface SubagentsServiceLike {
         provider: string;
         label: string;
         request: {
-            prompt: Array<{
-                type: 'text';
-                text: string;
-            }>;
+            prompt: SubagentTaskBlock[];
             parent: unknown;
             persona?: string;
             toolFilter?: {
@@ -64,10 +70,7 @@ export interface SubagentsServiceLike {
         messageId?: unknown;
     }>;
     /** 相邻 Agent 投递（live 父 Agent → direct child 派发下一回合）；**0.1.5 唯一推荐通道**。 */
-    sendMessage?(sender: unknown, targetId: string, content: Array<{
-        type: 'text';
-        text: string;
-    }>, options: {
+    sendMessage?(sender: unknown, targetId: string, content: SubagentTaskBlock[], options: {
         signal?: AbortSignal;
     }): Promise<unknown>;
     /**
@@ -77,10 +80,7 @@ export interface SubagentsServiceLike {
      * `queuePrompt` 仅存在于内部 continuation manager（同包 continuation.d.ts，经符号键方法转发），
      * 故该分支在新宿主上不可达，仅作旧宿主降级路径保留（缺失时 deliverReuse 给出明确错误）。
      */
-    queuePrompt?(parent: unknown, childId: string, content: Array<{
-        type: 'text';
-        text: string;
-    }>, source?: unknown, signal?: AbortSignal): Promise<unknown>;
+    queuePrompt?(parent: unknown, childId: string, content: SubagentTaskBlock[], source?: unknown, signal?: AbortSignal): Promise<unknown>;
     /** 尽力中断当前回合（同步签名 interrupt(target, authority)；保留会话）。 */
     interrupt?(childId: string, authority: {
         kind: 'user';

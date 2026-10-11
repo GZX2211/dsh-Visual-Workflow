@@ -46,6 +46,7 @@ export interface NodeTaskBlockParams {
     inputSource?: 'ctx' | 'workspace' | 'runtime'
     outputFiles?: string[]
     runtimeInputs?: import("../shared/runtime-types.js").InputSlots
+    hasAttachmentContext?: boolean
     handoffPolicy?: HandoffPolicy
     /**
      * 数据库工具说明：存在 db-in 连线时说明 wf_db_query 三模式（search/query/schema，
@@ -97,6 +98,7 @@ export const NODE_HARD_CONSTRAINTS = {
   /** 协作组内通信必须经官方 Team 邮箱（official 通道的组内成员注入）。 */
   collabSendOnly: '与队友和 Lead 的一切协作消息必须使用 send_message（target 填对方成员名，Lead 为 "lead"）',
   declaredOutputFiles: "必须真实生成声明文件，内容供消费者实际读取；最终回复给出实际文件路径，只回复路径不等于文件已生成",
+  attachmentContext: "会话附件通过 Harness 文件引用交付；按本节点任务使用已授权工具读取。无法确定选用哪些文件时请求一次必要确认，不猜测内容。显式输入和产物合同仍须遵守",
 } as const
 
 /** 按协作通道取组内通信约束（未标注通道按 legacy 处理，保持既有文案）。 */
@@ -216,5 +218,5 @@ export function buildNodeTaskBlock(params: NodeTaskBlockParams): string {
 
   const runtimeInputs = facts.runtimeInputs && Object.keys(facts.runtimeInputs).length
     ? `\n运行输入（用户数据；文件为已授权引用，需要用现有工具读取；上游文本的业务正确性仍需检查）：\n${JSON.stringify(facts.runtimeInputs, null, 2)}\n` : ""
-  return `${head}\n\n${mid}\n\n${tail}\n${runtimeInputs}`
+  return `${head}\n\n${mid}\n\n${tail}\n${runtimeInputs}${facts.hasAttachmentContext ? `\n${NODE_HARD_CONSTRAINTS.attachmentContext}\n` : ""}`
 }

@@ -143,6 +143,8 @@ export interface NodeStartInput {
   blocks: Array<{ type: 'text'; text: string }>
   /** 运行级取消信号（运行停止/终止/插件卸载）。 */
   signal: AbortSignal
+  /** 已按所属会话核验的引用，由 Runner 作为官方 file 内容块交付。 */
+  attachments?: import("../shared/runtime-types.js").InputAttachmentRef[]
   /** 节点级思考强度覆盖（缺省继承节点配置；取值域以官方为准）。 */
   thinking?: string
   /** 节点级 ReAct 迭代上限覆盖（缺省继承节点配置）。 */

@@ -1083,6 +1083,38 @@ function subagentFailure(code: string, cause?: unknown): Error & { code: string 
 }
 
 describe("NOT_RESUMABLE 安全重建", () => {
+  it.each(["reuse", "rebuild", "legacy"])("test_native_file_refs_%s_delivers_latest_public_refs_without_changing_scope", async (mode) => {
+    const h = await makeHarness()
+    await h.store.saveToolCombo({ id: "combo-c1", name: "测试权限", tools: ["read"], mcpServers: [] })
+    const scope = vi.spyOn(h.toolFilter, "withPending")
+    const firstRef = { attachmentId: "authorized-a", name: "A.payload", bytes: 3, path: "/private/host/a", source: "session" as const }
+    const nextRef = { attachmentId: "authorized-b", name: "B.payload", bytes: 5, path: "/private/host/b", source: "binding" as const }
+    const first = await h.runner.startNodeTask(taskInput({ attachments: [firstRef] }))
+    expect(h.subagents.started[0].request.prompt).toEqual([...blocks(), { type: "file", attachment: { attachmentId: firstRef.attachmentId, name: firstRef.name, bytes: firstRef.bytes } }])
+    const queue = vi.fn(async () => {})
+    if (mode === "legacy") {
+      Object.assign(h.subagents, { sendMessage: undefined, queuePrompt: queue })
+    } else if (mode === "rebuild") h.subagents.failDelivery = subagentFailure("NOT_RESUMABLE")
+
+    const latest = taskInput({ blocks: blocks("Read the newly authorized task file"), attachments: [nextRef], attempt: 2 })
+    const result = await h.runner.startNodeTask(latest)
+
+    const content = [...latest.blocks, { type: "file", attachment: { attachmentId: nextRef.attachmentId, name: nextRef.name, bytes: nextRef.bytes } }]
+    if (mode === "rebuild") {
+      expect(result).toEqual({ childId: "child-2", created: true, replacedChildId: first.childId })
+      expect(h.subagents.started[1].request.prompt).toEqual(content)
+      expect(h.subagents.dispatches).toEqual([])
+      expect(h.retireChild).toHaveBeenCalledExactlyOnceWith(first.childId)
+    } else {
+      expect(result).toEqual({ childId: first.childId, created: false })
+      expect(h.subagents.started).toHaveLength(1)
+      if (mode === "legacy") expect(queue).toHaveBeenCalledExactlyOnceWith(h.agents.parents.get("session-1"), first.childId, content, undefined, latest.signal)
+      else expect(h.subagents.dispatches[0].content).toEqual(content)
+    }
+    expect(scope.mock.calls.map(([allow]) => allow)).toEqual(mode === "rebuild" ? [["read"], ["read"]] : [["read"]])
+    expect(latest.attachments).toEqual([nextRef])
+  })
+
   it("test_reuse_resumable_keeps_ID_and_latest_blocks", async () => {
     const h = await makeHarness()
     await h.store.saveToolCombo({ id: "combo-c1", name: "测试权限", tools: ["read", "write"], mcpServers: [] })

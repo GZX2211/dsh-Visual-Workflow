@@ -1,9 +1,53 @@
 import { mkdir, symlink, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { afterEach, expect, it } from "vitest"
-import { handoffPolicyOf, jsonValueOf, runtimeInputsOf, publicRuntimeInputs } from "../../../src/host/orchestrator/runtime-inputs.js"
+import { handoffPolicyOf, jsonValueOf, runtimeInputsOf, publicRuntimeInputs, nodeInputAttachments } from "../../../src/host/orchestrator/runtime-inputs.js"
+import type { InputSlots, SessionInputFile } from "../../../src/host/shared/runtime-types.js"
 import { cleanupTempDirs, makeFlow, makeHarness } from "./fixtures/harness.js"
 afterEach(cleanupTempDirs)
+
+it.each(["session", "binding", "managed", "required", "ctx"])("test_harness_%s_file_selection_keeps_authorization_and_explicit_priority", async (kind) => {
+  const h = await makeHarness()
+  const files: SessionInputFile[] = []
+  for (const name of ["one.md", "two.json"]) {
+    const path = join(h.dir, name); await writeFile(path, "data")
+    files.push({ attachmentId: name, name, bytes: 4, path })
+  }
+  const flow = makeFlow()
+  const node = flow.nodes.find((node) => node.id === "n-a1")!
+  if (node.kind !== "agent") throw new Error("fixture")
+  const inputs: InputSlots = {}
+  if (kind === "binding") inputs.doc = [{ kind: "file", fileRef: { source: "attachment", ...files[1], path: "/forged/path" } }]
+  if (kind === "managed") inputs.doc = [{ kind: "file", fileRef: { source: "managed", path: "explicit-file" } }]
+  if (kind === "required") node.data.execution = { requiredFiles: ["explicit-file"] }
+  if (kind === "ctx") {
+    flow.nodes.push({ id: "doc", kind: "file", position: { x: 0, y: 0 }, data: { label: "explicit file", fileKind: "file" } })
+    flow.lines.push({ id: "file-in", source: "doc", target: node.id, sourceHandle: "ctx-out", targetHandle: "ctx-in" })
+  }
+  const attachments = await nodeInputAttachments(flow, node, inputs, { sessionId: "session-1", managedRoot: h.dir, files }, () => { throw new Error("valid fixture must not be unavailable") })
+  const candidates = kind === "session" ? files : kind === "binding" ? [files[1]] : []
+  expect(attachments).toEqual(candidates.map(({ attachmentId, name, bytes }) => ({ attachmentId, name, bytes, source: kind === "binding" ? "binding" : "session" })))
+  expect(JSON.stringify(attachments)).not.toContain(h.dir)
+})
+
+it("test_unavailable_optional_session_context_is_reported_without_requiring_a_file_for_ordinary_node", async () => {
+  const h = await makeHarness()
+  const flow = makeFlow(); const node = flow.nodes.find((node) => node.id === "n-a1")!
+  if (node.kind !== "agent") throw new Error("fixture")
+  const file = { attachmentId: "removed", name: "removed.txt", bytes: 4, path: join(h.dir, "missing") }
+  const unavailable: string[] = []
+  expect(await nodeInputAttachments(flow, node, {}, { sessionId: "session-1", managedRoot: h.dir, files: [file] }, (ref, error) => { unavailable.push(`${ref.attachmentId}:${error.code}`) })).toEqual([])
+  expect(unavailable).toEqual(["removed:WF_INPUT_FILE_UNAVAILABLE"])
+})
+
+it.each(["foreign", "forged"])("test_harness_%s_explicit_attachment_is_rejected_instead_of_falling_back_to_context", async (kind) => {
+  const h = await makeHarness(); const flow = makeFlow(); const node = flow.nodes.find((node) => node.id === "n-a1")!
+  if (node.kind !== "agent") throw new Error("fixture")
+  const path = join(h.dir, "allowed"); await writeFile(path, "data")
+  const file = { attachmentId: "own", name: "allowed", bytes: 4, path }
+  const inputs: InputSlots = { doc: [{ kind: "file", fileRef: { source: "attachment", ...file, ...(kind === "foreign" ? { attachmentId: "other-session" } : { bytes: 5 }) } }] }
+  await expect(nodeInputAttachments(flow, node, inputs, { sessionId: "session-1", managedRoot: h.dir, files: [file] }, () => {})).rejects.toMatchObject({ code: "WF_INPUT_FILE_UNAUTHORIZED" })
+})
 
 it.each(["unique", "proxy", "multiple", "conditional", "group", "isolated"])("test_input_options_%s_initial_target_uses_existing_graph_query", async (kind) => {
   const h = await makeHarness(undefined, { sessionInputFiles: async () => [{ attachmentId: "authorized", name: "sales.csv", bytes: 4, path: "/private/host/location" }] })

@@ -37,6 +37,7 @@ export declare function buildNodeBlocks(input: {
      * 缺省 legacy，保持未启用官方团队时的文案与行为。
      */
     effectiveInputs?: import("../shared/runtime-types.js").InputSlots;
+    hasAttachmentContext?: boolean;
     collabChannel?: CollabChannel;
 }): Array<{
     type: 'text';

@@ -30,6 +30,7 @@ export interface NodeTaskBlockParams {
         inputSource?: 'ctx' | 'workspace' | 'runtime';
         outputFiles?: string[];
         runtimeInputs?: import("../shared/runtime-types.js").InputSlots;
+        hasAttachmentContext?: boolean;
         handoffPolicy?: HandoffPolicy;
         /**
          * 数据库工具说明：存在 db-in 连线时说明 wf_db_query 三模式（search/query/schema，
@@ -80,6 +81,7 @@ export declare const NODE_HARD_CONSTRAINTS: {
     /** 协作组内通信必须经官方 Team 邮箱（official 通道的组内成员注入）。 */
     readonly collabSendOnly: "与队友和 Lead 的一切协作消息必须使用 send_message（target 填对方成员名，Lead 为 \"lead\"）";
     readonly declaredOutputFiles: "必须真实生成声明文件，内容供消费者实际读取；最终回复给出实际文件路径，只回复路径不等于文件已生成";
+    readonly attachmentContext: "会话附件通过 Harness 文件引用交付；按本节点任务使用已授权工具读取。无法确定选用哪些文件时请求一次必要确认，不猜测内容。显式输入和产物合同仍须遵守";
 };
 /**
  * 默认交接契约的字段清单（系统兜底用；用户裁决：有 ctx-out 出线且未配置 outputSchema 时注入）。

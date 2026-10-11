@@ -19,7 +19,7 @@ import { GLOBAL_RUN_CALL_LIMIT, type CallerInfo, type GroupMemberPlan, type Grou
 import { RuntimeLaunch } from './runtime-launch.js'
 import type { GroupNode, RoleNode, WorkflowDocument } from '../shared/graph-model.js'
 import { preflightNodeInputs } from './execution-inputs.js'
-import { runtimeInputsOf, validateRequiredInputs } from "./runtime-inputs.js"
+import { runtimeInputsOf, validateRequiredInputs, nodeInputAttachments } from "./runtime-inputs.js"
 import { boundNodeInputs, effectiveNodeInputs } from "./input-handoff.js"
 
 export class RuntimeExecute extends RuntimeLaunch {
@@ -151,13 +151,15 @@ export class RuntimeExecute extends RuntimeLaunch {
       throw new WfError(`节点「${labelOf(node)}」的子代理仍在执行，请等待结算后再调度`, "WF_BUSY")
     }
 
-    const validated = await runtimeInputsOf({ nodeInputs: { [node.id]: boundNodeInputs(run.snapshot, node.id) } }, flow, { sessionId: run.snapshot.sessionId, managedRoot: this.deps.store.root, files: await this.deps.sessionInputFiles?.(run.snapshot.sessionId) ?? [] })
+    const access = { sessionId: run.snapshot.sessionId, managedRoot: this.deps.store.root, files: await this.deps.sessionInputFiles?.(run.snapshot.sessionId) ?? [] }
+    const validated = await runtimeInputsOf({ nodeInputs: { [node.id]: boundNodeInputs(run.snapshot, node.id) } }, flow, access)
     assertActive()
     const inputSnapshot = structuredClone(run.snapshot)
     inputSnapshot.runtimeInputs = validated
     inputSnapshot.workflowInputNodeId = undefined
     const effectiveInputs = await effectiveNodeInputs(flow, node, inputSnapshot)
     validateRequiredInputs(node, effectiveInputs)
+    const attachments = await nodeInputAttachments(flow, node, effectiveInputs, access, (file, error) => this.log().warn(JSON.stringify({ runId: run.snapshot.id, nodeId: node.id, phase: "node_input", code: error.code, attachmentId: file.attachmentId })))
     const outputBaseline = await preflightNodeInputs(flow, node, inputSnapshot, this.deps.store.root, await this.deps.authorizedInputFiles?.(run.snapshot.sessionId), Object.values(effectiveInputs).some((values) => values.length))
     assertActive()
     const assertInputsCurrent = (): void => {
@@ -168,7 +170,7 @@ export class RuntimeExecute extends RuntimeLaunch {
       }
     }
     assertInputsCurrent()
-    const blocks = buildNodeBlocks({ flow, node, snapshot: inputSnapshot, effectiveInputs, documentTextLimit: this.deps.config.documentTextLimit, systemLanguage: this.deps.systemLanguage?.() ?? DEFAULT_SYSTEM_LANGUAGE })
+    const blocks = buildNodeBlocks({ flow, node, snapshot: inputSnapshot, effectiveInputs, hasAttachmentContext: attachments.length > 0, documentTextLimit: this.deps.config.documentTextLimit, systemLanguage: this.deps.systemLanguage?.() ?? DEFAULT_SYSTEM_LANGUAGE })
     run.snapshot.fileBindings = inputSnapshot.fileBindings
 
     // 硬护栏：全局调用上限 + 单节点重试上限
@@ -197,6 +199,7 @@ export class RuntimeExecute extends RuntimeLaunch {
     setNodeStatus(run.snapshot, resolvedNodeId, 'running', { attempts: attempt, now: this.now(), provider: node.data.provider || run.snapshot.parentRoute?.provider, model: node.data.model || run.snapshot.parentRoute?.model })
     const history = run.snapshot.nodes.find((record) => record.nodeId === resolvedNodeId)?.attemptHistory?.at(-1)
     if (history && Object.keys(outputBaseline).length) history.outputBaseline = outputBaseline
+    if (history && attachments.length) history.inputAttachments = attachments
     this.log().info(JSON.stringify({ runId: run.snapshot.id, nodeId: resolvedNodeId, attempt, phase: "child_start", status: "requested", provider: node.data.provider, model: node.data.model }))
     await this.persistWarn(run)
 
@@ -224,6 +227,7 @@ export class RuntimeExecute extends RuntimeLaunch {
         mode: run.snapshot.mode,
         node,
         blocks,
+        ...(attachments.length ? { attachments } : {}),
         signal,
         assertActive,
         collabPrompt: collabPromptOf(flow, node.id),
