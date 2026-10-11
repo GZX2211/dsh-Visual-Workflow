@@ -17,10 +17,12 @@ export function formInputValue(kind: InputEditorKind, value: string, files: read
 
 export interface RuntimeInputSelection { runtimeInputs: RuntimeInputs; handoffPolicy: HandoffPolicy; requestGeneration?: number }
 export interface RuntimeInputLifecycle { capture(): number; isCurrent(ticket: number): boolean }
-export type PrepareRuntimeInputs = (sessionId: string, flowId: string, runId?: string, binding?: boolean, configure?: boolean) => Promise<RuntimeInputSelection | null | undefined>
+export type PrepareRuntimeInputs = (sessionId: string, flowId: string, runId?: string, binding?: boolean, configure?: boolean, freshStart?: boolean) => Promise<RuntimeInputSelection | null | undefined>
 export interface RuntimeInputDialogState {
   sessionId: string; flowId: string; options: RuntimeInputOptions; inputs: RuntimeInputs; handoffPolicy: HandoffPolicy
   nodeId?: string; runId?: string; revision?: number; eligibleNodes: string[]; error: string; busy: boolean
+  blockedNodes?: string[]
+  freshStart?: boolean
 }
 
 export function useRuntimeInputs(remote: RemoteFace, t: Dict, owner: string) {
@@ -58,7 +60,7 @@ export function useRuntimeInputs(remote: RemoteFace, t: Dict, owner: string) {
     setDialog(next)
   }, [])
 
-  const prepare: PrepareRuntimeInputs = useCallback(async (sessionId, flowId, runId, binding = false, configure = true) => {
+  const prepare: PrepareRuntimeInputs = useCallback(async (sessionId, flowId, runId, binding = false, configure = true, freshStart = false) => {
     cancel()
     requested.current = { owner, flowId }
     const expected = generation.current
@@ -67,20 +69,39 @@ export function useRuntimeInputs(remote: RemoteFace, t: Dict, owner: string) {
     const checkpoint = runId ? await remote.call(EP.EP_RUN_STATUS, { sessionId, runId }) as RunSnapshot : undefined
     if (!alive.current || generation.current !== expected) return null
     if (checkpoint && checkpoint.flowId !== flowId) throw new Error(t.runtimeInputOwnerError)
-    const inputs = structuredClone(checkpoint?.runtimeInputs ?? options.checkpoint?.runtimeInputs ?? { workflowInputs: {}, nodeInputs: {} })
+    const isFreshStart = freshStart && !binding && !runId
+    const savedInputs = isFreshStart ? undefined : checkpoint?.runtimeInputs ?? options.checkpoint?.runtimeInputs
+    const inputs = structuredClone(savedInputs ?? { workflowInputs: {}, nodeInputs: {} })
     const handoffPolicy = checkpoint?.handoffPolicy ?? options.handoffPolicy
+    const fileSlots = Object.entries(options.nodeInputs).flatMap(([id, requirements]) => Object.entries(requirements).filter(([, requirement]) => requirement.kind === "file" && requirement.required !== false).map(([name]) => ({ id, name })))
+    let selectedAttachment = false
+    // Only a new run may choose a unique authorized file; uploading during execution never binds it.
+    if (!binding && !runId && (!options.checkpoint || isFreshStart) && options.files.length === 1 && fileSlots.length === 1) {
+      const { id, name } = fileSlots[0]
+      if (id === options.initialNodeId && !(inputs.nodeInputs[id]?.[name] ?? inputs.workflowInputs[name] ?? []).length) {
+        ;(inputs.nodeInputs[id] ??= {})[name] = [formInputValue("attachment", options.files[0].attachmentId, options.files)]
+        selectedAttachment = true
+      }
+    }
     const missingRequired = Object.entries(options.nodeInputs).some(([id, requirements]) => Object.entries(requirements).some(([name, requirement]) => requirement.required !== false && !(inputs.nodeInputs[id]?.[name] ?? inputs.workflowInputs[name] ?? []).some((value) => value.kind === requirement.kind)))
     if (!binding && !configure && !missingRequired) {
       requested.current = null
-      return checkpoint?.runtimeInputs || options.checkpoint?.runtimeInputs || handoffPolicy === "auto" ? { runtimeInputs: inputs, handoffPolicy, requestGeneration: expected } : undefined
+      return selectedAttachment || savedInputs || handoffPolicy === "auto" ? { runtimeInputs: inputs, handoffPolicy, requestGeneration: expected } : undefined
     }
     const eligibleNodes = Object.keys(options.nodeInputs).filter((id) => !binding || checkpoint?.nodes.some((node) => node.nodeId === id && node.status === "pending" && node.attempts === 0))
-    if (binding && !eligibleNodes.length) throw new Error(t.runtimeNoPendingNode)
-    const state: RuntimeInputDialogState = { sessionId, flowId, options, inputs, handoffPolicy, eligibleNodes, ...(binding ? { nodeId: eligibleNodes[0], runId, revision: checkpoint?.inputRevision ?? 0 } : {}), busy: false, error: "" }
+    const blockedNodes = binding ? Object.keys(options.nodeInputs).filter((id) => !eligibleNodes.includes(id)) : []
+    const state: RuntimeInputDialogState = { sessionId, flowId, options, inputs, handoffPolicy, eligibleNodes, blockedNodes, freshStart: isFreshStart, ...(binding ? { nodeId: eligibleNodes[0], runId, revision: checkpoint?.inputRevision ?? 0 } : {}), busy: false, error: binding && !eligibleNodes.length ? t.runtimeRestartRequired : "" }
     current.current = state
     setDialog(state)
     return new Promise<RuntimeInputSelection | null>((resolve) => { pending.current = resolve })
-  }, [cancel, owner, remote, t.runtimeInputOwnerError, t.runtimeNoPendingNode])
+  }, [cancel, owner, remote, t.runtimeInputOwnerError, t.runtimeRestartRequired])
+
+  const reuseCheckpointInputs = useCallback(() => {
+    const state = current.current
+    const inputs = state?.options.checkpoint?.runtimeInputs
+    if (!state?.freshStart || state.runId || state.busy || !inputs) return
+    change({ inputs: structuredClone(inputs) })
+  }, [change])
 
   const add = useCallback((target: string, name: string, kind: InputEditorKind, value: string) => {
     const state = current.current
@@ -149,13 +170,14 @@ export function useRuntimeInputs(remote: RemoteFace, t: Dict, owner: string) {
           const checkpoint = await remote.call(EP.EP_RUN_STATUS, { sessionId: state.sessionId, runId: state.runId }) as RunSnapshot
           if (!alive.current || expected !== generation.current) return
           const eligibleNodes = Object.keys(state.options.nodeInputs).filter((id) => checkpoint.nodes.some((node) => node.nodeId === id && node.status === "pending" && node.attempts === 0))
-          change({ revision: checkpoint.inputRevision ?? 0, eligibleNodes, nodeId: eligibleNodes.includes(state.nodeId!) ? state.nodeId : eligibleNodes[0], busy: false, error: t.runtimeRevisionChanged })
+          change({ revision: checkpoint.inputRevision ?? 0, eligibleNodes, blockedNodes: Object.keys(state.options.nodeInputs).filter((id) => !eligibleNodes.includes(id)), nodeId: eligibleNodes.includes(state.nodeId!) ? state.nodeId : eligibleNodes[0], busy: false, error: eligibleNodes.length ? t.runtimeRevisionChanged : t.runtimeRestartRequired })
           return
         } catch { /* Keep the original diagnostic if the refresh also fails. */ }
       }
-      change({ busy: false, error: error instanceof Error ? error.message : t.runtimeInvalidValue })
+      const code = (error as { code?: string } | null)?.code
+      change({ busy: false, error: code === "WF_INPUT_STATE_CONFLICT" ? `${code}: ${t.runtimeRestartRequired}` : `${code ? `${code}: ` : ""}${error instanceof Error ? error.message : t.runtimeInvalidValue}` })
     }
-  }, [change, remote, t.runtimeInvalidValue, t.runtimeRevisionChanged, t.runtimeNoPendingNode])
+  }, [change, remote, t.runtimeInvalidValue, t.runtimeRevisionChanged, t.runtimeNoPendingNode, t.runtimeRestartRequired])
 
-  return { dialog, prepare, lifecycle, cancel, change, add, remove, upload, submit }
+  return { dialog, prepare, lifecycle, cancel, change, reuseCheckpointInputs, add, remove, upload, submit }
 }

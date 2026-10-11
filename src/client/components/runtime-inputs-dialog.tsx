@@ -6,28 +6,36 @@ import type { InputEditorKind } from "../hooks/use-runtime-inputs.js"
 interface Props {
   state: RuntimeInputDialogState; t: Dict
   onCancel(): void; onSubmit(): void
+  onReuseCheckpointInputs(): void
   onChange(patch: Partial<RuntimeInputDialogState>): void
   onAdd(target: string, name: string, kind: InputEditorKind, value: string): void
   onRemove(target: string, name: string): void
   onUpload(target: string, name: string, file: File): void
 }
 
-export function RuntimeInputsDialog({ state, t, onCancel, onSubmit, onChange, onAdd, onRemove, onUpload }: Props): import("react").ReactElement {
-  const [target, setTarget] = useState("workflow")
-  const [name, setName] = useState("")
-  const [kind, setKind] = useState<InputEditorKind>("text")
+export function RuntimeInputsDialog({ state, t, onCancel, onSubmit, onReuseCheckpointInputs, onChange, onAdd, onRemove, onUpload }: Props): import("react").ReactElement {
+  const initialNode = state.nodeId ?? state.options.initialNodeId
+  const initialRequirements = initialNode ? state.options.nodeInputs[initialNode] ?? {} : {}
+  const initialSlot = Object.keys(initialRequirements).length === 1 ? Object.keys(initialRequirements)[0] : ""
+  const [target, setTarget] = useState(initialNode && initialSlot ? `node:${initialNode}` : "workflow")
+  const [name, setName] = useState(initialSlot)
+  const [kind, setKind] = useState<InputEditorKind>(initialRequirements[initialSlot]?.kind === "file" ? "attachment" : initialRequirements[initialSlot]?.kind === "json" ? "json" : "text")
   const [value, setValue] = useState("")
-  const selected = state.runId ? `node:${state.nodeId!}` : target
+  const selected = state.runId ? state.nodeId ? `node:${state.nodeId}` : "" : target
   const slots = selected === "workflow" ? state.inputs.workflowInputs : state.inputs.nodeInputs[selected.slice(5)] ?? {}
   const requirements = selected === "workflow" ? {} : state.options.nodeInputs[selected.slice(5)] ?? {}
   return <div className="wf-confirm-backdrop">
     <section className="wf-confirm wf-runtime-inputs" role="dialog" aria-modal="true" aria-label={t.runtimeInputsTitle}>
       <h3>{state.runId ? t.runtimeBindTitle : t.runtimeInputsTitle}</h3>
       <p>{t.runtimeInputHelp}</p>
-      <fieldset disabled={state.busy} className="wf-runtime-inputs__fields">
+      {state.freshStart && <p>{t.runtimeFreshInputsHelp}</p>}
+      {!!state.blockedNodes?.length && <p>{t.runtimeRestartRequired} ({state.blockedNodes.join(", ")})</p>}
+      <fieldset disabled={state.busy || !!state.runId && !state.nodeId} className="wf-runtime-inputs__fields">
+        {state.freshStart && state.options.checkpoint?.runtimeInputs && <button type="button" className="wf-btn" onClick={onReuseCheckpointInputs}>{t.runtimeReuseCheckpointInputs}</button>}
         <label>{t.runtimeTarget}<select value={selected} onChange={(event) => { const next = event.target.value; if (state.runId) onChange({ nodeId: next.slice(5) }); else setTarget(next); setName(""); setValue("") }}>
           {!state.runId && <option value="workflow">{t.runtimeWorkflowTarget}</option>}
           {state.eligibleNodes.map((id) => <option key={id} value={`node:${id}`}>{id}</option>)}
+          {state.blockedNodes?.map((id) => <option key={id} value={`node:${id}`} disabled>{id} ({t.runtimeNodeLocked})</option>)}
         </select></label>
         <p>{t.runtimeRequirements}: {Object.entries(requirements).map(([slot, requirement]) => `${slot} (${requirement.kind ?? "text"}${requirement.required === false ? "" : " *"})`).join(", ") || t.runtimeNoRequirements}</p>
         <label>{t.runtimeSlot}<input value={name} onChange={(event) => setName(event.target.value)} /></label>
@@ -41,7 +49,7 @@ export function RuntimeInputsDialog({ state, t, onCancel, onSubmit, onChange, on
         </select> : <textarea value={value} onChange={(event) => setValue(event.target.value)} />}</label>
         <button type="button" className="wf-btn" onClick={() => { onAdd(selected, name, kind, value) }}>{t.runtimeAdd}</button>
         <label>{t.runtimeUpload}<input type="file" onChange={(event) => { const file = event.target.files?.[0]; if (file) onUpload(selected, name, file); event.target.value = "" }} /></label>
-        <ul>{Object.entries(slots).map(([slot, values]) => <li key={slot}><span>{slot}: {values.map((item) => item.kind).join(", ")}</span><button type="button" className="wf-btn" onClick={() => onRemove(selected, slot)}>{t.runtimeRemove}</button></li>)}</ul>
+        <ul>{Object.entries(slots).map(([slot, values]) => <li key={slot}><span>{slot}: {values.map((item) => item.kind === "file" && item.fileRef.source === "attachment" ? item.fileRef.name : item.kind).join(", ")}</span><button type="button" className="wf-btn" onClick={() => onRemove(selected, slot)}>{t.runtimeRemove}</button></li>)}</ul>
         {!state.runId && <>
           <label>{t.runtimePolicy}<select value={state.handoffPolicy} onChange={(event) => onChange({ handoffPolicy: event.target.value as RuntimeInputDialogState["handoffPolicy"] })}>
             <option value="explicit">{t.runtimeExplicit}</option><option value="auto">{t.runtimeAuto}</option>
@@ -49,7 +57,7 @@ export function RuntimeInputsDialog({ state, t, onCancel, onSubmit, onChange, on
         </>}
       </fieldset>
       {state.error && <p role="alert" className="wf-runtime-inputs__error">{state.error}</p>}
-      <div className="wf-confirm__actions"><button type="button" className="wf-btn" onClick={onCancel}>{t.runtimeCancel}</button><button type="button" className="wf-btn is-primary" disabled={state.busy} onClick={onSubmit}>{state.busy ? t.runtimeWorking : state.runId ? t.runtimeBind : t.run}</button></div>
+      <div className="wf-confirm__actions"><button type="button" className="wf-btn" onClick={onCancel}>{t.runtimeCancel}</button><button type="button" className="wf-btn is-primary" disabled={state.busy || !!state.runId && !state.nodeId} onClick={onSubmit}>{state.busy ? t.runtimeWorking : state.runId ? t.runtimeBind : t.run}</button></div>
     </section>
   </div>
 }

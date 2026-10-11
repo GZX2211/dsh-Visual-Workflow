@@ -7,6 +7,7 @@
 
 // 运行时主类
 export { OrchestratorRuntime } from './runtime.js'
+export { publicRuntimeInputs } from "./runtime-inputs.js"
 
 // 依赖缝、常量与身份类型
 export {

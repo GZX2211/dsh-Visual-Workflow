@@ -17,7 +17,7 @@ import type { RunSnapshot } from '../shared/types.js'
 import type { WorkflowDocument } from '../shared/graph-model.js'
 import { RuntimeBase } from './runtime-base.js'
 import { prepareRunInputs, executionOf } from './execution-inputs.js'
-import { runtimeInputsOf, handoffPolicyOf, validateRequiredInputs } from "./runtime-inputs.js"
+import { runtimeInputsOf, handoffPolicyOf, validateRequiredInputs, publicRuntimeInputs } from "./runtime-inputs.js"
 import { boundNodeInputs, workflowInputTarget } from "./input-handoff.js"
 import { mainNodeIdOf, nodeById } from "../graph/index.js"
 import type { RuntimeInputOptions } from "../shared/runtime-types.js"
@@ -67,13 +67,22 @@ export class RuntimeLaunch extends RuntimeBase {
     const nodeInputs: RuntimeInputOptions["nodeInputs"] = {}
     for (const node of flow.nodes) if (node.kind === "agent") nodeInputs[node.id] = executionOf(node).inputs ?? {}
     const files = (await this.deps.sessionInputFiles?.(input.sessionId) ?? []).map(({ attachmentId, name, bytes }) => ({ attachmentId, name, bytes }))
-    return { nodeInputs, files, handoffPolicy: checkpoint?.handoffPolicy ?? "explicit", ...(checkpoint ? { checkpoint: { runId: checkpoint.id, runtimeInputs: checkpoint.runtimeInputs, handoffPolicy: checkpoint.handoffPolicy } } : {}) }
+    let initialNodeId: string | undefined
+    try { initialNodeId = workflowInputTarget(flow) } catch (error) {
+      if (!(error instanceof WfError) || error.code !== "WF_INPUT_AMBIGUOUS") throw error
+    }
+    return { nodeInputs, files, ...(initialNodeId ? { initialNodeId } : {}), handoffPolicy: checkpoint?.handoffPolicy ?? "explicit", ...(checkpoint ? { checkpoint: { runId: checkpoint.id, runtimeInputs: publicRuntimeInputs(checkpoint.runtimeInputs), handoffPolicy: checkpoint.handoffPolicy } } : {}) }
   }
 
   /** Pending-node binding uses the dispatch mutex and publishes only after a durable write. */
   async bindRuntimeInputs(input: { sessionId: string; runId: string; expectedRevision: number; nodeId: string; inputs: unknown }): Promise<RunSnapshot> {
     const entry = this.runs.get(input.runId)
-    if (!entry || entry.snapshot.sessionId !== input.sessionId) throw new WfError("运行不存在", "WF_NOT_FOUND")
+    if (!entry) {
+      const previous = await this.deps.store.getRun(input.runId)
+      if (previous?.sessionId === input.sessionId) throw new WfError("当前运行不能热绑定；请停止仍在运行的流程，通过配置输入并新建运行携带所选输入重新启动", "WF_INPUT_STATE_CONFLICT")
+      throw new WfError("运行不存在", "WF_NOT_FOUND")
+    }
+    if (entry.snapshot.sessionId !== input.sessionId) throw new WfError("运行不存在", "WF_NOT_FOUND")
     if (entry.inputBindingDone || entry.dispatching?.size) throw new WfError("输入绑定或节点派发尚未完成", "WF_BUSY")
     const assertCurrent = (): void => {
       if (this.runs.get(input.runId) !== entry || entry.controller.signal.aborted || !["running", "paused"].includes(entry.snapshot.status)) throw new WfError("运行已停止或被恢复运行替代", "WF_CANCELLED")
@@ -88,7 +97,7 @@ export class RuntimeLaunch extends RuntimeBase {
       const canonical = mainNodeIdOf(flow, input.nodeId) ?? input.nodeId
       const target = nodeById(flow, canonical)
       const record = entry.snapshot.nodes.find((node) => node.nodeId === canonical)
-      if (target?.kind !== "agent" || record?.status !== "pending" || record.attempts !== 0) throw new WfError("只能绑定尚未派发的 Agent 节点", "WF_INPUT_STATE_CONFLICT")
+      if (target?.kind !== "agent" || record?.status !== "pending" || record.attempts !== 0) throw new WfError("只能绑定尚未派发的 Agent；当前节点不能热绑定，请停止当前运行，再配置输入并新建运行", "WF_INPUT_STATE_CONFLICT")
       const authorized = await runtimeInputsOf({ nodeInputs: { [canonical]: input.inputs } }, flow, { sessionId: input.sessionId, managedRoot: this.deps.store.root, files: await this.deps.sessionInputFiles?.(input.sessionId) ?? [] })
       const inputs = { workflowInputs: structuredClone(entry.snapshot.runtimeInputs?.workflowInputs ?? {}), nodeInputs: { ...structuredClone(entry.snapshot.runtimeInputs?.nodeInputs ?? {}), [canonical]: authorized.nodeInputs[canonical] } }
       validateRequiredInputs(target, boundNodeInputs({ ...entry.snapshot, runtimeInputs: inputs }, canonical))

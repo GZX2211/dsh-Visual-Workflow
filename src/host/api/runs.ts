@@ -5,12 +5,17 @@
 // 逻辑归 transfer 模块，端点只做参数校验与响应映射）。
 
 import type { DatabaseNode } from '../shared/graph-model.js'
-import { findResumableRun } from '../orchestrator/index.js'
+import { findResumableRun, publicRuntimeInputs } from '../orchestrator/index.js'
+import type { RunSnapshot } from "../shared/types.js"
 import { buildIndexForDatabase, createDatabaseDriver, indexPathOf, testDatabaseConnection } from '../tools/index.js'
 import { VectorIndex } from '../embedding/indexer.js'
 import { exportAgentTemplate, exportWorkflowBundle, importAgentTemplate, importWorkflowBundle } from '../transfer/bundle.js'
 import { httpError } from './http.js'
 import { VisualWorkflowApiBase } from './boundary.js'
+
+function publicSnapshot(snapshot: RunSnapshot): RunSnapshot {
+  return { ...snapshot, ...(snapshot.runtimeInputs ? { runtimeInputs: publicRuntimeInputs(snapshot.runtimeInputs) } : {}) }
+}
 
 export class RunEndpoints extends VisualWorkflowApiBase {
   // ---------- 运行（父代理编排） ----------
@@ -21,11 +26,12 @@ export class RunEndpoints extends VisualWorkflowApiBase {
    * （run.sessionId === instance.sessionId，不再支持运行期新建会话——「开启新会话」
    * 只是创建实例时的一次性动作，见 createSession 端点）。
    */
-  async run(args: { sessionId?: unknown; flowId?: unknown; fileBindings?: unknown; runtimeInputs?: unknown; handoffPolicy?: unknown }): Promise<unknown> {
+  async run(args: { sessionId?: unknown; flowId?: unknown; fileBindings?: unknown; runtimeInputs?: unknown; handoffPolicy?: unknown; freshStart?: unknown }): Promise<unknown> {
     const sessionId = String(args?.sessionId ?? '')
     const flowId = String(args?.flowId ?? '')
     if (!sessionId || !flowId) throw httpError(400, 'requires sessionId and flowId')
-    const prev = await findResumableRun(this.host.store, { sessionId, flowId })
+    if (args.freshStart !== undefined && typeof args.freshStart !== "boolean") throw httpError(400, "freshStart must be a boolean")
+    const prev = args.freshStart === true ? null : await findResumableRun(this.host.store, { sessionId, flowId })
     if (prev) {
       return this.host.orchestrator.resumeRun({ sessionId, flowId, fromRunId: prev.id, ...(args.fileBindings === undefined ? {} : { fileBindings: args.fileBindings }), ...(args.runtimeInputs === undefined ? {} : { runtimeInputs: args.runtimeInputs }), ...(args.handoffPolicy === undefined ? {} : { handoffPolicy: args.handoffPolicy }) })
     }
@@ -40,11 +46,11 @@ export class RunEndpoints extends VisualWorkflowApiBase {
     const snapshot = this.host.orchestrator.runSnapshot(runId)
     if (snapshot) {
       if (snapshot.sessionId !== sessionId) throw httpError(404, `运行不存在：${runId}`)
-      return snapshot
+      return publicSnapshot(snapshot)
     }
     const disk = await this.host.store.getRun(runId)
     if (!disk || disk.sessionId !== sessionId) throw httpError(404, `运行不存在：${runId}`)
-    return disk
+    return publicSnapshot(disk)
   }
 
   /**
@@ -83,7 +89,7 @@ export class RunEndpoints extends VisualWorkflowApiBase {
     if (!sessionId || !flowId) throw httpError(400, 'requires sessionId and flowId')
     // 会话隔离（Bug 14）：运行历史必须限定当前会话，否则可按 flowId 读到
     // 其他会话的 run 记录（多租户隔离，架构文档 §9）。
-    return this.host.store.listRuns(flowId, sessionId)
+    return (await this.host.store.listRuns(flowId, sessionId)).map(publicSnapshot)
   }
 
   /** 断点续跑（历史面板「恢复」入口；runId 缺省取该工作流最近可恢复记录）。 */
@@ -111,7 +117,7 @@ export class RunEndpoints extends VisualWorkflowApiBase {
     const runId = String(args?.runId ?? "")
     const nodeId = String(args?.nodeId ?? "")
     if (!sessionId || !runId || !nodeId || !Number.isSafeInteger(args.expectedRevision)) throw httpError(400, "requires sessionId, runId, nodeId and expectedRevision")
-    return this.host.orchestrator.bindRuntimeInputs({ sessionId, runId, nodeId, expectedRevision: args.expectedRevision as number, inputs: args.inputs })
+    return publicSnapshot(await this.host.orchestrator.bindRuntimeInputs({ sessionId, runId, nodeId, expectedRevision: args.expectedRevision as number, inputs: args.inputs }))
   }
   // ---------- 数据库（GUI 面板） ----------
 

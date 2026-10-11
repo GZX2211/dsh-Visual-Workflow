@@ -7,7 +7,7 @@ import type { ToastFace } from './useToast.js';
 import type { DocumentActionsFace } from './useDocumentActions.js';
 import type { Dict } from '../i18n.js';
 export interface RunActionsFace {
-    startRun(configureInputs?: boolean): Promise<void>;
+    startRun(configureInputs?: boolean, freshStart?: boolean): Promise<void>;
     stopRun(): Promise<void>;
     openHistory(): Promise<void>;
     resumeRun(runId: string): Promise<void>;

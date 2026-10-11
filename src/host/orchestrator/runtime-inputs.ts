@@ -14,6 +14,16 @@ function nameOf(name: string, field: string): void {
   if (!name.trim() || ["__proto__", "prototype", "constructor"].includes(name)) bad(field, "输入名称无效")
 }
 function bad(field: string, message: string): never { throw new WfError(`${field}: ${message}`, "WF_RUNTIME_INPUT_INVALID", { phase: "node_input", retryable: false, details: [{ field, message }] }) }
+
+/** Public attachment references never include resolved host paths; stored inputs remain intact. */
+export function publicRuntimeInputs(inputs: RuntimeInputs | undefined): RuntimeInputs | undefined {
+  if (!inputs) return undefined
+  const result = structuredClone(inputs)
+  for (const slots of [result.workflowInputs, ...Object.values(result.nodeInputs)]) for (const values of Object.values(slots)) {
+    for (const value of values) if (value.kind === "file" && value.fileRef.source === "attachment") delete value.fileRef.path
+  }
+  return result
+}
 export function jsonValueOf(value: unknown, field: string, depth = 0, ancestors = new Set<unknown>()): JsonValue {
   if (depth > 24) bad(field, "JSON 结构过深")
   if (value === null || typeof value === "string" || typeof value === "boolean") return value
@@ -84,7 +94,7 @@ export function handoffPolicyOf(raw: unknown): import("../shared/runtime-types.j
 export function validateRequiredInputs(node: import("../shared/graph-model.js").RoleNode, slots: import("../shared/runtime-types.js").InputSlots): void {
   for (const [name, requirement] of Object.entries(node.data.execution?.inputs ?? {})) {
     const values = slots[name] ?? []
-    if (requirement.required !== false && !values.length) throw new WfError(`节点 ${node.id} 缺少输入 ${name}；请在工作台绑定后重试`, "WF_INPUT_REQUIRED")
+    if (requirement.required !== false && !values.length) throw new WfError(`节点 ${node.id} 缺少输入 ${name}；请在工作台保存绑定后重试，“已上传”消息不能代替输入绑定`, "WF_INPUT_REQUIRED")
     if (values.some((value) => value.kind !== requirement.kind)) bad(`${node.id}.${name}`, `需要 ${requirement.kind} 输入`)
   }
 }

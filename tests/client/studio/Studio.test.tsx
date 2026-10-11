@@ -125,7 +125,7 @@ describe('Studio 装配', () => {
       const policy = Array.from(document.querySelectorAll<HTMLSelectElement>(".wf-runtime-inputs select")).find((item) => item.querySelector('option[value="auto"]'))!
       await act(async () => { policy.value = "auto"; policy.dispatchEvent(new Event("change", { bubbles: true })) })
       await act(async () => { document.querySelector<HTMLButtonElement>(".wf-runtime-inputs .is-primary")!.click() })
-      expect(remote.calls.find((entry) => entry.endpoint === EP.EP_RUN)?.args).toMatchObject({ handoffPolicy: "auto" })
+      expect(remote.calls.find((entry) => entry.endpoint === EP.EP_RUN)?.args).toMatchObject({ handoffPolicy: "auto", freshStart: true, sessionId: "s-1", flowId: "existing" })
     } else {
       expect(document.querySelector(".wf-runtime-inputs")).toBeNull()
       expect(remote.calls.find((entry) => entry.endpoint === EP.EP_RUN)?.args).toEqual({ sessionId: "s-1", flowId: "existing" })

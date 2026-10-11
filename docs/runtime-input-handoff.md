@@ -22,6 +22,37 @@
 
 ## API 与持久化
 
+### #12：会话附件选择与新运行修复
+
+工作台继续从 sessionInputFiles 获取当前会话官方已接纳的附件，只展示 attachmentId/name/bytes。用户选择附件并加入目标输入后，以既有 source="attachment" 的 RuntimeInputs 提交；真实路径由 runtimeInputsOf 在宿主端重新授权解析，不需要复制容器路径，不信任调用方给出的附件 path/origin，也不搜索目录。
+
+运行状态、运行历史、绑定返回值和 options.checkpoint 的 RuntimeInputs 也剔除附件 fileRef.path；投影不修改磁盘快照，重新提交公开引用仍由宿主解析真实路径。该裁剪仅针对附件运行输入引用，不宣称清除 managed 引用、旧 fileBindings、产物或自由文本中的所有宿主路径，也不修复下文已有路由认证限制。
+
+runtimeInputOptions 额外返回可选 initialNodeId，使用原 workflowInputTarget 查询。新运行前，只有目标唯一、全图只有一个必需 file 输入槽、且只有一个授权附件时，工作台才预选到该槽；不会覆盖已有明确绑定。多个附件、多个文件目标/槽、条件/组/无初始目标、仅可选或未知输入类型都要求用户选择。规则只依赖图和 execution.inputs，不读节点名、职责、Prompt 或 CSV 扩展名。运行中的附件上传不触发自动选择或绑定，普通断点恢复也不新选附件。
+
+默认销售 auto 样例的 load_data 已声明 `execution.inputs.source.kind="file"`；不能靠“请读取 CSV”之类 Prompt 替代声明。普通无必需输入的 Agent 不检查 CSV。首次必需输入缺失在 prepareRuntimeInputs/派发预检处返回 WF_INPUT_REQUIRED，发生在 attempts/callCount 计账及 child 创建之前；这些原有检查未重复实现。
+
+尚未派发的 pending/attempts=0 节点继续通过“补充运行输入”保存绑定。成功后 snapshot 持久化且 inputRevision 增加；单纯上传或发送“已上传”不会改变版本。WF_BUSY、WF_INPUT_STATE_CONFLICT、WF_INPUT_REVISION_CONFLICT 保留稳定错误，失败不会自动循环调用。版本冲突仍刷新并保留草稿，请用户检查后提交。
+
+已开始、已失败或已终止的运行不允许热绑定，也不清零旧 attempts。工作台显示不可绑定节点和修复说明：取消输入窗口，使用原停止按钮停止仍活跃的运行，再点击“配置输入并新建运行”，选择或检查附件绑定后启动同一工作流。新运行入口给原 run API 传可选 `freshStart:true`，调用已有 startRun，而非自动恢复旧快照；活跃运行仍受原锁保护，不能被该标志覆盖。普通“运行”仍自动续跑可恢复断点，历史“恢复”仍走原 runResume，缺省请求语义不变。
+
+“配置输入并新建运行”默认从空 RuntimeInputs 草稿开始，旧 checkpoint 的附件、文本和 JSON 不会静默带入；唯一附件预选规则仍适用。若旧运行绑定 A、当前授权附件只有 B，新运行预选 B；若 A/B 均可选，必须手动选择。用户只有主动点击“复用上次运行输入（替换当前草稿）”才复制旧输入，提交时仍重新授权。普通运行的断点续跑及历史“恢复”继续保留原输入，不自动换成新上传附件。
+
+新运行不继承旧成功/失败状态或产物证据，历史成功结果不会因“新运行”变成当前结果。本轮支持工作台绑定和新运行修复，**不支持在聊天中上传附件后自动恢复已派发节点**。父代理提示只补充 Runtime 绑定返回/inputRevision 与错误的区别，#11 的重试/失败收尾约束保持原样，没有新的 Token 预算或热恢复状态机。
+
+本轮确定性五节点测试使用真实 Runtime、NodeAgentRunner、权限/Prompt 装配、持久化、附件授权解析及文件读写，覆盖 explicit、受管 auto 与会话附件 auto；模型传输提供可控结果。各业务节点有效 attempts 为 1，中间文件真实生成。这不能证明真实模型正确。现场 DSH 模型 E2E：**NOT RUN**；本轮真实 Token、耗时及现场节点 attempts：**NOT AVAILABLE**，不把测试耗时当作模型运行耗时，不报告性能改善比例。
+
+#12 最终验证（含 freshStart 边界补充）：`pnpm check` 通过，197 个测试文件、2414 项测试（较已合并 #11 的 main 新增 41 项，较 #12 首轮增加 5 项），包含四个 TS Program、构建和 client-smoke；独立 `pnpm build` 通过。7 个定向文件共 163 项测试通过。定向统计的输入 Hook、输入窗口和 runtime-inputs 三个文件合计行覆盖率 97.29%、分支 86.18%，不代表仓库整体覆盖率。同步 17 个生成 lib 文件（6 个 JS、11 个声明；其中本轮更新 4 个客户端产物），无新增生产模块、依赖或版本调整。
+
+现场验收可用已有脚本生成五节点流程，再在新会话聊天中上传 CSV，打开工作台检查 load_data/source 所选附件，并将交接策略选为“自动（确定的直接依赖）”后运行。prepare-only 不启动运行，也不替工作台选择运行策略：
+
+```bash
+# 使用现场 DSH_BASE_URL；模型运行还需准确的 DSH_TEST_PROVIDER/DSH_TEST_MODEL。
+node scripts/run-sales-live.mjs --prepare-only
+```
+
+若附件没有官方公开结构化授权引用（例如工具回复仅包含自然语言路径），仍不会自动绑定。请通过现有工作台受控上传或官方会话附件选择；不扫描附件目录、不绕过 sandbox。现场保留完整快照、真实 wf_finish 返回和父/子独立 Token 记录。原脚本的 A/B/C 模型验收及 live-metrics.json 继续可用。
+
 `run`、`runResume` 的原有参数均保留，增加可选 `runtimeInputs`、`handoffPolicy`。不传策略缺省为 explicit；恢复运行保留之前的输入和策略，新传 runtimeInputs 完整替换输入集合。
 
 ```json

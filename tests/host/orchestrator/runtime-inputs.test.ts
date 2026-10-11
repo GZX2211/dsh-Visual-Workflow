@@ -1,9 +1,28 @@
 import { mkdir, symlink, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { afterEach, expect, it } from "vitest"
-import { handoffPolicyOf, jsonValueOf, runtimeInputsOf } from "../../../src/host/orchestrator/runtime-inputs.js"
+import { handoffPolicyOf, jsonValueOf, runtimeInputsOf, publicRuntimeInputs } from "../../../src/host/orchestrator/runtime-inputs.js"
 import { cleanupTempDirs, makeFlow, makeHarness } from "./fixtures/harness.js"
 afterEach(cleanupTempDirs)
+
+it.each(["unique", "proxy", "multiple", "conditional", "group", "isolated"])("test_input_options_%s_initial_target_uses_existing_graph_query", async (kind) => {
+  const h = await makeHarness(undefined, { sessionInputFiles: async () => [{ attachmentId: "authorized", name: "sales.csv", bytes: 4, path: "/private/host/location" }] })
+  const flow = makeFlow()
+  flow.lines = [
+    { id: "begin", source: "n-start", target: "n-a1", sourceHandle: "flow-out", targetHandle: "flow-in" },
+    { id: "next", source: "n-a1", target: "n-a2", sourceHandle: "flow-out", targetHandle: "flow-in" },
+  ]
+  if (kind === "proxy") { flow.nodes.push({ id: "first-proxy", kind: "proxy", proxySourceId: "n-a1", position: { x: 0, y: 0 } }); flow.lines[0].target = "first-proxy" }
+  if (kind === "multiple") flow.lines[1].source = "n-start"
+  if (kind === "conditional") flow.lines[0].condition = { type: "pass" }
+  if (kind === "group") { const first = flow.nodes.find((node) => node.id === "n-a1")!; if (first.kind === "agent") first.data.groupId = "group" }
+  if (kind === "isolated") flow.lines.shift()
+  await h.store.saveWorkflow(flow, "session-1")
+  const options = await h.runtime.runtimeInputOptions({ sessionId: "session-1", flowId: flow.id })
+  expect(options.initialNodeId).toBe(kind === "unique" || kind === "proxy" ? "n-a1" : undefined)
+  expect(options.files).toEqual([{ attachmentId: "authorized", name: "sales.csv", bytes: 4 }])
+  expect(JSON.stringify(options)).not.toContain("/private/host/location")
+})
 
 it("test_runtime_input_managed_symlink_and_path_escape_are_rejected", async () => {
   const h = await makeHarness()
@@ -26,6 +45,9 @@ it("test_attachment_requires_exact_current_session_reference_and_ignores_supplie
   const parsed = await runtimeInputsOf(raw, makeFlow(), access)
   expect(parsed.workflowInputs.input).toEqual([{ kind: "file", fileRef: { source: "attachment", ...ref }, origin: { source: "attachment" } }])
   expect(parsed.nodeInputs).toEqual({})
+  expect(publicRuntimeInputs(parsed)?.workflowInputs.input).toEqual([{ kind: "file", fileRef: { source: "attachment", attachmentId: "current", name: "a.txt", bytes: 4 }, origin: { source: "attachment" } }])
+  expect(parsed.workflowInputs.input[0]).toMatchObject({ fileRef: { path } })
+  expect(publicRuntimeInputs(undefined)).toBeUndefined()
   await expect(runtimeInputsOf(raw, makeFlow(), { ...access, files: [] })).rejects.toMatchObject({ code: "WF_INPUT_FILE_UNAUTHORIZED" })
   await expect(runtimeInputsOf({ workflowInputs: { input: [{ kind: "file", fileRef: { source: "attachment", ...ref, bytes: 3 } }] } }, makeFlow(), access)).rejects.toMatchObject({ code: "WF_INPUT_FILE_UNAUTHORIZED" })
 })

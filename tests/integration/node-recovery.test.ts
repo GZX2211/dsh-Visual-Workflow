@@ -1,6 +1,7 @@
 import { runtimeManagedPrefix } from "../../src/host/storage/managed-files.js"
 // Real runner + runtime + permission/prompt setup + persistence; only the DSH transport is fake.
-import { mkdir, writeFile, rm } from "node:fs/promises"
+import { mkdir, writeFile, readFile, copyFile, rm } from "node:fs/promises"
+import { fileURLToPath } from "node:url"
 import { join } from "node:path"
 import { afterEach, expect, it, onTestFinished, vi } from "vitest"
 import type { NodeStartInput } from "../../src/host/orchestrator/index.js"
@@ -14,7 +15,7 @@ import { caller, cleanupTempDirs, makeFlow, makeHarness, start } from "../host/o
 
 afterEach(cleanupTempDirs)
 
-async function makeRealRunnerHarness(nodeId = "n-a1", options: { configure?: (flow: import("../../src/host/shared/graph-model.js").WorkflowDocument) => void; runtimeInputs?: unknown; handoffPolicy?: unknown; authorizedInputFiles?: () => Promise<readonly string[]>; sessionInputFiles?: () => Promise<readonly import("../../src/host/shared/runtime-types.js").SessionInputFile[]> } = {}) {
+async function makeRealRunnerHarness(nodeId = "n-a1", options: { configure?: (flow: import("../../src/host/shared/graph-model.js").WorkflowDocument) => void; runtimeInputs?: unknown; handoffPolicy?: unknown; deferStart?: boolean; authorizedInputFiles?: () => Promise<readonly string[]>; sessionInputFiles?: () => Promise<readonly import("../../src/host/shared/runtime-types.js").SessionInputFile[]> } = {}) {
   const h = await makeHarness(undefined, { workingDirectory: async () => h.dir, sessionInputFiles: options.sessionInputFiles, authorizedInputFiles: options.authorizedInputFiles })
   const flow = makeFlow()
   options.configure?.(flow)
@@ -30,7 +31,7 @@ async function makeRealRunnerHarness(nodeId = "n-a1", options: { configure?: (fl
   const sent: string[] = []
   const interrupted: string[] = []
   const epochs = new Map<string, string>()
-  const control: { resumable: boolean; startGate?: Promise<void>; onStart?: () => void } = { resumable: true }
+  const control: { resumable: boolean; startGate?: Promise<void>; onStart?: (spec: Parameters<SubagentsServiceLike["startContinuable"]>[0]) => void | Promise<void> } = { resumable: true }
   let epoch = 0
   const activate = (childId: string) => {
     const runId = `epoch-${++epoch}`
@@ -46,7 +47,7 @@ async function makeRealRunnerHarness(nodeId = "n-a1", options: { configure?: (fl
       const executing = flow.nodes.find((candidate) => candidate.kind === "agent" && spec.request.prompt.some((block) => block.text.includes(`「${candidate.data.label}」`)))
       expect(promptSetup.peekPending()).toMatchObject({ systemPrompt: executing?.kind === "agent" ? executing.data.systemPrompt : node.data.systemPrompt })
       starts.push(spec)
-      control.onStart?.()
+      await control.onStart?.(spec)
       await control.startGate
       const childId = `child-${starts.length}`
       activate(childId)
@@ -74,10 +75,9 @@ async function makeRealRunnerHarness(nodeId = "n-a1", options: { configure?: (fl
   h.runner.interruptChild = (childId, sessionId) => runner.interruptChild(childId, sessionId)
   onTestFinished(() => { h.runtime.dispose(); runner.dispose() })
   await h.store.saveWorkflow(flow, "session-1", { force: true })
-  await h.runtime.startRun({ sessionId: "session-1", flowId: flow.id, runtimeInputs: typeof options.runtimeInputs === "function" ? await options.runtimeInputs(h.dir) : options.runtimeInputs, handoffPolicy: options.handoffPolicy })
-  const entry = h.runtime.activeRunForSession("session-1")!
+  if (!options.deferStart) await h.runtime.startRun({ sessionId: "session-1", flowId: flow.id, runtimeInputs: typeof options.runtimeInputs === "function" ? await options.runtimeInputs(h.dir) : options.runtimeInputs, handoffPolicy: options.handoffPolicy })
   const settle = (childId: string, stopReason = "completed") => h.runtime.handleSubagentEnd({ id: childId, runId: epochs.get(childId), stopReason })
-  return { h, node, entry, starts, accepted, sent, interrupted, epochs, control, retired, dispatched, settle }
+  return { h, node, get entry() { const entry = h.runtime.activeRunForSession("session-1"); if (!entry) throw new Error("fixture requires an active run"); return entry }, starts, accepted, sent, interrupted, epochs, control, retired, dispatched, settle }
 }
 
 it("test_recovery_NOT_RESUMABLE_one_attempt_replaces_child_and_isolates_late_end", async () => {
@@ -248,6 +248,130 @@ function serialFlow(flow: import("../../src/host/shared/graph-model.js").Workflo
     { id: "end", source: "n-a2", target: "n-end", sourceHandle: "flow-out", targetHandle: "flow-in" },
   ]
 }
+
+it("test_required_initial_attachment_upload_without_binding_never_starts_child_or_parent", async () => {
+  const files: import("../../src/host/shared/runtime-types.js").SessionInputFile[] = []
+  const { h, starts } = await makeRealRunnerHarness("n-a1", { deferStart: true, sessionInputFiles: async () => files, configure: (flow) => {
+    serialFlow(flow)
+    const first = flow.nodes.find((node) => node.id === "n-a1")!
+    if (first.kind === "agent") first.data.execution = { inputs: { source: { kind: "file" } } }
+  } })
+  const path = join(h.dir, "sales_workflow_test.csv")
+  await writeFile(path, "authorized")
+  files.push({ attachmentId: "admitted", name: "sales_workflow_test.csv", bytes: 10, path })
+  for (let index = 0; index < 2; index++) {
+    h.agents.roots.get("session-1")!.session.events.push({ type: "user/message", data: { source: { kind: "user" }, content: [{ type: "text", text: "已经上传" }] } })
+    await expect(h.runtime.startRun({ sessionId: "session-1", flowId: "flow-1" })).rejects.toMatchObject({ code: "WF_INPUT_REQUIRED" })
+  }
+  expect(starts).toEqual([])
+  expect(h.agents.roots.get("session-1")!.messages).toEqual([])
+  expect(await h.store.listRuns("flow-1", "session-1")).toEqual([])
+})
+
+it("test_authorized_initial_attachment_binding_is_persisted_and_read_on_first_real_runner_dispatch", async () => {
+  const files: import("../../src/host/shared/runtime-types.js").SessionInputFile[] = []
+  const fixture = await makeRealRunnerHarness("n-a1", { deferStart: true, sessionInputFiles: async () => files, configure: (flow) => {
+    serialFlow(flow)
+    const first = flow.nodes.find((node) => node.id === "n-a1")!
+    if (first.kind === "agent") first.data.execution = { inputs: { source: { kind: "file" } } }
+  } })
+  const { h, starts, control } = fixture
+  const path = join(h.dir, "session-attachment.csv")
+  await copyFile(fileURLToPath(new URL("../fixtures/sales_workflow_test.csv", import.meta.url)), path)
+  const bytes = (await readFile(path)).length
+  const ref = { attachmentId: "official-reference", name: "sales_workflow_test.csv", bytes }
+  files.push({ ...ref, path })
+  const options = await h.runtime.runtimeInputOptions({ sessionId: "session-1", flowId: "flow-1" })
+  expect(options).toMatchObject({ initialNodeId: "n-a1", files: [ref] })
+  expect(JSON.stringify(options)).not.toContain(path)
+  await h.runtime.startRun({ sessionId: "session-1", flowId: "flow-1", runtimeInputs: { nodeInputs: { "n-a1": { source: [{ kind: "file", fileRef: { source: "attachment", ...options.files[0], path: "/forged/path" } }] } } } })
+  let actualInput = ""
+  control.onStart = async (spec) => {
+    expect(spec.request.prompt[0].text).toContain(path)
+    actualInput = await readFile(path, "utf8")
+  }
+  await h.runtime.wfRunNode(caller, { nodeId: "n-a1", retryLimit: 0 })
+  expect(actualInput.trim().split(/\r?\n/)).toHaveLength(12)
+  expect(starts).toHaveLength(1)
+  const snapshot = (await h.store.getRun(fixture.entry.snapshot.id))!
+  expect(snapshot).toMatchObject({ inputRevision: 1, runtimeInputs: { nodeInputs: { "n-a1": { source: [{ fileRef: { source: "attachment", ...ref, path } }] } } } })
+  expect(snapshot.nodes.find((node) => node.nodeId === "n-a1")).toMatchObject({ status: "running", attempts: 1 })
+  await expect(h.runtime.wfRunNode(caller, { nodeId: "n-a1", retryLimit: 0 })).rejects.toMatchObject({ code: "WF_BUSY" })
+  expect(fixture.entry.callCount).toBe(1)
+})
+
+it("test_pending_attachment_upload_and_natural_language_do_not_change_revision_until_binding", async () => {
+  const files: import("../../src/host/shared/runtime-types.js").SessionInputFile[] = []
+  const { h, entry, starts } = await makeRealRunnerHarness("n-a2", { sessionInputFiles: async () => files, configure: (flow) => {
+    serialFlow(flow)
+    const target = flow.nodes.find((node) => node.id === "n-a2")!
+    if (target.kind === "agent") target.data.execution = { inputs: { source: { kind: "file" } } }
+  } })
+  const path = join(h.dir, "admitted.csv")
+  await writeFile(path, "disk data")
+  const ref = { attachmentId: "admitted", name: "sales.csv", bytes: 9 }
+  files.push({ ...ref, path })
+  for (let index = 0; index < 2; index++) {
+    h.agents.roots.get("session-1")!.session.events.push({ type: "user/message", data: { source: { kind: "user" }, content: [{ type: "text", text: "已经上传" }] } })
+    await expect(h.runtime.wfRunNode(caller, { nodeId: "n-a2", retryLimit: 0 })).rejects.toMatchObject({ code: "WF_INPUT_REQUIRED" })
+  }
+  expect(entry.callCount).toBe(0)
+  expect(entry.snapshot.inputRevision).toBeUndefined()
+  expect(entry.snapshot.nodes.find((node) => node.nodeId === "n-a2")).toMatchObject({ status: "pending", attempts: 0 })
+  expect(starts).toEqual([])
+  await h.runtime.bindRuntimeInputs({ sessionId: "session-1", runId: entry.snapshot.id, nodeId: "n-proxy-a2", expectedRevision: 0, inputs: { source: [{ kind: "file", fileRef: { source: "attachment", ...ref } }] } })
+  expect((await h.store.getRun(entry.snapshot.id))?.inputRevision).toBe(1)
+  await h.runtime.wfRunNode(caller, { nodeId: "n-a2", retryLimit: 0 })
+  expect(starts[0].request.prompt[0].text).toContain(path)
+  expect(entry.callCount).toBe(1)
+})
+
+it.each(["running", "failed", "exhausted", "stopped"])("test_attachment_hot_binding_%s_is_rejected_without_resetting_attempts", async (state) => {
+  const { h, node, entry, starts, settle } = await makeRealRunnerHarness()
+  await h.runtime.wfRunNode(caller, { nodeId: node.id, retryLimit: 0 })
+  if (state !== "running") await settle("child-1", "error")
+  if (state === "exhausted") await expect(h.runtime.wfRunNode(caller, { nodeId: node.id, retryLimit: 0 })).rejects.toMatchObject({ code: "WF_RETRY_LIMIT" })
+  if (state === "stopped") await h.runtime.stopRun(entry.snapshot.id)
+  const previous = structuredClone(entry.snapshot)
+  await expect(h.runtime.bindRuntimeInputs({ sessionId: "session-1", runId: entry.snapshot.id, nodeId: node.id, expectedRevision: 0, inputs: {} })).rejects.toMatchObject({ code: "WF_INPUT_STATE_CONFLICT", message: expect.stringContaining("新建运行") })
+  expect(entry.snapshot).toEqual(previous)
+  expect(starts).toHaveLength(1)
+})
+
+it("test_new_run_accepts_selected_attachment_and_isolates_old_failed_child", async () => {
+  const files: import("../../src/host/shared/runtime-types.js").SessionInputFile[] = []
+  const { h, node, entry, starts, control, settle } = await makeRealRunnerHarness(undefined, { sessionInputFiles: async () => files })
+  await h.runtime.wfRunNode(caller, { nodeId: node.id, retryLimit: 0 })
+  await settle("child-1", "error")
+  await h.runtime.stopRun(entry.snapshot.id)
+  const path = join(h.dir, "selected.csv")
+  await writeFile(path, "selected input")
+  const ref = { attachmentId: "selected", name: "sales.csv", bytes: 14 }
+  files.push({ ...ref, path })
+  const result = await h.runtime.startRun({ sessionId: "session-1", flowId: "flow-1", runtimeInputs: { nodeInputs: { [node.id]: { source: [{ kind: "file", fileRef: { source: "attachment", ...ref } }] } } } })
+  control.resumable = false
+  await h.runtime.wfRunNode(caller, { nodeId: node.id, retryLimit: 0 })
+  expect(starts).toHaveLength(2)
+  expect(starts[1].request.prompt[0].text).toContain(path)
+  await h.runtime.handleSubagentEnd({ id: "child-1", runId: "epoch-1", stopReason: "completed", lastAssistantMessage: [{ type: "text", text: "old failure cannot become evidence" }] })
+  const snapshot = h.runtime.runSnapshot(result.runId)!
+  expect(snapshot).toMatchObject({ flowId: "flow-1", inputRevision: 1 })
+  expect(snapshot.resumedFromRunId).toBeUndefined()
+  expect(snapshot.nodes.find((record) => record.nodeId === node.id)).toMatchObject({ status: "running", attempts: 1, childId: "child-2", output: "" })
+  expect((await h.store.getRun(result.runId))?.runtimeInputs?.nodeInputs[node.id].source[0]).toMatchObject({ fileRef: { ...ref, path } })
+})
+
+it.each(["foreign", "forged", "revoked"])("test_attachment_%s_is_rejected_before_real_runner_start", async (kind) => {
+  const files: import("../../src/host/shared/runtime-types.js").SessionInputFile[] = []
+  const { h, starts } = await makeRealRunnerHarness(undefined, { deferStart: true, sessionInputFiles: async () => files })
+  const path = join(h.dir, "own.csv")
+  await writeFile(path, "own")
+  const ref = { attachmentId: "own", name: "own.csv", bytes: 3 }
+  if (kind !== "revoked") files.push({ ...ref, path })
+  await expect(h.runtime.startRun({ sessionId: "session-1", flowId: "flow-1", runtimeInputs: { nodeInputs: { "n-a1": { source: [{ kind: "file", fileRef: { source: "attachment", ...ref, ...(kind === "foreign" ? { attachmentId: "other-session" } : kind === "forged" ? { bytes: 4 } : {}) } }] } } } })).rejects.toMatchObject({ code: "WF_INPUT_FILE_UNAUTHORIZED" })
+  expect(starts).toEqual([])
+  expect(h.agents.roots.get("session-1")!.messages).toEqual([])
+})
 
 it.each(["text", "json", "file"])("test_input_%s_without_file_node_reaches_first_real_child", async (kind) => {
   const { h, starts, entry } = await makeRealRunnerHarness("n-a1", { configure: serialFlow, runtimeInputs: async (dir: string) => {
