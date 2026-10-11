@@ -134,36 +134,40 @@ describe('wf_experience_learn：注册与 schema', () => {
 })
 
 describe('wf_experience_learn：字段字数约束（只做提示词引导，不做校验）', () => {
-  it('字段描述：逐字段给出域层预算与硬上限（数字取自经验域本体，工具层不重复定义）', async () => {
+  it('字段描述：逐字段给出域层预算；不向模型暴露硬上限', async () => {
     const h = await makeHarness()
     const fields = candidateFieldDescriptions(h)
 
-    const scalarFields: Array<[string, number, number]> = [
-      ['responsibility', FIELD_BUDGETS.responsibility, FIELD_LIMITS.responsibility],
-      ['task_type', FIELD_BUDGETS.taskType, FIELD_LIMITS.taskType],
-      ['decision_domain', FIELD_BUDGETS.decisionDomain, FIELD_LIMITS.decisionDomain],
-      ['situation', FIELD_BUDGETS.situation, FIELD_LIMITS.situation],
-      ['trigger', FIELD_BUDGETS.trigger, FIELD_LIMITS.trigger],
-      ['principle', FIELD_BUDGETS.principle, FIELD_LIMITS.principle],
-      ['recommended_action', FIELD_BUDGETS.recommendedAction, FIELD_LIMITS.recommendedAction],
+    const scalarFields: Array<[string, number]> = [
+      ['responsibility', FIELD_BUDGETS.responsibility],
+      ['task_type', FIELD_BUDGETS.taskType],
+      ['decision_domain', FIELD_BUDGETS.decisionDomain],
+      ['situation', FIELD_BUDGETS.situation],
+      ['trigger', FIELD_BUDGETS.trigger],
+      ['principle', FIELD_BUDGETS.principle],
+      ['recommended_action', FIELD_BUDGETS.recommendedAction],
     ]
-    for (const [name, budget, cap] of scalarFields) {
+    for (const [name, budget] of scalarFields) {
+      // 预算（数字取自经验域本体：同源断言）
       expect(fields[name]).toContain(`at most ${budget} characters`)
-      expect(fields[name]).toContain(`cap is ${cap}`)
+      // 硬上限不进模型可见面（用户裁决：预算已足够约束写作）
+      expect(fields[name]).not.toContain('cap')
     }
     for (const name of ['exclusions', 'evidence']) {
-      expect(fields[name]).toContain(`At most ${FIELD_BUDGETS.arrayLength} items, each aimed at ${FIELD_BUDGETS.arrayElement} characters`)
-      expect(fields[name]).toContain(`${FIELD_LIMITS.arrayLength} items of ${FIELD_LIMITS.arrayElement} characters`)
+      expect(fields[name]).toContain(`At most ${FIELD_BUDGETS.arrayLength} items`)
+      expect(fields[name]).toContain(`${FIELD_BUDGETS.arrayElement} characters`)
+      expect(fields[name]).not.toContain('cap')
     }
   })
 
-  it('工具描述：声明预算是提示词引导（轻微超出仍受理），并给出总预算与总上限', async () => {
+  it('工具描述：给出总预算；不向模型暴露总上限', async () => {
     const h = await makeHarness()
     const description = h.tools.definitions.get(WF_EXPERIENCE_LEARN)!.description
 
-    expect(description).toContain('prompt guidance, not a validation rule')
-    expect(description).toContain('a slight overrun is still accepted')
-    expect(description).toContain(`within about ${FIELD_BUDGETS.total} characters in total (cap ${FIELD_LIMITS.total})`)
+    // 总预算（同源断言）
+    expect(description).toContain(`${FIELD_BUDGETS.total} characters in total`)
+    // 总上限不进模型可见面
+    expect(description).not.toContain(String(FIELD_LIMITS.total))
   })
 })
 

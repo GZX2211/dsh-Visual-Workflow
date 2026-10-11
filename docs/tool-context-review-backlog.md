@@ -25,6 +25,7 @@
 | G1 | **画布所有字段的禁令句**（`retryLimit / reactLimit / promptFilePath / injectSystemPrompt / injectToolSections / sourceAssetId`）：`wf_org_catalog` 描述里的那句已删除（commit `e48e4bb`）；`graph-op-contract.ts` 的 `ROLE_NODE_DATA_CONTRACT` 里的同义句**待用户确认后一并删除** | 待执行 |
 | G2 | `reports/audit/VERIFY-ROUND2.md:272` 曾以「模型被明确告知不要传」为依据判定某条不构成契约漏洞；若 G1 的第二句也删掉，该依据失效（`apply.ts` 的 `PARENT_UNCONFIGURABLE_ROLE_FIELDS` 行为不变，结论实质不受影响） | 已告知 Team |
 | G3 | 同一事实两个错误码：`wf_db_query` 的 `WF_BAD_CALLER`（tool.ts:84）与 `WF_BAD_ARGS`（tool.ts:168） | 待执行（见 §4.1） |
+| G4 | **错误消息清点口径**：必须按「出口」找（`WfError` 构造点 + 所有封装构造函数如 `invalid(...)`），只扫字面量会漏（本轮已漏过 experience 域，见 §6.6） | 已写入治理规则 §3 |
 
 ---
 
@@ -149,14 +150,20 @@
 > 单次调用按主体类型只返回其中一份（agent→420 / orchestrator→592 / team→518 tokens）。
 > 播种条件为「该类型没有任何行」，已存在的行（含用户改写正文）不被覆盖。
 
-### 6.3 按「不影响调用即不常驻」标准可精简（待裁决）
+### 6.3 已按用户裁决执行（本轮，2026-10-11）
 
-| 项 | 位置 | 可省 | 理由 |
-|---|---|---|---|
-| 9 个字段名的罗列 | description 第 3 句（`responsibility, task_type, … evidence`） | ~230 字符 | 与 `parameters` 里逐字段说明**重复**（那里已列出并带预算） |
-| 元描述句 | description 第 4 句开头（`every field below states a generation budget in characters`） | ~90 字符 | 描述的是**描述自身结构**，不影响调用 |
-| 理由说明 | description 第 5 句尾（`a shorter candidate stays retrievable and cheap to recall`） | ~70 字符 | 只解释「为什么」，不影响调用 |
-| **合计** | | **~390 字符 ≈ 98 tokens** | |
+| 删除 / 改动 | 理由 |
+|---|---|
+| description 里的九字段名罗列（`responsibility, task_type, … evidence`） | 与 `parameters` 逐字段说明重复；保留「九个语义字段 + 未知字段被拒」 |
+| `Field length: every field below states a generation budget in characters.` | 描述自身结构的元描述，不影响调用 |
+| `text that exceeds a field cap (or the total cap) fails the whole call with WF_EXPERIENCE_VALIDATION and nothing is recorded.` | **硬上限不应被模型知晓**（用户裁决：已有预算控制） |
+| `(cap 8000)` 与 `: a shorter candidate stays retrievable and cheap to recall` | 同上（上限 + 理由说明） |
+| `parameters` 中每字段的 `the cap is <M>`（7 个标量）与 `the caps are 8 items of 500 characters`（2 个数组） | 同上；字段级只保留生成预算 |
+| `and each field description below states its length budget` | 元描述 |
+
+**结果**：description 2013→**1564** 字符（298→236 词）、`parameters` 2296→**2041**、合计 4309→**3605 字符 ≈ 901 tokens**（省 176）；已实测确认模型可见面**不再出现任何硬上限**（`8000` 与 `cap` 均不存在）。
+
+**测试同步**：把「预算 + 上限」断言改造为「预算（同源断言）+ 不得出现 cap（规则门禁）」——符合新规则（同源关系允许、完整文案不允许）。
 
 ### 6.4 待重做（方法论类 / 语言一致性）
 
@@ -172,3 +179,29 @@
 - **逐字段预算**给出（影响模型填写长度）——保留；
 - 失败码齐全且进文本：`WF_EXPERIENCE_BAD_ARGS` / `WF_EXPERIENCE_VALIDATION` / `WF_EXPERIENCE_NOT_INITIALIZED` / `WF_EXPERIENCE_WRONG_TYPE` / `WF_EXPERIENCE_EMBEDDING_UNAVAILABLE`；
 - experience 域**无中文残留**（本轮统一后已确认）。
+
+### 6.6 ⚠️ 更正：experience 域仍有中文残留（上轮遗漏，待修）
+
+上轮的扫描口径只覆盖 `new WfError(` / `reason:` / `message:` / `error:` 字面量，**漏掉了经辅助构造函数生成的错误**，因此 6.5 最后一条结论**是错误的**，此处更正。
+
+已确认（可直接定位）：
+
+- `src/host/experience/validation.ts` 定义 `function invalid(message) { return new WfError(message, ERR_EXPERIENCE_VALIDATION) }`，其 **19 条消息全部为中文**：字段非字符串 / 空白 / 超长、数组元素类型与空白、未知字段、同字段两种写法、九个字段总长超限、缺必填字段、`experience_type` 非法或与提交类型不一致、载荷顶层未知字段、单次候选数超限、候选非对象、候选与前面重复、必填字段被置空……
+  这是**经验学习/评估最高频的失败路径**（模型最常撞到的错误面）。
+
+按「非注释行且含中文」精确统计（含少量行尾注释，需逐条筛）：
+
+| 文件 | 行数 |
+|---|---|
+| `experience/validation.ts` | 26 |
+| `experience/subject.ts` | 19 |
+| `experience/service.ts` | 17 |
+| `experience/team-context.ts` | 11 |
+| `experience/feedback.ts` | 8 |
+| `experience/embedding-codec.ts` | 7 |
+| `experience/retrieval.ts` / `projection.ts` / `scoring.ts` | 各 1 |
+| 三工具 `apply.ts`（learn / recall / feedback） | 13 / 2 / 3 |
+| 三工具 `tool.ts` | 2 / 3 / 2 |
+
+**治理规则补充（已写入 §3）**：错误消息必须按「出口」清点——`WfError` 构造点 **+ 所有封装构造函数**（`invalid(...)`、`fail(...)` 等），不能只扫字面量；否则会得出「已全英文」的错误结论。
+
