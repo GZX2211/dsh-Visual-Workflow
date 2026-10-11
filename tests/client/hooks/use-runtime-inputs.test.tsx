@@ -16,13 +16,20 @@ let container: HTMLDivElement | undefined
 let face!: { inputs: ReturnType<typeof useRuntimeInputs>; control: ReturnType<typeof useRunControl> }
 const options: RuntimeInputOptions = { nodeInputs: { workflow: {}, first: {} }, files: [{ attachmentId: "att", name: "data.csv", bytes: 4 }], handoffPolicy: "explicit" }
 const checkpoint = { id: "run", flowId: "flow", inputRevision: 3, handoffPolicy: "auto", runtimeInputs: { workflowInputs: { subject: [{ kind: "text", value: "saved" }] }, nodeInputs: { first: { old: [{ kind: "json", value: { count: 2 } }] } } }, nodes: [{ nodeId: "first", status: "pending", attempts: 0 }, { nodeId: "workflow", status: "running", attempts: 1 }] }
+const previousAttachment = { attachmentId: "att-a", name: "previous.csv", bytes: 4 }
+const newAttachment = { attachmentId: "att-b", name: "current.csv", bytes: 7 }
+function attachmentCheckpointOptions(files = [previousAttachment, newAttachment]): RuntimeInputOptions {
+  return { ...structuredClone(options), initialNodeId: "first", nodeInputs: { first: { source: { kind: "file" } } }, files,
+    checkpoint: { runId: "old", runtimeInputs: { workflowInputs: { subject: [{ kind: "text", value: "previous subject" }] }, nodeInputs: { first: { source: [{ kind: "file", fileRef: { source: "attachment", ...previousAttachment } }] } } } },
+  }
+}
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done }); return { promise, resolve } }
 async function render(remote: RemoteFace, owner = "session:flow", dispatch = vi.fn()) {
   function Harness({ owner }: { owner: string }) {
     const inputs = useRuntimeInputs(remote, zh, owner)
     const control = useRunControl(dispatch, remote, inputs.prepare, inputs.lifecycle)
     useEffect(() => { face = { inputs, control } })
-    return inputs.dialog ? <RuntimeInputsDialog state={inputs.dialog} t={zh} onCancel={inputs.cancel} onChange={inputs.change} onAdd={inputs.add} onRemove={inputs.remove} onUpload={inputs.upload} onSubmit={inputs.submit} /> : null
+    return inputs.dialog ? <RuntimeInputsDialog state={inputs.dialog} t={zh} onCancel={inputs.cancel} onReuseCheckpointInputs={inputs.reuseCheckpointInputs} onChange={inputs.change} onAdd={inputs.add} onRemove={inputs.remove} onUpload={inputs.upload} onSubmit={inputs.submit} /> : null
   }
   container = document.createElement("div"); document.body.append(container)
   root = createRoot(container)
@@ -123,16 +130,62 @@ it.each(["multiple-files", "multiple-targets", "multiple-slots", "unknown-target
   expect(await pending).toBeNull()
 })
 
-it("test_new_run_preserves_reviewed_input_and_sets_fresh_start_without_resuming", async () => {
+it.each([true, false])("test_fresh_start_configure_%s_selects_unique_new_attachment_without_inheriting_old_input", async (configure) => {
   const remote = remoteOf(() => ({ runId: "new" }))
-  vi.mocked(remote.call).mockImplementationOnce(async () => ({ ...options, initialNodeId: "first", nodeInputs: { first: { source: { kind: "file" } } }, checkpoint: { runId: "old", runtimeInputs: { workflowInputs: {}, nodeInputs: { first: { source: [{ kind: "file", fileRef: { source: "attachment", ...options.files[0] } }] } } } } }))
+  vi.mocked(remote.call).mockImplementationOnce(async () => attachmentCheckpointOptions([newAttachment]))
+  await render(remote)
+  let started!: Promise<string | null>
+  await act(async () => { started = face.control.startRun("session", "flow", configure, true) })
+  if (configure) {
+    expect(container!.textContent).toContain(zh.runtimeFreshInputsHelp)
+    expect(container!.textContent).toContain("source: current.csv")
+    await act(async () => { await face.inputs.submit() })
+  } else expect(face.inputs.dialog).toBeNull()
+  expect(await started).toBe("new")
+  expect(vi.mocked(remote.call).mock.calls.find(([name]) => name === EP.EP_RUN)?.[1]).toEqual({ sessionId: "session", flowId: "flow", freshStart: true, handoffPolicy: "explicit", runtimeInputs: { workflowInputs: {}, nodeInputs: { first: { source: [{ kind: "file", fileRef: { source: "attachment", ...newAttachment } }] } } } })
+  expect(vi.mocked(remote.call).mock.calls.some(([name]) => name === EP.EP_RUN_RESUME || name === EP.EP_RUN_INPUT_BIND)).toBe(false)
+})
+
+it("test_normal_checkpoint_resume_keeps_attachment_A_when_attachment_B_is_available", async () => {
+  const config = attachmentCheckpointOptions()
+  const remote = remoteOf(() => ({ runId: "resumed" }))
+  vi.mocked(remote.call).mockImplementationOnce(async () => config)
+  await render(remote)
+  await act(async () => { expect(await face.control.startRun("session", "flow")).toBe("resumed") })
+  expect(face.inputs.dialog).toBeNull()
+  expect(vi.mocked(remote.call).mock.calls.find(([name]) => name === EP.EP_RUN)?.[1]).toEqual({ sessionId: "session", flowId: "flow", handoffPolicy: "explicit", runtimeInputs: config.checkpoint!.runtimeInputs })
+})
+
+it("test_fresh_start_reuses_checkpoint_inputs_only_after_explicit_user_action", async () => {
+  const config = attachmentCheckpointOptions()
+  const remote = remoteOf(() => ({ runId: "fresh" }))
+  vi.mocked(remote.call).mockImplementationOnce(async () => config)
   await render(remote)
   let started!: Promise<string | null>
   await act(async () => { started = face.control.startRun("session", "flow", true, true) })
+  expect(face.inputs.dialog?.inputs).toEqual({ workflowInputs: {}, nodeInputs: {} })
+  await act(async () => { face.inputs.add("node:first", "source", "attachment", newAttachment.attachmentId) })
+  expect(face.inputs.dialog?.inputs.nodeInputs.first.source).toEqual([{ kind: "file", fileRef: { source: "attachment", ...newAttachment } }])
+  const reuse = Array.from(container!.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === zh.runtimeReuseCheckpointInputs)!
+  await act(async () => { reuse.click() })
+  expect(face.inputs.dialog?.inputs).toEqual(config.checkpoint!.runtimeInputs)
+  expect(container!.textContent).toContain("source: previous.csv")
   await act(async () => { await face.inputs.submit() })
-  expect(await started).toBe("new")
-  expect(vi.mocked(remote.call).mock.calls.find(([name]) => name === EP.EP_RUN)?.[1]).toMatchObject({ sessionId: "session", flowId: "flow", freshStart: true, runtimeInputs: { nodeInputs: { first: { source: [{ fileRef: options.files[0] }] } } } })
-  expect(vi.mocked(remote.call).mock.calls.some(([name]) => name === EP.EP_RUN_RESUME || name === EP.EP_RUN_INPUT_BIND)).toBe(false)
+  expect(await started).toBe("fresh")
+  expect(vi.mocked(remote.call).mock.calls.find(([name]) => name === EP.EP_RUN)?.[1]).toEqual({ sessionId: "session", flowId: "flow", freshStart: true, handoffPolicy: "explicit", runtimeInputs: config.checkpoint!.runtimeInputs })
+})
+
+it("test_pending_binding_does_not_offer_or_apply_fresh_input_reuse", async () => {
+  const remote = remoteOf()
+  vi.mocked(remote.call).mockImplementationOnce(async () => attachmentCheckpointOptions())
+  await render(remote)
+  const { pending } = await prepare("run", true)
+  expect(container!.textContent).not.toContain(zh.runtimeReuseCheckpointInputs)
+  await act(async () => { face.inputs.reuseCheckpointInputs() })
+  expect(face.inputs.dialog?.inputs).toEqual(checkpoint.runtimeInputs)
+  expect(vi.mocked(remote.call).mock.calls.some(([name]) => name === EP.EP_RUN_INPUT_BIND)).toBe(false)
+  await act(async () => { face.inputs.cancel() })
+  expect(await pending).toBeNull()
 })
 
 it("test_active_binding_does_not_implicitly_choose_newly_uploaded_attachment", async () => {
@@ -175,21 +228,21 @@ it("test_fresh_run_dialog_prepares_unique_attachment_using_declared_target_and_s
   expect(vi.mocked(remote.call).mock.calls.find(([name]) => name === EP.EP_RUN)?.[1]).toMatchObject({ freshStart: true, runtimeInputs: { nodeInputs: { first: { source: [{ fileRef: options.files[0] }] } } } })
 })
 
-it("test_multiple_attachment_dialog_requires_selection_and_adds_public_reference_without_path", async () => {
-  const second = { attachmentId: "att2", name: "second.csv", bytes: 7 }
+it.each([true, false])("test_fresh_start_configure_%s_multiple_attachments_A_and_B_require_selection_without_old_binding", async (configure) => {
   const remote = remoteOf(() => ({ runId: "selected" }))
-  vi.mocked(remote.call).mockImplementationOnce(async () => ({ ...options, initialNodeId: "first", nodeInputs: { first: { source: { kind: "file" } } }, files: [...options.files, second] }))
+  vi.mocked(remote.call).mockImplementationOnce(async () => attachmentCheckpointOptions())
   await render(remote)
   let started!: Promise<string | null>
-  await act(async () => { started = face.control.startRun("session", "flow", true, true) })
-  expect(face.inputs.dialog?.inputs.nodeInputs).toEqual({})
-  const select = Array.from(container!.querySelectorAll<HTMLSelectElement>("select")).find((select) => select.querySelector('option[value="att2"]'))!
+  await act(async () => { started = face.control.startRun("session", "flow", configure, true) })
+  expect(face.inputs.dialog?.inputs).toEqual({ workflowInputs: {}, nodeInputs: {} })
+  expect(vi.mocked(remote.call).mock.calls.some(([name]) => name === EP.EP_RUN)).toBe(false)
+  const select = Array.from(container!.querySelectorAll<HTMLSelectElement>("select")).find((select) => select.querySelector('option[value="att-b"]'))!
   expect(select.value).toBe("")
-  await act(async () => { select.value = "att2"; select.dispatchEvent(new Event("change", { bubbles: true })) })
+  await act(async () => { select.value = "att-b"; select.dispatchEvent(new Event("change", { bubbles: true })) })
   await act(async () => { Array.from(container!.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === zh.runtimeAdd)!.click() })
   await act(async () => { await face.inputs.submit() })
   expect(await started).toBe("selected")
-  expect(vi.mocked(remote.call).mock.calls.find(([name]) => name === EP.EP_RUN)?.[1]).toMatchObject({ runtimeInputs: { nodeInputs: { first: { source: [{ kind: "file", fileRef: { source: "attachment", ...second } }] } } } })
+  expect(vi.mocked(remote.call).mock.calls.find(([name]) => name === EP.EP_RUN)?.[1]).toEqual({ sessionId: "session", flowId: "flow", freshStart: true, handoffPolicy: "explicit", runtimeInputs: { workflowInputs: {}, nodeInputs: { first: { source: [{ kind: "file", fileRef: { source: "attachment", ...newAttachment } }] } } } })
 })
 
 it.each(["WF_INPUT_STATE_CONFLICT", "WF_BUSY"])("test_bind_%s_preserves_diagnostic_without_automatic_retry", async (code) => {

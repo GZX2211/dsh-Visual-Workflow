@@ -6,13 +6,14 @@ import type { InputEditorKind } from "../hooks/use-runtime-inputs.js"
 interface Props {
   state: RuntimeInputDialogState; t: Dict
   onCancel(): void; onSubmit(): void
+  onReuseCheckpointInputs(): void
   onChange(patch: Partial<RuntimeInputDialogState>): void
   onAdd(target: string, name: string, kind: InputEditorKind, value: string): void
   onRemove(target: string, name: string): void
   onUpload(target: string, name: string, file: File): void
 }
 
-export function RuntimeInputsDialog({ state, t, onCancel, onSubmit, onChange, onAdd, onRemove, onUpload }: Props): import("react").ReactElement {
+export function RuntimeInputsDialog({ state, t, onCancel, onSubmit, onReuseCheckpointInputs, onChange, onAdd, onRemove, onUpload }: Props): import("react").ReactElement {
   const initialNode = state.nodeId ?? state.options.initialNodeId
   const initialRequirements = initialNode ? state.options.nodeInputs[initialNode] ?? {} : {}
   const initialSlot = Object.keys(initialRequirements).length === 1 ? Object.keys(initialRequirements)[0] : ""
@@ -27,8 +28,10 @@ export function RuntimeInputsDialog({ state, t, onCancel, onSubmit, onChange, on
     <section className="wf-confirm wf-runtime-inputs" role="dialog" aria-modal="true" aria-label={t.runtimeInputsTitle}>
       <h3>{state.runId ? t.runtimeBindTitle : t.runtimeInputsTitle}</h3>
       <p>{t.runtimeInputHelp}</p>
+      {state.freshStart && <p>{t.runtimeFreshInputsHelp}</p>}
       {!!state.blockedNodes?.length && <p>{t.runtimeRestartRequired} ({state.blockedNodes.join(", ")})</p>}
       <fieldset disabled={state.busy || !!state.runId && !state.nodeId} className="wf-runtime-inputs__fields">
+        {state.freshStart && state.options.checkpoint?.runtimeInputs && <button type="button" className="wf-btn" onClick={onReuseCheckpointInputs}>{t.runtimeReuseCheckpointInputs}</button>}
         <label>{t.runtimeTarget}<select value={selected} onChange={(event) => { const next = event.target.value; if (state.runId) onChange({ nodeId: next.slice(5) }); else setTarget(next); setName(""); setValue("") }}>
           {!state.runId && <option value="workflow">{t.runtimeWorkflowTarget}</option>}
           {state.eligibleNodes.map((id) => <option key={id} value={`node:${id}`}>{id}</option>)}

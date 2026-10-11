@@ -127,6 +127,8 @@ export declare const zh: {
     runtimeChooseAttachment: string;
     runtimeExplicit: string;
     runtimeInputHelp: string;
+    runtimeFreshInputsHelp: string;
+    runtimeReuseCheckpointInputs: string;
     runtimeRestartRequired: string;
     runtimeNodeLocked: string;
     runtimeInputOwnerError: string;

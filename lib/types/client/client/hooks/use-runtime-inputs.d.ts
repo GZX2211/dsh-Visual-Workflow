@@ -28,6 +28,7 @@ export interface RuntimeInputDialogState {
     error: string;
     busy: boolean;
     blockedNodes?: string[];
+    freshStart?: boolean;
 }
 export declare function useRuntimeInputs(remote: RemoteFace, t: Dict, owner: string): {
     dialog: RuntimeInputDialogState | null;
@@ -35,6 +36,7 @@ export declare function useRuntimeInputs(remote: RemoteFace, t: Dict, owner: str
     lifecycle: RuntimeInputLifecycle;
     cancel: () => void;
     change: (patch: Partial<RuntimeInputDialogState>) => void;
+    reuseCheckpointInputs: () => void;
     add: (target: string, name: string, kind: InputEditorKind, value: string) => void;
     remove: (target: string, name: string) => void;
     upload: (target: string, name: string, file: File) => Promise<void>;
