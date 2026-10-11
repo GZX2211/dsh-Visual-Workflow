@@ -1,5 +1,7 @@
 import type { WorkflowDocument } from "../shared/graph-model.js";
 import type { JsonValue, RuntimeInputs, RuntimeInputValue, SessionInputFile } from "../shared/runtime-types.js";
+/** Public attachment references never include resolved host paths; stored inputs remain intact. */
+export declare function publicRuntimeInputs(inputs: RuntimeInputs | undefined): RuntimeInputs | undefined;
 export declare function jsonValueOf(value: unknown, field: string, depth?: number, ancestors?: Set<unknown>): JsonValue;
 export interface InputAccess {
     sessionId: string;

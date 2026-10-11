@@ -19,7 +19,7 @@ import type { Dict } from '../i18n.js'
 import { EP } from '../lib/remote.js'
 
 export interface RunActionsFace {
-  startRun(configureInputs?: boolean): Promise<void>
+  startRun(configureInputs?: boolean, freshStart?: boolean): Promise<void>
   stopRun(): Promise<void>
   openHistory(): Promise<void>
   resumeRun(runId: string): Promise<void>
@@ -41,7 +41,7 @@ export function useRunActions(
   createInstanceFromCanvas: DocumentActionsFace['createInstanceFromCanvas'],
 ): RunActionsFace {
   // ---------- 运行（模式一） ----------
-  const startRun = useCallback(async (configureInputs = false) => {
+  const startRun = useCallback(async (configureInputs = false, freshStart = false) => {
     if (state.mode !== 'mode1') return
     // 模板态 / 资产态：运行前自动「创建实例」（含开启新会话/覆盖确认）再运行——
     // 创建是异步的（可能弹确认框），后续启动统一经 afterCreate 回调接续。
@@ -54,7 +54,7 @@ export function useRunActions(
           notify('error', t.needStartAndEnd)
           return
         }
-        void runControl.startRun(flow.sessionId, flow.id, configureInputs).then((runId) => {
+        void runControl.startRun(flow.sessionId, flow.id, configureInputs, freshStart).then((runId) => {
           if (runId) notify('success', t.toastRunning)
         }).catch((error) => toastError(error))
       })
@@ -72,7 +72,7 @@ export function useRunActions(
     if (!saved) return
     try {
       // 运行当前实例：会话 = 实例绑定的会话（不再支持运行期新建会话）
-      const runId = await runControl.startRun((saved as import('../../host/shared/graph-model.js').WorkflowDocument).sessionId, saved.id, configureInputs)
+      const runId = await runControl.startRun((saved as import('../../host/shared/graph-model.js').WorkflowDocument).sessionId, saved.id, configureInputs, freshStart)
       if (runId) notify('success', t.toastRunning)
     } catch (error) {
       toastError(error)

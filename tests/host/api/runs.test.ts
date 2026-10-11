@@ -24,15 +24,50 @@ it("test_input_options_hide_attachment_path_and_binding_uses_current_session_res
   expect(JSON.stringify(options)).not.toContain(path)
   await h.api.handle("run", { sessionId: "session-1", flowId: "flow-1" })
   const binding = { sessionId: "session-1", runId: "run-1", nodeId: "n-a2", expectedRevision: 0, inputs: { source: [{ kind: "file", fileRef: { source: "attachment", ...file } }] } }
-  await h.api.handle("runInputBind", binding)
+  const result = await h.api.handle("runInputBind", binding)
+  expect(JSON.stringify(result)).not.toContain(path)
   expect(h.runtime.runSnapshot("run-1")?.runtimeInputs?.nodeInputs["n-a2"].source[0]).toMatchObject({ fileRef: { path } })
   binding.expectedRevision = 1
   await h.api.handle("runInputBind", { ...binding, inputs: { source: [{ kind: "file", fileRef: { source: "attachment", ...file, path: "/forged/host/path" } }] } })
   expect(h.runtime.runSnapshot("run-1")?.runtimeInputs?.nodeInputs["n-a2"].source[0]).toMatchObject({ fileRef: { path } })
   await expect(h.api.handle("runInputBind", { ...binding, sessionId: "other", expectedRevision: 2 })).rejects.toMatchObject({ code: "WF_NOT_FOUND" })
+  expect(JSON.stringify(await h.api.handle("runStatus", { sessionId: "session-1", runId: "run-1" }))).not.toContain(path)
+  expect((await h.store.getRun("run-1"))?.runtimeInputs?.nodeInputs["n-a2"].source[0]).toMatchObject({ fileRef: { path } })
+  await h.runtime.stopRun("run-1")
+  expect(JSON.stringify(await h.api.handle("runtimeInputOptions", { sessionId: "session-1", flowId: "flow-1" }))).not.toContain(path)
+  expect(JSON.stringify(await h.api.handle("runStatus", { sessionId: "session-1", runId: "run-1" }))).not.toContain(path)
+  expect(JSON.stringify(await h.api.handle("runHistory", { sessionId: "session-1", flowId: "flow-1" }))).not.toContain(path)
+  const reviewed = await h.api.handle("runtimeInputOptions", { sessionId: "session-1", flowId: "flow-1" }) as { checkpoint: { runtimeInputs: unknown } }
+  await h.api.handle("run", { sessionId: "session-1", flowId: "flow-1", freshStart: true, runtimeInputs: reviewed.checkpoint.runtimeInputs })
+  expect(h.runtime.runSnapshot("run-2")?.runtimeInputs?.nodeInputs["n-a2"].source[0]).toMatchObject({ fileRef: { path } })
 })
 
 describe('运行端点', () => {
+  it("test_fresh_start_reuses_definition_and_inputs_without_inheriting_stopped_results", async () => {
+    const h = await makeHarness()
+    await saveFlow(h)
+    await h.api.handle("run", { sessionId: "session-1", flowId: "flow-1", runtimeInputs: { nodeInputs: { "n-a1": { source: [{ kind: "text", value: "reviewed" }] } } } })
+    await h.runtime.wfRunNode({ isChild: false, sessionId: "session-1" }, { nodeId: "n-a1" })
+    await h.runtime.handleSubagentEnd({ id: "child-1", stopReason: "completed", lastAssistantMessage: [{ type: "text", text: "old evidence" }] })
+    await h.runtime.stopRun("run-1")
+    const started = await h.api.handle("run", { sessionId: "session-1", flowId: "flow-1", freshStart: true, runtimeInputs: { nodeInputs: { "n-a1": { source: [{ kind: "text", value: "reviewed" }] } } } })
+    expect(started).toMatchObject({ runId: "run-2" })
+    expect(started).not.toHaveProperty("resumedFromRunId")
+    const snapshot = (await h.store.getRun("run-2"))!
+    expect(snapshot.nodes.find((node) => node.nodeId === "n-a1")).toMatchObject({ status: "pending", attempts: 0, output: "" })
+    expect(snapshot.runtimeInputs?.nodeInputs["n-a1"].source[0]).toMatchObject({ value: "reviewed" })
+    expect(snapshot.inputRevision).toBe(1)
+    expect(snapshot.flowId).toBe("flow-1")
+  })
+
+  it("test_fresh_start_does_not_replace_active_run_or_accept_nonboolean_flag", async () => {
+    const h = await makeHarness()
+    await saveFlow(h)
+    await h.api.handle("run", { sessionId: "session-1", flowId: "flow-1" })
+    await expect(h.api.handle("run", { sessionId: "session-1", flowId: "flow-1", freshStart: true })).rejects.toMatchObject({ code: "WF_LOCKED" })
+    await expect(h.api.handle("run", { sessionId: "session-1", flowId: "flow-1", freshStart: "true" })).rejects.toMatchObject({ status: 400 })
+    expect(h.runtime.activeRunForSession("session-1")?.snapshot.id).toBe("run-1")
+  })
   it('run 无断点全新启动；有断点自动续跑（resumedFromRunId）', async () => {
     const h = await makeHarness()
     await saveFlow(h)

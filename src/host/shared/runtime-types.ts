@@ -12,5 +12,7 @@ export interface RuntimeInputOptions {
   nodeInputs: Record<string, Record<string, InputRequirement>>
   files: InputAttachmentRef[]
   handoffPolicy: HandoffPolicy
+  /** Canonical initial Agent, only when the existing graph query resolves a unique target. */
+  initialNodeId?: string
   checkpoint?: { runId: string; runtimeInputs?: RuntimeInputs; handoffPolicy?: HandoffPolicy }
 }

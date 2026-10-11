@@ -1,18 +1,20 @@
-// Deterministic runtime integration: the runner is a test double; all file IO,
-// intermediate products, ctx handoffs, persistence and finish are real.
-import { afterEach, expect, it } from 'vitest'
+// Real Runtime/NodeAgentRunner, authorization, file IO, settlement and persistence;
+// only the model transport produces deterministic business outputs, not model E2E.
+import { afterEach, expect, it, onTestFinished } from 'vitest'
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { NodeStartInput } from '../../src/host/orchestrator/index.js'
 import { DEFAULT_OUTPUT_CONTRACT, NODE_HARD_CONSTRAINTS } from "../../src/host/prompts/index.js"
 import { copyIntoManagedFile } from "../../src/host/storage/managed-files.js"
+import { NodeAgentRunner, createChildToolFilterSetup, createChildPromptSetup, createModelSelectionSetup, createReactGuard, type SubagentsServiceLike } from "../../src/host/agent/index.js"
 import { agent, stage, fileNode, makeFlow, makeHarness, caller, cleanupTempDirs } from '../host/orchestrator/fixtures/harness.js'
 
 afterEach(cleanupTempDirs)
 
-it.each(["explicit", "auto"] as const)('provided sales CSV: five file-processing stages with %s handoffs and verified report (Fake runner)', async (policy) => {
-  const h = await makeHarness({ documentTextLimit: 20000, outputFullLimit: 20000 }, { workingDirectory: async () => h.dir })
+it.each(["explicit", "auto", "attachment"] as const)('test_sales_five_real_runner_stages_%s_verify_actual_artifacts_with_fake_model_transport', async (policy) => {
+  const files: import("../../src/host/shared/runtime-types.js").SessionInputFile[] = []
+  const h = await makeHarness({ documentTextLimit: 20000, outputFullLimit: 20000 }, { workingDirectory: async () => h.dir, sessionInputFiles: async () => files })
   const ids = ['load_data', 'quality_check', 'sales_stats', 'summary_gen', 'report_gen']
   const flow = makeFlow()
   flow.nodes = [stage('start', 'start'), ...ids.map((id, index) => agent(id, id, {
@@ -25,19 +27,24 @@ it.each(["explicit", "auto"] as const)('provided sales CSV: five file-processing
   const csv = join(h.dir, 'sales_workflow_test.csv')
   await copyFile(fileURLToPath(new URL('../fixtures/sales_workflow_test.csv', import.meta.url)), csv)
   const upload = policy === "auto" ? await copyIntoManagedFile(h.store.root, { sessionId: "session-1", name: "sales.csv", base64: (await readFile(csv)).toString("base64") }) : undefined
+  const ref = { attachmentId: "admitted-sales-csv", name: "sales_workflow_test.csv", bytes: (await readFile(csv)).length }
+  if (policy === "attachment") files.push({ ...ref, path: csv })
   const inputFile = upload ? join(h.store.root, upload.managedPath) : csv
   await mkdir(join(h.dir, 'output'))
   const outputs = new Map<string, string>()
   const actualReads: string[] = []
-  h.runner.startNodeTask = async (input: NodeStartInput) => {
-    h.runner.calls.push(input)
-    const id = input.node.id
+  const toolFilter = createChildToolFilterSetup()
+  let modelCalls = 0
+  const transport: SubagentsServiceLike = { list: () => ["spawn"], startContinuable: async (spec) => {
+    expect(toolFilter.peekPending?.()).toEqual(["read", "write"])
+    const id = ids[modelCalls++]
     const index = ids.indexOf(id)
     const previous = index > 0 ? outputs.get(ids[index - 1])! : inputFile
-    expect(input.blocks[0].text).toContain(previous)
-    if (index < 4) expect(input.blocks[0].text).toContain(DEFAULT_OUTPUT_CONTRACT)
-    else expect(input.blocks[0].text).not.toContain(DEFAULT_OUTPUT_CONTRACT)
-    if (policy === "auto") expect(input.blocks[0].text).toContain(NODE_HARD_CONSTRAINTS.declaredOutputFiles)
+    expect(spec.request.prompt[0].text).toContain(`「${id}」`)
+    expect(spec.request.prompt[0].text).toContain(previous)
+    if (index < 4) expect(spec.request.prompt[0].text).toContain(DEFAULT_OUTPUT_CONTRACT)
+    else expect(spec.request.prompt[0].text).not.toContain(DEFAULT_OUTPUT_CONTRACT)
+    if (policy !== "explicit") expect(spec.request.prompt[0].text).toContain(NODE_HARD_CONSTRAINTS.declaredOutputFiles)
     const read = async (path: string) => { actualReads.push(path); return readFile(path, 'utf8') }
     let content: string
     let output: string
@@ -83,13 +90,21 @@ it.each(["explicit", "auto"] as const)('provided sales CSV: five file-processing
     const path = join(h.dir, output)
     await writeFile(path, content)
     outputs.set(id, path)
-    return { childId: `sales-${id}`, created: true }
-  }
+    h.runtime.handleSubagentStart({ id: `sales-${id}`, runId: `epoch-${id}` })
+    return { childId: `sales-${id}` }
+  }, sendMessage: async () => { throw new Error("fixture expects first dispatch only") }, interrupt: () => {} }
+  const runner = new NodeAgentRunner({ store: h.store, agents: () => ({ get: (id) => h.agents.getRootAgent(id) }), subagents: () => transport, teams: () => null,
+    toolsView: { visibleToolNames: async () => ["read", "write"], agentToolNames: async () => ["read", "write"], presetToolNames: async () => ["read", "write"] },
+    toolFilter, promptSetup: createChildPromptSetup(), modelSelection: createModelSelectionSetup(), react: createReactGuard().bridge,
+  })
+  h.runner.startNodeTask = (input: NodeStartInput) => runner.startNodeTask(input)
+  h.runner.interruptChild = (childId, sessionId) => runner.interruptChild(childId, sessionId)
+  onTestFinished(() => { h.runtime.dispose(); runner.dispose() })
   await h.store.saveWorkflow(flow, 'session-1')
-  const { runId } = await h.runtime.startRun({ sessionId: 'session-1', flowId: flow.id, ...(upload ? { handoffPolicy: "auto" as const, runtimeInputs: { nodeInputs: { load_data: { source: [{ kind: "file", fileRef: { source: "managed", path: upload.managedPath } }] } } } } : { fileBindings: { csv: [csv] } }) })
+  const { runId } = await h.runtime.startRun({ sessionId: 'session-1', flowId: flow.id, ...(policy !== "explicit" ? { handoffPolicy: "auto" as const, runtimeInputs: { nodeInputs: { load_data: { source: [{ kind: "file", fileRef: upload ? { source: "managed", path: upload.managedPath } : { source: "attachment", ...ref } }] } } } } : { fileBindings: { csv: [csv] } }) })
   for (const nodeId of ids) {
     await h.runtime.wfRunNode(caller, { nodeId })
-    await h.runtime.handleSubagentEnd({ id: `sales-${nodeId}`, stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: outputs.get(nodeId)! }] })
+    await h.runtime.handleSubagentEnd({ id: `sales-${nodeId}`, runId: `epoch-${nodeId}`, stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: outputs.get(nodeId)! }] })
   }
   expect(actualReads).toEqual([inputFile, ...ids.slice(0, 3).map((id) => outputs.get(id)!), outputs.get("sales_stats"), outputs.get("summary_gen")])
   const stats = JSON.parse(await readFile(outputs.get('sales_stats')!, 'utf8'))
@@ -97,6 +112,8 @@ it.each(["explicit", "auto"] as const)('provided sales CSV: five file-processing
   await h.runtime.wfFinish(caller, { status: 'completed', summary: '五个节点完成；报告已落盘并核验' })
   const snapshot = (await h.store.getRun(runId))!
   expect(snapshot.status).toBe('completed')
+  expect(modelCalls).toBe(5)
+  if (policy === "attachment") expect(snapshot).toMatchObject({ inputRevision: 1, runtimeInputs: { nodeInputs: { load_data: { source: [{ fileRef: { source: "attachment", ...ref, path: csv } }] } } } })
   expect(snapshot.nodes.filter((node) => ids.includes(node.nodeId))).toHaveLength(5)
   for (const node of snapshot.nodes.filter((node) => ids.includes(node.nodeId))) {
     expect(node).toMatchObject({ status: 'ok', attempts: 1, stopReason: 'completed', artifacts: [{ path: outputs.get(node.nodeId), size: expect.any(Number), verifiedAt: expect.any(String) }] })
