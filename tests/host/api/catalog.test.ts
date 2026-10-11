@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { ToolSwitchStore } from '../../../src/host/tools/infrastructure/tool-switches.js'
+import { registerRoutes } from '../../../src/host/api/index.js'
 import { DEFAULT_DISABLED_ON_FIRST_INSTALL } from '../../../src/host/shared/protocol.js'
 import { cleanupAll, makeHarness, snapshotDshHome } from './fixtures/api-harness.js'
 
@@ -144,6 +145,82 @@ describe('MCP 端点', () => {
     const removed = await h.api.handle('mcpDelete', { id: 'mcp-demo' })
     expect(removed).toEqual({ deleted: true })
     expect(await h.api.handle('mcpList', {})).toEqual([])
+  })
+
+  it('D01-01：mcpPut 收到含换行的注入式 id → 拒绝（稳定错误码）且不写盘', async () => {
+    const h = await makeHarness()
+    const mcpDir = join(h.dataDir, 'dsh-home-inject')
+    process.env.DSH_HOME = mcpDir
+    const patch = join(mcpDir, 'profiles', 'web', 'cordis.patch.yml')
+    // 注入式 id（含换行）必须被拒绝：这是 D01-01 的核心（YAML 注入面）
+    await expect(
+      h.api.handle('mcpPut', {
+        server: {
+          id: 'mcp-x\n- insert:\n    - id: evil\n      name: "/tmp/evil.mjs"',
+          serverName: 'demo', transport: 'stdio', commandLine: 'node a.js',
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'WF_BAD_ARGS' })
+    // 拒绝发生在落盘前：注入内容不会进入用户 profile 配置
+    await expect(readFile(patch, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('D01-01 路由层：注入式 id 经 HTTP 路径映射为 400（不得退化为 500）', async () => {
+    const h = await makeHarness()
+    process.env.DSH_HOME = join(h.dataDir, 'dsh-home-route')
+    let registered: { handler?: (req: unknown, res: unknown) => Promise<void> } | null = null
+    h.ctx.services.set('webServer', {
+      register(route: { handler: (req: unknown, res: unknown) => Promise<void> }) {
+        registered = route
+        return () => { registered = null }
+      },
+    })
+    registerRoutes({ get: (name) => h.ctx.get(name), logger: { warn: () => {} } }, h.host)
+
+    const responses: Array<{ status: number; body: string }> = []
+    const res = {
+      writeHead(status: number) { responses.push({ status, body: '' }); return this },
+      end(body: string) { responses[responses.length - 1].body = String(body ?? ''); return this },
+    }
+    const body = JSON.stringify({ args: { server: { id: 'mcp-x\n- insert:\n    - id: evil', serverName: 'demo', transport: 'stdio', commandLine: 'node a.js' } } })
+    await registered!.handler!({ method: 'POST', url: '/visual-workflow/mcpPut', on(event: string, cb: (chunk?: unknown) => void) { if (event === 'data') cb(body); if (event === 'end') cb() }, destroy() {} }, res)
+
+    // api/AGENTS.md：调用方错误不得被响应成 500；稳定码 → 状态映射是边界职责。
+    expect(responses[0].status, '调用方入参错误不得被响应成 500').toBe(400)
+    expect(JSON.parse(responses[0].body)).toMatchObject({ ok: false, error: { code: 'WF_BAD_ARGS' } })
+  })
+
+  it('D01-02：streamable-http + headers 写盘后 mcpList 往返一致，且切换其他项后 headers 仍在', async () => {
+    const h = await makeHarness()
+    const mcpDir = join(h.dataDir, 'dsh-home-headers')
+    process.env.DSH_HOME = mcpDir
+    const patch = join(mcpDir, 'profiles', 'web', 'cordis.patch.yml')
+
+    await h.api.handle('mcpPut', {
+      server: {
+        id: 'mcp-http', serverName: 'http-demo', transport: 'streamable-http',
+        url: 'https://x/mcp', headers: { Authorization: 'Bearer secret', 'X-Trace': '1' },
+      },
+    })
+    await h.api.handle('mcpPut', {
+      server: { id: 'mcp-stdio', serverName: 'stdio-demo', transport: 'stdio', commandLine: 'node b.js' },
+    })
+
+    const headersDemo = async (): Promise<Record<string, string>> => {
+      const list = (await h.api.handle('mcpList', {})) as Array<{ id?: string; headers?: Record<string, string> }>
+      return list.find((row) => row.id === 'mcp-http')?.headers ?? {}
+    }
+
+    // ① 写侧必须真的把 headers 渲染进 config（真实机制：写侧原样丢弃，保存当次即丢）
+    const text = await readFile(patch, 'utf8')
+    expect(text).toContain('Authorization')
+    // ② 读侧往返一致（inline JSON 形态）
+    expect(await headersDemo()).toEqual({ Authorization: 'Bearer secret', 'X-Trace': '1' })
+
+    // ③ 对另一个服务器做 disable：整段托管区重建后前者的 headers 仍必须在文件中
+    await h.api.handle('mcpToggle', { id: 'mcp-stdio', disabled: true })
+    expect(await readFile(patch, 'utf8')).toContain('Authorization')
+    expect(await headersDemo()).toEqual({ Authorization: 'Bearer secret', 'X-Trace': '1' })
   })
 })
 

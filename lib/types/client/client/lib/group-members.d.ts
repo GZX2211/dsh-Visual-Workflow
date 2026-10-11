@@ -1,4 +1,13 @@
 /**
+ * 协作组成员上限（画布交互约束）。
+ *
+ * 为什么必须与部署层联动：成员在运行期由官方 `spawnTeammate` 创建，其名额是
+ * **会话级累计**的（`agent-team.maxMembers`，见 profile 的 `cordis.patch.yml`）——
+ * 画布放得下但名额不够时，失败发生在运行期（`TEAM_MEMBER_LIMIT`），用户无从预防。
+ * 因此画布上限只允许 ≤ 部署层名额；两者一起调整。
+ */
+export declare const GROUP_MEMBER_LIMIT = 30;
+/**
  * 合并重复节点（修复历史数据中协作组节点被重复追加的缺陷）：
  *  - 同 id 的协作组节点合并为一个，memberIds 取**并集**（不丢任何成员），其余字段保留后出现者；
  *  - 每个协作组节点的 memberIds **一律去重**（即便单组内出现重复 id，也会被清理）。

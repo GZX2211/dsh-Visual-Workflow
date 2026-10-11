@@ -19,7 +19,7 @@ export declare const ORG_META_NORMALIZE_CAPS: {
     readonly nodeMax: 200;
     /** 协作组数量上限的安全网。 */
     readonly groupMax: 50;
-    /** 组内人数上限的安全网（画布 UI 既有上限为 8，此处放宽）。 */
+    /** 组内人数上限的安全网（画布 UI 既有上限为 30，此处放宽）。 */
     readonly membersMax: 50;
     /** 并行分支上限的安全网。 */
     readonly parallelBranchMax: 50;

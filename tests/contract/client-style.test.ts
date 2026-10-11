@@ -4,13 +4,16 @@
 //   1. 片段登记完整：styles/ 下每个片段都被 index.ts 引入，且引入顺序与拼接顺序一致
 //      （顺序即覆盖顺序，漏登记会静默丢样式）；
 //   2. 无死类名：styles 里定义的 .wf-* 必须在 client 源码中被引用（动态拼接前缀除外）；
-//   3. token 单一来源：`var(--wf-*)` 引用必须在 tokens.ts 有定义，定义必须被引用；
+//   3. token 单一来源：`var(--wf-*)` 引用必须在 tokens.ts 有定义，定义必须被引用（均剥注释后判定）；
 //   4. 颜色字面量只允许出现在 tokens.ts（存量见 COLOR_BASELINE）；
 //   5. 不使用 CSS Modules，`.css` 直接导入只允许 entry.ts 的注入占位；
-//   6. 禁止静态内联样式：值全为字面量的 style={{…}} 必须落成语义类（存量见 INLINE_STYLE_BASELINE）。
+//   6. 禁止静态内联样式：值全为字面量的 style={{…}} 必须落成语义类（存量见 INLINE_STYLE_BASELINE）；
+//   7. 每个样式片段必须能被 CSS 解析器解析（lightningcss）：无效声明（非 CSS 注释语法 `//`、
+//      语法错误）在此拦截，避免「门禁恒绿但样式静默失效」。
 
 import { describe, expect, it } from 'vitest'
 import ts from 'typescript'
+import { transform } from 'lightningcss'
 import { importsOf, listSourceFiles, parseSource, readText, stripCssComments } from './fixtures/client-scan.js'
 
 const STYLE_DIR = 'src/client/styles'
@@ -113,6 +116,35 @@ const FRAGMENT_IMPORTS = [...INDEX_SOURCE.matchAll(/import \{ (\w+) \} from '\.\
   exportName: match[1],
 }))
 
+/** 读取某样式模块的等价表（导出名 → 模板正文中的 CSS 规则文本）。 */
+function fragmentCssOf(module: string): Map<string, string> {
+  const entries = [...readText(`${STYLE_DIR}/${module}.ts`).matchAll(/export const (\w+) = `([\s\S]*?)`/g)]
+  return new Map(entries.map((match) => [match[1], match[2]]))
+}
+
+/** 样式片段清单 = 片段模块（模块名 / 导出名 / CSS 正文），与 index.ts 的登记逐条对应。 */
+const STYLE_FRAGMENTS = FRAGMENT_IMPORTS.map((entry) => {
+  const css = fragmentCssOf(entry.module).get(entry.exportName)
+  return { module: entry.module, exportName: entry.exportName, css }
+})
+
+/**
+ * 剥掉 CSS 注释后的片段正文：只有它才能代表「真正生效的声明」。
+ * 为什么必须剥：注释放不进浏览器/解析器的声明表，让注释里的 `--wf-ink-3:` 参与
+ * 「token 已定义」判定，等于给一条失效声明开绿灯（D06-02 的根因）。
+ */
+function cssWithoutComments(css: string): string {
+  return stripCssComments(css)
+}
+
+/** 从 CSS 文本中抽取 `--wf-*:` 定义名（仅在剥注释后的文本上调用）。 */
+function tokenNamesIn(css: string): string[] {
+  return [...css.matchAll(/(--wf-[a-z0-9-]+)\s*:/g)].map((match) => match[1])
+}
+
+/** tokens.ts 定义的 token（在剥注释后的正文上匹配：注释里的定义不算定义）。 */
+const DEFINED_TOKENS = tokenNamesIn(cssWithoutComments(fragmentCssOf('tokens').get('tokensStyles') ?? ''))
+
 describe('客户端样式门禁（片段装配）', () => {
   it('styles/ 下每个片段都被 index.ts 引入，且无悬空引用', () => {
     expect(FRAGMENT_IMPORTS.map((entry) => entry.module).sort()).toEqual(FRAGMENTS.map(fragmentName).sort())
@@ -123,6 +155,28 @@ describe('客户端样式门禁（片段装配）', () => {
     expect(arrayBlock).not.toBeNull()
     const order = [...(arrayBlock?.[1] ?? '').matchAll(/^\s*(\w+),/gm)].map((match) => match[1])
     expect(order).toEqual(FRAGMENT_IMPORTS.map((entry) => entry.exportName))
+  })
+
+  it('styleFragments 抽取自检：每个片段都能取到正文（防抽取失效导致门禁空转）', () => {
+    expect(STYLE_FRAGMENTS.length).toBe(FRAGMENT_IMPORTS.length)
+    for (const fragment of STYLE_FRAGMENTS) {
+      expect(fragment.css, `${fragment.module} 未能抽取到 CSS 正文（门禁会空转）`).toBeTypeOf('string')
+      expect(fragment.css!.trim().length, `${fragment.module} 的 CSS 正文为空`).toBeGreaterThan(0)
+    }
+  })
+
+  it('每个样式片段都能被项目依赖的 CSS 解析器解析（禁止无效声明/非 CSS 注释语法）', () => {
+    const failures: string[] = []
+    for (const fragment of STYLE_FRAGMENTS) {
+      try {
+        const { code } = transform({ filename: `${fragment.module}.css`, code: Buffer.from(fragment.css!, 'utf8'), minify: false })
+        // 解析成功但输出为空同样属于「该片段不产生任何规则」——按失败处理，避免空片段静默通过
+        if (code.length === 0) failures.push(`${fragment.module}: 解析成功但输出为空（0 字节）`)
+      } catch (error) {
+        failures.push(`${fragment.module}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    expect(failures, '样式片段必须是合法 CSS（lightningcss 可解析）；非 CSS 注释语法（//）与语法错误在此拦截').toEqual([])
   })
 })
 
@@ -143,31 +197,31 @@ describe('客户端样式门禁（类名使用率）', () => {
 })
 
 describe('客户端样式门禁（设计 token）', () => {
-  it('var(--wf-*) 引用必须在 tokens.ts 有定义', () => {
-    const defined = new Set([...readText(TOKENS_FILE).matchAll(/(--wf-[a-z0-9-]+)\s*:/g)].map((match) => match[1]))
+  it('var(--wf-*) 引用必须在 tokens.ts 有定义（剥注释后）', () => {
     const referenced = new Set(
-      STYLE_FILES.flatMap((file) => [...readText(file).matchAll(/var\((--wf-[a-z0-9-]+)/g)].map((match) => match[1])),
+      STYLE_FILES.flatMap((file) => [...stripCssComments(readText(file)).matchAll(/var\((--wf-[a-z0-9-]+)/g)].map((match) => match[1])),
     )
-    const undefinedRefs = [...referenced].filter((name) => !defined.has(name)).sort()
+    const undefinedRefs = [...referenced].filter((name) => !DEFINED_TOKENS.includes(name)).sort()
     expect(undefinedRefs).toEqual([])
-    expect(defined.size).toBeGreaterThan(10)
+    expect(DEFINED_TOKENS.length).toBeGreaterThan(10)
   })
 
-  it('tokens.ts 中定义的每个 token 都被样式引用（无死 token）', () => {
-    const defined = [...readText(TOKENS_FILE).matchAll(/(--wf-[a-z0-9-]+)\s*:/g)].map((match) => match[1])
+  it('tokens.ts 中定义的每个 token 都被样式引用（无死 token，剥注释后）', () => {
     const referenced = new Set(
-      STYLE_FILES.flatMap((file) => [...readText(file).matchAll(/var\((--wf-[a-z0-9-]+)/g)].map((match) => match[1])),
+      STYLE_FILES.flatMap((file) => [...stripCssComments(readText(file)).matchAll(/var\((--wf-[a-z0-9-]+)/g)].map((match) => match[1])),
     )
-    expect(defined.filter((name) => !referenced.has(name)).sort()).toEqual([])
+    expect(DEFINED_TOKENS.filter((name) => !referenced.has(name)).sort()).toEqual([])
   })
 
   it('颜色字面量只允许出现在 tokens.ts', () => {
     const pattern =
       /#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(|(?<![\w-])(?:white|black|red|lime|blue|yellow|cyan|magenta|silver|gray|grey|maroon|olive|green|purple|teal|navy|orange|pink|brown)(?![\w-])/g
     const found: Array<{ file: string; literal: string }> = []
-    for (const file of FRAGMENTS) {
-      if (file === TOKENS_FILE) continue
-      for (const match of stripCssComments(readText(file)).matchAll(pattern)) found.push({ file, literal: match[0] })
+    for (const fragment of STYLE_FRAGMENTS) {
+      if (fragment.module === 'tokens') continue
+      for (const match of stripCssComments(fragment.css!).matchAll(pattern)) {
+        found.push({ file: `${STYLE_DIR}/${fragment.module}.ts`, literal: match[0] })
+      }
     }
     const allowed = new Map<string, number>()
     for (const entry of COLOR_BASELINE) {

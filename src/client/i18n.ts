@@ -2,6 +2,9 @@
 //
 // 中英双语文案（照搬旧项目 i18n.js，按新需求模型扩展：模式/服务/断点/协作组/虚拟节点/浮窗）。
 
+// 上限数值只有一处本体（画布交互约束），文案插值引用它，避免「改了上限忘了改提示」。
+import { GROUP_MEMBER_LIMIT } from './lib/group-members.js'
+
 export const zh = {
   // 标题顶栏
   studio: '工作流设计器',
@@ -28,7 +31,7 @@ export const zh = {
   databases: '数据库',
   stages: '阶段',
   groupTemplates: '协作组',
-  groupMemberLimitHint: '协作组成员数量上限为 8',
+  groupMemberLimitHint: `协作组成员数量上限为 ${GROUP_MEMBER_LIMIT}`,
   toastGroupMemberAdded: '已加入协作组',
   stagePinHint: '固定模板',
   newTemplate: '新建模板',
@@ -548,7 +551,7 @@ export const en: Dict = {
   databases: 'Databases',
   stages: 'Stages',
   groupTemplates: 'Groups',
-  groupMemberLimitHint: 'A group supports up to 8 members',
+  groupMemberLimitHint: `A group supports up to ${GROUP_MEMBER_LIMIT} members`,
   toastGroupMemberAdded: 'Added to group',
   stagePinHint: 'Fixed template',
   newTemplate: 'New template',

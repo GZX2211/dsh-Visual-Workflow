@@ -49,7 +49,7 @@ describe('buildIndexForDatabase', () => {
     expect(existsSync(indexPathOf(dir, 'd1'))).toBe(true)
   })
 
-  it('服务器类型：本地索引构建不再被拒（无驱动时报驱动/连接错误而非 WF_DB_MODE）', async () => {
+  it('服务器类型：本地索引构建不再被拒（连接不可达时给出连接类具名错误）', async () => {
     const dir = await tempDir('vw-idx-')
     const node: DatabaseNode = {
       id: 'd1',
@@ -60,9 +60,14 @@ describe('buildIndexForDatabase', () => {
         conn: { host: '127.0.0.1', port: 3306, user: 'u', password: 'p', db: 'd' },
       },
     }
-    const error = await buildIndexForDatabase(dir, node, { source: 'bm25', dimension: 0, async ensureReady() {}, embed: async () => [], dispose() {} }).catch((e) => e)
-    // 服务器类型已纳入本地索引构建，不再抛 WF_DB_MODE；测试环境驱动缺失/服务不可达 → 驱动或连接错误
+    const error = await buildIndexForDatabase(dir, node, { source: 'bm25', dimension: 0, async ensureReady() {}, embed: async () => [], dispose() {} })
+      .then(() => null, (e: unknown) => e as { code?: string; message?: string })
+    // 正向/具名断言（D09-01）：服务器类型已纳入本地索引构建，错误必须是「连接类」具名码。
+    // 本工作区 mysql2 已安装且 3306 无服务 → ECONNREFUSED；无驱动环境立刻红而不是静默通过。
+    expect(error, '服务器库索引构建不应成功（无服务端可用）').not.toBeNull()
     expect(error?.code).not.toBe('WF_DB_MODE')
+    expect(error?.code, '驱动/错误码必须是连接类具名码').toMatch(/^(ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|WF_DB_DRIVER_MISSING)$/)
+    expect(error?.code).not.toBe('WF_DB_DRIVER_MISSING')
   })
 
   it('buildIndexForDatabase：应用 vectorOptions 分块/容量并回传 rowKey', async () => {

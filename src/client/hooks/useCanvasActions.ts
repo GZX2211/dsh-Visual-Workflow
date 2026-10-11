@@ -21,7 +21,7 @@ import type { SaveCanvasOptions } from './useDocumentActions.js'
 import type { RunLockSet } from '../lib/run-locks.js'
 import type { Dict } from '../i18n.js'
 import { connectionProblem, connectionProblemMessage } from '../lib/connection-rules.js'
-import { consolidateGroups, dropNodeFlowLines, joinNodeToGroup } from '../lib/group-members.js'
+import { GROUP_MEMBER_LIMIT, consolidateGroups, dropNodeFlowLines, joinNodeToGroup } from '../lib/group-members.js'
 import { layoutNodes } from '../lib/layout-fit.js'
 import { stageTemplateKinds } from '../lib/graph-handles.js'
 import { templateToNodeData } from '../lib/template-to-node.js'
@@ -352,7 +352,7 @@ export function useCanvasActions(
     const group = state.canvas.nodes.find((item) => item.id === groupId)
     if (!template || !group || group.kind !== 'group') return
     const members = (group.data.memberIds as string[] | undefined) ?? []
-    if (members.length >= 8) {
+    if (members.length >= GROUP_MEMBER_LIMIT) {
       notify('error', t.groupMemberLimitHint)
       return
     }
@@ -388,7 +388,7 @@ export function useCanvasActions(
     if (!node || (node.kind !== 'parent' && node.kind !== 'agent')) return
     const members = (group.data.memberIds as string[] | undefined) ?? []
     if (members.includes(nodeId)) return
-    if (members.length >= 8) {
+    if (members.length >= GROUP_MEMBER_LIMIT) {
       notify('error', t.groupMemberLimitHint)
       return
     }

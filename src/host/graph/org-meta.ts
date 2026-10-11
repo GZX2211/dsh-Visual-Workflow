@@ -36,7 +36,7 @@ export const ORG_META_NORMALIZE_CAPS = {
   nodeMax: 200,
   /** 协作组数量上限的安全网。 */
   groupMax: 50,
-  /** 组内人数上限的安全网（画布 UI 既有上限为 8，此处放宽）。 */
+  /** 组内人数上限的安全网（画布 UI 既有上限为 30，此处放宽）。 */
   membersMax: 50,
   /** 并行分支上限的安全网。 */
   parallelBranchMax: 50,

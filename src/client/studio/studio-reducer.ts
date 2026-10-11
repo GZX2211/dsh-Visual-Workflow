@@ -2,7 +2,7 @@
 //
 // 工作台状态机主体（纯 reducer，可独立单测）：studioReducer 依
 // StudioAction 单向流转状态；openDocument 打开文档（重置选中/编辑器/
-// 已保存图快照）；sanitizeSelectionAfterCanvas 校验画布恢复后的选中与
+// 已保存图快照/历史栈）；sanitizeSelectionAfterCanvas 校验画布恢复后的选中与
 // 编辑器引用（Bug 8）。所有变更经 dispatch(action) 流入。
 
 import type { StudioState, CanvasNode, CanvasEdge, EditorRef, LibSelKind } from './studio-types.js'
@@ -13,7 +13,7 @@ import { flowToCanvas, serviceToCanvas } from './studio-projection.js'
 import { graphSnapshotOf, graphSnapshotsEqual } from './studio-snapshot.js'
 import { HISTORY_LIMIT } from './studio-initial.js'
 
-/** 打开工作流/服务/模板时的选中与编辑器重置（可选保留画布选择）。 */
+/** 打开工作流/服务/模板时的选中、编辑器与历史栈重置（可选保留画布选择）。 */
 function openDocument(state: StudioState, canvas: { nodes: CanvasNode[]; edges: CanvasEdge[] }, kind: 'workflow' | 'service' | 'flowTemplate', id: string): StudioState {
   const libKind: LibSelKind = kind === 'workflow' ? 'workflow' : kind === 'service' ? 'service' : 'workflowTemplate'
   const editor: EditorRef = kind === 'workflow' ? { source: 'workflow', id } : kind === 'service' ? { source: 'service', id } : { source: 'flowTemplate', id }
@@ -27,6 +27,9 @@ function openDocument(state: StudioState, canvas: { nodes: CanvasNode[]; edges: 
     run: { runId: null, sessionId: null, snapshot: null },
     selection: { nodeId: null, edgeId: null, lib: { kind: libKind, id } },
     editor,
+    // 历史栈严格绑定当前文档：跨文档残留的快照一旦被 UNDO 取回，会把上一个文档的图
+    // 写进当前文档（几何防抖自动保存会立即把错误图静默落库，实例无版本历史不可回滚）。
+    history: { past: [], future: [] },
   }
   return opened
 }
@@ -77,7 +80,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       return state.experienceDoc ? { ...state, experienceDoc: { ...state.experienceDoc, ...action.patch } } : state
     case 'OPEN_FLOW_ASSET': {
       // 画布 = assetDoc 的纯投影（与 OPEN_FLOW_TEMPLATE 同口径：打开即重置
-      // 选中/编辑器/已保存快照）；assetId 不匹配视为陈旧装载，保持原状态。
+      // 选中/编辑器/已保存快照/历史栈）；assetId 不匹配视为陈旧装载，保持原状态。
       const detail = state.assetDoc
       if (!detail || detail.assetId !== action.assetId) return state
       const canvas = flowToCanvas(detail)
@@ -93,6 +96,9 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         editor: { source: 'flowAsset', id: detail.assetId },
         // 「开启新会话」临时选项与打开模板同口径：每次打开资产回到「不新开会话」默认
         instanceOptions: { newSession: false, workspacePath: '' },
+        // 第四处画布身份切换入口：历史栈同样必须清空（否则可撤销回上一个文档的图，
+        // 并被几何防抖自动保存写进本资产文档）
+        history: { past: [], future: [] },
       }
     }
     case 'OPEN_ROLE_ASSET':
@@ -131,6 +137,8 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
               canvas: { nodes: [], edges: [] },
               dirty: false,
               run: { runId: null, sessionId: null, snapshot: null },
+              // 画布身份已消失：历史栈同步清空（同 CLEAR_CANVAS；否则可撤销回已关闭资产的图）
+              history: { past: [], future: [] },
             }
           : {}),
         selection: { nodeId: null, edgeId: null, lib: null },
@@ -222,6 +230,8 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         editor: null,
         dirty: false,
         run: { runId: null, sessionId: null, snapshot: null },
+        // 画布身份已消失：历史栈同步清空（否则 UNDO 会把清空前的图恢复成「幽灵图」）
+        history: { past: [], future: [] },
       }
     case 'GRAPH_REPLACED':
       return { ...state, canvas: { nodes: action.nodes, edges: action.edges }, dirty: action.dirty }

@@ -4,14 +4,15 @@
 // 三模式执行、归属校验（运行态解耦/无实例/坏节点/无连线）、SQL 与索引错误路径。
 
 import { afterEach, describe, expect, it } from 'vitest'
+import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type { EmbeddingEngine } from '../../../../src/host/embedding/engine.js'
 import type { DatabaseNode, WorkflowDocument } from '../../../../src/host/shared/graph-model.js'
 import { WF_DB_QUERY } from '../../../../src/host/shared/protocol.js'
 import type { JsonSchemaNode } from '../../../../src/host/tools/infrastructure/define-tool.js'
-import { buildIndexForDatabase } from '../../../../src/host/tools/wf-db-query/service.js'
-import { QUERY_CELL_MAX_LENGTH, registerWfDbQuery } from '../../../../src/host/tools/wf-db-query/tool.js'
+import { indexPathOf } from '../../../../src/host/tools/wf-db-query/service.js'
+import { registerWfDbQuery, QUERY_CELL_MAX_LENGTH } from '../../../../src/host/tools/wf-db-query/tool.js'
 import type { WfDbQueryHost } from '../../../../src/host/tools/wf-db-query/types.js'
 import { makeDbFlow, makeSqliteDb } from '../fixtures/db-fixture.js'
 import {
@@ -152,21 +153,36 @@ describe('wf_db_query 工具执行', () => {
     expect((result as { rows: string[][] }).rows).toEqual([['苹果', '5.5'], ['香蕉', '3.2']])
   })
 
-  it('search 模式：索引未建 → WF_DB_INDEX_MISSING；建索引后返回 hits（bm25 标注）', async () => {
+  it('search 模式：有内容但未预建索引 → 惰性自动构建并返回 hits（不报 INDEX_MISSING）', async () => {
     const h = await makeHarness()
     await start(h)
     await h.runtime.wfRunNode({ isChild: false, sessionId: 'session-1' }, { nodeId: 'a1' })
     const def = h.tools.definitions.get(WF_DB_QUERY)!
-    const node = makeDbFlow(h.dbFile).nodes.find((n) => n.id === 'd1') as DatabaseNode
-    await buildIndexForDatabase(h.dataDir, node, h.engine)
+    // 索引不存在 + 库里有内容：惰性构建必然产出非空 chunks → search 覆盖，不进入 INDEX_MISSING。
+    // 「索引未建即报错」的旧语义已由本用例取代（原断言与紧随其后的重复成功断言一并删除）。
     const result = await def.execute({ dataId: 'd1', mode: 'search', query: '数据库', topK: 3 }, execOf(childAgent))
     expect(result).toMatchObject({ dataId: 'd1', mode: 'search', source: 'bm25' })
     const hits = (result as { hits: Array<{ text: string }> }).hits
     expect(hits.length).toBeGreaterThan(0)
     expect(hits.some((hit) => hit.text.includes('向量 检索'))).toBe(true)
-    // 未建索引的数据节点 → 明确错误
-    const missing = await def.execute({ dataId: 'd1', mode: 'search', query: 'x' }, execOf(childAgent))
-    expect(missing).toMatchObject({ dataId: 'd1', mode: 'search' })
+  })
+
+  it('search 模式：库里没有可索引内容且索引为空 → WF_DB_INDEX_MISSING（标题所述行为）', async () => {
+    const h = await makeHarness()
+    // 建表结构但不插任何行：schema() 有表、query 回 0 行 → 惰性构建产出 chunks=[] 的索引文件，
+    // 但文件已存在故不会再次构建，search 对空 chunks 返回 null → 确定性触发 WF_DB_INDEX_MISSING。
+    await rm(h.dbFile, { force: true })
+    const empty = new DatabaseSync(h.dbFile)
+    empty.exec('CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, price REAL)')
+    empty.exec('CREATE TABLE notes (id INTEGER PRIMARY KEY, content TEXT)')
+    empty.close()
+    await rm(indexPathOf(h.dataDir, 'd1'), { force: true })
+    await start(h)
+    await h.runtime.wfRunNode({ isChild: false, sessionId: 'session-1' }, { nodeId: 'a1' })
+    const def = h.tools.definitions.get(WF_DB_QUERY)!
+    await expect(
+      def.execute({ dataId: 'd1', mode: 'search', query: 'x' }, execOf(childAgent)),
+    ).rejects.toMatchObject({ code: 'WF_DB_INDEX_MISSING' })
   })
 
   it('search 模式：索引未建时运行期惰性自动构建（无需手动预建），且仅首次触发', async () => {
@@ -213,8 +229,15 @@ describe('wf_db_query 工具执行', () => {
       () => null,
       (e: unknown) => e as { code?: string },
     )
-    // 服务器类型已允许向量检索（不再抛 WF_DB_MODE）；测试环境无 mysql2 驱动/服务 → 驱动或连接错误
+    // 正向/具名断言：把「测试环境是否装了可选驱动」从隐含前提变成显式期望。
+    // 本工作区 mysql2 已装（node_modules/mysql2/package.json 存在）且 127.0.0.1:3306 无服务
+    // → 必为连接类错误 code（ECONNREFUSED），而不是驱动缺失码、更不是 WF_DB_MODE。
+    // 旧断言 `expect(error?.code).not.toBe('WF_DB_MODE')` 对「返回 null（误判成功）」与
+    // 任意非 WfError 异常都恒真，只对一种回归（退回 WF_DB_MODE）敏感，故此处升级为具名断言。
+    expect(error, '服务器库检索不应成功返回（无服务端可用）').not.toBeNull()
     expect(error?.code).not.toBe('WF_DB_MODE')
+    expect(error?.code, '驱动/错误码必须是连接类具名码').toMatch(/^(ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|WF_DB_DRIVER_MISSING|WF_DB_CONFIG)$/)
+    expect(error?.code).not.toBe('WF_DB_DRIVER_MISSING')
   })
 
   it('query 模式：超长单元格值被截断并标记 truncated（防向量/BLOB 列打爆上下文）', async () => {

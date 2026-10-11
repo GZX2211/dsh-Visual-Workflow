@@ -216,6 +216,115 @@ describe('studioReducer', () => {
     expect(state.dirty).toBe(true) // 重做离开保存态 → 未保存
   })
 
+  // -------------------------------------------------------------------------
+  // P0「撤销历史跨文档污染」：历史栈必须严格绑定当前文档（施工依据 VERIFY-ROUND2 §2）
+  // -------------------------------------------------------------------------
+
+  const flowDoc = (id: string, nodes: CanvasNode[]): never =>
+    ({ id, sessionId: 's-1', mode: 'mode1', name: id, description: '', nodes, lines: [] }) as never
+
+  it('P0：编辑 A 后打开 B，撤销不得把 A 的图写进 B 的画布', () => {
+    let state = baseState()
+    // A：打开并编辑（入栈一份 A 的画布快照）
+    state = studioReducer(state, { type: 'OPEN_FLOW', flow: flowDoc('A', [node({ id: 'a1', kind: 'agent', data: { label: 'A 的节点' } })]) })
+    state = studioReducer(state, { type: 'HISTORY_PUSH', snapshot: graphSnapshotOf(state) })
+    // 切到 B（B 是空画布）
+    state = studioReducer(state, { type: 'OPEN_FLOW', flow: flowDoc('B', []) })
+    // 历史必须随文档切换清空，撤销在 B 上不可用
+    expect(state.history.past).toEqual([])
+    expect(state.history.future).toEqual([])
+    state = studioReducer(state, { type: 'UNDO' })
+    expect(state.canvas.nodes).toEqual([])
+    expect(state.currentId).toBe('B')
+  })
+
+  it('P0：清空画布后撤销不得恢复幽灵图', () => {
+    let state = baseState()
+    state = studioReducer(state, { type: 'GRAPH_REPLACED', nodes: [node({ id: 'n1', kind: 'agent' })], edges: [], dirty: false })
+    state = studioReducer(state, { type: 'HISTORY_PUSH', snapshot: graphSnapshotOf(state) })
+    state = studioReducer(state, { type: 'CLEAR_CANVAS' })
+    expect(state.history.past).toEqual([])
+    state = studioReducer(state, { type: 'UNDO' })
+    expect(state.canvas.nodes).toEqual([])
+    expect(state.currentId).toBeNull()
+  })
+
+  it('P0：关闭资产（清空画布分支）后撤销不得恢复已关闭文档的图', () => {
+    let state = baseState()
+    state = studioReducer(state, { type: 'ASSET_DOC_LOADED', detail: assetDetail })
+    state = studioReducer(state, { type: 'OPEN_FLOW_ASSET', assetId: 'a-1' })
+    state = studioReducer(state, { type: 'HISTORY_PUSH', snapshot: graphSnapshotOf(state) })
+    state = studioReducer(state, { type: 'ASSET_CLOSED', assetId: 'a-1' })
+    expect(state.history.past).toEqual([])
+    state = studioReducer(state, { type: 'UNDO' })
+    expect(state.canvas.nodes).toEqual([])
+    expect(state.currentId).toBeNull()
+  })
+
+  it('P0 第四处入口：打开工作流资产后撤销，不得把上一个文档的图写进资产画布', () => {
+    let state = baseState()
+    // 先编辑文档 A（入栈一份 A 的画布快照）
+    state = studioReducer(state, { type: 'OPEN_FLOW', flow: flowDoc('A', [node({ id: 'a1', kind: 'agent', data: { label: 'A 的节点' } })]) })
+    state = studioReducer(state, { type: 'HISTORY_PUSH', snapshot: graphSnapshotOf(state) })
+    // 再从左侧栏打开工作流资产（第四处切换画布入口）
+    state = studioReducer(state, { type: 'ASSET_DOC_LOADED', detail: assetDetail })
+    state = studioReducer(state, { type: 'OPEN_FLOW_ASSET', assetId: 'a-1' })
+    // 历史必须随画布切换清空
+    expect(state.history.past).toEqual([])
+    expect(state.history.future).toEqual([])
+    state = studioReducer(state, { type: 'UNDO' })
+    // 资产画布仍是资产文档的图（s1），未被 A 的 a1 替换
+    expect(state.canvas.nodes.map((item) => item.id)).toEqual(['s1'])
+    expect(state.currentKind).toBe('flowAsset')
+    expect(state.currentId).toBe('a-1')
+  })
+
+  it('P0 根因锁定：切换文档后画布归属唯一——撤销不再产出其它文档的图，自动保存快照恒等于当前文档', () => {
+    // 自动保存（几何防抖）写入的是 state.canvas + 当前文档 id，本用例锁定其**前提**：
+    // 清栈后 canvas 不可能再变成另一份文档的图，故自动保存落库的内容必属当前文档。
+    let state = baseState()
+    state = studioReducer(state, { type: 'OPEN_FLOW', flow: flowDoc('A', [node({ id: 'a1', kind: 'agent' })]) })
+    state = studioReducer(state, { type: 'HISTORY_PUSH', snapshot: graphSnapshotOf(state) })
+    state = studioReducer(state, { type: 'OPEN_FLOW', flow: flowDoc('B', [node({ id: 'b1', kind: 'end' })]) })
+    state = studioReducer(state, { type: 'UNDO' })
+    // canvas 始终是 B 打开时的图（未被 A 的快照替换），因此自动保存写回的也是 B
+    expect(state.canvas.nodes.map((item) => item.id)).toEqual(['b1'])
+    expect(state.currentId).toBe('B')
+    expect(state.history.past.length + state.history.future.length).toBe(0)
+  })
+
+  it('P0 对齐：四处文档/画布身份切换入口都清空历史栈', () => {
+    // openDocument 的三条入口
+    for (const action of [
+      { type: 'OPEN_FLOW', flow: flowDoc('X', [node({ id: 'x1', kind: 'agent' })]) },
+      { type: 'OPEN_SERVICE', service: { id: 'sv', sessionId: 's-1', mode: 'mode2', name: 'sv', description: '', nodes: [], lines: [], createdAt: '', updatedAt: '', status: 'stopped' } as never },
+      { type: 'OPEN_FLOW_TEMPLATE', template: { id: 'T', mode: 'mode1', name: 'T', description: '', nodes: [], lines: [] } as never },
+    ] as const) {
+      let state = baseState()
+      state = studioReducer(state, { type: 'GRAPH_REPLACED', nodes: [node({ id: 'n1', kind: 'agent' })], edges: [], dirty: false })
+      state = studioReducer(state, { type: 'HISTORY_PUSH', snapshot: graphSnapshotOf(state) })
+      state = studioReducer(state, action as never)
+      expect(state.history.past, `${action.type} 未清空历史栈`).toEqual([])
+      expect(state.history.future, `${action.type} 未清空重做栈`).toEqual([])
+    }
+    // 第四处入口：OPEN_FLOW_ASSET（不走 openDocument）
+    let asset = baseState()
+    asset = studioReducer(asset, { type: 'GRAPH_REPLACED', nodes: [node({ id: 'n1', kind: 'agent' })], edges: [], dirty: false })
+    asset = studioReducer(asset, { type: 'HISTORY_PUSH', snapshot: graphSnapshotOf(asset) })
+    asset = studioReducer(asset, { type: 'ASSET_DOC_LOADED', detail: assetDetail })
+    asset = studioReducer(asset, { type: 'OPEN_FLOW_ASSET', assetId: 'a-1' })
+    expect(asset.history.past, 'OPEN_FLOW_ASSET 未清空历史栈').toEqual([])
+    expect(asset.history.future, 'OPEN_FLOW_ASSET 未清空重做栈').toEqual([])
+    // CLEAR_CANVAS
+    let cleared = baseState()
+    cleared = studioReducer(cleared, { type: 'GRAPH_REPLACED', nodes: [node({ id: 'n1', kind: 'agent' })], edges: [], dirty: false })
+    cleared = studioReducer(cleared, { type: 'HISTORY_PUSH', snapshot: graphSnapshotOf(cleared) })
+    cleared = studioReducer(cleared, { type: 'CLEAR_CANVAS' })
+    expect(cleared.history).toEqual({ past: [], future: [] })
+    // ASSET_CLOSED 的 closesCanvas 分支（已在上方用例覆盖，此处仅断言归属键不被清空影响）
+    expect(cleared.currentId).toBeNull()
+  })
+
   it('SELECT_LIB：父代理模板选择（右侧面板无显示）', () => {
     let state = baseState()
     state = studioReducer(state, { type: 'SELECT_LIB', kind: 'parentTemplate', id: 'p-1' })

@@ -10,6 +10,7 @@ import { readdirSync, statSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import { randomBytes } from 'node:crypto'
+import { WfError } from '../orchestrator/index.js'
 
 const MCP_CLIENT = '@deepseek-ai/dsh-mcp-client'
 const START = '# >>> dsh-visual-workflow'
@@ -72,9 +73,38 @@ export function hostPatchPath(): string {
   return join(profilesRoot, candidates[0], 'cordis.patch.yml')
 }
 
+/**
+ * id 规范化（**宽松解析**）：补 `mcp-` 前缀，不做字符校验。
+ * 为什么保持宽松：本函数被写入、删除、停用三条路径共用。删除/停用必须能处理历史上
+ * 已落盘的任意 id（含早于本校验的非规范值），否则这些遗留条目永远无法清理。
+ * 写入路径的严格校验见 requireValidMcpId（只作用于新增/更新）。
+ */
 function normalizeMcpId(nameOrId: string): string {
   const value = String(nameOrId ?? '').trim()
-  return value.startsWith('mcp-') ? value : `mcp-${value}`
+  // 只剥「非空」前缀名：'mcp' / 'mcp-' 视作裸名（补前缀得 mcp-mcp），
+  // 与 '' / 非 mcp 前缀同口径，避免产出无后缀的非法 id（官方要求 mcp- 后 1–32 字符）。
+  if (!value.startsWith('mcp-')) return `mcp-${value}`
+  const bare = value.slice('mcp-'.length)
+  return bare ? value : `mcp-${value}`
+}
+
+/**
+ * 写入路径的 id 严格校验（D01-01 双保险之一：**校验**）。
+ *
+ * 为什么必须严格：`id` 会被不加引号插值进用户 profile 的 YAML（`renderRegion`），
+ * 含换行即成为顶层数组的新条目（YAML 注入），含 `:`/`#`/引号则让整份配置解析失败、
+ * dsh 起不来。口径与官方一致（serverName 同族）：`mcp-` + 1–32 位 `[A-Za-z0-9_-]`。
+ * 失败抛稳定错误码 WF_BAD_ARGS 并给出可行动提示（调用方据此修正入参）。
+ */
+function requireValidMcpId(id: string): string {
+  const normalized = normalizeMcpId(id)
+  if (!/^mcp-[A-Za-z0-9_-]{1,32}$/.test(normalized)) {
+    throw new WfError(
+      `WF_BAD_ARGS: invalid MCP server id ${JSON.stringify(id)}; expected "mcp-" followed by 1-32 characters from [A-Za-z0-9_-] (no spaces, colons, quotes or newlines)`,
+      'WF_BAD_ARGS',
+    )
+  }
+  return normalized
 }
 
 /**
@@ -211,7 +241,7 @@ export function parseMcpRows(text: string): McpServerRow[] {
   const rows = new Map<string, { config: Record<string, unknown> }>()
   const toggles = new Map<string, boolean>()
   const lines = String(text ?? '').split(/\r?\n/)
-  let current: { insert?: boolean; id?: string; name?: string; config?: Record<string, unknown>; lastArrayKey?: string | null; envDepth?: number; disabled?: boolean } | null = null
+  let current: { insert?: boolean; id?: string; name?: string; config?: Record<string, unknown>; lastArrayKey?: string | null; nestedKey?: string | null; nestedDepth?: number; disabled?: boolean } | null = null
   const push = (): void => {
     if (current && current.insert && current.id && current.name === MCP_CLIENT) {
       rows.set(current.id, { config: current.config ?? {} })
@@ -246,21 +276,27 @@ export function parseMcpRows(text: string): McpServerRow[] {
       }
       continue
     }
-    if (current.insert && current.envDepth !== undefined && indent > current.envDepth) {
+    // 嵌套对象块（env / headers 共用）：缩进更深时收集子键为字符串值。
+    // nestedKey 记录当前块名，故两种块共用同一段状态机（D01-02 读侧）。
+    if (current.insert && current.nestedKey && current.nestedDepth !== undefined && indent > current.nestedDepth) {
       const kv = trimmed.match(/^([A-Za-z0-9_.-]+):\s*(.*)$/)
       if (kv) {
         if (!current.config) current.config = {}
-        if (!current.config.env || typeof current.config.env !== 'object') current.config.env = {}
-        ;(current.config.env as Record<string, string>)[kv[1]] = kv[2].replace(/^["']|["']$/g, '')
+        const existingBlock = current.config[current.nestedKey]
+        if (!existingBlock || typeof existingBlock !== 'object') current.config[current.nestedKey] = {}
+        ;(current.config[current.nestedKey] as Record<string, string>)[kv[1]] = kv[2].replace(/^["']|["']$/g, '')
       }
       continue
     }
-    const match = trimmed.match(/^([a-zA-Z]+):\s*(.*)$/)
+    // 键正则放宽到 [A-Za-z0-9_-]：headers 允许 X-Trace 这类连字符键，否则整行会被丢弃。
+    const match = trimmed.match(/^([A-Za-z0-9_-]+):\s*(.*)$/)
     if (!match) continue
     const [, key, rawValue] = match
     const value = rawValue.replace(/^["']|["']$/g, '')
-    if (current.insert && current.envDepth !== undefined && indent <= current.envDepth) {
-      current.envDepth = undefined
+    // 块级嵌套键（env / headers）在缩进回退时复位，避免块内 KV 继续污染后续同级键。
+    if (current.insert && current.nestedKey && current.nestedDepth !== undefined && indent <= current.nestedDepth) {
+      current.nestedKey = undefined
+      current.nestedDepth = undefined
       current.lastArrayKey = null
     }
     if (indent >= 6 && current.insert && ['serverName', 'transport', 'command', 'url'].includes(key)) {
@@ -271,18 +307,21 @@ export function parseMcpRows(text: string): McpServerRow[] {
       if (!current.config) current.config = {}
       current.config.args = []
       current.lastArrayKey = 'args'
-    } else if (indent >= 6 && current.insert && key === 'env') {
+    } else if (indent >= 6 && current.insert && (key === 'env' || key === 'headers')) {
+      // env 与 headers 同构：写侧都用 inline JSON（renderConfig 的 object 分支），
+      // 手写文件则可能是缩进对象块——两种形态都要能读回（D01-02）。
       if (!current.config) current.config = {}
       if (rawValue.trim().startsWith('{')) {
         try {
-          current.config.env = JSON.parse(rawValue) as Record<string, string>
+          current.config[key] = JSON.parse(rawValue) as Record<string, string>
         } catch {
-          current.config.env = {}
+          current.config[key] = {}
         }
         current.lastArrayKey = null
       } else {
-        current.config.env = {}
-        current.envDepth = indent
+        current.config[key] = {}
+        current.nestedKey = key
+        current.nestedDepth = indent
         current.lastArrayKey = null
       }
     } else if (indent >= 4 && current.insert && key === 'name') {
@@ -330,15 +369,23 @@ function renderRegion(rows: McpServerRow[], toggles: Array<[string, boolean]>): 
       const config: Record<string, unknown> = { serverName: row.serverName, transport: row.transport ?? 'stdio' }
       if ((row.transport ?? 'stdio') === 'streamable-http') {
         if (row.url) config.url = row.url
+        // headers 是 streamable-http 的唯一鉴权手段，必须落盘（renderConfig 的 object
+        // 分支以 inline JSON 输出）；否则「保存当次即丢」，界面回读恒为 {}。
+        // 刻意不做掩码：掩码会把密文写进配置，凭据语义由调用方（D07-05）统一。
+        if (row.headers && typeof row.headers === 'object' && Object.keys(row.headers).length > 0) config.headers = row.headers
       } else {
         if (row.command) config.command = row.command
         if (Array.isArray(row.args) && row.args.length > 0) config.args = row.args
         if (row.env && typeof row.env === 'object' && Object.keys(row.env).length > 0) config.env = row.env
       }
-      return `- insert:\n    - id: ${row.id}\n      name: '${MCP_CLIENT}'\n      config:${renderConfig(config)}`
+      // 双保险之二（**转义**）：id 一律经 yamlScalar 输出为带引号标量——即使校验被绕过，
+      // 换行/冒号/引号也只会留在单引号标量内部，不会变成 YAML 结构。
+      return `- insert:\n    - id: ${yamlScalar(row.id)}\n      name: '${MCP_CLIENT}'\n      config:${renderConfig(config)}`
     })
     .join('\n')
-  const toggleLines = toggles.map(([id, disabled]) => `- id: ${id}\n  disabled: ${disabled}`)
+  // toggle 行的 id 与 insert 行同口径（带引号 YAML 标量）：历史遗留的非规范 id 同样不会
+  // 破坏 YAML 结构；parseMcpRows 剥离首尾引号后可正确反解析。
+  const toggleLines = toggles.map(([id, disabled]) => `- id: ${yamlScalar(id)}\n  disabled: ${disabled}`)
   const content = [...(body ? [body] : []), ...toggleLines].join('\n')
   return content ? `${START}\n${content}\n${END}` : ''
 }
@@ -423,7 +470,7 @@ function validateEntry(input: Record<string, unknown>): { id: string; config: Re
     config.args = [...split.args, ...explicitArgs]
     if (input.env && typeof input.env === 'object') config.env = input.env
   }
-  return { id: normalizeMcpId(String(input.id ?? serverName)), config }
+  return { id: requireValidMcpId(String(input.id ?? serverName)), config }
 }
 
 /** 新建/更新一个 MCP 服务器（托管区 upsert）。 */

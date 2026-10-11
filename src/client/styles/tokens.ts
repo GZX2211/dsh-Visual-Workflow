@@ -17,7 +17,7 @@ export const tokensStyles = `
   --wf-on-brand: var(--dsw-alias-label-primary-inverse, var(--dsw-alias-label-reverse, #ffffff));
   --wf-ink: var(--dsw-alias-label-primary);
   --wf-ink-2: var(--dsw-alias-label-secondary);
-  // 弱化文字（日历前后月灰显）：刻意不随主题变化，保持与历史渲染一致
+  /* 弱化文字（日历前后月灰显）：刻意不随主题变化，保持与历史渲染一致 */
   --wf-ink-3: #6b7075;
   --wf-ok: var(--dsw-alias-state-success-primary);
   --wf-warn: var(--dsw-alias-state-warn-primary);
