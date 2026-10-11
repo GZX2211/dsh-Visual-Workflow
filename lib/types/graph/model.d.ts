@@ -133,8 +133,6 @@ export declare function activeMilestoneGateOf(flow: Partial<WorkflowDocument>, n
  * 二者在快照里是同一条记录（虚拟节点与主节点共享执行实例），必须在入口收敛为一种。
  */
 export declare function mainNodeIdOf(flow: Partial<WorkflowDocument>, nodeId: string): string | null;
-/** 某协作组的成员节点 id 列表。 */
-export declare function groupMemberIds(flow: Partial<WorkflowDocument>, groupId: string): string[];
 /** 某角色节点所属协作组 id（不在组内返回 null）。 */
 export declare function memberGroupId(flow: Partial<WorkflowDocument>, nodeId: string): string | null;
 /** 判断角色节点是否为协作组成员（§4.2.5.2 规则 4：组内成员仅 ctx/db 连接点）。 */

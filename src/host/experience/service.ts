@@ -30,7 +30,7 @@ import {
   ERR_EXPERIENCE_NOT_INITIALIZED,
   ERR_EXPERIENCE_RECALL_FAILED,
 } from "../shared/protocol.js"
-import { DUPLICATE_SIMILARITY_THRESHOLD, NEUTRAL_STATS } from "./constants.js"
+import { DUPLICATE_SIMILARITY_THRESHOLD, NEUTRAL_STATS, recallIdsLimitProblem } from "./constants.js"
 import { ExperienceExecutionState } from "./execution-state.js"
 import {
   submitExperienceFeedback,
@@ -89,6 +89,11 @@ function pairScoredEntries(
  */
 function createDuplicateJudge(): ExperienceDuplicateJudge {
   return (candidate, existing) => {
+    // 维度不一致 = 不可比（换嵌入模型/端点后，旧行与新候选不在同一向量空间）：不判重、照常入库。
+    // 这条守卫不能省：dotProduct 对异维返回 NaN，而 `NaN < 阈值` 恒为 false，会把「算不出分数」
+    // 误当成「高度相似」，使换模型后每条新经验都被静默丢弃。口径与 retrieval.ts 的 scoreChannel、
+    // retrieval-ranking.ts 的 channelSimilarity 一致（不猜测、不补零、不按短向量截断）。
+    if (candidate.decisionEmbedding.length !== existing.decisionEmbedding.length) return { duplicate: false }
     const similarity = dotProduct(candidate.decisionEmbedding, existing.decisionEmbedding)
     if (similarity < DUPLICATE_SIMILARITY_THRESHOLD) return { duplicate: false }
     return {
@@ -148,6 +153,12 @@ export class ExperienceService {
     const ids = input.ids
     if (ids !== undefined && ids.length === 0) {
       throw new WfError("ids must not be an empty array: pass candidate ids from the first stage, or use query for candidate recall.", ERR_EXPERIENCE_BAD_ARGS)
+    }
+    // 超限必须停在业务边界：ids 会变成 IN (…) 的绑定变量并逐条写入使用事实，无上限时
+    // 底层 SQLite 会以「too many SQL variables」失败，模型拿不到可行动的修正提示。
+    const idsLimitProblem = ids ? recallIdsLimitProblem(ids.length) : null
+    if (idsLimitProblem !== null) {
+      throw new WfError(idsLimitProblem, ERR_EXPERIENCE_BAD_ARGS)
     }
     const query = (input.query ?? "").trim()
     if (ids === undefined && !query) {

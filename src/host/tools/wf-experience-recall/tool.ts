@@ -13,6 +13,7 @@
 // 会发生什么 / 是否产生副作用」。
 
 import { ERR_EXPERIENCE_BAD_ARGS, ERR_EXPERIENCE_RECALL_FAILED, WF_EXPERIENCE_RECALL } from '../../shared/protocol.js'
+import { MAX_RECALL_IDS, recallIdsLimitProblem } from '../../experience/constants.js'
 import { WfError, messageOf } from '../../orchestrator/index.js'
 import { experienceCallerOf } from '../infrastructure/caller.js'
 import { defineTool, type ToolDefinitionLike, type ToolExecLike } from '../infrastructure/define-tool.js'
@@ -73,7 +74,7 @@ export function registerWfExperienceRecall(
       + 'Use wf_org_catalog instead to survey reusable organization assets (workflow and role assets): that tool inspects the organization, while this one recalls the learned experience of your own subject type. '
       + 'After you use recalled experiences, rate them with wf_experience_feedback in the final completion stage of that same task, the wrap-up stage shared with wf_experience_learn. '
       + 'Reading candidates changes nothing and can be repeated safely; reading full entries by ids is what makes them count as used, which later allows rating them with wf_experience_feedback. Content is never modified and the ranking is never recalculated here. Only experiences of the subject type you pass are returned, so a child agent may only pass type "agent" (otherwise WF_EXPERIENCE_WRONG_TYPE). '
-      + 'Failure semantics: a missing or invalid type, mixed-stage arguments, or malformed ids and topK fail with WF_EXPERIENCE_BAD_ARGS; an unknown id fails with WF_EXPERIENCE_NOT_FOUND; a retrieval failure fails with WF_EXPERIENCE_RECALL_FAILED.',
+      + `Failure semantics: a missing or invalid type, mixed-stage arguments, malformed ids and topK, or more than ${MAX_RECALL_IDS} ids in the second stage fail with WF_EXPERIENCE_BAD_ARGS; an unknown id fails with WF_EXPERIENCE_NOT_FOUND; a retrieval failure fails with WF_EXPERIENCE_RECALL_FAILED.`,
     parameters: {
       type: {
         type: 'string',
@@ -115,6 +116,12 @@ export function registerWfExperienceRecall(
       const ids = normalizeRecallIds(args?.ids)
       if (ids === null) {
         throw new WfError('WF_EXPERIENCE_BAD_ARGS: ids must be an array of strings (the second stage reads full entries by id)', ERR_EXPERIENCE_BAD_ARGS)
+      }
+      // 条数上限属经验域口径：在工具边界先拒绝，模型拿到的是可行动提示与稳定错误码，
+      // 而不是抵达 SQLite 之后才暴露的绑定变量越界。
+      const idsLimitProblem = recallIdsLimitProblem(ids.length)
+      if (idsLimitProblem !== null) {
+        throw new WfError(`WF_EXPERIENCE_BAD_ARGS: ${idsLimitProblem}`, ERR_EXPERIENCE_BAD_ARGS)
       }
       const topK = normalizeTopK(args?.topK)
       if (topK === null) {

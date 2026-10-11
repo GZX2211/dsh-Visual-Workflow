@@ -4,7 +4,7 @@ export type EmbeddingSource = 'local' | 'remote' | 'bm25';
 export interface EmbeddingEngine {
     /** 当前来源。 */
     readonly source: EmbeddingSource;
-    /** 降级原因（source 为 bm25 时给出可诊断信息；未降级为 null）。 */
+    /** 可诊断原因（bm25 降级或远程嵌入超时时写入；未提供为 null）。 */
     readonly degradeReason?: string | null;
     /** 向量维度（bm25 降级时为 0）。 */
     readonly dimension: number;
@@ -23,7 +23,13 @@ export interface EmbeddingEngine {
 }
 /** L2 归一化（内积即余弦相似度；零向量返回全零）。 */
 export declare function normalizeVector(values: number[] | Float64Array | Float32Array): Float64Array;
-/** 向量内积（两向量均归一化时即余弦相似度）。 */
+/**
+ * 向量内积（两向量均归一化时即余弦相似度）。
+ *
+ * 维度不一致返回 `NaN`：内积只对同一维度空间中的向量有定义，按较短向量截断会给出
+ * 「看起来正常的错分数」（换嵌入模型/端点后旧索引与当前查询维度不同即触发）。
+ * 调用方据此跳过不可比的行（召回取值路径见 `VectorIndex.search`）。
+ */
 export declare function dotProduct(a: Float64Array, b: Float64Array): number;
 /** 本地 transformers.js feature-extraction pipeline 的最小使用面（惰性 import；加载缝亦复用）。 */
 export interface LocalExtractorLike {
@@ -48,6 +54,11 @@ export interface EmbeddingServiceOptions {
     };
     /** fetch 实现注入（单测远程端点用；缺省全局 fetch）。 */
     fetchImpl?: typeof fetch;
+    /**
+     * 远程端点单次请求超时（毫秒；缺省 {@link DEFAULT_REMOTE_EMBEDDING_TIMEOUT_MS}）。
+     * 非正/非法值一律回落默认值——超时是兜底护栏，不允许配置成「永不超时」。
+     */
+    remoteTimeoutMs?: number;
     /**
      * 本地 extractor 加载缝（单测用受控加载：验证并发单飞与释放竞态）。
      * 缺省走真实路径：资产快速失败校验 + 动态 import transformers.js。
@@ -99,6 +110,8 @@ export declare class EmbeddingService implements EmbeddingEngine {
     /** 外部端点：POST {input: texts}，解析 { data: [{ embedding }] } 并归一化。 */
     private embedRemote;
 }
+/** 端点超时的默认值（毫秒）：远小于模型侧工具等待上限，同时给正常批嵌入留足余量。 */
+export declare const DEFAULT_REMOTE_EMBEDDING_TIMEOUT_MS = 10000;
 /**
  * 便捷构造：确保就绪后返回引擎（embed 前必须 await ensureReady）。
  * 供非 TS 侧的维护脚本复用「就绪后引擎」这一契约（scripts/build-products-index.mjs）。

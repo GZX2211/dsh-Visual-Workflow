@@ -31,12 +31,6 @@ export interface RoleContentFields {
   promptFilePath: string | null
 }
 
-/** 引用统计的规范化结果（reference_status 与数组长度恒一致）。 */
-export interface ReferenceStats {
-  referenceWorkflowIds: string[]
-  referenceStatus: 'unused' | 'used'
-}
-
 /**
  * 角色资产版本行：内容列不可变，统计列（role_asset_type / reference_* / updated_at）
  * 由写路径在原行上刷新。

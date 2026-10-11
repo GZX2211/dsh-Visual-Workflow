@@ -64,6 +64,33 @@ describe('EmbeddingService 来源选择', () => {
     await expect(service.embed(['a'])).rejects.toThrow('HTTP 401')
   })
 
+  it('外部端点连接不返回_超时中断请求并报超时', async () => {
+    // 黑洞连接：接受请求后永不返回，但响应 abort 信号（与真实 fetch 一致）
+    let lastSignal: AbortSignal | undefined
+    const fetchImpl = vi.fn((_input: unknown, init?: RequestInit) => {
+      lastSignal = init?.signal ?? undefined
+      return new Promise<Response>((_resolve, reject) => {
+        lastSignal?.addEventListener('abort', () => reject(new DOMException('This operation was aborted', 'AbortError')))
+      })
+    }) as unknown as typeof fetch
+    const service = new EmbeddingService({
+      endpoint: 'http://localhost:9999/v1/embeddings',
+      fetchImpl,
+      remoteTimeoutMs: 20,
+    })
+
+    const startedAt = Date.now()
+    const error = await service.embed(['a']).catch((caught: Error) => caught)
+
+    expect(Date.now() - startedAt).toBeLessThan(2000)
+    expect((error as Error).message).toContain('超时')
+    expect((error as Error).message).toContain('20ms')
+    // 超时落在 fetch 的 AbortSignal 上：请求必须被真正中断，且超时原因可诊断
+    expect(lastSignal?.aborted).toBe(true)
+    expect(service.degradeReason).toContain('超时')
+    service.dispose()
+  })
+
   it('资产缺失 → 降级 bm25（不加载重依赖，不抛错）', async () => {
     const dir = await tempDir('vw-empty-')
     const service = new EmbeddingService({ modelDir: join(dir, 'no-such-model') })

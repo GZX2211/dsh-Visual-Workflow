@@ -2,6 +2,7 @@
 //
 // 数据库表单（本地 / 服务器）：连接信息 + 检索高级选项。
 
+import { useState } from 'react'
 import type { Dict } from '../../../i18n.js'
 import { Field } from '../form-field.js'
 import { InputField, NameField, TextAreaField } from './form-primitives.js'
@@ -15,6 +16,12 @@ export function DatabaseForm({ data, copy, onPatch, onTest }: {
   const isServer = data.dbType === 'server'
   const conn = (data.conn ?? {}) as { host?: string; port?: number; user?: string; password?: string; db?: string }
   const vectorOptions = (data.vectorOptions ?? {}) as Record<string, number | undefined>
+  /**
+   * 已存口令不回显（D07-05）：受控值只承载「本次会话内用户新输入的口令」，失焦即清空，
+   * 因此打开属性栏不会把已存明文重新下发到浏览器 DOM。data.conn.password 仍是运行期
+   * 事实源（driver.ts 依赖），这里只改展示口径，不改写入时机与字段。
+   */
+  const [passwordDraft, setPasswordDraft] = useState<string | null>(null)
   const setOpt = (patch: Record<string, number | undefined>): void => onPatch({ vectorOptions: { ...vectorOptions, ...patch } })
   const clampInt = (value: string, min: number, fallback: number, max?: number): number => {
     const n = Number(value)
@@ -46,7 +53,18 @@ export function DatabaseForm({ data, copy, onPatch, onTest }: {
           </div>
           <div className="wf-form-grid-2">
             <InputField label={copy.dbUser} value={conn.user} onChange={(value) => onPatch({ conn: { ...conn, user: value } })} />
-            <InputField label={copy.dbPassword} type="password" value={conn.password} onChange={(value) => onPatch({ conn: { ...conn, password: value } })} />
+            <Field label={copy.dbPassword}>
+              <input
+                type="password"
+                value={passwordDraft ?? ''}
+                placeholder={String(conn.password ?? '') === '' ? copy.dbPasswordPlaceholder : copy.dbPasswordStored}
+                onChange={(event) => {
+                  setPasswordDraft(event.target.value)
+                  onPatch({ conn: { ...conn, password: event.target.value } })
+                }}
+                onBlur={() => setPasswordDraft(null)}
+              />
+            </Field>
           </div>
           <InputField label={copy.dbName} value={conn.db} onChange={(value) => onPatch({ conn: { ...conn, db: value } })} />
           <div>

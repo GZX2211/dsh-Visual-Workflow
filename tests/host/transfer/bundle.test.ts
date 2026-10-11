@@ -14,6 +14,7 @@ import {
   importAgentTemplate,
   importWorkflowBundle,
 } from '../../../src/host/transfer/bundle.js'
+import type { DatabaseNode } from '../../../src/host/shared/graph-model.js'
 import {
   agent,
   cleanupAll,
@@ -119,6 +120,96 @@ describe('工作流 bundle 导出/导入（mode1）', () => {
     const store = await makeStore()
     await expect(exportWorkflowBundle(store, 'session-1', 'nope')).rejects.toMatchObject({ code: 'TRANSFER_NOT_FOUND' })
     await expect(exportAgentTemplate(store, 'nope')).rejects.toMatchObject({ code: 'TRANSFER_NOT_FOUND' })
+  })
+})
+
+// D07-05：导出包是可分享产物，连接口令必须从导出产物中“剔除”（不是掩码），
+// 而落盘文档与运行期（wf-db-query/driver.ts）仍以文档为事实源，不得受影响。
+const SECRET = 'p@ssw0rd-secret'
+
+function serverDatabaseNode(): DatabaseNode {
+  return {
+    id: 'n-db',
+    kind: 'database',
+    position: { x: 0, y: 0 },
+    data: {
+      label: '服务器库',
+      description: '',
+      dbType: 'server',
+      dbKind: 'mysql',
+      conn: { host: 'db.internal', port: 3306, user: 'root', password: SECRET, db: 'prod' },
+    },
+  }
+}
+
+describe('导出剔除连接凭据（D07-05）', () => {
+  it('mode1：导出 bundle 不含节点口令，非密钥字段保留、落盘文档不受影响', async () => {
+    const store = await makeStore()
+    const flow = makeFlow()
+    flow.nodes = [...flow.nodes, serverDatabaseNode()]
+    await store.saveWorkflow(flow, 'session-1', { force: true })
+
+    const json = await exportWorkflowBundle(store, 'session-1', 'flow-1')
+    expect(json).not.toContain(SECRET)
+    const bundle = JSON.parse(json) as {
+      workflow?: { nodes?: Array<{ id?: string; data?: { conn?: Record<string, unknown> } }> }
+    }
+    const exported = bundle.workflow?.nodes?.find((node) => node.id === 'n-db')
+    expect(exported?.data?.conn?.host).toBe('db.internal')
+    expect(exported?.data?.conn?.user).toBe('root')
+    expect(exported?.data?.conn !== undefined && 'password' in exported.data.conn).toBe(false)
+
+    // 落盘文档是运行期唯一事实源：导出剔除不得回写存储
+    const stored = await store.getWorkflow('session-1', 'flow-1')
+    const storedNode = stored?.nodes.find((node) => node.id === 'n-db') as DatabaseNode | undefined
+    expect(storedNode?.data.conn?.password).toBe(SECRET)
+  })
+
+  it('mode2：服务导出同样剔除节点口令', async () => {
+    const store = await makeStore()
+    const service = {
+      id: 'svc-1',
+      sessionId: 'session-1',
+      mode: 'mode2',
+      name: '示例服务',
+      description: '服务描述',
+      revision: 0,
+      status: 'stopped',
+      nodes: [serverDatabaseNode(), ...makeFlow().nodes],
+      lines: [],
+    } as never
+    await store.saveService(service, 'session-1', { force: true })
+
+    const json = await exportWorkflowBundle(store, 'session-1', 'svc-1')
+    expect(json).not.toContain(SECRET)
+    const bundle = JSON.parse(json) as { service?: { nodes?: Array<{ id?: string; data?: { conn?: Record<string, unknown> } }> } }
+    const exported = bundle.service?.nodes?.find((node) => node.id === 'n-db')
+    expect(exported?.data?.conn?.host).toBe('db.internal')
+    expect(exported?.data?.conn !== undefined && 'password' in exported.data.conn).toBe(false)
+  })
+
+  it('嵌入式数据库模板的连接口令不随包导出', async () => {
+    const store = await makeStore()
+    await store.saveWorkflow(makeFlow(), 'session-1', { force: true })
+    await store.saveTemplate('database', {
+      id: 'db-1',
+      name: '生产库',
+      description: '',
+      dbType: 'server',
+      dbKind: 'mysql',
+      conn: { host: 'db.internal', port: 3306, user: 'root', password: SECRET, db: 'prod' },
+    } as never)
+
+    const json = await exportWorkflowBundle(store, 'session-1', 'flow-1')
+    expect(json).not.toContain(SECRET)
+    const bundle = JSON.parse(json) as { embedded?: { databases?: Array<{ conn?: Record<string, unknown> }> } }
+    const exported = bundle.embedded?.databases?.[0]
+    expect(exported?.conn?.host).toBe('db.internal')
+    expect(exported?.conn !== undefined && 'password' in exported.conn).toBe(false)
+
+    // 模板库同样不受导出影响
+    const storedTemplate = await store.getTemplate('database', 'db-1') as { conn?: { password?: string } } | null
+    expect(storedTemplate?.conn?.password).toBe(SECRET)
   })
 })
 

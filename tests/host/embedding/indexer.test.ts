@@ -3,7 +3,7 @@
 // 向量/BM25 索引单测（T-025）：分词与倒排打分、VectorIndex 的 rebuild（embedding/bm25
 // 双模式）、检索 Top-K 与阈值、rowKey 回溯、原子持久化、降级标注与删除清理。
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { existsSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -187,6 +187,36 @@ describe('VectorIndex 重建与检索', () => {
     expect(texts.some((t) => t.includes('苹果'))).toBe(true)
     expect(texts.some((t) => t.includes('香蕉'))).toBe(true)
     expect(texts.some((t) => t.includes('汽车'))).toBe(false)
+  })
+
+  it('search 维度不一致：视为无效块跳过，不按截断维度打分', async () => {
+    const dir = await tempDir('vw-idx-')
+    const indexPath = join(dir, 'idx.json')
+    const index = new VectorIndex(indexPath)
+    // 索引由 4 维引擎建立（模拟旧模型），随后换成 2 维引擎（模拟换端点/换模型）
+    await index.rebuild({
+      dataId: 'db-1',
+      records: [
+        { text: '第一条 内容', source: 't1' },
+        { text: '第二条 内容', source: 't2' },
+      ],
+      engine: fakeEngine('local', 4),
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const mismatched = await index.search('内容', 5, fakeEngine('local', 2))
+
+      // 维度不一致的块无法比较：不按较短向量截断打分（截断会得到 1.0 的假高分）
+      expect(mismatched?.hits).toEqual([])
+      expect(mismatched?.source).toBe('embedding')
+      // 汇总一条告警即可，不按块刷屏
+      const dimensionWarnings = warn.mock.calls.filter((call) => String(call[0]).includes('维度'))
+      expect(dimensionWarnings).toHaveLength(1)
+      expect(String(dimensionWarnings[0]?.[0])).toContain('2')
+      expect(String(dimensionWarnings[0]?.[0])).toContain('4')
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it('search 对 bm25 索引自动走 BM25 打分并标注 source=bm25', async () => {

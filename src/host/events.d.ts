@@ -83,8 +83,6 @@ declare module '@deepseek-ai/cordis' {
      * 监听器可返回 { kind: 'enter', messages } 替换本步消息或经 next() 透传。
      */
     'agent/pre-step'(payload: unknown, next: () => Promise<unknown>): Promise<unknown> | unknown
-    /** 回合将关闭（软截停护栏回合重置；官方 runtime-types L278，§8 #22）。 */
-    'agent/turn-stopping'(payload: unknown): void
     /**
      * 系统提示词组装瀑布（思考强度注入 provider/model 变量；官方 model-selection
      * L40-53，§8 #4）。签名 (assembly, context, next) 与官方一致。

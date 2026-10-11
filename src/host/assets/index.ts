@@ -120,6 +120,11 @@ export interface AssetStoreDeps {
   now?: () => number
   /** id 生成依赖（随机源/时间/序号；缺省系统实现）。 */
   ids?: IdGeneratorDeps
+  /**
+   * 只读打开通道（备份浏览 / 只读介质 / 诊断）：跳过建表与迁移，写方法由驱动层拒绝。
+   * 只读通道下读方法语义不变（`withRead`），写方法以只读库错误失败。
+   */
+  readOnly?: boolean
 }
 
 /** 角色模版晋升入参。 */
@@ -189,8 +194,9 @@ export interface AssetPromoteResult {
 /**
  * 资产库（单文件 SQLite）。
  *
- * 读改写语义：每个公开写方法与读方法都在**一笔事务**内完成（进程内串行 + BEGIN IMMEDIATE），
- * 失败整体回滚，不留半成品。
+ * 读改写语义：每个公开写方法都在**一笔写事务**内完成（进程内串行 + BEGIN IMMEDIATE），
+ * 失败整体回滚，不留半成品；读方法走只读事务（`withRead`，BEGIN DEFERRED + query_only），
+ * 不取写锁、不阻塞写路径。
  */
 export class AssetStore {
   private readonly db: AssetDb
@@ -200,7 +206,7 @@ export class AssetStore {
 
   constructor(root: string, deps: AssetStoreDeps = {}) {
     this.now = deps.now ?? Date.now
-    this.db = new AssetDb(root, this.now)
+    this.db = new AssetDb(root, this.now, deps.readOnly === true)
     this.ids = deps.ids ?? {}
   }
 
@@ -229,17 +235,17 @@ export class AssetStore {
 
   /** 角色资产列表（活跃；Active 版本投影；currentTemplateFingerprint 由 API 边界填充）。 */
   listRoleAssets(): Promise<RoleAssetSummary[]> {
-    return this.db.withTx((tx) => listRoleAssets(tx))
+    return this.db.withRead((tx) => listRoleAssets(tx))
   }
 
   /** 历史（已归档）角色资产列表（最新版本行投影；不进父代理召回面）。 */
   listRetiredRoleAssets(): Promise<RoleAssetSummary[]> {
-    return this.db.withTx((tx) => listRetiredRoleAssets(tx))
+    return this.db.withRead((tx) => listRetiredRoleAssets(tx))
   }
 
   /** 角色资产详情（活跃取 Active 版本、归档取最新版本行，归档时带 retired 标记）。 */
   getRoleAsset(assetId: string): Promise<RoleAssetDetail | null> {
-    return this.db.withTx((tx) => getRoleAssetDetail(tx, assetId))
+    return this.db.withRead((tx) => getRoleAssetDetail(tx, assetId))
   }
 
   /**
@@ -248,12 +254,12 @@ export class AssetStore {
    * （按钉住版本返回，不能读 Active，否则回滚后标注会撒谎）。
    */
   getRoleAssetVersion(roleRowId: string): Promise<RoleAssetDetail | null> {
-    return this.db.withTx((tx) => getRoleAssetVersionDetail(tx, roleRowId))
+    return this.db.withRead((tx) => getRoleAssetVersionDetail(tx, roleRowId))
   }
 
   /** 角色资产版本列表（版本号倒序；归档资产同样可列，用于重新启用）。 */
   listRoleVersions(assetId: string): Promise<AssetVersionEntry[]> {
-    return this.db.withTx((tx) => readRoleVersionEntries(tx, assetId))
+    return this.db.withRead((tx) => readRoleVersionEntries(tx, assetId))
   }
 
   /** 回滚角色资产到指定版本（活跃资产挪 Active 指针；归档资产即重新启用）。 */
@@ -322,22 +328,22 @@ export class AssetStore {
 
   /** 工作流资产列表（活跃；Active 版本投影；currentTemplateFingerprint 由 API 边界填充）。 */
   listWorkflowAssets(): Promise<WorkflowAssetSummary[]> {
-    return this.db.withTx((tx) => listWorkflowAssets(tx))
+    return this.db.withRead((tx) => listWorkflowAssets(tx))
   }
 
   /** 历史（已归档）工作流资产列表（最新版本行投影；不进父代理召回面）。 */
   listRetiredWorkflowAssets(): Promise<WorkflowAssetSummary[]> {
-    return this.db.withTx((tx) => listRetiredWorkflowAssets(tx))
+    return this.db.withRead((tx) => listRetiredWorkflowAssets(tx))
   }
 
   /** 工作流资产详情（活跃取 Active 版本、归档取最新版本行，归档时带 retired 标记）。 */
   getWorkflowAsset(assetId: string): Promise<WorkflowAssetDetail | null> {
-    return this.db.withTx((tx) => getWorkflowAssetDetail(tx, assetId))
+    return this.db.withRead((tx) => getWorkflowAssetDetail(tx, assetId))
   }
 
   /** 工作流资产版本列表（版本号倒序；归档资产同样可列，用于重新启用）。 */
   listWorkflowVersions(assetId: string): Promise<AssetVersionEntry[]> {
-    return this.db.withTx((tx) => readWorkflowVersionEntries(tx, assetId))
+    return this.db.withRead((tx) => readWorkflowVersionEntries(tx, assetId))
   }
 
   /** 回滚工作流资产到指定版本（活跃资产挪 Active 指针；归档资产即重新启用）。 */
@@ -360,7 +366,7 @@ export class AssetStore {
    * 判据与登记路径同源，因此预览结论与真实保存不会分叉。
    */
   previewAssetCascade(input: AssetCascadePreviewInput): Promise<RoleAssetReference[]> {
-    return this.db.withTx((tx) => {
+    return this.db.withRead((tx) => {
       if (input.kind === 'role') return previewRoleAssetCascade({ tx, now: this.now }, input.assetId, input.role)
       return previewWorkflowAssetCascade(tx, { workflowAssetId: input.workflowAssetId, nodes: input.nodes })
     })
@@ -453,17 +459,17 @@ export class AssetStore {
 
   /** 某主体类型当前生效的经验生成 Prompt（无活跃行返回 null，即该类型经验生成被关闭）。 */
   getActivePrompt(type: ExperienceType): Promise<ExperienceGenerationPromptEntry | null> {
-    return this.db.withTx((tx) => getActivePromptRow(tx, type))
+    return this.db.withRead((tx) => getActivePromptRow(tx, type))
   }
 
   /** 全量经验生成 Prompt（含历史版本；同类型内活跃行排在前）。 */
   listPrompts(): Promise<ExperienceGenerationPromptEntry[]> {
-    return this.db.withTx((tx) => listPromptRows(tx))
+    return this.db.withRead((tx) => listPromptRows(tx))
   }
 
   /** 界面经验列表（活跃与归档一并返回，条目自带 active 标记；超出上限按上限截断）。 */
   listRows(limit: number): Promise<ExperienceEntry[]> {
-    return this.db.withTx((tx) => listExperienceRows(tx, limit))
+    return this.db.withRead((tx) => listExperienceRows(tx, limit))
   }
 
   /**
@@ -471,7 +477,7 @@ export class AssetStore {
    * `activeOnly` = 召回面语义：归档经验一律查不到，避免调用方各自判断归档过滤。
    */
   getRows(ids: string[], options?: { activeOnly?: boolean }): Promise<ExperienceEntry[]> {
-    return this.db.withTx((tx) => readExperiencesByIds(tx, ids, options))
+    return this.db.withRead((tx) => readExperiencesByIds(tx, ids, options))
   }
 
   /**
@@ -479,7 +485,7 @@ export class AssetStore {
    * 向量不可用或只有单侧的行不返回：这类行无法参与双通道召回。
    */
   listActiveExperienceEmbeddings(type: ExperienceType): Promise<ExperienceEmbeddingRow[]> {
-    return this.db.withTx((tx) => listActiveExperienceEmbeddingRows(tx, type))
+    return this.db.withRead((tx) => listActiveExperienceEmbeddingRows(tx, type))
   }
 
   /**
@@ -521,7 +527,7 @@ export class AssetStore {
     experienceType: ExperienceType
     experienceIds: string[]
   }): Promise<string[]> {
-    return this.db.withTx((tx) => readInjectedExperienceIds({ tx, now: this.now, ids: this.ids }, input))
+    return this.db.withRead((tx) => readInjectedExperienceIds({ tx, now: this.now, ids: this.ids }, input))
   }
 
   /**
@@ -534,7 +540,7 @@ export class AssetStore {
 
   /** 读统计投影（缺行不返回：无统计即「证据不足」，读侧按中性解释，不伪造行）。 */
   getStats(experienceIds: string[]): Promise<ExperienceStatsEntry[]> {
-    return this.db.withTx((tx) => readStatsRows({ tx, now: this.now, ids: this.ids }, experienceIds))
+    return this.db.withRead((tx) => readStatsRows({ tx, now: this.now, ids: this.ids }, experienceIds))
   }
 
   /**

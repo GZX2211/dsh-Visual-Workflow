@@ -94,11 +94,6 @@ export function setWorkbenchMountHost(host: WorkbenchMountHost | null): void {
   if (host !== null) placeWorkbenchContainer()
 }
 
-/** 测试用：读取当前宿主（null 表示未初始化）。 */
-export function getWorkbenchMountHost(): WorkbenchMountHost | null {
-  return mountHost
-}
-
 /**
  * 登记一个标签页 body 挂载点并接管常驻容器；返回注销（body 卸载时调用）。
  * @param host - body 内的挂载点元素。

@@ -161,6 +161,53 @@ describe('初始化', () => {
   })
 })
 
+describe('读路径的事务模式（读不取写锁）', () => {
+  it('test_读路径_另一连接持有写事务时仍可读', async () => {
+    const promoted = await store.promoteRole({
+      templateId: 'tpl-1',
+      fingerprint: 'fp-1',
+      role: roleTemplate(),
+      source: 'human',
+    })
+
+    // 另开连接并持有写事务：BEGIN IMMEDIATE 的读路径此时会以「database is locked」失败
+    const { DatabaseSync } = await import('node:sqlite')
+    const holder = new DatabaseSync(join(root, ASSET_DB_FILE))
+    try {
+      holder.exec('BEGIN IMMEDIATE')
+
+      const detail = await store.getRoleAsset(promoted.assetId)
+      expect(detail?.name).toBe('研究员')
+    } finally {
+      holder.exec('ROLLBACK')
+      holder.close()
+    }
+  })
+
+  it('test_只读连接_读方法可用_真正的写语句被驱动层拒绝', async () => {
+    const promoted = await store.promoteRole({
+      templateId: 'tpl-1',
+      fingerprint: 'fp-1',
+      role: roleTemplate(),
+      source: 'human',
+    })
+    store.close()
+
+    // 只读连接：读路径不得**依赖**写事务（注意驱动层并不阻止 BEGIN IMMEDIATE，
+    // 只有真正的写语句才报 readonly，故本用例只能证明读可用 + 写被拒）
+    const readonlyStore = new AssetStore(root, { now: fakeClock(), ids: fakeIds(), readOnly: true })
+    await readonlyStore.init()
+    try {
+      expect(await readonlyStore.listRoleAssets()).toHaveLength(1)
+      expect((await readonlyStore.getRoleAsset(promoted.assetId))?.name).toBe('研究员')
+      // 写路径仍不可绕开：只读连接上真正的写语句由驱动层拒绝
+      await expect(readonlyStore.retireRoleAsset(promoted.assetId)).rejects.toThrow(/readonly/i)
+    } finally {
+      readonlyStore.close()
+    }
+  })
+})
+
 describe('存量库形状迁移（交接契约列的 JSON 约束退役）', () => {
   it('test_初始化_旧库带json_valid约束_退役约束且数据索引外键均保留', async () => {
     const legacyRoot = await makeLegacyStore()

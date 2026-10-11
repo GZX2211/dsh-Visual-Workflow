@@ -261,6 +261,9 @@ export const zh = {
   dbPort: '端口',
   dbUser: '用户名',
   dbPassword: '密码',
+  /** 已存口令不回显（D07-05）：只有在用户输入新口令时才写回 conn.password。 */
+  dbPasswordStored: '已保存口令（不回显），输入新口令即替换',
+  dbPasswordPlaceholder: '输入口令',
   dbName: '库名',
   dbTest: '测试连接',
   dbTestSuccess: '数据库连接成功',
@@ -768,6 +771,9 @@ export const en: Dict = {
   dbPort: 'Port',
   dbUser: 'User',
   dbPassword: 'Password',
+  /** 已存口令不回显（D07-05）：只有在用户输入新口令时才写回 conn.password。 */
+  dbPasswordStored: 'Password saved (hidden) — type a new one to replace',
+  dbPasswordPlaceholder: 'Enter password',
   dbName: 'Database',
   dbTest: 'Test connection',
   dbTestSuccess: 'Database connection OK',
@@ -1064,9 +1070,4 @@ export function detectLanguage(locale: unknown, navigatorLanguage?: string): str
   } catch {
     return navigatorLanguage ?? 'en'
   }
-}
-
-/** 从 locale 服务取值中提取语言码（旧项目兼容名）。 */
-export function localeLanguage(locale: unknown, navigatorLanguage?: string): string {
-  return detectLanguage(locale, navigatorLanguage)
 }

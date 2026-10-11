@@ -22,6 +22,41 @@ function safeClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value ?? null)) as T
 }
 
+/**
+ * 导出产物中不得携带的连接密钥字段（与 wf-org-catalog 的 SECRET_CONNECTION_KEYS 同一口径；
+ * 该常量属 tools 模块内部实现，transfer 不反向依赖它，故在此独立声明）。
+ */
+const SECRET_CONNECTION_KEYS = ['password'] as const
+
+/**
+ * 就地剔除导出副本里 `conn` 上的密钥字段（只删除调用方自己持有的深拷贝节点，不触碰存储文档）。
+ * 按结构定位（仅 `conn` 对象内），不做全局按名删除，避免误伤同名字段。
+ */
+function stripConnectionSecrets(node: unknown): void {
+  if (Array.isArray(node)) {
+    for (const item of node) stripConnectionSecrets(item)
+    return
+  }
+  if (typeof node !== 'object' || node === null) return
+  const record = node as Record<string, unknown>
+  const conn = record.conn
+  if (typeof conn === 'object' && conn !== null && !Array.isArray(conn)) {
+    for (const key of SECRET_CONNECTION_KEYS) delete (conn as Record<string, unknown>)[key]
+  }
+  for (const item of Object.values(record)) stripConnectionSecrets(item)
+}
+
+/**
+ * 导出专用深拷贝（D07-05）：导出包与单模板是可分享产物，连接口令一律**移除**（非掩码）。
+ * 只作用于导出路径——工作流文档与运行期（wf-db-query/driver.ts）仍从存储读取该字段；
+ * 被剔除的字段导入端不回填，用户需在属性栏重新填写（见 database-form 的不回显口径）。
+ */
+function exportClone<T>(value: T): T {
+  const clone = safeClone(value)
+  stripConnectionSecrets(clone)
+  return clone
+}
+
 /** 导入导出领域错误码：由调用边界映射为对外错误契约（模块内不出现 HTTP 语义）。 */
 export type TransferErrorCode = 'TRANSFER_INVALID_JSON' | 'TRANSFER_INVALID_BUNDLE' | 'TRANSFER_NOT_FOUND'
 
@@ -100,15 +135,15 @@ export async function exportWorkflowBundle(store: FlowStore, sessionId: string, 
       service: {
         name: service.name ?? service.id,
         description: service.description ?? '',
-        nodes: safeClone(service.nodes ?? []),
-        lines: safeClone(service.lines ?? []),
+        nodes: exportClone(service.nodes ?? []),
+        lines: exportClone(service.lines ?? []),
       },
       embedded: {
-        roles: safeClone(roles),
-        files: safeClone(files),
-        databases: safeClone(databases),
+        roles: exportClone(roles),
+        files: exportClone(files),
+        databases: exportClone(databases),
         groups: groupsOf(service as unknown as WorkflowDocument),
-        combos: safeClone(combos),
+        combos: exportClone(combos),
       },
     }
     return JSON.stringify(bundle, null, 2)
@@ -126,15 +161,15 @@ export async function exportWorkflowBundle(store: FlowStore, sessionId: string, 
     workflow: {
       name: flow.name ?? flow.id,
       description: flow.description ?? '',
-      nodes: safeClone(flow.nodes ?? []),
-      lines: safeClone(flow.lines ?? []),
+      nodes: exportClone(flow.nodes ?? []),
+      lines: exportClone(flow.lines ?? []),
     },
     embedded: {
-      roles: safeClone(roles),
-      files: safeClone(files),
-      databases: safeClone(databases),
+      roles: exportClone(roles),
+      files: exportClone(files),
+      databases: exportClone(databases),
       groups: groupsOf(flow),
-      combos: safeClone(combos),
+      combos: exportClone(combos),
     },
   }
   return JSON.stringify(bundle, null, 2)
@@ -223,7 +258,7 @@ export async function importWorkflowBundle(
 export async function exportAgentTemplate(store: FlowStore, id: string): Promise<string> {
   const template = await store.getTemplate('role', id)
   if (!template) throw new TransferError('TRANSFER_NOT_FOUND', `角色模板不存在：${id}`)
-  return JSON.stringify({ format: 'dsh-vw-template', version: 2, template: safeClone(template) }, null, 2)
+  return JSON.stringify({ format: 'dsh-vw-template', version: 2, template: exportClone(template) }, null, 2)
 }
 
 /** 导入角色模板（重名冲突语义同工作流导入）。 */

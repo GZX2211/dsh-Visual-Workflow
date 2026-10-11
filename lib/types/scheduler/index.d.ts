@@ -3,7 +3,7 @@ export type { SchedulerEngineDeps, SchedulerFlowStore, SchedulerLogger, Schedule
 export { emptyPersistedRuntime, SchedulerTaskStore } from './task-store.js';
 export type { PersistedRuntime } from './task-store.js';
 export { normalizeScheduledTask, parseScheduledTaskInput, ScheduledTaskInputError, validateScheduledTask, } from './task-config.js';
-export { addDays, dateOnlyOf, formatDateOnly, formatMinutes, localToUtc, parseDateOnly, parseTime, weekdayOf, zonedParts, } from './calendar.js';
+export { addDays, dateOnlyOf, formatDateOnly, formatMinutes, localToUtc, parseDateOnly, parseTime, zonedParts, } from './calendar.js';
 export type { ZonedParts } from './calendar.js';
 export { isValidDate, isWithinWindow, nextWindowStartAt, timeInRanges } from './window.js';
 export { nextTriggerAt, triggerPointsForDate } from './trigger.js';

@@ -138,8 +138,3 @@ export function localToUtc(
 export function dateOnlyOf(utcMs: number, timeZone: string): string {
   return zonedParts(utcMs, timeZone).dateOnly
 }
-
-/** UTC 毫秒 → 指定时区星期（0=周日 … 6=周六）。 */
-export function weekdayOf(utcMs: number, timeZone: string): number {
-  return zonedParts(utcMs, timeZone).weekday
-}

@@ -16,6 +16,7 @@ import type {
 import { decodeEmbedding } from "../../../src/host/assets/embedding-blob.js"
 import { asExperienceType, parseJsonArray } from "../../../src/host/assets/experience-codec.js"
 import { AssetStore, EXPERIENCE_LIST_MAX_LIMIT } from "../../../src/host/assets/index.js"
+import { readExperiencesByIds, RECALL_IN_QUERY_BATCH } from "../../../src/host/assets/experiences.js"
 import { experienceRow, keepAllJudge, makeStore, neutralStatsFixture, openRawDb, removeTempRoot, usageRow, vector } from "./fixtures/asset-fixture.js"
 
 /** 决策侧检索文本相同即视为重复（验证判重接入点，不验证相似度算法）。 */
@@ -344,6 +345,46 @@ describe("经验列表与按 id 召回", () => {
 
     expect(rows.map((entry) => entry.id)).toEqual(["ex-second", "ex-first"])
     expect(rows[0].situation).toBe("两端并行开发同一份跨模块契约")
+  })
+
+  it("test_按id召回_超大批量_按批切分且每批占位符有界", async () => {
+    const ids = Array.from({ length: 32767 }, (_, index) => `ex-bulk-${index}`)
+    let calls = 0
+    let maxPlaceholders = 0
+    // 计数用假事务上下文：只观察 SQL 形状，不触达真实库（32767 个绑定变量本就无法一次绑定）
+    const counting = {
+      exec: () => {},
+      run: () => {},
+      get: () => null,
+      all: (sql: string) => {
+        calls += 1
+        maxPlaceholders = Math.max(maxPlaceholders, (sql.match(/\?/g) ?? []).length)
+        return []
+      },
+    }
+
+    const rows = await readExperiencesByIds(counting, ids)
+
+    expect(rows).toEqual([])
+    expect(calls).toBe(Math.ceil(ids.length / RECALL_IN_QUERY_BATCH))
+    expect(maxPlaceholders).toBe(RECALL_IN_QUERY_BATCH)
+  })
+
+  it("test_按id召回_跨批读取_保持入参顺序且命中不到的不影响其他批", async () => {
+    // 条数跨过批边界（RECALL_IN_QUERY_BATCH + 2）：前批末条、后批首条都必须按入参顺序回填
+    const total = RECALL_IN_QUERY_BATCH + 2
+    for (let index = 0; index < total; index += 1) {
+      await insertOne(experienceRow(`ex-${index}`))
+    }
+    // 命中不到的 id 插在最前与批边界处：结果只略过它们，其余顺序不变
+    const ids = ["ex-缺失-头部", ...Array.from({ length: total }, (_, index) => `ex-${index}`), "ex-缺失-尾部"]
+
+    const rows = await store.getRows(ids)
+
+    expect(rows).toHaveLength(total)
+    expect(rows[0].id).toBe("ex-0")
+    expect(rows[total - 1].id).toBe(`ex-${total - 1}`)
+    expect(rows.map((entry) => entry.id)).toEqual(ids.slice(1, -1))
   })
 
   it("test_按id召回_空入参_返回空列表", async () => {

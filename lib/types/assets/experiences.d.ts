@@ -51,6 +51,14 @@ export declare function readExperienceRow(ctx: AssetTxContext, id: string): Expe
  */
 export declare function readExistingExperienceIds(ctx: AssetTxContext, ids: string[]): Set<string>;
 /**
+ * 按 id 读经验时 `IN (…)` 查询的每批条数。
+ *
+ * 为什么必须分批：占位符个数与入参条数一一对应，而 SQLite 的绑定变量有硬上限
+ * （本机实测 32767 个即报 `too many SQL variables`）。调用方若传入超大批量，
+ * 一次绑定会以底层驱动错误失败（不是可行动的业务错误），分批后每批恒在安全区内。
+ */
+export declare const RECALL_IN_QUERY_BATCH = 500;
+/**
  * 按 id 读经验（保持入参顺序，命中不到的略过）。
  * `activeOnly` = 召回面语义：归档经验不得被召回，因此表现为「查不到」而不是返回内容。
  */

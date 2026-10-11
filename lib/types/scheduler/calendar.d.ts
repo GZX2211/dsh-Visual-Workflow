@@ -58,5 +58,3 @@ export declare function localToUtc(input: {
 }, timeZone: string): number;
 /** UTC 毫秒 → 指定时区本地日期（"YYYY-MM-DD"）。 */
 export declare function dateOnlyOf(utcMs: number, timeZone: string): string;
-/** UTC 毫秒 → 指定时区星期（0=周日 … 6=周六）。 */
-export declare function weekdayOf(utcMs: number, timeZone: string): number;

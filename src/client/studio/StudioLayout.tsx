@@ -213,10 +213,10 @@ export function StudioLayout(props: StudioLayoutProps) {
   }
 
   return (
-    <div className="wf-root" data-wf-immersive="true">
+    <div className="wf-root">
       {/* 标题顶栏（工作流设计器一行；不再是窗口标题栏——工作台已迁到官方右侧 Sidebar 标签页，
           chip 由官方渲染，故此处不再有拖动手柄、窗口切换按钮与关闭按钮） */}
-      <nav className="wf-tabs" data-wf-titlebar="">
+      <nav className="wf-tabs">
         <span className="wf-titlebar__title">{t.studio}</span>
         <span className="wf-titlebar__badge">{t.badge}</span>
         <span className="wf-titlebar__note">{t.note}</span>
@@ -263,7 +263,7 @@ export function StudioLayout(props: StudioLayoutProps) {
         <button type="button" className="wf-btn" title={t.combos} onClick={() => dispatch({ type: 'COMBO_OPEN', open: true })}>{t.combos}</button>
       </nav>
 
-      <main className="wf-main" data-wf-main="">
+      <main className="wf-main">
         <LeftPanel
           copy={t}
           {...libraryProps}

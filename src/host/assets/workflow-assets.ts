@@ -39,7 +39,6 @@ import {
   markRoleVersionShared,
   readRoleActive,
   readRoleVersionRow,
-  referenceCount,
   releaseRoleReference,
   retireRoleAssetRow,
   roleAssetCurrentType,
@@ -50,6 +49,7 @@ import {
 import {
   isRoleNode,
   parseJsonStrict,
+  parseReferenceIds,
   roleFieldsFromNode,
   roleFieldsToNodeData,
   sameRoleFields,
@@ -477,7 +477,7 @@ function insertWorkflowVersion(
     // 保持原顺序遍历：roleRefs 与壳数组的角色节点顺序一致
     roleRefs.push({
       nodeId: node.id,
-      roleVersionId: registerRoleNode(ctx, node, request.source, request.nextRoleAssetId, shared),
+      roleVersionId: registerRoleNode(ctx, node, request.source, request.nextRoleAssetId, shared, request.assetId),
     })
     shells.push(roleShellOf(node))
   }
@@ -531,7 +531,7 @@ function insertWorkflowVersion(
     appendRoleReference(ctx, roleVersionId, rowId)
     const referencedAssetId = assetIdOfRoleRow(ctx.tx, roleVersionId)
     if (!referencedAssetId) continue
-    if (referenceCount(ctx.tx, roleVersionId) >= 2) {
+    if (referencingWorkflowAssetCount(ctx.tx, roleVersionId) >= 2) {
       const type = roleVersionType(ctx.tx, roleVersionId)
       if (type === 'standalone' || type === 'inline') {
         markRoleVersionShared(ctx, roleVersionId)
@@ -555,6 +555,28 @@ function insertWorkflowVersion(
 // ---------------------------------------------------------------------------
 // 引用结算与影响面预览
 // ---------------------------------------------------------------------------
+
+/**
+ * 该角色版本行的**引用方工作流资产**数量。
+ *
+ * 为什么不能直接用引用数组长度：`reference_workflow_ids` 记的是工作流**版本行** id
+ * （`<flowId>@<versionId>`），同一工作流保存第二个版本就会多出一条记录。若把版本行条数当引用方
+ * 数量，一个工作流在用、但保存过两次的内联角色资产就会被误升为 shared（`shared` 的语义是
+ * 「被多个工作流共用」，见 `settleReleasedReferences` 的说明），而 `listRoleAssetReferences`
+ * 早已按资产前缀去重——同一事实不能有两种口径。
+ */
+function referencingWorkflowAssetCount(ctx: AssetTxContext, roleRowId: string): number {
+  const row = ctx.get('SELECT reference_workflow_ids FROM role_asset_history WHERE id = ?', [roleRowId])
+  if (!row) return 0
+  const workflows = new Set<string>()
+  for (const id of parseReferenceIds(row.reference_workflow_ids)) {
+    // 只认 `<workflowAssetId>@<versionId>` 形状：形状漂移的旧数据宁可少算也不误报引用方
+    const separatorAt = id.lastIndexOf('@')
+    if (separatorAt <= 0) continue
+    workflows.add(id.slice(0, separatorAt))
+  }
+  return workflows.size
+}
 
 /**
  * 引用结算（用户裁决 A）：本工作流资产在新版本中不再引用的角色版本行，解除本资产的引用；
@@ -719,7 +741,8 @@ function sameWorkflowContent(left: WorkflowContentShape, right: WorkflowContentS
  * 单个角色节点的版本解析（算法 E 第 3 步）：
  *   1. data.sourceAssetId 命中未退役资产：内容与 Active 全等 → 直接引用该版本行；
  *      否则在该资产下登记新版本（类型与来源绑定跟随该资产）；
- *   2. 否则内容去重：命中 → 引用命中版本行，并把该资产升为 shared；
+ *   2. 否则内容去重：命中且**本工作流资产尚无更早版本**（即内容确实来自别处）→ 引用命中版本行
+ *      并把该资产升为 shared；本工作流续版命中自己的资产则只登记引用；
  *   3. 均未命中 → 新建 inline 角色资产（版本 1，不带来源模版绑定）。
  */
 function registerRoleNode(
@@ -728,6 +751,7 @@ function registerRoleNode(
   source: 'human' | 'agent',
   newAssetId: () => string,
   shared: Set<string>,
+  workflowAssetId: string,
 ): string {
   const fields = roleFieldsFromNode(node)
   const declared = typeof node.data.sourceAssetId === 'string' ? node.data.sourceAssetId : ''
@@ -756,14 +780,26 @@ function registerRoleNode(
 
   const duplicate = findRoleVersionByContent(ctx.tx, fields)
   if (duplicate) {
-    // 命中已存在内容：standalone/inline 都升 shared（同一内容被两处复用，修改需级联提示）
-    markRoleVersionShared(ctx, duplicate.row.id)
-    shared.add(duplicate.assetId)
+    // 命中已存在内容：先区分「本工作流在后续版本继续引用自己」与「另一处复用」。
+    // 判据取「本工作流资产是否已有更早的版本行」——在本版本行写入**之前**求值：
+    //   - 已有更早版本 → 同工作流内续用，不构成 shared 语义（shared = 被多个工作流共用），
+    //     否则一次改名保存就会把内联角色误标为共享并回传一条不存在的级联提示；
+    //   - 首版 → 内容已存在于别处（另一工作流或 standalone 资产），照旧升 shared。
+    const sameWorkflowContinues = workflowHasEarlierVersion(ctx.tx, workflowAssetId)
+    if (!sameWorkflowContinues) {
+      markRoleVersionShared(ctx, duplicate.row.id)
+      shared.add(duplicate.assetId)
+    }
     return duplicate.row.id
   }
 
   const created = createRoleAsset(ctx, { assetId: newAssetId(), fields, roleAssetType: 'inline', source })
   return created.rowId
+}
+
+/** 本工作流资产是否已有更早的版本行（在本次写作之前求值：用于区分续版与首版）。 */
+function workflowHasEarlierVersion(ctx: AssetTxContext, assetId: string): boolean {
+  return ctx.get('SELECT 1 AS present FROM workflow_asset_history WHERE asset_id = ? LIMIT 1', [assetId]) !== null
 }
 
 /** 壳重建（算法 H）：壳 + 角色版本映射 → 完整节点数组（顺序与壳一致）。 */

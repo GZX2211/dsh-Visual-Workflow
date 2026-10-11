@@ -4,7 +4,7 @@ export { makeLineId, makeNodeId, newDatabaseNode, newFileNode, newGroupNode, new
 export { ctxInEdges, dbInEdges, downstreamFlowNodeIds, entryNodes, flowInEdges, flowOutEdges, lineById, nodeById, proxiesOf, upstreamCtxNodeIds, } from './model.js';
 export { isFlowLine } from './dag.js';
 export { nodeHasFlowIn, nodeParticipatesInFlow } from './model.js';
-export { activeMilestoneGateOf, groupMemberIds, isGroupMember, mainNodeIdOf, memberGroupId, milestoneProxiesOf, proxyRoleOf, } from './model.js';
+export { activeMilestoneGateOf, isGroupMember, mainNodeIdOf, memberGroupId, milestoneProxiesOf, proxyRoleOf, } from './model.js';
 export { buildFlowDag, computeFlowLayers, detectCycleNodes, maxLayerWidth } from './dag.js';
 export type { FlowDag } from './dag.js';
 export { connectionProblem, validateFlow } from './validate.js';

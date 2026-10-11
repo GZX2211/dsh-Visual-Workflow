@@ -160,6 +160,15 @@ export function readExistingExperienceIds(ctx: AssetTxContext, ids: string[]): S
 }
 
 /**
+ * 按 id 读经验时 `IN (…)` 查询的每批条数。
+ *
+ * 为什么必须分批：占位符个数与入参条数一一对应，而 SQLite 的绑定变量有硬上限
+ * （本机实测 32767 个即报 `too many SQL variables`）。调用方若传入超大批量，
+ * 一次绑定会以底层驱动错误失败（不是可行动的业务错误），分批后每批恒在安全区内。
+ */
+export const RECALL_IN_QUERY_BATCH = 500
+
+/**
  * 按 id 读经验（保持入参顺序，命中不到的略过）。
  * `activeOnly` = 召回面语义：归档经验不得被召回，因此表现为「查不到」而不是返回内容。
  */
@@ -171,12 +180,17 @@ export function readExperiencesByIds(
   // 重复 id 不去重：SQL IN 本身按集合取值，再按入参顺序回填即可
   const wanted = ids.filter((id) => typeof id === "string" && id !== "")
   if (wanted.length === 0) return []
-  const rows = ctx.all(
-    `SELECT e.*${EXPERIENCE_STATS_JOIN_COLUMNS_SQL} FROM experiences e${EXPERIENCE_STATS_JOIN_SQL}
-      WHERE e.id IN (${sqlPlaceholders(wanted)})${options?.activeOnly === true ? " AND e.is_active = 1" : ""}`,
-    wanted,
-  )
-  const byId = new Map(rows.map((row) => [String(row.id ?? ""), experienceEntryOf(row)]))
+  const activeOnlySql = options?.activeOnly === true ? " AND e.is_active = 1" : ""
+  const byId = new Map<string, ExperienceEntry>()
+  for (let start = 0; start < wanted.length; start += RECALL_IN_QUERY_BATCH) {
+    const batch = wanted.slice(start, start + RECALL_IN_QUERY_BATCH)
+    const rows = ctx.all(
+      `SELECT e.*${EXPERIENCE_STATS_JOIN_COLUMNS_SQL} FROM experiences e${EXPERIENCE_STATS_JOIN_SQL}
+        WHERE e.id IN (${sqlPlaceholders(batch)})${activeOnlySql}`,
+      batch,
+    )
+    for (const row of rows) byId.set(String(row.id ?? ""), experienceEntryOf(row))
+  }
   return wanted.map((id) => byId.get(id)).filter((entry): entry is ExperienceEntry => entry !== undefined)
 }
 

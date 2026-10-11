@@ -1,4 +1,3 @@
-import type { GraphIssue } from '../../graph/index.js';
 import type { OrgMeta } from '../../shared/types.js';
 /** 补丁作用域：template = 工作流模板（规划期改模板）；instance = 工作流/服务实例（运行期改实例）。 */
 export type PatchScope = 'template' | 'instance';
@@ -136,5 +135,3 @@ export declare function groupsOf(ops: unknown[]): PatchGroup[];
 export declare function unknownOpsOf(ops: unknown[]): string[];
 /** 混组错误的可读分组说明（写进错误文本，帮助模型自我修正）。 */
 export declare const GROUP_HINTS: Record<PatchGroup, string>;
-/** 检查器 issue → 稳定错误码（error 阻断，warning 放行）。 */
-export declare function blockingIssuesOf(issues: GraphIssue[]): GraphIssue[];

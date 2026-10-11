@@ -137,7 +137,8 @@ export interface ExperienceRuntimePort {
 export interface ExperienceEmbeddingPort {
   readonly source: "local" | "remote" | "bm25"
   /**
-   * 降级原因（source 为 bm25 时的可诊断信息；未降级或实现不提供时为 null/undefined）。
+   * 可诊断原因（实现不提供时为 null/undefined）：`source === "bm25"` 时为降级原因；
+   * 远程嵌入超时也会在 `source === "remote"` 下写入超时原因（字段不专属于降级态）。
    * 为什么在端口上可见：只说「已降级」而不给原因，使用者无从定位（可观测性要求）。
    */
   readonly degradeReason?: string | null

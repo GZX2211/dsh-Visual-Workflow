@@ -116,11 +116,6 @@ export function mcpFormFromServer(server: McpServerEntry): McpFormState {
   }
 }
 
-/** 新建服务器的空表单。 */
-export function emptyMcpForm(): McpFormState {
-  return { serverName: '', transport: 'stdio', commandLine: '', env: '', headers: '', url: '' }
-}
-
 /**
  * 表单 → 后端 server 负载（按传输方式收窄字段：stdio 用 commandLine/env，
  * streamable-http 用 url/headers；空对象不写入）。

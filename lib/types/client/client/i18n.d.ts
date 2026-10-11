@@ -247,6 +247,9 @@ export declare const zh: {
     dbPort: string;
     dbUser: string;
     dbPassword: string;
+    /** 已存口令不回显（D07-05）：只有在用户输入新口令时才写回 conn.password。 */
+    dbPasswordStored: string;
+    dbPasswordPlaceholder: string;
     dbName: string;
     dbTest: string;
     dbTestSuccess: string;
@@ -519,5 +522,3 @@ export declare const en: Dict;
 export declare function text(language: string | null | undefined): Dict;
 /** 从 locale 服务取值中提取语言码（防御式）。 */
 export declare function detectLanguage(locale: unknown, navigatorLanguage?: string): string;
-/** 从 locale 服务取值中提取语言码（旧项目兼容名）。 */
-export declare function localeLanguage(locale: unknown, navigatorLanguage?: string): string;

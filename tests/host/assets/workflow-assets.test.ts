@@ -1,7 +1,8 @@
 // tests/host/assets/workflow-assets.test.ts
 //
 // 工作流资产语义测试：首次晋升（内联角色登记）、同模版二次晋升新版本、指纹短路、
-// 节点壳重建等价、回滚、退役、引用统计单调递增与新版本重置。
+// 节点壳重建等价、回滚、退役、引用统计单调递增与新版本重置，
+// 以及「同一工作流资产保存多次」不构成多引用方的资产级计数口径。
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ERR_ASSET_NOT_FOUND, ERR_ASSET_VERSION_NOT_FOUND } from '../../../src/host/shared/protocol.js'
@@ -442,6 +443,39 @@ describe('引用统计与 shared 晋升', () => {
     const detail = await store.getRoleAsset(inlineAssetId)
     expect(detail?.referenceWorkflowIds).toEqual([`${first.assetId}@1`, `${second.assetId}@1`])
     expect(detail?.roleAssetType).toBe('shared')
+  })
+
+  it('test_引用统计_同一工作流资产保存两次_不升shared且回传为空', async () => {
+    const role = roleNode({ id: 'n1' })
+    await store.promoteWorkflow({
+      templateId: 'tpl-flow-1',
+      fingerprint: 'fp-1',
+      mode: 'mode1',
+      name: '工作流A',
+      description: '说明A',
+      nodes: [role],
+      lines: [],
+      source: 'human',
+    })
+    const workflowAssetId = (await store.listWorkflowAssets())[0].assetId
+    const inlineAssetId = (await store.listRoleAssets())[0].assetId
+
+    // 同一工作流资产的第二个版本：名称已改（内容查重不短路），角色节点内容不变 → 复用同一角色版本行
+    const saved = await store.saveWorkflowVersion({
+      assetId: workflowAssetId,
+      mode: 'mode1',
+      name: '工作流A（改名）',
+      description: '说明A',
+      nodes: [role],
+      lines: [],
+      source: 'human',
+    })
+
+    // 引用记录里出现两个版本行 id，但引用方始终只有一个工作流资产
+    const detail = await store.getRoleAsset(inlineAssetId)
+    expect(detail?.referenceWorkflowIds).toEqual([`${workflowAssetId}@1`, `${workflowAssetId}@2`])
+    expect(saved.sharedRoleAssetIds).toEqual([])
+    expect(detail?.roleAssetType).toBe('inline')
   })
 
   it('test_引用统计_角色升版后新版本引用数组重置为空', async () => {

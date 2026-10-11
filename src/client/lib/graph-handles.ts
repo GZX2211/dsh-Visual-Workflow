@@ -31,7 +31,7 @@ export interface StageLabelCopy {
 }
 
 /** Stage labels are injected by UI callers so this pure graph helper stays locale-agnostic. */
-export function stageLabels(mode: string, copy: StageLabelCopy): { start: string; end: string; pause: string } {
+function stageLabels(mode: string, copy: StageLabelCopy): { start: string; end: string; pause: string } {
   const isMode2 = mode === 'mode2'
   return {
     start: isMode2 ? copy.input : copy.start,

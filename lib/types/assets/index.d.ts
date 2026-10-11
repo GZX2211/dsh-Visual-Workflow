@@ -21,6 +21,11 @@ export interface AssetStoreDeps {
     now?: () => number;
     /** id 生成依赖（随机源/时间/序号；缺省系统实现）。 */
     ids?: IdGeneratorDeps;
+    /**
+     * 只读打开通道（备份浏览 / 只读介质 / 诊断）：跳过建表与迁移，写方法由驱动层拒绝。
+     * 只读通道下读方法语义不变（`withRead`），写方法以只读库错误失败。
+     */
+    readOnly?: boolean;
 }
 /** 角色模版晋升入参。 */
 export interface RolePromoteInput {
@@ -89,8 +94,9 @@ export interface AssetPromoteResult {
 /**
  * 资产库（单文件 SQLite）。
  *
- * 读改写语义：每个公开写方法与读方法都在**一笔事务**内完成（进程内串行 + BEGIN IMMEDIATE），
- * 失败整体回滚，不留半成品。
+ * 读改写语义：每个公开写方法都在**一笔写事务**内完成（进程内串行 + BEGIN IMMEDIATE），
+ * 失败整体回滚，不留半成品；读方法走只读事务（`withRead`，BEGIN DEFERRED + query_only），
+ * 不取写锁、不阻塞写路径。
  */
 export declare class AssetStore {
     private readonly db;

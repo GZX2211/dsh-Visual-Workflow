@@ -342,12 +342,6 @@ export function mainNodeIdOf(flow: Partial<WorkflowDocument>, nodeId: string): s
   return source ? source.id : null
 }
 
-/** 某协作组的成员节点 id 列表。 */
-export function groupMemberIds(flow: Partial<WorkflowDocument>, groupId: string): string[] {
-  const g = nodeById(flow, groupId)
-  return g && g.kind === 'group' ? g.data.memberIds : []
-}
-
 /** 某角色节点所属协作组 id（不在组内返回 null）。 */
 export function memberGroupId(flow: Partial<WorkflowDocument>, nodeId: string): string | null {
   const n = nodeById(flow, nodeId)

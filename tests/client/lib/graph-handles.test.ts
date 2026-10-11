@@ -3,7 +3,7 @@
 // 连接点表与阶段节点标签（模式差异，§4.2.5.1）。
 
 import { describe, expect, it } from 'vitest'
-import { HANDLES, defaultInputHandle, defaultOutputHandle, stageLabels, stageTemplateKinds } from '../../../src/client/lib/graph-handles.js'
+import { HANDLES, defaultInputHandle, defaultOutputHandle, stageTemplateKinds } from '../../../src/client/lib/graph-handles.js'
 import { en, zh } from '../../../src/client/i18n.js'
 
 describe('阶段节点模式差异（§4.2.5.1）', () => {
@@ -17,7 +17,6 @@ describe('阶段节点模式差异（§4.2.5.1）', () => {
     expect(stageTemplateKinds('mode2', en.nodeKinds).map((item) => item.label)).toEqual([
       en.nodeKinds.input, en.nodeKinds.output,
     ])
-    expect(stageLabels('mode2', en.nodeKinds).pause).toBe(en.nodeKinds.pause)
   })
 })
 

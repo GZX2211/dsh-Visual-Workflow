@@ -50,8 +50,6 @@ export type McpImportResult = {
 export declare function mcpFormFromJson(raw: string): McpImportResult;
 /** 编辑既有服务器 → 表单草稿（列表「编辑」入口）。 */
 export declare function mcpFormFromServer(server: McpServerEntry): McpFormState;
-/** 新建服务器的空表单。 */
-export declare function emptyMcpForm(): McpFormState;
 /**
  * 表单 → 后端 server 负载（按传输方式收窄字段：stdio 用 commandLine/env，
  * streamable-http 用 url/headers；空对象不写入）。

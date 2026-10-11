@@ -25,7 +25,6 @@ import {
   injectWorkbenchTabBody,
   registerWorkbenchTabType,
   setWorkbenchMountHost,
-  workbenchTabDefinition,
   type SidebarRightTabsServiceLike,
   type SlotsServiceLike,
 } from './sidebar/workbench-tab.js'
@@ -68,10 +67,6 @@ export interface ClientPluginContext {
 //    依赖它们。改为在 apply 内用 ctx.inject(['slots','sidebarRightTabs'], …) 悬挂子 fiber：
 //    服务就绪即注册、服务变化即卸载重跑、插件本体照常生效。
 export const inject: string[] = ['locale']
-
-/** 测试导出（client-smoke 渲染路径验证）。 */
-export const VisualWorkflowView = null
-export const __test = { workbenchTabDefinition, createWorkbenchOpener }
 
 /**
  * 插件 apply 入口。

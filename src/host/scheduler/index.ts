@@ -44,7 +44,6 @@ export {
   localToUtc,
   parseDateOnly,
   parseTime,
-  weekdayOf,
   zonedParts,
 } from './calendar.js'
 export type { ZonedParts } from './calendar.js'

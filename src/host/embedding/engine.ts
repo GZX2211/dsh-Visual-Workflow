@@ -31,7 +31,7 @@ export type EmbeddingSource = 'local' | 'remote' | 'bm25'
 export interface EmbeddingEngine {
   /** 当前来源。 */
   readonly source: EmbeddingSource
-  /** 降级原因（source 为 bm25 时给出可诊断信息；未降级为 null）。 */
+  /** 可诊断原因（bm25 降级或远程嵌入超时时写入；未提供为 null）。 */
   readonly degradeReason?: string | null
   /** 向量维度（bm25 降级时为 0）。 */
   readonly dimension: number
@@ -65,11 +65,17 @@ export function normalizeVector(values: number[] | Float64Array | Float32Array):
   return out
 }
 
-/** 向量内积（两向量均归一化时即余弦相似度）。 */
+/**
+ * 向量内积（两向量均归一化时即余弦相似度）。
+ *
+ * 维度不一致返回 `NaN`：内积只对同一维度空间中的向量有定义，按较短向量截断会给出
+ * 「看起来正常的错分数」（换嵌入模型/端点后旧索引与当前查询维度不同即触发）。
+ * 调用方据此跳过不可比的行（召回取值路径见 `VectorIndex.search`）。
+ */
 export function dotProduct(a: Float64Array, b: Float64Array): number {
-  const len = Math.min(a.length, b.length)
+  if (a.length !== b.length) return Number.NaN
   let sum = 0
-  for (let i = 0; i < len; i += 1) sum += a[i] * b[i]
+  for (let i = 0; i < a.length; i += 1) sum += a[i] * b[i]
   return sum
 }
 
@@ -97,6 +103,11 @@ export interface EmbeddingServiceOptions {
   logger?: { warn(message: string): void }
   /** fetch 实现注入（单测远程端点用；缺省全局 fetch）。 */
   fetchImpl?: typeof fetch
+  /**
+   * 远程端点单次请求超时（毫秒；缺省 {@link DEFAULT_REMOTE_EMBEDDING_TIMEOUT_MS}）。
+   * 非正/非法值一律回落默认值——超时是兜底护栏，不允许配置成「永不超时」。
+   */
+  remoteTimeoutMs?: number
   /**
    * 本地 extractor 加载缝（单测用受控加载：验证并发单飞与释放竞态）。
    * 缺省走真实路径：资产快速失败校验 + 动态 import transformers.js。
@@ -252,21 +263,51 @@ export class EmbeddingService implements EmbeddingEngine {
   private async embedRemote(texts: string[]): Promise<Float64Array[]> {
     const endpoint = this.options.endpoint!
     const fetchImpl = this.options.fetchImpl ?? fetch
-    const response = await fetchImpl(endpoint, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ input: texts }),
-    })
-    if (!response.ok) {
-      throw new Error(`外部嵌入端点响应异常（HTTP ${response.status}）`)
+    const timeoutMs = remoteTimeoutOf(this.options.remoteTimeoutMs)
+    // 无超时的 fetch：端点接受连接后不返回（黑洞防火墙/服务僵死）会让本调用永不 settle，
+    // 而经验入库/召回都在写事务外等待它，表现为「工具没有输出」且串行队列后续写操作一并卡住。
+    const requestAbort = new AbortController()
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      requestAbort.abort()
+    }, timeoutMs)
+    try {
+      const response = await fetchImpl(endpoint, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ input: texts }),
+        signal: requestAbort.signal,
+      })
+      if (!response.ok) {
+        throw new Error(`外部嵌入端点响应异常（HTTP ${response.status}）`)
+      }
+      const json = (await response.json()) as RemoteEmbeddingsResponse
+      const rows = Array.isArray(json.data) ? json.data : []
+      if (rows.length !== texts.length) {
+        throw new Error(`外部嵌入端点返回数量不符（期望 ${texts.length}，实际 ${rows.length}）`)
+      }
+      return rows.map((row) => normalizeVector(Array.isArray(row.embedding) ? row.embedding : []))
+    } catch (error) {
+      // 超时必须可诊断：调用方据此降级（本地模型/BM25）而不是把它当成端点返回了坏数据
+      if (!timedOut) throw error
+      const reason = `外部嵌入端点请求超时（${timeoutMs}ms 内未返回）：请检查 embeddingEndpoint 可达性与服务健康状况`
+      this.degrade = reason
+      throw new Error(reason)
+    } finally {
+      clearTimeout(timer)
     }
-    const json = (await response.json()) as RemoteEmbeddingsResponse
-    const rows = Array.isArray(json.data) ? json.data : []
-    if (rows.length !== texts.length) {
-      throw new Error(`外部嵌入端点返回数量不符（期望 ${texts.length}，实际 ${rows.length}）`)
-    }
-    return rows.map((row) => normalizeVector(Array.isArray(row.embedding) ? row.embedding : []))
   }
+}
+
+/** 端点超时的默认值（毫秒）：远小于模型侧工具等待上限，同时给正常批嵌入留足余量。 */
+export const DEFAULT_REMOTE_EMBEDDING_TIMEOUT_MS = 10_000
+
+/** 端点超时取值：非法/非正的配置一律回落默认值（超时是兜底护栏，不接受「不设超时」）。 */
+function remoteTimeoutOf(configured?: number): number {
+  return typeof configured === 'number' && Number.isFinite(configured) && configured > 0
+    ? Math.floor(configured)
+    : DEFAULT_REMOTE_EMBEDDING_TIMEOUT_MS
 }
 
 /**

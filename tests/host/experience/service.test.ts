@@ -18,7 +18,7 @@ import {
   ERR_EXPERIENCE_WRONG_TYPE,
 } from "../../../src/host/shared/protocol.js"
 import { buildRecallSummary, buildRetrievalProjection } from "../../../src/host/experience/projection.js"
-import { CANDIDATE_POOL_SIZE, NEUTRAL_STATS, TRUST_ADJUSTMENT_BETA } from "../../../src/host/experience/constants.js"
+import { CANDIDATE_POOL_SIZE, MAX_RECALL_IDS, NEUTRAL_STATS, TRUST_ADJUSTMENT_BETA } from "../../../src/host/experience/constants.js"
 import type { ExperienceCaller } from "../../../src/host/experience/ports.js"
 import { ExperienceService } from "../../../src/host/experience/service.js"
 import { TEAM_EXPERIENCE_CONTEXT_HEADING } from "../../../src/host/experience/team-context.js"
@@ -351,6 +351,43 @@ describe("ExperienceService.submit 判重", () => {
     expect(result.skipped[0].decisionRetrievalText.includes("decision_domain")).toBe(true)
   })
 
+  it("test_换模型后维度不一致_新经验仍入库（不可比不等于重复）", async () => {
+    // 换嵌入模型/端点后：库里是旧模型写入的 4 维决策向量，当前端点声明 3 维。
+    // 维度不同 = 两条向量不可比，判重必须放行（照常入库），不得把「算不出分数」当成「重复」——
+    // 后者会让每条新经验都被静默丢弃（dotProduct 返回 NaN 时 `NaN < 阈值` 恒为 false）。
+    const world = createExperienceWorld({
+      dimension: 3,
+      embed: embedPairs([{ task: new Float64Array([0, 1, 0]), decision: new Float64Array([1, 0, 0]) }]),
+    })
+    seedPrompts(world)
+    seedEntry(world, { id: "ex-old-model", experienceType: "agent" }, { decisionVector: new Float64Array([1, 0, 0, 0]) })
+    const { service } = createService(world)
+    await service.initializePrompt({ caller: ROOT_CALLER, type: "agent" })
+
+    const result = await service.submit({ caller: ROOT_CALLER, type: "agent", candidates: [createCandidatePayload()] })
+
+    expect(result.skipped).toEqual([])
+    expect(result.inserted).toHaveLength(1)
+    expect(world.lastInsert?.rows[0].embeddingDimension).toBe(3)
+  })
+
+  it("test_同维度高相似度_仍判重（对照组，证明判重未被削弱）", async () => {
+    const world = createExperienceWorld({
+      dimension: 3,
+      embed: embedPairs([{ task: new Float64Array([0, 1, 0]), decision: new Float64Array([1, 0, 0]) }]),
+    })
+    seedPrompts(world)
+    seedEntry(world, { id: "ex-same-model", experienceType: "agent" }, { decisionVector: new Float64Array([1, 0, 0]) })
+    const { service } = createService(world)
+    await service.initializePrompt({ caller: ROOT_CALLER, type: "agent" })
+
+    const result = await service.submit({ caller: ROOT_CALLER, type: "agent", candidates: [createCandidatePayload()] })
+
+    expect(result.inserted).toHaveLength(0)
+    expect(result.skipped).toHaveLength(1)
+    expect(result.skipped[0].reason.includes("ex-same-model")).toBe(true)
+  })
+
   it("test_批内互相判重_第二条被拦截", async () => {
     const world = createExperienceWorld({
       embed: embedPairs([
@@ -484,6 +521,20 @@ describe("ExperienceService.recall", () => {
     const error = await errorOf(() => service.recall({ caller: ROOT_CALLER, type: "agent", ids: [] }))
 
     expect(error.code).toBe(ERR_EXPERIENCE_BAD_ARGS)
+  })
+
+  it("test_按 id 阶段超过条数上限_返回 WF_EXPERIENCE_BAD_ARGS 且提示分批", async () => {
+    const world = seedRecallWorld()
+    const { service } = createService(world)
+    const oversized = Array.from({ length: MAX_RECALL_IDS + 1 }, (_, index) => `ex-${index}`)
+
+    const error = await errorOf(() => service.recall({ caller: ROOT_CALLER, type: "agent", ids: oversized }))
+
+    // 超限必须在业务边界拒绝：不能落到 SQLite 的绑定变量越界错误上
+    expect(error.code).toBe(ERR_EXPERIENCE_BAD_ARGS)
+    expect(error.message).toContain(`${MAX_RECALL_IDS}`)
+    expect(error.message).toContain("batches")
+    expect(world.getRowsCalls).toEqual([])
   })
 
   it("test_语义不可用_候选标记 bm25", async () => {

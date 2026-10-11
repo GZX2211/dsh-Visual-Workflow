@@ -51,7 +51,6 @@ export { nodeHasFlowIn, nodeParticipatesInFlow } from './model.js'
 // ── 虚拟节点（闸门）与协作组语义 ──────────────────────────────────────────
 export {
   activeMilestoneGateOf,
-  groupMemberIds,
   isGroupMember,
   mainNodeIdOf,
   memberGroupId,

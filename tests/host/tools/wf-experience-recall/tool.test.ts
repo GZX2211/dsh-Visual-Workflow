@@ -13,6 +13,7 @@ import {
   WF_EXPERIENCE_RECALL,
 } from '../../../../src/host/shared/protocol.js'
 import { WfError } from '../../../../src/host/orchestrator/index.js'
+import { MAX_RECALL_IDS } from '../../../../src/host/experience/constants.js'
 import { registerWfExperienceRecall } from '../../../../src/host/tools/wf-experience-recall/tool.js'
 import type { JsonSchemaNode } from '../../../../src/host/tools/infrastructure/define-tool.js'
 import {
@@ -193,6 +194,27 @@ describe('wf_experience_recall：参数与身份校验', () => {
 
     expect((failure as WfError).code).toBe(ERR_EXPERIENCE_BAD_ARGS)
     expect(h.host.recallCalls).toEqual([])
+  })
+
+  it('ids 超过条数上限 → WF_EXPERIENCE_BAD_ARGS（在抵达 domain 前拒绝并提示分批）', async () => {
+    const h = await makeHarness()
+    const oversized = Array.from({ length: MAX_RECALL_IDS + 1 }, (_, index) => `ex-${index}`)
+
+    const failure = await failureOf(execute(h, { type: 'agent', ids: oversized }))
+
+    expect((failure as WfError).code).toBe(ERR_EXPERIENCE_BAD_ARGS)
+    expect((failure as Error).message).toContain(`${MAX_RECALL_IDS}`)
+    expect((failure as Error).message).toContain('batches')
+    expect(h.host.recallCalls).toEqual([])
+  })
+
+  it('ids 恰好等于上限 → 正常召回', async () => {
+    const h = await makeHarness()
+    const atLimit = Array.from({ length: MAX_RECALL_IDS }, (_, index) => `ex-${index}`)
+
+    await execute(h, { type: 'agent', ids: atLimit })
+
+    expect(h.host.recallCalls[0]?.ids).toEqual(atLimit)
   })
 
   it('topK 非法（0 / 负数 / 非数字）→ WF_EXPERIENCE_BAD_ARGS', async () => {
