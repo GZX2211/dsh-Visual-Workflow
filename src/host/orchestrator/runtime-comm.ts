@@ -32,9 +32,6 @@ export class RuntimeComm extends RuntimeExecute {
     if (!sessionId) throw new WfError('WF_BAD_CALLER: cannot identify the caller session', 'WF_BAD_CALLER')
     const run = this.activeRunForSession(sessionId)
     if (!run) throw new WfError('WF_NO_ACTIVE_RUN: no running orchestration in this session', 'WF_NO_ACTIVE_RUN')
-    if (run.snapshot.status !== 'running') {
-      throw new WfError(`WF_STOPPED: the run can no longer communicate (status: ${run.snapshot.status})`, 'WF_STOPPED')
-    }
     return run
   }
 
