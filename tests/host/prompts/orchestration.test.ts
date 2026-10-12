@@ -116,7 +116,7 @@ describe('T-005 编排父代理提示词（情况2 编排+自执行）', () => {
 describe("输入缺失与业务结算约束", () => {
   it("test_input_binding_constraint_uses_runtime_confirmation_and_existing_error_codes", () => {
     for (const code of ["WF_INPUT_REQUIRED", "WF_BUSY", "WF_INPUT_STATE_CONFLICT", "WF_INPUT_REVISION_CONFLICT"]) expect(ORCH_HARD_CONSTRAINTS.inputBindings).toContain(code)
-    expect(ORCH_HARD_CONSTRAINTS.inputBindings).toContain("inputRevision")
+    expect(buildOrchestratorPrompt({ facts: orchFacts, dynamic: {} })).toContain(ORCH_HARD_CONSTRAINTS.inputBindings)
   })
   it.each([buildOrchestratorPrompt, buildHybridPrompt])("test_prompt_input_settlement_and_termination_constraints_head_and_tail", (build) => {
     const output = build({ facts: orchFacts, dynamic: {} })

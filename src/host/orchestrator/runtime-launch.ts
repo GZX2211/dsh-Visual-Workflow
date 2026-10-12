@@ -17,9 +17,9 @@ import type { RunSnapshot } from '../shared/types.js'
 import type { WorkflowDocument } from '../shared/graph-model.js'
 import { RuntimeBase } from './runtime-base.js'
 import { prepareRunInputs, executionOf } from './execution-inputs.js'
-import { runtimeInputsOf, handoffPolicyOf, validateRequiredInputs, publicRuntimeInputs } from "./runtime-inputs.js"
+import { runtimeInputsOf, inputSlotsOf, handoffPolicyOf, validateRequiredInputs, publicRuntimeInputs } from "./runtime-inputs.js"
 import { boundNodeInputs, workflowInputTarget } from "./input-handoff.js"
-import { mainNodeIdOf, nodeById } from "../graph/index.js"
+import { ctxInEdges, isFlowLine, mainNodeIdOf, nodeById } from "../graph/index.js"
 import type { RuntimeInputOptions } from "../shared/runtime-types.js"
 
 /**
@@ -47,12 +47,29 @@ export class RuntimeLaunch extends RuntimeBase {
 
 
   protected async prepareRuntimeInputs(flow: WorkflowDocument, snapshot: RunSnapshot, raw?: unknown, policy?: unknown): Promise<void> {
-    if (raw !== undefined || snapshot.runtimeInputs !== undefined) {
-      snapshot.runtimeInputs = await runtimeInputsOf(raw ?? snapshot.runtimeInputs, flow, { sessionId: snapshot.sessionId, managedRoot: this.deps.store.root, files: await this.deps.sessionInputFiles?.(snapshot.sessionId) ?? [] })
-      snapshot.inputRevision = (snapshot.inputRevision ?? 0) + (raw === undefined ? 0 : 1)
-      snapshot.workflowInputNodeId = Object.values(snapshot.runtimeInputs.workflowInputs).some((values) => values.length) ? workflowInputTarget(flow) : undefined
-    }
     if (policy !== undefined || snapshot.handoffPolicy !== undefined) snapshot.handoffPolicy = handoffPolicyOf(policy ?? snapshot.handoffPolicy)
+    const access = { sessionId: snapshot.sessionId, managedRoot: this.deps.store.root, files: await this.deps.sessionInputFiles?.(snapshot.sessionId) ?? [] }
+    if (raw !== undefined || snapshot.runtimeInputs !== undefined || access.files.length === 1) {
+      const inputs = await runtimeInputsOf(raw ?? snapshot.runtimeInputs ?? {}, flow, access)
+      const target = Object.values(inputs.workflowInputs).some((values) => values.length) ? workflowInputTarget(flow) : undefined
+      let selected = false
+      // A single authorized candidate can satisfy one declared file slot per node; no business inference.
+      if (access.files.length === 1) for (const node of flow.nodes) if (node.kind === "agent" && !snapshot.nodes.find((record) => record.nodeId === node.id)?.resumed) {
+        // Explicit ctx and deterministic upstream handoff keep their existing source semantics.
+        if (ctxInEdges(flow, node.id).length || executionOf(node).requiredFiles?.length || snapshot.handoffPolicy === "auto" && flow.lines.some((line) => isFlowLine(line) && (mainNodeIdOf(flow, line.target) ?? line.target) === node.id && nodeById(flow, mainNodeIdOf(flow, line.source) ?? line.source)?.kind === "agent")) continue
+        const slots = Object.entries(executionOf(node).inputs ?? {}).filter(([, requirement]) => requirement.kind === "file" && requirement.required !== false)
+        if (slots.length !== 1 || boundNodeInputs({ ...snapshot, runtimeInputs: inputs, workflowInputNodeId: target }, node.id)[slots[0][0]]?.length) continue
+        const { attachmentId, name, bytes } = access.files[0]
+        const authorized = await inputSlotsOf({ [slots[0][0]]: [{ kind: "file", fileRef: { source: "attachment", attachmentId, name, bytes } }] }, `nodeInputs.${node.id}`, access)
+        Object.assign(inputs.nodeInputs[node.id] ??= {}, authorized)
+        selected = true
+      }
+      if (raw !== undefined || snapshot.runtimeInputs !== undefined || selected) {
+        snapshot.runtimeInputs = inputs
+        snapshot.inputRevision = (snapshot.inputRevision ?? 0) + (raw !== undefined || selected ? 1 : 0)
+        snapshot.workflowInputNodeId = target
+      }
+    }
     // Downstream inputs may be produced later. Initial and explicitly targeted required inputs are checked before orchestration.
     for (const node of flow.nodes) if (node.kind === "agent" && !snapshot.nodes.find((record) => record.nodeId === node.id)?.resumed && Object.keys(executionOf(node).inputs ?? {}).length) {
       const incoming = flow.lines.filter((line) => line.targetHandle === "flow-in" && (mainNodeIdOf(flow, line.target) ?? line.target) === node.id)

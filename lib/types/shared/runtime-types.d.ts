@@ -10,6 +10,9 @@ export interface InputAttachmentRef {
 export interface SessionInputFile extends InputAttachmentRef {
     path: string;
 }
+export interface NodeInputAttachment extends InputAttachmentRef {
+    source: "session" | "binding";
+}
 export type RuntimeFileRef = {
     source: "managed";
     path: string;

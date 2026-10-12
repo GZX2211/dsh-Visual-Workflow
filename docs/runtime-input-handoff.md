@@ -1,10 +1,74 @@
-# 轻量运行输入与串行数据交接
+# 通用会话文件交付与显式运行输入
 
-本补丁从包含 PR #6、#7、#8 的 main（e9436f8）独立实现。PR #9（57ebfdd）仅作为参考，保持未合并。
+本文记录 #10–#12 的显式运行输入机制及后续 Harness 文件上下文适配。后续适配基于已合并 #12 的 main（12b64dc），以独立 PR 提交，不回退 #6–#12。
 
-运行输入保存在 RunSnapshot，不写入 WorkflowDocument，不新增画布节点。Runtime 继承链仍为 `RuntimeBase → RuntimeLaunch → RuntimeExecute → RuntimeComm → RuntimeObserve → RuntimeLifecycle → OrchestratorRuntime`；NodeAgentRunner 的创建、复用、NOT_RESUMABLE 安全重建、权限与生命周期实现保持原样。
+运行输入保存在 RunSnapshot，不写入 WorkflowDocument，不新增画布节点。Runtime 继承链仍为 `RuntimeBase → RuntimeLaunch → RuntimeExecute → RuntimeComm → RuntimeObserve → RuntimeLifecycle → OrchestratorRuntime`；NodeAgentRunner 的创建、复用、NOT_RESUMABLE 安全重建、权限与生命周期语义保持原样，仅扩展现有任务投递的内容块。
 
-## 使用方式
+## Harness 会话文件上下文
+
+普通 Agent 不再以 RuntimeInputs 或工作台绑定作为使用会话文件的前提。上传文件须已经由官方接纳为当前工作流实例所属会话的结构化 `file` 引用；父代理只见到自然语言路径、工具回复或另一会话上传的文件，都不构成授权。
+
+每次合法 `wf_run_node` 派发先调用既有 `sessionInputFiles()`，取得当前会话授权的 attachmentId/name/bytes，复用既有附件解析及可读性校验。没有显式文件来源时，把所有可用引用交给子代理，由 Harness 根据节点任务选择并调用授权工具读取。多个附件不会被 Runtime 截成第一个，不按扩展名、节点名、职责或 Prompt 推断映射；无法确定时提示子代理请求一次必要确认。文件正文仍留在官方附件存储，不拷入 Prompt 或 snapshot。
+
+明确的文件来源优先：已绑定的 attachment 仅交付选定引用；managed/上游文件、`requiredFiles` 或文件 ctx 保留原授权路径和合同，不夹带其他会话附件作为替代。显式必需输入仍须满足声明，缺失在 attempts/callCount 和 child 创建之前返回 `WF_INPUT_REQUIRED`。普通文本节点不增加文件合同；已经删除的可选附件记录诊断并略过，不使文本任务凭空失败。文件存在不等于授权，也不保证其在现场子代理 sandbox 中可读。
+
+运行创建时，唯一授权附件可以填入每个尚未继承成功状态、仅声明一个必需 file 槽、且该槽没有有效绑定的 Agent。此快捷绑定不要求全图只有一个文件槽或唯一初始 Agent，但不会覆盖显式 ctx、requiredFiles、已有绑定或 auto 上游交接。仍通过 `inputSlotsOf()` 重新授权，实际写入既有 snapshot 并增加 inputRevision。多个候选附件或同一节点多个必需槽不自动猜测。
+
+普通 Agent 使用文件上下文不创建 RuntimeInputs，也不增加 inputRevision。上传 B 不会修改正在执行的旧 attempt；再次调度仍返回 `WF_BUSY`。旧 attempt 合法结算后，原 retryLimit 内的新 attempt 可获得届时授权的 A/B 引用；合法恢复或新运行同样在自己的派发边界获取上下文。显式绑定则继续原 pending/attempts=0、版本与持久化约束，不热绑定、不清零次数、不自动恢复已派发节点。
+
+在现有 `attemptHistory[].inputAttachments` 保存本轮准备交付的公开引用及 `source: session|binding`。已有 childId/phase 表示创建或投递是否被接纳；该字段本身不是“模型已经读取文件”的证据，失败派发也不能据此认定输入被消费。旧 child/epoch 不能覆盖新 attempt，已结算历史保持不变。
+
+### 官方接口及数据流
+
+已核实未修改的已发布 SDK 0.1.6-alpha.2 / 0.2.0-rc.2，使用的接口是公开能力，并非假设子代理继承父会话：
+
+| 边界 | 接口与插件位置 | 职责 |
+| --- | --- | --- |
+| 会话 → Runtime | `CordisAgentHost.sessionInputFiles()`，`src/host/agent/agents-host.ts` | 仅接受当前 root Session 的 user/message、source.kind=user、结构化 file 引用；官方 `attachments.fileHostPath(ref)` 确认引用 |
+| Runtime 预检 | `nodeInputAttachments()` / `runtimeInputsOf()`，`runtime-inputs.ts`；`wfRunNode()`，`runtime-execute.ts` | 精确匹配 id/name/bytes、复用授权路径和可读性检查、显式输入优先、尝试前校验 |
+| Runtime → 子代理 | `NodeStartInput.attachments` → `NodeAgentRunner` 的 `taskContent()`，`runner.ts` | 初次 `subagents.startContinuable({request:{prompt}})`；合法复用 `subagents.sendMessage(parent, childId, content, ...)`；投递 `{type:"file",attachment:{attachmentId,name,bytes}}` |
+| Harness → 模型/工具 | 官方 `dsh-llm` 的 `FileBlock`、`projectFilesToText()`、`fileReadPath()` | 保留 durable 文件引用，在模型请求阶段生成文件句柄；`attachments.fileHostPath(ref)` 经官方 `fs.processPathFromHostPath()` 映射到执行环境，工具访问仍受官方权限/sandbox 控制 |
+
+`dsh-subagent` 的 `SubagentStartRequest.prompt` 和 sendMessage 内容均接受官方 `ContentBlock[]`。隔离的 spawn 不继承父上下文，因此由现有 Runner 明确投递授权引用。新会话上下文通道不拼接宿主路径；显式旧 RuntimeInputs 任务文本仍保留已有授权路径规则。插件不调用聊天 `send_message` 工具绕过 Runtime；上表中的 subagents.sendMessage 是原有受控复用通道。旧 queuePrompt 兼容路径同样保留内容块，NOT_RESUMABLE 重建提交最新内容且重新安装原权限，不扩大白名单。
+
+### 删除、简化与保留
+
+- 移除普通文件任务必须先绑定 RuntimeInputs 的交付前提。唯一初始节点/全图唯一文件槽只保留为客户端显式配置的快捷预选，不能限制普通节点的授权文件上下文；服务器快捷绑定也覆盖多个独立声明节点。
+- 简化父代理输入、重试、结算和失败收尾说明，删除首段重复的推进/重试句子。保留首尾必要约束和 Runtime 的真实错误处理；Prompt 不负责确认授权、输入版本或执行成功。
+- 保留工具 Preset 的 standingKeyFor/acquireScope 真实 Scope、tools.guard、用户禁用开关及 requiredTools。父代理编排工具对子代理隐藏是状态所有权隔离；fork 排除是父上下文隔离；run_code/Team 工具不列入全局 allow 是官方自身作用域装配要求，不禁用官方自身层的合法工具。未找到可无依据删除的 Guard/沙箱限制。
+- 保留 DAG/条件语义、ctx/File Node/显式 RuntimeInputs/outputFiles、WF_BUSY、retryLimit、NOT_RESUMABLE、runId/attempt/childId/epoch、暂停停止恢复、当前写入和上游产物代际验证。auto 仍仅自动交接唯一无条件直接上游，不随机选择多来源；复杂图由原 ctx/合同和父代理决策处理。RuntimeObserve、DAG 核心、协作组、官方 DSH 和沙箱代码均未修改。
+
+### 兼容性与尚存边界
+
+没有声明文件合同的旧 Workflow 可以直接利用会话附件；没有文件或没有文件产物的普通文本/JSON任务照常运行。新的文件上下文及审计字段都是可选项，旧快照无需迁移。既有 explicit/auto 确定性交接仍使用原规则。
+
+客户端未增加文件页面或输入状态层：普通无必需输入的运行不弹窗；高级工作台保留显式多槽配置、pending 绑定和新运行修复。freshStart 清空旧输入草稿，普通断点恢复保留合法历史输入，只有用户主动选择才复用旧输入；原生上下文取当前授权引用，不把它们当作旧输入绑定。
+
+仍需高级输入选择的情况：显式命名必需槽存在多个候选/多个槽，或需要修改已经派发节点的绑定。前者可用已有工作台/API 明确选择，后者先停止旧运行，再用原新运行入口携带合法输入。未新增聊天热绑定工具。客户端的保守预选未扩展到多个声明目标，工作台可能仍显示这种显式配置；服务端调用运行入口已支持上面的无歧义多目标快捷绑定。
+
+原生附件内容块目前经单角色 wf_run_node（含 proxy canonical 路径）交付。官方整组 Agent Team、父代理 hybrid 自执行的输入装配未新增这一通道，沿用宿主自身上下文及旧 ctx 机制；携带新 RuntimeInputs 的整组路径仍按原保护明确拒绝，而非静默丢弃。没有官方结构化引用或没有可解析存储路径的附件，不扫描目录猜测。现场官方 fs 映射/权限失败仍如实报告。既有插件路由身份认证部署边界未扩大或重构。
+
+### 验证证据与现场验收
+
+`pnpm check`：197 个测试文件、2434 项测试通过（较已合并 #12 增加 20 项），包含四个 TS Program、构建和 client-smoke。独立 `pnpm build` 通过，同步 17 个生成 lib 文件。5 个定向文件共 180 项通过；V8 定向覆盖统计中，本轮新增/修改且可计量的业务行 41/41 命中，不代表仓库整体覆盖率。
+
+通用集成测试使用真实 Runtime、NodeAgentRunner、输入授权解析、权限/Prompt 装配、snapshot 和真实磁盘读写，由受控子代理传输提供结果：单附件两个读取节点、双附件双读取节点、上传后合法新 attempt、显式输入优先和失效引用均覆盖。通用图含文本、文件读取、多来源 ctx、条件分支与报告文件，实际派发/成功 6 个 Agent，每个 attempts=1，未选分支 skipped/attempts=0；测试验证实际报告内容和当前产物代际。工具实际执行另由官方 SDK Scope smoke 验证。这些测试不证明模型自主映射、确认次数或业务正确性。
+
+官方 SDK smoke 在上述两个版本均通过：每版 6 次 Preset 读取、15 次真实作用域工具执行（含拒绝）、2 个公开恢复钩子、2 次模型路由更新，以及官方 LocalAttachmentStore 真实保存/流式读取/路径读取一个 24 字节文件、官方 file 块投影且 durable 引用不变。没有模型调用，没有修改 SDK 源码。
+
+真实 DSH 模型 E2E：**NOT RUN**。用户内部 Docker 模型部署不在云环境可达范围；真实节点启动/成功/attempts、耗时、父子 Token 和性能改善：**NOT AVAILABLE**。定向测试套件耗时 3.54 秒（180 项），全量测试阶段 38.08 秒（2434 项），均不是模型 E2E 耗时。
+
+现场通用验收：在工作流实例绑定的 DSH 会话中上传 `instructions.txt`（如“结果按整数四舍五入”）与 `data.json`（如 `{"value":21.4}`），建立文本计划、两个读取 Agent、汇总 Agent、检查/另一条条件分支、最终报告 Agent。普通读取节点不声明 execution.inputs；汇总/报告使用原多来源 ctx，报告按需声明 outputFiles。选择现场已授权的 Preset 和准确 provider/model，按各节点职责读取两个官方附件，再运行；如无法区分附件只确认一次。核查报告真实生成、每个节点 attempts、有效结算/最终 wf_finish，以及独立父子 Token。再验证显式合同案例和运行中上传不触发旧 attempt 重派发。
+
+已有销售确定性验收命令仍保留，不能代替上述通用场景：
+
+```bash
+DSH_BASE_URL="$YOUR_DSH_BASE_URL" DSH_TEST_PROVIDER="$YOUR_DSH_PROVIDER" DSH_TEST_MODEL="$YOUR_DSH_MODEL" node scripts/run-sales-live.mjs
+```
+
+不预设 provider 标识、服务地址或凭据。官方接口 smoke 可通过 `DSH_RUNTIME_PACKAGE=/现场安装的/@deepseek-ai/dsh/package.json node scripts/dsh-scope-smoke.mjs` 独立执行，它也不是模型 E2E。
+
+## 显式输入使用方式（#10–#12）
 
 普通“运行”在没有缺失的必需运行输入时直接启动，不弹输入窗。需要补齐声明输入时打开弹窗；也可主动点击“配置输入后运行”，填写文本、JSON、选择当前会话的官方附件或受控上传文件，并选择 auto/explicit。取消弹窗不会发起运行，切换文档或卸载后旧请求不回写。恢复沿用已有合法输入及策略。为每项指定输入名称和目标：工作流或一个 Agent。文件上传只更新输入草稿，点击运行/绑定才交付；附件上传不等于文件绑定。
 

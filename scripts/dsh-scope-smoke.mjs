@@ -3,7 +3,7 @@
 import assert from "node:assert/strict"
 import { createRequire } from "node:module"
 import { pathToFileURL } from "node:url"
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises"
+import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { CordisToolsView, withPresetScope } from "../lib/agent/index.js"
@@ -128,7 +128,25 @@ try {
   })
   assert.equal(publicRecoveryHooksPassed, 2)
   assert.equal(modelRouteUpdates, 2)
-  console.log(JSON.stringify({ status: "passed", runtimeVersion: requireRuntime("./package.json").version, runtime: "@deepseek-ai/dsh-tools", presetScopeApi, actualPresetReads: 6, actualScopedExecutions: sequence, publicRecoveryHooksPassed, modelRouteUpdates, modelE2E: "NOT RUN" }))
+  // Exercise published attachment storage and file-block projection, without a model or custom file tool.
+  const [{ LocalAttachmentStore }, { createUserMessage, projectFilesToText, fileHandleText }] = await Promise.all([
+    runtimeImport("@deepseek-ai/dsh-attachment-local"), runtimeImport("@deepseek-ai/dsh-llm"),
+  ])
+  await root.plugin(LocalAttachmentStore, { dshHome: presetDirectory })
+  const attachments = root.get("attachments")
+  const bytes = Buffer.from("authorized task document")
+  const ref = await attachments.saveFile({ data: bytes, name: "generic.payload" })
+  assert.deepEqual(Object.keys(ref).sort(), ["attachmentId", "bytes", "name"])
+  const hostPath = attachments.fileHostPath(ref)
+  assert.deepEqual(await readFile(hostPath), bytes)
+  const chunks = []
+  for await (const chunk of attachments.readFileStream(ref)) chunks.push(chunk)
+  assert.deepEqual(Buffer.concat(chunks), bytes)
+  const message = createUserMessage({ content: [{ type: "file", attachment: ref }], source: { kind: "user" } })
+  const projected = projectFilesToText([message], (file) => attachments.fileHostPath(file))
+  assert.deepEqual(projected[0].content, [{ type: "text", text: fileHandleText(ref, hostPath) }])
+  assert.deepEqual(message.content, [{ type: "file", attachment: ref }], "durable official file references must remain intact")
+  console.log(JSON.stringify({ status: "passed", runtimeVersion: requireRuntime("./package.json").version, runtime: "@deepseek-ai/dsh-tools", presetScopeApi, actualPresetReads: 6, actualScopedExecutions: sequence, publicRecoveryHooksPassed, modelRouteUpdates, officialFileReferences: 1, officialFileBytes: bytes.length, modelE2E: "NOT RUN" }))
 } finally {
   for (const scope of owned.reverse()) await scope.dispose()
   await root.fiber.dispose()

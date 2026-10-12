@@ -11,7 +11,7 @@ import { createChildToolFilterSetup } from "../../src/host/agent/child-tool-filt
 import { createChildPromptSetup } from "../../src/host/agent/prompt-setup.js"
 import { createModelSelectionSetup } from "../../src/host/agent/model-selection.js"
 import { createReactGuard } from "../../src/host/agent/guards.js"
-import { caller, cleanupTempDirs, makeFlow, makeHarness, start } from "../host/orchestrator/fixtures/harness.js"
+import { agent, caller, cleanupTempDirs, makeFlow, makeHarness, stage, start } from "../host/orchestrator/fixtures/harness.js"
 
 afterEach(cleanupTempDirs)
 
@@ -29,6 +29,7 @@ async function makeRealRunnerHarness(nodeId = "n-a1", options: { configure?: (fl
   const starts: Parameters<SubagentsServiceLike["startContinuable"]>[0][] = []
   const accepted: string[] = []
   const sent: string[] = []
+  const sentContents: Parameters<NonNullable<SubagentsServiceLike["sendMessage"]>>[2][] = []
   const interrupted: string[] = []
   const epochs = new Map<string, string>()
   const control: { resumable: boolean; startGate?: Promise<void>; onStart?: (spec: Parameters<SubagentsServiceLike["startContinuable"]>[0]) => void | Promise<void> } = { resumable: true }
@@ -44,7 +45,7 @@ async function makeRealRunnerHarness(nodeId = "n-a1", options: { configure?: (fl
     startContinuable: async (spec) => {
       // Creation-window state is real AsyncLocalStorage, never broadened on recovery.
       expect(toolFilter.peekPending?.()).toEqual(["read", "write"])
-      const executing = flow.nodes.find((candidate) => candidate.kind === "agent" && spec.request.prompt.some((block) => block.text.includes(`「${candidate.data.label}」`)))
+      const executing = flow.nodes.find((candidate) => candidate.kind === "agent" && spec.request.prompt.some((block) => block.type === "text" && block.text.includes(`「${candidate.data.label}」`)))
       expect(promptSetup.peekPending()).toMatchObject({ systemPrompt: executing?.kind === "agent" ? executing.data.systemPrompt : node.data.systemPrompt })
       starts.push(spec)
       await control.onStart?.(spec)
@@ -53,9 +54,10 @@ async function makeRealRunnerHarness(nodeId = "n-a1", options: { configure?: (fl
       activate(childId)
       return { childId }
     },
-    sendMessage: async (_sender, childId) => {
+    sendMessage: async (_sender, childId, content) => {
       sent.push(childId)
       if (!control.resumable) throw Object.assign(new Error("持久化子代理不可恢复", { cause: new Error("持久会话不可用") }), { name: "SubagentError", code: "NOT_RESUMABLE" })
+      sentContents.push(content)
       activate(childId)
     },
     interrupt: (childId) => { interrupted.push(childId) },
@@ -77,7 +79,7 @@ async function makeRealRunnerHarness(nodeId = "n-a1", options: { configure?: (fl
   await h.store.saveWorkflow(flow, "session-1", { force: true })
   if (!options.deferStart) await h.runtime.startRun({ sessionId: "session-1", flowId: flow.id, runtimeInputs: typeof options.runtimeInputs === "function" ? await options.runtimeInputs(h.dir) : options.runtimeInputs, handoffPolicy: options.handoffPolicy })
   const settle = (childId: string, stopReason = "completed") => h.runtime.handleSubagentEnd({ id: childId, runId: epochs.get(childId), stopReason })
-  return { h, node, get entry() { const entry = h.runtime.activeRunForSession("session-1"); if (!entry) throw new Error("fixture requires an active run"); return entry }, starts, accepted, sent, interrupted, epochs, control, retired, dispatched, settle }
+  return { h, node, get entry() { const entry = h.runtime.activeRunForSession("session-1"); if (!entry) throw new Error("fixture requires an active run"); return entry }, starts, accepted, sent, sentContents, interrupted, epochs, control, retired, dispatched, settle }
 }
 
 it("test_recovery_NOT_RESUMABLE_one_attempt_replaces_child_and_isolates_late_end", async () => {
@@ -249,7 +251,178 @@ function serialFlow(flow: import("../../src/host/shared/graph-model.js").Workflo
   ]
 }
 
-it("test_required_initial_attachment_upload_without_binding_never_starts_child_or_parent", async () => {
+it.each(["ordinary", "declared"])("test_harness_single_attachment_%s_reaches_each_real_child_without_manual_binding", async (kind) => {
+  const files: import("../../src/host/shared/runtime-types.js").SessionInputFile[] = []
+  const { h, starts, control, settle } = await makeRealRunnerHarness("n-a1", { deferStart: true, sessionInputFiles: async () => files, configure: (flow) => {
+    serialFlow(flow)
+    if (kind === "declared") for (const node of flow.nodes) if (node.kind === "agent") node.data.execution = { inputs: { document: { kind: "file" } } }
+  } })
+  const path = join(h.dir, "unusual-extension.payload")
+  await writeFile(path, "authorized document")
+  const ref = { attachmentId: "admitted-document", name: "unusual-extension.payload", bytes: 19 }
+  files.push({ ...ref, path })
+  const reads: string[] = []
+  control.onStart = async (spec) => {
+    expect(spec.request.prompt.filter((block) => block.type === "file")).toEqual([{ type: "file", attachment: ref }])
+    reads.push(await readFile(files.find((file) => file.attachmentId === ref.attachmentId)!.path, "utf8"))
+    if (kind === "ordinary") expect(spec.request.prompt[0].text).not.toContain(path)
+  }
+  const { runId } = await h.runtime.startRun({ sessionId: "session-1", flowId: "flow-1" })
+  for (const nodeId of ["n-a1", "n-a2"]) { const child = await h.runtime.wfRunNode(caller, { nodeId }); await settle(child.childId!) }
+  await h.runtime.wfFinish(caller, { status: "completed" })
+  const snapshot = (await h.store.getRun(runId))!
+  expect(reads).toEqual(["authorized document", "authorized document"])
+  expect(starts).toHaveLength(2)
+  expect(snapshot.status).toBe("completed")
+  for (const node of snapshot.nodes.filter((node) => ["n-a1", "n-a2"].includes(node.nodeId))) expect(node).toMatchObject({ attempts: 1, status: "ok", attemptHistory: [{ inputAttachments: [{ ...ref, source: kind === "ordinary" ? "session" : "binding" }] }] })
+  if (kind === "ordinary") { expect(snapshot.runtimeInputs).toBeUndefined(); expect(snapshot.inputRevision).toBeUndefined() }
+  else {
+    expect(snapshot.inputRevision).toBe(1)
+    for (const id of ["n-a1", "n-a2"]) expect(snapshot.runtimeInputs?.nodeInputs[id].document[0]).toMatchObject({ kind: "file", fileRef: { source: "attachment", ...ref, path } })
+  }
+})
+
+it.each(["ctx", "requiredFiles"])("test_single_attachment_does_not_autobind_over_%s_dependency", async (source) => {
+  const files: import("../../src/host/shared/runtime-types.js").SessionInputFile[] = []
+  const { h, starts, settle } = await makeRealRunnerHarness("n-a1", { deferStart: true, sessionInputFiles: async () => files, configure: (flow) => {
+    serialFlow(flow)
+    const target = flow.nodes.find((node) => node.id === "n-a2")!
+    if (target.kind !== "agent") throw new Error("fixture")
+    target.data.execution = { inputs: { document: { kind: "file" } }, ...(source === "requiredFiles" ? { requiredFiles: ["upstream.txt"] } : {}) }
+    if (source === "ctx") flow.lines.push({ id: "ctx", source: "n-a1", target: "n-a2", sourceHandle: "ctx-out", targetHandle: "ctx-in" })
+  } })
+  const path = join(h.dir, "external.payload"); await writeFile(path, "context")
+  files.push({ attachmentId: "external", name: "external.payload", bytes: 7, path })
+  const { runId } = await h.runtime.startRun({ sessionId: "session-1", flowId: "flow-1" })
+  const child = await h.runtime.wfRunNode(caller, { nodeId: "n-a1" }); await settle(child.childId!)
+
+  await expect(h.runtime.wfRunNode(caller, { nodeId: "n-a2" })).rejects.toMatchObject({ code: "WF_INPUT_REQUIRED" })
+
+  const snapshot = (await h.store.getRun(runId))!
+  expect(snapshot.runtimeInputs).toBeUndefined()
+  expect(snapshot.nodes.find((node) => node.nodeId === "n-a2")).toMatchObject({ status: "pending", attempts: 0 })
+  expect(starts).toHaveLength(1)
+})
+
+it("test_single_attachment_does_not_replace_declared_auto_upstream_file", async () => {
+  const files: import("../../src/host/shared/runtime-types.js").SessionInputFile[] = []
+  const { h, starts, settle } = await makeRealRunnerHarness("n-a1", { deferStart: true, sessionInputFiles: async () => files, configure: (flow) => {
+    serialFlow(flow)
+    for (const node of flow.nodes) if (node.kind === "agent") node.data.execution = node.id === "n-a1" ? { outputFiles: ["transformed.txt"] } : { inputs: { upstreamFiles: { kind: "file" } } }
+  } })
+  const path = join(h.dir, "original.payload"); await writeFile(path, "original")
+  files.push({ attachmentId: "original", name: "original.payload", bytes: 8, path })
+  const { runId } = await h.runtime.startRun({ sessionId: "session-1", flowId: "flow-1", handoffPolicy: "auto" })
+  const child = await h.runtime.wfRunNode(caller, { nodeId: "n-a1" })
+  await writeFile(join(h.dir, "transformed.txt"), "verified current output")
+  await settle(child.childId!)
+
+  await h.runtime.wfRunNode(caller, { nodeId: "n-a2" })
+
+  expect(starts[1].request.prompt.filter((block) => block.type === "file")).toEqual([])
+  expect(starts[1].request.prompt[0].text).toContain(join(h.dir, "transformed.txt"))
+  expect(starts[1].request.prompt[0].text).not.toContain(path)
+  expect((await h.store.getRun(runId))?.runtimeInputs).toBeUndefined()
+})
+
+it("test_harness_multiple_attachments_reach_two_readers_without_runtime_guessing", async () => {
+  const files: import("../../src/host/shared/runtime-types.js").SessionInputFile[] = []
+  const { h, starts, control, settle } = await makeRealRunnerHarness("n-a1", { deferStart: true, sessionInputFiles: async () => files, configure: (flow) => {
+    serialFlow(flow)
+    flow.lines = [{ id: "one", source: "n-start", target: "n-a1", sourceHandle: "flow-out", targetHandle: "flow-in" }, { id: "two", source: "n-start", target: "n-a2", sourceHandle: "flow-out", targetHandle: "flow-in" }, ...["n-a1", "n-a2"].map((source) => ({ id: source, source, target: "n-end", sourceHandle: "flow-out" as const, targetHandle: "flow-in" as const }))]
+  } })
+  for (const [name, content] of [["brief.txt", "requirements"], ["records.json", '{"count":2}']]) {
+    const path = join(h.dir, name); await writeFile(path, content)
+    files.push({ attachmentId: name, name, bytes: Buffer.byteLength(content), path })
+  }
+  const refs = files.map(({ attachmentId, name, bytes }) => ({ type: "file" as const, attachment: { attachmentId, name, bytes } }))
+  const reads: string[] = []
+  control.onStart = async (spec) => {
+    expect(spec.request.prompt.filter((block) => block.type === "file")).toEqual(refs)
+    // Controlled model choice deliberately differs from the attachment's list order.
+    const selected = refs[starts.length === 1 ? 1 : 0].attachment
+    reads.push(await readFile(files.find((file) => file.attachmentId === selected.attachmentId)!.path, "utf8"))
+  }
+  const { runId } = await h.runtime.startRun({ sessionId: "session-1", flowId: "flow-1" })
+  for (const nodeId of ["n-a1", "n-a2"]) { const child = await h.runtime.wfRunNode(caller, { nodeId }); await settle(child.childId!) }
+  await h.runtime.wfFinish(caller, { status: "completed" })
+  expect(reads).toEqual(['{"count":2}', "requirements"])
+  const snapshot = (await h.store.getRun(runId))!
+  expect(snapshot.runtimeInputs).toBeUndefined()
+  for (const node of snapshot.nodes.filter((node) => ["n-a1", "n-a2"].includes(node.nodeId))) expect(node.attemptHistory?.[0].inputAttachments).toEqual(refs.map(({ attachment }) => ({ ...attachment, source: "session" })))
+})
+
+it("test_harness_upload_during_execution_only_reaches_a_legitimate_next_attempt", async () => {
+  const files: import("../../src/host/shared/runtime-types.js").SessionInputFile[] = []
+  const { h, starts, sentContents, settle, entry } = await makeRealRunnerHarness(undefined, { sessionInputFiles: async () => files })
+  for (const [name, content] of [["first.md", "first"], ["second.md", "second"]]) {
+    const path = join(h.dir, name); await writeFile(path, content)
+    files.push({ attachmentId: name, name, bytes: content.length, path })
+    if (files.length === 1) await h.runtime.wfRunNode(caller, { nodeId: "n-a1", retryLimit: 1 })
+  }
+  await expect(h.runtime.wfRunNode(caller, { nodeId: "n-a1", retryLimit: 1 })).rejects.toMatchObject({ code: "WF_BUSY" })
+  expect(starts).toHaveLength(1); expect(sentContents).toEqual([])
+  expect(entry.snapshot.nodes.find((node) => node.nodeId === "n-a1")?.attemptHistory?.[0].inputAttachments).toHaveLength(1)
+  await settle("child-1", "error")
+  await h.runtime.wfRunNode(caller, { nodeId: "n-a1", retryLimit: 1 })
+  expect(sentContents[0].filter((block) => block.type === "file")).toEqual(files.map(({ attachmentId, name, bytes }) => ({ type: "file", attachment: { attachmentId, name, bytes } })))
+  expect((await h.store.getRun(entry.snapshot.id))?.nodes.find((node) => node.nodeId === "n-a1")?.attemptHistory?.map((attempt) => attempt.inputAttachments?.length)).toEqual([1, 2])
+  await h.runtime.handleSubagentEnd({ id: "child-1", runId: "epoch-1", stopReason: "completed" })
+  expect(entry.snapshot.nodes.find((node) => node.nodeId === "n-a1")).toMatchObject({ status: "running", attempts: 2 })
+})
+
+it("test_harness_generic_text_files_multiple_sources_condition_and_report_use_real_runtime", async () => {
+  const files: import("../../src/host/shared/runtime-types.js").SessionInputFile[] = []
+  const ids = ["draft", "left", "right", "combine", "inspect", "final"]
+  const flowEdge = (source: string, target: string, condition?: import("../../src/host/shared/graph-model.js").Line["condition"]): import("../../src/host/shared/graph-model.js").Line => ({ id: `${source}-${target}`, source, target, sourceHandle: "flow-out", targetHandle: "flow-in", ...(condition ? { condition } : {}) })
+  const { h, starts, epochs, control } = await makeRealRunnerHarness("draft", { deferStart: true, sessionInputFiles: async () => files, configure: (flow) => {
+    flow.nodes = [stage("begin", "start"), ...[...ids, "unused"].map((id) => agent(id, id, { execution: id === "final" ? { outputFiles: ["report.md"], inputSource: "ctx" } : id === "combine" ? { inputSource: "ctx" } : {} })), stage("done", "end")]
+    flow.lines = [...["draft", "left", "right"].map((id) => flowEdge("begin", id)), ...["draft", "left", "right"].map((id) => flowEdge(id, "combine")), flowEdge("combine", "inspect", { type: "content", label: "needs inspection" }), flowEdge("combine", "unused", { type: "content", label: "alternative" }), flowEdge("inspect", "final"), flowEdge("unused", "final", { type: "content", label: "alternative report" }), flowEdge("final", "done")]
+    flow.lines.push(...["draft", "left", "right"].map((id) => ({ id: `ctx-${id}`, source: id, target: "combine", sourceHandle: "ctx-out" as const, targetHandle: "ctx-in" as const })), { id: "ctx-final", source: "inspect", target: "final", sourceHandle: "ctx-out", targetHandle: "ctx-in" })
+  } })
+  for (const [name, content] of [["brief.md", "apply rounding"], ["data.json", '{"value":21}']]) {
+    const path = join(h.dir, name); await writeFile(path, content)
+    files.push({ attachmentId: name, name, bytes: Buffer.byteLength(content), path })
+  }
+  const outputs = new Map<string, string>()
+  const reads: string[] = []
+  control.onStart = async (spec) => {
+    const text = spec.request.prompt.filter((block) => block.type === "text").map((block) => block.text).join("\n")
+    const id = ids.find((id) => text.includes(`「${id}」`))!
+    let output = "Use the authorized documents"
+    if (id === "left" || id === "right") {
+      const refs = spec.request.prompt.filter((block) => block.type === "file")
+      const ref = refs[id === "left" ? 0 : 1].attachment
+      output = await readFile(files.find((file) => file.attachmentId === ref.attachmentId)!.path, "utf8"); reads.push(output)
+    } else if (id === "combine") {
+      for (const source of ["draft", "left", "right"]) expect(text).toContain(outputs.get(source))
+      output = "needs inspection: apply rounding to value 21"
+    } else if (id === "inspect") output = "Inspected value: 21; rounding applied"
+    else if (id === "final") {
+      expect(text).toContain(outputs.get("inspect"))
+      const path = join(h.dir, "report.md")
+      await writeFile(path, `# Generic report\n${outputs.get("inspect")}\n`)
+      output = path
+    }
+    outputs.set(id, output)
+  }
+  const { runId } = await h.runtime.startRun({ sessionId: "session-1", flowId: "flow-1" })
+  for (const nodeId of ids) {
+    const { childId } = await h.runtime.wfRunNode(caller, { nodeId })
+    await h.runtime.handleSubagentEnd({ id: childId, runId: epochs.get(childId!), stopReason: "completed", lastAssistantMessage: [{ type: "text", text: outputs.get(nodeId)! }] })
+  }
+  await h.runtime.wfFinish(caller, { status: "completed" })
+  const snapshot = (await h.store.getRun(runId))!
+  expect(snapshot.status).toBe("completed")
+  expect(starts).toHaveLength(6)
+  expect(reads).toEqual(["apply rounding", '{"value":21}'])
+  expect(snapshot.nodes.filter((node) => ids.includes(node.nodeId)).every((node) => node.status === "ok" && node.attempts === 1)).toBe(true)
+  expect(snapshot.nodes.find((node) => node.nodeId === "unused")).toMatchObject({ status: "skipped", attempts: 0 })
+  expect(snapshot.nodes.find((node) => node.nodeId === "final")?.artifacts?.[0]).toMatchObject({ path: join(h.dir, "report.md"), attempt: 1, runId })
+  expect(await readFile(join(h.dir, "report.md"), "utf8")).toBe("# Generic report\nInspected value: 21; rounding applied\n")
+})
+
+it.each(["none", "ambiguous"])("test_required_initial_attachment_%s_without_binding_never_starts_child_or_parent", async (kind) => {
   const files: import("../../src/host/shared/runtime-types.js").SessionInputFile[] = []
   const { h, starts } = await makeRealRunnerHarness("n-a1", { deferStart: true, sessionInputFiles: async () => files, configure: (flow) => {
     serialFlow(flow)
@@ -258,7 +431,7 @@ it("test_required_initial_attachment_upload_without_binding_never_starts_child_o
   } })
   const path = join(h.dir, "sales_workflow_test.csv")
   await writeFile(path, "authorized")
-  files.push({ attachmentId: "admitted", name: "sales_workflow_test.csv", bytes: 10, path })
+  if (kind === "ambiguous") files.push({ attachmentId: "admitted", name: "sales_workflow_test.csv", bytes: 10, path }, { attachmentId: "another", name: "other.txt", bytes: 10, path })
   for (let index = 0; index < 2; index++) {
     h.agents.roots.get("session-1")!.session.events.push({ type: "user/message", data: { source: { kind: "user" }, content: [{ type: "text", text: "已经上传" }] } })
     await expect(h.runtime.startRun({ sessionId: "session-1", flowId: "flow-1" })).rejects.toMatchObject({ code: "WF_INPUT_REQUIRED" })

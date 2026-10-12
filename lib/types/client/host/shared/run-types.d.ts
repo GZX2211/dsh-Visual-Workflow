@@ -1,4 +1,4 @@
-import type { RuntimeInputs, HandoffPolicy } from "./runtime-types.js";
+import type { RuntimeInputs, HandoffPolicy, NodeInputAttachment } from "./runtime-types.js";
 import type { OrgMeta } from './org-meta.js';
 /** run 运行状态：运行/暂停/完成/失败/停止/中断（架构文档 §4.3 状态机 + §6.1）。 */
 export type RunStatus = 'running' | 'paused' | 'completed' | 'failed' | 'stopped' | 'interrupted';
@@ -151,6 +151,8 @@ export interface NodeAttempt {
     failure?: RunFailure;
     /** 显式文件产物在本次尝试开始前的签名；null 表示原本不存在。 */
     outputBaseline?: Record<string, string | null>;
+    /** 本次任务准备交付的授权引用；childId/phase 记录接纳，不代表模型已读取。 */
+    inputAttachments?: NodeInputAttachment[];
 }
 export interface RunTermination {
     source: "parent_error" | "parent_finish" | "user_stop" | "idle_timeout" | "execution_timeout" | "host_restart" | "runtime";

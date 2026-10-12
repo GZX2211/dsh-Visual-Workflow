@@ -1,10 +1,11 @@
 import { runtimeManagedPrefix } from "../storage/managed-files.js"
 import { basename, isAbsolute, resolve } from "node:path"
-import { mainNodeIdOf, nodeById } from "../graph/index.js"
-import type { WorkflowDocument } from "../shared/graph-model.js"
-import type { JsonValue, RuntimeInputs, RuntimeInputValue, SessionInputFile } from "../shared/runtime-types.js"
+import { ctxInEdges, mainNodeIdOf, nodeById } from "../graph/index.js"
+import type { RoleNode, WorkflowDocument } from "../shared/graph-model.js"
+import type { InputAttachmentRef, InputSlots, JsonValue, NodeInputAttachment, RuntimeInputs, RuntimeInputValue, SessionInputFile } from "../shared/runtime-types.js"
 import { WfError } from "./errors.js"
 import { authorizedInputPath } from "./execution-file-access.js"
+import { executionOf } from "./execution-inputs.js"
 
 function recordOf(raw: unknown, field: string): Record<string, unknown> {
   if (!raw || typeof raw !== "object" || Array.isArray(raw) || ![Object.prototype, null].includes(Object.getPrototypeOf(raw))) bad(field, "必须为普通对象")
@@ -38,6 +39,27 @@ export function jsonValueOf(value: unknown, field: string, depth = 0, ancestors 
   } finally { ancestors.delete(value) }
 }
 export interface InputAccess { sessionId: string; managedRoot: string; files: readonly SessionInputFile[] }
+/** Explicit file selection wins; otherwise all currently admitted references are context, not bindings. */
+export async function nodeInputAttachments(flow: WorkflowDocument, node: RoleNode, inputs: InputSlots, access: InputAccess, onUnavailable: (file: InputAttachmentRef, error: WfError) => void): Promise<NodeInputAttachment[]> {
+  const selected = Object.values(inputs).flat().filter((value) => value.kind === "file")
+  const explicitFiles = selected.length || executionOf(node).requiredFiles?.length || ctxInEdges(flow, node.id).some((edge) => {
+    const source = nodeById(flow, mainNodeIdOf(flow, edge.source) ?? edge.source)
+    return source?.kind === "file" && source.data.fileKind === "file"
+  })
+  const candidates = explicitFiles ? selected.flatMap((value) => value.kind === "file" && value.fileRef.source === "attachment" ? [value.fileRef] : []) : access.files
+  const result = new Map<string, NodeInputAttachment>()
+  for (const ref of candidates) {
+    try {
+      const value = await inputValueOf({ kind: "file", fileRef: { source: "attachment", attachmentId: ref.attachmentId, name: ref.name, bytes: ref.bytes } }, "sessionAttachments", access)
+      if (value.kind === "file" && value.fileRef.source === "attachment") result.set(ref.attachmentId, { attachmentId: ref.attachmentId, name: ref.name, bytes: ref.bytes, source: explicitFiles ? "binding" : "session" })
+    } catch (error) {
+      // Unavailable optional context must not create a new required input for ordinary nodes.
+      if (explicitFiles || !(error instanceof WfError) || error.code !== "WF_INPUT_FILE_UNAVAILABLE") throw error
+      onUnavailable(ref, error)
+    }
+  }
+  return [...result.values()]
+}
 async function inputValueOf(raw: unknown, field: string, access: InputAccess): Promise<RuntimeInputValue> {
   const part = recordOf(raw, field)
   if (part.kind === "text") { if (typeof part.value !== "string") bad(`${field}.value`, "必须为文本"); return { kind: "text", value: part.value, origin: { source: "user" } } }
@@ -94,7 +116,7 @@ export function handoffPolicyOf(raw: unknown): import("../shared/runtime-types.j
 export function validateRequiredInputs(node: import("../shared/graph-model.js").RoleNode, slots: import("../shared/runtime-types.js").InputSlots): void {
   for (const [name, requirement] of Object.entries(node.data.execution?.inputs ?? {})) {
     const values = slots[name] ?? []
-    if (requirement.required !== false && !values.length) throw new WfError(`节点 ${node.id} 缺少输入 ${name}；请在工作台保存绑定后重试，“已上传”消息不能代替输入绑定`, "WF_INPUT_REQUIRED")
+    if (requirement.required !== false && !values.length) throw new WfError(`节点 ${node.id} 缺少声明输入 ${name}；请明确提供所需输入，口头“已上传”不能代替合同校验`, "WF_INPUT_REQUIRED")
     if (values.some((value) => value.kind !== requirement.kind)) bad(`${node.id}.${name}`, `需要 ${requirement.kind} 输入`)
   }
 }

@@ -2,6 +2,7 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [key:
 export type HandoffPolicy = "explicit" | "auto"
 export interface InputAttachmentRef { attachmentId: string; name: string; bytes: number }
 export interface SessionInputFile extends InputAttachmentRef { path: string }
+export interface NodeInputAttachment extends InputAttachmentRef { source: "session" | "binding" }
 export type RuntimeFileRef = { source: "managed"; path: string } | ({ source: "attachment" } & InputAttachmentRef & { path?: string }) | { source: "node"; path: string }
 export interface InputOrigin { source: "user" | "managed" | "attachment" | "node"; nodeId?: string; runId?: string; attempt?: number }
 export type RuntimeInputValue = ({ kind: "text"; value: string } | { kind: "json"; value: JsonValue } | { kind: "file"; fileRef: RuntimeFileRef }) & { origin?: InputOrigin }
