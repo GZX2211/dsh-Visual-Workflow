@@ -56,11 +56,7 @@ export {
 export { buildCollabBlock, type CollabBlockParams, type CollabChannel } from './collab.js'
 
 // 运行期「编排变更」通知文案（画布保存改变编排语义时注入父代理）。
-export {
-  buildOrchestrationChangeText,
-  ORCH_CHANGE_MARKER,
-  type OrchestrationChangeParams,
-} from './orchestration-change.js'
+export { ORCH_CHANGE_MARKER, ORCH_CHANGE_TEXT } from './orchestration-change.js'
 
 // 「本次组织预算」末段文本构建器（动态值，仅末段注入；由 runtime-launch 接入）。
 export { buildOrgBudgetText } from './org-budget.js'

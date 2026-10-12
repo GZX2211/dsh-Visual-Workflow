@@ -87,6 +87,15 @@ export declare abstract class RuntimeBase {
     /** 某会话正在运行的 run（status === 'running'）。 */
     activeRunForSession(sessionId: string): RunEntry | null;
     /**
+     * 某会话正在运行实例的工作流文档（`wf_org_catalog` 的 instance 召回取数源；无活跃 run 返回 null）。
+     *
+     * 为什么只认 running：暂停中的运行不暴露骨架（暂停态父代理不继续编排，恢复后重新
+     * running 即再次可见）——「当前正在运行的实例」这条语义由本函数独占定义，取数方不判状态。
+     * 为什么取最新实例文档而不是运行起始快照：运行中画布可能被改，父代理要按最新拓扑调度
+     * （与 currentResolvedFlow 同口径；读失败回退起始快照）。
+     */
+    activeRunFlow(sessionId: string): Promise<WorkflowDocument | null>;
+    /**
      * 活跃 run 摘要（running/paused 均保留运行锁；返回 flowId/status/runId/sessionId）。
      * 工作台全局化改版：sessionId 缺省时返回**全部会话**的活跃 run（工作台全局面板
      * 实例列表状态徽标用）；传入时按会话过滤（进入时自动选中、旧单会话面板兼容）。
@@ -210,18 +219,17 @@ export declare abstract class RuntimeBase {
     /** 重读当前（运行的）工作流最新快照：每节点执行前读一次，运行中调整即时生效（双向同步①）。 */
     currentResolvedFlow(entry: RunEntry): Promise<WorkflowDocument>;
     /**
-     * 刷新实例保存后的运行事实源（双向同步①「画布→编排」的闭环补全）：
-     * 画布保存（putWorkflow/putService）会更新 workflows/services 目录，但运行
-     * 事实源 orchestrations/<runId>.json 是 startRun 时的一次性快照——若不同步
-     * 刷新，父代理（编排指令的 definitionPath 指向该文件）永远读到旧拓扑，
-     * 新增节点/连线在运行中不可见（本缺陷已验证）。此处对属于该实例且处于
-     * running/paused 的活跃 run，用最新保存内容重写其事实源文件。
+     * 刷新实例保存后的运行编排基线（双向同步①「画布→编排」的闭环补全）：
+     * 保存后若**编排语义确有变更**（flow-diff 判定，纯坐标拖动/组卡片缩放等几何改动不算），
+     * 且该 run 正在运行（running），立即向父代理注入【编排变更】通知（steer 插队优先，
+     * 父代理空闲时 followupRoot 唤醒），父代理据此重新召回实例骨架并调整后续编排。
      *
-     * 新机制（用户裁决）：保存后若**编排语义确有变更**（flow-diff 判定，纯坐标拖动/
-     * 组卡片缩放等几何改动不算），且该 run 正在运行（running），立即向父代理注入
-     * 【编排变更】通知（steer 插队优先，父代理空闲时 followupRoot 唤醒），父代理据此
-     * 重读事实源并调整后续编排——取代旧提示词「每次调度前重读源文件」的软约束。
-     * 暂停中的 run 只刷新事实源、不注入（不打断暂停态，恢复时按最新拓扑续跑）。
+     * 为什么基线是内存事实而不是落盘副本：那份 orchestrations/<runId>.json 副本的唯一用途
+     * 曾是「给父代理 read 一份只读快照」；改用 wf_org_catalog 的 instance 通道召回后它失去
+     * 消费者，故收敛为 RunEntry 上的内存基线（单一事实源，不再有「副本与画布漂移」这一整类问题）。
+     * 拓扑本身由 currentResolvedFlow 每次显式重读最新实例文档，不依赖任何快照副本。
+     *
+     * 暂停中的 run 只更新基线、不注入（不打断暂停态，恢复时按最新拓扑续跑）。
      * 幂等：无活跃 run 时为空操作；不打断正在执行的子代理。
      */
     refreshActiveDefinitions(flowId: string, sessionId: string, flow: WorkflowDocument): Promise<void>;
@@ -231,7 +239,7 @@ export declare abstract class RuntimeBase {
      * 注入（下一步边界即见，与 wf_ask_agent 超时通知同通道）；否则用 followupRoot 唤醒
      * （父代理空闲时也能收到）。注入失败仅告警，绝不阻断画布保存主流程。
      */
-    protected notifyOrchestrationChange(entry: RunEntry, flow: WorkflowDocument): void;
+    protected notifyOrchestrationChange(entry: RunEntry): void;
     /**
      * 清理运行时资源（插件卸载/Service dispose，幂等）：
      * 中止全部运行（阻塞等待随之 reject）并清空内存表。

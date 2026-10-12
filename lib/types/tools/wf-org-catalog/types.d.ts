@@ -6,6 +6,14 @@ export declare const WORKFLOW_ID_PREFIX = "flow-";
 export declare const ROLE_ID_PREFIX = "role-";
 /** 工作流资产内联角色复合键分隔符：`<工作流资产 id>#<节点 id>`。 */
 export declare const INLINE_ROLE_SEPARATOR = "#";
+/**
+ * 实例保留字：当前会话**正在运行**的实例。
+ *
+ * 为什么是保留字而不是资产 id：运行实例是运行期事实（同一会话至多一条、运行后才存在），
+ * 不是资产——它没有版本、不进资产库、也不能在规划期被参考。因此本工具只认这一个字面量，
+ * 不提供「按 id 枚举任意实例」的入口：其他实例（历史 run、其他会话）一律不可达。
+ */
+export declare const INSTANCE_ID = "instance";
 /** ID 约定文本（判据本体；索引与错误提示共用同一份）。 */
 export declare const ID_CONVENTION: {
     readonly workflow: "flow-* = workflow asset -> complete skeleton (stage nodes / roles and groups / lines / data-node bodies)";
@@ -130,6 +138,16 @@ export interface CatalogRoleNodeEntry {
     /** 角色 Prompt 来源文件名（画布展示用；无来源时省略）。 */
     systemPromptSource?: string;
     groupId: string | null;
+    /**
+     * 该节点是否**可调度**：为 false 表示父代理不应把它派发出去。
+     *
+     * 为什么需要显式标注：画布允许存在「未接流程线」的孤立节点（用户留作草稿/备选），
+     * 而骨架按定义返回全量节点——没有本字段，父代理只能自行从 lines 推断，proxy 与
+     * 协作组卡片这类间接连线极易推错。取值口径与运行期编排清单（orchestrationNodeList）
+     * 完全同源，等价于把服务端过滤改为显式标注。
+     * 仅 agent 标注：parent 是编排者本人，其执行身份由运行期指令给出，不属「可调度单元」。
+     */
+    schedulable?: boolean;
     /** 该节点引用的角色资产 id（无角色版本行映射时省略）。 */
     roleAssetId?: string;
     /**
@@ -154,6 +172,8 @@ export interface CatalogGroupNodeEntry {
     label: string;
     collabPrompt: string;
     memberIds: string[];
+    /** 是否参与流程（未接线的孤立组卡片不得启动）。口径见 CatalogRoleNodeEntry.schedulable。 */
+    schedulable?: boolean;
 }
 /** 文件数据源条目（正文无二次召回通道，一次性给全）。 */
 export interface CatalogFileNodeEntry {
@@ -214,6 +234,39 @@ export interface CatalogWorkflowDetail {
     inlineRoles: string[];
     note: string;
 }
+/**
+ * 当前运行实例骨架（`instance` 召回的第 2 层）。
+ *
+ * 与资产骨架的差别：实例没有版本，也没有「角色资产固定引用」——实例节点的角色 Prompt
+ * 是内联快照，因此第 3 层（`instance#<nodeId>`）直接取节点正文。
+ * 语义边界：只指**当前会话正在运行**的那一个实例；历史 run 与其他会话的实例不可达
+ * （判据层就不提供形状，故规划期无法借本工具参考不稳定实例）。
+ */
+export interface CatalogInstanceDetail {
+    type: 'instance';
+    id: typeof INSTANCE_ID;
+    name: string;
+    description: string;
+    mode: 'mode1' | 'mode2';
+    meta?: OrgMeta;
+    nodes: CatalogNodeEntry[];
+    lines: CatalogLineEntry[];
+    /** 该骨架内可直接召回的复合 id 清单（`instance#<nodeId>`）。 */
+    inlineRoles: string[];
+    note: string;
+}
+/**
+ * 无活跃实例时的**禁令体**（不是错误，而是运行期事实：规划阶段没有实例可参考）。
+ *
+ * 为什么返回正文而不是空数组或报错：空数组会让模型以为 id 打错了，进而自行另寻出路
+ * （例如去翻运行目录）；这里要表达的语义是「现在没在跑，且规划期不得参考实例」。
+ */
+export interface CatalogInstanceUnavailable {
+    type: 'instance';
+    id: typeof INSTANCE_ID;
+    available: false;
+    message: string;
+}
 /** 角色资产详情（systemPrompt 完整返回，不截断）。 */
 export interface CatalogRoleDetail {
     type: 'role';
@@ -257,6 +310,12 @@ export interface CatalogInlineRoleDetail {
 }
 /** 资产详情条目。 */
 export type CatalogAssetDetail = CatalogWorkflowDetail | CatalogRoleDetail | CatalogInlineRoleDetail;
+/**
+ * 详情通道的条目：三类资产 + 运行实例的两种形态（骨架 / 禁令体）。
+ * 实例与资产共用同一通道（都是「传 ids 召回」），但两者不混召：传 `instance` 时
+ * 只回实例条目，不掺任何资产内容。
+ */
+export type CatalogDetailEntry = CatalogAssetDetail | CatalogInstanceDetail | CatalogInstanceUnavailable;
 /** 坏 id 条目：单条失败不阻塞其余召回。 */
 export interface CatalogDetailError {
     id: string;
@@ -266,7 +325,7 @@ export interface CatalogDetailError {
 /** 资产详情（第二次调用的返回体）。 */
 export interface CatalogDetails {
     kind: 'details';
-    assets: CatalogAssetDetail[];
+    assets: CatalogDetailEntry[];
     errors: CatalogDetailError[];
 }
 /** preset 数据源条目。 */

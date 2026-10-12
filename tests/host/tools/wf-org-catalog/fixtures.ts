@@ -10,7 +10,7 @@ import type {
   WorkflowAssetDetail,
   WorkflowAssetSummary,
 } from '../../../../src/host/shared/asset-types.js'
-import type { GraphNode, Line, RoleNode } from '../../../../src/host/shared/graph-model.js'
+import type { GraphNode, Line, RoleNode, WorkflowDocument } from '../../../../src/host/shared/graph-model.js'
 import type { OrgCatalogHost } from '../../../../src/host/tools/wf-org-catalog/tool.js'
 
 /** 工作流资产索引条目。 */
@@ -153,6 +153,67 @@ export function inlineRoleNodeFixture(): RoleNode {
   return workflowAssetDetailFixture().nodes.find((node) => node.id === 'a1') as RoleNode
 }
 
+/**
+ * 当前运行实例样本（`instance` 骨架召回的第 2 层）。
+ * 刻意同时放入**参与流程**与**孤立**的 agent / 协作组，用于锁定 schedulable 的过滤口径：
+ *   - 参与流程：a1（s→a1→g1→e 流程链）、g1；
+ *   - 孤立（用户留在画布上但不执行）：a2、g2。
+ */
+export function instanceFlowFixture(overrides: Partial<WorkflowDocument> = {}): WorkflowDocument {
+  const nodes: GraphNode[] = [
+    { id: 's', kind: 'start', position: { x: 0, y: 0 }, data: { label: '启动' } },
+    {
+      id: 'a1',
+      kind: 'agent',
+      position: { x: 0, y: 0 },
+      data: {
+        label: '流程内角色',
+        systemPrompt: '你是流程内角色',
+        presetId: 'combo-1',
+        provider: 'deepseek',
+        model: 'deepseek-chat',
+        retryLimit: 3,
+        outputSchema: '交付说明',
+      },
+    },
+    {
+      id: 'a2',
+      kind: 'agent',
+      position: { x: 0, y: 0 },
+      data: { label: '孤立草稿', systemPrompt: '不该被调度', provider: '', model: '', retryLimit: 3 },
+    },
+    {
+      id: 'g1',
+      kind: 'group',
+      position: { x: 0, y: 0 },
+      data: { label: '流程内协作组', collabPrompt: '组内互相评审', memberIds: ['a1'] },
+    },
+    {
+      id: 'g2',
+      kind: 'group',
+      position: { x: 0, y: 0 },
+      data: { label: '孤立协作组', collabPrompt: '未接线', memberIds: [] },
+    },
+    { id: 'e', kind: 'end', position: { x: 0, y: 0 }, data: { label: '结束' } },
+  ]
+  const lines: Line[] = [
+    { id: 'l1', source: 's', target: 'a1', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+    { id: 'l2', source: 'a1', target: 'g1', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+    { id: 'l3', source: 'g1', target: 'e', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+  ]
+  return {
+    id: 'wf-live',
+    sessionId: 'sess-1',
+    mode: 'mode1',
+    name: '在跑实例',
+    description: '运行中的实例',
+    nodes,
+    lines,
+    revision: 7,
+    ...overrides,
+  }
+}
+
 /** 宿主 fake 的取数调用计数（批内缓存 / 批量取数断言的观测面）。 */
 export interface CatalogHostCalls {
   workflowLists: number
@@ -160,6 +221,8 @@ export interface CatalogHostCalls {
   workflowReads: string[]
   roleReads: string[]
   roleVersionReads: string[]
+  /** instance 召回的取数次数（按会话）；同一批多次引用实例只应记 1 次。 */
+  activeRunFlows: string[]
 }
 
 /**
@@ -176,6 +239,7 @@ export function makeCatalogHost(overrides: Partial<OrgCatalogHost> = {}): {
     workflowReads: [],
     roleReads: [],
     roleVersionReads: [],
+    activeRunFlows: [],
   }
   const defaults: OrgCatalogHost = {
     assets: {
@@ -205,6 +269,11 @@ export function makeCatalogHost(overrides: Partial<OrgCatalogHost> = {}): {
     },
     listPresets: async () => [{ id: 'standard', name: '标准', description: '官方标准模式' }],
     listModels: async () => [{ provider: 'deepseek', model: 'deepseek-chat', efforts: [{ id: 'high', name: '高' }] }],
+    // 默认提供一条「正在运行的实例」；无活跃实例场景由用例显式覆盖为 null。
+    async getActiveRunFlow(sessionId: string) {
+      calls.activeRunFlows.push(sessionId)
+      return instanceFlowFixture()
+    },
   }
   const host: OrgCatalogHost = {
     ...defaults,

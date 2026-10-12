@@ -1,6 +1,6 @@
 // tests/host/orchestrator/runtime-base.test.ts
 //
-// 运行时基础层单测：断点自动接续、运行快照读取、双向同步（事实源刷新与编排变更注入）、执行者模式。
+// 运行时基础层单测：断点自动接续、运行快照读取、双向同步（编排基线更新与编排变更注入）、执行者模式。
 // 装配与测试替身见 fixtures/harness.ts（共享，不在本文件内重复）。
 
 import { afterEach, describe, expect, it } from 'vitest'
@@ -275,36 +275,36 @@ describe('currentResolvedFlow 双向同步（§4.7 规则 1 ①）', () => {
   })
 })
 
-describe('refreshActiveDefinitions：画布保存 → 运行事实源实时刷新（双向同步①）', () => {
-  it('运行中保存实例：刷新对应 run 的 orchestrations 事实源（父代理读到最新拓扑）', async () => {
+describe('refreshActiveDefinitions：画布保存 → 运行编排基线更新（双向同步①）', () => {
+  it('运行中保存实例：更新本 run 的编排基线（父代理经工具召回最新拓扑）', async () => {
     const h = await makeHarness()
     const flow = makeFlow()
     const { result } = await start(h, flow)
-    const defBefore = await h.store.readOrchestration(result.runId)
-    expect(defBefore?.nodes).toHaveLength(6) // start/a1/pause/a2/end/proxy
+    expect(h.runtime.entryFor(result.runId)?.lastSyncedFlow?.nodes).toHaveLength(6) // start/a1/pause/a2/end/proxy
 
     // 模拟画布保存：新增一个节点后的最新文档
     const updated = { ...flow, revision: 2, nodes: [...flow.nodes, agent('n-a3', '子任务C')] }
     await h.store.saveWorkflow(updated, 'session-1', { force: true })
     await h.runtime.refreshActiveDefinitions('flow-1', 'session-1', updated)
 
-    // 运行事实源文件已刷新：父代理 read 该文件可见新增节点（冲突根因修复）
-    const defAfter = await h.store.readOrchestration(result.runId)
-    expect(defAfter?.nodes.map((n) => n.id)).toContain('n-a3')
-    // 快照节点状态不受影响（只刷新流程定义，不重置节点记录）
+    // 基线已前进：下一次保存的「编排语义是否变更」以最新拓扑为基准
+    expect(h.runtime.entryFor(result.runId)?.lastSyncedFlow?.nodes.map((n) => n.id)).toContain('n-a3')
+    // 快照节点状态不受影响（只更新编排基线，不重置节点记录）
     expect(h.runtime.runSnapshot(result.runId)?.nodes).toHaveLength(6)
   })
 
-  it('已结束的 run 不刷新；无匹配 run 为空操作（幂等）', async () => {
+  it('已结束的 run：空操作（幂等，既不注入也不报错）', async () => {
     const h = await makeHarness()
     const flow = makeFlow()
     const { result } = await start(h, flow)
     await h.runtime.stopRun(result.runId)
+    const root = h.agents.roots.get('session-1') as FakeRoot
 
     const updated = { ...flow, revision: 3, nodes: [...flow.nodes, agent('n-a4', '新任务')] }
     await h.runtime.refreshActiveDefinitions('flow-1', 'session-1', updated)
-    // 已完成 run 的事实源不应被改写（历史追溯语料保持原样）
-    expect((await h.store.readOrchestration(result.runId))?.nodes).toHaveLength(6)
+
+    expect(root.steered).toHaveLength(0)
+    expect(root.messages).toHaveLength(1)
   })
 })
 
@@ -316,7 +316,7 @@ describe('运行中画布保存 → 编排变更注入（新机制）', () => {
     return root as FakeRoot
   }
 
-  it('编排语义变更 + 父代理忙碌：steer 插队注入【编排变更】与事实源路径', async () => {
+  it('编排语义变更 + 父代理忙碌：steer 插队注入【编排变更】', async () => {
     const h = await makeHarness()
     const flow = makeFlow()
     const { result } = await start(h, flow)
@@ -335,14 +335,17 @@ describe('运行中画布保存 → 编排变更注入（新机制）', () => {
     expect(root.steered).toHaveLength(1)
     const text = root.steered[0]?.content[0]?.text ?? ''
     expect(text).toContain(ORCH_CHANGE_MARKER)
-    expect(text).toContain(h.store.orchestrationFilePath(result.runId))
+    // 安全门禁：注入文本不含宿主路径与数据目录名（父代理无从进入用户私有存储）
+    expect(text).not.toContain(h.store.root)
+    expect(text).not.toContain('orchestrations')
+    expect(text).not.toContain('.json')
     // 未走 followup（父代理忙碌时不新起回合；messages 仅启动注入那一条）
     expect(root.messages).toHaveLength(1)
-    // 事实源已刷新为最新拓扑
-    expect((await h.store.readOrchestration(result.runId))?.nodes.map((n) => n.id)).toContain('n-a3')
+    // 基线已更新为最新拓扑
+    expect(h.runtime.entryFor(result.runId)?.lastSyncedFlow?.nodes.map((n) => n.id)).toContain('n-a3')
   })
 
-  it('纯几何改动（节点坐标）：不注入，但事实源仍刷新', async () => {
+  it('纯几何改动（节点坐标）：不注入，但基线照常前进', async () => {
     const h = await makeHarness()
     const flow = makeFlow()
     const { result } = await start(h, flow)
@@ -357,7 +360,8 @@ describe('运行中画布保存 → 编排变更注入（新机制）', () => {
 
     expect(root.steered).toHaveLength(0)
     expect(root.messages).toHaveLength(1)
-    expect((await h.store.readOrchestration(result.runId))?.nodes[0]?.position).toEqual({ x: 321, y: 654 })
+    // 基线仍前进（几何改动不算编排语义变更，但下次比较应对齐最新文档）
+    expect(h.runtime.entryFor(result.runId)?.lastSyncedFlow?.nodes[0]?.position).toEqual({ x: 321, y: 654 })
   })
 
   it('节点配置变化（systemPrompt）：注入', async () => {
@@ -392,7 +396,7 @@ describe('运行中画布保存 → 编排变更注入（新机制）', () => {
     expect(root.messages[1]?.content[0]?.text ?? '').toContain(ORCH_CHANGE_MARKER)
   })
 
-  it('paused run：只刷新事实源，不注入（不打断暂停态）', async () => {
+  it('paused run：只更新基线，不注入（不打断暂停态）', async () => {
     const h = await makeHarness()
     const flow = makeFlow()
     const { result } = await start(h, flow)
@@ -405,7 +409,8 @@ describe('运行中画布保存 → 编排变更注入（新机制）', () => {
 
     expect(root.steered).toHaveLength(0)
     expect(root.messages).toHaveLength(1)
-    expect((await h.store.readOrchestration(result.runId))?.nodes.map((n) => n.id)).toContain('n-a3')
+    // 暂停态不注入通知，但基线已对齐：恢复后按最新拓扑续跑
+    expect(entry.lastSyncedFlow?.nodes.map((n) => n.id)).toContain('n-a3')
   })
 
   it('连续两次相同保存：第二次无变更 → 不重复注入', async () => {

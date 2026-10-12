@@ -44,10 +44,10 @@ describe('parseAssetId（资产 id 形状判定）', () => {
     if (!result.ok) expect(result.reason).toContain('workflow asset id')
   })
 
-  it('复合 id 左侧不是workflow asset id → 非法（inline roles are recalled from workflow assets only）', () => {
+  it('复合 id 左侧既非工作流资产也非实例保留字 → 非法（提示两个合法来源）', () => {
     const result = parseAssetId('role-1#node-abc')
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.reason).toContain('inline roles are recalled from workflow assets only')
+    if (!result.ok) expect(result.reason).toContain('recalled from a workflow asset or the running instance only')
   })
 
   it('未知前缀（含旧模版前缀 tpl-）→ 非法（原因列出三种支持的形状）', () => {
@@ -67,6 +67,39 @@ describe('parseAssetId（资产 id 形状判定）', () => {
     expect(parseAssetId('').ok).toBe(false)
     expect(parseAssetId('   ').ok).toBe(false)
     expect(parseAssetId(null).ok).toBe(false)
+  })
+
+  it('实例保留字：instance（当前会话正在运行的实例骨架）', () => {
+    expect(parseAssetId('instance')).toEqual({ ok: true, kind: 'instance', id: 'instance' })
+  })
+
+  it('实例保留字两端空白被裁剪', () => {
+    expect(parseAssetId('  instance  ')).toEqual({ ok: true, kind: 'instance', id: 'instance' })
+  })
+
+  it('实例复合 id：instance#<nodeId>（该实例内联角色）', () => {
+    expect(parseAssetId('instance#node-a')).toEqual({
+      ok: true,
+      kind: 'instanceRole',
+      id: 'instance#node-a',
+      nodeId: 'node-a',
+    })
+  })
+
+  it('实例复合 id 缺节点 → 非法（提示正确形状）', () => {
+    const result = parseAssetId('instance#')
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.reason).toContain('#')
+  })
+
+  it('instance 是整词保留字：粘连前缀不构成实例引用', () => {
+    expect(parseAssetId('instanceX').ok).toBe(false)
+  })
+
+  it('非法形状的提示包含 instance 这一可召回入口', () => {
+    const result = parseAssetId('nope')
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.reason).toContain('instance')
   })
 })
 

@@ -750,6 +750,9 @@ export class VisualWorkflowHost extends Service {
       },
       // 工具组合不是资产事实：仍由宿主数据层提供（勘察索引的 combos 段）。
       listToolCombos: () => this.store.listToolCombos(),
+      // 运行实例骨架（instance 召回）：只暴露当前会话正在运行的实例——历史 run 与其他
+      // 会话的实例没有取数路径。取数走编排器的语义化查询，工具层不触达运行表。
+      getActiveRunFlow: (sessionId: string) => this.orchestrator.activeRunFlow(sessionId),
       // 注：勘察工具只做静态资产盘点，因此不注入可用工具总清单（节点工具集只由 presetId
       // 决定）、工具开关全量清单与运行态探针——工作流实例事实由运行期编排指令提供。
       // preset/模型清单的官方服务投影与 GUI 生态端点共用同一实现（ecosystem-directory），

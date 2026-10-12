@@ -3,7 +3,7 @@
 // 规划期父代理提示词变体（自主编排实施方案 §10 P2；§3 规划期数据流）。
 //
 // 与运行期编排指令（orchestration.ts 的情况1/2）的区别：
-//   - 规划期**没有 run**：无流程事实源文件、无节点清单、无断点/暂停概念；
+//   - 规划期**没有 run**：无实例骨架（instance 召回为禁令体）、无节点清单、无断点/暂停概念；
 //   - 规划期的产物是**模板**：主用例是「无模板 → 按意图产出新模板」（create 通路），
 //     其次才是「在既有模板/实例上继续规划」（targetId + expectRevision 的更新语义）；
 //   - 组装完成后**不自动投产**（D-11）：是否创建实例并运行由用户点击决定。
@@ -93,7 +93,7 @@ function describeTarget(facts: OrgPlanPromptParams['facts']): { identity: string
   if (facts.target === 'instance') {
     return {
       identity: '你是工作流实例「' + name + '」（id=' + (id || '（未指定）') + '）的编排规划师。',
-      goal: '规划目标实例：' + name + '（id=' + (id || '（未指定）') + '）。对实例的编排改写会即时刷新运行事实源与画布回显。',
+      goal: '规划目标实例：' + name + '（id=' + (id || '（未指定）') + '）。对实例的编排改写会即时同步到运行中的编排与画布回显。',
       grammar: ORG_PLAN_HARD_CONSTRAINTS.updateTarget,
     }
   }

@@ -44,7 +44,7 @@ export class RuntimeLaunch extends RuntimeBase {
 
   /**
    * 启动一次「父代理编排」运行（模式一入口）。
-   * 流程：校验 → 运行锁 → 建 run 状态 → 写流程事实源文件 → 构造编排指令 →
+   * 流程：校验 → 运行锁 → 建 run 状态（含编排基线）→ 构造编排指令 →
    * followup 一次性注入+唤醒父代理 → 开始即落盘（崩溃后历史可追溯）。
    * 工作台全局化改版：运行唯一逻辑 = 运行当前实例——run 会话即实例绑定的会话
    * （run.sessionId === instance.sessionId）；「开启新会话」只是创建实例时的
@@ -111,6 +111,7 @@ export class RuntimeLaunch extends RuntimeBase {
       controller: new AbortController(),
       snapshot,
       baseFlow: flow,
+      lastSyncedFlow: flow,
       inflight: new Set(),
       attempts: new Map(),
       callCount: 0,
@@ -124,25 +125,16 @@ export class RuntimeLaunch extends RuntimeBase {
     this.assertFlowLockFree(flowId, sessionId)
     this.runs.set(runId, entry)
 
-    // 流程事实源文件（父代理可 read，只读；defPath 注入编排指令）
-    const defPath = this.deps.store.orchestrationFilePath(runId)
-    try {
-      await this.deps.store.saveOrchestration(runId, flow)
-    } catch (error) {
-      this.runs.delete(runId)
-      throw new WfError(`流程定义文件写入失败：${messageOf(error)}`, 'WF_DEF_WRITE_FAILED')
-    }
-
     // 一次性注入 + 唤醒：官方 Message 契约要求 id 与 source 齐备（缺 source 父回合
     // 以 UNKNOWN 失败——旧项目根因复盘结论，必须保留）。
     // 三情况组装（用户评审）：按画布形态判定父代理提示词变体，输出整份自洽提示词：
     //   - 情况1 纯编排：无执行单元，编排指令（orchestrator 变体）；
     //   - 情况2/3 父代理被流程线连接：prepareParentExecutor 先登记执行单元（快照
     //     标记 running、产出执行单元上下文），再按 hybrid/executor 变体组装。
+    // 拓扑不再进指令（不给宿主路径）：父代理按指令里的入口调 wf_org_catalog 召回实例骨架。
     const executor = await this.prepareParentExecutor(flow, entry)
     const directive = buildParentRunPrompt({
       flow,
-      defPath,
       mode,
       ...(question ? { question } : {}),
       executor,
@@ -164,7 +156,7 @@ export class RuntimeLaunch extends RuntimeBase {
 
     // 运行记录：开始即落盘（中断/崩溃后历史面板仍有记录）
     await this.persistWarn(entry)
-    return { runId, defPath, sessionId: runSessionId }
+    return { runId, sessionId: runSessionId }
   }
 
   // ---- 断点续跑（resumeRun） --------------------------------------------------
@@ -181,7 +173,7 @@ export class RuntimeLaunch extends RuntimeBase {
    *     故要求父代理空闲（root.status !== 'running'，否则 WF_ROOT_BUSY）；
    *   - 静默接续（工具路径，见 ensureActiveRun）：父代理正在自身回合内调用 wf_* 工具，
    *     只接管运行事实与锁，不注入编排指令、不要求父代理空闲。
-   * 两条语义共用同一套校验、快照继承与事实源写入——区别仅在「是否注入指令」。
+   * 两条语义共用同一套校验、快照继承与编排基线初始化——区别仅在「是否注入指令」。
    */
   async resumeRun(input: ResumeInput): Promise<ResumeResult> {
     const sessionId = String(input.sessionId ?? '')
@@ -242,6 +234,7 @@ export class RuntimeLaunch extends RuntimeBase {
       controller: new AbortController(),
       snapshot,
       baseFlow: flow,
+      lastSyncedFlow: flow,
       inflight: new Set(),
       attempts: new Map(),
       callCount: 0,
@@ -253,15 +246,6 @@ export class RuntimeLaunch extends RuntimeBase {
     // 请求的 await 期间登记同一 flowId 的 run；重检 + 写入同一同步块内完成。
     this.assertResumeLockFree(flowId, sessionId)
     this.runs.set(runId, entry)
-
-    // 流程事实源文件（同 startRun；defPath 注入编排指令）
-    const defPath = this.deps.store.orchestrationFilePath(runId)
-    try {
-      await this.deps.store.saveOrchestration(runId, flow)
-    } catch (error) {
-      this.runs.delete(runId)
-      throw new WfError(`流程定义文件写入失败：${messageOf(error)}`, 'WF_DEF_WRITE_FAILED')
-    }
 
     // 断点继续指令（仅显式启动注入）：isResume 动态态注入末段（已 ok 不重跑；从
     // resumeFromNodeId 继续）。起点必须取自 buildResumedSnapshot 计算出的新快照
@@ -282,7 +266,6 @@ export class RuntimeLaunch extends RuntimeBase {
     } else {
       const directive = buildParentRunPrompt({
         flow,
-        defPath,
         mode: prev.mode,
         resume: { resumeFromNodeId: snapshot.resumeFromNodeId, resumedFromRunId: prev.id },
         executor,
@@ -322,7 +305,7 @@ export class RuntimeLaunch extends RuntimeBase {
         this.releaseRunMemory(oldId)
       }
     }
-    return { runId, defPath, resumedFromRunId: prev.id }
+    return { runId, resumedFromRunId: prev.id }
   }
 
 }

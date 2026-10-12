@@ -12,7 +12,7 @@
 // 只能在画布/设置中由用户修改。
 //
 // 落盘规范：scope='template' 改工作流模板（规划期）；scope='instance' 改当前实例
-// （运行期），并即时刷新活跃 run 的事实源与画布回显（双向同步）。
+// （运行期），并即时刷新活跃 run 的编排基线与画布回显（双向同步）。
 // 新建通路：scope='template' 带 `create` 参数 = 新建模板（规划期主用例：无模板 →
 // 产出模板）；不带 create 仍是「必须已存在」的更新语义。显式传入已存在的 targetId +
 // create → WF_PATCH_CONFLICT，绝不静默覆盖。create 只允许与 graph 组同用（其余组语义不成立）。
@@ -60,7 +60,7 @@ import type { MilestoneMarkResult, MilestoneRunFacts, RunEntry } from '../../orc
 
 /** 工具层所需宿主能力（宿主 service 的最小结构适配；单测 fake）。 */
 export interface GraphPatchHost {
-  /** 数据层读写（模板/实例文档 + 运行事实源刷新）。 */
+  /** 数据层读写（模板/实例文档 + 编排基线刷新）。 */
   store: {
     getFlowTemplate(id: string): Promise<WorkflowTemplate | null>
     saveFlowTemplate(template: WorkflowTemplate, options: { expectedRevision: number; keepServerFields?: boolean }): Promise<WorkflowTemplate>
@@ -83,7 +83,7 @@ export interface GraphPatchHost {
    * 与 listPresets 同为 best-effort 生态缝：缺失或枚举失败时本批取值不参与存在性判定。
    */
   listModels?: () => Promise<unknown[]>
-  /** 编排运行时能力（mark_node 路径 + 事实源刷新 + 空闲基准）。 */
+  /** 编排运行时能力（mark_node 路径 + 编排基线刷新 + 空闲基准）。 */
   orchestrator: {
     activeRunForSession(sessionId: string): RunEntry | null
     flowLockInfo(flowId: string): { runId: string; sessionId: string; status: string } | null
@@ -324,7 +324,7 @@ function assertSingleGroup(ops: PatchOp[]): PatchGroup {
   return group
 }
 
-/** 图结构变更组：逐条容错应用 → 聚合拒绝或结构校验 → 元参数硬护栏 → 落盘 → 事实源刷新。 */
+/** 图结构变更组：逐条容错应用 → 聚合拒绝或结构校验 → 元参数硬护栏 → 落盘 → 编排基线刷新。 */
 async function runGraphGroup(
   host: GraphPatchHost,
   input: { scope: PatchScope; sessionId: string; targetId: string; expectRevision?: number; newTemplateDoc?: WorkflowTemplate },
@@ -586,7 +586,7 @@ async function loadDoc(
   throw new WfError(`WF_ORG_NOT_FOUND: workflow/service instance not found or not owned by this session: ${input.targetId}`, 'WF_ORG_NOT_FOUND')
 }
 
-/** 写回目标文档（模板 / 实例），并刷新活跃 run 的事实源。 */
+/** 写回目标文档（模板 / 实例），并刷新活跃 run 的编排基线。 */
 async function saveDoc(
   host: GraphPatchHost,
   input: { scope: PatchScope; sessionId: string; targetId: string; expectRevision?: number; newTemplateDoc?: WorkflowTemplate },
@@ -612,7 +612,7 @@ async function saveDoc(
       throw new WfError("WF_SCOPE_INVALID: a mode2 service instance cannot be rewritten by a patch; plan with scope='template' or stop the service first", 'WF_SCOPE_INVALID')
     }
     const saved = await host.store.saveWorkflow({ ...(doc as WorkflowDocument), revision: expected }, input.sessionId, { expectedRevision: expected, keepServerFields })
-    // 双向同步②：补丁落盘 → 刷新活跃 run 事实源（画布回显由前端轮询/保存事件驱动）
+    // 双向同步②：补丁落盘 → 刷新活跃 run 编排基线（画布回显由前端轮询/保存事件驱动）
     await host.orchestrator.refreshActiveDefinitions(saved.id, input.sessionId, saved)
     return { id: saved.id, revision: Number(saved.revision) || 0 }
   } catch (error) {

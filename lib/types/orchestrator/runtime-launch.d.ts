@@ -12,7 +12,7 @@ export declare class RuntimeLaunch extends RuntimeBase {
     protected collabChannelOf(sessionId: string): CollabChannel;
     /**
      * 启动一次「父代理编排」运行（模式一入口）。
-     * 流程：校验 → 运行锁 → 建 run 状态 → 写流程事实源文件 → 构造编排指令 →
+     * 流程：校验 → 运行锁 → 建 run 状态（含编排基线）→ 构造编排指令 →
      * followup 一次性注入+唤醒父代理 → 开始即落盘（崩溃后历史可追溯）。
      * 工作台全局化改版：运行唯一逻辑 = 运行当前实例——run 会话即实例绑定的会话
      * （run.sessionId === instance.sessionId）；「开启新会话」只是创建实例时的
@@ -34,7 +34,7 @@ export declare class RuntimeLaunch extends RuntimeBase {
      *     故要求父代理空闲（root.status !== 'running'，否则 WF_ROOT_BUSY）；
      *   - 静默接续（工具路径，见 ensureActiveRun）：父代理正在自身回合内调用 wf_* 工具，
      *     只接管运行事实与锁，不注入编排指令、不要求父代理空闲。
-     * 两条语义共用同一套校验、快照继承与事实源写入——区别仅在「是否注入指令」。
+     * 两条语义共用同一套校验、快照继承与编排基线初始化——区别仅在「是否注入指令」。
      */
     resumeRun(input: ResumeInput): Promise<ResumeResult>;
 }

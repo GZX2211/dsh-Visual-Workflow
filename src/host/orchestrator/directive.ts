@@ -4,7 +4,8 @@
 //   - parentPromptVariantOf / parentExecutorOf：按画布形态判定三情况（orchestrator / hybrid / executor）；
 //   - directiveParams：facts 静态事实 + dynamic 末段动态态（前缀稳定）；
 //   - buildParentRunPrompt：startRun/resumeRun 共用的整份提示词组装。
-// 入参（flow/defPath/mode/executor/动态）不变则输出字节不变。
+// 入参（flow/mode/executor/动态）不变则输出字节不变。
+// 拓扑不进指令：只给召回入口（wf_org_catalog 的 instance 通道），宿主路径不出现在文本里。
 
 import {
   buildHybridPrompt,
@@ -58,7 +59,6 @@ export function parentExecutorOf(flow: WorkflowDocument): { nodeId: string; node
 /** 编排指令参数组装（facts 静态事实 + dynamic 末段动态态，前缀稳定）。 */
 export function directiveParams(
   flow: WorkflowDocument,
-  defPath: string,
   mode: 'mode1' | 'mode2',
   extra?: {
     /** 断点继续事实（resumeRun 用）。 */
@@ -81,7 +81,6 @@ export function directiveParams(
     facts: {
       workflowName: flow.name ?? flow.id,
       workflowGoal: flow.description ?? '',
-      definitionPath: defPath,
       nodes: orchestrationNodeList(flow),
       collabGroups: collabGroupList(flow),
       collabChannel: extra?.collabChannel ?? 'legacy',
@@ -112,11 +111,10 @@ export function directiveParams(
  *   - 续跑继承边界：hybrid/executor 但父代理执行单元已 ok（断点继承完成、无任务块）
  *     时按 orchestrator 变体组装（剩余运行只有编排/收尾，不再含自执行任务内容），
  *     避免提示词出现「先执行自身节点任务」但无任务可执行的自相矛盾。
- * 纯函数：入参（flow/defPath/mode/executor/动态）不变则输出字节不变。
+ * 纯函数：入参（flow/mode/executor/动态）不变则输出字节不变。
  */
 export function buildParentRunPrompt(input: {
   flow: WorkflowDocument
-  defPath: string
   mode: 'mode1' | 'mode2'
   /** 模式二用户问题（不稳定内容，仅末段）。 */
   question?: string
@@ -131,7 +129,7 @@ export function buildParentRunPrompt(input: {
   /** 协作通道（官方 Agent Team 可用性；决定协作组段文案与启动方式）。 */
   collabChannel?: CollabChannel
 }): string {
-  const { flow, defPath, mode, executor, systemLanguage } = input
+  const { flow, mode, executor, systemLanguage } = input
   const variant = parentPromptVariantOf(flow)
   const resume = input.resume
   const collabChannel = input.collabChannel ?? 'legacy'
@@ -149,7 +147,7 @@ export function buildParentRunPrompt(input: {
   // 情况2：编排 + 自执行（有执行单元内容）
   if (variant === 'hybrid' && executor) {
     return buildHybridPrompt(
-      directiveParams(flow, defPath, mode, {
+      directiveParams(flow, mode, {
         ...(resume ? { resume } : {}),
         ...(input.question ? { question: input.question } : {}),
         ...(input.orgBudgetText ? { orgBudgetText: input.orgBudgetText } : {}),
@@ -163,7 +161,7 @@ export function buildParentRunPrompt(input: {
 
   // 情况1：纯编排；或 hybrid/executor 在续跑中父代理执行单元已 ok（继承完成 → 纯编排语义）
   return buildOrchestratorPrompt(
-    directiveParams(flow, defPath, mode, {
+    directiveParams(flow, mode, {
       ...(resume ? { resume } : {}),
       ...(input.question ? { question: input.question } : {}),
       ...(input.orgBudgetText ? { orgBudgetText: input.orgBudgetText } : {}),

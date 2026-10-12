@@ -11,7 +11,6 @@ import {
   NESTED_DIRS,
   combosPath,
   flowTemplatePath,
-  orchestrationPath,
   runsPath,
   safeFilePart,
   servicePath,
@@ -86,10 +85,9 @@ describe('资源路径计算', () => {
     expect(templatePath(ROOT, 'database', 'd1')).toBe(join(ROOT, 'data', 'd1.json'))
   })
 
-  it('工作流模板/run/编排事实源/组合文件路径', () => {
+  it('工作流模板/run/组合文件路径', () => {
     expect(flowTemplatePath(ROOT, 'tpl1')).toBe(join(ROOT, 'flow-templates', 'tpl1.json'))
     expect(runsPath(ROOT, 'run1')).toBe(join(ROOT, 'runs', 'run1.json'))
-    expect(orchestrationPath(ROOT, 'run1')).toBe(join(ROOT, 'orchestrations', 'run1.json'))
     expect(combosPath(ROOT)).toBe(join(ROOT, 'combos.json'))
   })
 

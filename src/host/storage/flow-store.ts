@@ -23,7 +23,6 @@ import {
   NESTED_DIRS as NESTED_DATA_DIRS,
   combosPath,
   flowTemplatePath,
-  orchestrationPath,
   runsPath,
   servicePath,
   sessionsPath,
@@ -558,22 +557,4 @@ export class FlowStore {
     })
   }
 
-  // ---- 编排事实源（orchestrations/<runId>.json，父代理只读） ------------------
-
-  /** 保存运行时流程定义（startRun 时写入，父代理只读的事实源）。 */
-  async saveOrchestration(runId: string, flow: WorkflowDocument): Promise<void> {
-    await withJsonLock(orchestrationPath(this.root, runId), async () => {
-      await atomicWriteJson(orchestrationPath(this.root, runId), flow)
-    })
-  }
-
-  /** 读取运行时流程定义。 */
-  async readOrchestration(runId: string): Promise<WorkflowDocument | null> {
-    return readJson<WorkflowDocument | null>(orchestrationPath(this.root, runId), null)
-  }
-
-  /** 运行时流程定义文件的绝对路径（编排指令 facts.definitionPath 注入用）。 */
-  orchestrationFilePath(runId: string): string {
-    return orchestrationPath(this.root, runId)
-  }
 }

@@ -53,6 +53,15 @@ export interface RunEntry {
   executorIsMilestone?: boolean
   /** 当前闸门虚拟节点 id（executorIsMilestone 时给出；mark_node 接受它或父代理节点 id）。 */
   milestoneProxyId?: string
+  /**
+   * 上次同步给编排的拓扑基线（画布保存后的「编排语义是否变更」判定用）。
+   *
+   * 为什么是内存事实：它只在本次运行期内有意义（重启后 run 转 interrupted，不再有保存
+   * 触发的变更判定），且拓扑取数已改为 currentResolvedFlow 显式重读最新实例文档——
+   * 曾经的 orchestrations/<runId>.json 落盘副本因此失去唯一消费者（该副本当初只为给
+   * 父代理 read 一份只读快照）。startRun/resumeRun 以起始 flow 初始化。
+   */
+  lastSyncedFlow?: WorkflowDocument
 }
 
 /** wait:true 的阻塞等待器（subagent/end 唤醒 resolve；终止/取消 reject）。 */
@@ -174,8 +183,6 @@ export interface StartRunOptions {
 
 export interface StartRunResult {
   runId: string
-  /** 流程事实源文件绝对路径（编排指令 facts.definitionPath）。 */
-  defPath: string
   /** 实际执行会话 id（工作台全局化改版：恒等于入参 sessionId——运行只认实例绑定的会话）。 */
   sessionId: string
 }

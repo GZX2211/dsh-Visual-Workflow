@@ -8,7 +8,7 @@ export { FlowNotFoundError, FlowRevisionConflictError } from './document-policy.
 export declare class FlowStore {
     readonly root: string;
     /** 顶层数据目录（init 时创建；常量表供测试与外部工具断言布局）。 */
-    static readonly DIRS: readonly ["workflows", "services", "roles", "data", "groups", "runs", "orchestrations", "flow-templates"];
+    static readonly DIRS: readonly ["workflows", "services", "roles", "data", "groups", "runs", "flow-templates"];
     /** 嵌套子目录（相对 root；随顶层目录一并幂等创建）。 */
     static readonly NESTED_DIRS: readonly ["data/files"];
     constructor(root: string);
@@ -120,10 +120,4 @@ export declare class FlowStore {
      * 不得再写映射；调用方在写入前须确认服务仍存在（storage 不保证跨文件事务）。
      */
     mergeUserIdMap(serviceId: string, entries: Record<string, string>): Promise<Record<string, string>>;
-    /** 保存运行时流程定义（startRun 时写入，父代理只读的事实源）。 */
-    saveOrchestration(runId: string, flow: WorkflowDocument): Promise<void>;
-    /** 读取运行时流程定义。 */
-    readOrchestration(runId: string): Promise<WorkflowDocument | null>;
-    /** 运行时流程定义文件的绝对路径（编排指令 facts.definitionPath 注入用）。 */
-    orchestrationFilePath(runId: string): string;
 }

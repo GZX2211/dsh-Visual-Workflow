@@ -1,6 +1,6 @@
 // tests/host/orchestrator/runtime-launch.test.ts
 //
-// 启动层单测（startRun/resumeRun）：并发运行锁、启动校验、事实源写入、指令注入、运行会话归属。
+// 启动层单测（startRun/resumeRun）：并发运行锁、启动校验、编排基线初始化、指令注入、运行会话归属。
 // 装配与测试替身见 fixtures/harness.ts（共享，不在本文件内重复）。
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -67,21 +67,18 @@ describe('startRun 并发运行锁（TOCTOU 竞态回归）', () => {
     expect(reason.code).toBe('WF_LOCKED')
     // 内存中只登记了一个激活 run
     expect(slowRuntime.activeRunForSession('session-1')).not.toBeNull()
-    // 磁盘 orchestration 只写了一份（后写者未走到事实源写入）
-    const dir = join(h.store.root, 'orchestrations')
-    const files = await import('node:fs/promises').then((fs) => fs.readdir(dir))
-    expect(files.length).toBe(1)
   })
 })
 
 describe('startRun 启动与运行锁', () => {
-  it('成功：锁建立、快照 running、事实源写入、指令注入、开始即落盘', async () => {
+  it('成功：锁建立、快照 running、编排基线初始化、指令注入、开始即落盘', async () => {
     const h = await makeHarness()
     const { result, entry } = await start(h, makeFlow())
 
     expect(result.runId).toBe('run-1')
-    expect(result.defPath).toContain('orchestrations')
     expect(entry.snapshot.status).toBe('running')
+    // 画布保存后的「编排语义变更」判定以本基线为基准（内存事实，不落盘副本）
+    expect(entry.lastSyncedFlow?.id).toBe('flow-1')
     expect(entry.snapshot.flowName).toBe('测试流程')
 
     // 运行锁：flowLockInfo 返回本运行
@@ -96,10 +93,6 @@ describe('startRun 启动与运行锁', () => {
     expect(msg.role).toBe('user')
     expect(msg.source).toEqual({ kind: 'user' })
     expect(typeof msg.content[0].text).toBe('string')
-
-    // 事实源文件已写（父代理只读）
-    const def = await h.store.readOrchestration('run-1')
-    expect(def?.id).toBe('flow-1')
 
     // 开始即落盘（§4.7：崩溃后历史可追溯）
     const persisted = await h.store.getRun('run-1')
@@ -205,17 +198,6 @@ describe('startRun 启动与运行锁', () => {
 
     h.agents.roots.get('session-1')!.status = 'running'
     await expect(h.runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })).rejects.toMatchObject({ code: 'WF_ROOT_BUSY' })
-  })
-
-  it('事实源写入失败：清理 run 并报 WF_DEF_WRITE_FAILED', async () => {
-    const h = await makeHarness()
-    await h.store.saveWorkflow(makeFlow(), 'session-1', { force: true })
-    h.store.saveOrchestration = async () => {
-      throw new Error('磁盘错误')
-    }
-    await expect(h.runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })).rejects.toMatchObject({ code: 'WF_DEF_WRITE_FAILED' })
-    expect(h.runtime.activeRunForSession('session-1')).toBeNull()
-    expect(h.runtime.flowLockInfo('flow-1')).toBeNull()
   })
 
   it('指令注入失败：清理 run 并报 WF_INJECT_FAILED', async () => {

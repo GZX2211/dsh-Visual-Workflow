@@ -20,7 +20,7 @@ export declare function parentExecutorOf(flow: WorkflowDocument): {
     nodeLabel: string;
 } | null;
 /** 编排指令参数组装（facts 静态事实 + dynamic 末段动态态，前缀稳定）。 */
-export declare function directiveParams(flow: WorkflowDocument, defPath: string, mode: 'mode1' | 'mode2', extra?: {
+export declare function directiveParams(flow: WorkflowDocument, mode: 'mode1' | 'mode2', extra?: {
     /** 断点继续事实（resumeRun 用）。 */
     resume?: {
         resumeFromNodeId?: string;
@@ -50,11 +50,10 @@ export declare function directiveParams(flow: WorkflowDocument, defPath: string,
  *   - 续跑继承边界：hybrid/executor 但父代理执行单元已 ok（断点继承完成、无任务块）
  *     时按 orchestrator 变体组装（剩余运行只有编排/收尾，不再含自执行任务内容），
  *     避免提示词出现「先执行自身节点任务」但无任务可执行的自相矛盾。
- * 纯函数：入参（flow/defPath/mode/executor/动态）不变则输出字节不变。
+ * 纯函数：入参（flow/mode/executor/动态）不变则输出字节不变。
  */
 export declare function buildParentRunPrompt(input: {
     flow: WorkflowDocument;
-    defPath: string;
     mode: 'mode1' | 'mode2';
     /** 模式二用户问题（不稳定内容，仅末段）。 */
     question?: string;

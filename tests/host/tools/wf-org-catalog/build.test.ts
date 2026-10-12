@@ -12,15 +12,19 @@ import { describe, expect, it } from 'vitest'
 import {
   buildIndex,
   buildInlineRoleDetail,
+  buildInstanceDetail,
   buildRoleDetail,
   buildWorkflowDetail,
   DETAIL_HINT,
+  INSTANCE_UNAVAILABLE_NOTE,
   maskConnection,
 } from '../../../../src/host/tools/wf-org-catalog/build.js'
 import { CATALOG_LIMITS, ID_CONVENTION } from '../../../../src/host/tools/wf-org-catalog/types.js'
 import { GATE_MARKING_SEMANTICS, PATCH_CONTRACT_TEXT } from '../../../../src/host/tools/infrastructure/graph-op-contract.js'
 import { ORG_SOP_DESIGN_METHOD, ORG_SOP_L1_GRAPH_SEMANTICS } from '../../../../src/host/prompts/index.js'
+import { collabGroupList, orchestrationNodeList } from '../../../../src/host/orchestrator/index.js'
 import {
+  instanceFlowFixture,
   makeCatalogHost,
   inlineRoleNodeFixture,
   roleAssetDetailFixture,
@@ -28,12 +32,20 @@ import {
   workflowAssetDetailFixture,
   workflowAssetSummaryFixture,
 } from './fixtures.js'
-import type { CatalogIndex, CatalogRoleNodeEntry, CatalogWorkflowDetail } from '../../../../src/host/tools/wf-org-catalog/types.js'
+import type { CatalogIndex, CatalogInstanceDetail, CatalogInstanceUnavailable, CatalogRoleNodeEntry, CatalogWorkflowDetail } from '../../../../src/host/tools/wf-org-catalog/types.js'
 import type { WorkflowAssetSummary } from '../../../../src/host/shared/asset-types.js'
+import type { WorkflowDocument } from '../../../../src/host/shared/graph-model.js'
 
 /** 取骨架里的角色节点条目（测试专用窄化）。 */
 function roleNodeOf(detail: CatalogWorkflowDetail, id: string): CatalogRoleNodeEntry {
   return detail.nodes.find((node) => node.id === id && (node.kind === 'agent' || node.kind === 'parent')) as CatalogRoleNodeEntry
+}
+
+/** 取实例骨架（窄化掉「无活跃实例」的禁令体；拿到禁令体即用例前提不成立，直接失败）。 */
+function instanceSkeletonOf(flow: WorkflowDocument): CatalogInstanceDetail {
+  const detail = buildInstanceDetail(flow)
+  if ('available' in detail) throw new Error('expected an instance skeleton, got the unavailable notice')
+  return detail
 }
 
 /** 空索引入参（各用例只覆盖自己关心的那一段）。 */
@@ -234,7 +246,7 @@ describe('buildWorkflowDetail（骨架自足性）', () => {
   it('角色节点给全不可召回字段，并标注固定引用的角色资产与版本，但**不含 systemPrompt**', () => {
     const role = roleNodeOf(detail, 'a1')
     expect(Object.keys(role).sort()).toEqual(
-      ['groupId', 'id', 'inputSchema', 'kind', 'label', 'model', 'outputSchema', 'presetId', 'provider', 'reasoning', 'roleAssetId', 'roleVersionId', 'systemPromptSource'].sort(),
+      ['groupId', 'id', 'inputSchema', 'kind', 'label', 'model', 'outputSchema', 'presetId', 'provider', 'reasoning', 'roleAssetId', 'roleVersionId', 'schedulable', 'systemPromptSource'].sort(),
     )
     expect(role.presetId).toBe('combo-1')
     expect(role.reasoning).toBe('high')
@@ -242,6 +254,7 @@ describe('buildWorkflowDetail（骨架自足性）', () => {
     expect(role.systemPromptSource).toBe('角色说明.md')
     expect(role.roleAssetId).toBe('role-1')
     expect(role.roleVersionId).toBe(3)
+    expect(role.schedulable).toBe(true)
     expect('systemPrompt' in role).toBe(false)
   })
 
@@ -264,7 +277,7 @@ describe('buildWorkflowDetail（骨架自足性）', () => {
 
   it('协作组节点给全 collabPrompt 与成员清单', () => {
     const group = detail.nodes.find((node) => node.id === 'g1')
-    expect(group).toEqual({ id: 'g1', kind: 'group', label: '评审组', collabPrompt: '组员互相评审', memberIds: ['a1'] })
+    expect(group).toEqual({ id: 'g1', kind: 'group', label: '评审组', collabPrompt: '组员互相评审', memberIds: ['a1'], schedulable: false })
   })
 
   it('虚拟节点给出引用主节点与闸门角色', () => {
@@ -364,5 +377,76 @@ describe('maskConnection（辅助纯函数）', () => {
     expect(maskConnection(null)).toBeUndefined()
     expect(maskConnection('x')).toBeUndefined()
     expect(maskConnection([1, 2])).toBeUndefined()
+  })
+})
+
+describe('buildInstanceDetail（instance 召回的第 2 层：当前运行实例骨架）', () => {
+  it('骨架 id 为保留字 instance，只给拓扑（角色节点不含 systemPrompt）', () => {
+    const detail = instanceSkeletonOf(instanceFlowFixture())
+    expect(detail.type).toBe('instance')
+    expect(detail.id).toBe('instance')
+    expect(detail.name).toBe('在跑实例')
+    expect(detail.mode).toBe('mode1')
+    const role = detail.nodes.find((node) => node.id === 'a1')
+    expect(role).not.toHaveProperty('systemPrompt')
+    expect(role).toMatchObject({ kind: 'agent', presetId: 'combo-1', outputSchema: '交付说明' })
+  })
+
+  it('内联角色入口为 instance#<nodeId>（第 3 层按需召回全部角色节点）', () => {
+    const detail = instanceSkeletonOf(instanceFlowFixture())
+    expect(detail.inlineRoles).toEqual(['instance#a1', 'instance#a2'])
+  })
+
+  it('连线与条件语义照常给全（骨架自足）', () => {
+    const detail = instanceSkeletonOf(instanceFlowFixture())
+    expect(detail.lines.map((line) => line.id)).toEqual(['l1', 'l2', 'l3'])
+    expect(detail.lines[0]).toMatchObject({ sourceHandle: 'flow-out', targetHandle: 'flow-in' })
+  })
+
+  it('无活跃实例 → 返回禁令体（既不是骨架，也不是错误）', () => {
+    const result = buildInstanceDetail(null)
+    expect(result.type).toBe('instance')
+    expect((result as CatalogInstanceUnavailable).available).toBe(false)
+    expect((result as CatalogInstanceUnavailable).message).toBe(INSTANCE_UNAVAILABLE_NOTE)
+  })
+
+  it('禁令不泄漏宿主路径（不得给出任何可供自行翻找的线索）', () => {
+    const result = buildInstanceDetail(null) as CatalogInstanceUnavailable
+    expect(result.message).not.toMatch(/[A-Za-z]:[\\/]/)
+    expect(result.message).not.toContain('orchestrations')
+    expect(result.message).not.toContain('dataDir')
+  })
+})
+
+describe('schedulable（孤立节点标注：与既有编排清单同口径）', () => {
+  it('参与流程的 agent / group 标 true，孤立节点标 false', () => {
+    const detail = instanceSkeletonOf(instanceFlowFixture())
+    const byId = new Map(detail.nodes.map((node) => [node.id, node]))
+    expect(byId.get('a1')).toMatchObject({ schedulable: true })
+    expect(byId.get('a2')).toMatchObject({ schedulable: false })
+    expect(byId.get('g1')).toMatchObject({ schedulable: true })
+    expect(byId.get('g2')).toMatchObject({ schedulable: false })
+  })
+
+  it('阶段节点不带 schedulable（它们不是调度单元）', () => {
+    const detail = instanceSkeletonOf(instanceFlowFixture())
+    for (const id of ['s', 'e']) {
+      expect(detail.nodes.find((node) => node.id === id)).not.toHaveProperty('schedulable')
+    }
+  })
+
+  it('口径等价于 orchestrationNodeList / collabGroupList 的过滤结果', () => {
+    const flow = instanceFlowFixture()
+    const detail = instanceSkeletonOf(flow)
+    const schedulableAgents = detail.nodes
+      .filter((node) => node.kind === 'agent' && node.schedulable === true)
+      .map((node) => node.id)
+      .sort()
+    const schedulableGroups = detail.nodes
+      .filter((node) => node.kind === 'group' && node.schedulable === true)
+      .map((node) => node.id)
+      .sort()
+    expect(schedulableAgents).toEqual(orchestrationNodeList(flow).map((node) => node.id).sort())
+    expect(schedulableGroups).toEqual(collabGroupList(flow).map((group) => group.groupId).sort())
   })
 })

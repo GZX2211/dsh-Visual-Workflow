@@ -1,7 +1,7 @@
 // src/host/api/workflows.ts
 //
 // GUI API 工作流与服务端点组（WorkflowEndpoints）：工作流 CRUD（含画布保存后刷新
-// 运行事实源的双向同步）与服务启停/状态（含运行时字段合并的完整 ServiceState 返回）。
+// 编排基线的双向同步）与服务启停/状态（含运行时字段合并的完整 ServiceState 返回）。
 
 import type { WorkflowDocument } from '../shared/graph-model.js'
 import { resolveWorkspacePath } from '../workspace-path.js'
@@ -79,9 +79,9 @@ export class WorkflowEndpoints extends VisualWorkflowApiBase {
     const normalized = { ...flow, sessionId } as WorkflowDocument
     try {
       const saved = await this.host.store.saveWorkflow(normalized, sessionId, { expectedRevision: expected })
-      // 双向同步①「画布→编排」：保存成功后刷新活跃 run 的编排事实源
-      // （orchestrations/<runId>.json），父代理（definitionPath 指向该文件）
-      // 在运行中即可读到最新拓扑（新增节点/连线/修改即时生效）。
+      // 双向同步①「画布→编排」：保存成功后更新活跃 run 的编排基线；若编排语义确有变更
+      // 且该 run 正在运行，父代理会收到【编排变更】通知并自行经 wf_org_catalog 召回最新
+      // 骨架。拓扑不注入指令、不给宿主路径——只给工具入口。
       await this.host.orchestrator.refreshActiveDefinitions(normalized.id, sessionId, saved)
       return saved
     } catch (error) {
@@ -138,7 +138,7 @@ export class WorkflowEndpoints extends VisualWorkflowApiBase {
       delete normalized.startNewSession
       delete normalized.workspacePath
       const saved = await this.host.store.saveService(normalized as never, sessionId, { expectedRevision: expected })
-      // 双向同步①「画布→编排」（模式二同理）：保存成功后刷新活跃 run 事实源。
+      // 双向同步①「画布→编排」（模式二同理）：保存成功后更新活跃 run 的编排基线。
       await this.host.orchestrator.refreshActiveDefinitions(serviceId, sessionId, {
         id: saved.id,
         sessionId: saved.sessionId,
@@ -148,7 +148,7 @@ export class WorkflowEndpoints extends VisualWorkflowApiBase {
         nodes: saved.nodes,
         lines: saved.lines,
         revision: saved.revision,
-        // 元参数（实例层）：运行事实源与编排指令必须与服务文档同口径，
+        // 元参数（实例层）：编排基线与编排指令必须与服务文档同口径，
         // 否则保存后服务实例的 meta 在活跃 run 中「消失」（P0 数据链路一致性）。
         ...(saved.meta ? { meta: saved.meta } : {}),
       } as WorkflowDocument)

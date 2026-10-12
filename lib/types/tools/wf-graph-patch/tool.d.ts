@@ -5,7 +5,7 @@ import type { OrgBudget } from '../../shared/types.js';
 import type { MilestoneMarkResult, MilestoneRunFacts, RunEntry } from '../../orchestrator/index.js';
 /** 工具层所需宿主能力（宿主 service 的最小结构适配；单测 fake）。 */
 export interface GraphPatchHost {
-    /** 数据层读写（模板/实例文档 + 运行事实源刷新）。 */
+    /** 数据层读写（模板/实例文档 + 编排基线刷新）。 */
     store: {
         getFlowTemplate(id: string): Promise<WorkflowTemplate | null>;
         saveFlowTemplate(template: WorkflowTemplate, options: {
@@ -39,7 +39,7 @@ export interface GraphPatchHost {
      * 与 listPresets 同为 best-effort 生态缝：缺失或枚举失败时本批取值不参与存在性判定。
      */
     listModels?: () => Promise<unknown[]>;
-    /** 编排运行时能力（mark_node 路径 + 事实源刷新 + 空闲基准）。 */
+    /** 编排运行时能力（mark_node 路径 + 编排基线刷新 + 空闲基准）。 */
     orchestrator: {
         activeRunForSession(sessionId: string): RunEntry | null;
         flowLockInfo(flowId: string): {

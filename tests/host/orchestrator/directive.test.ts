@@ -151,7 +151,7 @@ describe('orchestrationNodeList / collabGroupList 只列参与流程的执行单
 describe('buildParentRunPrompt 三情况整装（身份措辞互斥）', () => {
   it('情况1（无父代理）→ 纯编排指令：含「仅编排」、不含执行者模式（经导出常量引用）', () => {
     const f = flow([roleNode('a1', 'agent', '子代理A')], [flowLine('s-a1', 'start', 'a1'), flowLine('a1-end', 'a1', 'end')])
-    const directive = buildParentRunPrompt({ flow: f, defPath: 'orchestrations/run-1.json', mode: 'mode1', executor: null, systemLanguage: '中文' })
+    const directive = buildParentRunPrompt({ flow: f, mode: 'mode1', executor: null, systemLanguage: '中文' })
     expect(directive).toContain(ORCH_HARD_CONSTRAINTS.dispatchOnly)
     expect(directive).not.toContain(ORCH_HARD_CONSTRAINTS.executorRole)
   })
@@ -161,14 +161,14 @@ describe('buildParentRunPrompt 三情况整装（身份措辞互斥）', () => {
       [roleNode('p1', 'parent', '父执行'), roleNode('a1', 'agent', '子代理A')],
       [flowLine('s-p1', 'start', 'p1'), flowLine('p1-a1', 'p1', 'a1'), flowLine('a1-end', 'a1', 'end')],
     )
-    const directive = buildParentRunPrompt({ flow: f, defPath: 'orchestrations/run-1.json', mode: 'mode1', executor: executorOf('p1', '父执行'), systemLanguage: '中文' })
+    const directive = buildParentRunPrompt({ flow: f, mode: 'mode1', executor: executorOf('p1', '父执行'), systemLanguage: '中文' })
     expect(directive).toContain(ORCH_HARD_CONSTRAINTS.executorRole)
     expect(directive).not.toContain(ORCH_HARD_CONSTRAINTS.dispatchOnly)
   })
 
   it('情况3（executor）→ 纯执行提示：无编排/调度语义且含 wf_finish 收尾', () => {
     const f = flow([roleNode('p1', 'parent', '父执行')], [flowLine('s-p1', 'start', 'p1'), flowLine('p1-end', 'p1', 'end')])
-    const directive = buildParentRunPrompt({ flow: f, defPath: 'orchestrations/run-1.json', mode: 'mode1', executor: executorOf('p1', '父执行'), systemLanguage: '中文' })
+    const directive = buildParentRunPrompt({ flow: f, mode: 'mode1', executor: executorOf('p1', '父执行'), systemLanguage: '中文' })
     expect(directive).toContain('wf_finish')
     expect(directive).not.toContain(ORCH_HARD_CONSTRAINTS.dispatchOnly)
     expect(directive).not.toContain('wf_run_node')
@@ -181,7 +181,6 @@ describe('buildParentRunPrompt 三情况整装（身份措辞互斥）', () => {
     )
     const directive = buildParentRunPrompt({
       flow: f,
-      defPath: 'orchestrations/run-1.json',
       mode: 'mode1',
       executor: null,
       resume: { resumeFromNodeId: 'a1', resumedFromRunId: 'run-0' },

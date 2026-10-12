@@ -11,8 +11,6 @@ export interface OrchestrationDirectiveParams {
         workflowName: string;
         /** 工作流目标描述；可为空字符串。 */
         workflowGoal: string;
-        /** 流程事实源文件路径（父代理需 read 的只读 JSON 路径）。 */
-        definitionPath: string;
         /** 节点清单：流程中参与流程的可调度 agent 节点（id + 人类可读名称）。 */
         nodes: Array<{
             id: string;

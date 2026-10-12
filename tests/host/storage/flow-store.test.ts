@@ -2,7 +2,7 @@
 //
 // FlowStore 数据层测试（T-012）：全 CRUD、会话隔离（workflow/service 按 sessionId）、
 // revision 冲突保护、原子性与锁一致性（并发保存无撕裂/无垃圾文件）、userId 映射持久化、
-// 编排事实源、模板时间戳记账与单资源读语义。断言依据：架构文档 §4.1 + 需求文档 §4.2.2/§4.7/§6
+// 模板时间戳记账与单资源读语义。断言依据：架构文档 §4.1 + 需求文档 §4.2.2/§4.7/§6
 // + src/host/storage/AGENTS.md。
 
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
@@ -388,19 +388,6 @@ describe('userId → sessionId 映射（§4.1.3 规则 7）', () => {
     expect(merged.length).toBe(3)
     const disk = JSON.parse(await readFile(join(dir, 'services', 'svc-c.sessions.json'), 'utf8')) as Record<string, string>
     expect(Object.keys(disk).sort()).toEqual(['user-1', 'user-2', 'user-3'])
-  })
-})
-
-describe('编排事实源（orchestrations/<runId>.json）', () => {
-  it('保存→读取→路径可解析（父代理只读事实源）', async () => {
-    const flow = makeFlow('f1', 's1')
-    await store.saveOrchestration('run-1', flow)
-    expect(await store.readOrchestration('run-1')).not.toBeNull()
-    // 编排指令注入的绝对路径与读取入口指向同一文件
-    expect(store.orchestrationFilePath('run-1')).toBe(join(dir, 'orchestrations', 'run-1.json'))
-    expect(JSON.parse(await readFile(store.orchestrationFilePath('run-1'), 'utf8'))).toMatchObject({ id: 'f1' })
-    // 未写入的 run 读取为 null（不抛错）
-    expect(await store.readOrchestration('run-missing')).toBeNull()
   })
 })
 

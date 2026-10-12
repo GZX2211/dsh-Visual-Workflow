@@ -301,12 +301,12 @@ describe('registerWfOrgCatalog：注册面与调用方身份', () => {
     expect(out.assets.workflows[0].id).toBe('flow-1')
   })
 
-  it('工具描述公布三种 id 形状与两段调用模型，且不再提经验（模型据此构造调用）', () => {
+  it('工具描述公布 id 形状与两段调用模型（含运行实例入口），且不再提经验', () => {
     const { host } = makeCatalogHost()
     const { ctx, registered } = registerFixture()
     registerWfOrgCatalog(ctx, host)
     const description = registered[0].description
-    for (const expected of ['flow-*', 'role-*', '<flow-id>#<node-id>']) {
+    for (const expected of ['flow-*', 'role-*', '<flow-id>#<node-id>', 'instance']) {
       expect(description).toContain(expected)
     }
     expect(description).not.toContain('ex-*')
@@ -320,5 +320,69 @@ describe('registerWfOrgCatalog：注册面与调用方身份', () => {
   it('tools 服务不可用 → 注册显式失败（不静默跳过）', () => {
     const { host } = makeCatalogHost()
     expect(() => registerWfOrgCatalog({ get: () => undefined }, host)).toThrowError(/tools 服务不可用/)
+  })
+})
+
+describe('executeOrgCatalog：instance 召回（运行实例的两层）', () => {
+  const SESSION = 'sess-1'
+
+  it('传 instance → 只回实例骨架（不掺资产、不掺索引）', async () => {
+    const { host } = makeCatalogHost()
+    const out = await executeOrgCatalog(host, { ids: ['instance'] }, SESSION) as CatalogDetails
+    expect(out.kind).toBe('details')
+    expect(out.errors).toEqual([])
+    expect(out.assets).toHaveLength(1)
+    expect(out.assets[0]).toMatchObject({ type: 'instance', id: 'instance', name: '在跑实例' })
+    expect(Object.hasOwn(out.assets[0], 'assetId')).toBe(false)
+  })
+
+  it('无活跃实例 → 禁令体（不是错误、也不是空结果）', async () => {
+    const { host } = makeCatalogHost({ getActiveRunFlow: async () => null })
+    const out = await executeOrgCatalog(host, { ids: ['instance'] }, SESSION) as CatalogDetails
+    expect(out.errors).toEqual([])
+    expect(out.assets[0]).toMatchObject({ type: 'instance', available: false })
+  })
+
+  it('传 instance#<nodeId> → 该节点完整 systemPrompt（第 3 层按需召回）', async () => {
+    const { host } = makeCatalogHost()
+    const out = await executeOrgCatalog(host, { ids: ['instance#a1'] }, SESSION) as CatalogDetails
+    expect(out.errors).toEqual([])
+    expect(out.assets[0]).toMatchObject({
+      type: 'inlineRole',
+      containerId: 'instance',
+      nodeId: 'a1',
+      systemPrompt: '你是流程内角色',
+    })
+  })
+
+  it('无活跃实例时传 instance#<nodeId> → 单条报错，不阻塞同批其余', async () => {
+    const { host } = makeCatalogHost({ getActiveRunFlow: async () => null })
+    const out = await executeOrgCatalog(host, { ids: ['instance#a1', 'flow-1'] }, SESSION) as CatalogDetails
+    expect(out.errors.map((entry) => entry.id)).toEqual(['instance#a1'])
+    expect(out.assets.map((entry) => entry.type)).toEqual(['workflow'])
+  })
+
+  it('同批多次引用实例只取一次数（单例事实）', async () => {
+    const { host, calls } = makeCatalogHost()
+    await executeOrgCatalog(host, { ids: ['instance', 'instance#a1'] }, SESSION)
+    expect(calls.activeRunFlows).toEqual([SESSION])
+  })
+
+  it('实例与资产可同批召回，各自独立成条（互不混入）', async () => {
+    const { host } = makeCatalogHost()
+    const out = await executeOrgCatalog(host, { ids: ['instance', 'flow-1'] }, SESSION) as CatalogDetails
+    expect(out.assets.map((entry) => entry.type)).toEqual(['instance', 'workflow'])
+  })
+
+  it('缺调用者会话身份 → 实例召回显式失败（不伪装成「没有实例」）', async () => {
+    const { host } = makeCatalogHost()
+    const error = await executeOrgCatalog(host, { ids: ['instance'] }).catch((reason: unknown) => reason)
+    expect((error as WfError).code).toBe('WF_BAD_CALLER')
+  })
+
+  it('资产召回不依赖会话身份（无实例需求时不触发身份校验）', async () => {
+    const { host } = makeCatalogHost()
+    const out = await executeOrgCatalog(host, { ids: ['flow-1'] }) as CatalogDetails
+    expect(out.assets[0]).toMatchObject({ type: 'workflow', id: 'flow-1' })
   })
 })

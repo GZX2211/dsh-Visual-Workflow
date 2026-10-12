@@ -9,12 +9,13 @@
 //     parentPromptVariantOf + runtime-launch 的调用点。
 //
 // 上下文：本指令文本由编排器在 startRun/resumeRun 时一次性 followup 注入「父代理」
-//       主会话，指导父代理按 流程事实源（orchestrations/<runId>.json）自主调度节点
-//       子代理、判断条件连线、并在失控或正常走完时 wf_finish 收尾。
+//       主会话，指导父代理按 wf_org_catalog 召回的当前实例骨架（instance 通道）自主
+//       调度节点子代理、判断条件连线、并在失控或正常走完时 wf_finish 收尾。
+//       拓扑不进本指令：只给召回入口，不给宿主路径（父代理无从进入用户私有存储）。
 //
 // 稳定布局（前缀稳定 + 关键约束双位 + 动态值仅注入末尾）：
 //   ① 首段 = 硬约束（身份/调度协议/完成判定信号/收尾/失败语义/条件连线/组内通信）
-//   ② 中段 = 过程性信息（事实源路径 / 工作流目标 / 协作组并行说明，协作组按需输出）
+//   ② 中段 = 过程性信息（拓扑召回入口 / 工作流目标 / 协作组并行说明，协作组按需输出）
 //   ③ 末段 = 关键约束重申 + 本次动态状态（断点继续 / 暂停 / 运行参数 / 情况2的
 //            父代理自执行单元任务块等动态值仅在此注入）
 //
@@ -37,8 +38,6 @@ export interface OrchestrationDirectiveParams {
     workflowName: string
     /** 工作流目标描述；可为空字符串。 */
     workflowGoal: string
-    /** 流程事实源文件路径（父代理需 read 的只读 JSON 路径）。 */
-    definitionPath: string
     /** 节点清单：流程中参与流程的可调度 agent 节点（id + 人类可读名称）。 */
     nodes: Array<{ id: string; label: string }>
     /** 协作组成员说明（画布含协作组时组装该段；空数组 = 不组装协作组段）。 */
@@ -188,15 +187,18 @@ function buildTailSection(langRule: string, dynamic: OrchestrationDirectiveParam
   ].join('\n')
 }
 
-/** 中段过程性信息（情况1/2 共用）：事实源 + 目标 + 协作组（按需）。 */
+/** 中段过程性信息（情况1/2 共用）：拓扑召回入口 + 目标 + 协作组（按需）。 */
 function buildMidSection(facts: OrchestrationDirectiveParams['facts']): string {
   const midParts: string[] = [
     MID_MARKER,
     '',
-    // 增量读取口径（2026.09 提示词精简）：不再每轮要求重读事实源——父代理自己上一轮的读取
-    // 结果仍在上下文中，重复读取是纯浪费；只在「还没读过」「刚改过图」「收到【编排变更】通知」
-    // 三种情况下才需要读。
-    `工作流事实源：${facts.definitionPath}（只读 JSON：节点列表与连线语义）。首次调度前必须读取一次；此后仅在收到【编排变更】通知或你自己用 wf_graph_patch 改过图之后再读，无需每轮重读。`,
+    // 拓扑不再经文件读取，只经 wf_org_catalog 的 instance 通道召回（用户裁决 2026.10）：
+    // 既不给宿主路径（父代理无从进入用户私有存储），也避免整份流程 JSON 超出单次读取
+    // 窗口导致「读到截断的前半部而不自知」。增量口径不变：父代理上一轮的召回结果仍在
+    // 上下文中，只在「还没召回」「刚改过图」「收到【编排变更】通知」三种情况下才需要再召回。
+    '工作流拓扑：用 wf_org_catalog（ids: ["instance"]）召回当前运行实例的骨架'
+    + '（节点、连线与可调度标记）；不要试图从文件系统读取编排定义。'
+    + '首次调度前必须召回一次；此后仅在收到【编排变更】通知或你自己用 wf_graph_patch 改过图之后再召回，无需每轮重召回。',
   ]
   const goal = String(facts.workflowGoal ?? '').trim()
   if (goal) midParts.push('', `工作流目标：${goal}`)

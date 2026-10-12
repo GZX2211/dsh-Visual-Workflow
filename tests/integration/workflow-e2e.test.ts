@@ -202,11 +202,14 @@ describe('e2e：编排运行全链路与双向同步', () => {
     const flow = (await h.api.handle('getWorkflow', { sessionId: 'session-1', id: 'flow-1' })) as WorkflowDocument
 
     // 1. 启动（API 层）→ 编排指令注入根 Agent（消息 id/source 齐备）
-    const started = (await h.api.handle('run', { sessionId: 'session-1', flowId: flow.id })) as { runId: string; defPath: string }
+    const started = (await h.api.handle('run', { sessionId: 'session-1', flowId: flow.id })) as { runId: string; sessionId: string }
     expect(started.runId).toBeTruthy()
     const directive = h.root.messages[0]?.content
     const directiveText = (directive as Array<{ text?: string }>)?.map((m) => m.text ?? '').join('') ?? ''
     expect(directiveText.startsWith(HEAD_MARKER)).toBe(true)
+    // 安全门禁：编排指令不含宿主路径（拓扑只经 wf_org_catalog 的 instance 通道召回）
+    expect(directiveText).not.toContain('orchestrations')
+    expect(directiveText).not.toMatch(/[A-Za-z]:[\\/]/)
     // W-02 注意力双位机制：末段重申存在（TAIL_RESTATE_MARKER + 至少一条导出硬约束常量；
     // 只验证机制，不绑定具体文案条目——提示词文案可随版本润色）
     const tailSection = directiveText.slice(directiveText.indexOf(TAIL_MARKER))

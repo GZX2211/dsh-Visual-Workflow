@@ -1,5 +1,6 @@
 import type { CatalogDetails, CatalogIndex, CatalogModelSource, CatalogPresetSource } from './types.js';
 import type { RoleAssetDetail, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../../shared/asset-types.js';
+import type { WorkflowDocument } from '../../shared/graph-model.js';
 /**
  * 工具层所需宿主能力（宿主 service 的最小结构适配；单测 fake）。
  *
@@ -28,9 +29,22 @@ export interface OrgCatalogHost {
     listPresets?: () => Promise<CatalogPresetSource[]>;
     /** 模型目录（可选缝；缺失按空清单处理）：节点 provider/model/reasoning 的取值来源。 */
     listModels?: () => Promise<CatalogModelSource[]>;
+    /**
+     * 当前会话**正在运行**的实例文档（`instance` 召回的取数源；无活跃 run 返回 null）。
+     *
+     * 为什么必填：实例召回是本工具的一等能力，装配方必须显式给出；缺失是编程错误，
+     * 不做「静默降级成没有实例」——那会把装配问题伪装成正常状态（工具层另有断言）。
+     * 语义：只暴露 running 的实例，且取最新实例文档。历史 run、暂停中的运行与其他会话的
+     * 实例在此缝之外就不可达（不是靠校验拦住，而是判据层没有形状）。
+     */
+    getActiveRunFlow(sessionId: string): Promise<WorkflowDocument | null>;
 }
-/** 组装并执行一次勘察（导出供单测直接断言，无需起工具注册表）。 */
-export declare function executeOrgCatalog(host: OrgCatalogHost, args: Record<string, unknown>): Promise<CatalogIndex | CatalogDetails>;
+/**
+ * 组装并执行一次勘察（导出供单测直接断言，无需起工具注册表）。
+ *
+ * @param sessionId 调用者会话；只有实例相关 id（`instance` / `instance#<nodeId>`）需要它。
+ */
+export declare function executeOrgCatalog(host: OrgCatalogHost, args: Record<string, unknown>, sessionId?: string): Promise<CatalogIndex | CatalogDetails>;
 /**
  * 注册 wf_org_catalog（全局层；ctx.tools.register）。
  * 返回 disposer：注销失败尽力而为。

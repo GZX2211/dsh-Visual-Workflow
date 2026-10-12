@@ -7,7 +7,6 @@
 export const orchFacts = {
   workflowName: '示例工作流',
   workflowGoal: '演示编排指令基线',
-  definitionPath: 'orchestrations/run-abc123.json',
   nodes: [
     { id: 'node-a', label: '分析节点' },
     { id: 'node-b', label: '总结节点' },

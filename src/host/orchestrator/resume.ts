@@ -46,8 +46,6 @@ export interface ResumeInput {
 /** 断点续跑结果。 */
 export interface ResumeResult {
   runId: string
-  /** 流程事实源文件绝对路径（编排指令 facts.definitionPath）。 */
-  defPath: string
   /** 实际恢复的旧 run id。 */
   resumedFromRunId: string
 }
