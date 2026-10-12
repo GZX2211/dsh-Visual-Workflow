@@ -1,3 +1,5 @@
+// scripts/verify-embed-model.mjs
+//
 // 临时验证脚本：本地加载 bge-small-zh-v1.5 语义嵌入模型，确认语义向量路径可用。
 // 用法：node scripts/verify-embed-model.mjs
 import { existsSync } from 'node:fs'

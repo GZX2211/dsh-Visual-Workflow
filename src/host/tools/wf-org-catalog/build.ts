@@ -58,12 +58,6 @@ export const WORKFLOW_DETAIL_NOTE =
 /** 数据库连接里不进模型上下文的密钥字段。 */
 const SECRET_CONNECTION_KEYS = ['password'] as const
 
-/** 文本截断（空白压缩 + 超限标注，供角色摘要等短字段使用）。 */
-export function clip(value: unknown, limit: number): string {
-  const text = String(value ?? '').replace(/\s+/g, ' ').trim()
-  return text.length > limit ? `${text.slice(0, limit)}… (truncated)` : text
-}
-
 /** 数组预算：超限截断并返回是否截断。 */
 function clipList<T>(items: T[], limit: number): { items: T[]; truncated: boolean } {
   return items.length > limit ? { items: items.slice(0, limit), truncated: true } : { items, truncated: false }

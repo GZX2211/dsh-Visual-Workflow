@@ -527,7 +527,7 @@ export function applyGraphOps(input: {
   }
 
   return {
-    doc: doc as unknown as GraphPatchResult['doc'],
+    doc,
     createdNodeIds,
     removedNodeIds,
     updatedNodeIds,
@@ -566,7 +566,7 @@ export function applyGraphOpsTolerant(input: {
     const op = ops[index]
     try {
       const applied = applyGraphOps({ doc, ops: [op] })
-      doc = applied.doc as unknown as WorkflowDocument
+      doc = applied.doc
       createdNodeIds.push(...applied.createdNodeIds)
       removedNodeIds.push(...applied.removedNodeIds)
       updatedNodeIds.push(...applied.updatedNodeIds)
@@ -585,7 +585,7 @@ export function applyGraphOpsTolerant(input: {
   }
   return {
     result: {
-      doc: doc as unknown as GraphPatchResult['doc'],
+      doc,
       createdNodeIds,
       removedNodeIds,
       updatedNodeIds,
@@ -601,7 +601,7 @@ export function applyGraphOpsTolerant(input: {
  * 运行状态标记（C 组）纯函数：校验节点存在 + 闸门预算，给出标记结果。
  * 状态机分工（P3）：**「必须是当前闸门轮 / 当前闸门节点」由 runMarkGroup 判定**
  * （需要入口 entry 与解析后的画布），本函数只负责与单据无关的校验——
- * status 取值、节点是否在快照内、以及 status=ok 时的闸门预算（D-21：不含首次编排）。
+ * status 取值（入参层）、节点是否在快照内、以及 status=ok 时的闸门预算（D-21：不含首次编排）。
  */
 export function applyMarkOp(input: {
   op: MarkPatchOp
@@ -613,12 +613,17 @@ export function applyMarkOp(input: {
   milestoneMax?: number
 }): MarkPatchResult {
   const nodeId = String(input.op?.nodeId ?? '')
-  const status = input.op?.status
-  if (status !== 'ok' && status !== 'fail') {
-    throw new WfError('WF_GRAPH_INVALID: mark_node status must be ok or fail', 'WF_GRAPH_INVALID')
-  }
+  // 闸门身份（nodeId 是否在当前运行快照内）判定在前：它是**运行状态事实**，
+  // 而 status 取值只是入参形状问题。两者同时出错时先报前者——让这一轮补丁把真正
+  // 卡住的问题解决掉，而不是先改一个次要字段再撞同一堵墙。
   if (!input.nodeIds.includes(nodeId)) {
     throw new WfError(`WF_MILESTONE_INVALID: mark_node: node "${nodeId}" is not in the current run snapshot`, 'WF_MILESTONE_INVALID')
+  }
+  const status = input.op?.status
+  // status 取值属**入参**错误（WF_BAD_ARGS）：模型要改的是调用参数，不是图；
+  // 报 WF_GRAPH_INVALID 会把它引向「去改图」这条错误的修正路径。
+  if (status !== 'ok' && status !== 'fail') {
+    badArgs('WF_BAD_ARGS: mark_node status must be ok or fail')
   }
   const milestoneMax = Number(input.milestoneMax) || 0
   const used = Math.max(0, Math.floor(Number(input.milestoneUsed) || 0))

@@ -4,10 +4,10 @@
 // 纯函数单测，不依赖 harness；resolveSpawnCommandLine 通过 platform 参数固定分支。
 
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { normalizeServerName, parseMcpRows, resolveSpawnCommandLine, renderCommandLine, toggleMcpServer, upsertMcpServer } from '../../../src/host/mcp/registry.js'
+import { dirname, join } from 'node:path'
+import { normalizeServerName, parseMcpRows, removeMcpServer, resolveSpawnCommandLine, renderCommandLine, toggleMcpServer, upsertMcpServer } from '../../../src/host/mcp/registry.js'
 import { snapshotDshHome } from '../api/fixtures/api-harness.js'
 
 describe('normalizeServerName：对齐官方 serverName 校验口径', () => {
@@ -257,6 +257,113 @@ describe('MCP 托管区：禁用清单写回口径', () => {
     expect(rows[0]?.disabled).toBe(false)
     // 启用态不写禁用行（写盘口径：只出现 disabled 行）
     expect(text).not.toContain('disabled: true')
+    await rm(root, { recursive: true, force: true })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 写路径错误契约（IF-1）：领域只抛稳定 code，HTTP 状态映射归 api 边界
+// （400 / 404 的映射由 tests/host/api/catalog.test.ts 经路由锁定）
+// ---------------------------------------------------------------------------
+
+/** 捕获拒绝值：同时取稳定 code 与界面可见文案（裸 Error 无 code，会暴露为 undefined）。 */
+async function capturedError(run: () => Promise<unknown>): Promise<{ code?: string; message?: string } | null> {
+  return run().then(() => null, (error: unknown) => error as { code?: string; message?: string })
+}
+
+describe('MCP 写路径稳定错误码（IF-1）', () => {
+  it('streamable-http 缺 url → WF_MCP_BAD_ARGS：文案点名缺失参数与两条出路，且不写盘', async () => {
+    const { root, patch } = await useTempDshHome()
+    const error = await capturedError(() =>
+      upsertMcpServer({ id: 'mcp-http', serverName: 'http', transport: 'streamable-http' }),
+    )
+    expect(error?.code).toBe('WF_MCP_BAD_ARGS')
+    // 可行动：说清哪个参数导致失败、如何修正；码本身也写进文案（错误码书写规范 §3.1）
+    expect(String(error?.message)).toContain('WF_MCP_BAD_ARGS')
+    expect(String(error?.message)).toMatch(/url/)
+    expect(String(error?.message)).toMatch(/stdio/)
+    // 入参校验失败发生在落盘之前：不留半成品配置
+    await expect(readFile(patch, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    await rm(root, { recursive: true, force: true })
+  })
+
+  it('stdio 缺 command/commandLine → WF_MCP_BAD_ARGS：文案点名 commandLine 与可粘贴写法', async () => {
+    const { root, patch } = await useTempDshHome()
+    const error = await capturedError(() =>
+      upsertMcpServer({ id: 'mcp-stdio', serverName: 'stdio', transport: 'stdio' }),
+    )
+    expect(error?.code).toBe('WF_MCP_BAD_ARGS')
+    expect(String(error?.message)).toContain('WF_MCP_BAD_ARGS')
+    expect(String(error?.message)).toMatch(/commandLine/)
+    await expect(readFile(patch, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    await rm(root, { recursive: true, force: true })
+  })
+
+  it('toggle 不存在的服务器 → WF_MCP_NOT_FOUND（与「入参非法」是两个码）', async () => {
+    const { root } = await useTempDshHome()
+    // 先落一个真实服务器：确保「不存在」不是「托管区尚未创建」的特例
+    await upsertMcpServer({ id: 'mcp-a', serverName: 'a', transport: 'stdio', commandLine: 'node a.js' })
+    const error = await capturedError(() => toggleMcpServer('mcp-missing', true))
+    expect(error?.code).toBe('WF_MCP_NOT_FOUND')
+    // 可行动：回显被查找的 id，并给出修正方向
+    expect(String(error?.message)).toContain('mcp-missing')
+    expect(String(error?.message)).toMatch(/id/)
+    await rm(root, { recursive: true, force: true })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 宽松 id 解析的回归锁（IF-2）：删除/停用必须能处理历史非规范 id
+// ---------------------------------------------------------------------------
+//
+// 被保护的行为：normalizeMcpId 只补 `mcp-` 前缀、**不做字符校验**（严格校验只作用于
+// 写入路径 requireValidMcpId）。历史 profile 里可能存在早于该校验落盘的任意 id；
+// 若有人「顺手收紧」normalizeMcpId，这些遗留条目将永远无法删除/停用。
+
+const LEGACY_ID = 'mcp-legacy.id:1'
+const LEGACY_PATCH = [
+  '# >>> dsh-visual-workflow',
+  '- insert:',
+  `    - id: '${LEGACY_ID}'`,
+  "      name: '@deepseek-ai/dsh-mcp-client'",
+  '      config:',
+  "        serverName: 'legacy'",
+  "        transport: 'stdio'",
+  "        command: 'node'",
+  '        args:',
+  "          - 'legacy.js'",
+  '# <<< dsh-visual-workflow',
+].join('\n')
+
+/** 手工落盘一份含历史非规范 id 的托管区（写入路径永远不会产出这种 id）。 */
+async function seedLegacyPatch(patch: string): Promise<void> {
+  await mkdir(dirname(patch), { recursive: true })
+  await writeFile(patch, LEGACY_PATCH, 'utf8')
+}
+
+describe('删除/停用的宽松 id 解析（IF-2）', () => {
+  it('历史非规范 id：写入路径拒绝，但停用与删除仍可达', async () => {
+    const { root, patch } = await useTempDshHome()
+    await seedLegacyPatch(patch)
+    // 两个入口口径差异是有意的：写入防 YAML 注入，清理不给历史数据设障
+    await expect(
+      upsertMcpServer({ id: LEGACY_ID, serverName: 'legacy', transport: 'stdio', commandLine: 'node legacy.js' }),
+    ).rejects.toMatchObject({ code: 'WF_BAD_ARGS' })
+    // 停用：按原 id 定位历史行，且行 id 不被改写
+    const toggled = await toggleMcpServer(LEGACY_ID, true)
+    expect(toggled.id).toBe(LEGACY_ID)
+    expect(toggled.disabled).toBe(true)
+    expect(parseMcpRows(await readFile(patch, 'utf8')).find((row) => row.id === LEGACY_ID)?.disabled).toBe(true)
+    // 删除：历史条目真的从托管区移除
+    expect(await removeMcpServer(LEGACY_ID)).toEqual({ deleted: true })
+    expect(parseMcpRows(await readFile(patch, 'utf8')).some((row) => row.id === LEGACY_ID)).toBe(false)
+    await rm(root, { recursive: true, force: true })
+  })
+
+  it('裸名称（无 mcp- 前缀）经 normalizeMcpId 补前缀定位既有行并可删除', async () => {
+    const { root } = await useTempDshHome()
+    await upsertMcpServer({ id: 'mcp-demo', serverName: 'demo', transport: 'stdio', commandLine: 'node demo.js' })
+    expect(await removeMcpServer('demo')).toEqual({ deleted: true })
     await rm(root, { recursive: true, force: true })
   })
 })

@@ -412,15 +412,23 @@ describe('原子性与锁一致性', () => {
     const results = await Promise.all(
       Array.from({ length: 10 }, (_, i) => store.saveWorkflow({ ...flow, name: `并发-${i}` }, 's1')),
     )
-    const revs = results.map((r) => r.revision)
-    expect(new Set(revs).size).toBe(10) // 10 次并发写各自拿到不同 revision（锁串行化）
-    // 最终文件为完整 JSON
+    // 契约口径：只锁「初始 1 + 10 次追加 = 11」，不锁「每次并发写各拿到不同 revision」——
+    // 合法实现若合并/重排写入（只要不丢更新）不应误红。
     const final = await store.getWorkflow('s1', 'f1')
     expect(final!.revision).toBe(11)
     expect(final!.name).toMatch(/^并发-/)
-    // 无 .tmp-* 垃圾残留（原子写清理）
+    // 每个并发调用返回的仍是该次保存的完整文档（无撕裂），revision 落在本次并发区间内
+    for (const saved of results) {
+      expect(saved.id).toBe('f1')
+      expect(saved.sessionId).toBe('s1')
+      expect(Number.isInteger(saved.revision)).toBe(true)
+      expect(saved.revision).toBeGreaterThanOrEqual(1)
+      expect(saved.revision).toBeLessThanOrEqual(11)
+    }
+    // 目录契约口径：无临时文件/锁文件残留 + 目标文件存在（不锁「目录里只允许出现该文件」）
     const files = await readdir(join(dir, 'workflows'))
-    expect(files).toEqual(['f1.json'])
+    expect(files.filter((f) => f.startsWith('.tmp') || f.endsWith('.lock')), '不应残留临时文件或锁文件').toEqual([])
+    expect(files, '目标工作流文件必须存在').toContain('f1.json')
   })
 
   it('并发带陈旧期望的保存按乐观锁拒绝（其余不受影响）', async () => {

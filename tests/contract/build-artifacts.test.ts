@@ -1,3 +1,5 @@
+// tests/contract/build-artifacts.test.ts
+//
 // T-003 构建产物测试：**只读**校验已构建产物（本门禁不执行构建，D11C-02）。
 //
 // 为什么不在测试进程内构建：lib/ 受版本控制，而 scripts/build.mjs 第零步会整体
@@ -53,15 +55,53 @@ function listFiles(dir: string, base = ''): string[] {
   return found
 }
 
+/** 读取 package.json 的包名：加载器按包名对账 bundle，注册 id 与样式归属都必须等于它。 */
+function packageName(): string {
+  const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as { name: string }
+  return pkg.name
+}
+
+/** 从产物解析样式注入器的去重键与标签归属（注入器片段由构建链路生成，断言对象是产物本身）。 */
+function cssInjections(code: string): Array<{ tagId: string; pluginId: string }> {
+  const found: Array<{ tagId: string; pluginId: string }> = []
+  const selector = /style\[data-plugin-css=" \+ JSON\.stringify\((\w+)\) \+ "\]/g
+  for (const match of code.matchAll(selector)) {
+    const index = match.index ?? 0
+    // 去重键定义在查询之前、标签归属在查询之后；窗口只取本注入器片段，
+    // 避免误取源码自身创建样式标签时的 dataset.plugin 赋值。
+    const before = code.slice(Math.max(0, index - 500), index)
+    const appendAt = code.indexOf('document.head.appendChild(tag)', index)
+    const after = code.slice(index, appendAt < 0 ? index + 500 : appendAt)
+    const declared = new RegExp('const ' + match[1] + ' = ("(?:[^"\\\\]|\\\\.)*")').exec(before)
+    const owner = /dataset\.plugin = ("(?:[^"\\]|\\.)*")/.exec(after)
+    expect(declared, `产物缺少样式去重键 ${match[1]} 的字面量定义`).not.toBeNull()
+    expect(owner, '产物缺少 style 标签的 data-plugin 归属赋值').not.toBeNull()
+    found.push({ tagId: JSON.parse(declared![1]) as string, pluginId: JSON.parse(owner![1]) as string })
+  }
+  return found
+}
+
 describe('T-003 构建链路（client bundle + host/client 并存）', () => {
-  it('lib/client.js 存在且含 __ModuleLoader__.load 包装', () => {
+  it('lib/client.js 注册 id 等于 package.json 包名（加载器对账契约）', () => {
     const code = readArtifact('lib/client.js')
-    expect(code).toContain('window.__ModuleLoader__.load({')
+    // 只保留「banner 形态存在」的最小断言，注册 id 则与 package.json 跨来源对账；
+    // 不断言构建脚本里同源的字面量（那只会自证一致）。
+    const banner = /^window\.__ModuleLoader__\.load\(\{\s*id:\s*("(?:[^"\\]|\\.)*")\s*,\s*factory:\s*\(require\)\s*=>\s*\{/.exec(code)
+    expect(banner, 'lib/client.js 缺少 __ModuleLoader__.load({ id, factory }) banner 形态').not.toBeNull()
+    expect(JSON.parse(banner![1])).toBe(packageName())
   })
 
-  it('lib/client.js 含 style[data-plugin]（CSS 注入机制）', () => {
+  it('lib/client.js 的样式注入以包名命名空间（CSS 注入机制）', () => {
     const code = readArtifact('lib/client.js')
-    expect(code).toContain('style[data-plugin')
+    const name = packageName()
+    // 形态最小断言：注入器仍以 data-plugin-css 去重查询
+    expect(code).toContain('style[data-plugin-css=')
+    const injections = cssInjections(code)
+    expect(injections.length, '未解析到任何样式注入器（用例会真空通过）').toBeGreaterThan(0)
+    for (const { tagId, pluginId } of injections) {
+      expect(tagId.startsWith(`${name}/`), `样式去重键未以包名开头：${tagId}`).toBe(true)
+      expect(pluginId, `样式标签归属不等于包名：${pluginId}`).toBe(name)
+    }
   })
 
   it('lib/index.js（host 产物）仍存在（client build 未清空 host 输出）', () => {

@@ -77,7 +77,7 @@ export declare function applyGraphOpsTolerant(input: {
  * 运行状态标记（C 组）纯函数：校验节点存在 + 闸门预算，给出标记结果。
  * 状态机分工（P3）：**「必须是当前闸门轮 / 当前闸门节点」由 runMarkGroup 判定**
  * （需要入口 entry 与解析后的画布），本函数只负责与单据无关的校验——
- * status 取值、节点是否在快照内、以及 status=ok 时的闸门预算（D-21：不含首次编排）。
+ * status 取值（入参层）、节点是否在快照内、以及 status=ok 时的闸门预算（D-21：不含首次编排）。
  */
 export declare function applyMarkOp(input: {
     op: MarkPatchOp;

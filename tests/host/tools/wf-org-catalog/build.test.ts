@@ -14,7 +14,6 @@ import {
   buildInlineRoleDetail,
   buildRoleDetail,
   buildWorkflowDetail,
-  clip,
   DETAIL_HINT,
   maskConnection,
 } from '../../../../src/host/tools/wf-org-catalog/build.js'
@@ -135,7 +134,9 @@ describe('buildIndex（资产索引装配）', () => {
   })
 
   it('角色摘要由资产库截断后原样透传（目录侧不二次截断，避免截断标记叠加）', () => {
-    const summary = `${'长'.repeat(CATALOG_LIMITS.roleSummary)}…（已截断）`
+    // 摘要字数口径归资产库（它在列表查询里 JOIN 当前 Active 版本行时截断）；
+    // 目录侧只透传，故此处用资产库口径的成品串（60 字 + 标记）断言逐字相等。
+    const summary = `${'长'.repeat(60)}…（已截断）`
     const index = buildIndex({
       ...emptyIndexInput,
       roles: [roleAssetSummaryFixture({ summary })],
@@ -354,7 +355,7 @@ describe('buildRoleDetail / buildInlineRoleDetail（最长字段完整召回）'
   })
 })
 
-describe('maskConnection / clip（辅助纯函数）', () => {
+describe('maskConnection（辅助纯函数）', () => {
   it('只有密钥字段被替换，其余字段原样保留', () => {
     expect(maskConnection({ host: 'h', password: 'p', token: 't' })).toEqual({ host: 'h', password: '**', token: 't' })
   })
@@ -363,10 +364,5 @@ describe('maskConnection / clip（辅助纯函数）', () => {
     expect(maskConnection(null)).toBeUndefined()
     expect(maskConnection('x')).toBeUndefined()
     expect(maskConnection([1, 2])).toBeUndefined()
-  })
-
-  it('clip：空白压缩 + 超限标注', () => {
-    expect(clip('  a\n\nb  ', 10)).toBe('a b')
-    expect(clip('x'.repeat(20), 5)).toBe('xxxxx… (truncated)')
   })
 })

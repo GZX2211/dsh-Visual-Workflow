@@ -65,6 +65,10 @@ const ERROR_STATUS: Record<string, number> = {
   // 工具层/领域的「入参错误」稳定码：调用方错误必须是 4xx（api/AGENTS.md）。
   // MCP 写入路径的 id 严格校验（D01-01）抛的正是 WF_BAD_ARGS，缺此映射会退化为 500。
   WF_BAD_ARGS: 400,
+  // MCP 写入路径（registry）：入参非法 400、服务器不存在 404。领域只抛稳定码，
+  // 状态映射只在本表发生；未登记的码（真正的内部故障）仍落 500。
+  WF_MCP_BAD_ARGS: 400,
+  WF_MCP_NOT_FOUND: 404,
   TRANSFER_INVALID_JSON: 400,
   TRANSFER_INVALID_BUNDLE: 422,
   TRANSFER_NOT_FOUND: 404,

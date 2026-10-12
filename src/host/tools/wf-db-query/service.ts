@@ -13,6 +13,7 @@ import type { EmbeddingEngine } from '../../embedding/engine.js'
 import { VectorIndex, type IndexRecord, type VectorIndexFile } from '../../embedding/indexer.js'
 import { CHUNK_OVERLAP_DEFAULT, CHUNK_SIZE_DEFAULT } from '../../embedding/chunker.js'
 import { createDatabaseDriver } from './driver.js'
+import type { DatabaseDriverFactory } from './types.js'
 
 /** 索引构建行数上限（防超大库打爆内存；超限截断并返回截断标记）。 */
 export const INDEX_MAX_ROWS = 10000
@@ -84,13 +85,15 @@ export function quoteDbIdentifier(node: DatabaseNode, name: string): string {
  * 全表全行文本化（列值 join；跳过向量/嵌入列）后按行分块，原子持久化到
  * <dataDir>/data/vector/<dataId>.json。嵌入可用时写入向量，否则自动落 BM25 索引。
  * 本地与服务器共用同一套本地索引基础设施（一致性；服务器只需提供只读查询能力）。
+ * createDriver 为可选注入缝（缺省即真实驱动）：服务器库检索路径需要它才能被正向锁定。
  */
 export async function buildIndexForDatabase(
   dataDir: string,
   node: DatabaseNode,
   engine: EmbeddingEngine,
+  createDriver?: DatabaseDriverFactory,
 ): Promise<{ file: VectorIndexFile; truncated: boolean }> {
-  const driver = createDatabaseDriver(node)
+  const driver = (createDriver ?? createDatabaseDriver)(node)
   // 高级选项（均有默认值）：分块窗口 / 重叠 / 行数上限（0 合法、NaN 回退默认）
   const opts = node.data?.vectorOptions ?? {}
   const chunkSizeRaw = Number(opts.chunkSize)

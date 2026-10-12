@@ -1,4 +1,4 @@
-// tests/host/r4-host-lifecycle.test.ts
+// tests/host/visual-workflow-host.test.ts
 //
 // 宿主事件观察的卸载守卫（D01-06）：`dispose()` 之后到达的 `agent/created` /
 // `agent/disposed` 不得再产生任何副作用。

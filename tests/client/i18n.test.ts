@@ -1,3 +1,5 @@
+// tests/client/i18n.test.ts
+
 import { describe, expect, it } from "vitest"
 import { en, text, zh } from "../../src/client/i18n.js"
 

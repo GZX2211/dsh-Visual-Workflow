@@ -1,3 +1,5 @@
+// tests/contract/build-artifacts-isolation.test.ts
+//
 // D11C-02 回归门禁：构建产物契约门禁必须是**只读**的（不得改写受版本控制的 lib/）。
 //
 // 为什么独立成文件：本用例以子进程重新执行 build-artifacts.test.ts 本体；若并入同一文件

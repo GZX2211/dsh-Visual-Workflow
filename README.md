@@ -467,7 +467,6 @@ pnpm test           # 单元测试
 pnpm gates          # Contract / 门禁测试
 pnpm client-smoke   # Client 冒烟测试
 pnpm check          # 类型检查 + 测试 + 构建 + smoke
-pnpm verify         # 完整验证门禁
 ```
 
 > 修改 Client 需重新构建并硬刷新浏览器；修改 Host 需重启 `dsh web`。

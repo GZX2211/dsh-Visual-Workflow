@@ -1,3 +1,5 @@
+// tests/contract/package-contract.test.ts
+//
 // T-001 包契约测试：校验 package.json 的 name/type/module 形态、exports 键齐全、
 // dsh 元数据（bundle.patch / client）、依赖约束（W-05：零 @deepseek-ai/* 运行时依赖）、
 // patch 文件形态，以及 files/exports 引用的静态文件在磁盘上真实存在。

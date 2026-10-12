@@ -1,3 +1,5 @@
+// tests/contract/cordis-patch.test.ts
+//
 // T-002 测试：cordis.patch.yml 的 insert 行与 src/host/index.ts 最小宿主入口骨架。
 //
 // 层级归属：断言对象是包的挂载契约（patch 文件）与宿主入口契约文本（跨模块装配声明），

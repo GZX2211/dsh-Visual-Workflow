@@ -1,4 +1,4 @@
-import type { OrgMeta } from '../../shared/types.js';
+import type { WorkflowDocument } from '../../shared/graph-model.js';
 /** 补丁作用域：template = 工作流模板（规划期改模板）；instance = 工作流/服务实例（运行期改实例）。 */
 export type PatchScope = 'template' | 'instance';
 /**
@@ -72,23 +72,15 @@ export interface MarkPatchOp {
     op: 'mark_node';
     nodeId: string;
     status: 'ok' | 'fail';
-    summary?: string;
 }
 /** 补丁操作（判别联合）。 */
 export type PatchOp = GraphPatchOp | MarkPatchOp;
-/** 图结构变更结果。 */
+/**
+ * 图结构变更结果。
+ * doc 用图契约本体：后续校验、预算与落盘全部按 WorkflowDocument 语义进行。
+ */
 export interface GraphPatchResult {
-    doc: {
-        id: string;
-        sessionId: string;
-        mode: string;
-        name: string;
-        description: string;
-        nodes: unknown[];
-        lines: unknown[];
-        revision: number;
-        meta?: OrgMeta;
-    };
+    doc: WorkflowDocument;
     createdNodeIds: string[];
     removedNodeIds: string[];
     updatedNodeIds: string[];

@@ -5,6 +5,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { createRunSnapshot, parentExecutorOf, reconcileStaleRuns, setNodeStatus, sweepWatchdogOnce } from '../../../src/host/orchestrator/index.js'
+import { WfError } from '../../../src/host/orchestrator/index.js'
 import { ORCH_CHANGE_MARKER, ORCH_HARD_CONSTRAINTS } from '../../../src/host/prompts/index.js'
 import { type GraphNode, type RoleNode, type WorkflowDocument } from '../../../src/host/shared/graph-model.js'
 import { stage, agent, fileNode, parentNode, makeFlow, FakeRoot, type Harness, makeHarness, caller, start, cleanupTempDirs } from './fixtures/harness.js'
@@ -720,5 +721,57 @@ describe('父代理执行单元的重试预算文案', () => {
     await start(h, hybridBudgetFlow(0))
     const directive = h.agents.roots.get('session-1')!.messages[0].content.map((c) => c.text).join('\n')
     expect(directive).toContain('attempt 1/1（父代理执行单元）')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 闸门标记入参兜底（运行快照写者：status 取值属入参错误）
+// ---------------------------------------------------------------------------
+
+/** 含闸门的流程：start → m1(→p1) → a1 → end（只需要一条可运行的 run）。 */
+function gateFlowForMark(): WorkflowDocument {
+  return {
+    id: 'flow-1',
+    sessionId: 'session-1',
+    mode: 'mode1',
+    name: '闸门流程',
+    description: '',
+    revision: 1,
+    nodes: [
+      stage('n-start', 'start'),
+      parentNode('n-p1', 'CEO'),
+      { id: 'n-m1', kind: 'proxy', position: { x: 0, y: 0 }, proxySourceId: 'n-p1', data: { role: 'milestone' } },
+      agent('n-a1', '子任务A'),
+      stage('n-end', 'end'),
+    ],
+    lines: [
+      { id: 'l1', source: 'n-start', target: 'n-m1', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+      { id: 'l2', source: 'n-m1', target: 'n-a1', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+      { id: 'l3', source: 'n-a1', target: 'n-end', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+    ],
+  }
+}
+
+describe('markMilestoneNode · status 取值兜底（入参错误）', () => {
+  it('status 越界（绕过静态类型）→ WF_BAD_ARGS，且不写快照', async () => {
+    const h = await makeHarness()
+    const { entry } = await start(h, gateFlowForMark())
+
+    // 静态类型已把 status 收窄为 'ok' | 'fail'（运行时唯一的写者调用点传入的是
+    // applyMarkOp 返回值），故 TypeScript 在此**拒绝编译**——指令本身即不可达性的
+    // 编译期证据；运行时仍以越界值验证兜底分支的语义与快照零变更。
+    // @ts-expect-error status 只允许 'ok' | 'fail'
+    const input: { nodeId: string; status: 'ok' | 'fail' } = { nodeId: 'n-a1', status: 'pending' }
+
+    let error: WfError | undefined
+    try {
+      h.runtime.markMilestoneNode('session-1', input)
+    } catch (caught) {
+      error = caught as WfError
+    }
+    expect(error?.code).toBe('WF_BAD_ARGS')
+    // 兜底分支在写快照之前返回：状态与预算分毫未动
+    expect(entry.snapshot.nodes.find((node) => node.nodeId === 'n-a1')?.status).toBe('pending')
+    expect(entry.snapshot.milestoneUsed ?? 0).toBe(0)
   })
 })

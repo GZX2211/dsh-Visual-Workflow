@@ -73,7 +73,6 @@
     "test": "vitest run --pool=threads",
     "gates": "vitest run --pool=threads tests/contract",
     "client-smoke": "node scripts/client-smoke.mjs",
-    "check": "pnpm typecheck && pnpm test && pnpm build && pnpm client-smoke",
-    "verify": "pnpm typecheck && pnpm build && pnpm test && pnpm client-smoke"
+    "check": "pnpm typecheck && pnpm test && pnpm build && pnpm client-smoke"
   }
 }

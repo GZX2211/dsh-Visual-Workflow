@@ -10,7 +10,7 @@
 // 角色语义判定（proxyRoleOf 等）与闸门归一化（mainNodeIdOf）见 tests/host/graph/model.test.ts。
 
 import { describe, expect, it } from 'vitest'
-import { applyGraphOps, applyGraphOpsTolerant } from '../../../../src/host/tools/wf-graph-patch/apply.js'
+import { applyGraphOps, applyGraphOpsTolerant, applyMarkOp } from '../../../../src/host/tools/wf-graph-patch/apply.js'
 import { proxyRoleOf, stageLabel } from '../../../../src/host/graph/index.js'
 import { WfError } from '../../../../src/host/orchestrator/index.js'
 import type { GraphNode, Line, WorkflowDocument } from '../../../../src/host/shared/graph-model.js'
@@ -93,11 +93,11 @@ function gateFlow(role?: 'executor' | 'milestone'): WorkflowDocument {
 }
 
 describe('file 节点：写图只产文本型（D-07）', () => {
-  /** 取节点 data：结果文档的 nodes 是 unknown[]，测试内收窄一次。 */
-  function dataOf(doc: { nodes: unknown[] }, id: string): Record<string, unknown> {
-    const found = (doc.nodes as Array<{ id: string; data: Record<string, unknown> }>).find((node) => node.id === id)
+  /** 取节点 data：结果文档的 nodes 是真实节点联合，只在此收窄到 data 一层。 */
+  function dataOf(doc: { nodes: GraphNode[] }, id: string): Record<string, unknown> {
+    const found = doc.nodes.find((node) => node.id === id)
     if (!found) throw new Error(`测试夹具缺少节点：${id}`)
-    return found.data
+    return found.data as Record<string, unknown>
   }
 
   it('test_create_node 传受管文件_归一化为文本型并报告归一化', () => {
@@ -189,11 +189,11 @@ describe('补丁层 proxy data 归一化（applyGraphOps 纯函数）', () => {
   it('update_node_data：可把普通虚拟节点提升为闸门（并支持清空 role 退回 executor）', () => {
     const doc = gateFlow('executor')
     const up = applyGraphOps({ doc, ops: [{ op: 'update_node_data', nodeId: 'm1', data: { role: 'milestone', label: '闸门' } }] })
-    const upNodes = up.doc.nodes as GraphNode[]
+    const upNodes = up.doc.nodes
     expect(proxyRoleOf(upNodes.find((n) => n.id === 'm1'))).toBe('milestone')
     // 清空 role / label → data 整体删除，退回缺省 executor
-    const down = applyGraphOps({ doc: up.doc as unknown as WorkflowDocument, ops: [{ op: 'update_node_data', nodeId: 'm1', data: { role: null, label: '' } }] })
-    const downNodes = down.doc.nodes as GraphNode[]
+    const down = applyGraphOps({ doc: up.doc, ops: [{ op: 'update_node_data', nodeId: 'm1', data: { role: null, label: '' } }] })
+    const downNodes = down.doc.nodes
     const node = downNodes.find((n) => n.id === 'm1') as { data?: unknown }
     expect(node.data).toBeUndefined()
     expect(proxyRoleOf(downNodes.find((n) => n.id === 'm1'))).toBe('executor')
@@ -224,11 +224,11 @@ describe('补丁层 proxy data 归一化（applyGraphOps 纯函数）', () => {
 // 默认，更新时剥离传入值并保留现值。
 
 describe('角色节点 data 补全（normalizeRoleNodeData）', () => {
-  // 入参用严格契约 WorkflowDocument（applyGraphOps 输入类型）；出参 doc 是宽松的
-  // GraphPatchResult.doc 形状，故断言后用 roleDataOf 读取节点 data。
+  // 出参 doc 直接复用图契约本体（GraphPatchResult.doc = WorkflowDocument），
+  // 故断言只按节点判别联合收窄到 data 即可，无需再对文档本身做双重断言。
   type PatchDoc = ReturnType<typeof applyGraphOps>['doc']
   const roleDataOf = (doc: PatchDoc, id: string): Record<string, unknown> => {
-    const node = (doc.nodes as GraphNode[]).find((n) => n.id === id)
+    const node = doc.nodes.find((n) => n.id === id)
     return (node as unknown as { data: Record<string, unknown> }).data
   }
 
@@ -391,5 +391,36 @@ describe('容错应用（applyGraphOpsTolerant）', () => {
     expect(lineShapes(tolerant.result)).toEqual(lineShapes(strict))
     expect(tolerant.result.createdNodeIds).toEqual(strict.createdNodeIds)
     expect(tolerant.result.connectedLineIds).toHaveLength(strict.connectedLineIds.length)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 运行状态标记（applyMarkOp）：status 取值属**入参**错误
+// ---------------------------------------------------------------------------
+
+describe('applyMarkOp · status 取值校验', () => {
+  it('status 不是 ok/fail → WF_BAD_ARGS（要改的是入参，不是图）', () => {
+    // 模型可见入参是自由对象：status 在这个分支被拦下时，它的问题在调用参数上，
+    // 报 WF_GRAPH_INVALID 会把模型引向「去改图」这条错误修正路径。
+    const op = { op: 'mark_node', nodeId: 'a1', status: 'done' } as never
+    let error: WfError | undefined
+    try {
+      applyMarkOp({ op, runId: 'run-1', nodeIds: ['a1'] })
+    } catch (caught) {
+      error = caught as WfError
+    }
+    expect(error?.code).toBe('WF_BAD_ARGS')
+    expect(error?.message).toContain('mark_node status must be ok or fail')
+  })
+
+  it('nodeId 不在运行快照内 → 仍先报 WF_MILESTONE_INVALID（运行事实优先于入参形状）', () => {
+    const op = { op: 'mark_node', nodeId: '不存在', status: 'done' } as never
+    let error: WfError | undefined
+    try {
+      applyMarkOp({ op, runId: 'run-1', nodeIds: ['a1'] })
+    } catch (caught) {
+      error = caught as WfError
+    }
+    expect(error?.code).toBe('WF_MILESTONE_INVALID')
   })
 })

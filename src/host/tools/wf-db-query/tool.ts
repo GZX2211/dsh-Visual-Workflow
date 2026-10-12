@@ -26,7 +26,7 @@ import { textRender } from '../infrastructure/text-render.js'
 import { createDatabaseDriver } from './driver.js'
 import { sanitizeReadOnlySql } from './policy.js'
 import { buildIndexForDatabase, INDEX_MAX_ROWS, indexPathOf } from './service.js'
-import type { WfDbQueryHost } from './types.js'
+import type { DatabaseDriver, WfDbQueryHost } from './types.js'
 
 /** 查询结果行数上限（防结果集打爆上下文）。 */
 const QUERY_ROWS_LIMIT = 50
@@ -108,6 +108,8 @@ export function registerWfDbQuery(ctx: { get(name: string): unknown }, host: WfD
   if (!tools || typeof tools.register !== 'function') {
     throw new Error('[visual-workflow] tools 服务不可用，无法注册 wf_db_query')
   }
+  // 驱动统一经宿主缝解析：未注入 createDriver 时缺省即真实驱动。
+  const driverOf = (node: DatabaseNode): DatabaseDriver => (host.createDriver ?? createDatabaseDriver)(node)
 
   const definition = defineTool({
     name: WF_DB_QUERY,
@@ -199,7 +201,7 @@ export function registerWfDbQuery(ctx: { get(name: string): unknown }, host: WfD
         // 落盘后复用）：运行期首次检索无需手动预建，嵌入不可用时自动落 BM25（结果标注）。
         let file = await index.load()
         if (!file || file.chunks.length === 0) {
-          file = (await buildIndexForDatabase(host.dataDir, dataNode, host.engine)).file
+          file = (await buildIndexForDatabase(host.dataDir, dataNode, host.engine, host.createDriver)).file
         }
         const result = await index.search(
           queryText,
@@ -216,7 +218,7 @@ export function registerWfDbQuery(ctx: { get(name: string): unknown }, host: WfD
         const sql = String(args?.sql ?? '')
         const checked = sanitizeReadOnlySql(sql)
         if (!checked.ok) throw new WfError(`WF_DB_SQL: SQL rejected: ${checked.error}`, 'WF_DB_SQL')
-        const driver = createDatabaseDriver(dataNode)
+        const driver = driverOf(dataNode)
         try {
           const result = await driver.query(checked.sql)
           const truncatedRows = result.rows.length > QUERY_ROWS_LIMIT
@@ -238,7 +240,7 @@ export function registerWfDbQuery(ctx: { get(name: string): unknown }, host: WfD
       }
 
       // mode === 'schema'
-      const driver = createDatabaseDriver(dataNode)
+      const driver = driverOf(dataNode)
       try {
         // 驱动内部多取一行精确判定：正好满上限不算截断（与 search 的 truncated 判据同一口径）
         const { tables, truncated } = await driver.schemaPage()

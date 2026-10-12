@@ -249,7 +249,7 @@ const ctxInput = { sessionId: 'session-1' }
 // ---------------------------------------------------------------------------
 
 describe('wf_graph_patch · 图结构变更组', () => {
-  it('create_node + connect + disconnect：落盘 revision 递增、事实源刷新', async () => {
+  it('create_node + connect + disconnect：落盘 revision 递增、编排基线刷新', async () => {
     const { host, storeState, refreshed } = makeHost()
     storeState.workflows.set('wf-1', makeFlow())
     const result = await executeGraphPatch(host, 'session-1', {
@@ -1073,7 +1073,7 @@ describe('wf_graph_patch · 运行状态标记组', () => {
     const ok = await executeGraphPatch(host, 'session-1', {
       scope: 'instance',
       targetId: 'wf-1',
-      ops: [{ op: 'mark_node', nodeId: 'a1', status: 'ok', summary: '里程碑通过' }],
+      ops: [{ op: 'mark_node', nodeId: 'a1', status: 'ok' }],
     })
     expect(ok.revision).toBe(0) // C 组不改文档：revision 来自运行快照（baseFlow.revision 缺省 0）
     expect(ok.marked).toEqual({ nodeId: 'a1', status: 'ok', runId: 'run-1' })
@@ -1315,7 +1315,7 @@ describe('wf_graph_patch · 闸门状态机（mark_node）', () => {
     entries.set('session-1', entry)
     const result = await executeGraphPatch(host, 'session-1', {
       scope: 'instance', targetId: 'wf-1',
-      ops: [{ op: 'mark_node', nodeId: 'm1', status: 'ok', summary: '方案评审通过' }],
+      ops: [{ op: 'mark_node', nodeId: 'm1', status: 'ok' }],
     })
     expect(result.marked).toEqual({ nodeId: 'p1', status: 'ok', runId: 'run-1' })
     expect(result.milestoneUsed).toBe(1)

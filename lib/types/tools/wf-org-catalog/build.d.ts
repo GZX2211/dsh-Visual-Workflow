@@ -5,8 +5,6 @@ import type { RoleNode } from '../../shared/graph-model.js';
 export declare const DETAIL_HINT: string;
 /** 骨架返回体里的提示：角色提示词走复合 id 按需召回；角色版本无法解析时的取舍。 */
 export declare const WORKFLOW_DETAIL_NOTE: string;
-/** 文本截断（空白压缩 + 超限标注，供角色摘要等短字段使用）。 */
-export declare function clip(value: unknown, limit: number): string;
 /**
  * 节点 → 角色资产引用的解析结果。
  * `assetId` 为 null 表示角色版本行存在但无法回溯到资产 id（历史数据残缺）：

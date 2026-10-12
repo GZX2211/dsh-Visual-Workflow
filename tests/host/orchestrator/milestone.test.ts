@@ -101,7 +101,7 @@ describe('P3 里程碑闸门（运行时）', () => {
     const result = await executeGraphPatch(patchHost(h), 'session-1', {
       scope: 'instance',
       targetId: 'flow-1',
-      ops: [{ op: 'mark_node', nodeId: 'n-m1', status: 'ok', summary: '复核通过' }],
+      ops: [{ op: 'mark_node', nodeId: 'n-m1', status: 'ok' }],
     })
     expect(result.marked).toEqual({ nodeId: 'n-p1', status: 'ok', runId: 'run-1' })
     expect(result.milestoneUsed).toBe(1)

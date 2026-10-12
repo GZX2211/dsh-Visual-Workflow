@@ -24,8 +24,6 @@ export declare const CATALOG_LIMITS: {
     readonly presets: 40;
     /** 模型条目上限。 */
     readonly models: 60;
-    /** 角色摘要字数：只够判断职责，不替代完整提示词召回。 */
-    readonly roleSummary: 60;
     /** 单次详情召回的 id 上限：超限拒绝并提示分批，避免一次拉爆上下文。 */
     readonly detailIds: 20;
 };

@@ -92,6 +92,38 @@ describe('buildIndexForDatabase', () => {
     expect(indexFile.overlap).toBe(2)
   })
 
+  it('服务器库：经注入的驱动工厂建立本地索引（服务器库检索可用路径的正向锁定）', async () => {
+    const dir = await tempDir('vw-idx-')
+    const node: DatabaseNode = {
+      id: 'd2',
+      kind: 'database',
+      position: { x: 0, y: 0 },
+      data: {
+        label: '服务器库', description: '', dbType: 'server', dbKind: 'postgresql',
+        conn: { host: '127.0.0.1', port: 5432, user: 'u', password: 'p', db: 'd' },
+      },
+    }
+    const seen: string[] = []
+    const { file: indexFile, truncated } = await buildIndexForDatabase(dir, node, bm25Engine(), (injected) => {
+      seen.push(injected.id)
+      return {
+        async testConnection() {},
+        async query() { return { columns: ['id', 'name'], rows: [['1', '向量 检索']] } },
+        async schema() { return [{ name: 'users' }] },
+        async schemaPage() { return { tables: [{ name: 'users' }], truncated: false } },
+        close() {},
+      }
+    })
+    // 工厂确实按节点被调用（注入缝生效），索引内容来自注入驱动的数据
+    expect(seen).toEqual(['d2'])
+    expect(truncated).toBe(false)
+    expect(indexFile.source).toBe('bm25')
+    expect(indexFile.chunks.length).toBeGreaterThan(0)
+    expect(indexFile.chunks.some((chunk) => chunk.source === 'users')).toBe(true)
+    const { existsSync } = await import('node:fs')
+    expect(existsSync(indexPathOf(dir, 'd2'))).toBe(true)
+  })
+
   it('ensureDatabaseIndexes：为 db-in 所连本地库预建索引；已存在则复用不重复重建', async () => {
     const dir = await tempDir('vw-idx-')
     const dbFile = await makeSqliteDb(dir)

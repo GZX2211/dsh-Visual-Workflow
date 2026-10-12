@@ -1,4 +1,5 @@
 import type { OrchestratorRuntime } from '../../orchestrator/index.js';
+import type { DatabaseNode } from '../../shared/graph-model.js';
 import type { FlowStore } from '../../storage/flow-store.js';
 import type { EmbeddingEngine } from '../../embedding/engine.js';
 /** SQL 校验结果：通过（含规范化后的单条 SQL）或拒绝（错误原因）。 */
@@ -33,6 +34,8 @@ export interface DatabaseDriver {
     }>;
     close(): void;
 }
+/** 驱动工厂：把数据节点解析为驱动（缺省实现是 driver.ts 的 createDatabaseDriver）。 */
+export type DatabaseDriverFactory = (node: DatabaseNode) => DatabaseDriver;
 /** 服务器连接信息（mysql/postgresql 共用）。 */
 export interface ServerConnection {
     dbKind: 'mysql' | 'postgresql';
@@ -48,4 +51,9 @@ export interface WfDbQueryHost {
     store: FlowStore;
     dataDir: string;
     engine: EmbeddingEngine;
+    /**
+     * 可选驱动工厂：注入 fake 驱动即可覆盖「服务器库（mysql/postgresql）检索可用」路径。
+     * 不注入时行为与真实驱动完全一致（缺省即 createDatabaseDriver）。
+     */
+    createDriver?: DatabaseDriverFactory;
 }

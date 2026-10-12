@@ -15,7 +15,7 @@ import type { JsonSchemaNode } from '../../../../src/host/tools/infrastructure/d
 import { SCHEMA_TABLE_LIMIT } from '../../../../src/host/tools/wf-db-query/driver.js'
 import { indexPathOf } from '../../../../src/host/tools/wf-db-query/service.js'
 import { registerWfDbQuery, QUERY_CELL_MAX_LENGTH } from '../../../../src/host/tools/wf-db-query/tool.js'
-import type { WfDbQueryHost } from '../../../../src/host/tools/wf-db-query/types.js'
+import type { WfDbQueryHost, DatabaseDriver } from '../../../../src/host/tools/wf-db-query/types.js'
 import { makeDbFlow, makeSqliteDb } from '../fixtures/db-fixture.js'
 import {
   childAgent,
@@ -52,11 +52,11 @@ interface DbHarness extends TestEnv {
   disposeTools: () => void
 }
 
-/** 装配：真实编排运行时 + 临时 SQLite 库 + 注册 wf_db_query。 */
-async function makeHarness(): Promise<DbHarness> {
+/** 装配：真实编排运行时 + 临时 SQLite 库 + 注册 wf_db_query（hostOverrides 注入宿主缝）。 */
+async function makeHarness(hostOverrides: Partial<WfDbQueryHost> = {}): Promise<DbHarness> {
   const env = await makeEnv()
   const dbFile = await makeSqliteDb(env.dir)
-  const host: WfDbQueryHost = { orchestrator: env.runtime, store: env.store, dataDir: env.dir, engine }
+  const host: WfDbQueryHost = { orchestrator: env.runtime, store: env.store, dataDir: env.dir, engine, ...hostOverrides }
   const disposeTools = registerTools(env, host, [registerWfDbQuery])
   return { ...env, host, engine, dataDir: env.dir, dbFile, disposeTools }
 }
@@ -274,6 +274,62 @@ describe('wf_db_query 工具执行', () => {
     expect(error?.code).not.toBe('WF_DB_MODE')
     expect(error?.code, '驱动/错误码必须是连接类具名码').toMatch(/^(ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|WF_DB_DRIVER_MISSING|WF_DB_CONFIG)$/)
     expect(error?.code).not.toBe('WF_DB_DRIVER_MISSING')
+  })
+
+  it('服务器库（mysql）：注入驱动工厂后 schema/query/search 三模式可用（D09 缺口的正向锁定）', async () => {
+    // fake 驱动只回放固定数据：真实 MySQL/PG 服务在本环境不可提供，此前「服务器库检索可用」
+    // 只有反向断言（无服务时必失败），永远无法正向锁定。
+    const created: string[] = []
+    const fakeDriver: DatabaseDriver = {
+      async testConnection() {},
+      async query() {
+        return { columns: ['id', 'name'], rows: [['1', '向量 检索'], ['2', 'BM25 降级']] }
+      },
+      async schema() {
+        return [{ name: 'users' }]
+      },
+      async schemaPage() {
+        return { tables: [{ name: 'users' }], truncated: false }
+      },
+      close() {},
+    }
+    const h = await makeHarness({
+      createDriver: (node) => {
+        created.push(node.id)
+        return fakeDriver
+      },
+    })
+    const flow = makeDbFlow(h.dbFile)
+    const serverNode: DatabaseNode = {
+      id: 'd2',
+      kind: 'database',
+      position: { x: 0, y: 0 },
+      data: {
+        label: '服务器库', description: '', dbType: 'server', dbKind: 'mysql',
+        conn: { host: '127.0.0.1', port: 3306, user: 'u', password: 'p', db: 'd' },
+      },
+    }
+    flow.nodes.push(serverNode)
+    flow.lines.push({ id: 'l5', source: 'd2', target: 'a1', sourceHandle: 'db-out', targetHandle: 'db-in' })
+    await start(h, flow)
+    await h.runtime.wfRunNode({ isChild: false, sessionId: 'session-1' }, { nodeId: 'a1' })
+    const def = h.tools.definitions.get(WF_DB_QUERY)!
+
+    const schema = await def.execute({ dataId: 'd2', mode: 'schema' }, execOf(childAgent))
+    expect(schema).toMatchObject({ dataId: 'd2', mode: 'schema' })
+    expect((schema as { tables: Array<{ name: string }> }).tables).toEqual([{ name: 'users' }])
+
+    const queried = await def.execute({ dataId: 'd2', mode: 'query', sql: 'SELECT id, name FROM users LIMIT 2' }, execOf(childAgent))
+    expect(queried).toMatchObject({ dataId: 'd2', mode: 'query', columns: ['id', 'name'] })
+    expect((queried as { rows: string[][] }).rows).toEqual([['1', '向量 检索'], ['2', 'BM25 降级']])
+
+    // search：本地索引经同一驱动工厂构建（服务器库与本地库共用索引基础设施）
+    const searched = await def.execute({ dataId: 'd2', mode: 'search', query: '向量' }, execOf(childAgent))
+    expect(searched).toMatchObject({ dataId: 'd2', mode: 'search', source: 'bm25' })
+    expect((searched as { hits: unknown[] }).hits.length).toBeGreaterThan(0)
+
+    // 三处驱动创建（schema / query / 惰性索引构建）统一经宿主缝解析，无一处绕过
+    expect(created).toEqual(['d2', 'd2', 'd2'])
   })
 
   it('query 模式：超长单元格值被截断并标记 truncated（防向量/BLOB 列打爆上下文）', async () => {

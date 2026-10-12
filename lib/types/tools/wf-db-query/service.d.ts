@@ -1,6 +1,7 @@
 import type { DatabaseNode, WorkflowDocument } from '../../shared/graph-model.js';
 import type { EmbeddingEngine } from '../../embedding/engine.js';
 import { type VectorIndexFile } from '../../embedding/indexer.js';
+import type { DatabaseDriverFactory } from './types.js';
 /** 索引构建行数上限（防超大库打爆内存；超限截断并返回截断标记）。 */
 export declare const INDEX_MAX_ROWS = 10000;
 /**
@@ -28,8 +29,9 @@ export declare function quoteDbIdentifier(node: DatabaseNode, name: string): str
  * 全表全行文本化（列值 join；跳过向量/嵌入列）后按行分块，原子持久化到
  * <dataDir>/data/vector/<dataId>.json。嵌入可用时写入向量，否则自动落 BM25 索引。
  * 本地与服务器共用同一套本地索引基础设施（一致性；服务器只需提供只读查询能力）。
+ * createDriver 为可选注入缝（缺省即真实驱动）：服务器库检索路径需要它才能被正向锁定。
  */
-export declare function buildIndexForDatabase(dataDir: string, node: DatabaseNode, engine: EmbeddingEngine): Promise<{
+export declare function buildIndexForDatabase(dataDir: string, node: DatabaseNode, engine: EmbeddingEngine, createDriver?: DatabaseDriverFactory): Promise<{
     file: VectorIndexFile;
     truncated: boolean;
 }>;

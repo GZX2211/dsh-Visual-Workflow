@@ -1,3 +1,5 @@
+// tests/host/prompts/org-plan.test.ts
+//
 // 自主编排 P2：规划期提示词变体与三层 SOP 注入测试（自主编排实施方案 §10 P2）。
 //
 // 断言策略与同目录基线测试（orchestration/executor/node-task/collab）一致：**不对提示词

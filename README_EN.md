@@ -469,7 +469,6 @@ pnpm test           # Unit tests
 pnpm gates          # Contract / gate tests
 pnpm client-smoke   # Client smoke tests
 pnpm check          # Type check + test + build + smoke
-pnpm verify         # Full verification gate
 ```
 
 > Modifying Client requires rebuilding and hard-refreshing the browser; modifying Host requires restarting `dsh web`.

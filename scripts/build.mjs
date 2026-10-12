@@ -1,3 +1,5 @@
+// scripts/build.mjs
+//
 // 构建编排（T-003 扩展：host tsc 双发射 + client dts 发射 + client tsdown bundle）。
 //
 // 方案 B（类型产物）：tsc 分次发射——

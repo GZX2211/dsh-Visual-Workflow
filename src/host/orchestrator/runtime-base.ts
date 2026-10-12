@@ -493,8 +493,12 @@ export abstract class RuntimeBase {
       throw new WfError('WF_MILESTONE_INVALID: no running orchestration in this session (gate marking only makes sense during a run)', 'WF_MILESTONE_INVALID')
     }
     const { nodeId, status } = input
+    // status 取值属**入参**错误（WF_BAD_ARGS）：入库值越界时该改的是调用参数，不是图。
+    // 本分支当前不可达——输入静态类型已收窄为 'ok' | 'fail'，且全仓唯一调用方
+    // （wf_graph_patch 工具层）传入的是 applyMarkOp 已校验过的返回值；保留它作为
+    // 运行期兜底，避免非法值被静默写进快照。
     if (status !== 'ok' && status !== 'fail') {
-      throw new WfError('WF_GRAPH_INVALID: mark_node status must be ok or fail', 'WF_GRAPH_INVALID')
+      throw new WfError('WF_BAD_ARGS: mark_node status must be ok or fail', 'WF_BAD_ARGS')
     }
     const snapshot = entry.snapshot
     if (!snapshot.nodes.some((node) => node.nodeId === nodeId)) {

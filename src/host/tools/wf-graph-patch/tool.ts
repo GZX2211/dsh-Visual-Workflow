@@ -330,21 +330,23 @@ async function runGraphGroup(
   input: { scope: PatchScope; sessionId: string; targetId: string; expectRevision?: number; newTemplateDoc?: WorkflowTemplate },
   ops: GraphPatchOp[],
 ): Promise<{ revision: number; issues: GraphIssue[]; result: GraphPatchResult; savedId: string; budget: OrgBudget }> {
-  const loaded = await loadDoc(host, input)
-  const doc = loaded as WorkflowDocument
+  // 图管道按 WorkflowDocument 语义运作（模板与实例在此同构）。create / scope=template
+  // 通路的 loadDoc 返回的是模板本体（WorkflowTemplate 缺 sessionId 这一与图无关的实例归属
+  // 字段），故此处收敛一次。不引入类型体操：判据只是「模板在该管道内按文档处理」。
+  const doc = (await loadDoc(host, input)) as WorkflowDocument
   const meta = effectiveOrgMeta(metaOfDocument(doc))
   // 逐条应用并收集全部失败项：本工具不做部分应用（ops 有序依赖 + 整图检查器，
   // 部分应用会落盘半成品图），因此 errors 非空即整批拒绝。
   const applied = applyGraphOpsTolerant({ doc, ops })
   const failures = [
     ...applied.errors,
-    ...await presetIdFailuresOf(host, ops, applied.result.doc as unknown as WorkflowDocument),
-    ...await modelSelectionFailuresOf(host, ops, applied.result.doc as unknown as WorkflowDocument),
+    ...await presetIdFailuresOf(host, ops, applied.result.doc),
+    ...await modelSelectionFailuresOf(host, ops, applied.result.doc),
   ]
   if (failures.length > 0) throwPatchErrors(failures)
   const result = applied.result
   // 串联既有结构校验：先 validateFlow（结构合法性）→ 再 checkGraphInvariants（编排质量）
-  const structural = validateFlow(result.doc as unknown as WorkflowDocument)
+  const structural = validateFlow(result.doc)
   if (!structural.ok) {
     throw new WfError(
       `WF_GRAPH_INVALID: the patch violates structural validation: ${structural.issues.slice(0, 6).map((issue) => `[${issue.code}] ${issue.message}`).join('; ')}`,
@@ -354,7 +356,7 @@ async function runGraphGroup(
   // 改图方恒为代理（工具不再提供来源参数）：元参数硬护栏因此永久生效。
   const milestoneUsed = Math.max(0, Math.floor(Number(host.milestoneUsedOf?.(input.sessionId)) || 0))
   const issues = checkGraphInvariants({
-    flow: result.doc as unknown as WorkflowDocument,
+    flow: result.doc,
     meta,
     origin: 'agent',
     patchOps: ops.length,
@@ -369,14 +371,14 @@ async function runGraphGroup(
     at: new Date().toISOString(),
     nodeIds: [...new Set([...result.createdNodeIds, ...result.updatedNodeIds])],
   }
-  const saved = await saveDoc(host, input, result.doc as unknown as WorkflowDocument)
+  const saved = await saveDoc(host, input, result.doc)
   return {
     revision: saved.revision,
     issues,
     result,
     savedId: saved.id,
     // 预算取补丁后的规模：父代理据此判断「还能加几个节点」，而不是补丁前的旧值
-    budget: budgetOf(result.doc as unknown as WorkflowDocument, { milestoneUsed, patchOps: ops.length }),
+    budget: budgetOf(result.doc, { milestoneUsed, patchOps: ops.length }),
   }
 }
 
@@ -557,7 +559,7 @@ async function runMarkGroup(
   return {
     marked,
     issues: [],
-    budget: markBudgetOf(flow as unknown as WorkflowDocument, {
+    budget: markBudgetOf(flow, {
       milestoneMax: facts.milestoneMax,
       milestoneUsed: used,
       patchOps: ops.length,

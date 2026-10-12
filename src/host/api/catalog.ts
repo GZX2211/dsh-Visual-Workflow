@@ -207,6 +207,12 @@ export class CatalogEndpoints extends VisualWorkflowApiBase {
     return presentationOf(this.host, `MCP 服务器（stdio：${line}）`, `MCP server (stdio: ${line})`)
   }
 
+  /**
+   * MCP 服务器写入边界（新建/更新、删除、启停）。
+   * 错误契约：registry 抛稳定码 WF_MCP_BAD_ARGS（入参非法）与 WF_MCP_NOT_FOUND
+   * （服务器不存在），本层原样透传；HTTP 状态在传输边界统一映射为 400 / 404
+   * （未知码才是 500）——状态映射不在端点内重复实现。
+   */
   async mcpPut(args: { server?: unknown }): Promise<unknown> {
     return upsertMcpServer(args?.server ?? {})
   }
