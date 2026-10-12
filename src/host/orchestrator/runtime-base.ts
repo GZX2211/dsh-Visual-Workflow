@@ -26,7 +26,7 @@ import { summarizeFlowChange } from './flow-diff.js'
 import { buildNodeContextFacts } from './graph-facts.js'
 import { parentExecutorOf } from './directive.js'
 import { WfError, messageOf } from './errors.js'
-import type { MilestoneMarkResult, MilestoneRunFacts, OrchestratorDeps, RunEntry } from './run-entry.js'
+import type { MilestoneMarkResult, MilestoneRunFacts, OrchestratorDeps, RunEntry, TerminateOptions } from './run-entry.js'
 import {
   type ChildMeta,
   type FlowLockInfo,
@@ -43,6 +43,8 @@ export abstract class RuntimeBase {
    * 而不必把基类反向依赖到下游继承层。
    */
   abstract resumeRun(input: { sessionId: string; flowId: string; fromRunId?: string }): Promise<ResumeResult>
+  abstract terminateRun(entry: RunEntry, options: TerminateOptions): Promise<boolean>
+  protected abstract advanceDag(entry: RunEntry): Promise<void>
   /** 全部 run（含已终止的历史内存条目；持久化历史另见 store.listRuns）。 */
   readonly runs = new Map<string, RunEntry>()
   /** childId → 运行位置反查（subagent/end 观察回写用）。 */
@@ -395,6 +397,7 @@ export abstract class RuntimeBase {
     for (const entry of this.runs.values()) {
       const s = entry.snapshot
       if (s.sessionId === sessionId && s.status === 'paused') {
+        if (s.executionMode === "dag") throw new WfError("DAG 暂停只能通过工作台恢复，不接受聊天工具自动续跑", "WF_DAG_MANAGED")
         target = s.flowId
         break
       }
@@ -415,6 +418,7 @@ export abstract class RuntimeBase {
         return null
       }
       target = newest?.flowId ?? null
+      if (newest?.executionMode === "dag") throw new WfError("DAG 断点只能通过工作台恢复，不接受聊天工具自动续跑", "WF_DAG_MANAGED")
     }
     if (!target) return null
 
@@ -611,6 +615,7 @@ export abstract class RuntimeBase {
 
   /** 重读当前（运行的）工作流最新快照：每节点执行前读一次，运行中调整即时生效（双向同步①）。 */
   async currentResolvedFlow(entry: RunEntry): Promise<WorkflowDocument> {
+    if (entry.snapshot.executionMode === "dag") return entry.baseFlow
     try {
       // 模式二运行的服务文档在 services/ 目录，必须按 mode 分派读取；
       // 固定读 workflows/ 会让 mode2 运行「读错文档/读到 null 隐式回退」（Bug 20）。
@@ -643,6 +648,7 @@ export abstract class RuntimeBase {
     for (const entry of this.runs.values()) {
       const s = entry.snapshot
       if (s.flowId !== flowId || s.sessionId !== sessionId) continue
+      if (s.executionMode === "dag") continue
       if (s.status !== 'running' && s.status !== 'paused') continue
       // 编排变更判定：与「上一次同步进事实源的画布」比较（读失败按未变更处理，
       // 宁可不注入也不误注入——事实源仍照常刷新，宿主侧 currentResolvedFlow 兜底）。
@@ -720,6 +726,8 @@ export abstract class RuntimeBase {
    */
   protected notifyRunReflection(entry: RunEntry, warnPrefix: string): void {
     const snapshot = entry.snapshot
+    // A deterministic run must not wake a planning model for control flow or reflection.
+    if (snapshot.executionMode === "dag") return
     const runId = snapshot.id
     if (!runId || this.reflectionNotified.has(runId)) return
     const facts = reflectionFactsOf({

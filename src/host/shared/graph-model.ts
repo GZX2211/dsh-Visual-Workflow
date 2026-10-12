@@ -323,12 +323,17 @@ export interface Line {
 /** 运行模式：模式一编排执行、模式二后台服务。 */
 export type WorkflowMode = 'mode1' | 'mode2'
 
+/** 固定图由 Runtime 调度；缺省字段的历史文档保留 Agent 编排。 */
+export type ExecutionMode = "dag" | "agent"
+
 /**
  * 工作流模板（WorkflowTemplate）：图2 交互改造新增——左侧「工作流模板」列表的
  * 模板实体，与工作流实例同构（nodes/lines 全量内联），但**全局共享、跨会话可见**
  * （不按 sessionId 隔离），拖入画布保存后通过「创建实例」转为当前会话的实例。
  */
 export interface WorkflowTemplate {
+  executionMode?: ExecutionMode
+  dagConcurrency?: number
   /** 模板稳定标识（模板库内唯一）。 */
   id: string
   /** 运行模式（mode1 模板 / mode2 服务模板）。 */
@@ -385,6 +390,8 @@ export interface LastAgentPatch {
  * （数据模型核心规则）。
  */
 export interface WorkflowDocument {
+  executionMode?: ExecutionMode
+  dagConcurrency?: number
   // 说明：meta 字段类型即 OrgMeta 本体（type-only 引用，编译期擦除）
   /** 工作流稳定标识（flowId，会话内唯一；按 sessionId + flowId 维度隔离）。 */
   id: string

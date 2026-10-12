@@ -106,6 +106,8 @@ export interface GroupStartResult {
 }
 /** 节点任务启动入参（任务块与节点级参数，经子代理引擎透传官方配置）。 */
 export interface NodeStartInput {
+    /** DAG 在官方接纳之前登记预留身份，隔离极快结算及父会话通知。 */
+    onChildProvisioning?: (childId: string) => void;
     /** 派发/重建前重新检查运行状态（暂停可能不触发 AbortSignal）。 */
     assertActive?: () => void;
     runId?: string;
@@ -187,6 +189,8 @@ export type TurnEndInfo = {
 };
 /** 父代理侧宿主能力（会话根 Agent 服务；index.ts 的 CordisAgentHost 实现）。 */
 export interface AgentHost {
+    /** 保留 DAG child 的官方通知为上下文，不唤醒父模型；不处理其它来源。 */
+    installDagNotificationGate?(sessionId: string, ownsChild: (childId: string) => boolean): boolean;
     /** agents 服务是否可用。 */
     available(): boolean;
     /** 取会话根 Agent；未激活返回 null。 */
@@ -278,6 +282,7 @@ export interface CallerInfo {
 }
 /** 子代理归属反查记录（childId → 运行位置；wfRunNode 启动成功后登记）。 */
 export interface ChildMeta {
+    executionMode?: "dag" | "agent";
     sessionId: string;
     flowId: string;
     nodeId: string;

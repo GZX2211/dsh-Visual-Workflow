@@ -45,7 +45,7 @@ export async function sweepWatchdogOnce(runtime: OrchestratorRuntime): Promise<v
     if (!snapshot || snapshot.status !== 'running') continue
 
     // 先处理真实父错误，不能被同一扫描中的空闲或执行时限覆盖。
-    const terminal = runtime.parentTurnTerminal(entry)
+    const terminal = snapshot.executionMode === "dag" ? null : runtime.parentTurnTerminal(entry)
     if (terminal?.kind === "error" && !runtime.parentRunning(entry)) {
       await runtime.failRunForParentError(entry, terminal.error)
       continue
@@ -59,10 +59,10 @@ export async function sweepWatchdogOnce(runtime: OrchestratorRuntime): Promise<v
       continue
     }
     // 官方 Agent.status=running 涵盖模型请求、工具调用和压缩；不以 wf_* 静默判断它空闲。
-    if (runtime.parentRunning(entry)) entry.lastActiveAt = now
+    if (snapshot.executionMode !== "dag" && runtime.parentRunning(entry)) entry.lastActiveAt = now
 
     // 自愈：清掉已结束/已消失的 in-flight 子代理（流产物已结束但 subagent/end 未观测到时按结束计）
-    if (entry.inflight.size > 0) {
+    if (snapshot.executionMode !== "dag" && entry.inflight.size > 0) {
       for (const childId of [...entry.inflight]) {
         if (!runtime.childRunning(childId)) {
           entry.inflight.delete(childId)

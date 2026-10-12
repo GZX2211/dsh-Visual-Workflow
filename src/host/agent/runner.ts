@@ -16,6 +16,7 @@
 // - CHILD_AGENT_HIDDEN_TOOLS（wf_run_node/wf_run_node_wait/wf_finish + 自主编排两工具）永不进 allow，且 tools.restrict 显式 deny（双保险）。
 
 import { readFile } from 'node:fs/promises'
+import { randomUUID } from "node:crypto"
 import { dbInEdges, parseExecutionContract } from '../graph/index.js'
 import type { FlowStore } from '../storage/flow-store.js'
 import type { GraphNode, RoleNode } from '../shared/graph-model.js'
@@ -145,6 +146,7 @@ export interface SubagentsServiceLike {
   list?(): string[]
   /** 延续子代理创建：首条 prompt 即任务块（request 兼容 persona/toolFilter/agentOptions；signal 为必填）。 */
   startContinuable(spec: {
+    childId?: string
     provider: string
     label: string
     request: {
@@ -862,8 +864,12 @@ export class NodeAgentRunner implements NodeRunner {
     // 首轮 followup 组装之前串行 await 触发；此时 withPending 的 AsyncLocalStorage 状态仍在作用域内，
     // 各 contribution 能读到本次创建的 promptState/manifest）。因此 startContinuable 只需要
     // 创建子代理并提交首条任务，不再在返回后重复安装——避免二次「工具已更新」。
+    // Only DAG dispatch reserves an official identity; legacy creation/recovery stays unchanged.
+    const reservedChildId = input.onChildProvisioning ? randomUUID() : undefined
+    if (reservedChildId) input.onChildProvisioning?.(reservedChildId)
     const started = await this.deps.toolFilter.withPending(tools, () => this.deps.promptSetup.withPending(promptState, async () => {
       const result = await subagents.startContinuable({
+        ...(reservedChildId ? { childId: reservedChildId } : {}),
         provider,
         label: node.data.label || `visual-workflow:${input.flowId}:${node.id}`,
         request: {

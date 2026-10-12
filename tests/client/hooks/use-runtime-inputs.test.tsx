@@ -47,6 +47,37 @@ async function prepare(runId?: string, binding = false) {
 }
 afterEach(async () => { await act(async () => { root?.unmount() }); root = undefined; container?.remove(); vi.restoreAllMocks() })
 
+it("test_fresh_run_mode_comes_from_definition_and_resume_mode_is_frozen", async () => {
+  const config = { ...options, executionMode: "dag", dagConcurrency: 3, checkpoint: { runId: "old", executionMode: "agent", dagConcurrency: 1 } }
+  const remote = remoteOf()
+  vi.mocked(remote.call).mockImplementation(async () => structuredClone(config))
+  await render(remote)
+  let pending!: ReturnType<PrepareRuntimeInputs>
+  await act(async () => { pending = face.inputs.prepare("session", "flow", undefined, false, true, true) })
+  expect(face.inputs.dialog).toMatchObject({ executionMode: "dag", dagConcurrency: 3, resuming: false })
+  expect(container?.textContent).toContain(zh.runtimeConcurrency)
+  await act(async () => { face.inputs.cancel() })
+  await expect(pending).resolves.toBeNull()
+  await act(async () => { pending = face.inputs.prepare("session", "flow") })
+  expect(face.inputs.dialog).toMatchObject({ executionMode: "agent", dagConcurrency: 1, resuming: true })
+  expect(container?.textContent).toContain(zh.runtimeFrozenMode)
+  const modeLabel = Array.from(container!.querySelectorAll("label")).find((label) => label.textContent?.startsWith(zh.runtimeExecutionMode))!
+  expect(modeLabel.querySelector("select")!.disabled).toBe(true)
+  await act(async () => { face.inputs.cancel() })
+  await expect(pending).resolves.toBeNull()
+})
+
+it("test_explicit_agent_choice_is_submitted_with_new_run_without_altering_file_selection", async () => {
+  const remote = remoteOf(() => ({ runId: "started" }))
+  vi.mocked(remote.call).mockImplementationOnce(async () => ({ ...options, executionMode: "dag", dagConcurrency: 2 }))
+  await render(remote)
+  let started!: Promise<string | null>
+  await act(async () => { started = face.control.startRun("session", "flow", true, true) })
+  await act(async () => { face.inputs.change({ executionMode: "agent" }); await face.inputs.submit() })
+  await expect(started).resolves.toBe("started")
+  expect(vi.mocked(remote.call).mock.calls.find(([name]) => name === EP.EP_RUN)?.[1]).toMatchObject({ freshStart: true, executionMode: "agent", dagConcurrency: 2, runtimeInputs: { workflowInputs: {}, nodeInputs: {} } })
+})
+
 it("test_legacy_normal_run_skips_dialog_and_preserves_original_request", async () => {
   const remote = remoteOf(() => ({ runId: "started" }))
   await render(remote)

@@ -10,9 +10,49 @@
 // 另覆盖 createOrGetServiceAgent（模式二服务进程的会话根 Agent 取/建适配）：
 // 服务缺失报错、已有 Agent 复用、新建时携带父代理节点 provider/model。
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { CordisAgentHost, createOrGetServiceAgent } from '../../../src/host/agent/agents-host.js'
 import type { RootAgentLike, TurnEndInfo } from '../../../src/host/orchestrator/index.js'
+
+describe("DAG notification adapter", () => {
+  it("test_owned_notices_and_relays_are_recorded_without_waking_root_and_disposal_restores_methods", () => {
+    const injected: unknown[] = []
+    const wakes: unknown[] = []
+    const root = { id: "s1", inject(message: unknown) { injected.push(message) }, followup(message: unknown) { wakes.push([this.id, "followup", message]) }, steer(message: unknown) { wakes.push([this.id, "steer", message]) } }
+    const originalFollowup = root.followup
+    const originalSteer = root.steer
+    const disposers: Array<() => void> = []
+    const host = new CordisAgentHost({ get: () => ({ get: () => root }), effect: (effect: () => () => void) => { disposers.push(effect()) } } as never)
+    expect(host.installDagNotificationGate("s1", (id) => id === "dag-child")).toBe(true)
+    expect(host.installDagNotificationGate("s1", (id) => id === "dag-child")).toBe(true)
+    const notice = { source: { kind: "subagent-settled", form: "notice", senderSessionId: "dag-child" }, content: [{ type: "text", text: "settlement" }] }
+    const relay = { source: { kind: "agent-message", form: "relay", senderSessionId: "dag-child" }, content: [{ type: "text", text: "result" }] }
+    root.followup(notice)
+    root.steer(relay)
+    expect(injected).toEqual([notice, relay])
+    expect(wakes).toEqual([])
+    const user = { source: { kind: "user" }, content: [] }
+    const foreign = { ...notice, source: { ...notice.source, senderSessionId: "other-child" } }
+    root.followup(user)
+    root.steer(foreign)
+    root.followup(null)
+    expect(wakes).toEqual([["s1", "followup", user], ["s1", "steer", foreign], ["s1", "followup", null]])
+    expect(disposers).toHaveLength(1)
+    disposers[0]()
+    expect(root.followup).toBe(originalFollowup)
+    expect(root.steer).toBe(originalSteer)
+    root.followup(notice)
+    expect(wakes.at(-1)).toEqual(["s1", "followup", notice])
+  })
+  it("test_missing_nonwaking_capability_is_rejected_without_installing_partial_patch", () => {
+    const followup = vi.fn()
+    const effect = vi.fn()
+    const host = new CordisAgentHost({ get: () => ({ get: () => ({ followup }) }), effect } as never)
+    expect(host.installDagNotificationGate("s1", () => true)).toBe(false)
+    expect(followup).not.toHaveBeenCalled()
+    expect(effect).not.toHaveBeenCalled()
+  })
+})
 
 /** 构造一个最小 root session：0.1.1 形状（events 数组）。 */
 function rc2Session(events: Array<Record<string, unknown>>): { events: unknown[] } {

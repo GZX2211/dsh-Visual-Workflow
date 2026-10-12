@@ -21,6 +21,8 @@ import { runtimeInputsOf, inputSlotsOf, handoffPolicyOf, validateRequiredInputs,
 import { boundNodeInputs, workflowInputTarget } from "./input-handoff.js"
 import { ctxInEdges, isFlowLine, mainNodeIdOf, nodeById } from "../graph/index.js"
 import type { RuntimeInputOptions } from "../shared/runtime-types.js"
+import { dagConcurrencyOf, executionModeOf, validateDagForRun } from "./dag-scheduler.js"
+import { preflightNodeInputs } from "./execution-inputs.js"
 
 /**
  * 本次运行「组织预算」末段文本（自主编排方案 §6.4；P2 正式接入）。
@@ -34,7 +36,7 @@ function orgBudgetTextOf(snapshot: RunSnapshot, flow: WorkflowDocument): string 
   return buildOrgBudgetText(orgBudgetOf(meta, orgUsageOf(flow, { milestoneUsed })))
 }
 
-export class RuntimeLaunch extends RuntimeBase {
+export abstract class RuntimeLaunch extends RuntimeBase {
   /**
    * 协作通道判定（编排指令与成员任务块的唯一分支依据）：
    * 官方 Agent Team 可用（服务已挂载 + 根 Agent 存活 + 有可用 provider）→ official；
@@ -88,7 +90,7 @@ export class RuntimeLaunch extends RuntimeBase {
     try { initialNodeId = workflowInputTarget(flow) } catch (error) {
       if (!(error instanceof WfError) || error.code !== "WF_INPUT_AMBIGUOUS") throw error
     }
-    return { nodeInputs, files, ...(initialNodeId ? { initialNodeId } : {}), handoffPolicy: checkpoint?.handoffPolicy ?? (checkpoint && !checkpoint.harnessContext ? "explicit" : undefined), ...(checkpoint ? { checkpoint: { runId: checkpoint.id, runtimeInputs: publicRuntimeInputs(checkpoint.runtimeInputs), handoffPolicy: checkpoint.handoffPolicy } } : {}) }
+    return { executionMode: executionModeOf(flow.executionMode), dagConcurrency: dagConcurrencyOf(flow.dagConcurrency), nodeInputs, files, ...(initialNodeId ? { initialNodeId } : {}), handoffPolicy: checkpoint?.handoffPolicy ?? (checkpoint && !checkpoint.harnessContext ? "explicit" : undefined), ...(checkpoint ? { checkpoint: { runId: checkpoint.id, runtimeInputs: publicRuntimeInputs(checkpoint.runtimeInputs), handoffPolicy: checkpoint.handoffPolicy, executionMode: checkpoint.executionMode ?? "agent", dagConcurrency: checkpoint.dagConcurrency } } : {}) }
   }
 
   /** Pending-node binding uses the dispatch mutex and publishes only after a durable write. */
@@ -159,6 +161,9 @@ export class RuntimeLaunch extends RuntimeBase {
       ? await this.deps.store.getServiceAsFlow(flowId)
       : await this.deps.store.getWorkflow(sessionId, flowId)
     if (!flow) throw new WfError(mode === 'mode2' ? '服务不存在' : '工作流不存在', 'WF_NOT_FOUND')
+    const executionMode = executionModeOf(input.executionMode ?? flow.executionMode)
+    const dagConcurrency = executionMode === "dag" ? dagConcurrencyOf(input.dagConcurrency ?? flow.dagConcurrency) : undefined
+    if (executionMode === "dag") validateDagForRun(flow)
 
     // 运行前完整性：启动/输入与结束/输出必须齐备（保存中间态与运行分离）
     const missing = missingStageLabels(flow)
@@ -178,17 +183,25 @@ export class RuntimeLaunch extends RuntimeBase {
     const root = this.deps.agents.getRootAgent(runSessionId)
     if (!root) throw new WfError(runSessionId === sessionId ? '当前会话 Agent 未激活；请先在对话区发送一条消息后重试' : '新会话 Agent 未激活，无法启动', 'WF_ROOT_INACTIVE')
     if (root.status === 'running') throw new WfError('父代理当前正在忙碌，请稍后再运行', 'WF_ROOT_BUSY')
+    if (executionMode === "dag" && !this.deps.agents.installDagNotificationGate?.(runSessionId, (id) => this.childIndex.get(id)?.executionMode === "dag" && this.childIndex.get(id)?.sessionId === runSessionId)) throw new WfError("宿主缺少 DAG 的无唤醒通知能力（inject/followup/steer）；请使用兼容 agent 模式", "WF_DAG_UNSUPPORTED")
 
     // 父代理（会话根 Agent）配置注入：角色 Prompt 段（含 .md 路径读取）+ 官方系统提示词开关 +
     // 工具散文段开关 + 模型/思考强度。非侵入：挂载到根 Agent 的 ctx，仅对本会话生效，不修改官方源码。
-    await this.bindParentConfig(flow, root, runSessionId)
+    if (executionMode === "agent") await this.bindParentConfig(flow, root, runSessionId)
 
     const runId = this.deps.newRunId?.() ?? `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     const snapshot = createRunSnapshot({ runId, flow, sessionId: runSessionId, mode, now: this.now() })
+    snapshot.executionMode = executionMode
+    if (dagConcurrency !== undefined) snapshot.dagConcurrency = dagConcurrency
     snapshot.workingDirectory = await this.deps.workingDirectory?.(runSessionId)
     if (input.handoffPolicy === undefined) snapshot.harnessContext = true
     await prepareRunInputs(flow, snapshot, input.fileBindings, this.deps.store.root, await this.deps.authorizedInputFiles?.(runSessionId))
     await this.prepareRuntimeInputs(flow, snapshot, input.runtimeInputs, input.handoffPolicy)
+    if (executionMode === "dag") {
+      for (const node of flow.nodes) if (node.kind === "agent" && flow.lines.filter(isFlowLine).filter((line) => line.target === node.id).every((line) => nodeById(flow, line.source)?.kind === "start")) {
+        await preflightNodeInputs(flow, node, snapshot, this.deps.store.root, await this.deps.authorizedInputFiles?.(runSessionId), Object.values(boundNodeInputs(snapshot, node.id)).some((values) => values.length))
+      }
+    }
     // 元参数三层之第三层（D-13）：把「有效值（模板 ← 实例覆盖）」冻结进快照。
     // 为什么在 startRun 冻结而非每次读取：运行期预算须可审计、可还原；此后改模板/实例
     // 的 meta 不影响本次运行（续跑继承旧冻结值，见 resume.ts 的 buildResumedSnapshot）。
@@ -211,7 +224,7 @@ export class RuntimeLaunch extends RuntimeBase {
     const entry: RunEntry = {
       controller: new AbortController(),
       snapshot,
-      baseFlow: flow,
+      baseFlow: structuredClone(flow),
       inflight: new Set(),
       attempts: new Map(),
       callCount: 0,
@@ -233,6 +246,13 @@ export class RuntimeLaunch extends RuntimeBase {
     } catch (error) {
       this.runs.delete(runId)
       throw new WfError(`运行记录或流程定义文件写入失败：${messageOf(error)}`, 'WF_DEF_WRITE_FAILED')
+    }
+
+    if (executionMode === "dag") {
+      for (const node of flow.nodes) if (node.kind === "start") setNodeStatus(snapshot, node.id, "ok", { now: this.now() })
+      await this.deps.store.saveRun(snapshot)
+      await this.advanceDag(entry)
+      return { runId, defPath, sessionId: runSessionId }
     }
 
     // 一次性注入 + 唤醒：官方 Message 契约要求 id 与 source 齐备（缺 source 父回合
@@ -309,10 +329,11 @@ export class RuntimeLaunch extends RuntimeBase {
     // （登记前还会在同一同步块内重检一次，见 runs.set 前注释）
     this.assertResumeLockFree(flowId, sessionId)
 
-    const flow = prev.mode === 'mode2'
+    const flow = prev.executionMode === "dag" ? await this.deps.store.readOrchestration(prev.id) : prev.mode === 'mode2'
       ? await this.deps.store.getServiceAsFlow(flowId)
       : await this.deps.store.getWorkflow(sessionId, flowId)
     if (!flow) throw new WfError(prev.mode === 'mode2' ? '服务不存在' : '工作流不存在', 'WF_NOT_FOUND')
+    if (prev.executionMode === "dag") validateDagForRun(flow)
 
     // 运行前完整性（与全新启动同一套校验）
     const missing = missingStageLabels(flow)
@@ -328,10 +349,11 @@ export class RuntimeLaunch extends RuntimeBase {
     const root = this.deps.agents.getRootAgent(sessionId)
     if (!root) throw new WfError('当前会话 Agent 未激活；请先在对话区发送一条消息后重试', 'WF_ROOT_INACTIVE')
     if (root.status === 'running') throw new WfError('父代理当前正在忙碌，请稍后再运行', 'WF_ROOT_BUSY')
+    if (prev.executionMode === "dag" && !this.deps.agents.installDagNotificationGate?.(sessionId, (id) => this.childIndex.get(id)?.executionMode === "dag" && this.childIndex.get(id)?.sessionId === sessionId)) throw new WfError("宿主缺少 DAG 的无唤醒通知能力；请以 agent 模式新建运行", "WF_DAG_UNSUPPORTED")
 
     // 父代理（会话根 Agent）配置注入：角色 Prompt 段（含 .md 路径读取）+ 官方系统提示词开关 +
     // 工具散文段开关 + 模型/思考强度。非侵入：挂载到根 Agent 的 ctx，仅对本会话生效，不修改官方源码。
-    await this.bindParentConfig(flow, root, sessionId)
+    if (prev.executionMode !== "dag") await this.bindParentConfig(flow, root, sessionId)
 
     const runId = this.deps.newRunId?.() ?? `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     const snapshot = buildResumedSnapshot({ prev, runId, flow, sessionId, mode: prev.mode, now: this.now() })
@@ -348,7 +370,7 @@ export class RuntimeLaunch extends RuntimeBase {
     const entry: RunEntry = {
       controller: new AbortController(),
       snapshot,
-      baseFlow: flow,
+      baseFlow: structuredClone(flow),
       inflight: new Set(),
       attempts: new Map(),
       callCount: 0,
@@ -369,6 +391,26 @@ export class RuntimeLaunch extends RuntimeBase {
     } catch (error) {
       this.runs.delete(runId)
       throw new WfError(`运行记录或流程定义文件写入失败：${messageOf(error)}`, 'WF_DEF_WRITE_FAILED')
+    }
+
+    if (prev.executionMode === "dag") {
+      // The replacement owns future dispatch. Abort and retire the old generation first.
+      for (const [oldId, oldEntry] of [...this.runs]) if (oldId !== runId && oldEntry.snapshot.sessionId === sessionId && oldEntry.snapshot.flowId === flowId && oldEntry.snapshot.status === "paused") {
+        oldEntry.controller.abort("resumed")
+        this.rejectWaiters(oldEntry)
+        this.rejectAsks(oldEntry)
+        for (const childId of oldEntry.inflight) {
+          const meta = this.childIndex.get(childId)
+          if (meta) this.childIndex.set(childId, { ...meta, retired: true })
+          await this.deps.runner.interruptChild(childId, sessionId).catch(() => undefined)
+        }
+        this.runs.delete(oldId)
+      }
+      for (const node of flow.nodes) if (node.kind === "start") setNodeStatus(snapshot, node.id, "ok", { now: this.now() })
+      for (const record of snapshot.nodes) if (!record.resumed) entry.attempts.set(record.nodeId, record.attempts)
+      await this.deps.store.saveRun(snapshot)
+      await this.advanceDag(entry)
+      return { runId, defPath, resumedFromRunId: prev.id }
     }
 
     // 断点继续指令：isResume 动态态注入末段（已 ok 不重跑；从 resumeFromNodeId 继续）。

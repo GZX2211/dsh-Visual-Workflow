@@ -5,6 +5,7 @@ import type { Dict } from "../i18n.js"
 import type { RemoteFace } from "./useRemote.js"
 import { EP } from "../lib/remote.js"
 import type { RuntimeInputValue, InputAttachmentRef } from "../../host/shared/runtime-types.js"
+import type { ExecutionMode } from "../../host/shared/graph-model.js"
 export type InputEditorKind = "text" | "json" | "attachment"
 export function validInputSlot(name: string): boolean { return !!name.trim() && name.length <= 128 && !["__proto__", "prototype", "constructor"].includes(name) }
 export function formInputValue(kind: InputEditorKind, value: string, files: readonly InputAttachmentRef[]): RuntimeInputValue {
@@ -15,10 +16,13 @@ export function formInputValue(kind: InputEditorKind, value: string, files: read
   return { kind: "file", fileRef: { source: "attachment", attachmentId: file.attachmentId, name: file.name, bytes: file.bytes } }
 }
 
-export interface RuntimeInputSelection { runtimeInputs: RuntimeInputs; handoffPolicy?: HandoffPolicy; requestGeneration?: number }
+export interface RuntimeInputSelection { runtimeInputs: RuntimeInputs; handoffPolicy?: HandoffPolicy; executionMode?: ExecutionMode; dagConcurrency?: number; requestGeneration?: number }
 export interface RuntimeInputLifecycle { capture(): number; isCurrent(ticket: number): boolean }
 export type PrepareRuntimeInputs = (sessionId: string, flowId: string, runId?: string, binding?: boolean, configure?: boolean, freshStart?: boolean) => Promise<RuntimeInputSelection | null | undefined>
 export interface RuntimeInputDialogState {
+  executionMode?: ExecutionMode
+  dagConcurrency?: number
+  resuming?: boolean
   sessionId: string; flowId: string; options: RuntimeInputOptions; inputs: RuntimeInputs; handoffPolicy?: HandoffPolicy
   nodeId?: string; runId?: string; revision?: number; eligibleNodes: string[]; error: string; busy: boolean
   blockedNodes?: string[]
@@ -73,6 +77,9 @@ export function useRuntimeInputs(remote: RemoteFace, t: Dict, owner: string) {
     const savedInputs = isFreshStart ? undefined : checkpoint?.runtimeInputs ?? options.checkpoint?.runtimeInputs
     const inputs = structuredClone(savedInputs ?? { workflowInputs: {}, nodeInputs: {} })
     const handoffPolicy = isFreshStart ? options.checkpoint?.handoffPolicy : checkpoint?.handoffPolicy ?? options.handoffPolicy
+    const resuming = !isFreshStart && !!(checkpoint || options.checkpoint)
+    const executionMode = resuming ? checkpoint?.executionMode ?? options.checkpoint?.executionMode : options.executionMode
+    const dagConcurrency = resuming ? checkpoint?.dagConcurrency ?? options.checkpoint?.dagConcurrency : options.dagConcurrency
     const fileSlots = Object.entries(options.nodeInputs).flatMap(([id, requirements]) => Object.entries(requirements).filter(([, requirement]) => requirement.kind === "file" && requirement.required !== false).map(([name]) => ({ id, name })))
     let selectedAttachment = false
     // Only a new run may choose a unique authorized file; uploading during execution never binds it.
@@ -86,11 +93,11 @@ export function useRuntimeInputs(remote: RemoteFace, t: Dict, owner: string) {
     const missingRequired = Object.entries(options.nodeInputs).some(([id, requirements]) => Object.entries(requirements).some(([name, requirement]) => requirement.required !== false && !(inputs.nodeInputs[id]?.[name] ?? inputs.workflowInputs[name] ?? []).some((value) => value.kind === requirement.kind)))
     if (!binding && !configure && !missingRequired) {
       requested.current = null
-      return selectedAttachment || savedInputs || handoffPolicy === "auto" ? { runtimeInputs: inputs, handoffPolicy, requestGeneration: expected } : undefined
+      return selectedAttachment || savedInputs || handoffPolicy === "auto" ? { runtimeInputs: inputs, handoffPolicy, executionMode, dagConcurrency, requestGeneration: expected } : undefined
     }
     const eligibleNodes = Object.keys(options.nodeInputs).filter((id) => !binding || checkpoint?.nodes.some((node) => node.nodeId === id && node.status === "pending" && node.attempts === 0))
     const blockedNodes = binding ? Object.keys(options.nodeInputs).filter((id) => !eligibleNodes.includes(id)) : []
-    const state: RuntimeInputDialogState = { sessionId, flowId, options, inputs, handoffPolicy, eligibleNodes, blockedNodes, freshStart: isFreshStart, ...(binding ? { nodeId: eligibleNodes[0], runId, revision: checkpoint?.inputRevision ?? 0 } : {}), busy: false, error: binding && !eligibleNodes.length ? t.runtimeRestartRequired : "" }
+    const state: RuntimeInputDialogState = { executionMode, dagConcurrency, resuming, sessionId, flowId, options, inputs, handoffPolicy, eligibleNodes, blockedNodes, freshStart: isFreshStart, ...(binding ? { nodeId: eligibleNodes[0], runId, revision: checkpoint?.inputRevision ?? 0 } : {}), busy: false, error: binding && !eligibleNodes.length ? t.runtimeRestartRequired : "" }
     current.current = state
     setDialog(state)
     return new Promise<RuntimeInputSelection | null>((resolve) => { pending.current = resolve })
@@ -158,7 +165,7 @@ export function useRuntimeInputs(remote: RemoteFace, t: Dict, owner: string) {
       if (state.runId && !state.nodeId) throw new Error(t.runtimeNoPendingNode)
       if (state.runId) await remote.call(EP.EP_RUN_INPUT_BIND, { sessionId: state.sessionId, runId: state.runId, nodeId: state.nodeId, expectedRevision: state.revision, inputs: inputs.nodeInputs[state.nodeId!] ?? {} })
       if (!alive.current || expected !== generation.current) return
-      pending.current?.({ runtimeInputs: inputs, handoffPolicy: state.handoffPolicy, requestGeneration: expected })
+      pending.current?.({ runtimeInputs: inputs, handoffPolicy: state.handoffPolicy, ...(state.executionMode ? { executionMode: state.executionMode } : {}), ...(state.dagConcurrency !== undefined ? { dagConcurrency: state.dagConcurrency } : {}), requestGeneration: expected })
       pending.current = null
       requested.current = null
       current.current = null

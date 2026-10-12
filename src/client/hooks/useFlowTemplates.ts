@@ -58,6 +58,7 @@ export function useFlowTemplates(dispatch: Dispatch<StudioAction>, remote: Remot
     const draft = {
       id: `tpl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
       mode,
+      executionMode: mode === "mode1" ? "dag" : "agent",
       name,
       description: '',
       revision: 0,

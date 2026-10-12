@@ -12,6 +12,19 @@ import { cleanupAll, databaseNode, makeFlow, makeHarness, saveFlow } from './fix
 
 afterEach(cleanupAll)
 
+it("test_resume_preserves_frozen_agent_mode_after_definition_change_and_rejects_mode_override", async () => {
+  const h = await makeHarness()
+  await saveFlow(h)
+  await h.api.handle("run", { sessionId: "session-1", flowId: "flow-1" })
+  await h.runtime.stopRun("run-1")
+  const changed = { ...makeFlow(), executionMode: "dag" as const }
+  await h.store.saveWorkflow(changed, "session-1", { force: true })
+  await expect(h.api.handle("run", { sessionId: "session-1", flowId: "flow-1", executionMode: "dag" })).rejects.toMatchObject({ status: 409, code: "WF_DAG_CONFIG_CONFLICT" })
+  expect(await h.store.getRun("run-2")).toBeNull()
+  await h.api.handle("run", { sessionId: "session-1", flowId: "flow-1" })
+  expect((await h.store.getRun("run-2"))!.executionMode).toBe("agent")
+})
+
 it("test_input_options_hide_attachment_path_and_binding_uses_current_session_resolution", async () => {
   let path = ""
   const file = { attachmentId: "admitted", name: "input.txt", bytes: 4 }

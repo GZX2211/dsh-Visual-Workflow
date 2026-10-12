@@ -1,7 +1,9 @@
-import { type FinishArgs, type FinishResult, type RunNodeArgs, type RunNodeResult } from './run-entry.js';
+import { type FinishArgs, type FinishResult, type RunEntry, type RunNodeArgs, type RunNodeResult } from './run-entry.js';
 import { type CallerInfo } from './seams.js';
 import { RuntimeLaunch } from './runtime-launch.js';
-export declare class RuntimeExecute extends RuntimeLaunch {
+export declare abstract class RuntimeExecute extends RuntimeLaunch {
+    /** The existing dispatch set serializes frontier decisions and per-node start windows. */
+    protected advanceDag(run: RunEntry): Promise<void>;
     /** 校验调用者为「当前会话根 Agent」并取可直接执行节点的激活运行（必要时自动续跑）。 */
     private requireRootRun;
     /**
@@ -15,6 +17,7 @@ export declare class RuntimeExecute extends RuntimeLaunch {
     wfRunNode(caller: CallerInfo, args: RunNodeArgs, callerSignal?: AbortSignal, options?: {
         expectedMode?: 'mode1' | 'mode2';
     }): Promise<RunNodeResult>;
+    private dispatchAgentNode;
     private runAgentNode;
     /**
      * 协作组节点执行：把整组启动为官方 Agent Team。

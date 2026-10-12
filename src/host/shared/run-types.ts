@@ -9,6 +9,7 @@ import type { RuntimeInputs, HandoffPolicy, NodeInputAttachment } from "./runtim
 // 也不得定义运行时值。
 
 import type { OrgMeta } from './org-meta.js'
+import type { ExecutionMode } from "./graph-model.js"
 
 // ---------------------------------------------------------------------------
 // run 快照（runs/<runId>.json，架构文档 §6.1）
@@ -39,6 +40,9 @@ export type NodeRunStatus =
  * 自旧 run 并标记来源，经 resumedFromRunId 追溯继承链（需求文档 §4.7 规则 2）。
  */
 export interface RunSnapshot {
+  /** 创建时冻结；没有字段的历史快照继续使用 Agent 编排。 */
+  executionMode?: ExecutionMode
+  dagConcurrency?: number
   /** run 稳定标识（runId）。 */
   id: string
   /** 关联工作流 id（flowId）。 */
@@ -167,6 +171,8 @@ export interface RunFailure {
 }
 
 export interface NodeAttempt {
+  /** 当前尝试唯一一次接纳的条件路由，使用冻结图的连线 ID。 */
+  dagRoutes?: string[]
   runId?: string
   attempt: number
   phase: "child_start" | "child_execute" | "settled"

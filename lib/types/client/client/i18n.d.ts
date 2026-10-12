@@ -139,6 +139,11 @@ export declare const zh: {
     runtimeNoPendingNode: string;
     runtimeNoRequirements: string;
     runtimePolicy: string;
+    runtimeExecutionMode: string;
+    runtimeDag: string;
+    runtimeAgent: string;
+    runtimeConcurrency: string;
+    runtimeFrozenMode: string;
     runtimeHarness: string;
     runtimeRemove: string;
     runtimeRequirements: string;

@@ -1,5 +1,6 @@
 import type { RuntimeInputs, HandoffPolicy, NodeInputAttachment } from "./runtime-types.js";
 import type { OrgMeta } from './org-meta.js';
+import type { ExecutionMode } from "./graph-model.js";
 /** run 运行状态：运行/暂停/完成/失败/停止/中断（架构文档 §4.3 状态机 + §6.1）。 */
 export type RunStatus = 'running' | 'paused' | 'completed' | 'failed' | 'stopped' | 'interrupted';
 /** 单节点运行状态（架构文档 §6.1 nodes[].status）。 */
@@ -10,6 +11,9 @@ export type NodeRunStatus = 'pending' | 'running' | 'armed' | 'ok' | 'fail' | 's
  * 自旧 run 并标记来源，经 resumedFromRunId 追溯继承链（需求文档 §4.7 规则 2）。
  */
 export interface RunSnapshot {
+    /** 创建时冻结；没有字段的历史快照继续使用 Agent 编排。 */
+    executionMode?: ExecutionMode;
+    dagConcurrency?: number;
     /** run 稳定标识（runId）。 */
     id: string;
     /** 关联工作流 id（flowId）。 */
@@ -141,6 +145,8 @@ export interface RunFailure {
     occurredAt: string;
 }
 export interface NodeAttempt {
+    /** 当前尝试唯一一次接纳的条件路由，使用冻结图的连线 ID。 */
+    dagRoutes?: string[];
     runId?: string;
     attempt: number;
     phase: "child_start" | "child_execute" | "settled";

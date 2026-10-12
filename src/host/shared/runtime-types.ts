@@ -1,4 +1,4 @@
-import type { Line } from "./graph-model.js"
+import type { Line, ExecutionMode } from "./graph-model.js"
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 export type HandoffPolicy = "explicit" | "auto"
@@ -24,10 +24,12 @@ export type InputSlots = Record<string, RuntimeInputValue[]>
 export interface RuntimeInputs { workflowInputs: InputSlots; nodeInputs: Record<string, InputSlots> }
 export interface InputRequirement { kind: "text" | "json" | "file"; required?: boolean }
 export interface RuntimeInputOptions {
+  executionMode?: ExecutionMode
+  dagConcurrency?: number
   nodeInputs: Record<string, Record<string, InputRequirement>>
   files: InputAttachmentRef[]
   handoffPolicy?: HandoffPolicy
   /** Canonical initial Agent, only when the existing graph query resolves a unique target. */
   initialNodeId?: string
-  checkpoint?: { runId: string; runtimeInputs?: RuntimeInputs; handoffPolicy?: HandoffPolicy }
+  checkpoint?: { runId: string; runtimeInputs?: RuntimeInputs; handoffPolicy?: HandoffPolicy; executionMode?: ExecutionMode; dagConcurrency?: number }
 }

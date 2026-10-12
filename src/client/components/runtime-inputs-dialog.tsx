@@ -51,6 +51,11 @@ export function RuntimeInputsDialog({ state, t, onCancel, onSubmit, onReuseCheck
         <label>{t.runtimeUpload}<input type="file" onChange={(event) => { const file = event.target.files?.[0]; if (file) onUpload(selected, name, file); event.target.value = "" }} /></label>
         <ul>{Object.entries(slots).map(([slot, values]) => <li key={slot}><span>{slot}: {values.map((item) => item.kind === "file" && item.fileRef.source === "attachment" ? item.fileRef.name : item.kind).join(", ")}</span><button type="button" className="wf-btn" onClick={() => onRemove(selected, slot)}>{t.runtimeRemove}</button></li>)}</ul>
         {!state.runId && <>
+          <label>{t.runtimeExecutionMode}<select disabled={state.resuming} value={state.executionMode ?? "agent"} onChange={(event) => onChange({ executionMode: event.target.value as RuntimeInputDialogState["executionMode"] })}>
+            <option value="dag">{t.runtimeDag}</option><option value="agent">{t.runtimeAgent}</option>
+          </select></label>
+          {state.executionMode === "dag" && <label>{t.runtimeConcurrency}<input type="number" min={1} max={16} disabled={state.resuming} value={state.dagConcurrency ?? 2} onChange={(event) => onChange({ dagConcurrency: Number(event.target.value) })} /></label>}
+          {state.resuming && <p>{t.runtimeFrozenMode}</p>}
           <label>{t.runtimePolicy}<select value={state.handoffPolicy ?? ""} onChange={(event) => onChange({ handoffPolicy: event.target.value ? event.target.value as RuntimeInputDialogState["handoffPolicy"] : undefined })}>
             <option value="">{t.runtimeHarness}</option>
             <option value="explicit">{t.runtimeExplicit}</option><option value="auto">{t.runtimeAuto}</option>

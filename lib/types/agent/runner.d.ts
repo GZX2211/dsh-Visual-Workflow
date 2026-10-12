@@ -50,6 +50,7 @@ export interface SubagentsServiceLike {
     list?(): string[];
     /** 延续子代理创建：首条 prompt 即任务块（request 兼容 persona/toolFilter/agentOptions；signal 为必填）。 */
     startContinuable(spec: {
+        childId?: string;
         provider: string;
         label: string;
         request: {

@@ -2,12 +2,15 @@ import type { HandoffPolicy, RuntimeInputs, RuntimeInputOptions } from "../../ho
 import type { Dict } from "../i18n.js";
 import type { RemoteFace } from "./useRemote.js";
 import type { RuntimeInputValue, InputAttachmentRef } from "../../host/shared/runtime-types.js";
+import type { ExecutionMode } from "../../host/shared/graph-model.js";
 export type InputEditorKind = "text" | "json" | "attachment";
 export declare function validInputSlot(name: string): boolean;
 export declare function formInputValue(kind: InputEditorKind, value: string, files: readonly InputAttachmentRef[]): RuntimeInputValue;
 export interface RuntimeInputSelection {
     runtimeInputs: RuntimeInputs;
     handoffPolicy?: HandoffPolicy;
+    executionMode?: ExecutionMode;
+    dagConcurrency?: number;
     requestGeneration?: number;
 }
 export interface RuntimeInputLifecycle {
@@ -16,6 +19,9 @@ export interface RuntimeInputLifecycle {
 }
 export type PrepareRuntimeInputs = (sessionId: string, flowId: string, runId?: string, binding?: boolean, configure?: boolean, freshStart?: boolean) => Promise<RuntimeInputSelection | null | undefined>;
 export interface RuntimeInputDialogState {
+    executionMode?: ExecutionMode;
+    dagConcurrency?: number;
+    resuming?: boolean;
     sessionId: string;
     flowId: string;
     options: RuntimeInputOptions;

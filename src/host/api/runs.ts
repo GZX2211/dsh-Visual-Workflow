@@ -26,16 +26,17 @@ export class RunEndpoints extends VisualWorkflowApiBase {
    * （run.sessionId === instance.sessionId，不再支持运行期新建会话——「开启新会话」
    * 只是创建实例时的一次性动作，见 createSession 端点）。
    */
-  async run(args: { sessionId?: unknown; flowId?: unknown; fileBindings?: unknown; runtimeInputs?: unknown; handoffPolicy?: unknown; freshStart?: unknown }): Promise<unknown> {
+  async run(args: { sessionId?: unknown; flowId?: unknown; fileBindings?: unknown; runtimeInputs?: unknown; handoffPolicy?: unknown; executionMode?: unknown; dagConcurrency?: unknown; freshStart?: unknown }): Promise<unknown> {
     const sessionId = String(args?.sessionId ?? '')
     const flowId = String(args?.flowId ?? '')
     if (!sessionId || !flowId) throw httpError(400, 'requires sessionId and flowId')
     if (args.freshStart !== undefined && typeof args.freshStart !== "boolean") throw httpError(400, "freshStart must be a boolean")
     const prev = args.freshStart === true ? null : await findResumableRun(this.host.store, { sessionId, flowId })
     if (prev) {
+      if (args.executionMode !== undefined && args.executionMode !== (prev.executionMode ?? "agent") || args.dagConcurrency !== undefined && args.dagConcurrency !== (prev.dagConcurrency ?? 2)) throw httpError(409, "断点恢复使用已冻结的执行模式和并发上限；需要改变时请新建运行", "WF_DAG_CONFIG_CONFLICT")
       return this.host.orchestrator.resumeRun({ sessionId, flowId, fromRunId: prev.id, ...(args.fileBindings === undefined ? {} : { fileBindings: args.fileBindings }), ...(args.runtimeInputs === undefined ? {} : { runtimeInputs: args.runtimeInputs }), ...(args.handoffPolicy === undefined ? {} : { handoffPolicy: args.handoffPolicy }) })
     }
-    return this.host.orchestrator.startRun({ sessionId, flowId, ...(args.fileBindings === undefined ? {} : { fileBindings: args.fileBindings }), ...(args.runtimeInputs === undefined ? {} : { runtimeInputs: args.runtimeInputs }), ...(args.handoffPolicy === undefined ? {} : { handoffPolicy: args.handoffPolicy }) })
+    return this.host.orchestrator.startRun({ sessionId, flowId, ...(args.executionMode === undefined ? {} : { executionMode: args.executionMode }), ...(args.dagConcurrency === undefined ? {} : { dagConcurrency: args.dagConcurrency }), ...(args.fileBindings === undefined ? {} : { fileBindings: args.fileBindings }), ...(args.runtimeInputs === undefined ? {} : { runtimeInputs: args.runtimeInputs }), ...(args.handoffPolicy === undefined ? {} : { handoffPolicy: args.handoffPolicy }) })
   }
 
   /** 运行状态轮询：内存快照优先，终态（内存已释放）回退磁盘历史。会话归属校验。 */
