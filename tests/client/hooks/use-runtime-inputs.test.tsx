@@ -20,7 +20,7 @@ const previousAttachment = { attachmentId: "att-a", name: "previous.csv", bytes:
 const newAttachment = { attachmentId: "att-b", name: "current.csv", bytes: 7 }
 function attachmentCheckpointOptions(files = [previousAttachment, newAttachment]): RuntimeInputOptions {
   return { ...structuredClone(options), initialNodeId: "first", nodeInputs: { first: { source: { kind: "file" } } }, files,
-    checkpoint: { runId: "old", runtimeInputs: { workflowInputs: { subject: [{ kind: "text", value: "previous subject" }] }, nodeInputs: { first: { source: [{ kind: "file", fileRef: { source: "attachment", ...previousAttachment } }] } } } },
+    checkpoint: { runId: "old", handoffPolicy: "explicit", runtimeInputs: { workflowInputs: { subject: [{ kind: "text", value: "previous subject" }] }, nodeInputs: { first: { source: [{ kind: "file", fileRef: { source: "attachment", ...previousAttachment } }] } } } },
   }
 }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done }); return { promise, resolve } }
@@ -53,6 +53,27 @@ it("test_legacy_normal_run_skips_dialog_and_preserves_original_request", async (
   await act(async () => { expect(await face.control.startRun("session", "flow")).toBe("started") })
   expect(face.inputs.dialog).toBeNull()
   expect(vi.mocked(remote.call).mock.calls.find(([name]) => name === EP.EP_RUN)?.[1]).toEqual({ sessionId: "session", flowId: "flow" })
+})
+
+it("test_default_harness_option_does_not_insert_explicit_or_show_input_dialog", async () => {
+  const remote = remoteOf(() => ({ runId: "started" }))
+  vi.mocked(remote.call).mockImplementationOnce(async () => ({ ...options, handoffPolicy: undefined, files: [] }))
+  await render(remote)
+  await act(async () => { expect(await face.control.startRun("session", "flow")).toBe("started") })
+  expect(face.inputs.dialog).toBeNull()
+  expect(vi.mocked(remote.call).mock.calls.find(([name]) => name === EP.EP_RUN)?.[1]).toEqual({ sessionId: "session", flowId: "flow" })
+})
+
+it.each(["explicit", undefined] as const)("test_fresh_start_preserves_only_actually_stored_policy_%s", async (policy) => {
+  const remote = remoteOf()
+  vi.mocked(remote.call).mockImplementationOnce(async () => ({ ...options, handoffPolicy: "explicit", checkpoint: { runId: "old", handoffPolicy: policy } }))
+  await render(remote)
+  let pending!: ReturnType<PrepareRuntimeInputs>
+  await act(async () => { pending = face.inputs.prepare("session", "flow", undefined, false, true, true) })
+  expect(face.inputs.dialog?.handoffPolicy).toBe(policy)
+  expect(face.inputs.dialog?.inputs).toEqual({ workflowInputs: {}, nodeInputs: {} })
+  await act(async () => { face.inputs.cancel() })
+  expect(await pending).toBeNull()
 })
 
 it("test_normal_run_collects_missing_required_input_before_dispatch", async () => {

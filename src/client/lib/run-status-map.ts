@@ -9,7 +9,7 @@ import type { RunSnapshot } from '../../host/shared/types.js'
 export function runStatusMap(snapshot: RunSnapshot | null | undefined): Record<string, { status: string; attempts: number; outputSummary: string }> {
   const map: Record<string, { status: string; attempts: number; outputSummary: string }> = {}
   for (const node of snapshot?.nodes ?? []) {
-    if (node?.nodeId) map[node.nodeId] = { status: node.status, attempts: node.attempts, outputSummary: node.outputSummary }
+    if (node?.nodeId) map[node.nodeId] = { status: node.taskAcceptance && node.taskAcceptance.status !== "accepted" ? `task-${node.taskAcceptance.status}` : node.status, attempts: node.attempts, outputSummary: node.outputSummary }
   }
   return map
 }

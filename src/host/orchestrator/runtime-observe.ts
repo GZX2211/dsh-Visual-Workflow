@@ -74,11 +74,14 @@ export class RuntimeObserve extends RuntimeComm {
       // 仅 completed 才算节点成功；ReAct 软截停由 consumeReactCapped 另判 react-capped。
       let completed = stopReason === 'completed'
       let artifactFailure
+      let needsReview = false
       if (completed) {
         try {
-          const node = nodeById(await this.currentResolvedFlow(entry), meta.nodeId)
+          const flow = await this.currentResolvedFlow(entry)
+          const node = nodeById(flow, meta.nodeId)
           if (!this.currentChild(entry, childId, meta)) return
           if (node?.kind === "agent") {
+            needsReview = s.nodes.find((record) => record.nodeId === meta.nodeId)?.attemptHistory?.at(-1)?.taskReviewRequired === true
             // 检查期间可能发生重试/退役；先对捕获的代际副本验证，提交前再核对。
             const verification = structuredClone(s)
             await verifyNodeArtifacts(node, verification, this.now())
@@ -121,18 +124,25 @@ export class RuntimeObserve extends RuntimeComm {
         childId,
         ...(completed ? {} : { failure: artifactFailure ?? s.nodes.find((node) => node.nodeId === meta.nodeId)?.failure ?? failureOf({ message: `子代理执行结束：${stopReason || "unknown"}` }, "child_execute", "WF_CHILD_EXECUTION_FAILED", this.now()) }),
       })
+      const reviewed = s.nodes.find((record) => record.nodeId === meta.nodeId)
+      if (completed && needsReview && reviewed) {
+        reviewed.taskAcceptance = { status: "pending" }
+        const attempt = reviewed.attemptHistory?.at(-1)
+        if (attempt) attempt.taskAcceptance = { status: "pending" }
+      }
       // 协作组聚合：成员产出一轮后若组内全部成员均已产出且该组无挂起 ask → 组卡片记为 ok
       // （「组内全部 ok -> 组卡片记为 ok」；只做回显，不干预父代理调度）
       if (completed) await this.markGroupOkIfComplete(entry, meta.nodeId)
       await this.persistWarn(entry)
       const settledNode = s.nodes.find((node) => node.nodeId === meta.nodeId)
-      this.log().info(JSON.stringify({ runId: s.id, nodeId: meta.nodeId, childId, attempt: settledNode?.attempts, phase: "settled", status: finalStatus, stopReason, errorCode: settledNode?.failure?.code }))
+      this.log().info(JSON.stringify({ runId: s.id, nodeId: meta.nodeId, childId, attempt: settledNode?.attempts, phase: "settled", status: finalStatus, stopReason, taskAcceptance: settledNode?.taskAcceptance?.status, errorCode: settledNode?.failure?.code }))
       // 唤醒阻塞等待（wait:true；与 subagent/end 共用同一完成通道）。armed 视同完成。
       const waitKey = `${s.id}:${meta.nodeId}`
       const waiter = entry.waiters.get(waitKey)
       if (waiter) {
         entry.waiters.delete(waitKey)
-        waiter.resolve({ nodeId: meta.nodeId, status: finalStatus === 'fail' ? 'fail' : 'ok', childId, output: outputText })
+        waiter.resolve({ nodeId: meta.nodeId, status: finalStatus === 'fail' ? 'fail' : 'ok', childId, output: outputText,
+          ...(s.harnessContext ? { runId: s.id, attempt: settledNode?.attempts, taskAcceptance: settledNode?.taskAcceptance?.status } : {}) })
       }
       return
     }

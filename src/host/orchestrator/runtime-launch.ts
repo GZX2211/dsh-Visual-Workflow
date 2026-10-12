@@ -88,7 +88,7 @@ export class RuntimeLaunch extends RuntimeBase {
     try { initialNodeId = workflowInputTarget(flow) } catch (error) {
       if (!(error instanceof WfError) || error.code !== "WF_INPUT_AMBIGUOUS") throw error
     }
-    return { nodeInputs, files, ...(initialNodeId ? { initialNodeId } : {}), handoffPolicy: checkpoint?.handoffPolicy ?? "explicit", ...(checkpoint ? { checkpoint: { runId: checkpoint.id, runtimeInputs: publicRuntimeInputs(checkpoint.runtimeInputs), handoffPolicy: checkpoint.handoffPolicy } } : {}) }
+    return { nodeInputs, files, ...(initialNodeId ? { initialNodeId } : {}), handoffPolicy: checkpoint?.handoffPolicy ?? (checkpoint && !checkpoint.harnessContext ? "explicit" : undefined), ...(checkpoint ? { checkpoint: { runId: checkpoint.id, runtimeInputs: publicRuntimeInputs(checkpoint.runtimeInputs), handoffPolicy: checkpoint.handoffPolicy } } : {}) }
   }
 
   /** Pending-node binding uses the dispatch mutex and publishes only after a durable write. */
@@ -186,6 +186,7 @@ export class RuntimeLaunch extends RuntimeBase {
     const runId = this.deps.newRunId?.() ?? `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     const snapshot = createRunSnapshot({ runId, flow, sessionId: runSessionId, mode, now: this.now() })
     snapshot.workingDirectory = await this.deps.workingDirectory?.(runSessionId)
+    if (input.handoffPolicy === undefined) snapshot.harnessContext = true
     await prepareRunInputs(flow, snapshot, input.fileBindings, this.deps.store.root, await this.deps.authorizedInputFiles?.(runSessionId))
     await this.prepareRuntimeInputs(flow, snapshot, input.runtimeInputs, input.handoffPolicy)
     // 元参数三层之第三层（D-13）：把「有效值（模板 ← 实例覆盖）」冻结进快照。

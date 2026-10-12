@@ -286,7 +286,8 @@ export const childCaller: CallerInfo = { isChild: true, sessionId: 'session-1' }
 /** 保存流程并 startRun；返回结果与内存 run entry。 */
 export async function start(h: Harness, flow: WorkflowDocument) {
   await h.store.saveWorkflow(flow, 'session-1', { force: true })
-  const result = await h.runtime.startRun({ sessionId: 'session-1', flowId: flow.id })
+  // Historical lifecycle/ctx cases use explicit; default Harness behavior has dedicated integration coverage.
+  const result = await h.runtime.startRun({ sessionId: 'session-1', flowId: flow.id, handoffPolicy: "explicit" })
   const entry = h.runtime.activeRunForSession('session-1')
   if (!entry) throw new Error('startRun 后应有激活 run')
   return { result, entry }

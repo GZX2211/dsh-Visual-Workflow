@@ -515,6 +515,7 @@ export class VisualWorkflowHost extends Service {
       }
     })
     this.ctx.on('subagent/end', (payload) => this.onSubagentEnd(payload))
+    this.ctx.on("tools/result", (exec, result) => this.orchestrator.recordToolResult(exec, result))
     this.ctx.on('agent/error', (payload) => this.onAgentError(payload))
     this.ctx.on("agent/request", async (payload, next) => {
       const route = await next()

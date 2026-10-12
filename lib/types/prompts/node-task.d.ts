@@ -30,6 +30,7 @@ export interface NodeTaskBlockParams {
         inputSource?: 'ctx' | 'workspace' | 'runtime';
         outputFiles?: string[];
         runtimeInputs?: import("../shared/runtime-types.js").InputSlots;
+        flowContext?: import("../shared/runtime-types.js").FlowInputContext[];
         hasAttachmentContext?: boolean;
         handoffPolicy?: HandoffPolicy;
         /**

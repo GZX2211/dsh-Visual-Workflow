@@ -22,6 +22,11 @@ function snapshotOf(nodes: RunSnapshot['nodes']): RunSnapshot {
 }
 
 describe('运行状态派生（§4.5.8 节点高亮）', () => {
+  it.each(["pending", "needs-input", "failed", "accepted"] as const)("test_task_%s_is_projected_without_changing_execution_fact", (status) => {
+    const snapshot = snapshotOf([{ nodeId: "a", status: "ok", attempts: 1, startedAt: null, endedAt: null, output: "", outputSummary: "", taskAcceptance: { status } }])
+    expect(runStatusMap(snapshot).a.status).toBe(status === "accepted" ? "ok" : `task-${status}`)
+    expect(snapshot.nodes[0].status).toBe("ok")
+  })
   it('runningNodeIds：仅返回 status=running 的节点 id', () => {
     const snapshot = snapshotOf([
       { nodeId: 'a', status: 'running', attempts: 1, startedAt: null, endedAt: null, output: '', outputSummary: '' },

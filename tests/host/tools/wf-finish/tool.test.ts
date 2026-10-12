@@ -47,7 +47,7 @@ describe('wf_finish 注册与 schema', () => {
     const h = await makeHarness()
     const def = h.tools.definitions.get(WF_FINISH)!
     expect(def.parameters.required).toBeUndefined()
-    expect(Object.keys(def.parameters.properties ?? {}).sort()).toEqual(['status', 'summary'].sort())
+    expect(Object.keys(def.parameters.properties ?? {}).sort()).toEqual(['reviews', 'status', 'summary'].sort())
     expect((def.parameters.properties ?? {}).status).toMatchObject({ enum: ['completed', 'failed'] })
   })
 

@@ -139,6 +139,7 @@ export declare const zh: {
     runtimeNoPendingNode: string;
     runtimeNoRequirements: string;
     runtimePolicy: string;
+    runtimeHarness: string;
     runtimeRemove: string;
     runtimeRequirements: string;
     runtimeRevisionChanged: string;
@@ -381,6 +382,9 @@ export declare const zh: {
         fail: string;
         skipped: string;
         'react-capped': string;
+        'task-pending': string;
+        'task-needs-input': string;
+        'task-failed': string;
         stopped: string;
         completed: string;
         failed: string;

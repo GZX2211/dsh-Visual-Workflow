@@ -1,5 +1,7 @@
 import type { CallerInfo, OrchestratorRuntime, RootAgentLike } from '../../orchestrator/index.js';
-import type { ToolExecLike } from './define-tool.js';
+import type { PropertySpec, ToolExecLike } from './define-tool.js';
+/** Both scheduling and finishing carry the same one-attempt parent review protocol. */
+export declare const taskReviewsParameter: PropertySpec;
 /**
  * 从工具执行上下文派生调用方身份（CallerInfo）。
  * 官方 Session header 事实：子代理会话的 header 携带 `origin: 'subagent'` 与

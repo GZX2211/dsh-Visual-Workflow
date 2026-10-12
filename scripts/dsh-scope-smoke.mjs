@@ -10,6 +10,7 @@ import { CordisToolsView, withPresetScope } from "../lib/agent/index.js"
 import { installChildToolPolicy } from "../lib/agent/child-tool-filter.js"
 import { createModelSelectionSetup } from "../lib/agent/model-selection.js"
 import { createChildPromptSetup } from "../lib/agent/prompt-setup.js"
+import { registerWfRunNode } from "../lib/tools/wf-run-node/tool.js"
 
 const manifest = process.env.DSH_RUNTIME_PACKAGE
 assert.ok(manifest, "Set DSH_RUNTIME_PACKAGE to the absolute path of @deepseek-ai/dsh/package.json")
@@ -146,7 +147,20 @@ try {
   const projected = projectFilesToText([message], (file) => attachments.fileHostPath(file))
   assert.deepEqual(projected[0].content, [{ type: "text", text: fileHandleText(ref, hostPath) }])
   assert.deepEqual(message.content, [{ type: "file", attachment: ref }], "durable official file references must remain intact")
-  console.log(JSON.stringify({ status: "passed", runtimeVersion: requireRuntime("./package.json").version, runtime: "@deepseek-ai/dsh-tools", presetScopeApi, actualPresetReads: 6, actualScopedExecutions: sequence, publicRecoveryHooksPassed, modelRouteUpdates, officialFileReferences: 1, officialFileBytes: bytes.length, modelE2E: "NOT RUN" }))
+  let receivedNodeArgs
+  const unregisterNode = registerWfRunNode(root, { orchestrator: { wfRunNode: async (_caller, args) => {
+    if (!args.nodeId) throw Object.assign(new Error("wf_run_node requires flat nodeId"), { code: "WF_BAD_ARGS" })
+    receivedNodeArgs = args
+    return { nodeId: args.nodeId, status: "started", childId: "schema-probe", runId: "schema-run", attempt: 1 }
+  } } })
+  const review = { nodeId: "upstream", runId: "schema-run", childId: "upstream-child", attempt: 1, status: "accepted", reason: "bounded parent decision" }
+  const valid = await root.get("tools").execute({ callId: "schema-flat", name: "wf_run_node", arguments: { nodeId: "target", reviews: [review], flowSources: ["upstream"] }, agent: parent, signal: new AbortController().signal })
+  assert.equal(valid.isError, false)
+  assert.deepEqual(receivedNodeArgs, { nodeId: "target", reviews: [review], flowSources: ["upstream"] })
+  const invalid = await root.get("tools").execute({ callId: "schema-nested", name: "wf_run_node", arguments: { arguments: { nodeId: "target" } }, agent: parent, signal: new AbortController().signal })
+  assert.equal(invalid.isError, true, "nested arguments must not be silently repaired")
+  unregisterNode()
+  console.log(JSON.stringify({ status: "passed", runtimeVersion: requireRuntime("./package.json").version, runtime: "@deepseek-ai/dsh-tools", presetScopeApi, actualPresetReads: 6, actualScopedExecutions: sequence, publicRecoveryHooksPassed, modelRouteUpdates, officialFileReferences: 1, officialFileBytes: bytes.length, workflowSchemaCalls: 2, modelE2E: "NOT RUN" }))
 } finally {
   for (const scope of owned.reverse()) await scope.dispose()
   await root.fiber.dispose()

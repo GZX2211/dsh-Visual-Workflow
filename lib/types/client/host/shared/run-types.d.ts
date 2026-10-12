@@ -45,6 +45,8 @@ export interface RunSnapshot {
     fileBindings?: Record<string, string[]>;
     runtimeInputs?: RuntimeInputs;
     handoffPolicy?: HandoffPolicy;
+    /** 新运行的默认 Harness 上下文语义；缺省的旧快照保留原交接/结算规则。 */
+    harnessContext?: true;
     inputRevision?: number;
     workflowInputNodeId?: string;
     /**
@@ -85,6 +87,7 @@ export interface RunSnapshot {
         model?: string;
         failure?: RunFailure;
         attemptHistory?: NodeAttempt[];
+        taskAcceptance?: TaskAcceptance;
         artifacts?: Array<{
             path: string;
             size: number;
@@ -153,6 +156,21 @@ export interface NodeAttempt {
     outputBaseline?: Record<string, string | null>;
     /** 本次任务准备交付的授权引用；childId/phase 记录接纳，不代表模型已读取。 */
     inputAttachments?: NodeInputAttachment[];
+    taskAcceptance?: TaskAcceptance;
+    /** 派发时冻结验收要求，画布调整不重新解释已经启动的任务。 */
+    taskReviewRequired?: true;
+    flowSources?: Array<{
+        nodeId: string;
+        runId: string;
+        attempt: number;
+        childId?: string;
+    }>;
+}
+/** 执行结束与父代理对节点任务的有界验收分开记录，不声称机器证明业务正确。 */
+export interface TaskAcceptance {
+    status: "pending" | "accepted" | "needs-input" | "failed";
+    reason?: string;
+    reviewedAt?: string;
 }
 export interface RunTermination {
     source: "parent_error" | "parent_finish" | "user_stop" | "idle_timeout" | "execution_timeout" | "host_restart" | "runtime";

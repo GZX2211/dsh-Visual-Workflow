@@ -15,11 +15,11 @@ export function formInputValue(kind: InputEditorKind, value: string, files: read
   return { kind: "file", fileRef: { source: "attachment", attachmentId: file.attachmentId, name: file.name, bytes: file.bytes } }
 }
 
-export interface RuntimeInputSelection { runtimeInputs: RuntimeInputs; handoffPolicy: HandoffPolicy; requestGeneration?: number }
+export interface RuntimeInputSelection { runtimeInputs: RuntimeInputs; handoffPolicy?: HandoffPolicy; requestGeneration?: number }
 export interface RuntimeInputLifecycle { capture(): number; isCurrent(ticket: number): boolean }
 export type PrepareRuntimeInputs = (sessionId: string, flowId: string, runId?: string, binding?: boolean, configure?: boolean, freshStart?: boolean) => Promise<RuntimeInputSelection | null | undefined>
 export interface RuntimeInputDialogState {
-  sessionId: string; flowId: string; options: RuntimeInputOptions; inputs: RuntimeInputs; handoffPolicy: HandoffPolicy
+  sessionId: string; flowId: string; options: RuntimeInputOptions; inputs: RuntimeInputs; handoffPolicy?: HandoffPolicy
   nodeId?: string; runId?: string; revision?: number; eligibleNodes: string[]; error: string; busy: boolean
   blockedNodes?: string[]
   freshStart?: boolean
@@ -72,7 +72,7 @@ export function useRuntimeInputs(remote: RemoteFace, t: Dict, owner: string) {
     const isFreshStart = freshStart && !binding && !runId
     const savedInputs = isFreshStart ? undefined : checkpoint?.runtimeInputs ?? options.checkpoint?.runtimeInputs
     const inputs = structuredClone(savedInputs ?? { workflowInputs: {}, nodeInputs: {} })
-    const handoffPolicy = checkpoint?.handoffPolicy ?? options.handoffPolicy
+    const handoffPolicy = isFreshStart ? options.checkpoint?.handoffPolicy : checkpoint?.handoffPolicy ?? options.handoffPolicy
     const fileSlots = Object.entries(options.nodeInputs).flatMap(([id, requirements]) => Object.entries(requirements).filter(([, requirement]) => requirement.kind === "file" && requirement.required !== false).map(([name]) => ({ id, name })))
     let selectedAttachment = false
     // Only a new run may choose a unique authorized file; uploading during execution never binds it.

@@ -1,5 +1,7 @@
 # 通用会话文件交付与显式运行输入
 
+已合并 #13 后的新默认 Flow 上下文、执行结束与业务验收分离、旧快照兼容及独立真实 Harness 文件探针，见 [默认 Flow 上下文与一次任务验收](./harness-flow-acceptance.md)。下文的 explicit/auto 和 #13 说明保留为对应历史机制。
+
 本文记录 #10–#12 的显式运行输入机制及后续 Harness 文件上下文适配。后续适配基于已合并 #12 的 main（12b64dc），以独立 PR 提交，不回退 #6–#12。
 
 运行输入保存在 RunSnapshot，不写入 WorkflowDocument，不新增画布节点。Runtime 继承链仍为 `RuntimeBase → RuntimeLaunch → RuntimeExecute → RuntimeComm → RuntimeObserve → RuntimeLifecycle → OrchestratorRuntime`；NodeAgentRunner 的创建、复用、NOT_RESUMABLE 安全重建、权限与生命周期语义保持原样，仅扩展现有任务投递的内容块。

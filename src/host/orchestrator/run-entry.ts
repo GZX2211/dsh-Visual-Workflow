@@ -78,6 +78,8 @@ export function createWaiter(): Waiter {
 
 /** wf_run_node 入参（工具参数经 schema 校验后传入；未知字段宽松处理）。 */
 export interface RunNodeArgs {
+  reviews?: unknown
+  flowSources?: unknown
   nodeId?: unknown
   wait?: unknown
   thinking?: unknown
@@ -87,6 +89,9 @@ export interface RunNodeArgs {
 
 /** wf_run_node 返回（三条路径：started 异步 / paused 暂停门 / ok|fail wait 阻塞）。 */
 export interface RunNodeResult {
+  taskAcceptance?: "pending" | "accepted" | "needs-input" | "failed"
+  runId?: string
+  attempt?: number
   nodeId: string
   status: 'started' | 'paused' | 'ok' | 'fail'
   childId?: string
@@ -193,6 +198,7 @@ export interface StartRunResult {
 }
 
 export interface FinishArgs {
+  reviews?: unknown
   status?: unknown
   summary?: unknown
 }

@@ -44,6 +44,24 @@ export declare abstract class RuntimeBase {
     protected disposed: boolean;
     constructor(deps: OrchestratorDeps);
     protected log(): OrchestratorLogger;
+    /** Log the official canonical tool outcome without arguments, contents or another counter database. */
+    recordToolResult(exec: {
+        agent?: {
+            id?: unknown;
+        };
+        name?: unknown;
+        callId?: unknown;
+        rootCallId?: unknown;
+    }, result: {
+        isError?: unknown;
+        error?: {
+            info?: {
+                code?: unknown;
+            };
+        };
+    }): void;
+    /** A parent decision is immutable within one settled attempt; replay is idempotent. */
+    protected applyTaskReviews(entry: RunEntry, raw: unknown): Promise<void>;
     recordModelRoute(agentId: string, route: unknown, options?: {
         pendingChild?: boolean;
     }): Promise<void>;

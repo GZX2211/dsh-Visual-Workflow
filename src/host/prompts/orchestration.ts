@@ -96,7 +96,7 @@ export const ORCH_HARD_CONSTRAINTS = {
    * 只有 DSH 自动送达的结算通知才是节点完成的权威信号。
    */
   nodeSettledSignal:
-    "依据 Runtime 有效结算、声明产物和任务要求判断节点结果；收到结算前不推进，请求输入或回复路径不等于成功",
+    "依据 Runtime 有效结算和声明产物判断执行结果；taskAcceptance=pending 时按节点任务做一次判断，随下一次 wf_run_node 或 wf_finish 的 reviews 提交 nodeId/runId/attempt/childId、status(accepted/needs-input/failed) 和简短依据；请求输入不能验收为成功，不重复评估同一结果",
   inputBindings: "节点可使用宿主授权工具和会话附件上下文；显式输入合同由 Runtime 校验，WF_INPUT_REQUIRED 时通过合法输入入口补充，口头“已上传”不等于绑定成功。不用 wf_graph_patch 保存临时数据；WF_BUSY、WF_INPUT_STATE_CONFLICT、WF_INPUT_REVISION_CONFLICT 时处理原因，不循环派发",
   safeTermination: "无法继续时使用既有用户干预流程或 wf_finish(status=failed) 收尾，说明失败原因；工具错误须如实处理，不伪造成功、不绕过权限或沙箱",
   /** 收尾协议：wf_finish 幂等收尾、释放锁。 */

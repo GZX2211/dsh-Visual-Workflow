@@ -1,3 +1,4 @@
+import type { Line } from "./graph-model.js";
 export type JsonValue = null | boolean | number | string | JsonValue[] | {
     [key: string]: JsonValue;
 };
@@ -12,6 +13,24 @@ export interface SessionInputFile extends InputAttachmentRef {
 }
 export interface NodeInputAttachment extends InputAttachmentRef {
     source: "session" | "binding";
+}
+export interface FlowInputContext {
+    nodeId: string;
+    label: string;
+    responsibility: string;
+    runId: string;
+    attempt: number;
+    childId?: string;
+    result: string;
+    /** Declared graph edges for this selected source, not a machine proof of predicate truth. */
+    flowEdges?: Array<{
+        lineId: string;
+        condition?: Line["condition"];
+    }>;
+    artifacts: Array<{
+        path: string;
+        size: number;
+    }>;
 }
 export type RuntimeFileRef = {
     source: "managed";
@@ -54,7 +73,7 @@ export interface InputRequirement {
 export interface RuntimeInputOptions {
     nodeInputs: Record<string, Record<string, InputRequirement>>;
     files: InputAttachmentRef[];
-    handoffPolicy: HandoffPolicy;
+    handoffPolicy?: HandoffPolicy;
     /** Canonical initial Agent, only when the existing graph query resolves a unique target. */
     initialNodeId?: string;
     checkpoint?: {

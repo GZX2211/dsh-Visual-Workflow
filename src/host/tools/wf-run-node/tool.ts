@@ -12,7 +12,7 @@
 // 随后是前置条件/失败语义（WF_* 稳定错误码）/副作用（异步启动）；目标 ≤ 120 tokens。
 
 import { WF_RUN_NODE } from '../../shared/protocol.js'
-import { callerOf, type WfToolsHost } from '../infrastructure/caller.js'
+import { callerOf, taskReviewsParameter, type WfToolsHost } from '../infrastructure/caller.js'
 import { defineTool, type ToolDefinitionLike } from '../infrastructure/define-tool.js'
 import { textRender } from '../infrastructure/text-render.js'
 
@@ -40,6 +40,8 @@ export function registerWfRunNode(
       'A pause-node id pauses the run and persists a checkpoint instead (returns paused). ' +
       'Child agents are rejected; fails with WF_* codes on invalid arguments, missing nodes, mode mismatch, or a session that never started a run.',
     parameters: {
+      reviews: taskReviewsParameter,
+      flowSources: { type: "array", items: { type: "string" }, description: "Default Harness context only: explicitly selected direct conditional sources; mandatory predecessors cannot be omitted." },
       nodeId: { type: 'string', required: true, description: 'Node id from the flow definition file (nodes[].id) to start: a role node, or a collaboration-group card to start that whole group as an official Agent Team. A proxy node is a real flow step: pass the proxy id and the runtime resolves it to its source node for execution — never skip a proxy or pass its source node id instead.' },
       thinking: { type: 'string', description: 'Optional reasoning-effort override for this node run; value domain follows the official adapter. For a collaboration group it applies to every member.' },
       iterationLimit: { type: 'number', description: 'Optional ReAct iteration-limit override (soft cap: the child stops calling tools and concludes). For a collaboration group it applies to every member.' },
@@ -50,6 +52,8 @@ export function registerWfRunNode(
         type: 'object',
         additionalProperties: false,
         properties: {
+          runId: { type: "string", description: "Workflow run identity for a later task review." },
+          attempt: { type: "integer", description: "Current node attempt for a later task review." },
           nodeId: { type: 'string', required: true, description: 'The resolved node id that was started.' },
           status: { type: 'string', required: true, enum: ['started', 'paused'] as const, description: 'started: async start (a collaboration group also returns its member list); paused: pause gate.' },
           childId: { type: 'string', description: 'The node child session id (started path). Absent when a collaboration group started several member sessions.' },

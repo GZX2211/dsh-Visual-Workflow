@@ -7,7 +7,7 @@ export declare function validInputSlot(name: string): boolean;
 export declare function formInputValue(kind: InputEditorKind, value: string, files: readonly InputAttachmentRef[]): RuntimeInputValue;
 export interface RuntimeInputSelection {
     runtimeInputs: RuntimeInputs;
-    handoffPolicy: HandoffPolicy;
+    handoffPolicy?: HandoffPolicy;
     requestGeneration?: number;
 }
 export interface RuntimeInputLifecycle {
@@ -20,7 +20,7 @@ export interface RuntimeInputDialogState {
     flowId: string;
     options: RuntimeInputOptions;
     inputs: RuntimeInputs;
-    handoffPolicy: HandoffPolicy;
+    handoffPolicy?: HandoffPolicy;
     nodeId?: string;
     runId?: string;
     revision?: number;
