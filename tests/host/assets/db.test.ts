@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ASSET_DB_FILE, AssetStore } from '../../../src/host/assets/index.js'
+import { queryRow, queryRows, runSql } from '../../../src/host/assets/db.js'
 import { fakeClock, fakeIds, makeStore, removeTempRoot, roleTemplate } from './fixtures/asset-fixture.js'
 
 /**
@@ -282,6 +283,35 @@ describe('存量库形状迁移（交接契约列的 JSON 约束退役）', () =
       expect(raw.prepare("SELECT COUNT(*) AS total FROM role_asset_history").get()).toMatchObject({ total: 0 })
     } finally {
       raw.close()
+    }
+  })
+})
+
+describe('语句缓存（同一连接上重复执行的 SQL 只编译一次）', () => {
+  it('test_语句缓存_同一SQL重复执行_只prepare一次且结果不变', async () => {
+    const { DatabaseSync } = await import('node:sqlite')
+    const db = new DatabaseSync(':memory:')
+    try {
+      // 计数包装：prepare 次数是「语句是否被缓存」唯一可判别的观测面
+      let prepares = 0
+      const compile = db.prepare.bind(db)
+      db.prepare = (sql: string) => {
+        prepares += 1
+        return compile(sql)
+      }
+      db.exec('CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)')
+
+      runSql(db, 'INSERT INTO t (id, name) VALUES (?, ?)', [1, 'a'])
+      expect(prepares).toBe(1)
+
+      expect(queryRow(db, 'SELECT name FROM t WHERE id = ?', [1])).toEqual({ name: 'a' })
+      expect(queryRow(db, 'SELECT name FROM t WHERE id = ?', [1])).toEqual({ name: 'a' })
+      expect(queryRows(db, 'SELECT name FROM t WHERE id = ?', [1])).toEqual([{ name: 'a' }])
+
+      // 两种 SQL 原文各编译一次；无缓存时这里会是 4 次（缓存的判别性断言）
+      expect(prepares).toBe(2)
+    } finally {
+      db.close()
     }
   })
 })

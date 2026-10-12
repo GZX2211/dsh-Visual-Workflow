@@ -19,8 +19,8 @@
 //   runs/<runId>.json                    运行历史（RunSnapshot，含 flowId/断点/节点产出）
 //
 // 为什么没有「运行拓扑快照」目录：拓扑的唯一事实是实例文档（workflows/services）+ 运行期
-// 内存基线；曾有一份 orchestrations/<runId>.json 副本供父代理 read，改用 wf_org_catalog
-// 的 instance 通道召回后该副本失去消费者，已随改造删除（避免副本与画布漂移）。
+// 内存基线；父代理经 wf_org_catalog 的 instance 通道按需召回拓扑，不落副本（避免副本
+// 与画布漂移）。
 //
 // 为什么每个实例单独成文件（架构文档 §4.1 / 需求 §6）：单文件即单资源，
 // 原子写粒度=资源粒度——并发编辑同一资源经锁串行化，不同资源互不阻塞；
@@ -54,6 +54,13 @@ export function managedFilesDir(root: string): string {
 /**
  * 文件名消毒：id 中非法字符替换为下划线（防路径穿越/坏文件名）。
  * `.` 与 `..` 单独出现时同样替换，避免生成指向目录自身的路径。
+ *
+ * 已知限制（有意保留，不要顺手「修复」；改动前须先取得契约裁决）：
+ *   1. 映射非单射：`a/b`、`a b`、`a_b` 同落 `a_b.json`。改成无冲突编码会改变既有 id 的
+ *      落盘路径，磁盘上已存在的文件随之读不回来——「既有数据可读性」优先于文件名唯一。
+ *   2. 不排除 Windows 保留设备名（CON / PRN / AUX / NUL / COM1-9 / LPT1-9，含带扩展名形态）。
+ *      任何排除方式（转义或拒绝）都是一次路径变更，会让磁盘上以这类名字存在的文件或
+ *      记录读不回来；是否接受该代价属产品/契约裁决，不得在实现里静默选择。
  */
 export function safeFilePart(value: unknown): string {
   const sanitized = String(value).replace(/[^a-zA-Z0-9._-]/g, '_')

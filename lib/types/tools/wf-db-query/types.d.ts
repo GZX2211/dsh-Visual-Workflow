@@ -14,15 +14,35 @@ export type SqlCheckResult = {
 export interface QueryResult {
     columns: string[];
     rows: string[][];
+    /**
+     * rows 是否被**执行层上限**截断（驱动在 maxRows 之外仍读到了下一行）。
+     * 只在传入 QueryOptions.maxRows 时设置：未设上限时该事实无从谈起，由调用方按自身口径判定。
+     */
+    truncated?: boolean;
 }
 /** 表结构条目。 */
 export interface TableInfo {
     name: string;
 }
+/**
+ * 查询调用选项：执行层行数上限的唯一入口（后续语句级取消/超时在此扩展，调用形状不变）。
+ * 上限必须由执行层落实——`LIMIT 999999999` 这类形式约束与不写 LIMIT 在内存物化上等价。
+ */
+export interface QueryOptions {
+    /**
+     * 最多返回的行数（≥1；非有限或 <1 视为未设上限）。
+     * 驱动读取到 maxRows + 1 行即停止（+1 仅用于判定截断），返回前截到 maxRows。
+     */
+    maxRows?: number;
+}
 /** 数据库驱动接口（testConnection/query/schema/schemaPage/close）。 */
 export interface DatabaseDriver {
     testConnection(): Promise<void>;
-    query(sql: string): Promise<QueryResult>;
+    /**
+     * 执行只读查询。传 options.maxRows 时驱动必须**逐行读取**并在读满上限后停止（不全量物化），
+     * rows 截到 maxRows，truncated 如实上报是否还有更多行；未传时行为与全量读取一致。
+     */
+    query(sql: string, options?: QueryOptions): Promise<QueryResult>;
     schema(): Promise<TableInfo[]>;
     /**
      * 表清单页：查询取「上限+1」行，返回截到上限的清单与精确截断事实（是否还有更多表）。

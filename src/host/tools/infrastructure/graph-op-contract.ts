@@ -93,6 +93,7 @@ export const GATE_MARKING_SEMANTICS = [
   '3. One patch carries exactly 1 mark_node (there is one current gate);',
   "4. status='ok' increments the used count and is rejected at milestoneMax (0 = unlimited); status='fail' does not consume the budget;",
   '5. The reply carries a read-only budget (used / limit / remaining), so you can tell how many marks are left.',
+  '6. Validation order (fix the run fact first, the argument second): the target-must-be-the-current-gate check runs BEFORE the status-value check - a target that is not the current gate is rejected with WF_MILESTONE_INVALID even when status is invalid too; only after the target is the current gate does an invalid status reject with WF_BAD_ARGS (the call arguments are what to fix).',
 ].join('\n')
 
 /**

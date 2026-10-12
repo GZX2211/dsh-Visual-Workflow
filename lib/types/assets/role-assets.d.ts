@@ -1,6 +1,6 @@
 import type { AssetVersionEntry, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, RoleAssetType } from '../shared/asset-types.js';
 import type { RoleTemplate } from '../shared/template-types.js';
-import type { AssetTxContext } from './db.js';
+import { type AssetTxContext } from './db.js';
 import { roleRowValues, type RoleAssetActiveRow, type RoleAssetRow, type RoleContentFields } from './row-codec.js';
 /** 端口运行环境：时钟由 AssetStore 注入（测试可确定化）。 */
 export interface RolePortContext {
@@ -31,6 +31,17 @@ export interface RoleWriteResult extends RoleRegistration {
 }
 /** 角色版本行读取（无匹配返回 null）。 */
 export declare function readRoleVersionRow(ctx: AssetTxContext, assetId: string, versionId: number): RoleAssetRow | null;
+/**
+ * 按版本行 id 批量读取角色版本行（一次 `WHERE id IN (…)`）。
+ *
+ * 为什么必须有批量入口：工作流节点壳重建要按 `role_version_ids` 给每个角色节点回填内容，
+ * 逐个调用 readRoleVersionRow 就是 N+1 次回表（N = 角色节点数），而这一读在详情查询、
+ * 保存查重、回滚、恢复四条路径上都会发生。批量入口把「先收集行 id、再一次性取回」固化成
+ * 唯一写法；去重后的 id 个数与节点数同阶，远低于 SQLite 的绑定参数上限。
+ *
+ * @returns 行 id → 版本行（查不到的行不出现在结果里，由调用方按各自语义决定告警还是抛错）。
+ */
+export declare function readRoleVersionRowsByIds(ctx: AssetTxContext, rowIds: readonly string[]): Map<string, RoleAssetRow>;
 /** 是否处于未退役状态（Active 行存在）。 */
 export declare function isRoleAssetLive(ctx: AssetTxContext, assetId: string): boolean;
 /** 角色资产 Active 行（未归档资产必有；归档后为 null）。 */

@@ -68,6 +68,16 @@ describe('写图契约（graph-op-contract）', () => {
     expect(GATE_MARKING_SEMANTICS).toContain('exactly 1')
   })
 
+  it('闸门标记语义写明校验顺序：闸门身份先于 status 取值（同错时报 WF_MILESTONE_INVALID）', () => {
+    // 与实现同源的执行顺序：runMarkGroup 先判目标是否为当前闸门，applyMarkOp 再判 status 取值。
+    // 这一优先级必须常驻文本——否则模型会在目标不是当前闸门时去改 status（改错方向）。
+    // 不锁定整句（措辞可演进），但要求同一句里同时出现两条路径的码与优先级词。
+    const orderLine = String(GATE_MARKING_SEMANTICS).split('\n')
+      .find((line) => line.includes('WF_MILESTONE_INVALID') && line.includes('WF_BAD_ARGS'))
+    expect(orderLine).toBeDefined()
+    expect(orderLine).toMatch(/before|first|priorit/i)
+  })
+
   it('错误码语义写明批次级取码规则：全参数层错才 WF_BAD_ARGS，含任一条图语义错即 WF_GRAPH_INVALID', () => {
     // 取码规则必须成句写明，模型才能预期「一次列全」后拿到哪个码；不锁定完整句子
     const batchRule = String(ERROR_CODE_SEMANTICS).split('\n')

@@ -47,7 +47,7 @@ export declare function applyRoleNodeCreateDefaults(raw: unknown): Record<string
  */
 export declare function normalizeRoleNodeData(raw: unknown): Record<string, unknown>;
 /**
- * 应用图结构操作（按序，纯函数）。
+ * 应用图结构操作（按序，纯函数）：入参分毫不动，全部改动落在**一次**深拷贝出的副本上。
  * 失败一律抛 WfError（稳定 code），调用方据此返回带修复建议的补丁错误。
  */
 export declare function applyGraphOps(input: {
@@ -55,13 +55,14 @@ export declare function applyGraphOps(input: {
     ops: GraphPatchOp[];
 }): GraphPatchResult;
 /**
- * 容错应用：逐条复用严格应用器，失败的 op 记入 errors 并跳过，其余操作继续。
+ * 容错应用：逐条就地复用单 op 应用器，失败的 op 记入 errors 并跳过，其余操作继续。
  *
  * 为什么容错（而不是遇到第一条就停）：ops 之间存在有序依赖，父代理最常见的失败模式是
  * 一批里多条字段写错；一次只报一条会让它把同一批补丁反复重试，而失败清单一次列全后
  * 可以一轮改完。
- * 为什么逐条调用严格应用器：严格应用器在**内部副本**上推进，抛错时本层已成功的结果
- * 分毫未动——失败 op 既不污染后续 op 的判定基础，也不需要回滚逻辑。
+ * 为什么只拷贝一次：本层要按 op 隔离失败，而隔离不需要第二份副本——单 op 应用器**原子**
+ * （先校验后改动），失败时工作副本分毫未动，因此一次深拷贝即可，无需按 op 回滚或重拷贝；
+ * 判定基础与逐条严格应用逐字节等价。
  * 为什么只捕获 WfError：非 WfError 属于工具自身的缺陷，不能被伪装成「某条 op 写错了」。
  * 语义前提：调用方在 errors 非空时**整批不落盘**，因此返回的结果仅供错误报告与后续 op
  * 的判定基础使用。

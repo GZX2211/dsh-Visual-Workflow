@@ -3,10 +3,10 @@
 // wf_db_query 工具（tool.ts）单测：注册面（参数/输出 schema/description W-03）与
 // 三模式执行、归属校验（运行态解耦/无实例/坏节点/无连线）、SQL 与索引错误路径。
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
+import { DatabaseSync, StatementSync, type SQLOutputValue } from 'node:sqlite'
 import type { EmbeddingEngine } from '../../../../src/host/embedding/engine.js'
 import type { DatabaseNode, WorkflowDocument } from '../../../../src/host/shared/graph-model.js'
 import { WF_DB_QUERY } from '../../../../src/host/shared/protocol.js'
@@ -14,7 +14,7 @@ import { SEARCH_TOP_K_MAX } from '../../../../src/host/embedding/indexer.js'
 import type { JsonSchemaNode } from '../../../../src/host/tools/infrastructure/define-tool.js'
 import { SCHEMA_TABLE_LIMIT } from '../../../../src/host/tools/wf-db-query/driver.js'
 import { indexPathOf } from '../../../../src/host/tools/wf-db-query/service.js'
-import { registerWfDbQuery, QUERY_CELL_MAX_LENGTH } from '../../../../src/host/tools/wf-db-query/tool.js'
+import { registerWfDbQuery, QUERY_CELL_MAX_LENGTH, QUERY_ROWS_LIMIT } from '../../../../src/host/tools/wf-db-query/tool.js'
 import type { WfDbQueryHost, DatabaseDriver } from '../../../../src/host/tools/wf-db-query/types.js'
 import { makeDbFlow, makeSqliteDb } from '../fixtures/db-fixture.js'
 import {
@@ -39,6 +39,44 @@ function makeTableDb(file: string, count: number): void {
   } finally {
     db.close()
   }
+}
+
+/** 建一个含 count 行的临时 SQLite 库（查询执行层行数上限用；行数可远超上限）。 */
+function makeRowDb(file: string, count: number): void {
+  const db = new DatabaseSync(file)
+  try {
+    db.exec('CREATE TABLE lots (id INTEGER PRIMARY KEY, payload TEXT)')
+    db.exec(
+      `WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < ${count})
+       INSERT INTO lots (id, payload) SELECT n, 'r' || n FROM seq`,
+    )
+  } finally {
+    db.close()
+  }
+}
+
+/**
+ * 给 `StatementSync.iterate` 加计数包装：返回真实迭代器，但统计 `next()` 被调用了几次
+ * ——即语句实际推进的行数，是「工具查询路径只读取到上限行」的可观察证据。
+ * 未把行数上限下推到执行层（或驱动退回 `.all()` 全量物化）时，计数为 0。
+ */
+function spyOnIterate(): { nextCalls: () => number; restore: () => void } {
+  const original = StatementSync.prototype.iterate as unknown as
+    (this: StatementSync) => NodeJS.Iterator<Record<string, SQLOutputValue>>
+  let nextCalls = 0
+  const spy = vi.spyOn(StatementSync.prototype, 'iterate').mockImplementation(function (this: StatementSync) {
+    const inner = original.call(this)
+    return {
+      next: () => {
+        nextCalls += 1
+        return inner.next()
+      },
+      [Symbol.iterator]() {
+        return this
+      },
+    } as unknown as ReturnType<typeof original>
+  })
+  return { nextCalls: () => nextCalls, restore: () => spy.mockRestore() }
 }
 
 /** 降级引擎替身（bm25：不做嵌入）。 */
@@ -187,6 +225,43 @@ describe('wf_db_query 工具执行', () => {
     const result = await def.execute({ dataId: 'd1', mode: 'query', sql: 'SELECT name, price FROM products ORDER BY id LIMIT 2' }, execOf(childAgent))
     expect(result).toMatchObject({ dataId: 'd1', mode: 'query', columns: ['name', 'price'] })
     expect((result as { rows: string[][] }).rows).toEqual([['苹果', '5.5'], ['香蕉', '3.2']])
+  })
+
+  it('query 模式：大表超过上限 → 执行层只读「上限 + 1」行，rows 截到上限且 truncated 透传', async () => {
+    const h = await makeHarness()
+    const file = join(h.dataDir, 'many-rows.db')
+    makeRowDb(file, 20000)
+    await start(h, makeDbFlow(file))
+    await h.runtime.wfRunNode({ isChild: false, sessionId: 'session-1' }, { nodeId: 'a1' })
+    const def = h.tools.definitions.get(WF_DB_QUERY)!
+    const counter = spyOnIterate()
+    try {
+      const result = await def.execute(
+        { dataId: 'd1', mode: 'query', sql: 'SELECT id, payload FROM lots ORDER BY id LIMIT 999999999' },
+        execOf(childAgent),
+      )
+      expect(result).toMatchObject({ dataId: 'd1', mode: 'query', columns: ['id', 'payload'], truncated: true })
+      expect((result as { rows: string[][] }).rows).toHaveLength(QUERY_ROWS_LIMIT)
+      // 上限下推到执行层的判别性证据：底层语句只被推进 上限 + 1 次（含截断探测）
+      expect(counter.nextCalls()).toBe(QUERY_ROWS_LIMIT + 1)
+    } finally {
+      counter.restore()
+    }
+  })
+
+  it('query 模式：正好达到上限 → 不出现 truncated 字段（与 search/schema 同一精确口径）', async () => {
+    const h = await makeHarness()
+    const file = join(h.dataDir, 'exact-rows.db')
+    makeRowDb(file, QUERY_ROWS_LIMIT)
+    await start(h, makeDbFlow(file))
+    await h.runtime.wfRunNode({ isChild: false, sessionId: 'session-1' }, { nodeId: 'a1' })
+    const def = h.tools.definitions.get(WF_DB_QUERY)!
+    const result = await def.execute(
+      { dataId: 'd1', mode: 'query', sql: 'SELECT id FROM lots ORDER BY id LIMIT 999999999' },
+      execOf(childAgent),
+    )
+    expect((result as { rows: string[][] }).rows).toHaveLength(QUERY_ROWS_LIMIT)
+    expect((result as { truncated?: boolean }).truncated).toBeUndefined()
   })
 
   it('search 模式：有内容但未预建索引 → 惰性自动构建并返回 hits（不报 INDEX_MISSING）', async () => {

@@ -10,10 +10,28 @@
 import { DatabaseSync } from 'node:sqlite'
 import { WfError } from '../../orchestrator/index.js'
 import type { DatabaseNode } from '../../shared/graph-model.js'
-import type { DatabaseDriver, QueryResult, ServerConnection, TableInfo } from './types.js'
+import type { DatabaseDriver, QueryOptions, QueryResult, ServerConnection, TableInfo } from './types.js'
 
 /** 表清单条数上限：本地 SQLite 与服务器 MySQL/PostgreSQL 共用同一本体（大库表名列表不灌满上下文）。 */
 export const SCHEMA_TABLE_LIMIT = 200
+
+/** 执行层行数上限：非有限或 <1 视为未设上限（`null` = 不限制）。 */
+function rowCapOf(options?: QueryOptions): number | null {
+  const maxRows = options?.maxRows
+  return typeof maxRows === 'number' && Number.isFinite(maxRows) && maxRows >= 1 ? Math.floor(maxRows) : null
+}
+
+/** 行对象 → 字符串单元格（null/undefined → 空串；与全量读取路径同一口径）。 */
+function rowValues(row: Record<string, unknown>, columns: string[]): string[] {
+  return columns.map((column) => (row[column] == null ? '' : String(row[column])))
+}
+
+/** 结果集按执行层上限收口（供在客户端库边界已物化的服务器驱动使用）。 */
+function capRows(result: QueryResult, maxRows: number | null): QueryResult {
+  if (maxRows === null) return result
+  if (result.rows.length <= maxRows) return { columns: result.columns, rows: result.rows, truncated: false }
+  return { columns: result.columns, rows: result.rows.slice(0, maxRows), truncated: true }
+}
 
 /**
  * 表清单查询语句（三通道共用同一上限本体；语句与上限单点维护）。
@@ -45,13 +63,31 @@ export class SqliteDriver implements DatabaseDriver {
     this.open().prepare('SELECT 1').get()
   }
 
-  async query(sql: string): Promise<QueryResult> {
-    const rows = this.open().prepare(sql).all() as Array<Record<string, unknown>>
-    const columns = rows.length > 0 ? Object.keys(rows[0]) : []
-    return {
-      columns,
-      rows: rows.map((row) => columns.map((column) => (row[column] == null ? '' : String(row[column])))),
+  /**
+   * 只读查询。传 maxRows 时**逐行读取**（`stmt.iterate()`）并在读满上限后立即停止：
+   * 多拉一行只为判定截断，`LIMIT 999999999` 这类形式约束因此不再把整表物化进内存。
+   */
+  async query(sql: string, options?: QueryOptions): Promise<QueryResult> {
+    const statement = this.open().prepare(sql)
+    const maxRows = rowCapOf(options)
+    if (maxRows === null) {
+      const rows = statement.all() as Array<Record<string, unknown>>
+      const columns = rows.length > 0 ? Object.keys(rows[0]) : []
+      return { columns, rows: rows.map((row) => rowValues(row, columns)) }
     }
+    const rows: Array<Record<string, unknown>> = []
+    let columns: string[] = []
+    const iterator = statement.iterate()
+    for (let step = iterator.next(); !step.done; step = iterator.next()) {
+      const row = step.value
+      if (rows.length === 0) columns = Object.keys(row)
+      // 多拉到的这一行只用于判定截断，不进入结果（正好满上限时不会进入本分支）
+      if (rows.length === maxRows) {
+        return { columns, rows: rows.map((item) => rowValues(item, columns)), truncated: true }
+      }
+      rows.push(row)
+    }
+    return { columns, rows: rows.map((row) => rowValues(row, columns)), truncated: false }
   }
 
   async schema(): Promise<TableInfo[]> {
@@ -151,9 +187,10 @@ export class ServerDriver implements DatabaseDriver {
     }
   }
 
-  async query(sql: string): Promise<QueryResult> {
-    if (this.conn.dbKind === 'mysql') return this.queryMysql(sql)
-    return this.queryPostgres(sql)
+  async query(sql: string, options?: QueryOptions): Promise<QueryResult> {
+    const result = this.conn.dbKind === 'mysql' ? await this.queryMysql(sql) : await this.queryPostgres(sql)
+    // 服务器驱动在客户端库边界一次性物化结果集（不引入游标依赖）：此处只做上限收口与截断上报。
+    return capRows(result, rowCapOf(options))
   }
 
   async schema(): Promise<TableInfo[]> {

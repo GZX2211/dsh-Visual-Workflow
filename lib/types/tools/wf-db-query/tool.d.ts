@@ -1,4 +1,9 @@
 import type { WfDbQueryHost } from './types.js';
+/**
+ * 查询结果行数上限（防结果集打爆上下文）。
+ * 由执行层落实（驱动逐行读取并读满即停），不只做形式上的 LIMIT → slice。
+ */
+export declare const QUERY_ROWS_LIMIT = 50;
 /** 查询结果单元格值最大长度（超长截断防止向量/BLOB 列打爆上下文；追加标记）。 */
 export declare const QUERY_CELL_MAX_LENGTH = 240;
 /**

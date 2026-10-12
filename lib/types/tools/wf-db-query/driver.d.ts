@@ -1,5 +1,5 @@
 import type { DatabaseNode } from '../../shared/graph-model.js';
-import type { DatabaseDriver, QueryResult, ServerConnection, TableInfo } from './types.js';
+import type { DatabaseDriver, QueryOptions, QueryResult, ServerConnection, TableInfo } from './types.js';
 /** 表清单条数上限：本地 SQLite 与服务器 MySQL/PostgreSQL 共用同一本体（大库表名列表不灌满上下文）。 */
 export declare const SCHEMA_TABLE_LIMIT = 200;
 /**
@@ -14,7 +14,11 @@ export declare class SqliteDriver implements DatabaseDriver {
     constructor(filePath: string);
     private open;
     testConnection(): Promise<void>;
-    query(sql: string): Promise<QueryResult>;
+    /**
+     * 只读查询。传 maxRows 时**逐行读取**（`stmt.iterate()`）并在读满上限后立即停止：
+     * 多拉一行只为判定截断，`LIMIT 999999999` 这类形式约束因此不再把整表物化进内存。
+     */
+    query(sql: string, options?: QueryOptions): Promise<QueryResult>;
     schema(): Promise<TableInfo[]>;
     /** 表清单页：+1 行探测判定截断，返回前截到上限（对外不超过上限）。 */
     schemaPage(): Promise<{
@@ -34,7 +38,7 @@ export declare class ServerDriver implements DatabaseDriver {
     private queryMysql;
     private queryPostgres;
     testConnection(): Promise<void>;
-    query(sql: string): Promise<QueryResult>;
+    query(sql: string, options?: QueryOptions): Promise<QueryResult>;
     schema(): Promise<TableInfo[]>;
     /** 表清单页：+1 行探测判定截断，返回前截到上限（对外不超过上限）。 */
     schemaPage(): Promise<{

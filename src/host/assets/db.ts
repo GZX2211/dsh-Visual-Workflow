@@ -1,6 +1,6 @@
 // src/host/assets/db.ts
 //
-// 资产库连接与事务：打开/关闭、PRAGMA、withTx 事务助手。
+// 资产库连接与事务：打开/关闭、PRAGMA、withTx 事务助手，以及连接级的语句缓存。
 //
 // 为什么读改写必须共用 withTx：资产写路径存在「先查历史/Active、再决定新增版本还是
 // 仅移动指针」的读改写序列，裸读裸写会在两个进程之间留下丢更新窗口；withTx 内的
@@ -8,7 +8,7 @@
 
 import { mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
+import { DatabaseSync, type StatementSync } from 'node:sqlite'
 import { ASSET_DB_FILE, initSchema } from './schema.js'
 
 /** 库文件路径：固定 `<root>/assets.db`（root = 插件 dataDir）。 */
@@ -64,6 +64,35 @@ function applyJournalMode(db: DatabaseSync): void {
 /** 行值：node:sqlite 返回 null 原型对象，凡向外传递前都必须转成普通对象。 */
 export type DbRow = Record<string, unknown>
 
+/**
+ * 连接 → SQL 原文 → 已编译语句。三个通用入口（queryRows / queryRow / runSql）共用同一份缓存，
+ * 因此列表读、逐项明细与热点写语句都只编译一次。
+ *
+ * 为什么按连接分桶：语句与连接同生命周期，跨连接复用无效（驱动会拒绝）；WeakMap 让连接
+ * 关闭后整桶随之可回收，无需人工失效。
+ * 为什么键是 SQL 原文：参数一律经绑定传值，同一原文的语句对任意入参都可用；语句由 SQLite
+ * 在执行前复位，可安全重复执行。
+ * 为什么有长度上限：`IN (?,?,…)` 这类文本随入参个数变化，缓存因此可能有多个条目；缓存是纯
+ * 加速设施，不允许变成无界内存增长点，超限即整体丢弃（下次执行重新编译，不影响正确性）。
+ */
+const statementCache = new WeakMap<DatabaseSync, Map<string, StatementSync>>()
+const STATEMENT_CACHE_LIMIT = 256
+
+/** 取（必要时编译并缓存）语句。 */
+function preparedStatement(db: DatabaseSync, sql: string): StatementSync {
+  let bySql = statementCache.get(db)
+  if (!bySql) {
+    bySql = new Map<string, StatementSync>()
+    statementCache.set(db, bySql)
+  }
+  const cached = bySql.get(sql)
+  if (cached) return cached
+  if (bySql.size >= STATEMENT_CACHE_LIMIT) bySql.clear()
+  const statement = db.prepare(sql)
+  bySql.set(sql, statement)
+  return statement
+}
+
 /** 把 null 原型行对象转为普通对象（调用方不得持有驱动内部结构）。 */
 export function plainRow(row: Record<string, unknown>): DbRow {
   return { ...row }
@@ -71,21 +100,20 @@ export function plainRow(row: Record<string, unknown>): DbRow {
 
 /** 查询多行（返回普通对象数组）。 */
 export function queryRows(db: DatabaseSync, sql: string, params: unknown[] = []): DbRow[] {
-  return db
-    .prepare(sql)
+  return preparedStatement(db, sql)
     .all(...(params as never[]))
     .map((row) => plainRow(row as Record<string, unknown>))
 }
 
 /** 查询单行（无匹配返回 null）。 */
 export function queryRow(db: DatabaseSync, sql: string, params: unknown[] = []): DbRow | null {
-  const row = db.prepare(sql).get(...(params as never[]))
+  const row = preparedStatement(db, sql).get(...(params as never[]))
   return row === undefined ? null : plainRow(row as Record<string, unknown>)
 }
 
 /** 执行写语句（INSERT/UPDATE/DELETE）。 */
 export function runSql(db: DatabaseSync, sql: string, params: unknown[] = []): void {
-  db.prepare(sql).run(...(params as never[]))
+  preparedStatement(db, sql).run(...(params as never[]))
 }
 
 /**

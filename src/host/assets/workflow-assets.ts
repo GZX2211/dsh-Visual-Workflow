@@ -39,6 +39,7 @@ import {
   markRoleVersionShared,
   readRoleActive,
   readRoleVersionRow,
+  readRoleVersionRowsByIds,
   releaseRoleReference,
   retireRoleAssetRow,
   roleAssetCurrentType,
@@ -448,7 +449,7 @@ export function registerWorkflowVersion(ctx: RolePortContext, request: WorkflowW
   }
   // 内容查重（用户裁决）：名称/描述/mode/meta + 节点内容（**忽略节点坐标**）+ 连线全等
   // 即视为「未变化」，不新增版本。重复点击保存与纯坐标拖动都不会再堆版本。
-  if (sameWorkflowContent(workflowShapeOfRequest(request), workflowShapeOfRow(ctx.tx, baseline))) {
+  if (sameContentAsBaseline(ctx.tx, request, baseline)) {
     return {
       assetId: request.assetId,
       versionId: baseline.versionId,
@@ -689,12 +690,17 @@ export function previewWorkflowAssetCascade(
   })
 }
 
-/** 内容形状（保存查重判据）：节点坐标是纯视图事实，不参与比较。 */
-interface WorkflowContentShape {
+/** 内容头部（与节点无关的标量与元参数）：任一不等即整份内容必然不等。 */
+interface WorkflowContentHead {
   mode: WorkflowMode
   name: string
   description: string
   meta: OrgMeta | null
+}
+
+/** 内容形状（保存查重判据）：节点坐标是纯视图事实，不参与比较。 */
+interface WorkflowContentShape {
+  head: WorkflowContentHead
   nodes: unknown[]
   lines: Line[]
 }
@@ -702,10 +708,12 @@ interface WorkflowContentShape {
 /** 待写入请求 → 内容形状。 */
 function workflowShapeOfRequest(request: Omit<WorkflowWriteRequest, 'shortCircuitFingerprint'>): WorkflowContentShape {
   return {
-    mode: request.mode,
-    name: request.name,
-    description: request.description,
-    meta: request.meta,
+    head: {
+      mode: request.mode,
+      name: request.name,
+      description: request.description,
+      meta: request.meta,
+    },
     nodes: request.nodes.map(comparableNodeOf),
     lines: request.lines,
   }
@@ -714,13 +722,32 @@ function workflowShapeOfRequest(request: Omit<WorkflowWriteRequest, 'shortCircui
 /** 已落库版本行 → 内容形状（角色节点经 join 还原角色字段，与请求侧同口径比较）。 */
 function workflowShapeOfRow(ctx: AssetTxContext, row: WorkflowAssetRow): WorkflowContentShape {
   return {
-    mode: row.mode,
-    name: row.name,
-    description: row.description,
-    meta: row.meta,
+    head: rowHeadOf(row),
     nodes: rebuildNodes(ctx, row.assetId, row).map(comparableNodeOf),
     lines: row.lines,
   }
+}
+
+/** 版本行的内容头部（不触碰节点，节点内容在角色版本行里）。 */
+function rowHeadOf(row: WorkflowAssetRow): WorkflowContentHead {
+  return { mode: row.mode, name: row.name, description: row.description, meta: row.meta }
+}
+
+/**
+ * 待写入内容与基线版本行是否全等（保存查重）。
+ *
+ * 为什么先比头部：名称/描述/mode/meta 任一不同即整份内容必然不同，而基线整图的节点部分
+ * 需要按角色节点回表重建（基线角色版本行损坏时重建还会抛错）——一次改名保存不该买这个单。
+ * 头部全等才继续重建节点做全量比较，判定结果与「直接全量比较」逐位一致。
+ */
+function sameContentAsBaseline(
+  ctx: AssetTxContext,
+  request: Omit<WorkflowWriteRequest, 'shortCircuitFingerprint'>,
+  baseline: WorkflowAssetRow,
+): boolean {
+  const requestShape = workflowShapeOfRequest(request)
+  if (stableStringify(requestShape.head) !== stableStringify(rowHeadOf(baseline))) return false
+  return sameWorkflowContent(requestShape, workflowShapeOfRow(ctx, baseline))
 }
 
 /**
@@ -821,6 +848,11 @@ function workflowHasEarlierVersion(ctx: AssetTxContext, assetId: string): boolea
 /** 壳重建（算法 H）：壳 + 角色版本映射 → 完整节点数组（顺序与壳一致）。 */
 function rebuildNodes(ctx: AssetTxContext, assetId: string, row: WorkflowAssetRow): GraphNode[] {
   const refs = new Map(row.roleVersionIds.map((ref) => [ref.nodeId, ref.roleVersionId]))
+  // 角色版本行一次批量取回：本函数是「按壳逐个回填」，逐个回表即 N+1 次查询
+  const roleRows = readRoleVersionRowsByIds(
+    ctx,
+    row.nodeShells.flatMap((shell) => (isFullNodeShell(shell) ? [] : (refs.get(shell.id) ?? []))),
+  )
   const nodes: GraphNode[] = []
   for (const shell of row.nodeShells) {
     if (isFullNodeShell(shell)) {
@@ -833,7 +865,7 @@ function rebuildNodes(ctx: AssetTxContext, assetId: string, row: WorkflowAssetRo
         `工作流资产 ${assetId} v${row.versionId} 的节点 ${shell.id} 是角色节点但缺少角色版本映射：节点壳已损坏`,
       )
     }
-    const roleRow = readRoleRowById(ctx, roleVersionId)
+    const roleRow = roleRows.get(roleVersionId)
     if (!roleRow) {
       throw new Error(
         `工作流资产 ${assetId} v${row.versionId} 的节点 ${shell.id} 引用的角色版本行 ${roleVersionId} 不存在：角色资产可能已被删除`,
@@ -882,15 +914,6 @@ function roleShellOf(node: RoleNode): NodeShell {
   if (node.data.groupId !== undefined) shell.groupId = node.data.groupId
   if (node.data.sourceAssetId !== undefined) shell.sourceAssetId = node.data.sourceAssetId
   return shell
-}
-
-/** 按版本行 id 读取角色版本行（`<assetId>@<versionId>` 逆向拆分）。 */
-function readRoleRowById(ctx: AssetTxContext, rowId: string): RoleAssetRow | null {
-  const index = rowId.lastIndexOf('@')
-  if (index < 0) return null
-  const versionId = Number(rowId.slice(index + 1))
-  if (!Number.isInteger(versionId) || versionId < 1) return null
-  return readRoleVersionRow(ctx, rowId.slice(0, index), versionId)
 }
 
 /** 角色版本行 → 其所属逻辑资产 id（引用统计升 shared 时使用）。 */
