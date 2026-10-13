@@ -20,7 +20,7 @@ import type {
   WorkflowAssetDetail,
   WorkflowAssetSummary,
 } from '../shared/asset-types.js'
-import type { GraphNode, Line, WorkflowMode } from '../shared/graph-model.js'
+import type { GraphNode, Line, WorkflowMode, WorkflowExecutionOptions } from '../shared/graph-model.js'
 import type { OrgMeta } from '../shared/org-meta.js'
 import type { RoleTemplate } from '../shared/template-types.js'
 import { AssetDb } from './db.js'
@@ -99,7 +99,7 @@ export interface RolePromoteInput {
 }
 
 /** 工作流模版晋升入参。 */
-export interface WorkflowPromoteInput {
+export interface WorkflowPromoteInput extends WorkflowExecutionOptions {
   templateId: string
   fingerprint: string
   mode: WorkflowMode
@@ -119,7 +119,7 @@ export interface RoleSaveInput {
 }
 
 /** 工作流资产态保存入参。 */
-export interface WorkflowSaveInput {
+export interface WorkflowSaveInput extends WorkflowExecutionOptions {
   assetId: string
   mode: WorkflowMode
   name: string
@@ -342,6 +342,8 @@ export class AssetStore {
       const request = {
         assetId: bound?.assetId ?? newWorkflowAssetId(this.ids),
         mode: input.mode,
+        executionMode: input.executionMode,
+        dagConcurrency: input.dagConcurrency,
         name: input.name,
         description: input.description,
         nodes: input.nodes,
@@ -384,6 +386,8 @@ export class AssetStore {
       const result = registerWorkflowVersion(ctx, {
         assetId: input.assetId,
         mode: input.mode,
+        executionMode: input.executionMode,
+        dagConcurrency: input.dagConcurrency,
         name: input.name,
         description: input.description,
         nodes: input.nodes,

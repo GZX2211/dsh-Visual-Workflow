@@ -28,7 +28,7 @@ export function useRunControl(dispatch: Dispatch<StudioAction>, remote: RemoteFa
     const selection = prepareInputs ? await prepareInputs(sessionId, flowId, undefined, false, configureInputs, freshStart) : undefined
     if (!alive.current || selection === null) return null
     const ticket = selection?.requestGeneration ?? inputLifecycle?.capture()
-    const result = await remote.call(EP.EP_RUN, { sessionId, flowId, ...(freshStart ? { freshStart: true } : {}), ...(selection ? { runtimeInputs: selection.runtimeInputs, handoffPolicy: selection.handoffPolicy } : {}) }) as { runId?: unknown; sessionId?: unknown }
+    const result = await remote.call(EP.EP_RUN, { sessionId, flowId, ...(freshStart ? { freshStart: true } : {}), ...(selection ? { runtimeInputs: selection.runtimeInputs, handoffPolicy: selection.handoffPolicy, ...(selection.executionMode ? { executionMode: selection.executionMode } : {}), ...(selection.dagConcurrency !== undefined ? { dagConcurrency: selection.dagConcurrency } : {}) } : {}) }) as { runId?: unknown; sessionId?: unknown }
     if (!alive.current || ticket !== undefined && inputLifecycle && !inputLifecycle.isCurrent(ticket)) return null
     const runId = String(result?.runId ?? '')
     if (runId && alive.current) {

@@ -408,13 +408,15 @@ export function applyGraphOps(input: {
         const rawCondition = opc.condition
         let conditionType = ''
         let conditionLabel: string | undefined
+        let conditionRule: NonNullable<Line["condition"]>["rule"]
         if (rawCondition !== undefined && rawCondition !== null) {
           if (typeof rawCondition === 'string') {
             conditionType = rawCondition.trim()
           } else if (typeof rawCondition === 'object' && !Array.isArray(rawCondition)) {
-            const box = rawCondition as { type?: unknown; label?: unknown }
+            const box = rawCondition as { type?: unknown; label?: unknown; rule?: NonNullable<Line["condition"]>["rule"] }
             conditionType = String(box.type ?? '').trim()
             if (box.label !== undefined && box.label !== null) conditionLabel = String(box.label)
+            conditionRule = box.rule === undefined ? undefined : structuredClone(box.rule)
           }
           if (!CONDITION_TYPES.includes(conditionType as (typeof CONDITION_TYPES)[number])) {
             badArgs(
@@ -438,7 +440,7 @@ export function applyGraphOps(input: {
           sourceHandle: sourceHandle as Line['sourceHandle'],
           targetHandle: targetHandle as Line['targetHandle'],
           ...(conditionType
-            ? { condition: { type: conditionType as 'pass' | 'fail' | 'content', ...(conditionLabel ? { label: conditionLabel } : {}) } }
+            ? { condition: { type: conditionType as 'pass' | 'fail' | 'content', ...(conditionLabel ? { label: conditionLabel } : {}), ...(conditionRule !== undefined ? { rule: conditionRule } : {}) } }
             : {}),
         })
         connectedLineIds.push(lineId)

@@ -26,7 +26,8 @@ import { summarizeFlowChange } from './flow-diff.js'
 import { buildNodeContextFacts } from './graph-facts.js'
 import { parentExecutorOf } from './directive.js'
 import { WfError, messageOf } from './errors.js'
-import type { MilestoneMarkResult, MilestoneRunFacts, OrchestratorDeps, RunEntry } from './run-entry.js'
+import { dagStateOf } from "./dag-scheduler.js"
+import type { MilestoneMarkResult, MilestoneRunFacts, OrchestratorDeps, RunEntry, TerminateOptions } from './run-entry.js'
 import {
   type ChildMeta,
   type FlowLockInfo,
@@ -43,6 +44,9 @@ export abstract class RuntimeBase {
    * 而不必把基类反向依赖到下游继承层。
    */
   abstract resumeRun(input: { sessionId: string; flowId: string; fromRunId?: string }): Promise<ResumeResult>
+  abstract terminateRun(entry: RunEntry, options: TerminateOptions): Promise<boolean>
+  protected abstract advanceDag(entry: RunEntry): Promise<void>
+  protected abstract reviewDagNode(entry: RunEntry, nodeId: string): Promise<void>
   /** 全部 run（含已终止的历史内存条目；持久化历史另见 store.listRuns）。 */
   readonly runs = new Map<string, RunEntry>()
   /** childId → 运行位置反查（subagent/end 观察回写用）。 */
@@ -84,7 +88,25 @@ export abstract class RuntimeBase {
     const entry = meta ? this.runs.get(meta.runId ?? "") : this.activeRunForSession(exec.agent.id)
     if (!entry || meta?.retired || !["running", "paused"].includes(entry.snapshot.status)) return
     const node = meta && entry.snapshot.nodes.find((record) => record.nodeId === meta.nodeId)
+    if (meta?.purpose === "task-review") {
+      if (node?.taskAcceptance?.review?.childId !== exec.agent.id || meta.attempt !== node.attempts) return
+      node.taskAcceptance.review.errorCode = "WF_DAG_REVIEW_TOOL_DENIED"
+      this.log().warn(JSON.stringify({ runId: entry.snapshot.id, nodeId: node.nodeId, attempt: node.attempts, reviewChildId: exec.agent.id, phase: "tool_result", role: "review", tool: exec.name, isError: result.isError, errorCode: "WF_DAG_REVIEW_TOOL_DENIED" }))
+      return
+    }
     if (meta && (!node || node.status !== "running" || node.childId !== exec.agent.id || node.attempts !== meta.attempt)) return
+    if (entry.snapshot.executionMode === "dag" && node) {
+      const attempt = node.attemptHistory?.at(-1)
+      if (attempt) {
+        const results = attempt.toolResults ??= []
+        const callId = typeof exec.callId === "string" ? exec.callId : undefined
+        if (!callId || !results.some((previous) => previous.callId === callId)) {
+          if (results.length >= 100) {
+            if (!results.some((previous) => previous.errorCode === "WF_DAG_TOOL_EVIDENCE_LIMIT")) results.push({ tool: "runtime", isError: true, errorCode: "WF_DAG_TOOL_EVIDENCE_LIMIT" })
+          } else results.push({ tool: exec.name, callId, isError: result.isError, ...(typeof result.error?.info?.code === "string" ? { errorCode: result.error.info.code } : {}) })
+        }
+      }
+    }
     this.log().info(JSON.stringify({ runId: entry.snapshot.id, nodeId: meta?.nodeId, childId: meta ? exec.agent.id : undefined, attempt: node?.attempts,
       phase: "tool_result", role: meta ? "child" : "parent", tool: exec.name, callId: typeof exec.callId === "string" ? exec.callId : undefined,
       rootCallId: typeof exec.rootCallId === "string" ? exec.rootCallId : undefined, isError: result.isError, errorCode: typeof result.error?.info?.code === "string" ? result.error.info.code : undefined }))
@@ -133,6 +155,10 @@ export abstract class RuntimeBase {
     this.pendingChildRoutes.delete(agentId)
     const meta = this.childMetaFor(agentId)
     if (meta?.retired) return
+    if (meta?.purpose === "task-review") {
+      this.log().info(JSON.stringify({ runId: entry.snapshot.id, nodeId: meta.nodeId, attempt: meta.attempt, reviewChildId: agentId, phase: "model_request", role: "review", provider: value.provider, model: value.model }))
+      return
+    }
     if (parent) entry.snapshot.parentRoute = { provider: value.provider, model: value.model }
     else if (meta) {
       const node = entry.snapshot.nodes.find((item) => item.nodeId === meta.nodeId)
@@ -395,6 +421,7 @@ export abstract class RuntimeBase {
     for (const entry of this.runs.values()) {
       const s = entry.snapshot
       if (s.sessionId === sessionId && s.status === 'paused') {
+        if (s.executionMode === "dag") throw new WfError("DAG 暂停只能通过工作台恢复，不接受聊天工具自动续跑", "WF_DAG_MANAGED")
         target = s.flowId
         break
       }
@@ -415,6 +442,7 @@ export abstract class RuntimeBase {
         return null
       }
       target = newest?.flowId ?? null
+      if (newest?.executionMode === "dag") throw new WfError("DAG 断点只能通过工作台恢复，不接受聊天工具自动续跑", "WF_DAG_MANAGED")
     }
     if (!target) return null
 
@@ -497,7 +525,7 @@ export abstract class RuntimeBase {
   /** 读取 run 快照（深拷贝副本，防调用方改写内部状态）。 */
   runSnapshot(runId: string): RunSnapshot | null {
     const entry = this.runs.get(runId)
-    return entry ? cloneSnapshot(entry.snapshot) : null
+    return entry ? { ...cloneSnapshot(entry.snapshot), ...(entry.snapshot.executionMode === "dag" ? { dagState: dagStateOf(entry.baseFlow, entry.snapshot) } : {}) } : null
   }
 
   /** 取 run 内存条目本身（API 层会话归属校验用；调用方只读，不得改写内部状态）。 */
@@ -611,6 +639,7 @@ export abstract class RuntimeBase {
 
   /** 重读当前（运行的）工作流最新快照：每节点执行前读一次，运行中调整即时生效（双向同步①）。 */
   async currentResolvedFlow(entry: RunEntry): Promise<WorkflowDocument> {
+    if (entry.snapshot.executionMode === "dag") return entry.baseFlow
     try {
       // 模式二运行的服务文档在 services/ 目录，必须按 mode 分派读取；
       // 固定读 workflows/ 会让 mode2 运行「读错文档/读到 null 隐式回退」（Bug 20）。
@@ -643,6 +672,7 @@ export abstract class RuntimeBase {
     for (const entry of this.runs.values()) {
       const s = entry.snapshot
       if (s.flowId !== flowId || s.sessionId !== sessionId) continue
+      if (s.executionMode === "dag") continue
       if (s.status !== 'running' && s.status !== 'paused') continue
       // 编排变更判定：与「上一次同步进事实源的画布」比较（读失败按未变更处理，
       // 宁可不注入也不误注入——事实源仍照常刷新，宿主侧 currentResolvedFlow 兜底）。
@@ -720,6 +750,8 @@ export abstract class RuntimeBase {
    */
   protected notifyRunReflection(entry: RunEntry, warnPrefix: string): void {
     const snapshot = entry.snapshot
+    // A deterministic run must not wake a planning model for control flow or reflection.
+    if (snapshot.executionMode === "dag") return
     const runId = snapshot.id
     if (!runId || this.reflectionNotified.has(runId)) return
     const facts = reflectionFactsOf({

@@ -243,6 +243,8 @@ export class FlowStore {
         ...current,
         name: doc.name ?? current.name,
         description: doc.description ?? current.description,
+        executionMode: doc.executionMode,
+        dagConcurrency: doc.dagConcurrency,
         nodes: doc.nodes,
         lines: doc.lines,
         ...(doc.meta ? { meta: doc.meta } : {}),
@@ -469,6 +471,19 @@ export class FlowStore {
     return withJsonLock(path, async () => {
       await atomicWriteJson(path, run)
       return run
+    })
+  }
+
+  /** 共享 saveRun 的组合锁；持锁后生成候选，写盘成功后在解锁前同步发布给状态所有者。 */
+  async commitRun(runId: string, prepare: () => { snapshot: RunSnapshot; publish: () => boolean } | null): Promise<boolean> {
+    if (!runId) throw new Error("commitRun 需要 run id")
+    const path = runsPath(this.root, runId)
+    return withJsonLock(path, async () => {
+      const commit = prepare()
+      if (!commit) return false
+      if (commit.snapshot.id !== runId) throw new Error("提交快照的 run id 不匹配")
+      await atomicWriteJson(path, commit.snapshot)
+      return commit.publish()
     })
   }
 

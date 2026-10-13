@@ -24,6 +24,20 @@ afterEach(async () => {
 })
 
 describe('工作流模版晋升（算法 E）', () => {
+  it("test_execution_mode_and_concurrency_roundtrip_versions_without_reinterpreting_old_assets", async () => {
+    const payload = { templateId: "execution-template", fingerprint: "one", mode: "mode1" as const, name: "execution mode", description: "", nodes: [stageNode("s1"), roleNode({ id: "n1" })], lines: [flowLine("line", "s1", "n1", "flow-out", "flow-in")], source: "human" as const }
+    const old = await store.promoteWorkflow(payload)
+    expect(await store.getWorkflowAsset(old.assetId)).not.toHaveProperty("executionMode")
+    const next = await store.promoteWorkflow({ ...payload, fingerprint: "two", executionMode: "dag", dagConcurrency: 4 })
+    expect(next.versionId).toBe(2)
+    expect(await store.getWorkflowAsset(old.assetId)).toMatchObject({ executionMode: "dag", dagConcurrency: 4 })
+    await store.rollbackWorkflowAsset(old.assetId, 1)
+    expect(await store.getWorkflowAsset(old.assetId)).not.toHaveProperty("executionMode")
+    await store.rollbackWorkflowAsset(old.assetId, 2)
+    expect(await store.getWorkflowAsset(old.assetId)).toMatchObject({ executionMode: "dag", dagConcurrency: 4 })
+    const same = await store.saveWorkflowVersion({ assetId: old.assetId, ...payload, executionMode: "dag", dagConcurrency: 4 })
+    expect(same).toMatchObject({ unchanged: true, versionId: 2 })
+  })
   it('test_晋升_工作流模版_新建资产且角色节点登记为inline', async () => {
     const result = await store.promoteWorkflow({
       templateId: 'tpl-flow-1',

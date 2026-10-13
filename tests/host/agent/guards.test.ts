@@ -6,7 +6,7 @@
 //   - 回合重置与 consumeCapped 消费；未登记 child 旁路；贡献 disposer 生效。
 // 断言依据：架构文档 §4.2 L221、需求文档 §4.2.3.2 规则 3（软截停不硬性中断）。
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { REACT_CAP_DENY_REASON, REACT_CAP_MESSAGE, createReactGuard, type GuardChildContext } from '../../../src/host/agent/guards.js'
 
 /** 最小 childCtx fake：waterfall 事件链 + tools.guard 记录。 */
@@ -20,9 +20,10 @@ class FakeChildCtx implements GuardChildContext {
     },
   }
 
-  on(name: string, listener: (payload: unknown, next?: () => Promise<unknown>) => unknown): () => void {
+  on(name: string, listener: (payload: unknown, next?: () => Promise<unknown>) => unknown, prepend = false): () => void {
     const list = this.listeners.get(name) ?? []
-    list.push(listener)
+    if (prepend) list.unshift(listener)
+    else list.push(listener)
     this.listeners.set(name, list)
     return () => {
       const index = list.indexOf(listener)
@@ -58,6 +59,38 @@ class FakeChildCtx implements GuardChildContext {
 }
 
 const defaultDecision = (): unknown => ({ kind: 'enter', messages: [] })
+
+it("test_review_hard_limit_admits_one_model_step_and_prevents_request_recovery_across_turns", async () => {
+  const guard = createReactGuard()
+  const ctx = new FakeChildCtx()
+  const inheritedRecovery = vi.fn(async () => ({ kind: "retry" }))
+  ctx.on("agent/request-error", inheritedRecovery)
+  guard.bridge.setHardLimit!("review", 1)
+  guard.bridge.setLimit("review", undefined)
+  const dispose = guard.contribution(ctx, true)
+  const model = vi.fn(defaultDecision)
+  expect(await ctx.dispatch("agent/pre-step", { agent: { id: "review" }, turn: 1 }, model)).toEqual(defaultDecision())
+  expect(await ctx.dispatch("agent/pre-step", { agent: { id: "review" }, turn: 1 }, model)).toEqual({ kind: "reject" })
+  expect(await ctx.dispatch("agent/pre-step", { agent: { id: "review" }, turn: 2 }, model)).toEqual({ kind: "reject" })
+  const retry = vi.fn(() => ({ kind: "retry" }))
+  expect(await ctx.dispatch("agent/request-error", { agent: { id: "review" } }, retry)).toBeUndefined()
+  expect(retry).not.toHaveBeenCalled()
+  expect(inheritedRecovery).not.toHaveBeenCalled()
+  expect(model).toHaveBeenCalledTimes(1)
+  expect(guard.bridge.consumeCapped("review")).toBe(false)
+  guard.bridge.drop("review")
+  expect(await ctx.dispatch("agent/pre-step", { agent: { id: "review" }, turn: 3 }, model)).toEqual(defaultDecision())
+  dispose()
+  expect(ctx.listenerCount("agent/pre-step")).toBe(0)
+})
+
+it("test_required_review_guard_registration_failure_releases_partial_hooks_and_rejects_creation", () => {
+  const guard = createReactGuard()
+  const release = vi.fn()
+  const on = vi.fn((name: string) => { if (name === "agent/request-error") throw new Error("host registration failed"); return release })
+  expect(() => guard.contribution({ on }, true)).toThrow("host registration failed")
+  expect(release).toHaveBeenCalledTimes(1)
+})
 
 /** 构造 childCtx + 护栏桥 + 贡献装配。 */
 function setup(limit: number | undefined, childId = 'child-1') {

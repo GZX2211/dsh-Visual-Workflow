@@ -74,6 +74,8 @@ function assetAsTemplate(detail: WorkflowAssetDetail): WorkflowTemplate {
   return {
     id: `asset-${detail.assetId}`,
     mode: detail.mode,
+    ...(detail.executionMode ? { executionMode: detail.executionMode } : {}),
+    ...(detail.dagConcurrency !== undefined ? { dagConcurrency: detail.dagConcurrency } : {}),
     name: detail.name,
     description: detail.description,
     nodes: detail.nodes,
@@ -279,6 +281,8 @@ export function useDocumentActions(
                 id: source.id,
                 sessionId: source.sessionId,
                 mode: template.mode,
+                ...(template.executionMode ? { executionMode: template.executionMode } : {}),
+                ...(template.dagConcurrency !== undefined ? { dagConcurrency: template.dagConcurrency } : {}),
                 name: template.name ?? source.name,
                 description: template.description ?? '',
                 revision: Number(source.revision ?? 0),

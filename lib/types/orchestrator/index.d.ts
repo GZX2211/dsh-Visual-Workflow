@@ -6,6 +6,7 @@ export { createWaiter, type FinishArgs, type FinishResult, type MilestoneMarkRes
 export { ASK_MESSAGE_LIMIT, buildAskText, buildReplyText, coordinatorMessage, type AskAgentArgs, type AskAgentCmd, type AskAgentDelivery, type AskAgentResult, type AskAuditEntry, type PendingAsk, } from './ask-protocol.js';
 export { buildNodeContextFacts, collabBlockOf, collabGroupList, collabPromptOf, dbToolHintOf, labelOf, missingStageLabels, orchestrationNodeList, pauseNodeIdsOf, validateFlowForRun, } from './graph-facts.js';
 export { buildNodeBlocks, inputContractOf, outputContractOf } from './task-blocks.js';
+export { executionModeOf, dagConcurrencyOf, dagStateOf } from "./dag-scheduler.js";
 export { buildParentRunPrompt, directiveParams, parentExecutorOf, parentPromptVariantOf } from './directive.js';
 export { effectiveReactLimitOf, effectiveRetryLimitOf, effectiveThinkingOf } from './node-params.js';
 export { OUTPUT_SUMMARY_LIMIT, cloneSnapshot, createRunSnapshot, lastAssistantText, setNodeStatus, statusText, terminalizeNodes, truncateText, type SetNodeStatusOptions, } from './snapshot.js';

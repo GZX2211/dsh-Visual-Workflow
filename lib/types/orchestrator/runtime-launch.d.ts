@@ -5,7 +5,7 @@ import type { RunSnapshot } from '../shared/types.js';
 import type { WorkflowDocument } from '../shared/graph-model.js';
 import { RuntimeBase } from './runtime-base.js';
 import type { RuntimeInputOptions } from "../shared/runtime-types.js";
-export declare class RuntimeLaunch extends RuntimeBase {
+export declare abstract class RuntimeLaunch extends RuntimeBase {
     /**
      * 协作通道判定（编排指令与成员任务块的唯一分支依据）：
      * 官方 Agent Team 可用（服务已挂载 + 根 Agent 存活 + 有可用 provider）→ official；

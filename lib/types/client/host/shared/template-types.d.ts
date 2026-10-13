@@ -1,4 +1,4 @@
-import type { GraphNode, Line } from './graph-model.js';
+import type { GraphNode, Line, WorkflowExecutionOptions } from './graph-model.js';
 /**
  * 角色模板：父代理或子代理模板（架构文档 §6.3）。
  * 左侧栏「角色」Tab 的复用壳；拖入画布深拷贝为 RoleNode（与模板断引用）。
@@ -170,14 +170,14 @@ export interface BundleV2 {
         description: string;
         nodes: GraphNode[];
         lines: Line[];
-    };
+    } & WorkflowExecutionOptions;
     /** 服务 payload（模式二导入导出；与 workflow 二选一）。 */
     service?: {
         name: string;
         description: string;
         nodes: GraphNode[];
         lines: Line[];
-    };
+    } & WorkflowExecutionOptions;
     /** 嵌入式资源（角色/文件/数据库/协作组模板与工具组合；导入时解耦创建模板）。 */
     embedded: {
         roles?: RoleTemplate[];

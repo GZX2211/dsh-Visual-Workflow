@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS workflow_asset_history (
   role_version_ids TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(role_version_ids)),
   nodes_json TEXT NOT NULL CHECK (json_valid(nodes_json)),
   lines_json TEXT NOT NULL CHECK (json_valid(lines_json)),
+  execution_json TEXT CHECK (execution_json IS NULL OR json_valid(execution_json)),
   meta_json TEXT CHECK (meta_json IS NULL OR json_valid(meta_json)),
   retrieval_context TEXT,
   source TEXT NOT NULL CHECK (source IN ('human','agent')),
@@ -185,6 +186,8 @@ export const SCHEMA_STATEMENTS: string[] = [
 export function initSchema(db: DatabaseSync): void {
   for (const statement of SCHEMA_STATEMENTS) db.exec(statement)
   ensureExperienceActiveColumn(db)
+  // Missing metadata keeps historical assets in Agent mode; migrations never rewrite their versions.
+  if (!tableColumns(db, "workflow_asset_history").includes("execution_json")) db.exec("ALTER TABLE workflow_asset_history ADD COLUMN execution_json TEXT CHECK (execution_json IS NULL OR json_valid(execution_json))")
   retireJsonSchemaCheck(db)
 }
 

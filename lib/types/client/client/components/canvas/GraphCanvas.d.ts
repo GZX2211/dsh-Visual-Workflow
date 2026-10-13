@@ -1,4 +1,5 @@
 import type { Dict } from '../../i18n.js';
+import type { RunNodeStatusView } from "../../lib/run-status-map.js";
 import type { CanvasEdge, CanvasNode } from '../../studio/studio-state.js';
 export type { CanvasApi } from './use-canvas-viewport.js';
 export interface GraphCanvasProps {
@@ -10,11 +11,7 @@ export interface GraphCanvasProps {
     mode: 'mode1' | 'mode2';
     selectedNode: string | null;
     selectedEdge: string | null;
-    runStatusByNode: Record<string, {
-        status: string;
-        attempts: number;
-        outputSummary: string;
-    }>;
+    runStatusByNode: Record<string, RunNodeStatusView>;
     highlightedNodeIds: string[];
     /**
      * 运行中锁定项（已完成流程不可变更；模式一 running 时由 run-locks 计算）：

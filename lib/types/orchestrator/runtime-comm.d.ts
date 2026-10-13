@@ -1,7 +1,7 @@
 import { type AskAgentArgs, type AskAgentDelivery, type AskAgentResult } from './ask-protocol.js';
 import { type CallerInfo } from './seams.js';
 import { RuntimeExecute } from './runtime-execute.js';
-export declare class RuntimeComm extends RuntimeExecute {
+export declare abstract class RuntimeComm extends RuntimeExecute {
     /** 校验调用者会话存在运行且 running（ask/reply 共用；子代理不在此拒绝）。 */
     private requireRunningRun;
     /**

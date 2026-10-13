@@ -12,6 +12,8 @@ export declare class RunEndpoints extends VisualWorkflowApiBase {
         fileBindings?: unknown;
         runtimeInputs?: unknown;
         handoffPolicy?: unknown;
+        executionMode?: unknown;
+        dagConcurrency?: unknown;
         freshStart?: unknown;
     }): Promise<unknown>;
     /** 运行状态轮询：内存快照优先，终态（内存已释放）回退磁盘历史。会话归属校验。 */

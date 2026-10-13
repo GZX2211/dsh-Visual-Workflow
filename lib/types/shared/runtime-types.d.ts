@@ -1,4 +1,4 @@
-import type { Line } from "./graph-model.js";
+import type { Line, ExecutionMode } from "./graph-model.js";
 export type JsonValue = null | boolean | number | string | JsonValue[] | {
     [key: string]: JsonValue;
 };
@@ -71,6 +71,8 @@ export interface InputRequirement {
     required?: boolean;
 }
 export interface RuntimeInputOptions {
+    executionMode?: ExecutionMode;
+    dagConcurrency?: number;
     nodeInputs: Record<string, Record<string, InputRequirement>>;
     files: InputAttachmentRef[];
     handoffPolicy?: HandoffPolicy;
@@ -80,5 +82,7 @@ export interface RuntimeInputOptions {
         runId: string;
         runtimeInputs?: RuntimeInputs;
         handoffPolicy?: HandoffPolicy;
+        executionMode?: ExecutionMode;
+        dagConcurrency?: number;
     };
 }

@@ -6,7 +6,7 @@ export declare const REACT_CAP_DENY_REASON = "ReAct iteration limit reached \u20
 /** 守卫注入点的最小结构（childCtx 形状，运行时守卫收窄）。 */
 export interface GuardChildContext {
     /** cordis 事件注册（waterfall 语义由事件本身决定）。 */
-    on(name: string, listener: (payload: unknown, next?: () => Promise<unknown>) => unknown): () => void;
+    on(name: string, listener: (payload: unknown, next?: () => Promise<unknown>) => unknown, prepend?: boolean): () => void;
     /** 工具服务（child scope 的 tools.guard 只影响该子代理）。 */
     tools?: {
         guard(guard: (exec: {
@@ -21,6 +21,8 @@ export interface GuardChildContext {
 }
 /** 软截停护栏桥（runner 与编排器使用；NodeRunner.consumeReactCapped 的来源）。 */
 export interface ReactGuardBridge {
+    setHardLimit?(childId: string, limit: 1): void;
+    hasHardLimit?(childId: string): boolean;
     /** 登记/更新某 child 的 ReAct 上限（undefined = 不设限，护栏完全旁路）。 */
     setLimit(childId: string, limit: number | undefined): void;
     /** 移除某 child 的登记（子代理清理）。 */
@@ -35,7 +37,7 @@ export interface ReactGuardBridge {
  */
 export declare function createReactGuard(): {
     bridge: ReactGuardBridge;
-    contribution: (childCtx: unknown) => () => void;
+    contribution: (childCtx: unknown, required?: boolean) => () => void;
 };
 /** 从 bridge 派生 NodeRunner.consumeReactCapped 适配（runner 装配用）。 */
 export declare function consumeReactCappedOf(bridge: ReactGuardBridge): NonNullable<NodeRunner['consumeReactCapped']>;

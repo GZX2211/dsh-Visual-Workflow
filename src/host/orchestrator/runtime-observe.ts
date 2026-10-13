@@ -13,7 +13,7 @@ import type { RunEntry, SubagentEndInfo } from './run-entry.js'
 import { RuntimeComm } from './runtime-comm.js'
 import { verifyNodeArtifacts } from './execution-inputs.js'
 
-export class RuntimeObserve extends RuntimeComm {
+export abstract class RuntimeObserve extends RuntimeComm {
   /** 仅接纳宿主已识别的 Workflow child，不把官方 epoch ID 当 Workflow runId。 */
   handleSubagentStart(info: Pick<SubagentEndInfo, "id" | "runId">): void {
     if (this.disposed || typeof info.id !== "string" || typeof info.runId !== "string" || !info.runId) return
@@ -57,10 +57,23 @@ export class RuntimeObserve extends RuntimeComm {
       this.log().debug(`[visual-workflow] 已退役子代理的结束事件被丢弃：childId=${childId} node=${meta.nodeId}`)
       return
     }
+    if (meta.purpose === "task-review") {
+      const entry = this.runs.get(meta.runId ?? "")
+      if (!entry || entry.controller.signal.aborted || !["running", "paused"].includes(entry.snapshot.status)) return
+      const review = entry.snapshot.nodes.find((node) => node.nodeId === meta.nodeId)?.taskAcceptance?.review
+      if (review?.state === "requested") { this.deferSubagentEnd(info, tries); return }
+      await this.handleDagReviewEnd(entry, meta, info)
+      return
+    }
     for (const entry of this.runs.values()) {
       const s = entry.snapshot
       if (s.sessionId !== meta.sessionId || s.flowId !== meta.flowId) continue
       const current = s.nodes.find((node) => node.nodeId === meta.nodeId)
+      if (s.executionMode === "dag" && entry.dispatching?.has(meta.nodeId) && !entry.inflight.has(childId)) {
+        this.deferSubagentEnd(info, tries)
+        return
+      }
+      if (s.executionMode === "dag" && current?.status !== "running") return
       if (current?.status === "running" && current.childId === undefined && entry.dispatching?.has(meta.nodeId)) {
         // 冷恢复的同 ID 已有旧登记，新 epoch 可能在本次投递返回前结束。
         this.deferSubagentEnd(info, tries)
@@ -144,6 +157,19 @@ export class RuntimeObserve extends RuntimeComm {
         waiter.resolve({ nodeId: meta.nodeId, status: finalStatus === 'fail' ? 'fail' : 'ok', childId, output: outputText,
           ...(s.harnessContext ? { runId: s.id, attempt: settledNode?.attempts, taskAcceptance: settledNode?.taskAcceptance?.status } : {}) })
       }
+      if (s.executionMode === "dag") {
+        try { await this.reviewDagNode(entry, meta.nodeId) } catch (error) {
+          const failure = failureOf(error, "run_finish", "WF_DAG_REVIEW_PERSIST_FAILED", this.now())
+          const task = s.nodes.find((node) => node.nodeId === meta.nodeId)?.taskAcceptance
+          if (task?.review) { task.status = "pending"; task.reason = failure.message; task.review.state = "blocked"; task.review.errorCode = failure.code }
+          if (s.status === "running") {
+            s.status = "paused"
+            s.summary = `${failure.code}：验收持久化失败，未派发下游；请通过工作台处理`
+            await this.persistWarn(entry)
+          }
+        }
+        await this.advanceDag(entry)
+      }
       return
     }
   }
@@ -151,6 +177,7 @@ export class RuntimeObserve extends RuntimeComm {
   private currentChild(entry: RunEntry, childId: string, meta: ChildMeta): boolean {
     if (this.childIndex.get(childId) !== meta || meta.retired || (meta.runId && entry.snapshot.id !== meta.runId)) return false
     const node = entry.snapshot.nodes.find((record) => record.nodeId === meta.nodeId)
+    if (entry.snapshot.executionMode === "dag" && node?.status !== "running") return false
     // 旧登记缺省代际仍兼容；新的代际必须三元组一致。
     return !!node && (meta.attempt === undefined || node.attempts === meta.attempt)
       && (node.childId === undefined ? meta.runId === undefined : node.childId === childId)

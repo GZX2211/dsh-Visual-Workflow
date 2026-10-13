@@ -29,6 +29,20 @@ import {
 afterEach(cleanupAll)
 
 describe('工作流 bundle 导出/导入（mode1）', () => {
+  it("test_new_execution_options_roundtrip_and_legacy_missing_mode_stays_missing", async () => {
+    const store = await makeStore()
+    const flow = { ...makeFlow(), executionMode: "dag" as const, dagConcurrency: 3 }
+    await store.saveWorkflow(flow, "session-1", { force: true })
+    const encoded = await exportWorkflowBundle(store, "session-1", flow.id)
+    const result = await importWorkflowBundle(store, encoded) as { template: { executionMode?: string; dagConcurrency?: number } }
+    expect(result.template).toMatchObject({ executionMode: "dag", dagConcurrency: 3 })
+    const legacy = JSON.parse(encoded)
+    delete legacy.workflow.executionMode
+    delete legacy.workflow.dagConcurrency
+    legacy.workflow.name = "legacy mode"
+    const restored = await importWorkflowBundle(store, JSON.stringify(legacy)) as { template: { executionMode?: string } }
+    expect(restored.template).not.toHaveProperty("executionMode")
+  })
   it('responsibility 可选字段在保存、导出与导入中往返；旧节点无需该字段', async () => {
     const store = await makeStore()
     const flow = makeFlow()

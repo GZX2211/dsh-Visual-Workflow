@@ -40,6 +40,7 @@ const PLUGIN_SOURCE_ID = 'visual-workflow'
 
 /** 每回合计数与软截停标记（childCtx 维度，WeakMap 键随子代理释放自动回收）。 */
 interface CapState {
+  hardSteps: number
   /** 当前回合号（回合变化时重置计数与标记）。 */
   turn: number
   /** 当前回合已计步数（思考-行动迭代数）。 */
@@ -51,7 +52,7 @@ interface CapState {
 /** 守卫注入点的最小结构（childCtx 形状，运行时守卫收窄）。 */
 export interface GuardChildContext {
   /** cordis 事件注册（waterfall 语义由事件本身决定）。 */
-  on(name: string, listener: (payload: unknown, next?: () => Promise<unknown>) => unknown): () => void
+  on(name: string, listener: (payload: unknown, next?: () => Promise<unknown>) => unknown, prepend?: boolean): () => void
   /** 工具服务（child scope 的 tools.guard 只影响该子代理）。 */
   tools?: {
     guard(guard: (exec: { name?: unknown; agent?: { id?: unknown } }) => string | undefined): () => void
@@ -62,6 +63,8 @@ export interface GuardChildContext {
 
 /** 软截停护栏桥（runner 与编排器使用；NodeRunner.consumeReactCapped 的来源）。 */
 export interface ReactGuardBridge {
+  setHardLimit?(childId: string, limit: 1): void
+  hasHardLimit?(childId: string): boolean
   /** 登记/更新某 child 的 ReAct 上限（undefined = 不设限，护栏完全旁路）。 */
   setLimit(childId: string, limit: number | undefined): void
   /** 移除某 child 的登记（子代理清理）。 */
@@ -83,10 +86,10 @@ interface PreStepPayload {
  */
 export function createReactGuard(): {
   bridge: ReactGuardBridge
-  contribution: (childCtx: unknown) => () => void
+  contribution: (childCtx: unknown, required?: boolean) => () => void
 } {
   // childId → ReAct 上限（仅本插件创建的子代理；其他插件子代理不在表内即旁路）
-  const limits = new Map<string, number | undefined>()
+  const limits = new Map<string, { soft?: number; hard?: number }>()
   // childCtx → 回合状态（identity 键：同一 childCtx 对象即同一子代理）
   const states = new WeakMap<object, CapState>()
   // childId → 待消费的软截停标记（编排器 subagent/end 观察时消费）
@@ -94,8 +97,10 @@ export function createReactGuard(): {
 
   const bridge: ReactGuardBridge = {
     setLimit(childId, limit) {
-      limits.set(childId, limit)
+      limits.set(childId, { ...limits.get(childId), soft: limit })
     },
+    setHardLimit(childId, limit) { limits.set(childId, { ...limits.get(childId), hard: limit }) },
+    hasHardLimit(childId) { return limits.get(childId)?.hard !== undefined },
     drop(childId) {
       limits.delete(childId)
       cappedFlags.delete(childId)
@@ -114,7 +119,7 @@ export function createReactGuard(): {
   function stateOf(ctx: object): CapState {
     let state = states.get(ctx)
     if (!state) {
-      state = { turn: -1, steps: 0, capped: false }
+      state = { turn: -1, steps: 0, hardSteps: 0, capped: false }
       states.set(ctx, state)
     }
     return state
@@ -131,7 +136,7 @@ export function createReactGuard(): {
     return null
   }
 
-  const contribution = (rawChildCtx: unknown): (() => void) => {
+  const contribution = (rawChildCtx: unknown, required = false): (() => void) => {
     // 官方契约 childCtx 为 unknown：运行时守卫收窄到最小结构
     const childCtx = rawChildCtx as GuardChildContext
     const disposers: Array<() => void> = []
@@ -144,13 +149,15 @@ export function createReactGuard(): {
         childCtx.on('agent/pre-step', async (rawPayload, next) => {
           const payload = rawPayload as PreStepPayload | null | undefined
           const childId = agentIdOf(payload)
-          const limit = limits.get(childId)
+          const budget = limits.get(childId)
+          const limit = budget?.soft
+          const state = stateOf(childCtx)
+          if (budget?.hard !== undefined && ++state.hardSteps > budget.hard) return { kind: "reject" }
           // 非本插件子代理或未设限：放行（保留 next 链）
           if (limit === undefined) {
             if (next) return next()
             return undefined
           }
-          const state = stateOf(childCtx)
           const turn = Number(payload?.turn ?? -1)
           // 回合变化：新回合重置预算与软截停标记（未消费的旧标记在此自然清除）
           if (turn !== state.turn) {
@@ -186,9 +193,16 @@ export function createReactGuard(): {
               },
             ],
           }
-        }) as () => void,
+        }, required) as () => void,
       )
-    } catch {
+      disposers.push(childCtx.on("agent/request-error", async (rawPayload, next) => {
+        const id = agentIdOf(rawPayload as PreStepPayload)
+        // No infrastructure retry inside the single review request; record an unknown outcome.
+        if (limits.get(id)?.hard !== undefined) return undefined
+        return next?.()
+      }, required))
+    } catch (error) {
+      if (required) { for (const dispose of disposers.reverse()) dispose(); throw error }
       // childCtx 形状不符（理论上不出现）：计步线失效，拒绝线仍可注册（降级不阻塞）
     }
 

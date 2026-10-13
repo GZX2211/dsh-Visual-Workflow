@@ -11,8 +11,13 @@ if (process.argv.includes("--help")) {
 Required: DSH_BASE_URL, DSH_TEST_PROVIDER, DSH_TEST_MODEL (exact DSH routing identifiers).
 Optional: DSH_WEB_LOG (local DSH web log used for authentication; never printed),
 DSH_TEST_WORKSPACE (fresh host-visible directory), SALES_CSV, DSH_TEST_TIMEOUT_MS.
+--dag: deterministic Runtime, no Parent, ordinary Flow edges, execution:null.
+For DAG sales: first run --dag --prepare-only, upload the fixture CSV in that DSH
+session, then rerun --dag with DSH_TEST_SESSION_ID and the printed workspace.
+Only authorized official session attachments are used; multiple files require
+DSH_TEST_ATTACHMENT_ID (an authorized public attachmentId, never a host path).
 --text: three serial Agents receiving text; --json: two serial Agents receiving JSON.
-Default: five sales Agents receiving an explicitly uploaded file. All default to auto,
+Default (Agent mode): five sales Agents receiving an explicitly uploaded file. These use auto,
 with no File Node and no ctx edges. --explicit retains the original sales ctx fixture.
 --prepare-only creates a test session and workflow without starting any model run;
 only DSH_BASE_URL is required in this mode. --help has no side effects.
@@ -26,9 +31,11 @@ assert.ok(["http:", "https:"].includes(new URL(origin).protocol), "DSH_BASE_URL 
 const provider = process.env.DSH_TEST_PROVIDER
 const model = process.env.DSH_TEST_MODEL
 const prepareOnly = process.argv.includes("--prepare-only")
+const dag = process.argv.includes("--dag")
 const testCase = process.argv.includes("--text") ? "text" : process.argv.includes("--json") ? "json" : "sales"
 const explicit = process.argv.includes("--explicit")
 assert.ok(!explicit || testCase === "sales", "--explicit supports the legacy sales fixture only")
+assert.ok(!dag || !explicit, "--dag exercises plain Flow and official attachments; --explicit is the Agent compatibility fixture")
 assert.ok(prepareOnly || (provider && model), "Set DSH_TEST_PROVIDER and DSH_TEST_MODEL to configured DSH routing names; credentials remain in DSH settings")
 const timeoutMs = Number(process.env.DSH_TEST_TIMEOUT_MS ?? 600000)
 assert.ok(Number.isFinite(timeoutMs) && timeoutMs > 0, "DSH_TEST_TIMEOUT_MS must be positive")
@@ -52,13 +59,13 @@ async function api(endpoint, args) {
   if (!response.ok || result.ok !== true) throw new Error(`${endpoint}: ${result.error?.code ?? response.status}`)
   return result.value
 }
-const created = await api("createSession", { workspacePath: workspace, label: `${testCase} 运行输入验收` })
-const sessionId = created.sessionId
+assert.ok(!process.env.DSH_TEST_SESSION_ID || dag, "DSH_TEST_SESSION_ID is reserved for the DAG official-attachment fixture")
+const sessionId = process.env.DSH_TEST_SESSION_ID ?? (await api("createSession", { workspacePath: workspace, label: `${testCase} 运行输入验收` })).sessionId
 assert.ok(typeof sessionId === "string", "createSession did not return sessionId")
 const ids = testCase === "sales" ? ["load_data", "quality_check", "sales_stats", "summary_gen", "report_gen"] : testCase === "text" ? ["uppercase", "annotate", "summarize"] : ["produce", "consume"]
 const outputs = ["raw.json", "quality.json", "stats.json", "summary.md", "final_report.md"].map((name) => resolve(workspace, "output", name))
 const salesTasks = [
-  `实际使用 read 读取运行输入或显式 ctx 给出的 CSV 路径，按表头解析全部记录，保留重复行与空单元格（空字符串），不得把空值转换成零。写 JSON 记录数组到 ${outputs[0]}。最终回复准确给出该文件绝对路径。`,
+  `实际使用 read 读取官方会话文件附件、运行输入或显式 ctx 给出的 CSV，按表头解析全部记录，保留重复行与空单元格（空字符串），不得把空值转换成零。写 JSON 记录数组到 ${outputs[0]}。最终回复准确给出该文件绝对路径。`,
   `实际读取上游 raw.json，统计原始记录数、全部原始记录中的空单元格数、完全重复记录数（六列完全相同，首次以外每条计一次）；先去重再剔除任何有缺失单元格的记录。写 JSON {records,duplicates,missingCells,valid:[记录对象]} 到 ${outputs[1]}。最终回复准确给出文件绝对路径。`,
   `实际读取上游 quality.json，仅以 valid 中的 sales_amount 数值计算总额、平均额（两位小数字符串）、最大/最小记录，按原始 date 和 product 分组求和。写 JSON {records,duplicates,missingCells,valid:有效记录数,total,average,maximum:{id:order_id,amount},minimum:{id:order_id,amount},dailyTotals:{日期:销售额},productTotals:{产品:销售额}} 到 ${outputs[2]}，分组金额之和须与 total 一致。精确计算优先使用已授权脚本或数据库能力（若可用），以实际工具结果为依据，不以自述代替计算。最终回复准确给出文件绝对路径。`,
   `实际读取上游 stats.json，不重新估算统计。生成中文摘要，列出数量、总额、平均额、最大/最小记录及订单号、每天和每种产品的金额；按 dailyTotals 的实际变化解释趋势，区分统计事实与解释，无依据不声称持续上升或增长。写入 ${outputs[3]}，最终回复准确给出文件绝对路径。`,
@@ -79,13 +86,13 @@ const tasks = testCase === "sales" ? salesTasks : testCase === "text" ? [
   '读取运行输入 source 的 JSON，最终回复仅为原始 JSON 对象，不使用代码围栏。',
   '解析自动交接的 upstreamText，将 value 乘以 2，最终回复仅为 {"doubled":数字}，不使用代码围栏。',
 ]
-const role = (id, kind, systemPrompt, execution, contract = {}) => ({ id, kind, position: { x: 0, y: 0 }, data: { label: id, systemPrompt, provider: provider ?? "", model: model ?? "", presetId: "standard", retryLimit: 2, reactLimit: 50, inputSchema: "", outputSchema: "", ...contract, ...(execution ? { execution } : {}) } })
+const role = (id, kind, systemPrompt, execution, contract = {}) => ({ id, kind, position: { x: 0, y: 0 }, data: { label: id, systemPrompt, provider: provider ?? "", model: model ?? "", presetId: "standard", retryLimit: 2, reactLimit: 50, inputSchema: "", outputSchema: "", ...contract, ...(dag && kind === "agent" ? { execution: null } : execution ? { execution } : {}) } })
 const flowId = `inputs-${testCase}-${Date.now()}`
 const flow = {
-  id: flowId, sessionId, mode: "mode1", revision: 0, name: `${testCase} 运行输入验收`, description: `${testCase}: ${explicit ? "legacy explicit ctx" : "runtime inputs + serial auto handoff"}`,
+  id: flowId, sessionId, mode: "mode1", executionMode: dag ? "dag" : "agent", revision: 0, name: `${testCase} 运行输入验收`, description: `${testCase}: ${dag ? "DAG + Harness context" : explicit ? "legacy explicit ctx" : "runtime inputs + serial auto handoff"}`,
   nodes: [
     { id: "start", kind: "start", position: { x: 0, y: 0 }, data: { label: "启动" } },
-    role("parent", "parent", `你是编排父代理。只按流程调度 ${ids.length} 个子代理，等待有效结算后调度下游，不代替它们执行节点任务。核对节点状态和已声明产物后调用 wf_finish；节点失败须如实处理并报告。`),
+    ...(!dag ? [role("parent", "parent", `你是编排父代理。只按流程调度 ${ids.length} 个子代理，等待有效结算后调度下游，不代替它们执行节点任务。核对节点状态和已声明产物后调用 wf_finish；节点失败须如实处理并报告。`)] : []),
     ...ids.map((id, index) => role(id, "agent", tasks[index], testCase === "sales" ? { ...(explicit ? { inputSource: "ctx" } : index === 0 ? { inputs: { source: { kind: "file" } } } : {}), requiredTools: ["read", "write"], outputFiles: [outputs[index]] } : index === 0 ? { inputs: { source: { kind: testCase } } } : {}, testCase === "sales" ? salesContracts[index] : { inputSchema: index === 0 ? `运行输入 source：${testCase}` : "自动交接 upstreamText", outputSchema: testCase === "text" ? "仅返回任务指定文本，不添加额外字段" : "仅返回任务指定 JSON 对象，不添加字段或代码围栏" })),
     { id: "end", kind: "end", position: { x: 0, y: 0 }, data: { label: "结束" } },
     ...(explicit ? [{ id: "csv", kind: "file", position: { x: 0, y: 0 }, data: { label: "销售 CSV 输入", fileKind: "file" } }] : []),
@@ -98,36 +105,47 @@ if (explicit) flow.lines.push(...["csv", ...ids.slice(0, -1)].map((source, index
 await writeFile(resolve(workspace, "live-flow.json"), JSON.stringify(flow, null, 2))
 await api("putWorkflow", { sessionId, flow })
 if (prepareOnly) {
-  console.log(JSON.stringify({ status: "prepared", sessionId, flowId, workspace, modelRunStarted: false }))
+  console.log(JSON.stringify({ status: "prepared", executionMode: flow.executionMode, sessionId, flowId, workspace, modelRunStarted: false, next: dag && testCase === "sales" ? "Upload the fixture CSV in this DSH session, then set DSH_TEST_SESSION_ID and DSH_TEST_WORKSPACE and rerun --dag" : undefined }))
   process.exit(0)
 }
 const runtimeInputs = { workflowInputs: {}, nodeInputs: {} }
 if (!explicit) {
-  const source = testCase === "sales"
+  let source
+  if (dag && testCase === "sales") {
+    const options = await api("runtimeInputOptions", { sessionId, flowId })
+    const chosenId = process.env.DSH_TEST_ATTACHMENT_ID
+    const candidates = chosenId ? options.files.filter((file) => file.attachmentId === chosenId) : options.files
+    assert.equal(candidates.length, 1, "DAG sales requires exactly one authorized official attachment; upload in the selected DSH session or explicitly select DSH_TEST_ATTACHMENT_ID")
+    source = { kind: "file", fileRef: { source: "attachment", ...candidates[0] } }
+  } else source = testCase === "sales"
     ? { kind: "file", fileRef: { source: "managed", path: (await api("fileUpload", { sessionId, name: `${flowId}-input.csv`, base64: (await readFile(csv)).toString("base64") })).managedPath } }
     : testCase === "text" ? { kind: "text", value: "hello workflow" } : { kind: "json", value: { value: 21 } }
   runtimeInputs.nodeInputs[ids[0]] = { source: [source] }
 }
 const runStartedAt = Date.now()
-const { runId } = await api("run", { sessionId, flowId, ...(explicit ? { fileBindings: { csv: [csv] } } : { handoffPolicy: "auto", runtimeInputs }) })
+const { runId } = await api("run", { sessionId, flowId, ...(explicit ? { fileBindings: { csv: [csv] } } : { ...(!dag ? { handoffPolicy: "auto" } : {}), runtimeInputs }) })
 console.log(JSON.stringify({ phase: "started", runId, sessionId, flowId, provider, model, workspace }))
 const deadline = Date.now() + timeoutMs
 let snapshot
 let progress = ""
 while (Date.now() < deadline) {
   snapshot = await api("runStatus", { sessionId, runId })
-  const state = JSON.stringify({ status: snapshot.status, nodes: snapshot.nodes.filter((node) => ids.includes(node.nodeId)).map(({ nodeId, status, attempts }) => ({ nodeId, status, attempts })) })
+  const state = JSON.stringify({ status: snapshot.status, nodes: snapshot.nodes.filter((node) => ids.includes(node.nodeId)).map(({ nodeId, status, attempts, taskAcceptance }) => ({ nodeId, status, attempts, taskAcceptance })) })
   if (state !== progress) { console.log(state); progress = state }
   if (!["running", "paused"].includes(snapshot.status)) break
+  if (dag && snapshot.status === "paused") break
   await new Promise((resolve) => setTimeout(resolve, 1000))
 }
 await writeFile(resolve(workspace, "live-run.json"), JSON.stringify(snapshot, null, 2))
 // runStatus has no independent Agent usage counters; never infer them from attempts.
 await writeFile(resolve(workspace, "live-metrics.json"), JSON.stringify({
-  runId, testCase, durationMs: Date.now() - runStartedAt, observedStatus: snapshot?.status ?? "unknown",
+  runId, testCase, executionMode: flow.executionMode, modelE2E: "EXECUTED: inspect observed status and business assertions", durationMs: Date.now() - runStartedAt, observedStatus: snapshot?.status ?? "unknown",
   parentRoute: snapshot?.parentRoute, parentTokenUsage: "NOT AVAILABLE: export independent usage from onsite DSH",
-  nodes: (snapshot?.nodes ?? []).filter((node) => ids.includes(node.nodeId)).map(({ nodeId, childId, status, attempts, attemptHistory }) => ({ nodeId, childId, status, attempts, attemptHistory, tokenUsage: "NOT AVAILABLE: export independent usage from onsite DSH" })),
+  semanticReviewTokenUsage: "NOT AVAILABLE: export independent review-child usage from onsite DSH",
+  totalToolCalls: "NOT AVAILABLE: export actual tool events from onsite DSH", repeatedDispatches: "NOT AVAILABLE: correlate actual generation events with attemptHistory",
+  nodes: (snapshot?.nodes ?? []).filter((node) => ids.includes(node.nodeId)).map(({ nodeId, childId, status, attempts, attemptHistory, taskAcceptance }) => ({ nodeId, childId, status, attempts, attemptHistory, taskAcceptance, tokenUsage: "NOT AVAILABLE: export independent usage from onsite DSH" })),
 }, null, 2))
+if (dag && snapshot?.status === "paused") throw new Error(`DAG blocked: ${snapshot.summary}; inspect live-run.json. No automatic retry or input guess was made`)
 if (!snapshot || ["running", "paused"].includes(snapshot.status)) {
   await api("runStop", { sessionId, runId })
   throw new Error(`Live acceptance timed out; stopped owned test run ${runId}`)
@@ -136,9 +154,11 @@ assert.equal(snapshot.status, "completed", `run ${runId}: ${snapshot.status}; in
 for (const id of ids) {
   const node = snapshot.nodes.find((node) => node.nodeId === id)
   assert.equal(node?.status, "ok", `${id} did not complete`)
-  assert.ok(node.childId && node.attempts > 0 && node.provider && node.model && (testCase !== "sales" || node.artifacts?.length), `${id} lacks actual child/route/artifact evidence`)
+  assert.ok(node.childId && node.attempts > 0 && node.provider && node.model && (dag || testCase !== "sales" || node.artifacts?.length), `${id} lacks actual child/route/artifact evidence`)
+  if (dag) { assert.equal(node.taskAcceptance?.status, "accepted", `${id} has not passed task acceptance`); assert.equal(node.attempts, 1, `${id} was dispatched more than once`) }
 }
-assert.ok(snapshot.parentRoute?.provider && snapshot.parentRoute?.model, "parent model route was not recorded")
+if (dag) { assert.equal(snapshot.executionMode, "dag"); assert.equal(snapshot.parentRoute, undefined) }
+else assert.ok(snapshot.parentRoute?.provider && snapshot.parentRoute?.model, "parent model route was not recorded")
 if (testCase !== "sales") {
   const final = snapshot.nodes.find((node) => node.nodeId === ids.at(-1)).output.trim()
   if (testCase === "text") assert.ok(final.includes("NOTE: HELLO WORKFLOW"), "serial text content was not preserved")

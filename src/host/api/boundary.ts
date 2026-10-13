@@ -11,7 +11,7 @@
 // 只依赖本基座，最终类按显式清单汇聚原型方法（见 routes.ts）。
 
 import * as EP from '../shared/protocol.js'
-import type { AssetCascadePreviewInput, AssetPromoteResult, AssetStore } from '../assets/index.js'
+import type { AssetCascadePreviewInput, AssetPromoteResult, AssetStore, WorkflowPromoteInput, WorkflowSaveInput } from '../assets/index.js'
 import type { FlowStore } from '../storage/flow-store.js'
 import type { OrchestratorRuntime } from '../orchestrator/index.js'
 import type { EmbeddingEngine } from '../embedding/engine.js'
@@ -28,8 +28,6 @@ import type {
   WorkflowAssetSummary,
 } from '../shared/asset-types.js'
 import type { RoleTemplate } from '../shared/template-types.js'
-import type { GraphNode, Line, WorkflowMode } from '../shared/graph-model.js'
-import type { OrgMeta } from '../shared/org-meta.js'
 import { httpError } from './http.js'
 
 /**
@@ -67,28 +65,9 @@ interface AssetStoreLike {
   saveExperience(id: string, patch: ExperiencePatch): Promise<ExperienceEntry>
   setExperienceActive(id: string, active: boolean): Promise<ExperienceEntry>
   promoteRole(input: { templateId: string; fingerprint: string; role: RoleTemplate; source: 'human' | 'agent' }): Promise<PromoteResult>
-  promoteWorkflow(input: {
-    templateId: string
-    fingerprint: string
-    mode: WorkflowMode
-    name: string
-    description: string
-    nodes: GraphNode[]
-    lines: Line[]
-    meta?: OrgMeta
-    source: 'human' | 'agent'
-  }): Promise<PromoteResult>
+  promoteWorkflow(input: WorkflowPromoteInput): Promise<PromoteResult>
   saveRoleVersion(input: { assetId: string; role: RoleTemplate; source: 'human' | 'agent' }): Promise<PromoteResult>
-  saveWorkflowVersion(input: {
-    assetId: string
-    mode: WorkflowMode
-    name: string
-    description: string
-    nodes: GraphNode[]
-    lines: Line[]
-    meta?: OrgMeta
-    source: 'human' | 'agent'
-  }): Promise<PromoteResult>
+  saveWorkflowVersion(input: WorkflowSaveInput): Promise<PromoteResult>
 }
 
 /** 宿主能力缝（index.ts 装配；单测 fake）。 */

@@ -6,7 +6,7 @@
 // 纯度契约（见 ./AGENTS.md）：本文件只允许 `import type`，不得引入运行时 import，
 // 也不得定义运行时值。
 
-import type { GraphNode, Line } from './graph-model.js'
+import type { GraphNode, Line, WorkflowExecutionOptions } from './graph-model.js'
 import type { OrgMeta } from './org-meta.js'
 
 // ---------------------------------------------------------------------------
@@ -20,7 +20,7 @@ export type ServiceStatus = 'stopped' | 'running' | 'crashed'
  * 服务状态（模式二工作流实例 + 端口/鉴权/进程状态，架构文档 §6.2 逐字段）。
  * 一个服务 = 一个模式二工作流 + 一个常驻子进程 + 一个 REST API 端口（术语 §2）。
  */
-export interface ServiceState {
+export interface ServiceState extends WorkflowExecutionOptions {
   /** 服务稳定标识（serviceId）。 */
   id: string
   /** 归属会话 id。 */

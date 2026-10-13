@@ -18,7 +18,7 @@ export interface RunEntry {
     /** wf_run_node 总调用数（全局硬护栏）。 */
     callCount: number;
     /** 同一节点的派发窗口去重；finally 撤销，不进入持久化快照。 */
-    dispatching?: Set<string>;
+    dispatching?: Set<string | symbol>;
     inputBindingDone?: Promise<void>;
     /** 最近活动时间戳（空闲看护基准）。 */
     lastActiveAt: number;
@@ -151,6 +151,8 @@ export interface MilestoneMarkResult {
     milestoneUsed: number;
 }
 export interface StartRunOptions {
+    executionMode?: unknown;
+    dagConcurrency?: unknown;
     runtimeInputs?: unknown;
     handoffPolicy?: unknown;
     /** 文件节点 id → 实际输入路径数组；由运行边界校验未知 JSON。 */
