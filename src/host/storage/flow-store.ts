@@ -474,6 +474,19 @@ export class FlowStore {
     })
   }
 
+  /** 共享 saveRun 的组合锁；持锁后生成候选，写盘成功后在解锁前同步发布给状态所有者。 */
+  async commitRun(runId: string, prepare: () => { snapshot: RunSnapshot; publish: () => boolean } | null): Promise<boolean> {
+    if (!runId) throw new Error("commitRun 需要 run id")
+    const path = runsPath(this.root, runId)
+    return withJsonLock(path, async () => {
+      const commit = prepare()
+      if (!commit) return false
+      if (commit.snapshot.id !== runId) throw new Error("提交快照的 run id 不匹配")
+      await atomicWriteJson(path, commit.snapshot)
+      return commit.publish()
+    })
+  }
+
   /** 扫描全部 run id（reconcileStaleRuns 用，T-027）。 */
   async listAllRunIds(): Promise<string[]> {
     const dir = join(this.root, 'runs')

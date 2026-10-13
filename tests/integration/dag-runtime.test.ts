@@ -11,6 +11,8 @@ import { createReactGuard } from "../../src/host/agent/guards.js"
 import type { NodeStartInput } from "../../src/host/orchestrator/index.js"
 import type { WorkflowDocument } from "../../src/host/shared/graph-model.js"
 import type { SessionInputFile } from "../../src/host/shared/runtime-types.js"
+import type { RunSnapshot } from "../../src/host/shared/run-types.js"
+import * as runPersistence from "../../src/host/storage/atomic.js"
 import { agent, caller, cleanupTempDirs, makeHarness, stage } from "../host/orchestrator/fixtures/harness.js"
 
 afterEach(cleanupTempDirs)
@@ -18,6 +20,12 @@ afterEach(cleanupTempDirs)
 function flowOf(ids = ["a", "b"]): WorkflowDocument {
   const path = ["start", ...ids, "end"]
   return { id: "dag", sessionId: "session-1", mode: "mode1", executionMode: "dag", name: "generic flow", description: "", nodes: [stage("start", "start"), ...ids.map((id) => ({ ...agent(id, id), data: { ...agent(id, id).data, presetId: "standard" } })), stage("end", "end")], lines: path.slice(1).map((target, index) => ({ id: `line-${index}`, source: path[index], target, sourceHandle: "flow-out", targetHandle: "flow-in" })) }
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void
+  const promise = new Promise<void>((done) => { resolve = done })
+  return { promise, resolve }
 }
 
 async function harness(flow = flowOf(), config: { dagReviewTimeoutMs?: number } = {}) {
@@ -114,12 +122,137 @@ it("test_concurrent_parallel_reviews_join_once_only_after_both_durable_acceptanc
   expect(fixture.dispatched.filter((input) => input.node.id === "d")).toHaveLength(0)
   const reviews = ["b", "c"].map((id) => [...fixture.starts].reverse().find((spec) => spec.label === `DAG review ${id}`)!.childId!)
   const verdict = JSON.stringify({ status: "accepted", reason: "Branch fulfills its responsibility" })
-  await Promise.all(reviews.flatMap((id) => [fixture.settle(id, verdict), fixture.settle(id, verdict)]))
+  const entered = deferred()
+  const release = deferred()
+  const writes: string[][] = []
+  const path = join(fixture.h.store.root, "runs", `${runId}.json`)
+  const atomicWrite = runPersistence.atomicWriteJson
+  const spy = vi.spyOn(runPersistence, "atomicWriteJson").mockImplementation(async (file, data, options) => {
+    const snapshot = data as RunSnapshot
+    if (file === path && snapshot.nodes.find((node) => node.nodeId === "b")?.taskAcceptance?.status === "accepted" && !writes.length) { entered.resolve(); await release.promise }
+    await atomicWrite(file, data, options)
+    if (file === path) writes.push((await fixture.h.store.getRun(runId))!.nodes.filter((node) => node.taskAcceptance?.status === "accepted").map((node) => node.nodeId))
+  })
+  onTestFinished(() => { release.resolve(); spy.mockRestore() })
+  const first = fixture.settle(reviews[0], verdict)
+  await entered.promise
+  expect(entry.snapshot.nodes.find((node) => node.nodeId === "b")!.taskAcceptance?.status).toBe("pending")
+  expect(fixture.dispatched.filter((input) => input.node.id === "d")).toHaveLength(0)
+  const second = Promise.all([fixture.settle(reviews[1], verdict), ...reviews.map((id) => fixture.settle(id, verdict))])
+  const concurrentSave = fixture.h.store.saveRun(entry.snapshot)
+  release.resolve()
+  await Promise.all([first, second, concurrentSave])
   expect(fixture.dispatched.filter((input) => input.node.id === "d")).toHaveLength(1)
   const saved = (await fixture.h.store.getRun(runId))!
   expect(saved.nodes.filter((node) => ["b", "c"].includes(node.nodeId)).map((node) => node.taskAcceptance?.status)).toEqual(["accepted", "accepted"])
+  for (const node of saved.nodes.filter((node) => ["b", "c"].includes(node.nodeId))) expect(node.attemptHistory!.at(-1)!.taskAcceptance).toEqual(node.taskAcceptance)
+  expect(writes.some((nodes) => nodes.includes("c"))).toBe(true)
+  expect(writes.filter((nodes) => nodes.includes("c")).every((nodes) => nodes.includes("b"))).toBe(true)
   await finishTask(fixture, "d", "Merged actual branch results")
   expect((await fixture.h.store.getRun(runId))!.status).toBe("completed")
+})
+
+it("test_acceptance_write_failure_never_publishes_success_or_dispatches_successor", async () => {
+  const fixture = await harness()
+  const { runId } = await fixture.launch()
+  await fixture.settle(fixture.starts[0].childId!, "Actual worker result")
+  const review = fixture.starts[1]
+  const path = join(fixture.h.store.root, "runs", `${runId}.json`)
+  const atomicWrite = runPersistence.atomicWriteJson
+  const spy = vi.spyOn(runPersistence, "atomicWriteJson").mockImplementation(async (file, data, options) => {
+    if (file === path && (data as RunSnapshot).nodes.find((node) => node.nodeId === "a")?.taskAcceptance?.status === "accepted") throw Object.assign(new Error("Controlled persistence failure"), { code: "EIO" })
+    return atomicWrite(file, data, options)
+  })
+  onTestFinished(() => { spy.mockRestore() })
+  const verdict = JSON.stringify({ status: "accepted", reason: "Valid result, but commit must be durable" })
+  await fixture.settle(review.childId!, verdict)
+  await fixture.settle(review.childId!, verdict)
+  const memory = fixture.h.runtime.activeRunForSession("session-1")!.snapshot.nodes.find((node) => node.nodeId === "a")!
+  expect(memory.taskAcceptance).toMatchObject({ status: "pending", review: { state: "blocked", errorCode: "WF_DAG_REVIEW_PERSIST_FAILED" } })
+  expect(memory.attemptHistory!.at(-1)!.taskAcceptance).toEqual(memory.taskAcceptance)
+  const durable = (await fixture.h.store.getRun(runId))!.nodes.find((node) => node.nodeId === "a")!
+  expect(durable.taskAcceptance?.status).toBe("pending")
+  expect(durable.attemptHistory!.at(-1)!.taskAcceptance?.status).toBe("pending")
+  expect(fixture.dispatched.filter((input) => input.node.id === "b")).toHaveLength(0)
+})
+
+it("test_queued_acceptance_rechecks_stopped_run_inside_the_existing_file_lock", async () => {
+  const fixture = await harness()
+  const { runId } = await fixture.launch()
+  await fixture.settle(fixture.starts[0].childId!, "Actual result")
+  const path = join(fixture.h.store.root, "runs", `${runId}.json`)
+  const entered = deferred()
+  const release = deferred()
+  const held = runPersistence.withJsonLock(path, async () => { entered.resolve(); await release.promise })
+  onTestFinished(() => { release.resolve() })
+  await entered.promise
+  const atomicWrite = runPersistence.atomicWriteJson
+  let acceptedWrites = 0
+  const spy = vi.spyOn(runPersistence, "atomicWriteJson").mockImplementation(async (file, data, options) => {
+    if (file === path && (data as RunSnapshot).nodes.some((node) => node.taskAcceptance?.status === "accepted")) acceptedWrites++
+    return atomicWrite(file, data, options)
+  })
+  onTestFinished(() => { spy.mockRestore() })
+  const verdict = fixture.settle(fixture.starts[1].childId!, JSON.stringify({ status: "accepted", reason: "Now obsolete after stopping" }))
+  const stopped = fixture.h.runtime.stopRun(runId)
+  release.resolve()
+  await Promise.all([held, verdict, stopped])
+  const saved = (await fixture.h.store.getRun(runId))!
+  expect(saved.status).toBe("stopped")
+  expect(saved.nodes.find((node) => node.nodeId === "a")!.taskAcceptance?.status).toBe("pending")
+  expect(acceptedWrites).toBe(0)
+  expect(fixture.dispatched.filter((input) => input.node.id === "b")).toHaveLength(0)
+})
+
+it("test_review_settles_durably_while_paused_without_advancing_until_resume", async () => {
+  const fixture = await harness()
+  const { runId } = await fixture.launch()
+  await fixture.settle(fixture.starts[0].childId!, "Actual result")
+  await fixture.h.runtime.suspendRun(runId)
+  await fixture.settle(fixture.starts[1].childId!, JSON.stringify({ status: "accepted", reason: "Review started before pause and confirms completion" }))
+  const saved = (await fixture.h.store.getRun(runId))!
+  expect(saved.status).toBe("paused")
+  const node = saved.nodes.find((record) => record.nodeId === "a")!
+  expect(node.taskAcceptance?.status).toBe("accepted")
+  expect(node.attemptHistory!.at(-1)!.taskAcceptance).toEqual(node.taskAcceptance)
+  expect(fixture.dispatched.filter((input) => input.node.id === "b")).toHaveLength(0)
+  await fixture.h.runtime.resumeRun({ sessionId: "session-1", flowId: "dag", fromRunId: runId })
+  expect(fixture.dispatched.filter((input) => input.node.id === "a")).toHaveLength(1)
+  expect(fixture.dispatched.filter((input) => input.node.id === "b")).toHaveLength(1)
+})
+
+it("test_old_and_duplicate_review_events_cannot_overwrite_the_current_attempt_verdict", async () => {
+  const flow = flowOf()
+  const node = flow.nodes.find((entry) => entry.id === "a")!
+  if (node.kind !== "agent") throw new Error("fixture")
+  node.data.execution = { inputs: { source: { kind: "file" } } }
+  const fixture = await harness(flow)
+  const firstPath = join(fixture.h.dir, "first.payload")
+  const secondPath = join(fixture.h.dir, "second.payload")
+  await writeFile(firstPath, "first")
+  await writeFile(secondPath, "second")
+  fixture.files.push({ attachmentId: "first", name: "first.payload", bytes: 5, path: firstPath })
+  const { runId } = await fixture.launch()
+  await finishTask(fixture, "a", "Need corrected input", "needs-input")
+  const oldReview = fixture.starts[1].childId!
+  fixture.files.push({ attachmentId: "second", name: "second.payload", bytes: 6, path: secondPath })
+  fixture.recovery.resumable = false
+  const resumed = await fixture.h.runtime.resumeRun({ sessionId: flow.sessionId, flowId: flow.id, fromRunId: runId, runtimeInputs: { nodeInputs: { a: { source: [{ kind: "file", fileRef: { source: "attachment", attachmentId: "second", name: "second.payload", bytes: 6 } }] } } } })
+  const entry = fixture.h.runtime.activeRunForSession(flow.sessionId)!
+  const worker = entry.snapshot.nodes.find((record) => record.nodeId === "a")!
+  const currentChild = worker.childId!
+  await fixture.settle(currentChild, "Actual corrected result")
+  const currentReview = fixture.starts.at(-1)!.childId!
+  await Promise.all([
+    fixture.settle(oldReview, JSON.stringify({ status: "failed", reason: "Obsolete attempt" })),
+    fixture.settle(currentReview, JSON.stringify({ status: "accepted", reason: "Current attempt fulfills the task" })),
+  ])
+  await fixture.settle(currentReview, JSON.stringify({ status: "failed", reason: "Conflicting duplicate" }))
+  const saved = (await fixture.h.store.getRun(resumed.runId))!.nodes.find((record) => record.nodeId === "a")!
+  expect(saved.taskAcceptance).toMatchObject({ status: "accepted", reason: "Current attempt fulfills the task", origin: { runId: resumed.runId, nodeId: "a", attempt: 2, childId: currentChild }, review: { runId: resumed.runId, childId: currentReview, state: "finished" } })
+  expect(saved.attemptHistory!.map((attempt) => attempt.taskAcceptance?.status)).toEqual(["needs-input", "accepted"])
+  expect(saved.attemptHistory!.at(-1)!.taskAcceptance).toEqual(saved.taskAcceptance)
+  expect(fixture.dispatched.filter((input) => input.node.id === "b")).toHaveLength(1)
 })
 
 it.each(["needs-input", "failed", "unknown", "malformed"])("test_review_%s_never_advances_business_successor_or_loops_verification", async (kind) => {
