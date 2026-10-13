@@ -48,6 +48,8 @@ export {
 // 节点任务块构建器（子代理任务文本）：含交接契约（outputContract）与输入结构（inputContract）。
 export {
   buildNodeTaskBlock,
+  buildDagReviewPrompt,
+  DAG_REVIEW_RULE,
   NODE_HARD_CONSTRAINTS,
   DEFAULT_OUTPUT_CONTRACT,
   type NodeTaskBlockParams,

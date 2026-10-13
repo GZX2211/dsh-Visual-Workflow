@@ -5,7 +5,7 @@
 // 逻辑归 transfer 模块，端点只做参数校验与响应映射）。
 
 import type { DatabaseNode } from '../shared/graph-model.js'
-import { findResumableRun, publicRuntimeInputs } from '../orchestrator/index.js'
+import { findResumableRun, publicRuntimeInputs, dagStateOf } from '../orchestrator/index.js'
 import type { RunSnapshot } from "../shared/types.js"
 import { buildIndexForDatabase, createDatabaseDriver, indexPathOf, testDatabaseConnection } from '../tools/index.js'
 import { VectorIndex } from '../embedding/indexer.js'
@@ -51,7 +51,8 @@ export class RunEndpoints extends VisualWorkflowApiBase {
     }
     const disk = await this.host.store.getRun(runId)
     if (!disk || disk.sessionId !== sessionId) throw httpError(404, `运行不存在：${runId}`)
-    return publicSnapshot(disk)
+    const definition = disk.executionMode === "dag" ? await this.host.store.readOrchestration(disk.id) : undefined
+    return publicSnapshot({ ...disk, ...(definition ? { dagState: dagStateOf(definition, disk) } : {}) })
   }
 
   /**

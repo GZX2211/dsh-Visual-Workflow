@@ -20,6 +20,8 @@ export function serviceToWorkflowView(service: ServiceState): WorkflowDocument {
     id: service.id,
     sessionId: service.sessionId,
     mode: 'mode2',
+    ...(service.executionMode ? { executionMode: service.executionMode } : {}),
+    ...(service.dagConcurrency !== undefined ? { dagConcurrency: service.dagConcurrency } : {}),
     name: service.name,
     description: service.description,
     nodes: service.nodes,

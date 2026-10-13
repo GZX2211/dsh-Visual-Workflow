@@ -1,7 +1,17 @@
 import { type FinishArgs, type FinishResult, type RunEntry, type RunNodeArgs, type RunNodeResult } from './run-entry.js';
 import { type CallerInfo } from './seams.js';
 import { RuntimeLaunch } from './runtime-launch.js';
+import type { ChildMeta } from "./seams.js";
+import type { SubagentEndInfo } from "./run-entry.js";
 export declare abstract class RuntimeExecute extends RuntimeLaunch {
+    private verifyDagArtifacts;
+    /** A settled ordinary task receives at most one isolated, tool-free Harness review. */
+    protected reviewDagNode(run: RunEntry, nodeId: string): Promise<void>;
+    private startDagReview;
+    protected handleDagReviewEnd(run: RunEntry, meta: ChildMeta, info: SubagentEndInfo): Promise<void>;
+    private finishDagReview;
+    /** Reuse the snapshot's atomic file lock; publish acceptance only after the candidate is durable. */
+    private commitDagTask;
     /** The existing dispatch set serializes frontier decisions and per-node start windows. */
     protected advanceDag(run: RunEntry): Promise<void>;
     /** 校验调用者为「当前会话根 Agent」并取可直接执行节点的激活运行（必要时自动续跑）。 */

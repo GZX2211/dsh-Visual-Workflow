@@ -18,6 +18,7 @@ export declare abstract class RuntimeBase {
     }): Promise<ResumeResult>;
     abstract terminateRun(entry: RunEntry, options: TerminateOptions): Promise<boolean>;
     protected abstract advanceDag(entry: RunEntry): Promise<void>;
+    protected abstract reviewDagNode(entry: RunEntry, nodeId: string): Promise<void>;
     /** 全部 run（含已终止的历史内存条目；持久化历史另见 store.listRuns）。 */
     readonly runs: Map<string, RunEntry>;
     /** childId → 运行位置反查（subagent/end 观察回写用）。 */

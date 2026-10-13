@@ -17,6 +17,7 @@
 //   - 连接点按「入口/出口」区分颜色（左/右位置由交换决定，颜色区分方向）。协作组卡片不提供该按钮。
 
 import type { Dict } from '../../i18n.js'
+import type { RunNodeStatusView } from "../../lib/run-status-map.js"
 import type { CanvasNode } from '../../studio/studio-state.js'
 import { HANDLES } from '../../lib/graph-handles.js'
 import { nodeSizeOf } from '../../lib/card-geometry.js'
@@ -30,7 +31,7 @@ interface FlowNodeProps {
   selected: boolean
   highlighted: boolean
   dragging: boolean
-  runStatus: { status: string; attempts: number } | null
+  runStatus: RunNodeStatusView | { status: string; attempts: number } | null
   /** 运行中锁定（已完成/执行中）：显示锁角标 + 悬停提示；不影响拖动移动。 */
   locked?: boolean
   /** 锁定时显示的悬停说明（已完成/执行中文案不同）。 */
@@ -173,6 +174,7 @@ export function FlowNode({ node, copy, mode, selected, highlighted, dragging, ru
           <span>{String(copy.nodeKinds[displayKind] ?? displayKind)}</span>
           {statusText ? <span className={`wf-status-dot is-${status}`} /> : null}
           {statusText ? <span className="wf-hint">{statusText}</span> : null}
+          {runStatus && "executionStatus" in runStatus && runStatus.executionStatus && <span className="wf-hint" title={[`${String(copy.runExecutionState)}: ${statusLabelOf(copy, runStatus.executionStatus)}`, runStatus.taskStatus ? `${String(copy.runTaskState)}: ${statusLabelOf(copy, `task-${runStatus.taskStatus}`)}` : "", runStatus.blockedReason ? `${String((copy.dagBlocking as Record<string, string>)[runStatus.blockedReason])} ${runStatus.blockedNodeIds?.join(", ") ?? ""}` : "", runStatus.sources?.length ? `${String(copy.runInputSources)}: ${runStatus.sources.join(", ")}` : ""].filter(Boolean).join("\n")}>ⓘ</span>}
           {/* 运行中锁定角标（已完成/执行中流程不可修改、不可删除；仍可拖动移动） */}
           {locked ? <span className="wf-node__lock-badge" title={lockHint}>🔒</span> : null}
           {/* P4：最近一次父代理补丁改动的节点（帮助用户理解画布为何变了） */}

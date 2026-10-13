@@ -243,6 +243,8 @@ export class FlowStore {
         ...current,
         name: doc.name ?? current.name,
         description: doc.description ?? current.description,
+        executionMode: doc.executionMode,
+        dagConcurrency: doc.dagConcurrency,
         nodes: doc.nodes,
         lines: doc.lines,
         ...(doc.meta ? { meta: doc.meta } : {}),

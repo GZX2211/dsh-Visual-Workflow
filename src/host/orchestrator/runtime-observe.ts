@@ -57,6 +57,14 @@ export abstract class RuntimeObserve extends RuntimeComm {
       this.log().debug(`[visual-workflow] 已退役子代理的结束事件被丢弃：childId=${childId} node=${meta.nodeId}`)
       return
     }
+    if (meta.purpose === "task-review") {
+      const entry = this.runs.get(meta.runId ?? "")
+      if (!entry || entry.controller.signal.aborted || !["running", "paused"].includes(entry.snapshot.status)) return
+      const review = entry.snapshot.nodes.find((node) => node.nodeId === meta.nodeId)?.taskAcceptance?.review
+      if (review?.state === "requested") { this.deferSubagentEnd(info, tries); return }
+      await this.handleDagReviewEnd(entry, meta, info)
+      return
+    }
     for (const entry of this.runs.values()) {
       const s = entry.snapshot
       if (s.sessionId !== meta.sessionId || s.flowId !== meta.flowId) continue
@@ -149,7 +157,19 @@ export abstract class RuntimeObserve extends RuntimeComm {
         waiter.resolve({ nodeId: meta.nodeId, status: finalStatus === 'fail' ? 'fail' : 'ok', childId, output: outputText,
           ...(s.harnessContext ? { runId: s.id, attempt: settledNode?.attempts, taskAcceptance: settledNode?.taskAcceptance?.status } : {}) })
       }
-      if (s.executionMode === "dag") await this.advanceDag(entry)
+      if (s.executionMode === "dag") {
+        try { await this.reviewDagNode(entry, meta.nodeId) } catch (error) {
+          const failure = failureOf(error, "run_finish", "WF_DAG_REVIEW_PERSIST_FAILED", this.now())
+          const task = s.nodes.find((node) => node.nodeId === meta.nodeId)?.taskAcceptance
+          if (task?.review) { task.status = "pending"; task.reason = failure.message; task.review.state = "blocked"; task.review.errorCode = failure.code }
+          if (s.status === "running") {
+            s.status = "paused"
+            s.summary = `${failure.code}：验收持久化失败，未派发下游；请通过工作台处理`
+            await this.persistWarn(entry)
+          }
+        }
+        await this.advanceDag(entry)
+      }
       return
     }
   }

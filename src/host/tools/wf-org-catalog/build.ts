@@ -248,6 +248,8 @@ export function buildWorkflowDetail(
     name: trimmedOrNull(asset.name) ?? id,
     description: textOf(asset.description),
     mode: asset.mode === 'mode2' ? 'mode2' : 'mode1',
+    ...(asset.executionMode ? { executionMode: asset.executionMode } : {}),
+    ...(asset.dagConcurrency !== undefined ? { dagConcurrency: asset.dagConcurrency } : {}),
     ...(asset.meta && Object.keys(asset.meta).length > 0 ? { meta: asset.meta } : {}),
     nodes: nodes.map((node) => nodeEntryOf(node, roleNodeEntryOf)),
     lines: (asset.lines ?? []).map(lineEntryOf),

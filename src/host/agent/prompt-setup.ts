@@ -27,6 +27,8 @@ const VISUAL_WORKFLOW_PROMPT_ORDER = 1
 
 /** 子代理提示词注入状态（runner 在节点启动后写入；bindParent 也使用）。 */
 export interface ChildPromptState {
+  /** 一次性验收角色的严格护栏组成；随官方会话组成记录恢复。 */
+  modelCallLimit?: 1
   /** 节点自定义 System Prompt（角色 Prompt；可为空）。 */
   systemPrompt: string
   /** 官方系统提示词注入开关（默认 true）。 */

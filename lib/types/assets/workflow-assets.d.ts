@@ -1,5 +1,5 @@
 import type { AssetVersionEntry, RoleAssetReference, WorkflowAssetDetail, WorkflowAssetRoleRef, WorkflowAssetSummary } from '../shared/asset-types.js';
-import type { GraphNode, Line, WorkflowMode } from '../shared/graph-model.js';
+import type { GraphNode, Line, WorkflowMode, WorkflowExecutionOptions } from '../shared/graph-model.js';
 import type { OrgMeta } from '../shared/org-meta.js';
 import type { AssetTxContext } from './db.js';
 import { type RolePortContext } from './role-assets.js';
@@ -15,7 +15,7 @@ export interface NodeShell {
     sourceAssetId?: string;
 }
 /** 工作流资产版本行的内容字段（不含审计列）。 */
-export interface WorkflowContentFields {
+export interface WorkflowContentFields extends WorkflowExecutionOptions {
     mode: WorkflowMode;
     name: string;
     description: string;
@@ -48,7 +48,7 @@ export interface WorkflowAssetActiveRow {
     updatedAt: number;
 }
 /** 登记入参（AssetStore 组装；assetId 已解析、来源绑定已确定）。 */
-export interface WorkflowWriteRequest {
+export interface WorkflowWriteRequest extends WorkflowExecutionOptions {
     assetId: string;
     mode: WorkflowMode;
     name: string;

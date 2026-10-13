@@ -1,4 +1,5 @@
 import type { Dict } from '../../i18n.js';
+import type { RunNodeStatusView } from "../../lib/run-status-map.js";
 import type { CanvasNode } from '../../studio/studio-state.js';
 interface FlowNodeProps {
     node: CanvasNode;
@@ -9,7 +10,7 @@ interface FlowNodeProps {
     selected: boolean;
     highlighted: boolean;
     dragging: boolean;
-    runStatus: {
+    runStatus: RunNodeStatusView | {
         status: string;
         attempts: number;
     } | null;

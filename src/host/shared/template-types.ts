@@ -7,7 +7,7 @@
 // 纯度契约（见 ./AGENTS.md）：本文件只允许 `import type`，不得引入运行时 import，
 // 也不得定义运行时值。
 
-import type { GraphNode, Line } from './graph-model.js'
+import type { GraphNode, Line, WorkflowExecutionOptions } from './graph-model.js'
 
 // ---------------------------------------------------------------------------
 // 模板（架构文档 §6.3）
@@ -179,9 +179,9 @@ export interface BundleV2 {
   /** 所属模式（导入时按模式落到 workflows/ 或 services/）。 */
   mode: 'mode1' | 'mode2'
   /** 工作流 payload（模式一导入导出；与 service 二选一）。 */
-  workflow?: { name: string; description: string; nodes: GraphNode[]; lines: Line[] }
+  workflow?: { name: string; description: string; nodes: GraphNode[]; lines: Line[] } & WorkflowExecutionOptions
   /** 服务 payload（模式二导入导出；与 workflow 二选一）。 */
-  service?: { name: string; description: string; nodes: GraphNode[]; lines: Line[] }
+  service?: { name: string; description: string; nodes: GraphNode[]; lines: Line[] } & WorkflowExecutionOptions
   /** 嵌入式资源（角色/文件/数据库/协作组模板与工具组合；导入时解耦创建模板）。 */
   embedded: {
     roles?: RoleTemplate[]

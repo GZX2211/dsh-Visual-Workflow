@@ -1,5 +1,5 @@
 import type { AssetVersionEntry, AssetVersionSource, ExperienceDraft, ExperienceEntry, ExperienceIndexEntry, ExperiencePatch, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, RoleAssetType, WorkflowAssetDetail, WorkflowAssetSummary } from '../shared/asset-types.js';
-import type { GraphNode, Line, WorkflowMode } from '../shared/graph-model.js';
+import type { GraphNode, Line, WorkflowMode, WorkflowExecutionOptions } from '../shared/graph-model.js';
 import type { OrgMeta } from '../shared/org-meta.js';
 import type { RoleTemplate } from '../shared/template-types.js';
 import { type ExperienceInsertResult } from './experiences.js';
@@ -26,7 +26,7 @@ export interface RolePromoteInput {
     source: AssetVersionSource;
 }
 /** 工作流模版晋升入参。 */
-export interface WorkflowPromoteInput {
+export interface WorkflowPromoteInput extends WorkflowExecutionOptions {
     templateId: string;
     fingerprint: string;
     mode: WorkflowMode;
@@ -44,7 +44,7 @@ export interface RoleSaveInput {
     source: AssetVersionSource;
 }
 /** 工作流资产态保存入参。 */
-export interface WorkflowSaveInput {
+export interface WorkflowSaveInput extends WorkflowExecutionOptions {
     assetId: string;
     mode: WorkflowMode;
     name: string;

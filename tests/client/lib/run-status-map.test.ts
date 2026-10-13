@@ -22,6 +22,16 @@ function snapshotOf(nodes: RunSnapshot['nodes']): RunSnapshot {
 }
 
 describe('运行状态派生（§4.5.8 节点高亮）', () => {
+  it("test_dag_view_separates_execution_acceptance_ready_blocking_and_actual_sources", () => {
+    const snapshot = snapshotOf([{ nodeId: "a", status: "ok", attempts: 1, startedAt: null, endedAt: null, output: "result", outputSummary: "result", taskAcceptance: { status: "accepted" }, attemptHistory: [{ attempt: 1, phase: "settled", startedAt: "", status: "ok", inputAttachments: [{ attachmentId: "authorized", name: "payload", bytes: 3, source: "session" }] }] }, { nodeId: "b", status: "pending", attempts: 0, startedAt: null, endedAt: null, output: "", outputSummary: "" }])
+    snapshot.executionMode = "dag"
+    snapshot.dagState = { ready: ["b"], blocked: { b: { reason: "capacity", nodeIds: [] } } }
+    const before = structuredClone(snapshot)
+    const view = runStatusMap(snapshot)
+    expect(view.a).toMatchObject({ status: "task-accepted", executionStatus: "ok", taskStatus: "accepted", sources: ["payload (authorized)"] })
+    expect(view.b).toMatchObject({ status: "ready", executionStatus: "pending", blockedReason: "capacity" })
+    expect(snapshot).toEqual(before)
+  })
   it.each(["pending", "needs-input", "failed", "accepted"] as const)("test_task_%s_is_projected_without_changing_execution_fact", (status) => {
     const snapshot = snapshotOf([{ nodeId: "a", status: "ok", attempts: 1, startedAt: null, endedAt: null, output: "", outputSummary: "", taskAcceptance: { status } }])
     expect(runStatusMap(snapshot).a.status).toBe(status === "accepted" ? "ok" : `task-${status}`)

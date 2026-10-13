@@ -69,6 +69,8 @@ export interface NodeRunner {
    * （消费后清除）。触达上限仍正常产出——节点标记 react-capped（非失败）。
    */
   consumeReactCapped?(childId: string): boolean
+  /** 仅清除一次性验收任务的复用缓存；作用域护栏仍由宿主在销毁事件中回收。 */
+  forgetTaskChild?(childId: string): void
 }
 
 /** 协作组成员启动计划（任务块与节点级参数由编排器组装后传入）。 */
@@ -125,6 +127,8 @@ export interface GroupStartResult {
 
 /** 节点任务启动入参（任务块与节点级参数，经子代理引擎透传官方配置）。 */
 export interface NodeStartInput {
+  /** 临时语义验收任务的硬上限；普通节点保持原 ReAct 软截停语义。 */
+  modelCallLimit?: 1
   /** DAG 在官方接纳之前登记预留身份，隔离极快结算及父会话通知。 */
   onChildProvisioning?: (childId: string) => void
   /** 派发/重建前重新检查运行状态（暂停可能不触发 AbortSignal）。 */
@@ -219,6 +223,7 @@ export interface OrchestratorConfig {
   /** 运行空闲超时毫秒数（无 in-flight 时看护门限）。 */
   runIdleTimeoutMs: number
   runExecutionTimeoutMs?: number
+  dagReviewTimeoutMs?: number
   /** 单节点回流重试次数默认上限（节点未配置时兜底）。 */
   retryLimitDefault: number
   /** ReAct 迭代次数默认上限（节点未配置时兜底）。 */
@@ -316,6 +321,7 @@ export interface CallerInfo {
 
 /** 子代理归属反查记录（childId → 运行位置；wfRunNode 启动成功后登记）。 */
 export interface ChildMeta {
+  purpose?: "task-review"
   executionMode?: "dag" | "agent"
   sessionId: string
   flowId: string

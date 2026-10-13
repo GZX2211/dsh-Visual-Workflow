@@ -1,4 +1,4 @@
-import type { AssetCascadePreviewInput, AssetPromoteResult } from '../assets/index.js';
+import type { AssetCascadePreviewInput, AssetPromoteResult, WorkflowPromoteInput, WorkflowSaveInput } from '../assets/index.js';
 import type { FlowStore } from '../storage/flow-store.js';
 import type { OrchestratorRuntime } from '../orchestrator/index.js';
 import type { EmbeddingEngine } from '../embedding/engine.js';
@@ -6,8 +6,6 @@ import type { SchedulerEngine, SchedulerTaskStore } from '../scheduler/index.js'
 import type { ToolSwitchStore } from '../tools/index.js';
 import type { AssetVersionEntry, ExperienceEntry, ExperiencePatch, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../shared/asset-types.js';
 import type { RoleTemplate } from '../shared/template-types.js';
-import type { GraphNode, Line, WorkflowMode } from '../shared/graph-model.js';
-import type { OrgMeta } from '../shared/org-meta.js';
 /**
  * 入库/保存结果的能力缝形状：字段取自资产库的 AssetPromoteResult。
  * `sharedRoleAssetIds` / `archivedRoleAssetIds` 是写路径的副作用明细（本次合并为共享的角色
@@ -44,32 +42,13 @@ interface AssetStoreLike {
         role: RoleTemplate;
         source: 'human' | 'agent';
     }): Promise<PromoteResult>;
-    promoteWorkflow(input: {
-        templateId: string;
-        fingerprint: string;
-        mode: WorkflowMode;
-        name: string;
-        description: string;
-        nodes: GraphNode[];
-        lines: Line[];
-        meta?: OrgMeta;
-        source: 'human' | 'agent';
-    }): Promise<PromoteResult>;
+    promoteWorkflow(input: WorkflowPromoteInput): Promise<PromoteResult>;
     saveRoleVersion(input: {
         assetId: string;
         role: RoleTemplate;
         source: 'human' | 'agent';
     }): Promise<PromoteResult>;
-    saveWorkflowVersion(input: {
-        assetId: string;
-        mode: WorkflowMode;
-        name: string;
-        description: string;
-        nodes: GraphNode[];
-        lines: Line[];
-        meta?: OrgMeta;
-        source: 'human' | 'agent';
-    }): Promise<PromoteResult>;
+    saveWorkflowVersion(input: WorkflowSaveInput): Promise<PromoteResult>;
 }
 /** 宿主能力缝（index.ts 装配；单测 fake）。 */
 export interface ApiHost {

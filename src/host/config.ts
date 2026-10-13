@@ -34,6 +34,7 @@ export interface Config {
   runIdleTimeoutMs: number
   /** 运行执行时限，独立于空闲时限；0 表示关闭执行时限。 */
   runExecutionTimeoutMs?: number
+  dagReviewTimeoutMs?: number
   /** 运行状态回显轮询间隔毫秒数。 */
   runPollMs: number
   /** ReAct 迭代次数默认上限（软截停强制收尾）。 */
@@ -59,6 +60,7 @@ export const Config: z<Config> = z.object({
   wfAskAgentTimeoutMs: z.natural().default(120000),
   runIdleTimeoutMs: z.natural().default(1800000),
   runExecutionTimeoutMs: z.natural().default(DEFAULT_RUN_EXECUTION_TIMEOUT_MS),
+  dagReviewTimeoutMs: z.natural().min(1).default(120000),
   runPollMs: z.natural().default(2000),
   reactIterationLimitDefault: z.natural().default(50),
   retryLimitDefault: z.natural().default(3),

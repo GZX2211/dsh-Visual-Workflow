@@ -166,7 +166,7 @@ export const overlaysStyles = `
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--wf-ok) 18%, transparent);
 }
 
-.wf-status-dot.is-ok {
+.wf-status-dot.is-ok, .wf-status-dot.is-task-accepted {
   background: var(--wf-ok);
 }
 

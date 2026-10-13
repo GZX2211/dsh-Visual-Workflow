@@ -46,7 +46,7 @@ export function childKey(sessionId: string, flowId: string, nodeId: string): str
  * injectSystemPrompt 决定官方系统提示词开关；injectToolSections 决定工具散文段开关；
  * rolePrompt 为角色 Prompt 的实际注入文本——当 .md 文件路径设置时为其当前内容，文件改动即重建）。
  */
-export function nodeChildSignature(node: GraphNode, resolvedTools: string[], rolePrompt: string, injectSystemPrompt = true, injectToolSections = true, collabPrompt = ''): string {
+export function nodeChildSignature(node: GraphNode, resolvedTools: string[], rolePrompt: string, injectSystemPrompt = true, injectToolSections = true, collabPrompt = '', modelCallLimit?: 1): string {
   const data = node.kind === 'parent' || node.kind === 'agent' ? node.data : undefined
   return JSON.stringify({
     rolePrompt: String(rolePrompt ?? ''),
@@ -59,6 +59,7 @@ export function nodeChildSignature(node: GraphNode, resolvedTools: string[], rol
     injectToolSections: injectToolSections !== false,
     // 协作 Prompt 属于组级配置；变化时同样重建子代理，避免旧协作信息残留
     collabPrompt,
+    ...(modelCallLimit ? { modelCallLimit } : {}),
   })
 }
 
@@ -154,7 +155,7 @@ export interface SubagentsServiceLike {
       parent: unknown
       persona?: string
       toolFilter?: { allow: string[] }
-      agentOptions?: { provider?: string; model?: string }
+      agentOptions?: { provider?: string; model?: string; maxTokens?: number }
     }
     signal: AbortSignal
   }): Promise<{ childId: string; messageId?: unknown }>
@@ -742,6 +743,10 @@ export class NodeAgentRunner implements NodeRunner {
     this.deps.react.drop(childId)
   }
 
+  forgetTaskChild(childId: string): void {
+    for (const [key, entry] of this.nodeChildren) if (entry.childId === childId) this.nodeChildren.delete(key)
+  }
+
   /** 清理子代理表与护栏登记（宿主 dispose 调用；不中断**存活**子代理——由运行时统一中止）。
    *  （例外：配置签名变化重建时被替换的旧子代理立即尽力中断，见 ensureNodeChild。）
    *  每子代理作用域装配（角色提示词/工具可见性/模型选择/软截停）由 host 层
@@ -838,11 +843,11 @@ export class NodeAgentRunner implements NodeRunner {
     const rolePrompt = await resolveRolePrompt(node)
     const injectSystemPrompt = node.data?.injectSystemPrompt !== false
     const injectToolSections = node.data?.injectToolSections !== false
-    const signature = nodeChildSignature(node, tools, rolePrompt, injectSystemPrompt, injectToolSections, collabPrompt)
+    const signature = nodeChildSignature(node, tools, rolePrompt, injectSystemPrompt, injectToolSections, collabPrompt, input.modelCallLimit)
     const existing = this.nodeChildren.get(key)
     this.assertActive(input)
     if (!recreate && existing && existing.signature === signature) return { childId: existing.childId, created: false }
-    return this.createNodeChild(input, tools, signature, { systemPrompt: rolePrompt, injectSystemPrompt, injectToolSections })
+    return this.createNodeChild(input, tools, signature, { systemPrompt: rolePrompt, injectSystemPrompt, injectToolSections, ...(input.modelCallLimit ? { modelCallLimit: input.modelCallLimit } : {}) })
   }
 
   /** 首次、配置变更与不可恢复重建共用创建窗口；成功才切换缓存。 */
@@ -855,9 +860,10 @@ export class NodeAgentRunner implements NodeRunner {
 
     const provider = detectSubagentProvider(subagents)
     if (!provider) throw Object.assign(new Error("没有可用的隔离子代理 provider；请在 DSH profile 启用 @deepseek-ai/dsh-subagent-spawn-in-process 或安装支持隔离的 provider。fork 会继承父历史，不能用于独立节点"), { code: "WF_ISOLATED_PROVIDER_UNAVAILABLE", phase: "child_start", retryable: false })
-    const agentOptions: { provider?: string; model?: string } = {}
+    const agentOptions: { provider?: string; model?: string; maxTokens?: number } = {}
     if (node.data?.provider) agentOptions.provider = node.data.provider
     if (node.data?.model) agentOptions.model = node.data.model
+    if (input.modelCallLimit) agentOptions.maxTokens = 2048
 
     // 【关键时序】每子代理作用域装配（角色提示词/工具可见性/模型选择/软截停）由 host 层
     // `agent/created` 处理器在子代理创建窗口内安装（该事件在 agents.create 发布、
@@ -866,6 +872,10 @@ export class NodeAgentRunner implements NodeRunner {
     // 创建子代理并提交首条任务，不再在返回后重复安装——避免二次「工具已更新」。
     // Only DAG dispatch reserves an official identity; legacy creation/recovery stays unchanged.
     const reservedChildId = input.onChildProvisioning ? randomUUID() : undefined
+    if (input.modelCallLimit !== undefined) {
+      if (!reservedChildId || !this.deps.react.setHardLimit) throw Object.assign(new Error("宿主缺少一次语义验收的硬调用护栏"), { code: "WF_DAG_REVIEW_UNAVAILABLE" })
+      this.deps.react.setHardLimit(reservedChildId, input.modelCallLimit)
+    }
     if (reservedChildId) input.onChildProvisioning?.(reservedChildId)
     const started = await this.deps.toolFilter.withPending(tools, () => this.deps.promptSetup.withPending(promptState, async () => {
       const result = await subagents.startContinuable({

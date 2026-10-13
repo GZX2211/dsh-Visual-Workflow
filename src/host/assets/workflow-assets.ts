@@ -21,7 +21,7 @@ import type {
   WorkflowAssetRoleRef,
   WorkflowAssetSummary,
 } from '../shared/asset-types.js'
-import type { GraphNode, Line, RoleNode, WorkflowMode } from '../shared/graph-model.js'
+import type { GraphNode, Line, RoleNode, WorkflowMode, WorkflowExecutionOptions } from '../shared/graph-model.js'
 import type { OrgMeta } from '../shared/org-meta.js'
 import type { AssetTxContext } from './db.js'
 import { assetNotFound, assetVersionNotFound } from './errors.js'
@@ -67,7 +67,7 @@ export interface NodeShell {
 }
 
 /** 工作流资产版本行的内容字段（不含审计列）。 */
-export interface WorkflowContentFields {
+export interface WorkflowContentFields extends WorkflowExecutionOptions {
   mode: WorkflowMode
   name: string
   description: string
@@ -103,7 +103,7 @@ export interface WorkflowAssetActiveRow {
 }
 
 /** 登记入参（AssetStore 组装；assetId 已解析、来源绑定已确定）。 */
-export interface WorkflowWriteRequest {
+export interface WorkflowWriteRequest extends WorkflowExecutionOptions {
   assetId: string
   mode: WorkflowMode
   name: string
@@ -145,6 +145,7 @@ const WORKFLOW_HISTORY_COLUMNS = [
   'role_version_ids',
   'nodes_json',
   'lines_json',
+  'execution_json',
   'meta_json',
   'retrieval_context',
   'source',
@@ -490,8 +491,8 @@ function insertWorkflowVersion(
   ctx.tx.run(
     `INSERT INTO workflow_asset_history (
        id, version_id, asset_id, mode, name, description, role_version_ids, nodes_json, lines_json,
-       meta_json, retrieval_context, source, source_run_id, source_template_id, source_fingerprint, created_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       meta_json, retrieval_context, source, source_run_id, source_template_id, source_fingerprint, created_at, execution_json
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       rowId,
       versionId,
@@ -510,6 +511,7 @@ function insertWorkflowVersion(
       request.sourceTemplateId,
       request.fingerprint,
       previous?.createdAt ?? now,
+      request.executionMode === undefined && request.dagConcurrency === undefined ? null : JSON.stringify({ executionMode: request.executionMode, dagConcurrency: request.dagConcurrency }),
     ],
   )
   if (activate) {
@@ -652,7 +654,7 @@ export function previewWorkflowAssetCascade(
 }
 
 /** 内容形状（保存查重判据）：节点坐标是纯视图事实，不参与比较。 */
-interface WorkflowContentShape {
+interface WorkflowContentShape extends WorkflowExecutionOptions {
   mode: WorkflowMode
   name: string
   description: string
@@ -665,6 +667,8 @@ interface WorkflowContentShape {
 function workflowShapeOfRequest(request: Omit<WorkflowWriteRequest, 'shortCircuitFingerprint'>): WorkflowContentShape {
   return {
     mode: request.mode,
+    executionMode: request.executionMode,
+    dagConcurrency: request.dagConcurrency,
     name: request.name,
     description: request.description,
     meta: request.meta,
@@ -677,6 +681,8 @@ function workflowShapeOfRequest(request: Omit<WorkflowWriteRequest, 'shortCircui
 function workflowShapeOfRow(ctx: AssetTxContext, row: WorkflowAssetRow): WorkflowContentShape {
   return {
     mode: row.mode,
+    executionMode: row.executionMode,
+    dagConcurrency: row.dagConcurrency,
     name: row.name,
     description: row.description,
     meta: row.meta,
@@ -813,6 +819,8 @@ function workflowDetailOf(ctx: AssetTxContext, row: WorkflowAssetRow): WorkflowA
     versionId: row.versionId,
     rowId: row.id,
     mode: row.mode,
+    ...(row.executionMode ? { executionMode: row.executionMode } : {}),
+    ...(row.dagConcurrency !== undefined ? { dagConcurrency: row.dagConcurrency } : {}),
     name: row.name,
     description: row.description,
     nodes: rebuildNodes(ctx, row.assetId, row),
@@ -874,6 +882,7 @@ function workflowRowToAssetRow(row: Record<string, unknown>): WorkflowAssetRow {
     versionId: toInteger(row.version_id, 0),
     assetId: String(row.asset_id ?? ''),
     mode: row.mode === 'mode2' ? 'mode2' : 'mode1',
+    ...(typeof row.execution_json === "string" ? parseJsonStrict(row.execution_json, "execution_json") as WorkflowExecutionOptions : {}),
     name: String(row.name ?? ''),
     description: String(row.description ?? ''),
     nodeShells: nodeShells as NodeShell[],

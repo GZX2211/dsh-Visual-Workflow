@@ -16,7 +16,7 @@ export declare function childKey(sessionId: string, flowId: string, nodeId: stri
  * injectSystemPrompt 决定官方系统提示词开关；injectToolSections 决定工具散文段开关；
  * rolePrompt 为角色 Prompt 的实际注入文本——当 .md 文件路径设置时为其当前内容，文件改动即重建）。
  */
-export declare function nodeChildSignature(node: GraphNode, resolvedTools: string[], rolePrompt: string, injectSystemPrompt?: boolean, injectToolSections?: boolean, collabPrompt?: string): string;
+export declare function nodeChildSignature(node: GraphNode, resolvedTools: string[], rolePrompt: string, injectSystemPrompt?: boolean, injectToolSections?: boolean, collabPrompt?: string, modelCallLimit?: 1): string;
 /** 从可用 provider 清单中挑选（首选序优先，否则清单第一个；无可选返回 null）。 */
 export declare function pickProviderName(available: string[]): string | null;
 /**
@@ -63,6 +63,7 @@ export interface SubagentsServiceLike {
             agentOptions?: {
                 provider?: string;
                 model?: string;
+                maxTokens?: number;
             };
         };
         signal: AbortSignal;
@@ -255,6 +256,7 @@ export declare class NodeAgentRunner implements NodeRunner {
     interruptChild(childId: string, sessionId: string): Promise<void>;
     /** 宿主确认旧 Agent 已销毁后回收登记；存活期间保留护栏。 */
     releaseRetiredChild(childId: string): void;
+    forgetTaskChild(childId: string): void;
     /** 清理子代理表与护栏登记（宿主 dispose 调用；不中断**存活**子代理——由运行时统一中止）。
      *  （例外：配置签名变化重建时被替换的旧子代理立即尽力中断，见 ensureNodeChild。）
      *  每子代理作用域装配（角色提示词/工具可见性/模型选择/软截停）由 host 层

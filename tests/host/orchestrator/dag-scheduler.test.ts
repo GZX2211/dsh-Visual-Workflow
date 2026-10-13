@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { dagConcurrencyOf, dagFrontierOf, executionModeOf, findReadyNodes, validateDagForRun } from "../../../src/host/orchestrator/dag-scheduler.js"
+import { dagConcurrencyOf, dagFrontierOf, executionModeOf, findReadyNodes, validateDagForRun, selectDagRoutes, dagReviewResultOf } from "../../../src/host/orchestrator/dag-scheduler.js"
 import type { WorkflowDocument } from "../../../src/host/shared/graph-model.js"
 import { createRunSnapshot, setNodeStatus } from "../../../src/host/orchestrator/snapshot.js"
 import { agent, stage } from "./fixtures/harness.js"
@@ -17,11 +17,54 @@ function accept(value: ReturnType<typeof snapshot>, id: string) {
   setNodeStatus(value, id, "running", { attempts: 1, childId: `${id}-child`, now: 1000 })
   setNodeStatus(value, id, "ok", { childId: `${id}-child`, output: `${id} result`, now: 2000 })
   const node = value.nodes.find((entry) => entry.nodeId === id)!
-  node.taskAcceptance = { status: "accepted" }
-  node.attemptHistory![0].taskAcceptance = { status: "accepted" }
+  node.taskAcceptance = { status: "accepted", origin: { runId: value.id, nodeId: id, attempt: 1, childId: `${id}-child`, definitionRunId: value.dagDefinitionRunId ?? value.id } }
+  node.attemptHistory![0].taskAcceptance = structuredClone(node.taskAcceptance)
 }
 
 describe("deterministic DAG frontier", () => {
+  it.each(["eq", "ne", "gt", "gte", "lt", "lte", "exists"] as const)("test_computable_%s_rule_reads_only_accepted_own_json_fields", (operator) => {
+    const flow = graph([["start", "a"], ["a", "b"], ["b", "end"]], ["a", "b"])
+    flow.lines[1].condition = { type: "content", label: "declared rule", rule: { path: ["data", "value"], operator, value: operator === "lt" || operator === "lte" ? 4 : 2 } }
+    validateDagForRun(flow)
+    const run = snapshot(flow)
+    accept(run, "a")
+    run.nodes[1].output = JSON.stringify({ data: { value: operator === "eq" ? 2 : 3 } })
+    const before = structuredClone(run)
+    expect(selectDagRoutes(flow, run, "a")).toEqual([flow.lines[1].id])
+    expect(run).toEqual(before)
+    run.nodes[1].taskAcceptance!.status = "pending"
+    expect(() => selectDagRoutes(flow, run, "a")).toThrow(expect.objectContaining({ code: "WF_DAG_CONDITION_INVALID" }))
+  })
+  it("test_undeclared_semantic_conditions_and_unsafe_rules_reject_before_running", () => {
+    const flow = graph([["start", "a"], ["a", "b"], ["b", "end"]], ["a", "b"])
+    flow.lines[1].condition = { type: "content", label: "needs language understanding" }
+    expect(() => validateDagForRun(flow)).toThrow(expect.objectContaining({ code: "WF_DAG_UNSUPPORTED" }))
+    for (const path of [[], ["__proto__"], ["constructor"], ["prototype"]]) {
+      flow.lines[1].condition.rule = { path, operator: "eq", value: true }
+      expect(() => validateDagForRun(flow)).toThrow(expect.objectContaining({ code: "WF_DAG_CONDITION_INVALID" }))
+    }
+    flow.lines[1].condition.rule = { path: ["score"], operator: "gt", value: "2" }
+    expect(() => validateDagForRun(flow)).toThrow(expect.objectContaining({ code: "WF_DAG_CONDITION_INVALID" }))
+  })
+  it("test_missing_field_bad_json_and_non_numeric_operand_do_not_select_a_route", () => {
+    const flow = graph([["start", "a"], ["a", "b"], ["b", "end"]], ["a", "b"])
+    flow.lines[1].condition = { type: "content", label: "score", rule: { path: ["score"], operator: "gt", value: 2 } }
+    const run = snapshot(flow)
+    accept(run, "a")
+    for (const output of ["claimed score=3", "{}", '{"score":"3"}']) {
+      run.nodes[1].output = output
+      expect(() => selectDagRoutes(flow, run, "a")).toThrow(expect.objectContaining({ code: "WF_DAG_CONDITION_INVALID" }))
+    }
+    flow.lines[1].condition.rule!.operator = "exists"
+    run.nodes[1].output = "{}"
+    expect(selectDagRoutes(flow, run, "a")).toEqual([])
+  })
+  it.each(["accepted", "needs-input", "failed", "unknown"])("test_bounded_review_%s_schema_has_exact_fields", (status) => {
+    expect(dagReviewResultOf(JSON.stringify({ status, reason: "evidence" }))).toEqual({ status, reason: "evidence" })
+  })
+  it.each(["true", "[]", "invalid json", '{"status":"accepted","reason":""}', '{"status":"accepted","reason":"claim","selected":["foreign-node"]}', '{"status":"ok","reason":"claim"}'])("test_invalid_review_%s_is_never_accepted", (raw) => {
+    expect(() => dagReviewResultOf(raw)).toThrow(expect.objectContaining({ code: "WF_DAG_REVIEW_INVALID" }))
+  })
   it("test_linear_frontier_uses_current_accepted_generation_without_mutating_inputs", () => {
     const flow = graph([["start", "a"], ["a", "b"], ["b", "end"]], ["a", "b"])
     validateDagForRun(flow)

@@ -21,7 +21,7 @@ export interface ChildToolFilterSetup {
   contribution(childCtx: unknown, scope?: unknown): () => void
   withPending<T>(allow: readonly string[] | undefined, operation: () => Promise<T>): Promise<T>
   remember(childId: string, allow: readonly string[] | undefined): void
-  restore(childId: string, childCtx: unknown, scope?: unknown): () => void
+  restore(childId: string, childCtx: unknown, scope?: unknown, denyAll?: boolean): () => void
   peekPending?(): readonly string[] | undefined
 }
 
@@ -35,13 +35,14 @@ function toolsOf(raw: unknown): ScopedTools {
 }
 
 /** 在实际创建作用域中验证继承权限；自己的工具由执行守卫约束。 */
-export function installChildToolPolicy(raw: unknown, allow: readonly string[] | undefined, scope?: unknown): () => void {
+export function installChildToolPolicy(raw: unknown, allow: readonly string[] | undefined, scope?: unknown, denyAll = false): () => void {
   const tools = toolsOf(raw)
   const approved = allow === undefined ? undefined : new Set(allow)
   const hidden: readonly string[] = CHILD_AGENT_HIDDEN_TOOLS
   const infrastructure: readonly string[] = [RESERVED_TRANSPORT_TOOL, ...TEAM_TOOL_NAMES]
   // 创建监听器必须等待策略成功，失败向上抛出，不能发布或派发未装配的 child。
   const disposeGuard = tools.guard(({ name }) => {
+    if (denyAll) return "WF_DAG_REVIEW_TOOL_DENIED: 语义验收不授予工具执行权限"
     if (typeof name !== 'string') return 'WF_CHILD_TOOL_DENIED: 无法识别工具执行名称'
     if (hidden.includes(name)) return "WF_NOT_ROOT: 父代理专属工具禁止子代理调用"
     if (approved !== undefined && !approved.has(name) && !infrastructure.includes(name)) {
@@ -92,6 +93,6 @@ export function createChildToolFilterSetup(): ChildToolFilterSetup {
       if (allow === undefined) remembered.delete(id)
       else remembered.set(id, [...allow])
     },
-    restore: (id, context, scope) => installChildToolPolicy(context, remembered.get(id), scope),
+    restore: (id, context, scope, denyAll) => installChildToolPolicy(context, remembered.get(id), scope, denyAll),
   }
 }

@@ -88,6 +88,7 @@ export {
 
 // 节点任务块与交接契约（纯函数）
 export { buildNodeBlocks, inputContractOf, outputContractOf } from './task-blocks.js'
+export { executionModeOf, dagConcurrencyOf, dagStateOf } from "./dag-scheduler.js"
 
 // 父代理提示词变体与编排指令组装（纯函数）
 export { buildParentRunPrompt, directiveParams, parentExecutorOf, parentPromptVariantOf } from './directive.js'

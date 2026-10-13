@@ -68,6 +68,10 @@ export interface NodeExecutionContract {
   requiredFiles?: string[]
   requiredTools?: string[]
   outputFiles?: string[]
+  /** 显式声明产物合同足以证明完成；未声明时文件存在仍需语义验收。 */
+  completion?: "output-files"
+  /** 无法确认交付/外部副作用时，只有显式可安全重试的节点允许自动重跑。 */
+  retrySafe?: boolean
 }
 
 /**
@@ -82,7 +86,7 @@ export interface RoleNode extends BaseNode {
     label: string
     /** 规划来源与职责边界；旧工作流可省略。 */
     responsibility?: NodeResponsibility
-    execution?: NodeExecutionContract
+    execution?: NodeExecutionContract | null
     /** 系统提示词：场景独立生效，不继承父/子任何一方。 */
     systemPrompt: string
     /** 服务商（模型提供方，经宿主适配器解析）。 */
@@ -313,7 +317,7 @@ export interface Line {
   /** 目标侧连接点类型（Handle）。 */
   targetHandle: Handle
   /** 条件（可选）：仅流程线可带条件；条件判断由父代理语义判定。 */
-  condition?: { type: ConditionType; label?: string }
+  condition?: { type: ConditionType; label?: string; rule?: { path: string[]; operator: "eq" | "ne" | "gt" | "gte" | "lt" | "lte" | "exists"; value?: string | number | boolean | null } }
 }
 
 // ---------------------------------------------------------------------------
@@ -326,14 +330,17 @@ export type WorkflowMode = 'mode1' | 'mode2'
 /** 固定图由 Runtime 调度；缺省字段的历史文档保留 Agent 编排。 */
 export type ExecutionMode = "dag" | "agent"
 
+export interface WorkflowExecutionOptions {
+  executionMode?: ExecutionMode
+  dagConcurrency?: number
+}
+
 /**
  * 工作流模板（WorkflowTemplate）：图2 交互改造新增——左侧「工作流模板」列表的
  * 模板实体，与工作流实例同构（nodes/lines 全量内联），但**全局共享、跨会话可见**
  * （不按 sessionId 隔离），拖入画布保存后通过「创建实例」转为当前会话的实例。
  */
-export interface WorkflowTemplate {
-  executionMode?: ExecutionMode
-  dagConcurrency?: number
+export interface WorkflowTemplate extends WorkflowExecutionOptions {
   /** 模板稳定标识（模板库内唯一）。 */
   id: string
   /** 运行模式（mode1 模板 / mode2 服务模板）。 */
@@ -389,9 +396,7 @@ export interface LastAgentPatch {
  * 「节点 JSON 即事实源」：nodes/lines 为全量内联快照，不含 templateId 引用
  * （数据模型核心规则）。
  */
-export interface WorkflowDocument {
-  executionMode?: ExecutionMode
-  dagConcurrency?: number
+export interface WorkflowDocument extends WorkflowExecutionOptions {
   // 说明：meta 字段类型即 OrgMeta 本体（type-only 引用，编译期擦除）
   /** 工作流稳定标识（flowId，会话内唯一；按 sessionId + flowId 维度隔离）。 */
   id: string
