@@ -5,7 +5,7 @@
 // 拖入画布保存后经「创建实例」转为当前会话的实例（useWorkflows.saveWorkflow）。
 // 数据模型对齐后端 WorkflowTemplate（shared/graph-model.ts）。
 
-import { useCallback } from 'react'
+import { useCallback, useMemo } from 'react'
 import type { Dispatch } from 'react'
 import type { WorkflowTemplate } from '../../host/shared/graph-model.js'
 import type { Drafted, StudioAction, CanvasNode, CanvasEdge } from '../studio/studio-state.js'
@@ -70,5 +70,9 @@ export function useFlowTemplates(dispatch: Dispatch<StudioAction>, remote: Remot
     dispatch({ type: 'OPEN_FLOW_TEMPLATE', template })
   }, [dispatch])
 
-  return { loadFlowTemplates, createFlowTemplateDraft, saveFlowTemplate, deleteFlowTemplate, openFlowTemplate }
+  // face 引用跨「同一 state 的重渲染」保持恒等（D06-08：装配层据此记忆化派生 props）
+  return useMemo(
+    () => ({ loadFlowTemplates, createFlowTemplateDraft, saveFlowTemplate, deleteFlowTemplate, openFlowTemplate }),
+    [loadFlowTemplates, createFlowTemplateDraft, saveFlowTemplate, deleteFlowTemplate, openFlowTemplate],
+  )
 }

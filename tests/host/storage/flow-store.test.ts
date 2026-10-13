@@ -398,7 +398,7 @@ describe('运行历史（runs/<runId>.json）', () => {
     }
   }
 
-  it('保存→读取→按 flowId 过滤→exists→全量 id 扫描', async () => {
+  it('保存→读取→按 flowId 过滤→exists→全量扫描', async () => {
     await store.saveRun(makeRun('run-1', 'f1'))
     await store.saveRun(makeRun('run-2', 'f1'))
     await store.saveRun(makeRun('run-3', 'f2'))
@@ -406,7 +406,7 @@ describe('运行历史（runs/<runId>.json）', () => {
     expect((await store.listRuns('f2')).map((r) => r.id)).toEqual(['run-3'])
     expect(await store.getRun('run-1')).not.toBeNull()
     expect(await store.getRun('ghost')).toBeNull()
-    expect((await store.listAllRunIds()).sort()).toEqual(['run-1', 'run-2', 'run-3'].sort())
+    expect((await store.listAllRuns()).map((r) => r.id).sort()).toEqual(['run-1', 'run-2', 'run-3'].sort())
   })
 
   it('Bug 14：listRuns 可按 sessionId 过滤（跨会话历史不可见）', async () => {

@@ -20,7 +20,7 @@ import { FlowNode } from './FlowNode.js'
 import { GroupCard } from './GroupCard.js'
 import { CanvasEdges } from './CanvasEdges.js'
 import { useCanvasViewport } from './use-canvas-viewport.js'
-import { groupOfMember, swappedOf } from './geometry.js'
+import { memberGroupIndexOf, swappedOf } from './geometry.js'
 
 export type { CanvasApi } from './use-canvas-viewport.js'
 
@@ -78,16 +78,22 @@ export function GraphCanvas(props: GraphCanvasProps) {
   const [connectionDraft, setConnectionDraft] = useState<{ source: string; sourceHandle: string; clientX: number; clientY: number; start: { x: number; y: number } } | null>(null)
   const byId = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes])
   const highlightedSet = useMemo(() => new Set(highlightedNodeIds), [highlightedNodeIds])
-  const runStatusOf = (id: string): { status: string; attempts: number; outputSummary: string } | null => runStatusByNode[id] ?? null
+  /**
+   * 成员 id → 所属组 预建索引：连线几何逐边反查所属组，若每次全节点扫描则是 O(边×节点)。
+   * 与 byId 同生命周期（节点集不变即复用），草稿线方向判定同样走它。
+   */
+  const memberGroups = useMemo(() => memberGroupIndexOf(byId), [byId])
+  // 以下判定函数以 useCallback 固定引用：它们是子组件（memo）的 props，引用漂移会让 memo 失效
+  const runStatusOf = useCallback((id: string): { status: string; attempts: number; outputSummary: string } | null => runStatusByNode[id] ?? null, [runStatusByNode])
   /** 锁定判定（未传入视为全解锁）：节点锁角标、连线灰化虚线、点击不选中。 */
-  const isLockedNode = (id: string): boolean => lockedNodeIds?.has(id) === true
+  const isLockedNode = useCallback((id: string): boolean => lockedNodeIds?.has(id) === true, [lockedNodeIds])
   // P4：父代理补丁改动标记（数组 → Set，渲染期 O(1) 判定）
-  const agentPatchedSet = new Set(agentPatchedNodeIds ?? [])
-  const isLockedEdge = (id: string): boolean => lockedEdgeIds?.has(id) === true
+  const agentPatchedSet = useMemo(() => new Set(agentPatchedNodeIds ?? []), [agentPatchedNodeIds])
+  const isLockedEdge = useCallback((id: string): boolean => lockedEdgeIds?.has(id) === true, [lockedEdgeIds])
   /** 节点锁悬停文案（已完成/执行中语义不同，取自词典）。 */
-  const nodeLockHint = (id: string): string => (runStatusOf(id)?.status === 'running'
+  const nodeLockHint = useCallback((id: string): string => (runStatusOf(id)?.status === 'running'
     ? String(copy.lockedRunningNodeHint)
-    : String(copy.lockedCompletedNodeHint))
+    : String(copy.lockedCompletedNodeHint)), [runStatusOf, copy.lockedRunningNodeHint, copy.lockedCompletedNodeHint])
 
   // ---- 节点拖拽 ----
   const beginNodeDrag = useCallback((event: React.PointerEvent, nodeId: string): void => {
@@ -248,42 +254,52 @@ export function GraphCanvas(props: GraphCanvasProps) {
     // 草稿线起始控制点方向跟随源端口朝向（与 edgeGeometry 一致；仅出点可发起连线）。
     // 源为组内成员时出点固定在组卡片右缘（+1）；交换节点出点在左缘（-1）；默认右缘（+1）。
     const sourceNode = byId.get(connectionDraft.source)
-    const draftStartDir = sourceNode ? (groupOfMember(byId, sourceNode.id) ? 1 : (swappedOf(sourceNode) ? -1 : 1)) : 1
+    const draftStartDir = sourceNode ? (memberGroups.get(sourceNode.id) ? 1 : (swappedOf(sourceNode) ? -1 : 1)) : 1
     const bend = Math.max(54, Math.abs(mouseWorld.x - connectionDraft.start.x) * 0.46)
     draftPath = `M ${connectionDraft.start.x} ${connectionDraft.start.y} C ${connectionDraft.start.x + draftStartDir * bend} ${connectionDraft.start.y}, ${mouseWorld.x - bend} ${mouseWorld.y}, ${mouseWorld.x} ${mouseWorld.y}`
   }
 
   const transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`
 
+  // 派生容器全部 useMemo：拖拽/平移/缩放等本地渲染态重渲染时，节点集未变即不重建
+  // （重建会让下游 memo 子组件的 props 引用漂移，memo 边界失效并触发每帧全量重算）。
   // 虚拟节点显示数据：label 从主节点取（不存独立配置）
-  const renderedNodes: CanvasNode[] = nodes.map((node) => {
+  const renderedNodes = useMemo<CanvasNode[]>(() => nodes.map((node) => {
     if (node.kind !== 'proxy') return node
     const sourceId = String(node.proxySourceId ?? '')
     const main = byId.get(sourceId)
     return main ? { ...node, data: { ...node.data, label: String((main.data as { label?: unknown }).label ?? '') } } : node
-  })
-  const groupNodes = nodes.filter((node) => node.kind === 'group')
+  }), [nodes, byId])
+  const groupNodes = useMemo(() => nodes.filter((node) => node.kind === 'group'), [nodes])
   // 组内成员 id（以 group.data.memberIds 为准并对重复 id 去重；与右侧「组合成员」及删除逻辑一致）
-  const memberIdsOf = new Set<string>()
-  for (const group of groupNodes) {
-    for (const memberId of [...new Set((group.data.memberIds as string[] | undefined) ?? [])]) memberIdsOf.add(memberId)
-  }
+  const memberIdsOf = useMemo(() => {
+    const ids = new Set<string>()
+    for (const group of groupNodes) {
+      for (const memberId of [...new Set((group.data.memberIds as string[] | undefined) ?? [])]) ids.add(memberId)
+    }
+    return ids
+  }, [groupNodes])
   // 组内成员仅在组卡片内显示迷你卡（不在画布重复渲染大卡）
-  const standalone = renderedNodes.filter((node) => node.kind !== 'group' && !memberIdsOf.has(node.id))
-  const groupMembers = new Map<string, { id: string; label: string; status: string | null; locked: boolean }[]>()
-  for (const group of groupNodes) {
-    const members = [...new Set((group.data.memberIds as string[] | undefined) ?? [])].map((memberId) => {
-      const member = byId.get(memberId)
-      return {
-        id: memberId,
-        // 成员显示名与属性栏共用同一回退规则（studio-selectors.memberLabelOf）
-        label: memberLabelOf(member, memberId),
-        status: runStatusOf(memberId)?.status ?? null,
-        locked: isLockedNode(memberId),
-      }
-    })
-    groupMembers.set(group.id, members)
-  }
+  const standalone = useMemo(
+    () => renderedNodes.filter((node) => node.kind !== 'group' && !memberIdsOf.has(node.id)),
+    [renderedNodes, memberIdsOf],
+  )
+  const groupMembers = useMemo(() => {
+    const members = new Map<string, { id: string; label: string; status: string | null; locked: boolean }[]>()
+    for (const group of groupNodes) {
+      members.set(group.id, [...new Set((group.data.memberIds as string[] | undefined) ?? [])].map((memberId) => {
+        const member = byId.get(memberId)
+        return {
+          id: memberId,
+          // 成员显示名与属性栏共用同一回退规则（studio-selectors.memberLabelOf）
+          label: memberLabelOf(member, memberId),
+          status: runStatusOf(memberId)?.status ?? null,
+          locked: isLockedNode(memberId),
+        }
+      }))
+    }
+    return members
+  }, [groupNodes, byId, runStatusOf, isLockedNode])
 
   return (
     <div className="wf-canvas-stage">
@@ -298,6 +314,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
             nodes={nodes}
             edges={edges}
             byId={byId}
+            memberGroups={memberGroups}
             selectedEdge={selectedEdge}
             runStatusOf={runStatusOf}
             isLockedEdge={isLockedEdge}

@@ -4,6 +4,7 @@
 // 成员节点为组内角色（data.groupId = 组 id），作为迷你卡片渲染于组内（见 GraphCanvas）；
 // 组卡片仅提供流程入/出连接点（跨组上下文连线走成员接点）。
 
+import { memo } from 'react'
 import type { Dict } from '../../i18n.js'
 import type { CanvasNode } from '../../studio/studio-state.js'
 import { nodeSizeOf } from '../../lib/card-geometry.js'
@@ -29,7 +30,11 @@ interface GroupCardProps {
   onResizeStart(event: React.PointerEvent, id: string, direction: string): void
 }
 
-export function GroupCard({ node, copy, members, selected, highlighted, runStatus, dropTarget, locked, lockHint, onPointerDown, onHandlePointerDown, onMemberSelect, onResizeStart }: GroupCardProps) {
+/**
+ * 以 memo 包住：父组件拖拽/平移/缩放等本地渲染态变化时，只要组卡输入（节点、成员列表、
+ * 选中/高亮/锁定、回调引用）未变即不重渲染；成员列表由 GraphCanvas 以 useMemo 保持引用稳定。
+ */
+export const GroupCard = memo(function GroupCard({ node, copy, members, selected, highlighted, runStatus, dropTarget, locked, lockHint, onPointerDown, onHandlePointerDown, onMemberSelect, onResizeStart }: GroupCardProps) {
   const size = nodeSizeOf(node)
   // 去重计数（历史数据可能残留重复 memberIds，避免计数虚高）
   const memberIds = [...new Set((node.data.memberIds as string[] | undefined) ?? [])]
@@ -76,24 +81,20 @@ export function GroupCard({ node, copy, members, selected, highlighted, runStatu
                   ) : null}
                   {/* 组内成员仅数据库/上下文接点，无流程接点（流程由组卡片承担）；
                       成员为缩小版角色卡：仅名称 + 状态（用户批注） */}
-                  {/* 左侧 db-in / ctx-in 拉大垂直间距，避免左右两个接点贴在一起（用户批注） */}
                   <span
-                    className="wf-graph__handle wf-graph__handle--target wf-graph__handle--mini"
-                    style={{ top: '30%' }}
+                    className="wf-graph__handle wf-graph__handle--target wf-graph__handle--mini wf-graph__handle--member-db-in"
                     data-handle="db-in"
                     title="db-in"
                     onPointerDown={(event) => { event.stopPropagation(); onHandlePointerDown(event, member.id, 'db-in') }}
                   />
                   <span
-                    className="wf-graph__handle wf-graph__handle--target wf-graph__handle--mini"
-                    style={{ top: '64%' }}
+                    className="wf-graph__handle wf-graph__handle--target wf-graph__handle--mini wf-graph__handle--member-ctx-in"
                     data-handle="ctx-in"
                     title="ctx-in"
                     onPointerDown={(event) => { event.stopPropagation(); onHandlePointerDown(event, member.id, 'ctx-in') }}
                   />
                   <span
-                    className="wf-graph__handle wf-graph__handle--source wf-graph__handle--mini"
-                    style={{ top: '47%' }}
+                    className="wf-graph__handle wf-graph__handle--source wf-graph__handle--mini wf-graph__handle--member-ctx-out"
                     data-handle="ctx-out"
                     title="ctx-out"
                     onPointerDown={(event) => { event.stopPropagation(); onHandlePointerDown(event, member.id, 'ctx-out') }}
@@ -102,15 +103,13 @@ export function GroupCard({ node, copy, members, selected, highlighted, runStatu
               ))}
         </div>
         <span
-          className="wf-graph__handle wf-graph__handle--target"
-          style={{ top: '50%' }}
+          className="wf-graph__handle wf-graph__handle--target wf-graph__handle--group-flow"
           data-handle="flow-in"
           title="flow-in"
           onPointerDown={(event) => onHandlePointerDown(event, node.id, 'flow-in')}
         />
         <span
-          className="wf-graph__handle wf-graph__handle--source"
-          style={{ top: '50%' }}
+          className="wf-graph__handle wf-graph__handle--source wf-graph__handle--group-flow"
           data-handle="flow-out"
           title="flow-out"
           onPointerDown={(event) => onHandlePointerDown(event, node.id, 'flow-out')}
@@ -122,4 +121,4 @@ export function GroupCard({ node, copy, members, selected, highlighted, runStatu
       </div>
     </div>
   )
-}
+})

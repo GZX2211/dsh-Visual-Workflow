@@ -13,11 +13,13 @@
 //      （不吞掉输入框自身的编辑/删除默认行为）；
 //   ⑤ 卸载时移除 window 监听（副作用责任者可追踪）。
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import React from 'react'
 import { useKeyShortcuts } from '../../../src/client/hooks/useKeyShortcuts.js'
+import { useSelection } from '../../../src/client/hooks/useSelection.js'
+import { useGraphHistory } from '../../../src/client/hooks/useGraphHistory.js'
 import type { SelectionFace } from '../../../src/client/hooks/useSelection.js'
 import type { GraphHistoryFace } from '../../../src/client/hooks/useGraphHistory.js'
 import { createInitialState } from '../../../src/client/studio/studio-initial.js'
@@ -253,5 +255,66 @@ describe('useKeyShortcuts：生命周期', () => {
     expect(rec.removedSelected).toBe(0)
     expect(rec.removedLines).toEqual([])
     expect(rec.undo).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 监听不重挂（D08-07）：面身份稳定性的判别性断言
+// ---------------------------------------------------------------------------
+
+/** 组合真实面（useSelection + useGraphHistory）：它们的身份稳定决定监听是否重挂。 */
+const stableDispatch = (): void => {}
+const stableRemoveLine = (_id: string): void => {}
+const stableRemoveSelected = (): void => {}
+
+async function renderComposed(state: StudioState): Promise<{ rerender(next: StudioState): Promise<void> }> {
+  function Harness({ state }: { state: StudioState }): null {
+    const selection = useSelection(stableDispatch as never)
+    const history = useGraphHistory(state, stableDispatch as never)
+    useKeyShortcuts(state, stableDispatch as never, selection, history, stableRemoveLine, stableRemoveSelected)
+    return null
+  }
+  await act(async () => {
+    root = createRoot(container!)
+    root.render(React.createElement(Harness, { state }))
+  })
+  return {
+    rerender: async (next: StudioState): Promise<void> => {
+      await act(async () => { root!.render(React.createElement(Harness, { state: next })) })
+    },
+  }
+}
+
+describe('useKeyShortcuts：window 监听不重挂（D08-07）', () => {
+  it('无关状态切片变化：keydown 监听只挂一次（面身份稳定则 effect 不重跑）', async () => {
+    const added: string[] = []
+    const removed: string[] = []
+    const addSpy = vi.spyOn(window, 'addEventListener').mockImplementation(((type: string) => { added.push(type) }) as never)
+    const removeSpy = vi.spyOn(window, 'removeEventListener').mockImplementation(((type: string) => { removed.push(type) }) as never)
+
+    const state = stateWith({})
+    const composed = await renderComposed(state)
+    // 无关切片（toasts）变化触发的重渲染：不得重挂键盘监听
+    await composed.rerender({ ...state, toasts: [{ id: 't-1', kind: 'info', text: 'x' }] })
+
+    expect(added.filter((type) => type === 'keydown')).toHaveLength(1)
+    expect(removed.filter((type) => type === 'keydown')).toHaveLength(0)
+
+    addSpy.mockRestore()
+    removeSpy.mockRestore()
+  })
+
+  it('确认框开合与选中变化：仍按需重挂（依赖收窄不等于漏依赖）', async () => {
+    const added: string[] = []
+    vi.spyOn(window, 'addEventListener').mockImplementation(((type: string) => { added.push(type) }) as never)
+
+    const state = stateWith({})
+    const composed = await renderComposed(state)
+    await composed.rerender({ ...state, confirm: { kind: 'unsaved' } })
+    await composed.rerender({ ...state, confirm: { kind: 'unsaved' }, selection: { nodeId: 'n1', edgeId: null, lib: null } })
+
+    expect(added.filter((type) => type === 'keydown')).toHaveLength(3)
+
+    vi.restoreAllMocks()
   })
 })

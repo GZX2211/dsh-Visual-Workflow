@@ -646,8 +646,13 @@ export function useEditorActions(
     }
   }, [assets, clearCanvasIfOwned, dispatch, experiences, notify, removeLine, removeSelected, state, t.assetRetireConfirm, t.assetRetireMessage, t.assetRetireSharedMessage, t.assetRetireTitle, t.confirmDelete, t.deleteFlow, t.experienceRetireConfirm, t.experienceRetireMessage, t.experienceRetireTitle, t.toastDeleted, templates, flowTemplates, toastError, workflows])
 
-  return {
+  // face 引用跨「同一 state 的重渲染」保持恒等（装配层用它作派生 props 的记忆化依赖）；
+  // 依赖即 face 暴露的全部方法，均为 useCallback，故同一 state 下引用稳定。
+  return useMemo(() => ({
     selectLibraryCard, patchEditor, saveEditor, deleteEditor,
     promoteEditor, promoteLocked, openAssetVersions, rollbackAssetVersion,
-  }
+  }), [
+    selectLibraryCard, patchEditor, saveEditor, deleteEditor,
+    promoteEditor, promoteLocked, openAssetVersions, rollbackAssetVersion,
+  ])
 }

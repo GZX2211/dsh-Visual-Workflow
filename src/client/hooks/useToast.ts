@@ -2,7 +2,7 @@
 //
 // 轻提示：push（自动超时移除）/ 错误便捷入口。
 
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { Dispatch } from 'react'
 import type { StudioAction } from '../studio/studio-state.js'
 
@@ -37,5 +37,7 @@ export function useToast(dispatch: Dispatch<StudioAction>): ToastFace {
     toast('error', error instanceof Error ? error.message : String(error))
   }, [toast])
 
-  return { toast, toastError }
+  // face 引用跨「同一 state 的重渲染」保持恒等：toastError 被多个领域 face 当 useCallback 依赖，
+  // 每次新建会沿着依赖链让上游 face 与派生 props 的记忆化整体失效（D06-08/D08-07 同口径）。
+  return useMemo(() => ({ toast, toastError }), [toast, toastError])
 }

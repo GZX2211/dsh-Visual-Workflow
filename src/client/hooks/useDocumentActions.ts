@@ -4,7 +4,7 @@
 // 模板、打开/选中（未保存守卫包裹）与新建草稿。数据经各列表面 hook 落库，
 // 本面只负责编排与 toast 反馈。
 
-import { useCallback } from 'react'
+import { useCallback, useMemo } from 'react'
 import type { Dispatch } from 'react'
 import type { WorkflowDocument, WorkflowTemplate } from '../../host/shared/graph-model.js'
 import type { ServiceState } from '../../host/shared/types.js'
@@ -15,7 +15,7 @@ import type { FlowTemplatesFace } from './useFlowTemplates.js'
 import type { TemplatesFace } from './useTemplates.js'
 import type { SelectionFace } from './useSelection.js'
 import type { UnsavedGuardFace } from './useUnsavedGuard.js'
-import type { ServiceControlFace } from './useServiceControl.js'
+import { serviceShapeTextOf, type ServiceControlFace } from './useServiceControl.js'
 import type { RemoteFace } from './useRemote.js'
 import type { ToastFace } from './useToast.js'
 import type { Dict } from '../i18n.js'
@@ -202,12 +202,12 @@ export function useDocumentActions(
         }
         return saved
       } catch (error) {
-        await handleSaveFailure(error, serviceControl.loadServices)
+        await handleSaveFailure(serviceShapeTextOf(error, t.toastServiceStateShape), serviceControl.loadServices)
         return null
       }
     }
     return null
-  }, [dispatch, handleSaveFailure, notify, state, workflows, flowTemplates, serviceControl, t.saveRunningConfirm, t.saveRunningMessage, t.saveRunningTitle, t.toastSaved])
+  }, [dispatch, handleSaveFailure, notify, state, workflows, flowTemplates, serviceControl, t.saveRunningConfirm, t.saveRunningMessage, t.saveRunningTitle, t.toastSaved, t.toastServiceStateShape])
 
   /**
    * 创建实例：
@@ -319,7 +319,7 @@ export function useDocumentActions(
           afterCreate?.(saved)
         }
       } catch (error) {
-        await handleSaveFailure(error, state.mode === 'mode1' ? workflows.loadWorkflows : serviceControl.loadServices)
+        await handleSaveFailure(serviceShapeTextOf(error, t.toastServiceStateShape), state.mode === 'mode1' ? workflows.loadWorkflows : serviceControl.loadServices)
       }
     }
 
@@ -353,8 +353,9 @@ export function useDocumentActions(
       const template = flowTemplates.createFlowTemplateDraft(state.mode, t.untitledFlowTemplate)
       template.name = source.name
       template.description = source.description ?? ''
-      template.nodes = JSON.parse(JSON.stringify(state.canvas.nodes)) as never
-      template.lines = JSON.parse(JSON.stringify(state.canvas.edges)) as never
+      // 深拷贝后按目标字段类型赋值（模板与画布的容器形状不同，故不能直接引用画布数组类型）
+      template.nodes = JSON.parse(JSON.stringify(state.canvas.nodes)) as typeof template.nodes
+      template.lines = JSON.parse(JSON.stringify(state.canvas.edges)) as typeof template.lines
       const saved = await flowTemplates.saveFlowTemplate(template, state.canvas.nodes, state.canvas.edges)
       if (saved) notify('success', t.toastSavedAsTemplate)
     } catch (error) {
@@ -435,9 +436,15 @@ export function useDocumentActions(
     }
   }, [notify, selection, state.mode, t.newTemplate, t.newWorkflow, t.templateDefaultName, t.untitledFlowTemplate, t.untitledServiceTemplate, flowTemplates, templates])
 
-  return {
+  // face 引用跨「同一 state 的重渲染」保持恒等（装配层用它作派生 props 的记忆化依赖）；
+  // 依赖即 face 暴露的全部方法，均为 useCallback，故同一 state 下引用稳定。
+  return useMemo(() => ({
     saveCanvas, createInstanceFromCanvas, saveCurrentAsFlowTemplate,
     openFlowById, openServiceById, openFlowTemplateById,
     selectWorkflow, selectFlowTemplate, createNew,
-  }
+  }), [
+    saveCanvas, createInstanceFromCanvas, saveCurrentAsFlowTemplate,
+    openFlowById, openServiceById, openFlowTemplateById,
+    selectWorkflow, selectFlowTemplate, createNew,
+  ])
 }

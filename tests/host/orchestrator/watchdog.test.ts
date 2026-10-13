@@ -3,6 +3,8 @@
 // 运行看护单测：空闲超时、父代理回合终态、定时扫描与宿主重启对账。
 // 装配与测试替身见 fixtures/harness.ts（共享，不在本文件内重复）。
 
+import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createRunSnapshot, reconcileStaleRuns, scheduleIdleWatchdog, setNodeStatus, sweepWatchdogOnce } from '../../../src/host/orchestrator/index.js'
 import { makeFlow, makeHarness, caller, start, cleanupTempDirs } from './fixtures/harness.js'
@@ -115,5 +117,31 @@ describe('watchdog 看护与陈旧记录对账', () => {
     expect(r2?.resumeFromNodeId).toBe('n-pause')
 
     expect((await h.store.getRun('stale-3'))?.status).toBe('completed')
+  })
+
+  it('reconcileStaleRuns：runs 目录混入非本资源文档时跳过它并完成对账（单个坏文件不中断整轮扫描）', async () => {
+    const h = await makeHarness()
+    const flow = makeFlow()
+    const stale = createRunSnapshot({ runId: 'stale-1', flow, sessionId: 'session-1', mode: 'mode1', now: 1000 })
+    stale.status = 'running'
+    await h.store.saveRun(stale)
+
+    // 历史遗留的旧格式聚合文档：JSON 合法、但不含 run 身份字段。
+    // 对账按文件名扫描 runs/，过去经单资源读解析这种文件会抛错，使整轮对账失败并阻断宿主启动。
+    await writeFile(join(h.dir, 'runs', 'wf-legacy.json'), JSON.stringify({ runs: [{ id: 'run-old' }] }), 'utf8')
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const changed = await reconcileStaleRuns(h.store, { now: () => 5000 })
+      expect(changed).toBe(1)
+      expect((await h.store.getRun('stale-1'))?.status).toBe('interrupted')
+      // 跳过必须留痕：否则「数据有问题」会退化成无人知道的静默少一条
+      expect(warn.mock.calls.some((call) => String(call[0]).includes('wf-legacy.json'))).toBe(true)
+    } finally {
+      warn.mockRestore()
+    }
+
+    // 单资源读语义不变：坏文档仍抛可诊断错误（只有扫描/列表路径才跳过）
+    await expect(h.store.getRun('wf-legacy')).rejects.toThrow(/wf-legacy\.json/)
   })
 })

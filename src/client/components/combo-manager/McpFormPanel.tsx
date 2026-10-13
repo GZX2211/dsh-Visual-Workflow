@@ -5,6 +5,7 @@
 
 import type { Dict } from '../../i18n.js'
 import type { McpFormState } from '../../lib/mcp-form.js'
+import { Modal } from '../modal/Modal.js'
 
 export interface McpFormPanelProps {
   copy: Dict
@@ -91,27 +92,30 @@ export function McpFormPanel(props: McpFormPanelProps) {
         </div>
       )}
       {importOpen ? (
-        <div className="wf-combo-backdrop">
-          <div className="wf-combo wf-combo--dialog">
-            <div className="wf-combo__head">
-              <h4>{copy.mcpImport}</h4>
-              <button type="button" className="wf-btn wf-combo__close" onClick={() => onImportOpenChange(false)}>✕</button>
-            </div>
-            <div className="wf-mcp-import__body">
-              <span className="wf-hint wf-hint--block">{copy.mcpImportHint}</span>
-              <textarea
-                className="wf-mcp-import__text"
-                value={importText}
-                onChange={(event) => onImportTextChange(event.target.value)}
-                placeholder={copy.mcpImportPlaceholder}
-              />
-              <div className="wf-mcp-form__row">
-                <button type="button" className="wf-btn is-primary" onClick={onImportApply} disabled={busy}>{copy.mcpImportApply}</button>
-                <button type="button" className="wf-btn" onClick={() => onImportOpenChange(false)} disabled={busy}>{copy.importCancel}</button>
-              </div>
+        <Modal
+          className="wf-combo wf-combo--dialog"
+          backdropClassName="wf-combo-backdrop"
+          label={String(copy.mcpImport)}
+          onClose={() => onImportOpenChange(false)}
+        >
+          <div className="wf-combo__head">
+            <h4>{copy.mcpImport}</h4>
+            <button type="button" className="wf-btn wf-combo__close" onClick={() => onImportOpenChange(false)}>✕</button>
+          </div>
+          <div className="wf-mcp-import__body">
+            <span className="wf-hint wf-hint--block">{copy.mcpImportHint}</span>
+            <textarea
+              className="wf-mcp-import__text"
+              value={importText}
+              onChange={(event) => onImportTextChange(event.target.value)}
+              placeholder={copy.mcpImportPlaceholder}
+            />
+            <div className="wf-mcp-form__row">
+              <button type="button" className="wf-btn is-primary" onClick={onImportApply} disabled={busy}>{copy.mcpImportApply}</button>
+              <button type="button" className="wf-btn" onClick={() => onImportOpenChange(false)} disabled={busy}>{copy.importCancel}</button>
             </div>
           </div>
-        </div>
+        </Modal>
       ) : null}
     </>
   )

@@ -2,7 +2,7 @@
 //
 // 未保存修改守卫：dirty 时先弹三选项（保存/放弃/取消），确认后再继续。
 
-import { useCallback } from 'react'
+import { useCallback, useMemo } from 'react'
 import type { Dispatch } from 'react'
 import type { StudioAction, ConfirmState, StudioState } from '../studio/studio-state.js'
 
@@ -66,5 +66,10 @@ export function useUnsavedGuard(state: StudioState, dispatch: Dispatch<StudioAct
     dispatch({ type: 'CONFIRM_SET', confirm: null })
   }, [dispatch])
 
-  return { confirm: state.confirm, guard, saveAndProceed, discardAndProceed, cancel }
+  // face 引用跨「同一 state 的重渲染」保持恒等：`guard` 等被领域 face 当依赖，
+  // 每次新建会沿依赖链让上游记忆化失效（D06-08/D08-07 同口径）。
+  return useMemo(
+    () => ({ confirm: state.confirm, guard, saveAndProceed, discardAndProceed, cancel }),
+    [state.confirm, guard, saveAndProceed, discardAndProceed, cancel],
+  )
 }

@@ -3,7 +3,7 @@
 // 模板列表：四类（role/file/database/group）并行加载 / 本地草稿新建 / 保存 / 删除。
 // 数据模型对齐后端（RoleTemplate/FileTemplate/DatabaseTemplate/GroupTemplate）。
 
-import { useCallback } from 'react'
+import { useCallback, useMemo } from 'react'
 import type { Dispatch } from 'react'
 import type { RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate } from '../../host/shared/types.js'
 import type { Drafted, StudioAction, TemplateKind } from '../studio/studio-state.js'
@@ -82,5 +82,9 @@ export function useTemplates(dispatch: Dispatch<StudioAction>, remote: RemoteFac
     dispatch({ type: 'TEMPLATE_REMOVED', kind, id })
   }, [dispatch, remote])
 
-  return { loadTemplates, createTemplateDraft, saveTemplate, deleteTemplate }
+  // face 引用跨「同一 state 的重渲染」保持恒等（D06-08：装配层据此记忆化派生 props）
+  return useMemo(
+    () => ({ loadTemplates, createTemplateDraft, saveTemplate, deleteTemplate }),
+    [loadTemplates, createTemplateDraft, saveTemplate, deleteTemplate],
+  )
 }

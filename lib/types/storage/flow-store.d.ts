@@ -96,6 +96,15 @@ export declare class FlowStore {
      *   必须传，防跨会话运行历史泄露；resume 侧因调用前已按会话定位 flow 可不传）。
      */
     listRuns(flowId: string, sessionId?: string): Promise<RunSnapshot[]>;
+    /**
+     * 列出全部 run 快照（对账 / 接续 / 幂等判定等**扫描整个目录**的场景；顺序不保证）。
+     *
+     * 为什么不提供「先列 id 再逐个 getRun」的用法：getRun 是单资源读，形状不合法即抛错，
+     * 而扫描场景的输入是整个目录——目录里混入任何非本资源文档（历史格式残留、外部文件）
+     * 都会让整轮扫描失败。此处复用列表读语义逐文件跳过并告警：一个坏文件不影响其余记录，
+     * 「跳过」仍可在日志中追溯。
+     */
+    listAllRuns(): Promise<RunSnapshot[]>;
     /** 读取单个 run 快照。 */
     getRun(runId: string): Promise<RunSnapshot | null>;
     /**
@@ -108,8 +117,6 @@ export declare class FlowStore {
      * 按调用方给出的完整对象原样落盘，任何字段级改写都会破坏断点续跑的一致性。
      */
     saveRun(run: RunSnapshot): Promise<RunSnapshot>;
-    /** 扫描全部 run id（reconcileStaleRuns 用）。 */
-    listAllRunIds(): Promise<string[]>;
     /**
      * 读取工具组合文档（combos.json，单资源）。
      * 文件不存在即空列表（既有降级语义）；形状不合法抛带路径的可诊断错误——读取方会直接

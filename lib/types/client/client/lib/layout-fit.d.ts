@@ -9,6 +9,20 @@ export interface LayoutBoxNode {
     };
     data?: Record<string, unknown>;
 }
+/** 布局入参的最小节点形状：布局只读 id/kind/data，尺寸另行解析（不绑定画布投影类型）。 */
+export interface LayoutNodeLike {
+    id: string;
+    kind: string;
+    data?: Record<string, unknown>;
+}
+/** 布局入参的最小连线形状：id 仅用于诊断回传，连接点用于 flow 与数据关联分类。 */
+export interface LayoutLineLike {
+    id?: string;
+    source: string;
+    target: string;
+    sourceHandle?: string;
+    targetHandle?: string;
+}
 /** 渲染盒子（用于重叠判定；不含组内成员与虚拟节点）。 */
 export interface LayoutBox {
     id: string;
@@ -53,15 +67,11 @@ export declare function collapsedIdsOf(inputs: Array<{
  * 统一布局入口（「整理布局」按钮与自动布局共用同一实现）：
  * 「宿主节点 → 布局输入 → 分层布局 → 坐标写回」四步收敛在一处，
  * 避免两条路径各写一遍而坐实「两份布局算法漂移」。
- * @param sizeOf 卡片尺寸解析（通常为 card-geometry.groupCardSizeOf）
+ * @param sizeOf 卡片尺寸解析（通常为 card-geometry.groupCardSizeOf）；
+ *   形参是布局最小节点面（id/kind/data），调用方无需为类型擦除做断言。
  */
-export declare function tidyNodes<T extends LayoutBoxNode>(nodes: T[], lines: Array<{
-    source: string;
-    target: string;
-    sourceHandle?: string;
-    targetHandle?: string;
-}>, options?: {
-    sizeOf: (node: T) => {
+export declare function tidyNodes<T extends LayoutBoxNode>(nodes: T[], lines: LayoutLineLike[], options?: {
+    sizeOf: (node: LayoutNodeLike) => {
         w: number;
         h: number;
     };
@@ -89,9 +99,4 @@ export declare function applyLayout<T extends LayoutBoxNode>(nodes: T[], result:
  *   - 尺寸口径：src/client/lib/card-geometry.ts 的 groupCardSizeOf。
  * 本函数保持原有签名与「返回含新 position 的新数组」语义：既有调用方与测试零改动。
  */
-export declare function layoutNodes<T extends LayoutBoxNode>(nodes: T[], lines: Array<{
-    source: string;
-    target: string;
-    sourceHandle?: string;
-    targetHandle?: string;
-}>): T[];
+export declare function layoutNodes<T extends LayoutBoxNode>(nodes: T[], lines: LayoutLineLike[]): T[];

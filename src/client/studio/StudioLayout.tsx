@@ -10,8 +10,8 @@
 
 import type { Dispatch } from 'react'
 import type { Dict } from '../i18n.js'
-import type { StudioAction, StudioState, EditorData, CanvasEdge, LibrarySource } from './studio-state.js'
-import { agentPatchedNodeIdsOf, isInstanceSourceKind } from './studio-selectors.js'
+import type { StudioAction, StudioState, EditorData, CanvasEdge } from './studio-state.js'
+import { isInstanceSourceKind } from './studio-selectors.js'
 import type { DocumentActionsFace } from '../hooks/useDocumentActions.js'
 import type { AssetsFace } from '../hooks/useAssets.js'
 import type { CanvasActionsFace } from '../hooks/useCanvasActions.js'
@@ -33,6 +33,7 @@ import { EP } from '../lib/remote.js'
 import type { CanvasApi } from '../components/canvas/GraphCanvas.js'
 import { GraphCanvas } from '../components/canvas/GraphCanvas.js'
 import { LeftPanel } from '../components/sidebar/LeftPanel.js'
+import type { LeftPanelProps } from '../components/sidebar/LeftPanel.js'
 import { BottomPanel } from '../components/sidebar/BottomPanel.js'
 import { Toolbar } from '../components/toolbar/Toolbar.js'
 import { Inspector } from '../components/panels/inspector/Inspector.js'
@@ -43,6 +44,14 @@ import { ComboManager } from '../components/combo-manager/ComboManager.js'
 import { SchedulerManager } from '../components/scheduler/SchedulerManager.js'
 import { useAutoLayout } from '../hooks/useAutoLayout.js'
 import { useServiceDebugStream } from '../hooks/useServiceDebugStream.js'
+
+/**
+ * 左栏/底栏共用的库内容 props：即左栏 props 去掉「显示布局」相关字段
+ * （open/width 与底栏的 open/height 各自由所在布局传入）与词典。
+ * 词典不并入的原因：t 的引用不必跨渲染稳定，并入会让整份库 props 随词典重建，
+ * 下游记忆化边界反而失效；两个面板各自显式取本布局持有的 t。
+ */
+export type StudioLibraryProps = Omit<LeftPanelProps, 'open' | 'width' | 'copy'>
 
 export interface StudioLayoutProps {
   t: Dict
@@ -62,6 +71,10 @@ export interface StudioLayoutProps {
   toolbarRunning: boolean
   runStatusByNode: ReturnType<typeof runStatusMap>
   highlightedNodeIds: ReturnType<typeof runningNodeIds>
+  /** P4 父代理补丁角标：由装配层按 state 记忆化，同一 state 下重渲染保持引用恒等。 */
+  agentPatchedNodeIds: string[]
+  /** 左栏/底栏共用的库内容 props（装配层已记忆化：同一 state 下引用恒等）。 */
+  libraryProps: StudioLibraryProps
   /** 运行中锁定项（已完成/执行中流程）：节点锁角标、连线灰化虚线、连线点击不选中。 */
   lockedNodeIds: ReadonlySet<string>
   lockedEdgeIds: ReadonlySet<string>
@@ -104,12 +117,6 @@ export interface StudioLayoutProps {
   switchMode: (mode: 'mode1' | 'mode2') => void
   /** 运行联动：宿主让出空间（官方右侧 Sidebar 全屏时缩回）+ 折叠自身左右栏 + 触发运行。 */
   handleRun: () => void
-  /** 库来源切换（模版 / 资产；未保存守卫后同时切库来源与画布文档类型）。 */
-  onSetLibrarySource: (source: LibrarySource) => void
-  /** 打开工作流资产为画布文档（资产态；未保存守卫后切换）。 */
-  onSelectFlowAsset: (assetId: string) => void
-  /** 角色资产拖入画布（装配层先装载详情，再生成内联角色节点）。 */
-  onPlaceRoleAsset: (assetId: string, position: { x: number; y: number }) => void
   /** 两侧侧栏是否都已折叠（顶部一键折叠/展开按钮用）。 */
   panelsCollapsed: boolean
   /** 顶部一键折叠/展开左右侧栏回调。 */
@@ -122,6 +129,7 @@ export function StudioLayout(props: StudioLayoutProps) {
     t, state, sessionId, remote,
     currentFlow, currentService, currentFlowTemplate, editorData, edgeList, stageKinds, parentTemplate, roleTemplates, groupTemplates,
     toolbarRunning, runStatusByNode, highlightedNodeIds, modeName,
+    agentPatchedNodeIds, libraryProps,
     lockedNodeIds, lockedEdgeIds, instanceRunning,
     canvasApiRef, canvasShellRef, libraryImportRef, personaInputRef, groupMdInputRef,
     dispatch, doc, assets, canvas, editor, run, transfer, selection, history, guard, panels, toast,
@@ -129,7 +137,6 @@ export function StudioLayout(props: StudioLayoutProps) {
     modeMenuOpen, setModeMenuOpen, switchMode, canvasCaption,
     leftOpen, bottomOpen, inspectorOpen,
     handleRun, panelsCollapsed, onTogglePanels,
-    onSetLibrarySource, onSelectFlowAsset, onPlaceRoleAsset,
   } = props
 
   // 自动布局：打开/接收文档时若节点缺坐标（哨兵 {0,0}）
@@ -148,69 +155,13 @@ export function StudioLayout(props: StudioLayoutProps) {
     sessionId: currentService?.sessionId ?? sessionId,
     enabled: state.mode === 'mode2' && currentService?.status === 'running',
     errorPrefix: t.serviceDebugErrorPrefix,
+    omittedLabel: t.serviceDebugOmitted,
   })
 
-  // 左栏（LeftPanel）与底栏（BottomPanel）共用同一份库内容 props（内容/选中/拖拽逻辑一致，
-  // 本次仅显示布局不同）。仅 open/width 或 open/height 两处按各自布局传入。
+  // 左栏（LeftPanel）与底栏（BottomPanel）共用同一份库内容 props：由装配层记忆化后经
+  // props 传入（同一 state 下引用恒等），本层不再在渲染期重建。
   // 「实例来源态」= 模版态或资产态：二者都以「画布内容 → 新实例」为保存/运行前置（同口径）。
   const isInstanceSource = isInstanceSourceKind(state.currentKind)
-  const libraryProps = {
-    libTab: state.libTab,
-    onSetTab: (tab: import('../studio/studio-state.js').LibTab) => dispatch({ type: 'SET_LIB_TAB', tab }),
-    // 库来源（模版 / 资产）+ 搜索关键词（两态共用）；来源切换会同时切画布文档类型
-    librarySource: state.librarySource,
-    onSetLibrarySource,
-    libSearch: state.libSearch,
-    onSetLibSearch: (query: string) => dispatch({ type: 'SET_LIB_SEARCH', query }),
-    mode: state.mode,
-    // 工作台全局化：实例列表 = 全部会话实例（带各自 sessionId 供「当前」标签/状态徽标归属）。
-    // 状态徽标：当前实例快照优先（600ms 快轮询），否则全量活跃 run 摘要（2s 轮询）。
-    currentSessionId: state.sessionId,
-    workflows: (state.mode === 'mode2' ? state.services : state.workflows).map((item) => {
-      const active = state.activeRuns.find((a) => a.flowId === item.id && a.sessionId === item.sessionId)
-      const currentSnapshot = state.run.runId !== null && state.run.snapshot?.flowId === item.id
-        ? state.run.snapshot.status
-        : null
-      return {
-        id: item.id,
-        name: item.name,
-        description: item.description,
-        nodes: item.nodes,
-        sessionId: item.sessionId,
-        runStatus: currentSnapshot ?? active?.status ?? null,
-      }
-    }),
-    flowTemplates: (state.flowTemplates ?? []).filter((item) => item.mode === state.mode),
-    // 资产列表（Active 索引）：资产态左栏数据源（模版态不消费）
-    assets: state.assets,
-    // 经验列表：资产态「数据」Tag 以「经验」呈现时的数据源（活跃 + 已归档）
-    experiences: state.experiences,
-    parentTemplate,
-    roleTemplates,
-    fileTemplates: state.templates.file as import('../../host/shared/types.js').FileTemplate[],
-    databaseTemplates: state.templates.database as import('../../host/shared/types.js').DatabaseTemplate[],
-    groupTemplates,
-    stageKinds,
-    libSelection: state.selection.lib,
-    modeName,
-    onSelectWorkflow: doc.selectWorkflow,
-    onSelectFlowTemplate: doc.selectFlowTemplate,
-    // 资产卡片：工作流资产 → 打开为画布文档；角色资产 → 属性栏编辑 / 拖入画布
-    onSelectFlowAsset,
-    onOpenRoleAsset: (id: string) => { void assets.openRoleAsset(id) },
-    onPlaceRoleAsset,
-    // 经验卡片：经验没有画布形态，只能打开到属性栏编辑（无拖入入口）
-    onOpenExperience: (id: string) => editor.selectLibraryCard('experience', id),
-    onSelectLib: editor.selectLibraryCard,
-    onPlaceTemplate: canvas.placeTemplateNode,
-    onPlaceTemplateIntoGroup: canvas.placeTemplateIntoGroup,
-    onPlaceStage: canvas.placeStageNode,
-    onPlaceGroup: canvas.placeGroupNode,
-    onPlaceGroupFromTemplate: canvas.placeGroupFromTemplate,
-    onPlaceParent: canvas.placeParentNode,
-    onCreateNew: doc.createNew,
-    onBeginDrag: beginLibraryDrag,
-  }
 
   return (
     <div className="wf-root">
@@ -334,7 +285,7 @@ export function StudioLayout(props: StudioLayoutProps) {
             highlightedNodeIds={highlightedNodeIds}
             lockedNodeIds={lockedNodeIds}
             lockedEdgeIds={lockedEdgeIds}
-            agentPatchedNodeIds={agentPatchedNodeIdsOf(state)}
+            agentPatchedNodeIds={agentPatchedNodeIds}
             onInit={(api) => { canvasApiRef.current = api }}
             onNodeDragStart={canvas.onNodeDragStart}
             onNodeMove={canvas.moveNode}

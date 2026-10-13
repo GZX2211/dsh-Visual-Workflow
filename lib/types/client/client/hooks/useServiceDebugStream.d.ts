@@ -19,5 +19,11 @@ export interface ServiceDebugOptions {
     enabled: boolean;
     /** 流内错误行前缀（来自词典，如「[错误] 」）。 */
     errorPrefix: string;
+    /**
+     * 输出超限的省略提示词（来自词典，如「…… 已省略早期输出 」）。
+     * 实际提示 = 提示词 + 丢弃字符数；空串表示不提示（仍会截断）。
+     * 提示词须自足成句（不自带待闭合的括号），因为数字由累积器直接拼在提示词之后。
+     */
+    omittedLabel: string;
 }
 export declare function useServiceDebugStream(remote: RemoteFace, options: ServiceDebugOptions): ServiceDebugFace;

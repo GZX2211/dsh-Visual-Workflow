@@ -151,7 +151,11 @@ describe('标签页 body 挂载/卸载往返：常驻容器不重建（状态全
       valueSetter.call(workspace, 'C:/work/ws')
       workspace!.dispatchEvent(new Event('input', { bubbles: true }))
     })
-    // 已落盘 localStorage（instanceOptions 缓存）
+    // 已落盘 localStorage（instanceOptions 缓存）。D06-09 行为变更：落盘由「逐字符同步写」
+    // 改为 300ms 防抖（输入停顿才写），故此处需等静默窗口结束再读缓存。
+    await vi.waitFor(() => {
+      expect(localStorage.getItem(INSTANCE_OPTIONS_KEY)).toContain('C:/work/ws')
+    }, { timeout: 2000 })
     const cached = JSON.parse(localStorage.getItem(INSTANCE_OPTIONS_KEY) ?? '{}') as { newSession?: boolean; workspacePath?: string }
     expect(cached.newSession).toBe(true)
     expect(cached.workspacePath).toBe('C:/work/ws')

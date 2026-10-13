@@ -495,6 +495,31 @@ export class FlowStore {
     return items.sort((a, b) => compareText(String(b.startedAt ?? ''), String(a.startedAt ?? '')))
   }
 
+  /**
+   * 列出全部 run 快照（对账 / 接续 / 幂等判定等**扫描整个目录**的场景；顺序不保证）。
+   *
+   * 为什么不提供「先列 id 再逐个 getRun」的用法：getRun 是单资源读，形状不合法即抛错，
+   * 而扫描场景的输入是整个目录——目录里混入任何非本资源文档（历史格式残留、外部文件）
+   * 都会让整轮扫描失败。此处复用列表读语义逐文件跳过并告警：一个坏文件不影响其余记录，
+   * 「跳过」仍可在日志中追溯。
+   */
+  async listAllRuns(): Promise<RunSnapshot[]> {
+    const dir = join(this.root, 'runs')
+    let names: string[] = []
+    try {
+      names = await readdir(dir)
+    } catch {
+      return []
+    }
+    const items: RunSnapshot[] = []
+    for (const name of names) {
+      if (!name.endsWith('.json')) continue
+      const run = await readListEntry<RunSnapshot>(dir, name, isRunSnapshot)
+      if (run) items.push(run)
+    }
+    return items
+  }
+
   /** 读取单个 run 快照。 */
   async getRun(runId: string): Promise<RunSnapshot | null> {
     return readDocument(runsPath(this.root, runId), isRunSnapshot)
@@ -516,16 +541,6 @@ export class FlowStore {
       await atomicWriteJson(path, run)
       return run
     })
-  }
-
-  /** 扫描全部 run id（reconcileStaleRuns 用）。 */
-  async listAllRunIds(): Promise<string[]> {
-    const dir = join(this.root, 'runs')
-    try {
-      return (await readdir(dir)).filter((n) => n.endsWith('.json')).map((n) => n.slice(0, -'.json'.length))
-    } catch {
-      return []
-    }
   }
 
   // ---- 工具组合（combos.json 单文件） ---------------------------------------

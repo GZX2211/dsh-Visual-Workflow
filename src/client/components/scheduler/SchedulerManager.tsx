@@ -21,6 +21,7 @@ import {
 } from '../../lib/scheduler-task.js'
 import { SchedulerTaskForm } from './SchedulerTaskForm.js'
 import { SchedulerTaskList } from './SchedulerTaskList.js'
+import { Modal } from '../modal/Modal.js'
 
 export interface SchedulerManagerProps {
   copy: Dict
@@ -65,6 +66,16 @@ export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: 
       }
     })()
   }, [load, onToast, selectAfterLoad])
+
+  // 时区探测不可用：显式提示用户手动选择——否则新建任务会落到 FALLBACK_TIMEZONE 而用户
+  // 毫不知情，触发时刻与「本机时间」整体偏移。只提示一次（onToast 身份可能每次渲染变化，
+  // 无守卫会在连续渲染里反复弹同一条提示）。
+  const timezoneWarnedRef = useRef(false)
+  useEffect(() => {
+    if (timezoneWarnedRef.current || detectLocalTimezone() !== null) return
+    timezoneWarnedRef.current = true
+    onToast('error', copy.schedulerTimezoneUnavailable)
+  }, [copy.schedulerTimezoneUnavailable, onToast])
 
   const activeView = useMemo(
     () => tasks.views.find((item) => item.task.taskId === activeTaskId) ?? null,
@@ -202,7 +213,8 @@ export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: 
   const timezones = useMemo(() => {
     const list = [...SCHEDULER_TIMEZONE_SUGGESTIONS]
     const local = detectLocalTimezone()
-    if (!list.includes(local)) list.unshift(local)
+    // 探测不可用（null）不插入本地项：与上方的显式提示配对，不把未知时区混进候选当已知
+    if (local && !list.includes(local)) list.unshift(local)
     return list
   }, [])
 
@@ -215,55 +227,53 @@ export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: 
   }
 
   return (
-    <div className="wf-combo-backdrop">
-      <div className="wf-combo wf-sched" role="dialog" aria-modal="true">
-        <div className="wf-combo__head">
-          <h3>{copy.schedulerManager}</h3>
-          <span className="wf-status">{copy.schedulerHint}</span>
-          <button type="button" className="wf-btn wf-combo__close" onClick={onClose}>✕</button>
-        </div>
-        <div className="wf-combo__body">
-          <SchedulerTaskForm
-            copy={copy}
-            draft={draft}
-            templates={tasks.templates}
-            timezoneOptions={timezoneOptions}
-            unbounded={unbounded}
-            calendarOpen={calendarOpen}
-            dateRange={dateRange}
-            activeView={activeView}
-            busy={tasks.busy}
-            confirmDelete={confirmDelete}
-            onPatch={patch}
-            onPatchWindow={patchWindow}
-            onToggleUnbounded={toggleUnbounded}
-            onToggleCalendar={() => setCalendarOpen((open) => !open)}
-            onCloseCalendar={() => setCalendarOpen(false)}
-            onSetDaysAll={() => patchWindow({ daysOfWeek: [] })}
-            onToggleDay={toggleDay}
-            onPatchRange={patchRange}
-            onAddRange={addRange}
-            onRemoveRange={removeRange}
-            onPatchTimePoint={patchTimePoint}
-            onAddTimePoint={addTimePoint}
-            onRemoveTimePoint={removeTimePoint}
-            onSave={() => { void saveTask() }}
-            onDelete={() => { void deleteTask() }}
-          />
-          <SchedulerTaskList
-            copy={copy}
-            views={tasks.views}
-            templates={tasks.templates}
-            activeTaskId={activeTaskId}
-            draftEnabled={draft?.enabled === true}
-            hasDraft={draft !== null}
-            busy={tasks.busy}
-            onSelect={selectTask}
-            onNew={newTask}
-            onToggleEnabled={(enabled) => patch({ enabled })}
-          />
-        </div>
+    <Modal className="wf-combo wf-sched" backdropClassName="wf-combo-backdrop" label={String(copy.schedulerManager)} onClose={onClose}>
+      <div className="wf-combo__head">
+        <h3>{copy.schedulerManager}</h3>
+        <span className="wf-status">{copy.schedulerHint}</span>
+        <button type="button" className="wf-btn wf-combo__close" onClick={onClose}>✕</button>
       </div>
-    </div>
+      <div className="wf-combo__body">
+        <SchedulerTaskForm
+          copy={copy}
+          draft={draft}
+          templates={tasks.templates}
+          timezoneOptions={timezoneOptions}
+          unbounded={unbounded}
+          calendarOpen={calendarOpen}
+          dateRange={dateRange}
+          activeView={activeView}
+          busy={tasks.busy}
+          confirmDelete={confirmDelete}
+          onPatch={patch}
+          onPatchWindow={patchWindow}
+          onToggleUnbounded={toggleUnbounded}
+          onToggleCalendar={() => setCalendarOpen((open) => !open)}
+          onCloseCalendar={() => setCalendarOpen(false)}
+          onSetDaysAll={() => patchWindow({ daysOfWeek: [] })}
+          onToggleDay={toggleDay}
+          onPatchRange={patchRange}
+          onAddRange={addRange}
+          onRemoveRange={removeRange}
+          onPatchTimePoint={patchTimePoint}
+          onAddTimePoint={addTimePoint}
+          onRemoveTimePoint={removeTimePoint}
+          onSave={() => { void saveTask() }}
+          onDelete={() => { void deleteTask() }}
+        />
+        <SchedulerTaskList
+          copy={copy}
+          views={tasks.views}
+          templates={tasks.templates}
+          activeTaskId={activeTaskId}
+          draftEnabled={draft?.enabled === true}
+          hasDraft={draft !== null}
+          busy={tasks.busy}
+          onSelect={selectTask}
+          onNew={newTask}
+          onToggleEnabled={(enabled) => patch({ enabled })}
+        />
+      </div>
+    </Modal>
   )
 }

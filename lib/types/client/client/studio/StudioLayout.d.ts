@@ -1,6 +1,6 @@
 import type { Dispatch } from 'react';
 import type { Dict } from '../i18n.js';
-import type { StudioAction, StudioState, EditorData, CanvasEdge, LibrarySource } from './studio-state.js';
+import type { StudioAction, StudioState, EditorData, CanvasEdge } from './studio-state.js';
 import type { DocumentActionsFace } from '../hooks/useDocumentActions.js';
 import type { AssetsFace } from '../hooks/useAssets.js';
 import type { CanvasActionsFace } from '../hooks/useCanvasActions.js';
@@ -19,6 +19,14 @@ import type { GroupTemplate, RoleTemplate, ServiceState } from '../../host/share
 import type { runStatusMap, runningNodeIds } from '../lib/run-status-map.js';
 import type { stageTemplateKinds } from '../lib/graph-handles.js';
 import type { CanvasApi } from '../components/canvas/GraphCanvas.js';
+import type { LeftPanelProps } from '../components/sidebar/LeftPanel.js';
+/**
+ * 左栏/底栏共用的库内容 props：即左栏 props 去掉「显示布局」相关字段
+ * （open/width 与底栏的 open/height 各自由所在布局传入）与词典。
+ * 词典不并入的原因：t 的引用不必跨渲染稳定，并入会让整份库 props 随词典重建，
+ * 下游记忆化边界反而失效；两个面板各自显式取本布局持有的 t。
+ */
+export type StudioLibraryProps = Omit<LeftPanelProps, 'open' | 'width' | 'copy'>;
 export interface StudioLayoutProps {
     t: Dict;
     state: StudioState;
@@ -36,6 +44,10 @@ export interface StudioLayoutProps {
     toolbarRunning: boolean;
     runStatusByNode: ReturnType<typeof runStatusMap>;
     highlightedNodeIds: ReturnType<typeof runningNodeIds>;
+    /** P4 父代理补丁角标：由装配层按 state 记忆化，同一 state 下重渲染保持引用恒等。 */
+    agentPatchedNodeIds: string[];
+    /** 左栏/底栏共用的库内容 props（装配层已记忆化：同一 state 下引用恒等）。 */
+    libraryProps: StudioLibraryProps;
     /** 运行中锁定项（已完成/执行中流程）：节点锁角标、连线灰化虚线、连线点击不选中。 */
     lockedNodeIds: ReadonlySet<string>;
     lockedEdgeIds: ReadonlySet<string>;
@@ -73,15 +85,6 @@ export interface StudioLayoutProps {
     switchMode: (mode: 'mode1' | 'mode2') => void;
     /** 运行联动：宿主让出空间（官方右侧 Sidebar 全屏时缩回）+ 折叠自身左右栏 + 触发运行。 */
     handleRun: () => void;
-    /** 库来源切换（模版 / 资产；未保存守卫后同时切库来源与画布文档类型）。 */
-    onSetLibrarySource: (source: LibrarySource) => void;
-    /** 打开工作流资产为画布文档（资产态；未保存守卫后切换）。 */
-    onSelectFlowAsset: (assetId: string) => void;
-    /** 角色资产拖入画布（装配层先装载详情，再生成内联角色节点）。 */
-    onPlaceRoleAsset: (assetId: string, position: {
-        x: number;
-        y: number;
-    }) => void;
     /** 两侧侧栏是否都已折叠（顶部一键折叠/展开按钮用）。 */
     panelsCollapsed: boolean;
     /** 顶部一键折叠/展开左右侧栏回调。 */

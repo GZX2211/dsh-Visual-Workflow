@@ -171,6 +171,7 @@ export const zh = {
   serviceDebugEmpty: '服务运行中，发送问题后 SSE 流式回答将实时显示在此处',
   serviceDebugHint: '调试请求经独立调试会话发送，与真实用户会话隔离',
   serviceDebugErrorPrefix: '[错误] ',
+  serviceDebugOmitted: '…… 已省略早期输出 ',
   history: '运行历史',
   // 模板→实例 / 实例→模板
   saveAsTemplate: '另存为模板',
@@ -352,6 +353,8 @@ export const zh = {
   toastRunning: '运行已开始',
   toastStopped: '运行已停止',
   toastSaved: '已保存',
+  // 服务状态形状漂移（稳定码 SERVICE_STATE_SHAPE）：界面语言由调用方持有，故由调用方映射
+  toastServiceStateShape: '宿主返回的服务状态不完整（缺少标识），工作区未更新；请重试该操作或重新打开服务列表',
   // 乐观锁冲突（后端稳定码 ERR_REVISION_CONFLICT）：刷新列表后提示用户重试保存
   revisionConflictRetry: '保存冲突：该资源已在别处被修改。已重新加载服务端最新版本列表（当前画布改动仍保留），请再次保存。',
   sessionCreateFailed: '新建会话失败：未返回会话 id',
@@ -531,6 +534,9 @@ export const zh = {
   schedulerDeleted: '任务已删除',
   schedulerNeedName: '请填写任务名称',
   schedulerNeedTemplate: '请选择执行的工作流模板',
+  // 日期展示 locale：日期格式跟随界面语言（lib 只接收注入值，不持有词典）
+  schedulerLocale: 'zh-CN',
+  schedulerTimezoneUnavailable: '无法探测本机时区：请在「时区」中手动选择，否则按 Asia/Shanghai 计算触发时刻',
   remoteTimeout: "工作流服务响应超时（{endpoint}）",
   remoteConnection: "无法连接工作流服务：{detail}",
   remoteHttpStatus: "工作流服务错误（HTTP {status}）",
@@ -696,6 +702,7 @@ export const en: Dict = {
   serviceDebugEmpty: 'Run the service, then send a question to preview the SSE streamed answer',
   serviceDebugHint: 'Debug requests use a separate debug session, isolated from real users',
   serviceDebugErrorPrefix: '[Error] ',
+  serviceDebugOmitted: '... earlier output omitted: ',
   history: 'Run History',
   // 模板→实例 / 实例→模板
   saveAsTemplate: 'Save as template',
@@ -861,6 +868,8 @@ export const en: Dict = {
   toastRunning: 'Run started',
   toastStopped: 'Run stopped',
   toastSaved: 'Saved',
+  // Service-state shape drift (stable code SERVICE_STATE_SHAPE): mapped where the UI language is owned
+  toastServiceStateShape: 'The host returned an incomplete service state (missing id); the workspace was not updated — retry the action or reopen the service list',
   // Optimistic-lock conflict (backend code ERR_REVISION_CONFLICT): reload lists, ask user to retry
   revisionConflictRetry: 'Save conflict: this resource was modified elsewhere. The latest server version list has been reloaded (your canvas changes are kept) — please save again.',
   sessionCreateFailed: 'Failed to create the session: no session id returned',
@@ -1035,6 +1044,8 @@ export const en: Dict = {
   schedulerDeleted: 'Task deleted',
   schedulerNeedName: 'Please enter a task name',
   schedulerNeedTemplate: 'Please choose a workflow template',
+  schedulerLocale: 'en-US',
+  schedulerTimezoneUnavailable: 'Local timezone could not be detected — choose one under "Timezone", otherwise trigger times are computed in Asia/Shanghai',
   remoteTimeout: "Workflow service timed out ({endpoint})",
   remoteConnection: "Could not connect to the workflow service: {detail}",
   remoteHttpStatus: "Workflow service error (HTTP {status})",

@@ -78,6 +78,10 @@ export function useStudioBoot(
         // 查询——查询与创建之间无同步，会出现「创建成功但列表未刷新」的部分更新。
         const loaded = await templates.loadTemplates()
         // 内置父代理模板：模板库首次启动时补齐（角色 Tab 置顶固定显示）
+        // 已知限制（用户裁决：维持现状，不改行为）：存在性判据只有 kind==='parent'，
+        // 不比对语言与内容——库中已有任意父代理模板（含用户自建）时本次不补齐；反之
+        // 若某次启动时库中没有且当次界面语言是外语，写入的 name/systemPrompt 会被
+        // 永久固化为该语言文案，之后切回中文也不会刷新。
         const roleItems = loaded.role ?? []
         if (!roleItems.some((item) => (item as { kind?: string }).kind === 'parent')) {
           await templates.saveTemplate('role', {
@@ -92,7 +96,7 @@ export function useStudioBoot(
             reactLimit: null,
             inputSchema: '',
             outputSchema: '',
-          } as never)
+          })
           if (cancelled) return // 卸载后不再刷新（避免卸载后 dispatch）
           await templates.loadTemplates() // 刷新列表（含新建内置模板）
         }

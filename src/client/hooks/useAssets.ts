@@ -18,7 +18,7 @@
 // 异步防竞态：列表与详情加载各持一份请求序号，只有最新一次请求可写状态；
 // 卸载后一律不写。
 
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { Dispatch } from 'react'
 import type {
   AssetDetail, AssetKind, AssetVersionEntry, RoleAssetDetail, RoleAssetReference, RoleAssetType, WorkflowAssetDetail,
@@ -347,11 +347,18 @@ export function useAssets(
     dispatch({ type: 'OPEN_ROLE_ASSET', assetId })
   }, [dispatch, loadAsset])
 
-  return {
+  // face 引用必须跨「同一 state 的重渲染」保持恒等：装配层会把它当作派生 props 的记忆化
+  // 依赖，每次渲染新建会让下游 props 比较与 memo 边界全部失效（D06-08/D08-07 同口径）。
+  // 依赖即 face 暴露的全部内容——state 切片与 useCallback 方法，任何一项真正变化都应重建。
+  return useMemo(() => ({
     assets: state.assets,
     assetDoc: state.assetDoc,
     assetVersions: state.assetVersions,
     refresh, loadAsset, promote, saveVersion, previewCascade, openVersions, closeVersions, rollback, retire, restore,
     openFlowAsset, openRoleAsset,
-  }
+  }), [
+    state.assets, state.assetDoc, state.assetVersions,
+    refresh, loadAsset, promote, saveVersion, previewCascade, openVersions, closeVersions, rollback, retire, restore,
+    openFlowAsset, openRoleAsset,
+  ])
 }

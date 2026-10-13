@@ -1,7 +1,7 @@
 // tests/client/components/canvas/geometry.test.ts
 //
 // 画布渲染几何纯函数（协作组/阶段节点适配）：阶段节点紧凑尺寸；组内成员连线锚点；
-// 组卡片流程接点居中。
+// 组卡片流程接点居中；成员 → 组 预建索引（连线几何不得逐边全节点扫描）。
 //
 // 注（治理）：卡片尺寸常量与尺寸解析的唯一本体是 lib/card-geometry.ts（含
 // GRAPH_STAGE_WIDTH / GRAPH_STAGE_HEIGHT / nodeSizeOf），因此该部分用例按源文件归属移至
@@ -12,21 +12,43 @@
 import { describe, expect, it } from 'vitest'
 import {
   edgeGeometry,
-  groupOfMember,
   memberAnchor,
+  memberGroupIndexOf,
 } from '../../../../src/client/components/canvas/geometry.js'
-import type { CanvasNode } from '../../../../src/client/studio/studio-state.js'
+import type { MemberGroupIndex } from '../../../../src/client/components/canvas/geometry.js'
+import type { CanvasEdge, CanvasNode } from '../../../../src/client/studio/studio-state.js'
 
 function nodeOf(id: string, kind: CanvasNode['kind'], extra: Record<string, unknown> = {}): CanvasNode {
   return { id, kind, position: { x: 100, y: 200 }, data: { label: id, ...extra } } as CanvasNode
 }
 
+/** 成员的所属组反查走成员 → 组 预建索引（全量扫描只允许发生在预建时）。 */
+function geometryIndex(byId: Map<string, CanvasNode>): MemberGroupIndex {
+  return memberGroupIndexOf(byId)
+}
+
+/** 记录全节点扫描次数的 Map：`values()` 是按全量节点反查的唯一入口。 */
+class ScanCountingMap extends Map<string, CanvasNode> {
+  scans = 0
+  override values(): ReturnType<Map<string, CanvasNode>['values']> {
+    this.scans += 1
+    return super.values()
+  }
+}
+
 describe('画布几何（协作组/阶段）', () => {
-  it('groupOfMember：按 memberIds 反查成员所属组', () => {
-    const group = nodeOf('g', 'group', { memberIds: ['a1'], size: { w: 300, h: 220 } })
-    const byId = new Map<string, CanvasNode>([['g', group], ['a1', nodeOf('a1', 'agent', { groupId: 'g' })]])
-    expect(groupOfMember(byId, 'a1')?.id).toBe('g')
-    expect(groupOfMember(byId, 'nobody')).toBeNull()
+  it('memberGroupIndexOf：按 memberIds 反查成员所属组（含同成员属多组时先到者优先）', () => {
+    const group = nodeOf('g', 'group', { memberIds: ['a1', 'a1'], size: { w: 300, h: 220 } })
+    const later = nodeOf('g2', 'group', { memberIds: ['a1', 'a2'], size: { w: 300, h: 220 } })
+    const byId = new Map<string, CanvasNode>([
+      ['g', group], ['g2', later],
+      ['a1', nodeOf('a1', 'agent', { groupId: 'g' })], ['a2', nodeOf('a2', 'agent', { groupId: 'g2' })],
+    ])
+    const index = memberGroupIndexOf(byId)
+    // 与旧的全量扫描同口径：节点顺序先到的组胜出；重复 memberIds 不产生第二处条目
+    expect(index.get('a1')?.id).toBe('g')
+    expect(index.get('a2')?.id).toBe('g2')
+    expect(index.get('nobody')).toBeUndefined()
   })
 
   it('memberAnchor：成员行中心位于组卡片左右边缘', () => {
@@ -48,6 +70,7 @@ describe('画布几何（协作组/阶段）', () => {
     const groupEdge = edgeGeometry(
       { id: 'e1', source: 'g', target: 'b', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
       byId,
+      geometryIndex(byId),
     )
     expect(groupEdge!.start.y).toBe(200 + 220 * 0.5)
 
@@ -55,6 +78,7 @@ describe('画布几何（协作组/阶段）', () => {
     const memberEdge = edgeGeometry(
       { id: 'e2', source: 'a1', target: 'b', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' },
       byId,
+      geometryIndex(byId),
     )
     expect(memberEdge!.start.x).toBe(400)
   })
@@ -67,13 +91,13 @@ describe('画布几何（协作组/阶段）', () => {
     const byId = new Map<string, CanvasNode>([['src', src], ['tgt', tgt], ['n', normal], ['nr', normalTgt]])
 
     // 源交换（出点移左侧）→ start.x 为源节点左缘（未交换为右缘 100+208）
-    const e1 = edgeGeometry({ id: 'e1', source: 'src', target: 'n', sourceHandle: 'flow-out', targetHandle: 'flow-in' }, byId)
+    const e1 = edgeGeometry({ id: 'e1', source: 'src', target: 'n', sourceHandle: 'flow-out', targetHandle: 'flow-in' }, byId, geometryIndex(byId))
     expect(e1!.start.x).toBe(100)
     // 目标交换（入点移右侧）→ end.x 为目标节点右缘（未交换为左缘 100）
-    const e2 = edgeGeometry({ id: 'e2', source: 'n', target: 'tgt', sourceHandle: 'flow-out', targetHandle: 'flow-in' }, byId)
+    const e2 = edgeGeometry({ id: 'e2', source: 'n', target: 'tgt', sourceHandle: 'flow-out', targetHandle: 'flow-in' }, byId, geometryIndex(byId))
     expect(e2!.end.x).toBe(100 + 208)
     // 未交换默认：源右缘、目标左缘（基线，防退化）
-    const e3 = edgeGeometry({ id: 'e3', source: 'n', target: 'nr', sourceHandle: 'flow-out', targetHandle: 'flow-in' }, byId)
+    const e3 = edgeGeometry({ id: 'e3', source: 'n', target: 'nr', sourceHandle: 'flow-out', targetHandle: 'flow-in' }, byId, geometryIndex(byId))
     expect(e3!.start.x).toBe(100 + 208)
     expect(e3!.end.x).toBe(100)
   })
@@ -88,16 +112,16 @@ describe('画布几何（协作组/阶段）', () => {
     ])
 
     // 标准相对（未交换）：源出点在右缘 → c1 在 start 右侧；目标入点在左缘 → c2 在 end 左侧
-    const std = edgeGeometry({ id: 'e', source: 'n', target: 'nr', sourceHandle: 'flow-out', targetHandle: 'flow-in' }, byId)!
+    const std = edgeGeometry({ id: 'e', source: 'n', target: 'nr', sourceHandle: 'flow-out', targetHandle: 'flow-in' }, byId, geometryIndex(byId))!
     expect(std.c1.x).toBeGreaterThan(std.start.x)
     expect(std.c2.x).toBeLessThan(std.end.x)
 
     // 源交换（出点移左缘）：控制点应向左伸出（start 左缘 100，c1<100），否则穿入自身卡片体被遮挡
-    const srcEdge = edgeGeometry({ id: 'e', source: 'ss', target: 'nr', sourceHandle: 'flow-out', targetHandle: 'flow-in' }, byId)!
+    const srcEdge = edgeGeometry({ id: 'e', source: 'ss', target: 'nr', sourceHandle: 'flow-out', targetHandle: 'flow-in' }, byId, geometryIndex(byId))!
     expect(srcEdge.c1.x).toBeLessThan(srcEdge.start.x)
 
     // 目标交换（入点移右缘）：控制点应从右侧进入（end 右缘 308，c2>308），否则穿入目标卡片体被遮挡
-    const tgtEdge = edgeGeometry({ id: 'e', source: 'n', target: 'tt', sourceHandle: 'flow-out', targetHandle: 'flow-in' }, byId)!
+    const tgtEdge = edgeGeometry({ id: 'e', source: 'n', target: 'tt', sourceHandle: 'flow-out', targetHandle: 'flow-in' }, byId, geometryIndex(byId))!
     expect(tgtEdge.c2.x).toBeGreaterThan(tgtEdge.end.x)
   })
 
@@ -109,10 +133,34 @@ describe('画布几何（协作组/阶段）', () => {
     R.position = { x: 560, y: 300 }
     const byId = new Map<string, CanvasNode>([['L', L], ['R', R]])
 
-    const edge = edgeGeometry({ id: 'e', source: 'R', target: 'L', sourceHandle: 'flow-out', targetHandle: 'flow-in' }, byId)!
+    const edge = edgeGeometry({ id: 'e', source: 'R', target: 'L', sourceHandle: 'flow-out', targetHandle: 'flow-in' }, byId, geometryIndex(byId))!
     // 左卡卡片体 x∈[160,368]；曲线若穿入左卡，min x 会 < 368（旧逻辑为 351）。修复后应保持 >= 左卡右缘。
     const range = pathXRange(edge.path)
     expect(range.min).toBeGreaterThanOrEqual(368 - 0.5)
+  })
+})
+
+describe('画布几何（连线不做逐边全节点扫描：D07-03）', () => {
+  it('edgeGeometry 用预建索引逐边 O(1) 命中：边数增加不再触发全节点扫描', () => {
+    const byId = new ScanCountingMap()
+    byId.set('g', nodeOf('g', 'group', { memberIds: ['a1', 'a2'], size: { w: 300, h: 220 } }))
+    byId.set('a1', nodeOf('a1', 'agent', { groupId: 'g' }))
+    byId.set('a2', nodeOf('a2', 'agent', { groupId: 'g' }))
+    byId.set('b', nodeOf('b', 'agent'))
+    const memberGroups = geometryIndex(byId)
+    const scansAtBuild = byId.scans
+
+    const edges: CanvasEdge[] = [
+      { id: 'e1', source: 'a1', target: 'b', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' },
+      { id: 'e2', source: 'a2', target: 'b', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' },
+      { id: 'e3', source: 'g', target: 'b', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+    ]
+    for (const edge of edges) {
+      expect(edgeGeometry(edge, byId, memberGroups)?.path).toBeTypeOf('string')
+    }
+    // 预建索引是唯一一次全节点扫描：逐边若退回全节点反查（每条边扫两次），此处必然大于基准
+    expect(scansAtBuild).toBe(1)
+    expect(byId.scans).toBe(scansAtBuild)
   })
 })
 

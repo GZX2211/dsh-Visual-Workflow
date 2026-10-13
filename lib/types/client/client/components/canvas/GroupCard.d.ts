@@ -27,5 +27,9 @@ interface GroupCardProps {
     onMemberSelect(id: string): void;
     onResizeStart(event: React.PointerEvent, id: string, direction: string): void;
 }
-export declare function GroupCard({ node, copy, members, selected, highlighted, runStatus, dropTarget, locked, lockHint, onPointerDown, onHandlePointerDown, onMemberSelect, onResizeStart }: GroupCardProps): import("react").JSX.Element;
+/**
+ * 以 memo 包住：父组件拖拽/平移/缩放等本地渲染态变化时，只要组卡输入（节点、成员列表、
+ * 选中/高亮/锁定、回调引用）未变即不重渲染；成员列表由 GraphCanvas 以 useMemo 保持引用稳定。
+ */
+export declare const GroupCard: import("react").MemoExoticComponent<({ node, copy, members, selected, highlighted, runStatus, dropTarget, locked, lockHint, onPointerDown, onHandlePointerDown, onMemberSelect, onResizeStart }: GroupCardProps) => import("react").JSX.Element>;
 export {};

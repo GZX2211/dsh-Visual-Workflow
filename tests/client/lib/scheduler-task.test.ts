@@ -1,16 +1,19 @@
 // tests/client/lib/scheduler-task.test.ts
 //
-// 定时任务纯逻辑（lib/scheduler-task.ts）单测：时区探测 / 本地日期与偏移 /
-// id 生成 / 空草稿默认值 / 视图深拷贝 / 表单即时校验 / ISO 格式化。
+// 定时任务纯逻辑（lib/scheduler-task.ts）单测：时区探测（可用/不可用两态） /
+// 本地日期与偏移 / id 生成 / 空草稿默认值 / 视图深拷贝 / 表单即时校验 /
+// ISO 格式化（跟随注入的界面 locale）。
 // 环境：纯函数测试，无需 jsdom（不触碰 DOM）。
 //
 // 确定性：时间一律注入固定 Date（localDateOnly/shiftDateOnly/createTaskDraft 均支持）；
-// newTaskId 只断言前缀与不重复，不断言具体值（内含 Date.now 与随机源）。
+// newTaskId 只断言前缀与不重复，不断言具体值（内含 Date.now 与随机源）；
+// 时区不可用经 Intl.DateTimeFormat.prototype.resolvedOptions 注入（不依赖本机时区）。
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   createTaskDraft,
   detectLocalTimezone,
+  FALLBACK_TIMEZONE,
   formatIso,
   localDateOnly,
   newTaskId,
@@ -42,9 +45,24 @@ function makeTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
 }
 
 describe('detectLocalTimezone：本地时区探测', () => {
-  it('与运行时 Intl 解析结果一致（不可用时回退 Asia/Shanghai）', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it('可用时与运行时 Intl 解析结果一致', () => {
     const resolved = new Intl.DateTimeFormat().resolvedOptions().timeZone
-    expect(detectLocalTimezone()).toBe(resolved || 'Asia/Shanghai')
+    expect(detectLocalTimezone()).toBe(resolved || null)
+  })
+
+  it('解析结果为空时返回 null（不再静默按 Asia/Shanghai 解释）', () => {
+    vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions')
+      .mockReturnValue({ timeZone: '' } as Intl.ResolvedDateTimeFormatOptions)
+    expect(detectLocalTimezone()).toBeNull()
+  })
+
+  it('探测抛错时返回 null（由调用方提示用户手动选择时区）', () => {
+    vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockImplementation(() => {
+      throw new Error('timezone unavailable')
+    })
+    expect(detectLocalTimezone()).toBeNull()
   })
 })
 
@@ -73,6 +91,8 @@ describe('newTaskId：任务 id 生成', () => {
 })
 
 describe('createTaskDraft：空任务草稿默认值', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+
   it('以注入的 now 推导：今天起 30 天窗口、每天 09:00–18:00、定点 09:00', () => {
     const now = new Date(2026, 8, 1, 10, 30)
     const draft = createTaskDraft('s-1', now)
@@ -80,7 +100,7 @@ describe('createTaskDraft：空任务草稿默认值', () => {
     expect(draft.name).toBe('')
     expect(draft.workflowTemplateId).toBe('')
     expect(draft.enabled).toBe(true)
-    expect(draft.timezone).toBe(detectLocalTimezone())
+    expect(draft.timezone).toBe(detectLocalTimezone() ?? FALLBACK_TIMEZONE)
     expect(draft.window.startDate).toBe('2026-09-01')
     expect(draft.window.endDate).toBe('2026-10-01')
     expect(draft.window.daysOfWeek).toEqual([])
@@ -92,6 +112,13 @@ describe('createTaskDraft：空任务草稿默认值', () => {
     expect(draft.createdAt).toBe(now.toISOString())
     expect(draft.updatedAt).toBe(now.toISOString())
     expect(draft.taskId.startsWith('task-')).toBe(true)
+  })
+
+  it('探测不可用时草稿落兜底时区（宿主契约 timezone 必填；界面另行显式提示）', () => {
+    vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions')
+      .mockReturnValue({ timeZone: '' } as Intl.ResolvedDateTimeFormatOptions)
+    const draft = createTaskDraft('s-1', new Date(2026, 8, 1, 10, 30))
+    expect(draft.timezone).toBe(FALLBACK_TIMEZONE)
   })
 })
 
@@ -115,19 +142,23 @@ describe('validateTaskDraft：表单即时校验', () => {
   })
 })
 
-describe('formatIso：ISO → 本地可读', () => {
+describe('formatIso：ISO → 本地可读（格式跟随注入的界面语言）', () => {
   it('空值返回破折号；非法值原样返回', () => {
-    expect(formatIso(null)).toBe('—')
-    expect(formatIso('')).toBe('—')
-    expect(formatIso('not-a-date')).toBe('not-a-date')
+    expect(formatIso(null, 'zh-CN')).toBe('—')
+    expect(formatIso('', 'en-US')).toBe('—')
+    expect(formatIso('not-a-date', 'zh-CN')).toBe('not-a-date')
   })
 
-  it('合法 ISO → 本地可读格式（与运行时 Intl 同一口径，时区无关）', () => {
+  it('合法 ISO → 与注入 locale 的 Intl 输出逐字一致（时区无关）', () => {
     const iso = '2026-09-01T10:30:00.000Z'
-    const expected = new Intl.DateTimeFormat('zh-CN', {
-      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
-    }).format(new Date(iso))
-    expect(formatIso(iso)).toBe(expected)
-    expect(formatIso(iso)).toContain('2026')
+    const options = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' } as const
+    expect(formatIso(iso, 'zh-CN')).toBe(new Intl.DateTimeFormat('zh-CN', options).format(new Date(iso)))
+    expect(formatIso(iso, 'en-US')).toBe(new Intl.DateTimeFormat('en-US', options).format(new Date(iso)))
+    expect(formatIso(iso, 'zh-CN')).toContain('2026')
+  })
+
+  it('locale 真实影响格式：同一时刻中英输出不同（不再硬编码 zh-CN）', () => {
+    const iso = '2026-09-01T10:30:00.000Z'
+    expect(formatIso(iso, 'en-US')).not.toBe(formatIso(iso, 'zh-CN'))
   })
 })

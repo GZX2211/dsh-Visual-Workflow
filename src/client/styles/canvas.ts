@@ -582,6 +582,25 @@ g.is-locked .wf-graph__edge-hit {
   border-width: 1px;
 }
 
+/* 组卡片流程接点（居中）：位置随语义类下沉，不得退回内联样式 */
+.wf-graph__handle--group-flow {
+  top: 50%;
+}
+
+/* 组内成员接点的固定纵向位置（成员行内锚点；用户批注：左侧 db/ctx 接点拉开间距，
+   避免两个接点贴在一起，右侧 ctx 接点居中）。 */
+.wf-graph__handle--member-db-in {
+  top: 30%;
+}
+
+.wf-graph__handle--member-ctx-in {
+  top: 64%;
+}
+
+.wf-graph__handle--member-ctx-out {
+  top: 47%;
+}
+
 .wf-graph__handle--mini:hover {
   transform: translateY(-50%) scale(1.25);
 }

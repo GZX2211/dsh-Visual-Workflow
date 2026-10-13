@@ -29,8 +29,15 @@ export interface EdgeGeometry {
     };
     path: string;
 }
-/** 成员所在组（画布节点含该成员）。 */
-export declare function groupOfMember(byId: Map<string, CanvasNode>, memberId: string): CanvasNode | null;
+/**
+ * 成员 id → 所属组 的预建索引。
+ * 为什么需要：所属组反查若按全节点扫描，连线几何会对每条边扫两次全节点（O(边×节点)），
+ * 且拖拽时每帧执行；索引化后由 GraphCanvas 按节点集预建一次，逐边只做 O(1) 命中。
+ * 同一成员出现在多个组时按节点顺序取先到的组，与原先的全量扫描口径一致。
+ */
+export type MemberGroupIndex = Map<string, CanvasNode>;
+/** 由画布节点表预建成员 → 组索引（一次全量扫描，替代逐边反查）。 */
+export declare function memberGroupIndexOf(byId: Map<string, CanvasNode>): MemberGroupIndex;
 /** 组内成员连线锚点（组卡片左/右边缘 + 成员行中心）。 */
 export declare function memberAnchor(group: CanvasNode, memberId: string, side: 'left' | 'right'): {
     x: number;
@@ -45,4 +52,4 @@ export declare function swappedOf(node: CanvasNode | null | undefined): boolean;
  *  交换过连接点的节点：源出点改在左边缘（start.x=左侧），目标入点改在右边缘（end.x=右侧）。
  *  控制点方向跟随端口所在边缘（右缘向外 +x、左缘向外 -x），连线从正确一侧进出，不会
  *  穿入卡片体被遮挡（用户批注：连线方向应当根据连接点确定，而非默认朝右）。 */
-export declare function edgeGeometry(edge: CanvasEdge, byId: Map<string, CanvasNode>): EdgeGeometry | null;
+export declare function edgeGeometry(edge: CanvasEdge, byId: Map<string, CanvasNode>, memberGroups: MemberGroupIndex): EdgeGeometry | null;

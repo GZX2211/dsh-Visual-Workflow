@@ -12,7 +12,9 @@
 // 按源文件归属拆分——studio-selectors 用例归入本文件。
 
 import { describe, expect, it } from 'vitest'
-import { agentPatchedNodeIdsOf, editorDataOf, memberLabelOf } from '../../../src/client/studio/studio-selectors.js'
+import {
+  activeRunBadgeOf, activeRunIndexOf, agentPatchedNodeIdsOf, editorDataOf, instanceRunBadgesOf, memberLabelOf,
+} from '../../../src/client/studio/studio-selectors.js'
 import { createInitialState } from '../../../src/client/studio/studio-initial.js'
 import type { CanvasNode, StudioState } from '../../../src/client/studio/studio-types.js'
 import type { WorkflowDocument } from '../../../src/host/shared/graph-model.js'
@@ -103,5 +105,59 @@ describe('编辑器数据投影（editorDataOf 的资产语义）', () => {
     const unbound: CanvasNode = { ...bound, data: { ...bound.data, sourceAssetId: undefined } }
     const plain: StudioState = { ...state, canvas: { nodes: [unbound], edges: [] } }
     expect(editorDataOf(plain)?.sourceAssetId).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// D06-08：实例列表运行徽标投影（activeRuns 索引 + 逐实例投影）
+// ---------------------------------------------------------------------------
+
+describe('实例运行徽标投影（activeRunIndexOf / instanceRunBadgesOf）', () => {
+  const base = createInitialState('s-1')
+
+  it('索引按「实例 id + 会话」定位：同名实例在不同会话下互不串状态', () => {
+    const state: StudioState = {
+      ...base,
+      activeRuns: [
+        { flowId: 'wf-1', sessionId: 's-1', status: 'running', runId: 'r-1' },
+        { flowId: 'wf-1', sessionId: 's-2', status: 'paused', runId: 'r-2' },
+      ],
+    }
+    const index = activeRunIndexOf(state)
+    expect(activeRunBadgeOf(index, 'wf-1', 's-1')).toEqual({ status: 'running', runId: 'r-1', sessionId: 's-1' })
+    expect(activeRunBadgeOf(index, 'wf-1', 's-2')).toEqual({ status: 'paused', runId: 'r-2', sessionId: 's-2' })
+    // 会话维度缺失即不命中（不得退化为「只按 id」匹配到别的会话）
+    expect(activeRunBadgeOf(index, 'wf-1', 's-3')).toBeNull()
+  })
+
+  it('投影：活跃摘要与「当前跟踪快照」分列，快照只认自己的实例', () => {
+    const index = activeRunIndexOf({
+      ...base,
+      activeRuns: [{ flowId: 'wf-2', sessionId: 's-1', status: 'paused', runId: 'r-2' }],
+    })
+    const flows = [{ id: 'wf-1', sessionId: 's-1' }, { id: 'wf-2', sessionId: 's-1' }]
+    const badges = instanceRunBadgesOf(flows, { runId: 'r-2', snapshot: { flowId: 'wf-2', status: 'running' } }, index)
+    expect(badges.get('wf-1')).toEqual({ active: null, currentSnapshot: null })
+    expect(badges.get('wf-2')).toEqual({
+      active: { status: 'paused', runId: 'r-2', sessionId: 's-1' },
+      currentSnapshot: 'running',
+    })
+    // 未跟踪 run（runId 为 null）时快照不参与判定（避免把上次运行的状态挂到新实例上）
+    const noRun = instanceRunBadgesOf(flows, { runId: null, snapshot: { flowId: 'wf-2', status: 'running' } }, index)
+    expect(noRun.get('wf-2')?.currentSnapshot).toBeNull()
+  })
+
+  it('脏条目与空列表：缺 flowId 的摘要丢弃，无活跃 run 时全部为 null', () => {
+    const index = activeRunIndexOf({
+      ...base,
+      activeRuns: [
+        { flowId: '', sessionId: 's-1', status: 'running', runId: 'r-0' },
+        { flowId: 'wf-1', sessionId: 's-1', status: '', runId: 'r-1' },
+      ],
+    })
+    expect(activeRunBadgeOf(index, '', 's-1')).toBeNull()
+    expect(activeRunBadgeOf(index, 'wf-1', 's-1')).toEqual({ status: '', runId: 'r-1', sessionId: 's-1' })
+    const empty = instanceRunBadgesOf([{ id: 'wf-9', sessionId: 's-9' }], { runId: null, snapshot: null }, activeRunIndexOf(base))
+    expect(empty.get('wf-9')).toEqual({ active: null, currentSnapshot: null })
   })
 })

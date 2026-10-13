@@ -156,6 +156,7 @@ export declare const zh: {
     serviceDebugEmpty: string;
     serviceDebugHint: string;
     serviceDebugErrorPrefix: string;
+    serviceDebugOmitted: string;
     history: string;
     saveAsTemplate: string;
     toastSavedAsTemplate: string;
@@ -337,6 +338,7 @@ export declare const zh: {
     toastRunning: string;
     toastStopped: string;
     toastSaved: string;
+    toastServiceStateShape: string;
     revisionConflictRetry: string;
     sessionCreateFailed: string;
     toastDeleted: string;
@@ -518,6 +520,8 @@ export declare const zh: {
     schedulerDeleted: string;
     schedulerNeedName: string;
     schedulerNeedTemplate: string;
+    schedulerLocale: string;
+    schedulerTimezoneUnavailable: string;
     remoteTimeout: string;
     remoteConnection: string;
     remoteHttpStatus: string;

@@ -349,9 +349,9 @@ export abstract class RuntimeBase {
     if (!target) {
       let newest: RunSnapshot | null = null
       try {
-        for (const runId of await this.deps.store.listAllRunIds()) {
-          const record = await this.deps.store.getRun(runId)
-          if (!record || record.sessionId !== sessionId) continue
+        // 扫描语义（跳过非本资源文档）：单个坏文件不得让整轮断点扫描失效
+        for (const record of await this.deps.store.listAllRuns()) {
+          if (record.sessionId !== sessionId) continue
           if (!(RESUMABLE_STATUSES as readonly string[]).includes(record.status)) continue
           if (!newest || String(record.startedAt ?? '') > String(newest.startedAt ?? '')) newest = record
         }

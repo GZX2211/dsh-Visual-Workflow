@@ -12,7 +12,7 @@ import type { StudioAction, StudioState } from '../studio/studio-state.js'
 import { currentFlowOf, currentFlowTemplateOf, currentFlowAssetOf, currentServiceOf, isInstanceSourceKind } from '../studio/studio-state.js'
 import type { RemoteFace } from './useRemote.js'
 import type { RunControlFace } from './useRunControl.js'
-import type { ServiceControlFace } from './useServiceControl.js'
+import { serviceShapeTextOf, type ServiceControlFace } from './useServiceControl.js'
 import type { ToastFace } from './useToast.js'
 import type { DocumentActionsFace } from './useDocumentActions.js'
 import type { Dict } from '../i18n.js'
@@ -143,7 +143,7 @@ export function useRunActions(
         const service = created as import('../../host/shared/types.js').ServiceState
         void serviceControl.startService(service.id, service.sessionId).then(() => {
           notify('success', t.toastServiceStarted)
-        }).catch((error) => toastError(error))
+        }).catch((error) => toastError(serviceShapeTextOf(error, t.toastServiceStateShape)))
       })
       return
     }
@@ -167,9 +167,9 @@ export function useRunActions(
       await serviceControl.startService((saved as import('../../host/shared/types.js').ServiceState).id, (saved as import('../../host/shared/types.js').ServiceState).sessionId)
       notify('success', t.toastServiceStarted)
     } catch (error) {
-      toastError(error)
+      toastError(serviceShapeTextOf(error, t.toastServiceStateShape))
     }
-  }, [createInstanceFromCanvas, notify, saveCanvas, serviceControl, state, t.needParentForService, t.needStartAndEnd, t.toastServiceStarted, toastError])
+  }, [createInstanceFromCanvas, notify, saveCanvas, serviceControl, state, t.needParentForService, t.needStartAndEnd, t.toastServiceStarted, t.toastServiceStateShape, toastError])
 
   const stopService = useCallback(async () => {
     const service = currentServiceOf(state)
@@ -178,9 +178,9 @@ export function useRunActions(
       await serviceControl.stopService(service.id, service.sessionId)
       notify('info', t.toastServiceStopped)
     } catch (error) {
-      toastError(error)
+      toastError(serviceShapeTextOf(error, t.toastServiceStateShape))
     }
-  }, [notify, serviceControl, t.toastServiceStopped, toastError])
+  }, [notify, serviceControl, t.toastServiceStopped, t.toastServiceStateShape, toastError])
 
   return { startRun, stopRun, openHistory, resumeRun, startService, stopService }
 }

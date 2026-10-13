@@ -10,7 +10,7 @@
 //   - 运行中实例画布锁定（run-locks）：已完成/执行中流程不可删除、不可改线；
 //   - 纯 XY 拖动 / 协作组卡片缩放 = 几何改动 → 防抖自动保存（不弹确认、静默落盘）。
 
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { Dispatch } from 'react'
 import type { StudioAction, StudioState, CanvasNode, CanvasEdge } from '../studio/studio-state.js'
 import { currentFlowOf, currentFlowTemplateOf, currentServiceOf } from '../studio/studio-state.js'
@@ -29,6 +29,14 @@ import { roleAssetNodeKind, roleAssetToNodeData } from '../lib/asset-to-node.js'
 
 /** 几何拖动（节点拖动 / 组卡片缩放）自动保存的防抖窗口（毫秒）。 */
 export const GEOMETRY_AUTOSAVE_DEBOUNCE_MS = 400
+
+/**
+ * 词典 → 字符串词条表：连线错误文案只消费字符串词条，而词典里还有数组/嵌套词条。
+ * 按值类型投影，避免为「只读字符串」对整个词典做断言（断言会把非字符串词条一起骗过类型）。
+ */
+function stringEntriesOf(dict: Dict): Record<string, string> {
+  return Object.fromEntries(Object.entries(dict).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
+}
 
 /** 画布编辑面的外部依赖注入（锁定判定 + 自动保存）。 */
 export interface CanvasActionsOptions {
@@ -79,22 +87,29 @@ export function useCanvasActions(
   /** 几何自动保存防抖计时器（跨渲染保持；卸载时清理，避免迟到保存）。 */
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // 事件回调读 state 的最新切片：经 ref 取当前渲染的 state，使下面的回调身份
+  // 与整个 state 解耦——否则每次状态变化都重建 moveNode/onGroupResize，
+  // 下游以 face 为依赖的 effect（keydown/pointermove 监听）会反复重挂（D08-07）。
+  const stateRef = useRef(state)
+  stateRef.current = state
+
   /** 当前画布对象是否可自动保存（无对象/本地草稿态跳过——草稿须手动保存/创建实例）。 */
   const canAutoSave = useCallback((): boolean => {
-    if (!state.currentId) return false
+    const current = stateRef.current
+    if (!current.currentId) return false
     // 资产态：内容变更必须显式「登记新版本」（版本是显式动作，T6 接线的保存入口负责），
     // 不做几何防抖自动保存——否则拖动即静默产生版本。
-    if (state.currentKind === 'flowAsset') return false
-    const doc = state.currentKind === 'flowTemplate'
-      ? currentFlowTemplateOf(state)
-      : state.currentKind === 'workflow'
-        ? currentFlowOf(state)
-        : state.currentKind === 'service'
-          ? currentServiceOf(state)
+    if (current.currentKind === 'flowAsset') return false
+    const doc = current.currentKind === 'flowTemplate'
+      ? currentFlowTemplateOf(current)
+      : current.currentKind === 'workflow'
+        ? currentFlowOf(current)
+        : current.currentKind === 'service'
+          ? currentServiceOf(current)
           : null
     if (!doc) return false
     return (doc as { _draft?: boolean })._draft !== true
-  }, [state])
+  }, [])
 
   /** 纯几何改动（拖动/缩放）→ 防抖自动保存（静默落库；草稿态不自动落库）。 */
   const scheduleGeometryAutoSave = useCallback((): void => {
@@ -133,7 +148,7 @@ export function useCanvasActions(
     }
     const problem = connectionProblem(state.canvas.nodes, state.canvas.edges, connection)
     if (!problem.valid) {
-      notify('error', connectionProblemMessage(problem as { valid: boolean; code: string }, t as unknown as Record<string, string>))
+      notify('error', connectionProblemMessage(problem, stringEntriesOf(t)))
       return
     }
     history.remember()
@@ -452,10 +467,18 @@ export function useCanvasActions(
     dispatch({ type: 'NODE_DATA_PATCH', id, patch: { swapPorts: (node.data as { swapPorts?: unknown }).swapPorts !== true } })
   }, [dispatch, history, state.canvas.nodes])
 
-  return {
+  // face 身份固定（同 useRemote）：回调本身已按各自依赖 useCallback，
+  // 这里只把「字面量每次渲染都是新对象」这一点消掉，让下游 effect 依赖保持稳定。
+  return useMemo<CanvasActionsFace>(() => ({
     rememberGraph, moveNode, onNodeDragStart, onConnect, onConnectionRejected,
     tidyGraph, clearGraph, removeSelected, removeNodeNow, removeLine,
     placeTemplateNode, placeRoleAssetNode, placeParentNode, placeStageNode, placeGroupNode, placeGroupFromTemplate, placeTemplateIntoGroup,
     onGroupResize, addNodeToGroup, copyToProxy, removeGroupMember, swapNodePorts,
-  }
+  }), [
+    addNodeToGroup, clearGraph, copyToProxy, moveNode, onConnect, onConnectionRejected,
+    onGroupResize, onNodeDragStart, placeGroupFromTemplate, placeGroupNode, placeParentNode,
+    placeRoleAssetNode, placeStageNode, placeTemplateIntoGroup, placeTemplateNode,
+    rememberGraph, removeGroupMember, removeLine, removeNodeNow, removeSelected,
+    swapNodePorts, tidyGraph,
+  ])
 }

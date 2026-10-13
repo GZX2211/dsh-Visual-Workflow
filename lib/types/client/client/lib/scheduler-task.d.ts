@@ -1,6 +1,12 @@
 import type { ScheduledTask, ScheduledTaskView } from '../../host/shared/types.js';
-/** 本地时区（浏览器/Node resolvedOptions；不可用时回退 Asia/Shanghai）。 */
-export declare function detectLocalTimezone(): string;
+/** 时区探测不可用时的兜底时区（宿主契约 ScheduledTask.timezone 必填；界面须同时显式提示）。 */
+export declare const FALLBACK_TIMEZONE = "Asia/Shanghai";
+/**
+ * 本地时区（浏览器/Node resolvedOptions）。探测不可用返回 null —— 不静默按上海解释：
+ * 把未知时区当成已知事实会让全部触发时刻整体偏移，故由调用方提示用户手动选择
+ * （SchedulerManager 的 schedulerTimezoneUnavailable；草稿落库另用 FALLBACK_TIMEZONE）。
+ */
+export declare function detectLocalTimezone(): string | null;
 /** 本地日期 "YYYY-MM-DD"（今天）。 */
 export declare function localDateOnly(date?: Date): string;
 /** 日期偏移（"YYYY-MM-DD"）。 */
@@ -13,5 +19,9 @@ export declare function createTaskDraft(ownerSessionId: string, now?: Date): Sch
 export declare function taskFromView(view: ScheduledTaskView): ScheduledTask;
 /** 表单即时校验：返回第一处错误消息（null = 通过基础检查）。 */
 export declare function validateTaskDraft(task: ScheduledTask): string | null;
-/** 显示格式化：ISO → 本地可读（含时区标识）。 */
-export declare function formatIso(value: string | null | undefined): string;
+/**
+ * 显示格式化：ISO → 本地可读。
+ * locale 由调用方从词典注入（lib 不持有词典）：年月日/时分顺序与 AM/PM 表达随界面
+ * 语言变化，硬编码 'zh-CN' 会让英文界面一直显示中文习惯的日期格式。
+ */
+export declare function formatIso(value: string | null | undefined, locale: string): string;

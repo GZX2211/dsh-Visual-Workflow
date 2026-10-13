@@ -254,7 +254,7 @@ export function SchedulerTaskForm(props: SchedulerTaskFormProps) {
               <span className={`wf-sched-dot is-${activeView?.runtime.status ?? 'idle'}`} />
               {schedulerStatusLabelOf(copy, activeView?.runtime.status ?? 'idle')}
             </span>
-            <span className="wf-sched-status-cell">{`${copy.schedulerNextRun}：${formatIso(activeView?.runtime.nextTriggerAt ?? null)}`}</span>
+            <span className="wf-sched-status-cell">{`${copy.schedulerNextRun}：${formatIso(activeView?.runtime.nextTriggerAt ?? null, copy.schedulerLocale)}`}</span>
             <span className="wf-sched-status-cell">{`${copy.schedulerLastOutcome}：${schedulerResultLabelOf(copy, activeView?.runtime.lastResult ?? null)}`}</span>
             {activeView?.runtime.lastError ? <span className="wf-sched-status-cell is-error">{activeView.runtime.lastError}</span> : null}
           </div>

@@ -7,7 +7,7 @@ import type { FlowTemplatesFace } from './useFlowTemplates.js';
 import type { TemplatesFace } from './useTemplates.js';
 import type { SelectionFace } from './useSelection.js';
 import type { UnsavedGuardFace } from './useUnsavedGuard.js';
-import type { ServiceControlFace } from './useServiceControl.js';
+import { type ServiceControlFace } from './useServiceControl.js';
 import type { RemoteFace } from './useRemote.js';
 import type { ToastFace } from './useToast.js';
 import type { Dict } from '../i18n.js';

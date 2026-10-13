@@ -9,7 +9,7 @@
 //     或新建主会话；「开启新会话」为一次性临时选项，实例文档不再继承该字段）；
 //   - saveWorkflow 以实例自身 sessionId 归属（运行/历史/状态都以实例绑定的会话为准）。
 
-import { useCallback, useRef } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import type { Dispatch } from 'react'
 import type { WorkflowDocument, WorkflowTemplate } from '../../host/shared/graph-model.js'
 import type { Drafted, StudioAction, CanvasNode, CanvasEdge } from '../studio/studio-state.js'
@@ -176,12 +176,14 @@ export function useWorkflows(
     dispatch({ type: 'OPEN_FLOW', flow })
   }, [dispatch])
 
-  return {
+  // face 引用跨「同一 state 的重渲染」保持恒等：装配层把它当派生 props 的记忆化依赖
+  // （D06-08/D08-07 同口径），每次渲染新建会让下游 memo 边界整体失效。
+  return useMemo(() => ({
     loadWorkflows,
     createWorkflowDraft,
     instantiateFromTemplate,
     saveWorkflow,
     deleteWorkflow,
     openFlow,
-  }
+  }), [loadWorkflows, createWorkflowDraft, instantiateFromTemplate, saveWorkflow, deleteWorkflow, openFlow])
 }

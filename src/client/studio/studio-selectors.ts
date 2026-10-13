@@ -78,6 +78,78 @@ export function instanceRunningOf(state: StudioState): boolean {
 }
 
 /**
+ * 活跃 run 摘要的投影类型：实例列表状态徽标（全量活跃 run → 按实例定位）。
+ * 投影与索引都保留 runId/sessionId——徽标之外的运行对账（Studio）也消费同一份索引。
+ */
+export interface ActiveRunBadge {
+  status: string
+  runId: string
+  sessionId: string
+}
+
+/** 单个实例的索引键：flowId + sessionId（同一实例可被多个会话持有同名 id，必须带会话维度）。 */
+function activeRunIndexKey(flowId: string, sessionId: string): string {
+  return `${flowId}\u0000${sessionId}`
+}
+
+/**
+ * 活跃 run 摘要 → 以「实例（flowId+sessionId）」为键的索引，供实例列表按实例 O(1) 取状态徽标
+ * （此前每实例一次全量 `activeRuns.find` 线性查找，n 个实例即 n 次全表扫描）。
+ * 纯函数：输入即全部事实，不读全局；同一 key 重复出现时以最后一条为准（列表顺序即权威）。
+ * 只丢弃缺 flowId 的脏条目（无法归属实例）——其余字段缺失按空串降级，不改变既有展示口径。
+ */
+export function activeRunIndexOf(state: StudioState): Map<string, ActiveRunBadge> {
+  const index = new Map<string, ActiveRunBadge>()
+  for (const item of state.activeRuns) {
+    const flowId = String(item?.flowId ?? '')
+    if (!flowId) continue
+    const sessionId = String(item?.sessionId ?? '')
+    const status = String(item?.status ?? '')
+    const runId = String(item?.runId ?? '')
+    index.set(activeRunIndexKey(flowId, sessionId), { status, runId, sessionId })
+  }
+  return index
+}
+
+/** 实例 → 运行徽标（activeRunIndex 键）；无活跃 run 返回 null。 */
+export function activeRunBadgeOf(
+  index: ReadonlyMap<string, ActiveRunBadge>,
+  flowId: string,
+  sessionId: string,
+): ActiveRunBadge | null {
+  return index.get(activeRunIndexKey(flowId, sessionId)) ?? null
+}
+
+/** 实例列表的运行状态徽标数据源（左栏/底栏共用；`currentSnapshot` 为该实例的更即时快照）。 */
+export interface InstanceRunBadge {
+  /** 活跃 run 摘要（来自全量轮询）；null = 无活跃 run。 */
+  active: ActiveRunBadge | null
+  /** 当前跟踪 run 快照的 status（仅当快照属于该实例）；无法判定当前实例时为 null。 */
+  currentSnapshot: string | null
+}
+
+/**
+ * 按实例投影运行状态徽标（渲染层不再做全量线性查找）：**一次**扫描活跃 run 建索引
+ * （O(n+m)），逐实例只做一次 Map 查询。顺序与入参一致，不改变已有语义：
+ * 快照优先于活跃摘要由消费方（实例列表）按既有口径决定。
+ */
+export function instanceRunBadgesOf(
+  flows: ReadonlyArray<{ id: string; sessionId: string }>,
+  current: { runId: string | null; snapshot: { flowId: string; status: string } | null },
+  index: ReadonlyMap<string, ActiveRunBadge>,
+): Map<string, InstanceRunBadge> {
+  const out = new Map<string, InstanceRunBadge>()
+  for (const flow of flows) {
+    const active = activeRunBadgeOf(index, flow.id, flow.sessionId)
+    const currentSnapshot = current.runId !== null && current.snapshot?.flowId === flow.id
+      ? current.snapshot.status
+      : null
+    out.set(flow.id, { active, currentSnapshot })
+  }
+  return out
+}
+
+/**
  * 协作组成员显示名（唯一本体）：成员节点缺失或 label 缺失/为 null 时回退成员 id。
  * 画布组卡片（GraphCanvas）与右侧属性栏（editorDataOf）共用，避免两处各写一份回退规则。
  * 只接受已解析出的成员节点，节点的查找方式（Map / find）由调用方决定。

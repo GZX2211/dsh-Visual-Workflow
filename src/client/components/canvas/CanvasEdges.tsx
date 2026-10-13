@@ -2,16 +2,23 @@
 //
 // 画布连线层（SVG）：贝塞尔连线、条件标签、运行/锁定态样式、方向箭头定义与连线草稿。
 // 从 GraphCanvas 拆出——连线渲染与节点交互是两个独立的变更原因。
+//
+// 渲染边界：本组件以 memo 包住，派生视图用 useMemo 收敛。父组件因拖拽/平移/缩放等本地
+// 渲染态重渲染时，只要连线输入（节点、边、索引、选中项、回调引用）未变，连线层与逐边
+// 几何计算整体跳过——拖拽每帧不应重算全部连线几何。
 
+import { memo, useMemo } from 'react'
 import type { Dict } from '../../i18n.js'
 import type { CanvasEdge, CanvasNode } from '../../studio/studio-state.js'
 import { conditionLabel, lineColorClass } from '../../lib/graph-edges.js'
-import { edgeGeometry } from './geometry.js'
+import { edgeGeometry, type MemberGroupIndex } from './geometry.js'
 
 export interface CanvasEdgesProps {
   nodes: CanvasNode[]
   edges: CanvasEdge[]
   byId: Map<string, CanvasNode>
+  /** 成员 → 组 预建索引（所属组反查 O(1)，由 GraphCanvas 按节点集 memo 化）。 */
+  memberGroups: MemberGroupIndex
   selectedEdge: string | null
   /** 连线源节点的运行状态（运行中连线用虚线）。 */
   runStatusOf(id: string): { status: string; attempts: number; outputSummary: string } | null
@@ -22,11 +29,11 @@ export interface CanvasEdgesProps {
   draftPath: string | null
 }
 
-export function CanvasEdges(props: CanvasEdgesProps) {
-  const { nodes, edges, byId, selectedEdge, runStatusOf, isLockedEdge, copy, onEdgeSelect, draftPath } = props
+export const CanvasEdges = memo(function CanvasEdges(props: CanvasEdgesProps) {
+  const { nodes, edges, byId, memberGroups, selectedEdge, runStatusOf, isLockedEdge, copy, onEdgeSelect, draftPath } = props
 
-  const edgeViews = nodes.length === 0 ? [] : edges.map((edge) => {
-    const geometry = edgeGeometry(edge, byId)
+  const edgeViews = useMemo(() => nodes.length === 0 ? [] : edges.map((edge) => {
+    const geometry = edgeGeometry(edge, byId, memberGroups)
     if (!geometry) return null
     const isSelected = edge.id === selectedEdge
     const isRunning = runStatusOf(edge.source)?.status === 'running'
@@ -67,10 +74,10 @@ export function CanvasEdges(props: CanvasEdgesProps) {
         ) : null}
       </g>
     )
-  })
+  }), [nodes, edges, byId, memberGroups, selectedEdge, runStatusOf, isLockedEdge, copy, onEdgeSelect])
 
   return (
-    <svg className="wf-graph__edges" width="100%" height="100%" style={{ position: 'absolute', inset: 0, overflow: 'visible' }}>
+    <svg className="wf-graph__edges" width="100%" height="100%">
       {/* 有向线段箭头（流程通道：流程/通过/不通过/内容；上下文/数据库线无方向要求） */}
       <defs>
         <marker id="wf-arrow-flow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -90,4 +97,4 @@ export function CanvasEdges(props: CanvasEdgesProps) {
       {draftPath ? <path className="wf-graph__connection" d={draftPath} /> : null}
     </svg>
   )
-}
+})

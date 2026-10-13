@@ -10,6 +10,7 @@
 //   - 输入/输出节点各只保留一个连接点（模式二：输入=flow-out、输出=flow-in）；
 //   - 连接点按入口/出口区分颜色；交换左右连接点（swapPorts）随节点持久化，协作组卡片不提供该按钮。
 
+import { memo } from 'react'
 import type { Dict } from '../../i18n.js'
 import type { CanvasNode } from '../../studio/studio-state.js'
 import { HANDLES } from '../../lib/graph-handles.js'
@@ -97,7 +98,11 @@ function metaLinesOf(node: CanvasNode, copy: Dict & { modeName(id: string | null
   return out.filter((line) => String(line ?? '').trim())
 }
 
-export function FlowNode({ node, copy, mode, selected, highlighted, dragging, runStatus, locked, lockHint, agentPatched, onPointerDown, onHandlePointerDown, onToggleSwap }: FlowNodeProps) {
+/**
+ * 节点卡片以 memo 包住：父组件拖拽/平移/缩放等本地渲染态变化时，未变的节点不重渲染
+ * （回调由 GraphCanvas 以 useCallback 固定引用，节点对象与运行状态对象保持原引用）。
+ */
+export const FlowNode = memo(function FlowNode({ node, copy, mode, selected, highlighted, dragging, runStatus, locked, lockHint, agentPatched, onPointerDown, onHandlePointerDown, onToggleSwap }: FlowNodeProps) {
   const kind = node.kind
   const isProxy = kind === 'proxy'
   // 里程碑闸门：proxy.data.role='milestone' 时用里程碑样式 + 角标（label 已在名称行渲染）
@@ -186,4 +191,4 @@ export function FlowNode({ node, copy, mode, selected, highlighted, dragging, ru
       </div>
     </div>
   )
-}
+})

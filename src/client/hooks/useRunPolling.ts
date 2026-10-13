@@ -1,8 +1,8 @@
 // src/client/hooks/useRunPolling.ts
 //
-// 运行状态轮询：runId 存在时按间隔拉取 runStatus；终态后停止轮询
-// （快照保留在 state 供画布高亮）。并发保护（in-flight 互斥 / 序号丢弃过期
-// 响应 / 卸载取消）统一由 usePolling 承担。
+// 运行状态轮询：runId 存在时按间隔拉取 runStatus；终态后停止轮询并**同轮清空快照**
+// （RUN_SNAPSHOT 后紧跟 RUN_CLEARED，画布着色随运行结束一并撤掉）。并发保护
+// （in-flight 互斥 / 序号丢弃过期响应 / 卸载取消）统一由 usePolling 承担。
 //
 // 轮询间隔由 host 经 runtimeConfig 端点下发（runPollMs）：前端不得自读 host 的配置
 // 对象，只能经统一网络边界取；host 未下发 / 下发失败 / 取值非法时回退 RUN_POLL_MS。
