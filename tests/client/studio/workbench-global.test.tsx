@@ -10,12 +10,10 @@
 //   3. 勾选「开启新会话」创建实例：先经 createSession 建立主会话，实例保存到新会话；
 //   4. 实例列表 = 全部会话实例；当前主会话实例带「当前」标签，其他会话实例无。
 
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
+import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { act } from 'react'
-import { flushAsync, waitForCondition } from '../fixtures/async-flush.js'
-import { createRoot, type Root } from 'react-dom/client'
-import React from 'react'
-import { Studio } from '../../../src/client/studio/Studio.js'
+import { flushAsync } from '../fixtures/async-flush.js'
+import type { Root } from 'react-dom/client'
 import { zh } from '../../../src/client/i18n.js'
 import type { RemoteFace } from '../../../src/client/hooks/useRemote.js'
 import { EP } from '../../../src/client/lib/remote.js'

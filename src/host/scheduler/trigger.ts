@@ -26,7 +26,7 @@ import { isValidDate, isWithinWindow } from './window.js'
 export const DAILY_TIME_MIN_INTERVAL = 1
 
 /** 某本地日期（须有效）上的全部理论触发点（本地分钟，升序；interval 跨天截断）。 */
-export function triggerPointsForDate(task: Pick<ScheduledTask, 'triggerMode' | 'dailyTimeConfig' | 'intervalConfig'>, dateOnly: string): number[] {
+export function triggerPointsForDate(task: Pick<ScheduledTask, 'triggerMode' | 'dailyTimeConfig' | 'intervalConfig'>, _dateOnly: string): number[] {
   if (task.triggerMode === 'daily_time') {
     const points = (task.dailyTimeConfig?.timePoints ?? []).map(parseTime).filter((v): v is number => v !== null)
     return [...new Set(points)].sort((a, b) => a - b)

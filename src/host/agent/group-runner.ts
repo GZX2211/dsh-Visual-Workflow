@@ -27,7 +27,6 @@ import type {
   OrchestratorLogger,
 } from '../orchestrator/index.js'
 import {
-  findMemberByName,
   isTeammateNameValid,
   teammateDescriptionOf,
   teammateNameOf,

@@ -127,13 +127,13 @@ export interface StudioLayoutProps {
 export function StudioLayout(props: StudioLayoutProps) {
   const {
     t, state, sessionId, remote,
-    currentFlow, currentService, currentFlowTemplate, editorData, edgeList, stageKinds, parentTemplate, roleTemplates, groupTemplates,
+    currentFlow, currentService, editorData, edgeList,
     toolbarRunning, runStatusByNode, highlightedNodeIds, modeName,
     agentPatchedNodeIds, libraryProps,
     lockedNodeIds, lockedEdgeIds, instanceRunning,
     canvasApiRef, canvasShellRef, libraryImportRef, personaInputRef, groupMdInputRef,
     dispatch, doc, assets, canvas, editor, run, transfer, selection, history, guard, panels, toast,
-    beginLibraryDrag, dragPreview, dropGroupId,
+    dragPreview, dropGroupId,
     modeMenuOpen, setModeMenuOpen, switchMode, canvasCaption,
     leftOpen, bottomOpen, inspectorOpen,
     handleRun, panelsCollapsed, onTogglePanels,

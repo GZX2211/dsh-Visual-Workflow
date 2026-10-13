@@ -175,7 +175,7 @@ export function buildLibraryModel(input: LibraryModelInput): LibraryModel {
     roleTemplates, fileTemplates, databaseTemplates, groupTemplates, stageKinds, libSelection,
     onSelectWorkflow, onSelectFlowTemplate, onSelectFlowAsset, onOpenRoleAsset, onPlaceRoleAsset, onOpenExperience,
     onSelectLib, onPlaceTemplate, onPlaceTemplateIntoGroup, onPlaceStage, onPlaceGroupFromTemplate,
-    onPlaceParent, onCreateNew,
+    onPlaceParent,
   } = input
 
   const librarySource: LibrarySource = input.librarySource === 'asset' ? 'asset' : 'template'

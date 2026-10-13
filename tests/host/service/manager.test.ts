@@ -11,10 +11,10 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FlowStore } from '../../../src/host/storage/flow-store.js'
-import { ServiceManager, resolveDshCommand, SERVICE_ERR, STOP_GRACE_MS } from '../../../src/host/service/index.js'
+import { ServiceManager, resolveDshCommand, SERVICE_ERR } from '../../../src/host/service/index.js'
 import type { ManagerLogger } from '../../../src/host/service/index.js'
 import type { ServiceState } from '../../../src/host/shared/types.js'
-import type { RoleNode, StageNode, WorkflowDocument, Line } from '../../../src/host/shared/graph-model.js'
+import type { RoleNode, StageNode, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
 import { stageLabel } from '../../../src/host/graph/index.js'
 
 const cleanups: Array<() => Promise<void>> = []

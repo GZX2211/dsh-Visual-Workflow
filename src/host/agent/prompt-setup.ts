@@ -233,7 +233,7 @@ function registerPromptOnCtx(childCtx: PromptChildContextLike, ref: PromptStateR
   // 缓存/稳定性优化）；否则按 applyPromptStateToAssembly 保留角色段 + Code 协议段 + 按开关的
   // 工具段/官方段。角色 Prompt 设置时会替换官方身份/人设段（用户裁决）。
   // 工具调用能力仅由 tools[] Schema 决定，本瀑布从不改动 assembly.tools。
-  const disposeAssembly = childCtx.on('system-prompt/assemble', async (rawAssembly, _rawContext, next) => {
+  const disposeAssembly = childCtx.on('system-prompt/assemble', async (_rawAssembly, _rawContext, next) => {
     const assembly = (await next()) as PromptAssemblyLike | null
     return applyPromptStateToAssembly(assembly, ref, sectionRegistered)
   }) as () => void
@@ -324,7 +324,7 @@ export function createChildPromptSetup(): ChildPromptSetup {
    */
   const registerGlobalAssemblyHook = (ctx: PromptChildContextLike): (() => void) => {
     if (typeof ctx?.on !== 'function') return () => {}
-    return ctx.on('system-prompt/assemble', async (rawAssembly, _rawContext, next) => {
+    return ctx.on('system-prompt/assemble', async (_rawAssembly, _rawContext, next) => {
       const assembly = (await next()) as PromptAssemblyLike | null
       const pendingState = pending.getStore()
       if (!pendingState) return assembly // 非视觉工作流子代理首轮/后续回合：交给 per-agent 贡献/bindParent

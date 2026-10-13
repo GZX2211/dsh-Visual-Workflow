@@ -6,7 +6,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OrchestratorRuntime, type NodeRunner } from '../../../src/host/orchestrator/index.js'
 import { type GraphNode, type RoleNode, type WorkflowDocument } from '../../../src/host/shared/graph-model.js'
-import { agent, makeFlow, makeHarness, caller, start, cleanupTempDirs } from './fixtures/harness.js'
+import { makeFlow, makeHarness, caller, start, cleanupTempDirs } from './fixtures/harness.js'
 
 // 临时目录：makeHarness 登记，文件结束统一清理
 afterEach(cleanupTempDirs)

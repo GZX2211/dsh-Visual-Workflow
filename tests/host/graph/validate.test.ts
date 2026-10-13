@@ -19,7 +19,6 @@ import {
   newProxyNode,
   newRoleNode,
   newStageNode,
-  stageLabel,
   validateFlow,
 } from '../../../src/host/graph/index.js'
 import type { GraphNode, WorkflowDocument } from '../../../src/host/shared/graph-model.js'

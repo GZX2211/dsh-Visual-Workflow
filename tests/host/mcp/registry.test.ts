@@ -4,8 +4,7 @@
 // 纯函数单测，不依赖 harness；resolveSpawnCommandLine 通过 platform 参数固定分支。
 
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { normalizeServerName, parseMcpRows, removeMcpServer, resolveSpawnCommandLine, renderCommandLine, toggleMcpServer, upsertMcpServer } from '../../../src/host/mcp/registry.js'
 import { snapshotDshHome } from '../api/fixtures/api-harness.js'

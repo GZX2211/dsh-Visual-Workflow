@@ -17,6 +17,7 @@ import {
   rootAgent,
   start,
   type TestEnv,
+  type TestEnvOptions,
 } from '../fixtures/tool-harness.js'
 
 afterEach(cleanupTempDirs)
@@ -27,8 +28,8 @@ interface Harness extends TestEnv {
 }
 
 /** 装配：真实编排运行时 + 注册 wf_finish。 */
-async function makeHarness(): Promise<Harness> {
-  const env = await makeEnv()
+async function makeHarness(options?: TestEnvOptions): Promise<Harness> {
+  const env = await makeEnv(options)
   const host: WfToolsHost = { orchestrator: env.runtime, getRootAgent: (sid) => env.agents.getRootAgent(sid) }
   const disposeTools = registerTools(env, host, [registerWfFinish])
   return { ...env, host, disposeTools }
@@ -91,5 +92,36 @@ describe('wf_finish 工具执行', () => {
     const h = await makeHarness()
     const def = h.tools.definitions.get(WF_FINISH)!
     await expect(def.execute({}, execOf(rootAgent))).rejects.toMatchObject({ code: 'WF_NO_ACTIVE_RUN' })
+  })
+
+  it('磁盘最新一条为 running（崩溃残留）：不伪造终态、按 WF_NO_ACTIVE_RUN 拒绝', async () => {
+    const h = await makeHarness({ newRunId: (() => { let n = 0; return () => `run-${(n += 1)}` })() })
+    await start(h)
+    const runId = h.runtime.activeRunForSession('session-1')!.snapshot.id
+    // 模拟宿主重启/崩溃：磁盘留有 running 记录，内存条目已丢失；running 不在可恢复状态内
+    h.runtime.runs.delete(runId)
+    expect(h.runtime.activeRunForSession('session-1')).toBeNull()
+
+    const def = h.tools.definitions.get(WF_FINISH)!
+    await expect(def.execute({}, execOf(rootAgent))).rejects.toMatchObject({ code: 'WF_NO_ACTIVE_RUN' })
+
+    // 崩溃残留记录不得被本次调用改写：收尾只作用于本次确认/接管的运行，不猜「就是它」
+    expect((await h.store.getRun(runId))?.status).toBe('running')
+  })
+
+  it('对照：磁盘 stopped 断点被静默接续接管后可直接收尾（与 running 残留的分界）', async () => {
+    const h = await makeHarness({ newRunId: (() => { let n = 0; return () => `run-${(n += 1)}` })() })
+    await start(h)
+    const stoppedId = h.runtime.activeRunForSession('session-1')!.snapshot.id
+    await h.runtime.stopRun(stoppedId)
+    expect(h.runtime.activeRunForSession('session-1')).toBeNull()
+
+    const def = h.tools.definitions.get(WF_FINISH)!
+    const finished = await def.execute({ status: 'completed', summary: '确认流程已走完' }, execOf(rootAgent))
+
+    // 断点被静默接管后按「本次收尾」处理（不是幂等回放历史终态）
+    expect(finished).toMatchObject({ ok: true, status: 'completed' })
+    expect((finished as { idempotent?: boolean }).idempotent).toBeUndefined()
+    expect((finished as { runId?: string }).runId).not.toBe(stoppedId)
   })
 })

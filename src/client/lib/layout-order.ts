@@ -23,7 +23,7 @@ export interface OrderInput {
 export const DEFAULT_ORDER_ROUNDS = 4
 
 /** 计算某单元在参考层的平均位置（无邻居时返回 undefined）。 */
-function barycenter(id: string, neighbours: string[], indexOf: Map<string, number>): number | undefined {
+function barycenter(_id: string, neighbours: string[], indexOf: Map<string, number>): number | undefined {
   let sum = 0
   let count = 0
   for (const other of neighbours) {

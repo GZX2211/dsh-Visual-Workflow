@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { OUTPUT_SUMMARY_LIMIT, createRunSnapshot, lastAssistantText, setNodeStatus, statusText, terminalizeNodes, truncateText } from '../../../src/host/orchestrator/index.js'
-import { makeFlow, start } from './fixtures/harness.js'
+import { makeFlow } from './fixtures/harness.js'
 
 describe('snapshot 纯函数', () => {
   it('truncateText：超限截断并追加标记，未超限原样', () => {

@@ -254,7 +254,7 @@ export function filterToolsInAssembly(assembly: PromptAssemblyLike, disabled: Re
  *   - 返回 disposer（插件卸载时撤销）。
  */
 export function registerToolSwitchFilter(ctx: FilterContextLike, store: ToolSwitchStore): () => void {
-  return ctx.on('system-prompt/assemble', async (rawAssembly, _context, next) => {
+  return ctx.on('system-prompt/assemble', async (_rawAssembly, _context, next) => {
     await store.ensureFresh()
     const assembly = (await next()) as PromptAssemblyLike | null
     if (!assembly) return assembly

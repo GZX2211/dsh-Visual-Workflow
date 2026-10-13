@@ -17,13 +17,21 @@ import { makeFlow, stage, agent, FakeRoot, makeHarness, start, caller, cleanupTe
 afterEach(cleanupTempDirs)
 
 describe('startRun 并发运行锁（TOCTOU 竞态回归）', () => {
-  /** 装配一个「读文档可控阻塞」的运行时（保留 FlowStore 原型链，仅覆盖 getWorkflow）。 */
-  function slowRuntimeOf(h: Harness, hook: () => Promise<void>): { runtime: OrchestratorRuntime; gateHits: () => number } {
+  /**
+   * 装配一个「读文档可控阻塞」的运行时（保留 FlowStore 原型链，仅覆盖 getWorkflow）。
+   * hook 收到本次读文档的序号，便于用例只闸住其中某一次（交叉并发用例的 setup 阶段
+   * 也要读文档，不能一并闸住）；newRunId 可注入以便区分本次运行与既有 run。
+   */
+  function slowRuntimeOf(
+    h: Harness,
+    hook: (call: number) => Promise<void>,
+    options: { newRunId?: () => string } = {},
+  ): { runtime: OrchestratorRuntime; gateHits: () => number } {
     let hits = 0
     const slowStore = Object.create(h.store) as FlowStore
     slowStore.getWorkflow = async (sessionId: string, flowId: string) => {
       hits += 1
-      await hook()
+      await hook(hits)
       return h.store.getWorkflow(sessionId, flowId)
     }
     const runtime = new OrchestratorRuntime({
@@ -36,7 +44,7 @@ describe('startRun 并发运行锁（TOCTOU 竞态回归）', () => {
       },
       logger: { warn: (message) => h.warnings.push(message), info: () => {}, debug: () => {} },
       now: () => h.clock.now,
-      newRunId: () => 'run-race',
+      newRunId: options.newRunId ?? (() => 'run-race'),
       uuid: () => 'uuid-race',
     })
     return { runtime, gateHits: () => hits }
@@ -84,6 +92,60 @@ describe('startRun 并发运行锁（TOCTOU 竞态回归）', () => {
     await expect(runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })).rejects.toThrow('磁盘瞬时不可用')
     // 预留必须已释放：否则第二次启动会被自己的残留预留拒成 WF_LOCKED
     await expect(runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })).resolves.toMatchObject({ runId: 'run-race' })
+  })
+
+  it('交叉并发（startRun × resumeRun）：resume 在 startRun 的 await 期间登记 → 登记前重检 WF_LOCKED，不产生第二个 run', async () => {
+    const h = await makeHarness()
+    await h.store.saveWorkflow(makeFlow(), 'session-1', { force: true })
+
+    // 可布防闸门：默认旁路；arm 之后只闸住下一次读文档（setup 阶段也要读文档，不能一并闸住）
+    let armed = false
+    let enteredGate: () => void = () => {}
+    let releaseGate: () => void = () => {}
+    let entered = Promise.resolve()
+    const runSeq = { n: 0 }
+    const { runtime } = slowRuntimeOf(
+      h,
+      async () => {
+        if (!armed) return
+        armed = false
+        enteredGate()
+        await new Promise<void>((resolve) => { releaseGate = resolve })
+      },
+      { newRunId: () => { runSeq.n += 1; return `run-${runSeq.n}` } },
+    )
+
+    // 前置：跑一次再停止 → 磁盘留一条可恢复断点，内存锁已释放（开头护栏不会拦）
+    const first = await runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })
+    await runtime.stopRun(first.runId)
+    expect(runtime.flowLockInfo('flow-1')).toBeNull()
+    const root = h.agents.roots.get('session-1')!
+    const injectedBefore = root.messages.length
+
+    // winner：已过开头护栏、已拿启动预留，卡在「读文档」这个异步点
+    entered = new Promise<void>((resolve) => { enteredGate = resolve })
+    armed = true
+    const starting = runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })
+    await entered
+
+    // 交叉并发：resumeRun 不经启动预留表（它只有自己的锁断言），此刻登记新 run 接管运行锁
+    const resumed = await runtime.resumeRun({ sessionId: 'session-1', flowId: 'flow-1' })
+    expect(runtime.flowLockInfo('flow-1')).toMatchObject({ runId: resumed.runId, status: 'running' })
+    expect(root.messages.length).toBe(injectedBefore + 1)
+
+    releaseGate()
+    // 登记前重检在此收口：startRun 不得覆盖 resume 已建立的运行事实
+    await expect(starting).rejects.toMatchObject({ code: 'WF_LOCKED' })
+
+    // 内存只有 resume 那一条；startRun 未登记条目、也未注入编排指令
+    expect([...runtime.runs.keys()]).toEqual([resumed.runId])
+    expect(root.messages.length).toBe(injectedBefore + 1)
+    // 磁盘同样只多出 resume 那条（startRun 无任何落盘副作用）
+    const diskIds = (await h.store.listAllRuns())
+      .filter((record) => record.sessionId === 'session-1')
+      .map((record) => record.id)
+      .sort()
+    expect(diskIds).toEqual([first.runId, resumed.runId].sort())
   })
 })
 

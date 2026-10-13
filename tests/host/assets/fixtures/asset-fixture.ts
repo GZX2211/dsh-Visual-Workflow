@@ -489,7 +489,7 @@ export async function makeMixedTeamShapeRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'dsh-assets-mixed-team-'))
   const raw = await openRawDb(root)
   try {
-    const { EXPERIENCE_PROMPTS_DDL, EXPERIENCES_DDL, initSchema } = await import(
+    const { EXPERIENCES_DDL, initSchema } = await import(
       '../../../../src/host/assets/schema.js'
     )
     initSchema(raw, () => 1000)

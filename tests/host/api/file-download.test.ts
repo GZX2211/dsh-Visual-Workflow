@@ -31,7 +31,7 @@ describe('受管文件下载路由', () => {
 
     const responses: Array<{ status: number; body: string }> = []
     const res = {
-      writeHead(status: number, headers: Record<string, string>) {
+      writeHead(status: number, _headers: Record<string, string>) {
         responses.push({ status, body: '' })
         return this
       },

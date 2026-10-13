@@ -27,9 +27,7 @@ import {
   createReactGuard,
   resolveRolePrompt,
   subagentsServiceLike,
-  type AgentsServiceLike,
   type ChildPromptState,
-  type SubagentsServiceLike,
 } from './agent/index.js'
 import { systemLanguageOf, type SettingsServiceLike } from './system-language.js'
 import { agentTeamsServiceLike } from './team/index.js'

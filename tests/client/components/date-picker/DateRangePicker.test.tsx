@@ -130,7 +130,6 @@ describe('DateRangePicker', () => {
     // 右面板：‹ 再从 2026-09 翻到 2026-08；但 8 月 == 左月，应被钳制为 2026-10（左月+1）
     const rightHead = qall<HTMLElement>('.wf-cal-month')[1]
     await act(async () => {
-      const prev = rightHead.querySelector<HTMLButtonElement>('.wf-cal-nav')
       const buttons = Array.from(rightHead.querySelectorAll<HTMLButtonElement>('.wf-cal-nav'))
       buttons[0]?.click() // 右面板 ‹
     })

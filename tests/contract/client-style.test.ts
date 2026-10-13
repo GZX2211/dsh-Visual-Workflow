@@ -18,7 +18,6 @@ import { importsOf, listSourceFiles, parseSource, readText, stripCssComments } f
 
 const STYLE_DIR = 'src/client/styles'
 const INDEX_FILE = `${STYLE_DIR}/index.ts`
-const TOKENS_FILE = `${STYLE_DIR}/tokens.ts`
 
 const STYLE_FILES = listSourceFiles(STYLE_DIR)
 const FRAGMENTS = STYLE_FILES.filter((file) => file !== INDEX_FILE)

@@ -8,7 +8,7 @@
 import type { Dict } from '../../../i18n.js'
 import type { PresetItem, ModelItem } from '../../../studio/studio-state.js'
 import { Field } from '../form-field.js'
-import { InputField, NameField, TextAreaField } from './form-primitives.js'
+import { NameField, TextAreaField } from './form-primitives.js'
 
 export interface ComboLike { id: string; name: string; tools?: string[]; mcpServers?: string[] }
 /** 预设条目（与 studio-state PresetItem 同构，复用避免双份漂移）。 */

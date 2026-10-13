@@ -223,7 +223,6 @@ describe('resumeRun mode2（服务断点续跑）', () => {
     await h.runtime.stopRun('run-1') // 先停掉当前锁
     h.runtime.runs.delete('run-1')
     // 造一个磁盘 paused 记录（可恢复断点）
-    const snapshot = h.runtime.runSnapshot('run-1') ?? null
     // stopRun 已写磁盘；这里直接构造 paused 记录
     const prev = await h.store.getRun('run-1')
     expect(prev).toBeTruthy()

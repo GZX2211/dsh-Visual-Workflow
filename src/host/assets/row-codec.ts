@@ -10,7 +10,7 @@ import type { GraphNode, RoleNode } from '../shared/graph-model.js'
 import type { RoleTemplate } from '../shared/template-types.js'
 import type { RoleAssetKind, RoleAssetType } from '../shared/asset-types.js'
 import type { DbRow } from './db.js'
-import { toInteger, toJsonText, toNullableInteger, toNullableText, toOptionalText, toText } from './role-check.js'
+import { toInteger, toNullableInteger, toNullableText, toOptionalText, toText } from './role-check.js'
 
 /** 角色资产版本行的内容字段（不含统计缓存与审计列，便于整组比较）。 */
 export interface RoleContentFields {

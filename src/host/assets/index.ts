@@ -10,7 +10,6 @@ import type {
   AssetVersionEntry,
   AssetVersionSource,
   ExperienceEntry,
-  ExperienceEvaluationEntry,
   ExperienceEvaluationInsertInput,
   ExperienceGenerationPromptEntry,
   ExperienceInsertCheckedInput,
@@ -31,7 +30,7 @@ import type { GraphNode, Line, WorkflowMode } from '../shared/graph-model.js'
 import type { OrgMeta } from '../shared/org-meta.js'
 import type { RoleTemplate } from '../shared/template-types.js'
 import { AssetDb } from './db.js'
-import { assetNotFound, AssetError } from './errors.js'
+import { assetNotFound } from './errors.js'
 import {
   insertEvaluationsCheckedRows,
   type ExperienceEvaluationsCheckedResult,
@@ -50,12 +49,7 @@ import {
   type ExperienceInsertCheckedResult,
 } from './experiences.js'
 import {
-  EXPERIENCE_EVALUATION_ID_PREFIX,
-  EXPERIENCE_ID_PREFIX,
-  EXPERIENCE_USAGE_ID_PREFIX,
-  newExperienceEvaluationId,
   newExperienceId,
-  newExperienceUsageId,
   newRoleAssetId,
   newWorkflowAssetId,
   type IdGeneratorDeps,

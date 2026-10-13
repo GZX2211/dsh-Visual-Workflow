@@ -9,7 +9,7 @@
 
 import type { FlowDag } from './dag.js'
 import type { CheckGraphInput, GraphIssue } from './invariants-types.js'
-import type { DatabaseNode, GraphNode, Line } from '../shared/graph-model.js'
+import type { DatabaseNode, GraphNode } from '../shared/graph-model.js'
 import { channelIn, channelOfIn, channelOfOut, channelOut, proxyRoleOf } from './model.js'
 
 /** 按 id 建索引（保持输入顺序）。 */

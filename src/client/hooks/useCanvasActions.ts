@@ -360,7 +360,7 @@ export function useCanvasActions(
   }, [dispatch, history, notify, state.currentId, state.templates.group, t.groupDefaultName, t.toastNodeAdded])
 
   /** 左栏角色模板拖入协作组：生成节点并直接登记为组内成员。 */
-  const placeTemplateIntoGroup = useCallback((kind: 'role', templateId: string, groupId: string, position: { x: number; y: number }) => {
+  const placeTemplateIntoGroup = useCallback((kind: 'role', templateId: string, groupId: string, _position: { x: number; y: number }) => {
     if (!state.currentId) return
     const template = state.templates[kind].find((item) => item.id === templateId)
     const group = state.canvas.nodes.find((item) => item.id === groupId)

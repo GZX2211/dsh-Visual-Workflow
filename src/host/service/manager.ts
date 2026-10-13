@@ -365,7 +365,7 @@ export class ServiceManager {
 
   /** 停止全部服务（主进程卸载时尽力而为）。 */
   dispose(): void {
-    for (const [id, managed] of [...this.children]) {
+    for (const managed of [...this.children.values()]) {
       managed.stopping = true
       if (managed.forceKill) clearTimeout(managed.forceKill)
       try {
@@ -392,7 +392,7 @@ export class ServiceManager {
     return join(this.deps.dataDir, 'services', `${serviceId}.serve.patch.yml`)
   }
 
-  private spawnChild(dshCommand: string, serviceId: string, port: number, patchPath: string): ChildProcess {
+  private spawnChild(dshCommand: string, _serviceId: string, _port: number, patchPath: string): ChildProcess {
     const factory = this.deps.spawn ?? spawn
     // 参数约定（为什么这样传，官方 CLI 事实）：
     //   - headless 应用的 commander 只自持 task 位置参数；app 级未知 flag

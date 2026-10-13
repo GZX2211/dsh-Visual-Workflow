@@ -4,7 +4,7 @@
 // 装配与测试替身见 fixtures/harness.ts（共享，不在本文件内重复）。
 
 import { afterEach, describe, expect, it } from 'vitest'
-import { createRunSnapshot, parentExecutorOf, reconcileStaleRuns, setNodeStatus, sweepWatchdogOnce } from '../../../src/host/orchestrator/index.js'
+import { createRunSnapshot, parentExecutorOf, setNodeStatus, sweepWatchdogOnce } from '../../../src/host/orchestrator/index.js'
 import { WfError } from '../../../src/host/orchestrator/index.js'
 import { ORCH_CHANGE_MARKER, ORCH_HARD_CONSTRAINTS } from '../../../src/host/prompts/index.js'
 import { type GraphNode, type RoleNode, type WorkflowDocument } from '../../../src/host/shared/graph-model.js'
@@ -582,7 +582,6 @@ describe('父代理执行者模式', () => {
     const h = await makeHarness()
     const { result } = await start(h, executorFlow())
     await h.runtime.stopRun(result.runId)
-    const parentNode = h.runtime.runSnapshot(result.runId)?.nodes.find((n) => n.nodeId === 'n-parent')
     // 内存条目 terminated 后已释放：查磁盘记录
     const disk = await h.store.getRun(result.runId)
     expect(disk?.nodes.find((n) => n.nodeId === 'n-parent')?.status).toBe('fail')

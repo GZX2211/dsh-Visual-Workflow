@@ -158,7 +158,6 @@ describe('SchedulerManager', () => {
         .find((item) => item.textContent?.includes('新建任务'))
       button?.click()
     })
-    const nameInput = document.querySelector<HTMLInputElement>('input[placeholder="任务名称"]')
     await setInput('input[placeholder="任务名称"]', '夜间归档')
     // 选择模板（第一个 select）
     await act(async () => {

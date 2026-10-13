@@ -14,64 +14,33 @@
 //   - 生命周期：运行停止后调用被拒（终态条目已释放）、审计日志事件。
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { FlowStore } from '../../../../src/host/storage/flow-store.js'
-import {
-  OrchestratorRuntime,
-  type AgentHost,
-  type CoordinatorMessage,
-  type NodeRunner,
-  type NodeStartInput,
-  type OrchestratorConfig,
-  type RootAgentLike,
-  type TurnEndInfo,
-} from '../../../../src/host/orchestrator/index.js'
-import { stageLabel } from '../../../../src/host/graph/index.js'
-import type { RoleNode, StageNode, WorkflowDocument } from '../../../../src/host/shared/graph-model.js'
+import type { CoordinatorMessage, OrchestratorConfig } from '../../../../src/host/orchestrator/index.js'
+import type { WorkflowDocument } from '../../../../src/host/shared/graph-model.js'
 import { WF_ASK_AGENT, WF_RUN_NODE } from '../../../../src/host/shared/protocol.js'
 import { registerWfRunNode } from '../../../../src/host/tools/wf-run-node/tool.js'
 import { registerWfAskAgent, type WfAskAgentHost } from '../../../../src/host/tools/wf-ask-agent/tool.js'
-import type { ToolDefinitionLike, ToolExecLike } from '../../../../src/host/tools/infrastructure/define-tool.js'
-import type { JsonSchemaNode } from '../../../../src/host/tools/infrastructure/define-tool.js'
+import type { JsonSchemaNode, ToolDefinitionLike } from '../../../../src/host/tools/infrastructure/define-tool.js'
+import {
+  FakeRoot,
+  cleanupTempDirs,
+  execOf,
+  makeEnv,
+  registerTools,
+  role,
+  stage,
+  type TestEnv,
+} from '../fixtures/tool-harness.js'
 
 // ---------------------------------------------------------------------------
-// 测试替身与装配
+// 测试数据与装配（替身与骨架复用工具域共享夹具 tool-harness.ts）
 // ---------------------------------------------------------------------------
-
-const cleanups: Array<() => Promise<void>> = []
 
 afterEach(async () => {
-  await Promise.all(cleanups.splice(0).map((fn) => fn()))
+  await cleanupTempDirs()
   vi.useRealTimers()
 })
 
-function stage(id: string, kind: 'start' | 'end' | 'pause'): StageNode {
-  return { id, kind, position: { x: 0, y: 0 }, data: { label: stageLabel(kind, 'mode1') } }
-}
-
-function agent(id: string, label: string): RoleNode {
-  return {
-    id,
-    kind: 'agent',
-    position: { x: 0, y: 0 },
-    data: {
-      label,
-      systemPrompt: `任务：${label}`,
-      provider: '',
-      model: '',
-      presetId: null,
-      retryLimit: 3,
-      reactLimit: null,
-      inputSchema: '',
-      outputSchema: '',
-      groupId: null,
-    },
-  }
-}
-
-/** 标准测试流程（模式一）：start → a1 → a2 → end。 */
+/** 协作流程（模式一）：start → a1 → a2 → end（两名成员在线，供 ask/reply 双向投递）。 */
 function makeFlow(): WorkflowDocument {
   return {
     id: 'flow-1',
@@ -80,78 +49,12 @@ function makeFlow(): WorkflowDocument {
     name: '协作流程',
     description: '测试目标',
     revision: 1,
-    nodes: [stage('n-start', 'start'), agent('n-a1', '成员A'), agent('n-a2', '成员B'), stage('n-end', 'end')],
+    nodes: [stage('n-start', 'start'), role('n-a1', 'agent', '成员A'), role('n-a2', 'agent', '成员B'), stage('n-end', 'end')],
     lines: [
       { id: 'l1', source: 'n-start', target: 'n-a1', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
       { id: 'l2', source: 'n-a1', target: 'n-a2', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
       { id: 'l3', source: 'n-a2', target: 'n-end', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
     ],
-  }
-}
-
-class FakeRoot implements RootAgentLike {
-  id: string
-  status = 'idle'
-  session: { events: unknown[] } = { events: [] }
-  steers: CoordinatorMessage[] = []
-  constructor(id: string) {
-    this.id = id
-  }
-  steer(message: CoordinatorMessage): void {
-    this.steers.push(message)
-  }
-}
-
-class FakeChild implements RootAgentLike {
-  id: string
-  status = 'running'
-  steers: CoordinatorMessage[] = []
-  constructor(id: string) {
-    this.id = id
-  }
-  steer(message: CoordinatorMessage): void {
-    this.steers.push(message)
-  }
-}
-
-class FakeAgents implements AgentHost {
-  roots = new Map<string, FakeRoot>()
-  children = new Map<string, FakeChild>()
-  available(): boolean {
-    return true
-  }
-  getRootAgent(id: string): RootAgentLike | null {
-    return this.roots.get(id) ?? null
-  }
-  getChildAgent(childId: string): RootAgentLike | null {
-    return this.children.get(childId) ?? null
-  }
-  followupRoot(): void {}
-  latestTurnEnd(): TurnEndInfo | null {
-    return null
-  }
-  childRunning(): boolean {
-    return false
-  }
-}
-
-class FakeRunner implements NodeRunner {
-  calls: NodeStartInput[] = []
-  async startNodeTask(input: NodeStartInput): Promise<{ childId: string; created: boolean }> {
-    this.calls.push(input)
-    return { childId: `child-${this.calls.length}`, created: true }
-  }
-  async interruptChild(): Promise<void> {}
-}
-
-class FakeToolsRegistry {
-  definitions = new Map<string, ToolDefinitionLike>()
-  register(def: ToolDefinitionLike): () => void {
-    if (this.definitions.has(def.name)) throw new Error(`duplicate tool: ${def.name}`)
-    this.definitions.set(def.name, def)
-    return () => {
-      this.definitions.delete(def.name)
-    }
   }
 }
 
@@ -170,11 +73,8 @@ interface AskReceipt {
   to: string
 }
 
-interface Harness {
-  runtime: OrchestratorRuntime
-  store: FlowStore
-  agents: FakeAgents
-  tools: FakeToolsRegistry
+/** 共享装配（TestEnv）+ 本工具专用观测面（冷恢复投递、审计行、steer 记录）。 */
+interface Harness extends TestEnv {
   followups: FollowupCall[]
   infos: string[]
   disposeTools: () => void
@@ -184,92 +84,49 @@ interface Harness {
 
 interface HarnessOptions {
   config?: Partial<OrchestratorConfig>
-  /** 注入可控时钟（TTL 用例；缺省用 defaultClock）。 */
+  /** 注入可控时钟（TTL 用例；缺省用共享夹具的 clock）。 */
   now?: () => number
 }
 
 /**
- * 缺省可控时钟：固定起点 + 每次读取单调 +1ms。
- * 分段计时类逻辑（如运行空闲超时）可据此推进，同时使 TTL 判断完全脱离真实墙钟；
- * 每个 harness 独立持有，避免跨用例共享可变状态。
+ * 装配：共享夹具（真实编排运行时 + 临时 FlowStore + fake 依赖）+ 注册 wf_run_node 与 wf_ask_agent。
+ * 缺省 TTL 放宽到 30s、runId 固定 run-1、uuid 递增——用例断言口径不变。
  */
-function makeClock(): () => number {
-  let value = 1_000
-  return () => {
-    value += 1
-    return value
-  }
-}
-
-/** 装配：真实编排运行时 + fake 依赖 + 注册 wf_run_node 与 wf_ask_agent。 */
 async function makeHarness(options?: HarnessOptions): Promise<Harness> {
-  const dir = await mkdtemp(join(tmpdir(), 'vw-askagent-'))
-  cleanups.push(() => rm(dir, { recursive: true, force: true }))
-  const store = new FlowStore(dir)
-  await store.init()
-  const agents = new FakeAgents()
-  agents.roots.set('session-1', new FakeRoot('session-1'))
-  const runner = new FakeRunner()
   const infos: string[] = []
-  const uuidSeq = { n: 0 }
-  // 每个 harness 独立时钟：TTL 用例传入可变时钟，其余用例用本实例的单调时钟
-  const clock = options?.now ?? makeClock()
-  const runtime = new OrchestratorRuntime({
-    store,
-    runner,
-    agents,
-    config: {
-      outputFullLimit: 400,
-      documentTextLimit: 200,
-      runIdleTimeoutMs: 500,
-      retryLimitDefault: 3,
-      reactIterationLimitDefault: 50,
-      // 多数用例不关心 TTL：默认放宽到 30s，使登记不会在用例执行期间意外过期
-      wfAskAgentTtlMs: 30_000,
-      ...options?.config,
-    },
-    logger: { warn: () => {}, info: (message) => infos.push(message), debug: () => {} },
+  let uuidSeq = 0
+  const env = await makeEnv({
+    config: { wfAskAgentTtlMs: 30_000, ...options?.config },
+    ...(options?.now ? { now: options.now } : {}),
     newRunId: () => 'run-1',
-    uuid: () => `uuid-${(uuidSeq.n += 1)}`,
-    // 缺省注入可控时钟：不关心 TTL 的用例不受真实墙钟抖动影响；TTL 用例自行注入可变时钟
-    now: clock,
+    uuid: () => `uuid-${(uuidSeq += 1)}`,
+    logger: {
+      warn: () => {},
+      info: (message) => {
+        infos.push(message)
+      },
+      debug: () => {},
+    },
   })
-  const tools = new FakeToolsRegistry()
   const followups: FollowupCall[] = []
   const host: WfAskAgentHost = {
-    orchestrator: runtime,
-    getRootAgent: (sid) => agents.getRootAgent(sid),
-    getChildAgent: (cid) => agents.getChildAgent(cid),
-    followupChild: async (parent, childId, content, options2) => {
-      followups.push({ parentId: parent.id, childId, content, options: options2 })
+    orchestrator: env.runtime,
+    getRootAgent: (sessionId) => env.agents.getRootAgent(sessionId),
+    getChildAgent: (childId) => env.agents.getChildAgent(childId),
+    followupChild: async (parent, childId, content, deliveryOptions) => {
+      followups.push({ parentId: parent.id, childId, content, options: deliveryOptions })
       return `msg-${childId}`
     },
   }
-  const ctx = { get: (name: string) => (name === 'tools' ? tools : null) }
-  const disposeTools = (() => {
-    const d1 = registerWfRunNode(ctx, host)
-    const d2 = registerWfAskAgent(ctx, host)
-    return () => {
-      d1()
-      d2()
-    }
-  })()
+  const disposeTools = registerTools(env, host, [registerWfRunNode, registerWfAskAgent])
   return {
-    runtime,
-    store,
-    agents,
-    tools,
+    ...env,
     followups,
     infos,
     disposeTools,
-    childSteers: (childId) => agents.children.get(childId)?.steers ?? [],
-    rootSteers: () => agents.roots.get('session-1')?.steers ?? [],
+    childSteers: (childId) => env.agents.children.get(childId)?.steers ?? [],
+    rootSteers: () => env.agents.roots.get('session-1')?.steers ?? [],
   }
-}
-
-/** 构造工具执行上下文（agent 形状按官方 Session header 事实）。 */
-function execOf(agent2: unknown, signal?: AbortSignal): ToolExecLike {
-  return { signal: signal ?? new AbortController().signal, agent: agent2 }
 }
 
 const rootAgent = { id: 'session-1', session: { header: {} } }
@@ -284,8 +141,8 @@ async function start(h: Harness): Promise<void> {
   const runDef = h.tools.definitions.get(WF_RUN_NODE)!
   await runDef.execute({ nodeId: 'n-a1' }, execOf(rootAgent))
   await runDef.execute({ nodeId: 'n-a2' }, execOf(rootAgent))
-  h.agents.children.set('child-1', new FakeChild('child-1'))
-  h.agents.children.set('child-2', new FakeChild('child-2'))
+  h.agents.children.set('child-1', new FakeRoot('child-1', 'running'))
+  h.agents.children.set('child-2', new FakeRoot('child-2', 'running'))
 }
 
 const ASK_ARGS = { cmd: 'ask', targetChildId: 'child-2', message: '请把中间结果发给我' }

@@ -14,7 +14,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import React from 'react'
 import { GraphCanvas, type GraphCanvasProps } from '../../../../src/client/components/canvas/GraphCanvas.js'
 import { zh } from '../../../../src/client/i18n.js'
 import type { CanvasEdge, CanvasNode } from '../../../../src/client/studio/studio-state.js'

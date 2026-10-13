@@ -46,7 +46,7 @@ export interface SelectionChildContext {
  */
 export function installModelSelectionLike(childCtx: SelectionChildContext, selection: ModelSelectionRefLike): () => void {
   // system-prompt/assemble：组装期把 provider/model 注入提示词变量（官方 L40-53）
-  const disposeAssembly = childCtx.on('system-prompt/assemble', async (rawAssembly, _rawContext, next) => {
+  const disposeAssembly = childCtx.on('system-prompt/assemble', async (_rawAssembly, _rawContext, next) => {
     const assembly = await next()
     const selected = selection.current
     selection.assembled = selected
@@ -65,7 +65,7 @@ export function installModelSelectionLike(childCtx: SelectionChildContext, selec
 
   // agent/request：请求路由改写 provider/model，并写入 reasoningEffort
   // （官方 L54-70：无 effort 时清除继承值，恢复所选模型默认行为）
-  const disposeRequest = childCtx.on('agent/request', async (rawPayload, next) => {
+  const disposeRequest = childCtx.on('agent/request', async (_rawPayload, next) => {
     const resolved = (await next()) as Record<string, unknown> | null
     const selected = selection.assembled
     if (selected === undefined) return resolved

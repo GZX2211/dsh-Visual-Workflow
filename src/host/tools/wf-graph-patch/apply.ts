@@ -15,7 +15,6 @@ import {
   NODE_KINDS,
   makeLineId,
   makeNodeId,
-  newRoleNode,
   pairingTargetOf,
   stageLabel,
 } from '../../graph/index.js'

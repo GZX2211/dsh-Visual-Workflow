@@ -37,7 +37,6 @@ import {
 import { detailIdsLimitProblem, normalizeAssetIds, parseAssetId } from './ids.js'
 import { INSTANCE_ID } from './types.js'
 import type {
-  CatalogAssetDetail,
   CatalogDetailEntry,
   CatalogDetails,
   CatalogDetailError,

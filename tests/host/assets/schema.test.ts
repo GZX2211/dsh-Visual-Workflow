@@ -14,14 +14,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { EXPERIENCE_TYPE_VALUES } from "../../../src/host/assets/experience-codec.js"
 import { EXPERIENCE_PROMPT_SEEDS, EXPERIENCE_PROMPT_SEED_VERSION } from "../../../src/host/assets/experience-seeds.js"
 import { AssetStore } from "../../../src/host/assets/index.js"
-import { initSchema, EXPERIENCE_EVALUATION_DDL, EXPERIENCE_STATS_DDL, EXPERIENCE_USAGE_DDL } from "../../../src/host/assets/schema.js"
+import { EXPERIENCE_EVALUATION_DDL, EXPERIENCE_STATS_DDL, EXPERIENCE_USAGE_DDL } from "../../../src/host/assets/schema.js"
 import {
   evaluationRow,
   experienceRow,
   fakeClock,
   fakeIds,
   keepAllJudge,
-  LEGACY_TEAM_INDEX_NAMES,
   makeLegacyTeamRoot,
   makeMixedTeamShapeRoot,
   makeStore,
