@@ -1569,7 +1569,7 @@ describe('wf_graph_patch · 参数层契约守卫', () => {
       targetId: 'wf-1',
       ops: [{ op: 'connect', source: 's' } as never],
     }), 'WF_BAD_ARGS')
-    expect(err.message).toContain('source/target 必填')
+    expect(err.message).toContain('source/target are required')
     expect(err.message).toContain("op:'connect'")
   })
 
@@ -1581,8 +1581,8 @@ describe('wf_graph_patch · 参数层契约守卫', () => {
       targetId: 'wf-1',
       ops: [{ op: 'create_node', kind: 'agent', id: 'a9' } as never],
     }), 'WF_BAD_ARGS')
-    expect(err.message).toContain('node 对象')
-    expect(err.message).toContain('顶层')
+    expect(err.message).toContain('missing the node object')
+    expect(err.message).toContain('written directly on the op')
   })
 
   it('connect 省略 handle：按流程通道补全 flow-out/flow-in（不再写出幽灵线）', async () => {

@@ -7,8 +7,8 @@
 //     → 父代理回合事件增量推进 → 回合结束且 run 终态后收尾；
 //   - 会话事件流读取适配（DSH 0.1.2 的 seq/eventAt，兼容 0.1.1 的 events）。
 //
-// 轮询推进同时调用 deps.sweep()（watchdog 单次扫描）——服务进程内看护周期
-// 默认 15s，请求等待需主动推进状态机（父代理回合终态判定/空闲超时）。
+// 轮询推进同时调用 sweep()（watchdog 单次扫描，跨请求在途去重）——服务进程内看护
+// 周期默认 15s，请求等待需主动推进状态机（父代理回合终态判定/空闲超时）。
 //
 // 为什么与 HTTP 层分开：本核心只依赖编排运行时与数据层的抽象缝（可纯逻辑测试），
 // HTTP/SSE 是 webServer 官方契约的适配层（路由注册、响应序列化、请求体读取）——
@@ -186,8 +186,29 @@ function extractText(content: unknown): string {
 export class OpenAiApi {
   /** in-flight 请求计数（并发上限）。 */
   private inflight = 0
+  /** in-flight watchdog 扫描（跨请求重入去重；见 sweep）。 */
+  private sweeping: Promise<void> | null = null
 
   constructor(private readonly deps: OpenAiApiDeps) {}
+
+  /**
+   * 单次 watchdog 推进（各请求的轮询循环共用入口）。
+   *
+   * 重入去重（与 SchedulerEngine.sweep 同构）：多个并发请求各有自己的轮询循环，
+   * 若各自直接调用 deps.sweep()，同一时刻会并发扫描同一批运行——同一运行被并发
+   * 判定终态/重复挂起。在途扫描共享同一个 Promise，扫描结束即释放（不粘住后续推进；
+   * 顺序调用之间的次数语义不变）。
+   */
+  async sweep(): Promise<void> {
+    if (this.sweeping) return this.sweeping
+    const task = this.deps.sweep()
+    this.sweeping = task
+    try {
+      await task
+    } finally {
+      if (this.sweeping === task) this.sweeping = null
+    }
+  }
 
   /** 鉴权校验：apiKey 配置非空时要求 Authorization: Bearer <apiKey>。 */
   authorize(authorization: unknown): void {
@@ -271,48 +292,64 @@ export class OpenAiApi {
     const abort = async (): Promise<void> => {
       await this.deps.orchestrator.stopRun(runId).catch(() => {})
     }
-    for (;;) {
-      if (isAborted()) {
-        await abort()
-        throw new OpenAiError(499, 'client_error', CLIENT_CLOSED_CODE, '客户端已断开连接，已停止后台编排运行')
-      }
-      if (Date.now() >= deadline) {
-        await abort()
-        throw new OpenAiError(
-          504,
-          'server_error',
-          'generation_timeout',
-          `SSE 流式响应超时（${Math.round(timeoutMs / 1000)} 秒），已停止后台编排运行`,
-        )
-      }
-      await this.deps.sweep()
-      const eventLength = sessionEventLengthOf(agentLike.session)
-      for (let index = baseSeq; index < eventLength; index += 1) {
-        const event = sessionEventAt(agentLike.session, index) as { type?: unknown; data?: { message?: { content?: unknown } } } | null
-        if (!event) continue
-        if (event.type === 'assistant/message' && event.data?.message?.content !== undefined) {
-          const joined = extractText(event.data.message.content)
-          if (joined && joined !== text) {
-            const delta = joined.startsWith(text) ? joined.slice(text.length) : joined
-            text = joined
-            if (delta && onDelta) onDelta(delta)
+    const throwClientClosed = async (): Promise<never> => {
+      await abort()
+      throw new OpenAiError(499, 'client_error', CLIENT_CLOSED_CODE, '客户端已断开连接，已停止后台编排运行')
+    }
+    // 断开信号一到就停止运行，而不是等下一轮顶部再发现：轮询循环里「sweep + 事件推进 +
+    // 终态判定 + sleep」整段都在 aborted 置位之后继续执行，断开到停止之间白占一个周期。
+    // 监听器在 runChat 返回前摘除（正常终态/超时/断开三条出口都经 finally）。
+    // stopRun 幂等：监听器与循环内的判定分支可能都调到它。
+    const signal = options.signal
+    const onAbort = (): void => { void abort() }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    try {
+      for (;;) {
+        if (isAborted()) await throwClientClosed()
+        if (Date.now() >= deadline) {
+          await abort()
+          throw new OpenAiError(
+            504,
+            'server_error',
+            'generation_timeout',
+            `SSE 流式响应超时（${Math.round(timeoutMs / 1000)} 秒），已停止后台编排运行`,
+          )
+        }
+        await this.sweep()
+        // 断开判定必须在扫描返回后再做一次：监听器已把运行停成终态，
+        // 若此处直接按终态返回，调用方会把「客户端断开导致的停止」当成正常收尾
+        // （稳定语义 client_closed 丢失）。事件处理与终态返回之间无 await，故两次判定已覆盖整轮。
+        if (isAborted()) await throwClientClosed()
+        const eventLength = sessionEventLengthOf(agentLike.session)
+        for (let index = baseSeq; index < eventLength; index += 1) {
+          const event = sessionEventAt(agentLike.session, index) as { type?: unknown; data?: { message?: { content?: unknown } } } | null
+          if (!event) continue
+          if (event.type === 'assistant/message' && event.data?.message?.content !== undefined) {
+            const joined = extractText(event.data.message.content)
+            if (joined && joined !== text) {
+              const delta = joined.startsWith(text) ? joined.slice(text.length) : joined
+              text = joined
+              if (delta && onDelta) onDelta(delta)
+            }
           }
         }
-      }
-      baseSeq = eventLength
+        baseSeq = eventLength
 
-      const snapshot = this.deps.orchestrator.runSnapshot(runId)
-      const status = snapshot?.status
-      if (status !== undefined && status !== 'running') {
-        return {
-          text,
-          status,
-          runId,
-          ...(status !== 'completed' ? { error: failureText(status, snapshot?.summary ?? '') } : {}),
+        const snapshot = this.deps.orchestrator.runSnapshot(runId)
+        const status = snapshot?.status
+        if (status !== undefined && status !== 'running') {
+          return {
+            text,
+            status,
+            runId,
+            ...(status !== 'completed' ? { error: failureText(status, snapshot?.summary ?? '') } : {}),
+          }
         }
+        // 回合结束但 run 未终态时，继续等待 wf_finish 收尾/看护兜底（继续轮询）
+        await sleep(pollMs)
       }
-      // 回合结束但 run 未终态时，继续等待 wf_finish 收尾/看护兜底（继续轮询）
-      await sleep(pollMs)
+    } finally {
+      signal?.removeEventListener('abort', onAbort)
     }
   }
 

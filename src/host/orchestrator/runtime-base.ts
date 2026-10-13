@@ -302,7 +302,7 @@ export abstract class RuntimeBase {
    * 取「可直接执行节点」的激活运行；依次尝试：
    *   ① 本会话 running 的 run（常态路径）；
    *   ② 内存中本会话 paused 的 run → 用该 flowId **静默接续**（等价人工点「运行」，但不注入指令）；
-   *   ③ 该会话**最近可恢复**的磁盘记录（stopped/interrupted/paused）→ 静默接续；
+   *   ③ 该会话**全部可恢复**的磁盘记录（stopped/interrupted/paused）→ 逐条静默接续；
    *   ④ 都没有 → null（调用方按 WF_NO_ACTIVE_RUN 给出可行动提示）。
    *
    * 运行锁语义（用户裁决）：锁不再作为「执行节点的前置条件」，而是降权为
@@ -314,7 +314,7 @@ export abstract class RuntimeBase {
    * （WF_ROOT_BUSY），两者天然互斥——这正是「必须人工点运行」的根因。
    *
    * 停点判定为何「内存优先」：paused 是唯一保留在内存的断点（锁未释放），
-   * 恢复它会原样接管其断点产出；磁盘兜底按 startedAt 倒序取最近一条可恢复记录。
+   * 恢复它会原样接管其断点产出；磁盘兜底按 startedAt 倒序逐条尝试。
    */
   protected async ensureActiveRun(sessionId: string): Promise<RunEntry | null> {
     const active = this.activeRunForSession(sessionId)
@@ -335,39 +335,66 @@ export abstract class RuntimeBase {
 
   /** 接续本体（已由 ensureActiveRun 完成会话级去重）：定位断点 → 静默接续 → 取回运行条目。 */
   private async adoptRunContext(sessionId: string): Promise<RunEntry | null> {
-    // ① 内存 paused（锁保留在内存中，优先于磁盘历史）
-    let target: string | null = null
+    // 断点候选按「内存 paused 优先，磁盘按 startedAt 倒序」排列，逐条尝试。
+    // 为什么逐条而不是只认最新一条：一条断点不可恢复（图被改坏/被别的会话锁住/指定记录
+    // 不可恢复）不代表本会话没有可用的断点；旧实现只试最新一条，失败即上抛，用户明明
+    // 还有可接续的运行却收到错误。
+    const candidates: Array<{ flowId: string; runId: string }> = []
+    const known = new Set<string>()
     for (const entry of this.runs.values()) {
       const s = entry.snapshot
-      if (s.sessionId === sessionId && s.status === 'paused') {
-        target = s.flowId
-        break
-      }
+      if (s.sessionId !== sessionId || s.status !== 'paused') continue
+      candidates.push({ flowId: s.flowId, runId: s.id })
+      known.add(s.id)
     }
 
-    // ② 磁盘断点（stopped/interrupted/paused；宿主重启或用户在工作台停止后）
-    if (!target) {
-      let newest: RunSnapshot | null = null
+    // 磁盘断点（stopped/interrupted/paused；宿主重启或用户在工作台停止后）。
+    // 扫描语义（跳过非本资源文档）：单个坏文件不得让整轮断点扫描失效。
+    try {
+      const disk = (await this.deps.store.listAllRuns()).filter((record) =>
+        record.sessionId === sessionId
+        && !known.has(record.id)
+        && (RESUMABLE_STATUSES as readonly string[]).includes(record.status))
+      disk.sort((a, b) => (String(a.startedAt ?? '') < String(b.startedAt ?? '') ? 1 : -1))
+      for (const record of disk) candidates.push({ flowId: record.flowId, runId: record.id })
+    } catch (error) {
+      this.log().warn(`[visual-workflow] 断点扫描失败：${messageOf(error)}`)
+      if (candidates.length === 0) return null
+    }
+    if (candidates.length === 0) return null
+
+    const skipped: Array<{ runId: string; code: string; reason: string }> = []
+    for (const candidate of candidates) {
       try {
-        // 扫描语义（跳过非本资源文档）：单个坏文件不得让整轮断点扫描失效
-        for (const record of await this.deps.store.listAllRuns()) {
-          if (record.sessionId !== sessionId) continue
-          if (!(RESUMABLE_STATUSES as readonly string[]).includes(record.status)) continue
-          if (!newest || String(record.startedAt ?? '') > String(newest.startedAt ?? '')) newest = record
-        }
+        await this.autoResumeRun(sessionId, candidate.flowId, candidate.runId)
       } catch (error) {
-        this.log().warn(`[visual-workflow] 断点扫描失败：${messageOf(error)}`)
-        return null
+        // 恢复类错误（断点不可恢复）逐条跳过并留痕；非恢复类错误（程序缺陷/磁盘故障）
+        // 不得被吞——直接上抛，否则真正的故障会被伪装成「没有可接续的断点」。
+        if (!(error instanceof WfError)) throw error
+        skipped.push({ runId: candidate.runId, code: error.code, reason: messageOf(error) })
+        continue
       }
-      target = newest?.flowId ?? null
+      const adopted = this.runningEntryOf(sessionId, candidate.flowId)
+      if (adopted) return adopted
+      skipped.push({ runId: candidate.runId, code: 'WF_NO_ACTIVE_RUN', reason: '接续后未产生运行条目（可能已被并发接续或停止）' })
     }
-    if (!target) return null
 
-    await this.autoResumeRun(sessionId, target)
-    // 只认「刚恢复的那个工作流」的运行（本会话可能有多个实例，取错会张冠李戴）
+    // 全部候选都失败：报可行动错误并逐条列出被跳过的断点与原因（不静默丢断点）。
+    // 错误码沿用**最新一条**候选的恢复类错误码——单候选时与旧行为逐字一致，
+    // 调用方按码分支的既有逻辑（如 WF_FLOW_INCOMPLETE 的提示）不失效。
+    const detail = skipped.map((item) => `${item.runId}（${item.reason}）`).join('；')
+    throw new WfError(
+      `本会话的断点都无法接续（已跳过 ${skipped.length} 条：${detail}）。请在工作台检查这些工作流的完整性后重新运行。`,
+      skipped[0].code,
+      { runId: skipped[0].runId },
+    )
+  }
+
+  /** 本会话某工作流当前 running 的条目（接续成功后取回；未取到返回 null）。 */
+  private runningEntryOf(sessionId: string, flowId: string): RunEntry | null {
     for (const entry of this.runs.values()) {
       const s = entry.snapshot
-      if (s.sessionId === sessionId && s.flowId === target && s.status === 'running') return entry
+      if (s.sessionId === sessionId && s.flowId === flowId && s.status === 'running') return entry
     }
     return null
   }
@@ -378,13 +405,14 @@ export abstract class RuntimeBase {
    * 固定 silent：本方法只服务工具路径——调用时父代理正在自身回合内，故不注入编排指令、
    * 也不要求父代理空闲；显式启动语义（工作台/调度器/模式二）不经此路径。接续成功日志
    * 由 resumeRun 的静默分支记录，此处不重复。
+   * fromRunId 指定本次要接管的断点记录（接续多候选逐条尝试时用），缺省取该工作流最新可恢复记录。
    */
-  protected autoResumeRun(sessionId: string, flowId: string): Promise<ResumeResult | null> {
+  protected autoResumeRun(sessionId: string, flowId: string, fromRunId?: string): Promise<ResumeResult | null> {
     const pending = this.resuming.get(flowId)
     if (pending) return pending
     const task = (async (): Promise<ResumeResult | null> => {
       try {
-        return await this.resumeRun({ sessionId, flowId, silent: true })
+        return await this.resumeRun({ sessionId, flowId, ...(fromRunId ? { fromRunId } : {}), silent: true })
       } finally {
         this.resuming.delete(flowId)
       }

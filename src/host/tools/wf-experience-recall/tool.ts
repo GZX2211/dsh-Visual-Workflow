@@ -16,7 +16,8 @@ import { ERR_EXPERIENCE_BAD_ARGS, ERR_EXPERIENCE_RECALL_FAILED, WF_EXPERIENCE_RE
 import { EXPERIENCE_TYPES, MAX_RECALL_IDS, recallIdsLimitProblem } from '../../experience/constants.js'
 import { WfError, messageOf } from '../../orchestrator/index.js'
 import { experienceCallerOf } from '../infrastructure/caller.js'
-import { defineTool, type ToolDefinitionLike, type ToolExecLike } from '../infrastructure/define-tool.js'
+import { defineTool, type ToolExecLike } from '../infrastructure/define-tool.js'
+import { registerTool, requireToolsService } from '../infrastructure/register-tool.js'
 import { EXPERIENCE_TYPE_PARAM_DESCRIPTION, assertExperienceTypeOwnership, parseExperienceType, type WfExperienceHost } from '../infrastructure/experience-contract.js'
 import { candidateResultOf, detailsResultOf, renderRecallResult } from './build.js'
 import type { RecallResult } from './types.js'
@@ -61,10 +62,7 @@ export function registerWfExperienceRecall(
   ctx: { get(name: string): unknown },
   host: WfExperienceHost,
 ): () => void {
-  const tools = ctx.get('tools') as { register(def: ToolDefinitionLike): () => void } | null | undefined
-  if (!tools || typeof tools.register !== 'function') {
-    throw new Error('[visual-workflow] tools 服务不可用，无法注册 wf_experience_recall')
-  }
+  const tools = requireToolsService(ctx, WF_EXPERIENCE_RECALL)
 
   const definition = defineTool({
     name: WF_EXPERIENCE_RECALL,
@@ -164,12 +162,5 @@ export function registerWfExperienceRecall(
     },
   })
 
-  const dispose = tools.register(definition)
-  return () => {
-    try {
-      dispose()
-    } catch {
-      // 注销尽力而为（工具可能已被外部注销）
-    }
-  }
+  return registerTool(tools, definition)
 }

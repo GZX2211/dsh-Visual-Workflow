@@ -79,8 +79,9 @@ export const Config: z<Config> = z.object({
  * 入口若直接拼一份完整对象，就会在源码里出现第二份默认值清单（改 schema 后两处不一致）。
  * 本函数把「部分入参 → 完整 Config」收敛到唯一一处，默认值来源仍只有上面的 schema。
  *
- * 注意：schema 对「可为 null」的键不填默认（default(null) 视为无默认），调用方需显式给出
- * apiKey / embeddingModelDir / embeddingEndpoint 的取值。
+ * 注意：schema 对「可为 null」的键不填默认（default(null) 视为无默认），而 Config 接口
+ * 把这类键声明为必填（`string | null`）。resolveConfig 是唯一的解析入口，故在此显式补齐
+ * null——否则调用方拿到的是「接口说必填、运行时缺键」的失真对象，只能各自 `?? null` 兜底。
  */
 export function resolveConfig(input: Partial<Config>): Config {
   // 旧键读取兼容：早期把「待回复登记 TTL」命名为 wfAskAgentTimeoutMs；只在解析入口投影到
@@ -90,5 +91,11 @@ export function resolveConfig(input: Partial<Config>): Config {
     rest.wfAskAgentTtlMs === undefined && typeof legacy === 'number' && legacy > 0
       ? { ...rest, wfAskAgentTtlMs: legacy }
       : rest
-  return (Config as unknown as (value: Partial<Config>) => Config)(merged)
+  const resolved = (Config as unknown as (value: Partial<Config>) => Config)(merged)
+  return {
+    ...resolved,
+    apiKey: resolved.apiKey ?? null,
+    embeddingModelDir: resolved.embeddingModelDir ?? null,
+    embeddingEndpoint: resolved.embeddingEndpoint ?? null,
+  }
 }

@@ -130,7 +130,7 @@ export declare abstract class RuntimeBase {
      * 取「可直接执行节点」的激活运行；依次尝试：
      *   ① 本会话 running 的 run（常态路径）；
      *   ② 内存中本会话 paused 的 run → 用该 flowId **静默接续**（等价人工点「运行」，但不注入指令）；
-     *   ③ 该会话**最近可恢复**的磁盘记录（stopped/interrupted/paused）→ 静默接续；
+     *   ③ 该会话**全部可恢复**的磁盘记录（stopped/interrupted/paused）→ 逐条静默接续；
      *   ④ 都没有 → null（调用方按 WF_NO_ACTIVE_RUN 给出可行动提示）。
      *
      * 运行锁语义（用户裁决）：锁不再作为「执行节点的前置条件」，而是降权为
@@ -142,19 +142,22 @@ export declare abstract class RuntimeBase {
      * （WF_ROOT_BUSY），两者天然互斥——这正是「必须人工点运行」的根因。
      *
      * 停点判定为何「内存优先」：paused 是唯一保留在内存的断点（锁未释放），
-     * 恢复它会原样接管其断点产出；磁盘兜底按 startedAt 倒序取最近一条可恢复记录。
+     * 恢复它会原样接管其断点产出；磁盘兜底按 startedAt 倒序逐条尝试。
      */
     protected ensureActiveRun(sessionId: string): Promise<RunEntry | null>;
     /** 接续本体（已由 ensureActiveRun 完成会话级去重）：定位断点 → 静默接续 → 取回运行条目。 */
     private adoptRunContext;
+    /** 本会话某工作流当前 running 的条目（接续成功后取回；未取到返回 null）。 */
+    private runningEntryOf;
     /**
      * 断点静默接续（同 flowId 并发去重）：续跑失败时把恢复路径的错误向上抛（调用方据此
      * 给出精确错误码，例如 WF_FLOW_INCOMPLETE），不吞错。
      * 固定 silent：本方法只服务工具路径——调用时父代理正在自身回合内，故不注入编排指令、
      * 也不要求父代理空闲；显式启动语义（工作台/调度器/模式二）不经此路径。接续成功日志
      * 由 resumeRun 的静默分支记录，此处不重复。
+     * fromRunId 指定本次要接管的断点记录（接续多候选逐条尝试时用），缺省取该工作流最新可恢复记录。
      */
-    protected autoResumeRun(sessionId: string, flowId: string): Promise<ResumeResult | null>;
+    protected autoResumeRun(sessionId: string, flowId: string, fromRunId?: string): Promise<ResumeResult | null>;
     /** 某工作流当前被哪个会话锁定（running/paused 均保留锁）。 */
     flowLockInfo(flowId: string): FlowLockInfo | null;
     /**

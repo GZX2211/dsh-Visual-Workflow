@@ -18,7 +18,8 @@
 import { WF_ASK } from '../../shared/protocol.js'
 import { WfError } from '../../orchestrator/index.js'
 import { callerOf, type WfToolsHost } from '../infrastructure/caller.js'
-import { defineTool, type ToolDefinitionLike } from '../infrastructure/define-tool.js'
+import { defineTool } from '../infrastructure/define-tool.js'
+import { registerTool, requireToolsService } from '../infrastructure/register-tool.js'
 import { textRender } from '../infrastructure/text-render.js'
 
 /** userQuestions 服务最小结构（官方 ask 契约）。 */
@@ -73,10 +74,7 @@ export function registerWfAsk(
   ctx: { get(name: string): unknown },
   host: WfToolsHost,
 ): () => void {
-  const tools = ctx.get('tools') as { register(def: ToolDefinitionLike): () => void } | null | undefined
-  if (!tools || typeof tools.register !== 'function') {
-    throw new Error('[visual-workflow] tools 服务不可用，无法注册 wf_ask')
-  }
+  const tools = requireToolsService(ctx, WF_ASK)
 
   const definition = defineTool({
     name: WF_ASK,
@@ -187,12 +185,5 @@ export function registerWfAsk(
     },
   })
 
-  const dispose = tools.register(definition)
-  return () => {
-    try {
-      dispose()
-    } catch {
-      // 注销尽力而为（工具可能已被外部注销）
-    }
-  }
+  return registerTool(tools, definition)
 }

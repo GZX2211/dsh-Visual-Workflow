@@ -38,7 +38,7 @@ function resolveHandle(handle: string, kind: string, side: 'out' | 'in'): Handle
   const allowed = (side === 'out' ? def?.outputs : def?.inputs) ?? []
   if (!allowed.includes(handle as Handle)) {
     throw new WfError(
-      `connect: ${kind} 节点没有${side === 'out' ? '输出' : '输入'}点「${handle}」（可用：${allowed.join('/') || '无'}）`,
+      `connect: node kind "${kind}" has no ${side === 'out' ? 'output' : 'input'} handle "${handle}" (available: ${allowed.join('/') || 'none'})`,
       'WF_GRAPH_INVALID',
     )
   }
@@ -279,13 +279,13 @@ function applyGraphOpsInPlace(
           // 以前这里只报「非法节点种类「」」，模型无法定位到自己少了一层 node 包装。
           const flattened = 'kind' in opTop || 'data' in opTop
           badArgs(
-            `create_node: 缺少 node 对象${flattened ? '（检测到 kind/data 被直接写在了 op 顶层）' : ''}——正确形状：${OP_FIELD_SHAPES.create_node}`,
+            `create_node: missing the node object${flattened ? ' (kind/data was written directly on the op instead of inside node)' : ''}; correct shape: ${OP_FIELD_SHAPES.create_node}`,
           )
         }
         const raw = opTop.node as Record<string, unknown>
         const kind = String(raw.kind ?? '').trim()
         if (!kind) {
-          badArgs(`create_node: node.kind 缺失——正确形状：${OP_FIELD_SHAPES.create_node}`)
+          badArgs(`create_node: node.kind is required; correct shape: ${OP_FIELD_SHAPES.create_node}`)
         }
         if (!NODE_KINDS.includes(kind as GraphNode['kind'])) {
           throw new WfError(`WF_GRAPH_INVALID: create_node: invalid node kind "${kind}" (allowed: ${NODE_KINDS.join('/')})`, 'WF_GRAPH_INVALID')
@@ -342,7 +342,7 @@ function applyGraphOpsInPlace(
       }
       case 'remove_node': {
         const nodeId = String(op.nodeId ?? '').trim()
-        if (!nodeId) badArgs(`remove_node: nodeId 必填——正确形状：${OP_FIELD_SHAPES.remove_node}`)
+        if (!nodeId) badArgs(`remove_node: nodeId is required; correct shape: ${OP_FIELD_SHAPES.remove_node}`)
         const node = doc.nodes.find((item) => item.id === nodeId)
         if (!node) throw new WfError(`WF_GRAPH_INVALID: remove_node: node not found "${nodeId}"`, 'WF_GRAPH_INVALID')
         const cascade = op.cascade !== false
@@ -375,7 +375,7 @@ function applyGraphOpsInPlace(
       }
       case 'update_node_data': {
         const nodeId = String(op.nodeId ?? '').trim()
-        if (!nodeId) badArgs(`update_node_data: nodeId 必填——正确形状：${OP_FIELD_SHAPES.update_node_data}`)
+        if (!nodeId) badArgs(`update_node_data: nodeId is required; correct shape: ${OP_FIELD_SHAPES.update_node_data}`)
         const node = doc.nodes.find((item) => item.id === nodeId)
         if (!node) throw new WfError(`WF_GRAPH_INVALID: update_node_data: node not found "${nodeId}"`, 'WF_GRAPH_INVALID')
         if (node.kind === 'start' || node.kind === 'end' || node.kind === 'pause') {
@@ -428,14 +428,14 @@ function applyGraphOpsInPlace(
         const opc = op as unknown as Record<string, unknown>
         if (opc.from !== undefined || opc.to !== undefined) {
           // 实测最常见的写法错误：端点字段猜成 from/to（契约是 source/target）。
-          badArgs(`connect: 端点字段是 source/target（不是 from/to）——正确形状：${OP_FIELD_SHAPES.connect}`)
+          badArgs(`connect: the endpoint fields are source/target (not from/to); correct shape: ${OP_FIELD_SHAPES.connect}`)
         }
         const source = String(opc.source ?? '').trim()
         const target = String(opc.target ?? '').trim()
         if (!source || !target) {
           badArgs(
-            `connect: source/target 必填（收到 source=${JSON.stringify(opc.source ?? null)}, target=${JSON.stringify(opc.target ?? null)}）`
-            + `——正确形状：${OP_FIELD_SHAPES.connect}`,
+            `connect: source/target are required (received source=${JSON.stringify(opc.source ?? null)}, target=${JSON.stringify(opc.target ?? null)}); `
+            + `correct shape: ${OP_FIELD_SHAPES.connect}`,
           )
         }
         const sourceNode = doc.nodes.find((item) => item.id === source)
@@ -471,12 +471,12 @@ function applyGraphOpsInPlace(
           }
           if (!CONDITION_TYPES.includes(conditionType as (typeof CONDITION_TYPES)[number])) {
             badArgs(
-              `connect: condition.type 必须是 ${CONDITION_TYPES.join('/')}（收到 ${JSON.stringify(conditionType)}）`
-              + `——漏写 type 会让条件线静默退化成普通流程线；正确形状：${OP_FIELD_SHAPES.connect}`,
+              `connect: condition.type must be ${CONDITION_TYPES.join('/')} (received ${JSON.stringify(conditionType)}); `
+              + `omitting type silently degrades a condition line into a plain flow line; correct shape: ${OP_FIELD_SHAPES.connect}`,
             )
           }
           if (conditionType === 'content' && !conditionLabel) {
-            badArgs(`connect: condition.type='content' 必须带 label（条件内容文本）——正确形状：${OP_FIELD_SHAPES.connect}`)
+            badArgs(`connect: condition.type='content' requires a label (the condition text); correct shape: ${OP_FIELD_SHAPES.connect}`)
           }
         }
         if (doc.lines.some((line) => line.source === source && line.target === target
@@ -508,7 +508,7 @@ function applyGraphOpsInPlace(
           next = doc.lines.filter((line) => !(line.source === key.source && line.target === key.target
             && line.sourceHandle === key.sourceHandle && line.targetHandle === key.targetHandle))
         } else {
-          badArgs(`disconnect: 需要 lineId 或 key（四个端点字段）——正确形状：${OP_FIELD_SHAPES.disconnect}`)
+          badArgs(`disconnect: lineId or key (all four endpoint fields) is required; correct shape: ${OP_FIELD_SHAPES.disconnect}`)
         }
         if (next.length === before) {
           throw new WfError('WF_GRAPH_INVALID: disconnect: no matching line found (lines come from the orchestration directive topology or the wf_org_catalog workflow skeleton)', 'WF_GRAPH_INVALID')
@@ -518,7 +518,7 @@ function applyGraphOpsInPlace(
       }
       case 'create_group': {
         const groupId = String(op.groupId ?? '').trim()
-        if (!groupId) badArgs(`create_group: groupId 必填——正确形状：${OP_FIELD_SHAPES.create_group}`)
+        if (!groupId) badArgs(`create_group: groupId is required; correct shape: ${OP_FIELD_SHAPES.create_group}`)
         if (doc.nodes.some((item) => item.id === groupId)) {
           throw new WfError(`WF_GRAPH_INVALID: create_group: node id already exists "${groupId}"`, 'WF_GRAPH_INVALID')
         }
@@ -542,10 +542,10 @@ function applyGraphOpsInPlace(
       }
       case 'set_group_members': {
         const groupId = String(op.groupId ?? '').trim()
-        if (!groupId) badArgs(`set_group_members: groupId 必填——正确形状：${OP_FIELD_SHAPES.set_group_members}`)
+        if (!groupId) badArgs(`set_group_members: groupId is required; correct shape: ${OP_FIELD_SHAPES.set_group_members}`)
         // 旧实现把缺失的 memberIds 兜底成 []，等于「悄悄清空全组成员」——破坏性默认值必须拒绝。
         if (!Array.isArray(op.memberIds)) {
-          badArgs(`set_group_members: memberIds 必须是数组（清空成员请显式传 []）——正确形状：${OP_FIELD_SHAPES.set_group_members}`)
+          badArgs(`set_group_members: memberIds must be an array (pass [] explicitly to clear members); correct shape: ${OP_FIELD_SHAPES.set_group_members}`)
         }
         doc.nodes = ensureGroupConsistency(doc.nodes, groupId, op.memberIds)
         outcome.updatedNodeIds.push(groupId)

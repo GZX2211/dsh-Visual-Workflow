@@ -4,7 +4,7 @@
 //
 // 启动链：消毒 serviceId → 服务存在/未运行/图校验 → 端口池分配 → 渲染
 // serve.patch.yml（原子写）→ fork `dsh --profile headless --patch <产物>
-// --visual-workflow-serve <serviceId> --port <n>`（环境继承 + cwd=数据根；
+// __visual_workflow_service__`（身份/端口经 patch config 域传递；环境继承 + cwd=数据根；
 // PATH 无 dsh 时报明确错误）→ 持久化 running + port。
 //
 // 生命周期：非主动停止的 exit → crashed（可重启）；stop → SIGTERM → 5s →
@@ -398,9 +398,8 @@ export class ServiceManager {
     //   - headless 应用的 commander 只自持 task 位置参数；app 级未知 flag
     //     （--visual-workflow-serve/--port）会被 commander 拒绝 → 进程崩溃
     //     （此前根因：服务启动即 crashed）。
-    //   - serviceId/port 已在 renderServePatch 渲染进 patch config（config 域），
-    //     服务进程经 ctx.cmdlineArgs→parseServiceArgs 优先解析 flag、缺省回退
-    //     config——故 fork 只传一个占位 task 位置参数满足 headless-startup 的
+    //   - serviceId/port 已由 renderServePatch 渲染进 patch config（config 域，唯一来源），
+    //     服务进程据此装配——故 fork 只传一个占位 task 位置参数满足 headless-startup 的
     //     非空校验；headless-runner 已被 serve patch disabled，不会执行该任务。
     return factory(dshCommand, [
       '--profile', 'headless',

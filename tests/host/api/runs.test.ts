@@ -151,6 +151,29 @@ describe('导入导出端点', () => {
     })
   })
 
+  it('importWorkflow/importAgentTemplate：conflictMode 取值域非法 → 400（不触达 transfer）', async () => {
+    const h = await makeHarness()
+    for (const conflictMode of ['merge', 'OVERWRITE', 1, {}, true]) {
+      await expect(h.api.handle('importWorkflow', { json: '{}', conflictMode })).rejects.toMatchObject({ status: 400 })
+      await expect(h.api.handle('importAgentTemplate', { json: '{}', conflictMode })).rejects.toMatchObject({ status: 400 })
+    }
+    // 合法取值域照旧透传到领域层（此处用非法 json 把调用截在领域第一道校验上）
+    await expect(h.api.handle('importWorkflow', { json: 'not-json', conflictMode: 'overwrite' })).rejects.toMatchObject({
+      code: 'TRANSFER_INVALID_JSON',
+    })
+    await expect(h.api.handle('importAgentTemplate', { json: 'not-json', conflictMode: 'rename' })).rejects.toMatchObject({
+      code: 'TRANSFER_INVALID_JSON',
+    })
+    // 缺省 / null / 空串视为未指定（沿用领域默认策略）
+    await expect(h.api.handle('importWorkflow', { json: 'not-json' })).rejects.toMatchObject({ code: 'TRANSFER_INVALID_JSON' })
+    await expect(h.api.handle('importWorkflow', { json: 'not-json', conflictMode: null })).rejects.toMatchObject({
+      code: 'TRANSFER_INVALID_JSON',
+    })
+    await expect(h.api.handle('importWorkflow', { json: 'not-json', conflictMode: '' })).rejects.toMatchObject({
+      code: 'TRANSFER_INVALID_JSON',
+    })
+  })
+
   it('importWorkflow：端点把 bundle 落为工作流模板（不再创建实例）；conflictMode 透传', async () => {
     const h = await makeHarness()
     await h.store.saveWorkflow(makeFlow(), 'session-1', { force: true })

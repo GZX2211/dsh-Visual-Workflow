@@ -19,6 +19,10 @@
 //   node scripts/strip-doc-refs.mjs --write         # 落盘改写
 //   node scripts/strip-doc-refs.mjs --check         # CI 用：存在可清理项时以非零码退出
 //   node scripts/strip-doc-refs.mjs --paths src     # 指定扫描根（可重复）
+//   pnpm docs:strip [--check|--write|--verbose]     # 同一入口的命令别名
+//
+// 为什么 --check 暂不挂 check/gates：2026-10-14 dry-run 存量 260 个文件、733 处待清理，
+// 此时纳入门禁会让每次 check 立刻红灯；先清理存量，再把它挂上门禁。
 
 import { readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'

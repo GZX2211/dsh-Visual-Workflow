@@ -21,7 +21,8 @@
 // 提示词规范：description 官方标准英文（何时调用/前置条件/失败语义/副作用）。
 
 import { WF_ORG_CATALOG } from '../../shared/protocol.js'
-import { defineTool, type ToolDefinitionLike, type ToolExecLike } from '../infrastructure/define-tool.js'
+import { defineTool, type ToolExecLike } from '../infrastructure/define-tool.js'
+import { registerTool, requireToolsService } from '../infrastructure/register-tool.js'
 import { textRender } from '../infrastructure/text-render.js'
 import { callerOf } from '../infrastructure/caller.js'
 import { WfError } from '../../orchestrator/index.js'
@@ -328,10 +329,7 @@ export function registerWfOrgCatalog(
   ctx: { get(name: string): unknown },
   host: OrgCatalogHost,
 ): () => void {
-  const tools = ctx.get('tools') as { register(def: ToolDefinitionLike): () => void } | null | undefined
-  if (!tools || typeof tools.register !== 'function') {
-    throw new Error('[visual-workflow] tools 服务不可用，无法注册 wf_org_catalog')
-  }
+  const tools = requireToolsService(ctx, WF_ORG_CATALOG)
   const def = defineTool({
     name: WF_ORG_CATALOG,
     description:
@@ -367,5 +365,5 @@ export function registerWfOrgCatalog(
       return executeOrgCatalog(host, (args ?? {}) as Record<string, unknown>, sessionId)
     },
   })
-  return tools.register(def)
+  return registerTool(tools, def)
 }

@@ -1,7 +1,10 @@
 // tests/host/config.test.ts
 //
-// 配置解析单测（resolveConfig）：默认值填充与「待回复登记 TTL」旧键名的读取兼容。
+// 配置解析单测（resolveConfig）：默认值填充、null 默认键的显式补全，与
+// 「待回复登记 TTL」旧键名的读取兼容。
 // 兼容契约：旧键 wfAskAgentTimeoutMs 仅在 >0 时投影到新键 wfAskAgentTtlMs，新键优先。
+// 必填契约：apiKey / embeddingModelDir / embeddingEndpoint 声明为必填（string | null），
+// 缺省解析必须显式产出 null（schemastery 不填 null 默认）。
 import { describe, expect, it } from 'vitest'
 import { Config, resolveConfig } from '../../src/host/config.js'
 
@@ -65,12 +68,19 @@ describe('resolveConfig：schema 默认值逐键填充', () => {
 
     const resolved = resolveConfig({}) as unknown as Record<string, unknown>
     const filled: string[] = []
+    const nullFilled: string[] = []
     for (const [key, schema] of Object.entries(dict)) {
       const declared = schema.meta.default
       if (declared === null) {
-        // schemastery 对 null 默认不填充（Schema.resolve 遇 isNullable(fallback) 原样返回）：
-        // 缺省时该键或缺失、或为 null，两者都是同一业务语义（关闭鉴权/随包资产/本地嵌入）。
-        expect(resolved[key] ?? null, `${key} 缺省时必须落在 schema 的 null 默认`).toBeNull()
+        // schemastery 对 null 默认不填充（Schema.resolve 遇 isNullable(fallback) 原样返回），
+        // 而 Config 接口把这三个键声明为必填（`string | null`）：resolveConfig 必须显式补 null。
+        // 缺键与 null 在接口层不等价——缺键会让「必填」声明在运行时失真（消费方只能靠 `?? null` 兜底）。
+        expect(
+          Object.prototype.hasOwnProperty.call(resolved, key),
+          `${key} 缺省时必须显式存在（Config 接口声明为必填）`,
+        ).toBe(true)
+        expect(resolved[key], `${key} 缺省时必须为 null`).toBeNull()
+        nullFilled.push(key)
         continue
       }
       expect(resolved, `${key} 缺省时应被 schema 默认值填充`).toHaveProperty(key)
@@ -79,6 +89,8 @@ describe('resolveConfig：schema 默认值逐键填充', () => {
     }
     // 聚合口径：schema 声明了非 null 默认值的键必须全部填充（防漏填导致逐个断言被跳过）
     expect(keys.filter((key) => dict[key].meta.default !== null).sort()).toEqual(filled.sort())
+    // 聚合口径：null 默认键也必须全部显式落 null（遗漏键名不该被逐个断言掩盖）
+    expect(keys.filter((key) => dict[key].meta.default === null).sort()).toEqual(nullFilled.sort())
   })
 
   it('显式给出的键逐键生效，缺省值不覆盖调用方取值', () => {

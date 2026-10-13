@@ -21,7 +21,8 @@ import { dbInEdges } from '../../graph/index.js'
 import { WfError, type CallerInfo, type OrchestratorRuntime, type RunEntry } from '../../orchestrator/index.js'
 import { SEARCH_TOP_K_MAX, VectorIndex } from '../../embedding/indexer.js'
 import { callerOf } from '../infrastructure/caller.js'
-import { defineTool, type ToolDefinitionLike, type ToolExecLike } from '../infrastructure/define-tool.js'
+import { defineTool, type ToolExecLike } from '../infrastructure/define-tool.js'
+import { registerTool, requireToolsService } from '../infrastructure/register-tool.js'
 import { textRender } from '../infrastructure/text-render.js'
 import { createDatabaseDriver } from './driver.js'
 import { sanitizeReadOnlySql } from './policy.js'
@@ -107,10 +108,7 @@ function callerNodeIdOf(flow: WorkflowDocument, caller: CallerInfo, childNodeId:
  * 返回 disposer：注销失败尽力而为。
  */
 export function registerWfDbQuery(ctx: { get(name: string): unknown }, host: WfDbQueryHost): () => void {
-  const tools = ctx.get('tools') as { register(def: ToolDefinitionLike): () => void } | null | undefined
-  if (!tools || typeof tools.register !== 'function') {
-    throw new Error('[visual-workflow] tools 服务不可用，无法注册 wf_db_query')
-  }
+  const tools = requireToolsService(ctx, WF_DB_QUERY)
   // 驱动统一经宿主缝解析：未注入 createDriver 时缺省即真实驱动。
   const driverOf = (node: DatabaseNode): DatabaseDriver => (host.createDriver ?? createDatabaseDriver)(node)
 
@@ -256,12 +254,5 @@ export function registerWfDbQuery(ctx: { get(name: string): unknown }, host: WfD
     },
   })
 
-  const dispose = tools.register(definition)
-  return () => {
-    try {
-      dispose()
-    } catch {
-      // 注销尽力而为
-    }
-  }
+  return registerTool(tools, definition)
 }

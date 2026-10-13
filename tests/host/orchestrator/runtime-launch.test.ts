@@ -3,7 +3,7 @@
 // 启动层单测（startRun/resumeRun）：并发运行锁、启动校验、编排基线初始化、指令注入、运行会话归属。
 // 装配与测试替身见 fixtures/harness.ts（共享，不在本文件内重复）。
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { FlowStore } from '../../../src/host/storage/flow-store.js'
@@ -11,29 +11,22 @@ import { OrchestratorRuntime } from '../../../src/host/orchestrator/index.js'
 import { HEAD_MARKER, MID_MARKER, ORCH_HARD_CONSTRAINTS, TAIL_MARKER, TAIL_RESTATE_MARKER } from '../../../src/host/prompts/index.js'
 import type { ServiceState } from '../../../src/host/shared/types.js'
 import type { WorkflowDocument } from '../../../src/host/shared/graph-model.js'
-import { makeFlow, stage, agent, FakeRoot, makeHarness, start, caller, cleanupTempDirs } from './fixtures/harness.js'
+import { makeFlow, stage, agent, FakeRoot, makeHarness, start, caller, cleanupTempDirs, type Harness } from './fixtures/harness.js'
 
 // 临时目录：makeHarness 登记，文件结束统一清理
 afterEach(cleanupTempDirs)
 
 describe('startRun 并发运行锁（TOCTOU 竞态回归）', () => {
-  it('并发 startRun 同一 flowId：只允许一个成功，另一个 WF_LOCKED', async () => {
-    const h = await makeHarness()
-    await h.store.saveWorkflow(makeFlow(), 'session-1', { force: true })
-
-    // 受控闸门：让两个并发 startRun 都在运行锁首查之后、登记之前交错
-    // （两请求都读到「无锁」，制造 check-then-act 竞态窗口）。
-    let release!: () => void
-    const gate = new Promise<void>((resolve) => { release = resolve })
-    let inGate = 0
-    // Object.create 保留 FlowStore 原型链方法（spread 会丢失），仅覆盖 getWorkflow
+  /** 装配一个「读文档可控阻塞」的运行时（保留 FlowStore 原型链，仅覆盖 getWorkflow）。 */
+  function slowRuntimeOf(h: Harness, hook: () => Promise<void>): { runtime: OrchestratorRuntime; gateHits: () => number } {
+    let hits = 0
     const slowStore = Object.create(h.store) as FlowStore
     slowStore.getWorkflow = async (sessionId: string, flowId: string) => {
-      inGate += 1
-      if (inGate === 1 || inGate === 2) await gate
+      hits += 1
+      await hook()
       return h.store.getWorkflow(sessionId, flowId)
     }
-    const slowRuntime = new OrchestratorRuntime({
+    const runtime = new OrchestratorRuntime({
       store: slowStore,
       runner: h.runner,
       agents: h.agents,
@@ -46,27 +39,51 @@ describe('startRun 并发运行锁（TOCTOU 竞态回归）', () => {
       newRunId: () => 'run-race',
       uuid: () => 'uuid-race',
     })
+    return { runtime, gateHits: () => hits }
+  }
 
-    const p1 = slowRuntime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })
-    const p2 = slowRuntime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })
-    // 等两个请求都进入闸门（都已完成锁首查且看到 null）。
-    // 必须带上限：若加锁顺序变化导致条件永不成立，应报「未进入竞态窗口」而非挂到 vitest 超时。
-    await expect(
-      vi.waitFor(() => {
-        if (inGate < 2) throw new Error(`只有 ${inGate} 个 startRun 进入闸门`)
-      }, { timeout: 2_000 }),
-    ).resolves.toBeUndefined()
+  it('并发 startRun 同一 flowId：只允许一个成功，另一个在第一个异步点之前 WF_LOCKED（不读文档）', async () => {
+    const h = await makeHarness()
+    await h.store.saveWorkflow(makeFlow(), 'session-1', { force: true })
+
+    // 受控闸门：winner 卡在「读文档」这一步，用来观察 loser 是否连文档都没读。
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const { runtime, gateHits } = slowRuntimeOf(h, () => gate)
+
+    const first = runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })
+    const second = runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })
+    // 同步观察（两个 startRun 的同步前缀都已跑完）：loser 若未被预留拦下，会各自再读一遍文档。
+    const docReads = gateHits()
+
     release()
-
-    const results = await Promise.allSettled([p1, p2])
-    const fulfilled = results.filter((r) => r.status === 'fulfilled')
-    const rejected = results.filter((r) => r.status === 'rejected')
+    const results = await Promise.allSettled([first, second])
+    const fulfilled = results.filter((result) => result.status === 'fulfilled')
+    const rejected = results.filter((result) => result.status === 'rejected')
+    // loser 由「同步预留」在第一个 await 之前拦下：文档读取次数恒为 1（无效工作归零）
+    expect(docReads).toBe(1)
     expect(fulfilled).toHaveLength(1)
     expect(rejected).toHaveLength(1)
-    const reason = (rejected[0] as PromiseRejectedResult).reason as { code?: string }
-    expect(reason.code).toBe('WF_LOCKED')
-    // 内存中只登记了一个激活 run
-    expect(slowRuntime.activeRunForSession('session-1')).not.toBeNull()
+    expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ code: 'WF_LOCKED' })
+    // 内存中只登记一个激活 run；磁盘也只有一条（loser 无任何副作用）
+    expect(runtime.activeRunForSession('session-1')).not.toBeNull()
+    expect((await h.store.listRuns('flow-1', 'session-1')).map((run) => run.id)).toEqual(['run-race'])
+  })
+
+  it('启动失败后预留释放：同一 flowId 可以再次 startRun（不留下永久「启动中」）', async () => {
+    const h = await makeHarness()
+    await h.store.saveWorkflow(makeFlow(), 'session-1', { force: true })
+    let failOnce = true
+    const { runtime } = slowRuntimeOf(h, async () => {
+      if (failOnce) {
+        failOnce = false
+        throw new Error('磁盘瞬时不可用')
+      }
+    })
+
+    await expect(runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })).rejects.toThrow('磁盘瞬时不可用')
+    // 预留必须已释放：否则第二次启动会被自己的残留预留拒成 WF_LOCKED
+    await expect(runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })).resolves.toMatchObject({ runId: 'run-race' })
   })
 })
 

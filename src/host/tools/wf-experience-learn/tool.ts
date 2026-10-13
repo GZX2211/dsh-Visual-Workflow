@@ -16,7 +16,8 @@ import { EXPERIENCE_TYPES, FIELD_BUDGETS } from '../../experience/index.js'
 import { ERR_EXPERIENCE_BAD_ARGS, WF_EXPERIENCE_LEARN } from '../../shared/protocol.js'
 import { WfError } from '../../orchestrator/index.js'
 import { experienceCallerOf } from '../infrastructure/caller.js'
-import { defineTool, type ToolDefinitionLike, type ToolExecLike } from '../infrastructure/define-tool.js'
+import { defineTool, type ToolExecLike } from '../infrastructure/define-tool.js'
+import { registerTool, requireToolsService } from '../infrastructure/register-tool.js'
 import { EXPERIENCE_TYPE_PARAM_DESCRIPTION, assertExperienceTypeOwnership, parseExperienceType, type WfExperienceHost } from '../infrastructure/experience-contract.js'
 import { textRender } from '../infrastructure/text-render.js'
 import { mapExperienceCandidates } from './apply.js'
@@ -44,10 +45,7 @@ export function registerWfExperienceLearn(
   ctx: { get(name: string): unknown },
   host: WfExperienceHost,
 ): () => void {
-  const tools = ctx.get('tools') as { register(def: ToolDefinitionLike): () => void } | null | undefined
-  if (!tools || typeof tools.register !== 'function') {
-    throw new Error('[visual-workflow] tools 服务不可用，无法注册 wf_experience_learn')
-  }
+  const tools = requireToolsService(ctx, WF_EXPERIENCE_LEARN)
 
   const definition = defineTool({
     name: WF_EXPERIENCE_LEARN,
@@ -136,12 +134,5 @@ export function registerWfExperienceLearn(
     },
   })
 
-  const dispose = tools.register(definition)
-  return () => {
-    try {
-      dispose()
-    } catch {
-      // 注销尽力而为（工具可能已被外部注销）
-    }
-  }
+  return registerTool(tools, definition)
 }

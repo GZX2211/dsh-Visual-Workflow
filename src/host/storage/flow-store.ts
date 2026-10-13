@@ -120,6 +120,21 @@ function warnSkippedDocument(path: string, detail: string): void {
 }
 
 /**
+ * 目录级列表读取：目录不存在（ENOENT）→ 空列表（合法降级：该资源从未写过）；
+ * 其余失败（EACCES/ENOTDIR 等）原样上浮。
+ * 为什么只放过 ENOENT：把权限/结构故障一并吞成「空列表」，数据消失就无人可诊断
+ * ——列表读的可用性只应覆盖「本来就没有」这一种情况（见 ./AGENTS.md「读取语义」）。
+ */
+async function readDirNames(dir: string): Promise<string[]> {
+  try {
+    return await readdir(dir)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') return []
+    throw error
+  }
+}
+
+/**
  * 码位序比较（契约排序，**不用 localeCompare**）。
  * 为什么：localeCompare 依赖运行环境的 ICU 数据与默认 locale，同一份数据在不同机器上
  * 会得到不同顺序（全量 ICU 与 small-icu、非 en 默认 locale 下 collation 不同），
@@ -163,12 +178,7 @@ export class FlowStore {
    */
   async listWorkflows(sessionId?: string): Promise<WorkflowDocument[]> {
     const dir = join(this.root, 'workflows')
-    let names: string[] = []
-    try {
-      names = await readdir(dir)
-    } catch {
-      return []
-    }
+    const names = await readDirNames(dir)
     const items: WorkflowDocument[] = []
     for (const name of names) {
       if (!name.endsWith('.json')) continue
@@ -226,12 +236,7 @@ export class FlowStore {
    */
   async listServices(sessionId?: string): Promise<ServiceState[]> {
     const dir = join(this.root, 'services')
-    let names: string[] = []
-    try {
-      names = await readdir(dir)
-    } catch {
-      return []
-    }
+    const names = await readDirNames(dir)
     const items: ServiceState[] = []
     for (const name of names) {
       if (!name.endsWith('.json') || name.endsWith('.sessions.json')) continue
@@ -256,12 +261,7 @@ export class FlowStore {
   /** 列出全部服务（不按会话过滤；自动恢复扫描用）。 */
   async listServicesAll(): Promise<ServiceState[]> {
     const dir = join(this.root, 'services')
-    let names: string[] = []
-    try {
-      names = await readdir(dir)
-    } catch {
-      return []
-    }
+    const names = await readDirNames(dir)
     const items: ServiceState[] = []
     for (const name of names) {
       if (!name.endsWith('.json') || name.endsWith('.sessions.json')) continue
@@ -363,12 +363,7 @@ export class FlowStore {
   /** 列出某类模板（roles/ 角色；groups/ 协作组；data/ 文件+数据库按字段判别过滤）。 */
   async listTemplates(kind: TemplateKind): Promise<Template[]> {
     const dir = join(this.root, templateDir(kind))
-    let names: string[] = []
-    try {
-      names = await readdir(dir)
-    } catch {
-      return []
-    }
+    const names = await readDirNames(dir)
     const items: Template[] = []
     for (const name of names) {
       if (!name.endsWith('.json')) continue
@@ -427,12 +422,7 @@ export class FlowStore {
   /** 列出全部工作流模板（按 updatedAt 倒序；全局共享，所有会话可见）。 */
   async listFlowTemplates(): Promise<WorkflowTemplate[]> {
     const dir = join(this.root, 'flow-templates')
-    let names: string[] = []
-    try {
-      names = await readdir(dir)
-    } catch {
-      return []
-    }
+    const names = await readDirNames(dir)
     const items: WorkflowTemplate[] = []
     for (const name of names) {
       if (!name.endsWith('.json')) continue
@@ -479,12 +469,7 @@ export class FlowStore {
    */
   async listRuns(flowId: string, sessionId?: string): Promise<RunSnapshot[]> {
     const dir = join(this.root, 'runs')
-    let names: string[] = []
-    try {
-      names = await readdir(dir)
-    } catch {
-      return []
-    }
+    const names = await readDirNames(dir)
     const items: RunSnapshot[] = []
     for (const name of names) {
       if (!name.endsWith('.json')) continue
@@ -505,12 +490,7 @@ export class FlowStore {
    */
   async listAllRuns(): Promise<RunSnapshot[]> {
     const dir = join(this.root, 'runs')
-    let names: string[] = []
-    try {
-      names = await readdir(dir)
-    } catch {
-      return []
-    }
+    const names = await readDirNames(dir)
     const items: RunSnapshot[] = []
     for (const name of names) {
       if (!name.endsWith('.json')) continue

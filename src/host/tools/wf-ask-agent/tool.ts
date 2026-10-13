@@ -26,7 +26,8 @@
 import { WF_ASK_AGENT } from '../../shared/protocol.js'
 import type { AskAgentDelivery, RootAgentLike } from '../../orchestrator/index.js'
 import { callerOf, type WfToolsHost } from '../infrastructure/caller.js'
-import { defineTool, type ToolDefinitionLike } from '../infrastructure/define-tool.js'
+import { defineTool } from '../infrastructure/define-tool.js'
+import { registerTool, requireToolsService } from '../infrastructure/register-tool.js'
 import { textRender } from '../infrastructure/text-render.js'
 
 /** 宿主能力缝（index.ts 装配；单测 fake）：在 wf 工具宿主之上加子代理查询与冷恢复。 */
@@ -76,10 +77,7 @@ export function registerWfAskAgent(
   ctx: { get(name: string): unknown },
   host: WfAskAgentHost,
 ): () => void {
-  const tools = ctx.get('tools') as { register(def: ToolDefinitionLike): () => void } | null | undefined
-  if (!tools || typeof tools.register !== 'function') {
-    throw new Error('[visual-workflow] tools 服务不可用，无法注册 wf_ask_agent')
-  }
+  const tools = requireToolsService(ctx, WF_ASK_AGENT)
 
   const delivery = makeDelivery(host)
 
@@ -116,12 +114,5 @@ export function registerWfAskAgent(
     },
   })
 
-  const dispose = tools.register(def)
-  return () => {
-    try {
-      dispose()
-    } catch {
-      // 注销尽力而为（工具可能已被外部注销）
-    }
-  }
+  return registerTool(tools, def)
 }

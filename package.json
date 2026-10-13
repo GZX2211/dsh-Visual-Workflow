@@ -73,6 +73,11 @@
     "test": "vitest run --pool=threads",
     "gates": "vitest run --pool=threads tests/contract",
     "client-smoke": "node scripts/client-smoke.mjs",
-    "check": "pnpm typecheck && pnpm test && pnpm build && pnpm client-smoke"
+    "check": "pnpm typecheck && pnpm test && pnpm build && pnpm client-smoke",
+    "dev:client": "node scripts/watch-client.mjs",
+    "dev:host": "node scripts/watch-host.mjs",
+    "assets:embedding": "node scripts/embedding-model.mjs",
+    "verify:embedding": "node scripts/verify-embed-model.mjs",
+    "docs:strip": "node scripts/strip-doc-refs.mjs"
   }
 }

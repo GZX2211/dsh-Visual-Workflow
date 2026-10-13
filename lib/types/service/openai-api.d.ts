@@ -87,7 +87,18 @@ export declare class OpenAiApi {
     private readonly deps;
     /** in-flight 请求计数（并发上限）。 */
     private inflight;
+    /** in-flight watchdog 扫描（跨请求重入去重；见 sweep）。 */
+    private sweeping;
     constructor(deps: OpenAiApiDeps);
+    /**
+     * 单次 watchdog 推进（各请求的轮询循环共用入口）。
+     *
+     * 重入去重（与 SchedulerEngine.sweep 同构）：多个并发请求各有自己的轮询循环，
+     * 若各自直接调用 deps.sweep()，同一时刻会并发扫描同一批运行——同一运行被并发
+     * 判定终态/重复挂起。在途扫描共享同一个 Promise，扫描结束即释放（不粘住后续推进；
+     * 顺序调用之间的次数语义不变）。
+     */
+    sweep(): Promise<void>;
     /** 鉴权校验：apiKey 配置非空时要求 Authorization: Bearer <apiKey>。 */
     authorize(authorization: unknown): void;
     /** 获取并发槽；超限抛 429。返回释放函数（finally 必调）。 */

@@ -188,6 +188,41 @@ describe('资产态保存端点', () => {
     expect(input.meta).toEqual({ groupMax: 2 })
   })
 
+  it('saveAssetVersion 工作流：节点与 meta 非法形状 → 400（端点内校验，不触达资产库）', async () => {
+    const { h, assets } = await makeAssetHarness()
+    assets.seedWorkflow({ assetId: 'a-flow', name: '流程' })
+    const badArgs = { status: 400, code: 'WF_ASSET_BAD_ARGS' }
+    const bad: unknown[] = [
+      { name: 'n', description: 'd', nodes: [null], lines: [] },
+      { name: 'n', description: 'd', nodes: ['x'], lines: [] },
+      { name: 'n', description: 'd', nodes: [{ kind: 'agent' }], lines: [] },
+      { name: 'n', description: 'd', nodes: [{ id: '   ', kind: 'agent' }], lines: [] },
+      { name: 'n', description: 'd', nodes: [{ id: 'n1', kind: 'unknown-kind' }], lines: [] },
+      { name: 'n', description: 'd', nodes: [], lines: [], meta: 'x' },
+      { name: 'n', description: 'd', nodes: [], lines: [], meta: [] },
+    ]
+    for (const payload of bad) {
+      await expect(h.api.handle('saveAssetVersion', { kind: 'workflow', assetId: 'a-flow', payload })).rejects.toMatchObject(badArgs)
+    }
+    expect(assets.calls.saveWorkflow).toHaveLength(0)
+  })
+
+  it('saveAssetVersion 工作流：合法节点原样转交（不重写、不丢字段）', async () => {
+    const { h, assets } = await makeAssetHarness()
+    assets.seedWorkflow({ assetId: 'a-flow', name: '流程' })
+    const node = { id: 'n1', kind: 'agent', position: { x: 1, y: 2 }, data: { label: 'A' } }
+
+    await h.api.handle('saveAssetVersion', {
+      kind: 'workflow',
+      assetId: 'a-flow',
+      payload: { name: '新流程', description: '目标', nodes: [node], lines: [], meta: { nodeMax: 3 } },
+    })
+
+    const input = assets.calls.saveWorkflow[0] as WorkflowSaveInput
+    expect(input.nodes).toEqual([node])
+    expect(input.meta).toEqual({ nodeMax: 3 })
+  })
+
   it('saveAssetVersion 载荷形状非法：ERR_ASSET_BAD_ARGS 400（不触达资产库）', async () => {
     const { h, assets } = await makeAssetHarness()
     assets.seedRole({ assetId: 'a-role', name: '角色' })
@@ -354,6 +389,11 @@ describe('资产影响面预览端点', () => {
     await expect(h.api.handle('previewAssetCascade', { kind: 'role', payload: { nodes: [] } })).rejects.toMatchObject({
       status: 400,
     })
+    // 预览与保存共用同一节点校验：形状非法的节点集不得进入影响面推演
+    await expect(
+      h.api.handle('previewAssetCascade', { kind: 'workflow', payload: { nodes: [{ kind: 'agent' }] } }),
+    ).rejects.toMatchObject({ status: 400 })
+    expect(assets.calls.preview).toHaveLength(1)
   })
 })
 

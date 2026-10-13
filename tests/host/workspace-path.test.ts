@@ -1,13 +1,13 @@
 // tests/host/workspace-path.test.ts
 //
 // 新会话工作区路径校验单测（src/host/workspace-path.ts）：
-// 存在目录通过 / 空值忽略 / 不存在报错 / 文件（非目录）报错。
+// 存在目录通过并返回绝对路径 / 空值忽略 / 相对路径规范化 / 不存在报错 / 文件（非目录）报错。
 // 该能力是 host 级横切输入校验契约（GUI 端点与定时任务端点共用），故归属 host 根测试。
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { resolveWorkspacePath } from '../../src/host/workspace-path.js'
 
 const cleanups: Array<() => Promise<void>> = []
@@ -24,9 +24,15 @@ async function tempDir(): Promise<string> {
 }
 
 describe('resolveWorkspacePath', () => {
-  it('存在的目录：通过并返回原路径', async () => {
+  it('存在的绝对目录：通过并原样返回（规范化后与输入一致）', async () => {
     const dir = await tempDir()
     expect(await resolveWorkspacePath(dir)).toBe(dir)
+  })
+
+  it('相对路径：按宿主进程 cwd 解析为绝对路径返回（下游要求绝对 cwd）', async () => {
+    const resolved = await resolveWorkspacePath('.')
+    expect(resolved).toBe(process.cwd())
+    expect(isAbsolute(String(resolved))).toBe(true)
   })
 
   it('空值/空白：返回 undefined（未配置）', async () => {

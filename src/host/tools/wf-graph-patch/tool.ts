@@ -24,7 +24,8 @@
 import { randomUUID } from 'node:crypto'
 
 import { WF_GRAPH_PATCH, ERR_REVISION_CONFLICT } from '../../shared/protocol.js'
-import { defineTool, type ToolDefinitionLike, type ToolExecLike } from '../infrastructure/define-tool.js'
+import { defineTool, type ToolExecLike } from '../infrastructure/define-tool.js'
+import { registerTool, requireToolsService } from '../infrastructure/register-tool.js'
 import { textRender } from '../infrastructure/text-render.js'
 import { callerOf } from '../infrastructure/caller.js'
 import { WfError } from '../../orchestrator/index.js'
@@ -433,8 +434,8 @@ async function knownPresetIdsOf(host: GraphPatchHost): Promise<Set<string> | nul
 /** 候选 id 清单的可读摘要（截断，避免错误文本被目录撑爆）。 */
 function sampleOf(ids: Set<string>): string {
   const all = [...ids]
-  const head = all.slice(0, 10).join('、')
-  return all.length > 10 ? `${head}…（共 ${all.length} 个）` : head
+  const head = all.slice(0, 10).join(', ')
+  return all.length > 10 ? `${head}, ... (${all.length} total)` : head
 }
 
 /** 本批 ops 显式写入的 presetId（create_node / update_node_data 的角色节点）。 */
@@ -730,10 +731,7 @@ export function registerWfGraphPatch(
   ctx: { get(name: string): unknown },
   host: GraphPatchHost,
 ): () => void {
-  const tools = ctx.get('tools') as { register(def: ToolDefinitionLike): () => void } | null | undefined
-  if (!tools || typeof tools.register !== 'function') {
-    throw new Error('[visual-workflow] tools 服务不可用，无法注册 wf_graph_patch')
-  }
+  const tools = requireToolsService(ctx, WF_GRAPH_PATCH)
   const def = defineTool({
     name: WF_GRAPH_PATCH,
     // 描述只写「何时调用 / 前置条件 / 失败语义 / 副作用」：字段形状与提交规则由
@@ -815,7 +813,7 @@ export function registerWfGraphPatch(
       return executeGraphPatch(host, caller.sessionId, (args ?? {}) as Record<string, unknown>)
     },
   })
-  return tools.register(def)
+  return registerTool(tools, def)
 }
 
 // 说明：以下类型 re-export 便于单测与宿主装配从单一入口引用（避免多处 import 路径漂移）。

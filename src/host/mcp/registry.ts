@@ -236,7 +236,16 @@ export function renderCommandLine(command: string, args: string[]): string {
   return tokens.filter((token) => token !== '').map(quoteShellToken).join(' ')
 }
 
-/** 解析 YAML 文本中的 MCP 行（托管区内 + 全文中 mcp-* 行）。 */
+/**
+ * 解析 YAML 文本中的 MCP 行（托管区内 + 全文中 mcp-* 行）。
+ *
+ * 引号边界（IF-3 判定，零行为变更）：单引号标量只剥首尾引号，**不做** YAML `''` 反转义。
+ * 生产不可达：进入托管区的 id 一律过 requireValidMcpId（`mcp-[A-Za-z0-9_-]{1,32}`，字符集
+ * 无单引号），yamlScalar 的 `''` 翻倍只是纵深防御；删除/停用路径也只回读既有 id、不产出新 id。
+ * 手工编辑 profile 写入 `'mc''x'` 这类转义标量时会保留翻倍形态——那是越过写侧校验的场景，
+ * 而本解析对遗留非规范 id 的职责是「原样保留以便清理」，静默反转义等于改写用户磁盘事实。
+ * 若将来放宽 id 字符集，必须同步在此反转义。
+ */
 export function parseMcpRows(text: string): McpServerRow[] {
   const rows = new Map<string, { config: Record<string, unknown> }>()
   const toggles = new Map<string, boolean>()

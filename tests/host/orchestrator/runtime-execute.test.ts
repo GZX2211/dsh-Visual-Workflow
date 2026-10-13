@@ -4,7 +4,7 @@
 // 装配与测试替身见 fixtures/harness.ts（共享，不在本文件内重复）。
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { GLOBAL_RUN_CALL_LIMIT, OUTPUT_SUMMARY_LIMIT, buildNodeBlocks } from '../../../src/host/orchestrator/index.js'
+import { GLOBAL_RUN_CALL_LIMIT, OUTPUT_SUMMARY_LIMIT, buildNodeBlocks, createRunSnapshot } from '../../../src/host/orchestrator/index.js'
 import { DEFAULT_SYSTEM_LANGUAGE } from '../../../src/host/system-language.js'
 import { HEAD_MARKER, MID_MARKER, TAIL_MARKER } from '../../../src/host/prompts/index.js'
 import { TEAM_SEND_MESSAGE, WF_ASK_AGENT } from '../../../src/host/shared/protocol.js'
@@ -599,6 +599,32 @@ describe('wfFinish 收尾', () => {
     await h.runtime.wfFinish(caller, { status: 'completed' })
     const second = await h.runtime.wfFinish(caller, { status: 'completed' })
     expect(second).toMatchObject({ ok: true, status: 'completed', idempotent: true })
+  })
+
+  it('幂等判定取本会话最新一条：不把无关的旧终态运行当成本次收尾结果', async () => {
+    const h = await makeHarness()
+    const older = createRunSnapshot({ runId: 'run-a-old', flow: makeFlow(), sessionId: 'session-1', mode: 'mode1', now: 1000 })
+    older.status = 'completed'
+    await h.store.saveRun(older)
+    const newer = createRunSnapshot({
+      runId: 'run-b-new',
+      flow: { ...makeFlow(), id: 'flow-2', name: '另一条流程' },
+      sessionId: 'session-1',
+      mode: 'mode1',
+      now: 9000,
+    })
+    newer.status = 'failed'
+    await h.store.saveRun(newer)
+    // 其它会话的更新记录必须被会话隔离挡掉（否则会串会话返回别人的运行）
+    const otherSession = createRunSnapshot({ runId: 'run-c-other', flow: makeFlow(), sessionId: 'session-9', mode: 'mode1', now: 99999 })
+    otherSession.status = 'completed'
+    await h.store.saveRun(otherSession)
+
+    const result = await h.runtime.wfFinish(caller, { status: 'completed' })
+
+    // 磁盘路径按 startedAt 倒序取最新一条本会话记录（run-a-old 的文件名更靠前，
+    // 旧实现按目录顺序取第一条会误报它为本次收尾结果）
+    expect(result).toEqual({ ok: true, runId: 'run-b-new', status: 'failed', idempotent: true })
   })
 
   it('归属：子代理 WF_NOT_ROOT；无运行 WF_NO_ACTIVE_RUN', async () => {

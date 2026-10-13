@@ -4,6 +4,15 @@ import type { StartRunOptions, StartRunResult } from './run-entry.js';
 import { RuntimeBase } from './runtime-base.js';
 export declare class RuntimeLaunch extends RuntimeBase {
     /**
+     * 启动预留表（flowId → 启动在途）。
+     * 为什么需要：运行锁的「开头护栏」与「登记前重检」之间跨越多个 await（读文档/完整性
+     * 校验/注入父代理配置——后者要读 .md 文件），两个并发 startRun 都会全程做完这些工作，
+     * loser 直到登记前的同步重检才被拒。此处把互斥提前到第一个异步点之前（同步登记），
+     * loser 不再产生任何无效工作。预留只覆盖 startRun 自身生命周期；登记之后的运行期
+     * 仍由运行锁（runs 表）负责，两者语义不同、必须并存。
+     */
+    private readonly launching;
+    /**
      * 协作通道判定（编排指令与成员任务块的唯一分支依据）：
      * 官方 Agent Team 可用（服务已挂载 + 根 Agent 存活 + 有可用 provider）→ official；
      * 否则 legacy（父代理逐个启动成员节点，成员间用插件自建协作工具）。
@@ -12,7 +21,7 @@ export declare class RuntimeLaunch extends RuntimeBase {
     protected collabChannelOf(sessionId: string): CollabChannel;
     /**
      * 启动一次「父代理编排」运行（模式一入口）。
-     * 流程：校验 → 运行锁 → 建 run 状态（含编排基线）→ 构造编排指令 →
+     * 流程：校验 → 运行锁 + 并发启动预留 → 建 run 状态（含编排基线）→ 构造编排指令 →
      * followup 一次性注入+唤醒父代理 → 开始即落盘（崩溃后历史可追溯）。
      * 工作台全局化改版：运行唯一逻辑 = 运行当前实例——run 会话即实例绑定的会话
      * （run.sessionId === instance.sessionId）；「开启新会话」只是创建实例时的
@@ -22,6 +31,8 @@ export declare class RuntimeLaunch extends RuntimeBase {
         sessionId: string;
         flowId: string;
     } & StartRunOptions): Promise<StartRunResult>;
+    /** startRun 本体（launching 预留保护下运行；护栏与预留语义见 startRun）。 */
+    private startRunReserved;
     /**
      * 断点续跑：从 paused/interrupted/stopped 的旧 run 创建新 run（resumedFromRunId 继承链）。
      * 已 ok/react-capped 节点继承状态与完整产出（resumed 标记，不重跑），其余节点

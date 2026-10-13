@@ -8,6 +8,8 @@
 // 的映射在 tests/host/api/routes.test.ts 覆盖。
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import {
   exportAgentTemplate,
   exportWorkflowBundle,
@@ -358,5 +360,33 @@ describe('bundle 导入的组合并入', () => {
     expect(templates[0]?.lines.map((line) => `${line.source}->${line.target}`)).toEqual(
       source.lines.map((line) => `${line.source}->${line.target}`),
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// IF-12 导出侧的读取失败语义：资源确实为空 ≠ 读取失败
+// 旧实现在四处 `.catch(() => [])` 里把「读不到」当成「没有」，导出包因此静默丢失
+// 嵌入式资源（用户拿到一个内容缺失但格式合法的包，且没有任何提示）。
+// ---------------------------------------------------------------------------
+
+describe('导出侧读取失败不得降级为空资源', () => {
+  it('模板目录不可枚举（ENOTDIR）→ 导出上浮错误，不产出缺资源的包', async () => {
+    const store = await makeStore()
+    await store.saveWorkflow(makeFlow(), 'session-1', { force: true })
+    await store.saveTemplate('role', roleTemplate() as never)
+    // 目录项被同名文件占位：readdir 抛 ENOTDIR（确定性的非 ENOENT 失败）
+    await rm(join(store.root, 'roles'), { recursive: true, force: true })
+    await writeFile(join(store.root, 'roles'), 'not a directory')
+
+    await expect(exportWorkflowBundle(store, 'session-1', 'flow-1')).rejects.toMatchObject({ code: 'ENOTDIR' })
+  })
+
+  it('工具组合文件损坏 → 导入上浮错误，不按「没有组合」静默并入', async () => {
+    const store = await makeStore()
+    // combos.json 形状不合法（缺 combos 数组）：读取失败必须上浮，否则重名判重失效
+    await writeFile(join(store.root, 'combos.json'), JSON.stringify({ nope: true }))
+    const bundle = bundleWithCombos([])
+
+    await expect(importWorkflowBundle(store, bundle)).rejects.toMatchObject({ name: 'InvalidDocumentError' })
   })
 })

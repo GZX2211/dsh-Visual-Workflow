@@ -1,6 +1,8 @@
 // scripts/build-products-index.mjs
 // 一次性工具：为指定数据库节点构建本地向量索引，复用插件自身的
 // buildIndexForDatabase + EmbeddingService 路径（等价于 GUI 数据库面板「建立索引」）。
+// 生效边界（一次性运维脚本）：必须显式给出 dataDir/nodeId（会写宿主数据目录），且依赖
+// lib/ 已构建产物（import ../lib/...）；不提供 package.json 别名，不参与 build/check/gates。
 // 产出：<dataDir>/data/vector/<nodeId>.json
 // 用法：node scripts/build-products-index.mjs <dataDir> <nodeId> [sqlitePath]
 //   也可用环境变量 WF_DATA_DIR / WF_NODE_ID / WF_SQLITE_PATH 提供。

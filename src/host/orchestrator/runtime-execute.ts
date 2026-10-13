@@ -360,11 +360,17 @@ export class RuntimeExecute extends RuntimeLaunch {
     // 终态条目已从内存释放（防内存膨胀），故幂等判定查磁盘历史（收尾调用频率极低）。
     if (!run) {
       try {
-        // 扫描语义（跳过非本资源文档）：单个坏文件不得让幂等判定整体失效
-        for (const record of await this.deps.store.listAllRuns()) {
-          if (record.sessionId === sessionId && record.status !== 'running') {
-            return { ok: true, runId: record.id, status: record.status, idempotent: true }
-          }
+        // 口径（D02-06）：只认「本会话最近一条运行」——旧实现按目录遍历顺序取第一条非
+        // running 记录，会把任意一条本会话的旧终态运行当成本次请求的收尾结果（多实例/
+        // 多工作流会话下报告错误状态与 runId）。为什么不直接用 listRuns(flowId, sessionId)：
+        // wf_finish 的调用方身份只有 sessionId（工具层不携带 flowId），且「本次请求的
+        // flowId」在无激活运行时本就无从取得，故在唯一可用的扫描入口上显式过滤 + 倒序取最新。
+        // 扫描语义（跳过非本资源文档）：单个坏文件不得让幂等判定整体失效。
+        const latest = (await this.deps.store.listAllRuns())
+          .filter((record) => record.sessionId === sessionId)
+          .sort((a, b) => (String(a.startedAt ?? '') < String(b.startedAt ?? '') ? 1 : -1))[0]
+        if (latest && latest.status !== 'running') {
+          return { ok: true, runId: latest.id, status: latest.status, idempotent: true }
         }
       } catch {
         // 磁盘读失败按无历史处理

@@ -52,7 +52,7 @@ mixInEndpointGroups(VisualWorkflowApi, [
  * 稳定错误码 → HTTP 状态映射（自带 status 的传输错误优先，见 statusOf）。
  * 领域模块只抛稳定 code，翻译成对外状态是边界的职责。
  */
-const ERROR_STATUS: Record<string, number> = {
+export const ERROR_STATUS: Record<string, number> = {
   [EP.ERR_REVISION_CONFLICT]: 409,
   // 写路径归属校验失败（他人实例 / 不存在，两义合一，不泄露存在性）
   [EP.ERR_FLOW_NOT_FOUND]: 404,
@@ -78,6 +78,92 @@ const ERROR_STATUS: Record<string, number> = {
   [EP.ERR_ASSET_DUPLICATE]: 409,
   [EP.ERR_EXPERIENCE_NOT_FOUND]: 404,
   [EP.ERR_EXPERIENCE_BAD_ARGS]: 400,
+
+  // —— IF-10：稳定码穷举补齐（逐码理由即分组依据；穷举门禁见
+  //    tests/host/api/error-status.test.ts：全仓稳定码必须 ⊆ 本表 ∪ ERROR_STATUS_EXEMPT）——
+
+  // 入参形状/取值/身份缺失：要改的是调用方自己的请求。
+  WF_BAD_CALLER: 400, // 请求体自报的 sessionId 缺失（本 API 无应用层鉴权，故不是 401）
+  WF_MODE_MISMATCH: 400, // 调用面与运行模式不匹配（mode1 工具撞 mode2 运行）
+  WF_SCOPE_INVALID: 400, // 补丁 scope 与真实目标类型不匹配
+  WF_PATCH_MIXED_GROUPS: 400, // 一次补丁混用不同 op 组（拆成多次调用即可）
+  WF_NODE_KIND: 400, // 传入的 nodeId 指向非 agent 节点（入参与画布事实不符）
+  WF_NO_ASK_TARGET: 400, // wf_ask 未给出提问目标
+  WF_EXPERIENCE_WRONG_TYPE: 400, // 经验类型取值不在闭集（agent / orchestrator）
+
+  // 身份/角色不满足：换调用方才能解决，不是请求内容问题。
+  WF_NOT_ROOT: 403,
+  WF_NOT_CHILD: 403,
+  WF_ASK_FORBIDDEN: 403,
+  WF_ASK_MISMATCH: 403, // 只有协作消息的目标方可以回复
+
+  // 资源不存在（含「本会话没有该资源」，不泄露他人资源存在性）。
+  WF_NOT_FOUND: 404,
+  WF_NO_INSTANCE: 404,
+  WF_NODE_MISSING: 404,
+  WF_ORG_NOT_FOUND: 404,
+  WF_ASK_NOT_FOUND: 404,
+  WF_ASK_TARGET_UNKNOWN: 404,
+
+  // 状态前置不满足：停止 / 恢复 / 等待后可重试（与既有 WF_LOCKED、WF_SERVICE_RUNNING 同口径）。
+  WF_PAUSED: 409,
+  WF_NOT_RESUMABLE: 409,
+  WF_NO_RESUME_POINT: 409,
+  WF_NO_ACTIVE_RUN: 409,
+  WF_STOPPED: 409,
+  WF_CANCELLED: 409,
+  WF_BUSY: 409,
+  WF_RETRY_LIMIT: 409,
+  WF_MILESTONE_INVALID: 409,
+  WF_PATCH_CONFLICT: 409,
+  WF_ROOT_INACTIVE: 409,
+  WF_ROOT_BUSY: 409,
+  WF_EXPERIENCE_NOT_INITIALIZED: 409, // 生成 Prompt 未在本轮取过（调用顺序前置）
+
+  // 图 / 内容语义不合法（请求可解析，语义被拒；与 WF_FLOW_INVALID 同口径）。
+  WF_FLOW_INCOMPLETE: 422,
+  WF_GROUP_EMPTY: 422,
+  WF_GRAPH_INVALID: 422,
+  [EP.ERR_EXPERIENCE_VALIDATION]: 422,
+
+  // 调用量超限（单次编排的全局调用上限，超限即自动停止）。
+  WF_GLOBAL_LIMIT: 429,
+
+  // 服务端故障：确属内部/环境问题，保持 5xx。显式登记是为了让穷举门禁能区分
+  // 「已判定为内部故障」与「遗漏未登记」，两者在响应上同为 5xx。
+  WF_INJECT_FAILED: 500,
+  WF_DELIVERY_FAILED: 500,
+  WF_SERVICE_START_FAILED: 500,
+  WF_DSH_NOT_FOUND: 500, // 执行环境缺 dsh 运行时：能力已装配但环境不满足，故不是 501
+  [EP.ERR_EXPERIENCE_RECALL_FAILED]: 500,
+  [EP.ERR_EXPERIENCE_FEEDBACK_FAILED]: 500,
+
+  // 能力未装配：部署面缺所需服务（与既有 WF_AGENT_UNAVAILABLE / WF_SERVICE_MANAGER_UNAVAILABLE
+  // 在边界处已有的 501 响应同口径，避免同码两义）。
+  WF_AGENT_UNAVAILABLE: 501,
+  WF_SERVICE_MANAGER_UNAVAILABLE: 501,
+  WF_TEAM_UNAVAILABLE: 501,
+  WF_NO_ASK_PROVIDER: 501,
+
+  // 依赖能力暂时不可用：语义嵌入缺失时经验不落库，稍后可重试。
+  [EP.ERR_EXPERIENCE_EMBEDDING_UNAVAILABLE]: 503,
+}
+
+/**
+ * 显式豁免的稳定码（码 → 依据）：这些码只经 agent 工具面（MCP / 子代理）抛出，
+ * 不经 GUI HTTP 边界，因此不在此映射；它们的状态语义由工具面自己消化。
+ * 为什么仍要显式列出：穷举性门禁（tests/host/api/error-status.test.ts）要求每个稳定码
+ * 都有明确归属——「豁免」必须是被判定过的结论，而不是遗漏。
+ */
+export const ERROR_STATUS_EXEMPT: Record<string, string> = {
+  // wf_db_query 工具面专用码：驱动/连接/索引/SQL 校验都在工具执行内完成，
+  // GUI 无数据库查询端点，故整体豁免（工具面无 HTTP 状态语义）。
+  WF_DB_BAD_DATA: '只经 wf_db_query 工具面（模型可见错误码），不经 GUI HTTP 边界',
+  WF_DB_CONFIG: '只经 wf_db_query 工具面（模型可见错误码），不经 GUI HTTP 边界',
+  WF_DB_DRIVER_MISSING: '只经 wf_db_query 工具面（模型可见错误码），不经 GUI HTTP 边界',
+  WF_DB_INDEX_MISSING: '只经 wf_db_query 工具面（模型可见错误码），不经 GUI HTTP 边界',
+  WF_DB_NO_LINE: '只经 wf_db_query 工具面（模型可见错误码），不经 GUI HTTP 边界',
+  WF_DB_SQL: '只经 wf_db_query 工具面（模型可见错误码），不经 GUI HTTP 边界',
 }
 
 /**

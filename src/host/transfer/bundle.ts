@@ -96,7 +96,9 @@ async function importEmbeddedTemplates(
     { kind: 'database', entries: embedded?.databases ?? [] },
   ]
   for (const group of groups) {
-    const existing = await store.listTemplates(group.kind).catch(() => [] as Template[])
+    // 不吞读取失败：把「读不到已有模板」当成「没有同名模板」会让重名复用与 id 换新判定失效，
+    // 导入因此覆盖/重复入库；storage 已把「资源本来就是空的」表达为空数组。
+    const existing = await store.listTemplates(group.kind)
     for (const entry of group.entries) {
       const t = entry as Template
       if (!t?.id || !String(t.name ?? '').trim()) continue
@@ -123,10 +125,10 @@ export async function exportWorkflowBundle(store: FlowStore, sessionId: string, 
     const service = await store.getService(sessionId, flowId)
     if (!service) throw new TransferError('TRANSFER_NOT_FOUND', `工作流/服务不存在：${flowId}`)
     const [combos, roles, files, databases] = await Promise.all([
-      store.listToolCombos().catch(() => []),
-      store.listTemplates('role').catch(() => []),
-      store.listTemplates('file').catch(() => []),
-      store.listTemplates('database').catch(() => []),
+      store.listToolCombos(),
+      store.listTemplates('role'),
+      store.listTemplates('file'),
+      store.listTemplates('database'),
     ])
     const bundle: BundleV2 = {
       format: 'dsh-vw-bundle',
@@ -148,11 +150,13 @@ export async function exportWorkflowBundle(store: FlowStore, sessionId: string, 
     }
     return JSON.stringify(bundle, null, 2)
   }
+  // 导出侧读取失败一律上浮：导出包是交付产物，静默丢资源会产出「格式合法但内容缺失」的包，
+  // 用户无从察觉（区分「该资源确实为空」与「读取失败」由 storage 的列表读语义承担）。
   const [combos, roles, files, databases] = await Promise.all([
-    store.listToolCombos().catch(() => []),
-    store.listTemplates('role').catch(() => []),
-    store.listTemplates('file').catch(() => []),
-    store.listTemplates('database').catch(() => []),
+    store.listToolCombos(),
+    store.listTemplates('role'),
+    store.listTemplates('file'),
+    store.listTemplates('database'),
   ])
   const bundle: BundleV2 = {
     format: 'dsh-vw-bundle',
@@ -218,7 +222,8 @@ export async function importWorkflowBundle(
   // 快照在循环外取一次并随写入推进（listToolCombos 是整文件读——逐个组合重读会 2N 次读盘，
   // 且循环内基于过期快照判重依赖「前面已写入的组合不在快照里」这一巧合）。
   const combos = bundle.embedded?.combos ?? []
-  const existingCombos = await store.listToolCombos().catch(() => [] as ToolCombo[])
+  // 同上：读取失败必须上浮，否则「已有组合」快照恒为空，判重与 id 换新全部失效。
+  const existingCombos = await store.listToolCombos()
   for (const combo of combos) {
     if (!combo?.id || !String(combo.name ?? '').trim()) continue
     if (existingCombos.some((item) => item.name === combo.name)) continue // 重名复用已有

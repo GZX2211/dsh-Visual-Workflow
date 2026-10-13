@@ -100,6 +100,52 @@ describe('运行上下文自动接续（运行锁降权）', () => {
     await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })).rejects.toMatchObject({ code: 'WF_FLOW_INCOMPLETE' })
   })
 
+  it('最新断点不可恢复时回退次新一条（逐条 try，不因一条失败放弃整轮接续）', async () => {
+    const h = await makeHarness()
+    const good = makeFlow()
+    await h.store.saveWorkflow(good, 'session-1', { force: true })
+    // 更新的断点属于另一条已被改坏的流程（缺结束节点）：接续必然失败
+    const broken = { ...makeFlow(), id: 'flow-broken', name: '坏流程', nodes: makeFlow().nodes.filter((n) => n.kind !== 'end') }
+    await h.store.saveWorkflow(broken, 'session-1', { force: true })
+
+    const older = createRunSnapshot({ runId: 'run-good', flow: good, sessionId: 'session-1', mode: 'mode1', now: 1000 })
+    older.status = 'stopped'
+    await h.store.saveRun(older)
+    const newer = createRunSnapshot({ runId: 'run-broken', flow: broken, sessionId: 'session-1', mode: 'mode1', now: 9000 })
+    newer.status = 'stopped'
+    await h.store.saveRun(newer)
+
+    const result = await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+
+    expect(result).toMatchObject({ nodeId: 'n-a1', status: 'started' })
+    // 次新一条被接管（继承链指向 run-good），坏断点未被误用、也保持原状
+    const lock = h.runtime.flowLockInfo('flow-1')
+    expect(lock).toMatchObject({ status: 'running' })
+    expect((await h.store.getRun(String(lock?.runId)))?.resumedFromRunId).toBe('run-good')
+    expect((await h.store.getRun('run-broken'))?.status).toBe('stopped')
+  })
+
+  it('全部断点都无法接续：错误列出被跳过的断点与原因（可行动，不静默丢断点）', async () => {
+    const h = await makeHarness()
+    const nodesOf = (id: string) => ({ ...makeFlow(), id, nodes: makeFlow().nodes.filter((n) => n.kind !== 'end') })
+    await h.store.saveWorkflow(nodesOf('flow-bad-a'), 'session-1', { force: true })
+    await h.store.saveWorkflow(nodesOf('flow-bad-b'), 'session-1', { force: true })
+    const first = createRunSnapshot({ runId: 'run-bad-a', flow: nodesOf('flow-bad-a'), sessionId: 'session-1', mode: 'mode1', now: 1000 })
+    first.status = 'stopped'
+    await h.store.saveRun(first)
+    const second = createRunSnapshot({ runId: 'run-bad-b', flow: nodesOf('flow-bad-b'), sessionId: 'session-1', mode: 'mode1', now: 9000 })
+    second.status = 'stopped'
+    await h.store.saveRun(second)
+
+    const failure = await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' }).then(() => null, (error: unknown) => error)
+
+    // 错误码取最新一条的恢复类错误（单候选时与旧行为一致），消息里逐条列出被跳过的断点
+    expect(failure).toMatchObject({ code: 'WF_FLOW_INCOMPLETE' })
+    const message = failure instanceof Error ? failure.message : String(failure)
+    expect(message).toContain('run-bad-b')
+    expect(message).toContain('run-bad-a')
+  })
+
   it('wf_finish：无激活运行但有断点时自动续跑后收尾（磁盘旧记录保持原状）', async () => {
     const h = await makeHarness()
     await start(h, makeFlow())

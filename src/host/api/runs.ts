@@ -11,6 +11,17 @@ import { exportAgentTemplate, exportWorkflowBundle, importAgentTemplate, importW
 import { httpError } from './http.js'
 import { presentationOf, VisualWorkflowApiBase } from './boundary.js'
 
+/**
+ * 校验并归一化导入冲突策略：取值域闭集，缺省（未给 / null / 空串）交由 transfer 取默认策略。
+ * 为什么在端点内校验：`as 'rename' | 'overwrite'` 只是编译期断言，非法字符串会被
+ * 静默当成「非 overwrite」处理（导入行为与用户所选策略不一致且无任何提示）。
+ */
+function optionalConflictMode(value: unknown): 'rename' | 'overwrite' | undefined {
+  if (value === undefined || value === null || value === '') return undefined
+  if (value !== 'rename' && value !== 'overwrite') throw httpError(400, 'conflictMode must be rename or overwrite')
+  return value
+}
+
 export class RunEndpoints extends VisualWorkflowApiBase {
   // ---------- 运行（父代理编排） ----------
 
@@ -118,9 +129,8 @@ export class RunEndpoints extends VisualWorkflowApiBase {
   async importWorkflow(args: { json?: unknown; conflictMode?: unknown }): Promise<unknown> {
     // 图2 交互改造：导入一律落为「工作流模板」（全局共享），不再直接创建实例——
     // 用户需在画布中「创建实例」后才能运行（sessionId 参数不再需要）。
-    return importWorkflowBundle(this.host.store, args?.json, {
-      conflictMode: args?.conflictMode as 'rename' | 'overwrite' | undefined,
-    })
+    const conflictMode = optionalConflictMode(args?.conflictMode)
+    return importWorkflowBundle(this.host.store, args?.json, { conflictMode })
   }
 
   async exportAgentTemplate(args: { id?: unknown }): Promise<unknown> {
@@ -130,8 +140,7 @@ export class RunEndpoints extends VisualWorkflowApiBase {
   }
 
   async importAgentTemplate(args: { json?: unknown; conflictMode?: unknown }): Promise<unknown> {
-    return importAgentTemplate(this.host.store, args?.json, {
-      conflictMode: args?.conflictMode as 'rename' | 'overwrite' | undefined,
-    })
+    const conflictMode = optionalConflictMode(args?.conflictMode)
+    return importAgentTemplate(this.host.store, args?.json, { conflictMode })
   }
 }

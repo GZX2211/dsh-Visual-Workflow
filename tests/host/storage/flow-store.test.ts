@@ -685,3 +685,38 @@ describe('列表排序的确定性', () => {
     expect(listed.map((item) => String((item as { name?: string }).name))).toEqual(codepointSorted(names))
   })
 })
+
+// ---------------------------------------------------------------------------
+// IF-12 列表读取的错误语义：目录不存在（ENOENT）降级为空，其他失败一律上浮
+// （storage/AGENTS.md：列表读可用，但不得把权限等读取失败伪装成空列表）
+// ---------------------------------------------------------------------------
+
+describe('列表读取的错误语义', () => {
+  it('目录不存在 → 各列表入口都返回空（合法降级，不抛错）', async () => {
+    for (const name of ['workflows', 'services', 'roles', 'data', 'groups', 'flow-templates', 'runs']) {
+      await rm(join(dir, name), { recursive: true, force: true })
+    }
+    expect(await store.listWorkflows()).toEqual([])
+    expect(await store.listServices()).toEqual([])
+    expect(await store.listServicesAll()).toEqual([])
+    expect(await store.listTemplates('role')).toEqual([])
+    expect(await store.listTemplates('file')).toEqual([])
+    expect(await store.listTemplates('database')).toEqual([])
+    expect(await store.listTemplates('group')).toEqual([])
+    expect(await store.listFlowTemplates()).toEqual([])
+    expect(await store.listRuns('flow-1')).toEqual([])
+    expect(await store.listAllRuns()).toEqual([])
+  })
+
+  it('目录不可枚举（ENOTDIR，代指权限等非 ENOENT 失败）→ 上浮可诊断错误，不伪装成空列表', async () => {
+    // 用「目录项被同名文件占位」造出确定性的非 ENOENT 失败（Windows/POSIX 同为 ENOTDIR），
+    // 避免依赖平台相关的权限 ACL 才能复现权限失败。
+    await rm(join(dir, 'workflows'), { recursive: true, force: true })
+    await writeFile(join(dir, 'workflows'), 'not a directory')
+    await expect(store.listWorkflows()).rejects.toMatchObject({ code: 'ENOTDIR' })
+
+    await rm(join(dir, 'roles'), { recursive: true, force: true })
+    await writeFile(join(dir, 'roles'), 'not a directory')
+    await expect(store.listTemplates('role')).rejects.toMatchObject({ code: 'ENOTDIR' })
+  })
+})
