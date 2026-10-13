@@ -10,6 +10,9 @@ import { CordisToolsView, withPresetScope } from "../lib/agent/index.js"
 import { installChildToolPolicy } from "../lib/agent/child-tool-filter.js"
 import { createModelSelectionSetup } from "../lib/agent/model-selection.js"
 import { createChildPromptSetup } from "../lib/agent/prompt-setup.js"
+import { createReactGuard } from "../lib/agent/guards.js"
+import { CordisAgentHost } from "../lib/agent/agents-host.js"
+import { registerWfRunNode } from "../lib/tools/wf-run-node/tool.js"
 
 const manifest = process.env.DSH_RUNTIME_PACKAGE
 assert.ok(manifest, "Set DSH_RUNTIME_PACKAGE to the absolute path of @deepseek-ai/dsh/package.json")
@@ -102,6 +105,21 @@ try {
   const replacement = installChildToolPolicy(scope.ctx, [], child)
   assert.equal((await invoke(child, "custom")).isError, true, "replacement scope policy must remain closed")
   replacement()
+  const reviewerPolicy = installChildToolPolicy(scope.ctx, [], child, true)
+  for (const name of ["read", "write", "send_message", "wf_finish", "custom"]) assert.equal((await invoke(child, name)).isError, true, `isolated review must deny ${name}`)
+  reviewerPolicy()
+  const { bridge, contribution } = createReactGuard()
+  bridge.setHardLimit(child.id, 1)
+  let inheritedRecoveryCalls = 0
+  const recovery = scope.ctx.on("agent/request-error", () => { inheritedRecoveryCalls++; return { kind: "retry" } })
+  const hardGuard = contribution(scope.ctx, true)
+  assert.equal(await scope.ctx.waterfall("agent/pre-step", { agent: child, turn: 1 }, async () => true), true)
+  assert.deepEqual(await scope.ctx.waterfall("agent/pre-step", { agent: child, turn: 2 }, async () => true), { kind: "reject" })
+  assert.equal(await scope.ctx.waterfall("agent/request-error", { agent: child }, async () => ({ kind: "retry" })), undefined)
+  assert.equal(inheritedRecoveryCalls, 0, "single review must stop inherited infrastructure recovery")
+  hardGuard()
+  recovery()
+  bridge.drop(child.id)
   let publicRecoveryHooksPassed = 0
   let modelRouteUpdates = 0
   await root.inject(["systemPrompt"], async (context) => {
@@ -146,7 +164,39 @@ try {
   const projected = projectFilesToText([message], (file) => attachments.fileHostPath(file))
   assert.deepEqual(projected[0].content, [{ type: "text", text: fileHandleText(ref, hostPath) }])
   assert.deepEqual(message.content, [{ type: "file", attachment: ref }], "durable official file references must remain intact")
-  console.log(JSON.stringify({ status: "passed", runtimeVersion: requireRuntime("./package.json").version, runtime: "@deepseek-ai/dsh-tools", presetScopeApi, actualPresetReads: 6, actualScopedExecutions: sequence, publicRecoveryHooksPassed, modelRouteUpdates, officialFileReferences: 1, officialFileBytes: bytes.length, modelE2E: "NOT RUN" }))
+  const notifications = { injected: [], awakened: [] }
+  const notificationRoot = { id: "dag-parent", sessionId: "dag-parent", status: "idle", ctx: root,
+    inject(message) { notifications.injected.push(message) },
+    followup(message) { assert.equal(this, notificationRoot); notifications.awakened.push(message) },
+    steer(message) { assert.equal(this, notificationRoot); notifications.awakened.push(message) } }
+  const notificationScope = createScope(root, notificationRoot)
+  notificationScope.ctx.provide("agents", { get: (id) => id === notificationRoot.id ? notificationRoot : undefined })
+  await notificationScope.ctx.fiber.await()
+  const notificationHost = new CordisAgentHost(notificationScope.ctx)
+  const oldFollowup = notificationRoot.followup
+  assert.equal(notificationHost.installDagNotificationGate(notificationRoot.id, (id) => id === child.id), true)
+  notificationRoot.followup(createUserMessage({ content: [], source: { kind: "subagent-settled", form: "notice", senderSessionId: child.id } }))
+  notificationRoot.steer(createUserMessage({ content: [], source: { kind: "agent-message", form: "relay", senderSessionId: child.id } }))
+  notificationRoot.followup(createUserMessage({ content: [], source: { kind: "user" } }))
+  notificationRoot.followup(createUserMessage({ content: [], source: { kind: "subagent-settled", form: "notice", senderSessionId: "foreign-child" } }))
+  assert.equal(notifications.injected.length, 2)
+  assert.equal(notifications.awakened.length, 2)
+  await notificationScope.dispose()
+  assert.equal(notificationRoot.followup, oldFollowup)
+  let receivedNodeArgs
+  const unregisterNode = registerWfRunNode(root, { orchestrator: { wfRunNode: async (_caller, args) => {
+    if (!args.nodeId) throw Object.assign(new Error("wf_run_node requires flat nodeId"), { code: "WF_BAD_ARGS" })
+    receivedNodeArgs = args
+    return { nodeId: args.nodeId, status: "started", childId: "schema-probe", runId: "schema-run", attempt: 1 }
+  } } })
+  const review = { nodeId: "upstream", runId: "schema-run", childId: "upstream-child", attempt: 1, status: "accepted", reason: "bounded parent decision" }
+  const valid = await root.get("tools").execute({ callId: "schema-flat", name: "wf_run_node", arguments: { nodeId: "target", reviews: [review], flowSources: ["upstream"] }, agent: parent, signal: new AbortController().signal })
+  assert.equal(valid.isError, false)
+  assert.deepEqual(receivedNodeArgs, { nodeId: "target", reviews: [review], flowSources: ["upstream"] })
+  const invalid = await root.get("tools").execute({ callId: "schema-nested", name: "wf_run_node", arguments: { arguments: { nodeId: "target" } }, agent: parent, signal: new AbortController().signal })
+  assert.equal(invalid.isError, true, "nested arguments must not be silently repaired")
+  unregisterNode()
+  console.log(JSON.stringify({ status: "passed", runtimeVersion: requireRuntime("./package.json").version, runtime: "@deepseek-ai/dsh-tools", presetScopeApi, actualPresetReads: 6, actualScopedExecutions: sequence, publicRecoveryHooksPassed, modelRouteUpdates, officialFileReferences: 1, officialFileBytes: bytes.length, workflowSchemaCalls: 2, reviewToolDenials: 5, reviewModelCallLimit: 1, dagQueuedNotifications: 2, preservedOtherNotifications: 2, modelE2E: "NOT RUN" }))
 } finally {
   for (const scope of owned.reverse()) await scope.dispose()
   await root.fiber.dispose()

@@ -100,6 +100,11 @@ export declare class FlowStore {
     getRun(runId: string): Promise<RunSnapshot | null>;
     /** 保存 run 快照（断点持久化走同一入口；原子写保证崩溃不撕裂）。 */
     saveRun(run: RunSnapshot): Promise<RunSnapshot>;
+    /** 共享 saveRun 的组合锁；持锁后生成候选，写盘成功后在解锁前同步发布给状态所有者。 */
+    commitRun(runId: string, prepare: () => {
+        snapshot: RunSnapshot;
+        publish: () => boolean;
+    } | null): Promise<boolean>;
     /** 扫描全部 run id（reconcileStaleRuns 用，T-027）。 */
     listAllRunIds(): Promise<string[]>;
     /** 列出全部工具组合（全局共享）。 */

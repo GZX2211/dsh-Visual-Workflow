@@ -22,6 +22,7 @@
 // 与提交规则由 wf_org_catalog 的 rules 提供，避免同一份契约在两处常驻文本里各自漂移。
 
 import { randomUUID } from 'node:crypto'
+import { executionModeOf, dagConcurrencyOf } from "../../orchestrator/index.js"
 
 import { WF_GRAPH_PATCH, ERR_REVISION_CONFLICT } from '../../shared/protocol.js'
 import { defineTool, type ToolDefinitionLike, type ToolExecLike } from '../infrastructure/define-tool.js'
@@ -251,7 +252,7 @@ function parseNewTemplateSpec(value: unknown): NewTemplateSpec | null {
   if (typeof value !== 'object' || Array.isArray(value)) {
     throw new WfError('create 必须是对象：{ name, description?, mode? }', 'WF_BAD_ARGS')
   }
-  const raw = value as { name?: unknown; description?: unknown; mode?: unknown }
+  const raw = value as { name?: unknown; description?: unknown; mode?: unknown; executionMode?: unknown; dagConcurrency?: unknown }
   const name = String(raw.name ?? '').trim()
   if (!name) throw new WfError('create.name 必填（新建模板必须有可读名称）', 'WF_BAD_ARGS')
   const mode = raw.mode === undefined || raw.mode === null ? 'mode1' : String(raw.mode)
@@ -259,7 +260,7 @@ function parseNewTemplateSpec(value: unknown): NewTemplateSpec | null {
     throw new WfError("create.mode 必须是 'mode1' 或 'mode2'", 'WF_BAD_ARGS')
   }
   const description = raw.description === undefined || raw.description === null ? '' : String(raw.description)
-  return { name, description, mode: mode as 'mode1' | 'mode2' }
+  return { name, description, mode: mode as 'mode1' | 'mode2', executionMode: executionModeOf(raw.executionMode ?? (mode === "mode1" ? "dag" : "agent")), ...(raw.dagConcurrency !== undefined ? { dagConcurrency: dagConcurrencyOf(raw.dagConcurrency) } : {}) }
 }
 
 /** 生成新模板 id（可注入缝，单测用确定性 id；缺省 tpl-<12 hex>）。 */
@@ -273,6 +274,8 @@ function newTemplateDoc(id: string, spec: NewTemplateSpec): WorkflowTemplate {
   return {
     id,
     mode: spec.mode ?? 'mode1',
+    executionMode: spec.executionMode,
+    ...(spec.dagConcurrency !== undefined ? { dagConcurrency: spec.dagConcurrency } : {}),
     name: spec.name,
     description: spec.description ?? '',
     nodes: [],
@@ -641,6 +644,8 @@ export async function executeGraphPatch(
   }
 
   let targetId = String(args?.targetId ?? '').trim()
+  const activeDag = host.orchestrator.activeRunForSession(sessionId)
+  if (scope === "instance" && activeDag?.snapshot.executionMode === "dag" && activeDag.snapshot.flowId === targetId) throw new WfError("DAG 运行使用冻结图，不支持运行中代理改图；动态编排请选择 agent 模式", "WF_DAG_MANAGED")
   if (spec) {
     if (!targetId) targetId = generateTemplateId(host)
     // 显式给 id 时绝不静默覆盖既有模板（TOCTOU 由 saveDoc 的 expectedRevision=0 二次兜底）
@@ -737,6 +742,8 @@ export function registerWfGraphPatch(
           name: { type: 'string', required: true, description: 'Human-readable template name.' },
           description: { type: 'string', description: 'Optional template description.' },
           mode: { type: 'string', enum: ['mode1', 'mode2'] as const, description: 'Workflow mode; default mode1.' },
+          executionMode: { type: "string", enum: ["dag", "agent"] as const, description: "New mode1 workflows default to dag. Parent, Team, Proxy and dynamic orchestration require agent." },
+          dagConcurrency: { type: "number", description: "DAG node concurrency, integer 1-16; default 2." },
         },
       },
       expectRevision: { type: 'number', description: 'Optimistic-lock revision you last read; mismatch is rejected without retry (WF_PATCH_CONFLICT).' },

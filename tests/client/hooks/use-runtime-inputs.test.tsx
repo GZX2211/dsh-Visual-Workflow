@@ -20,7 +20,7 @@ const previousAttachment = { attachmentId: "att-a", name: "previous.csv", bytes:
 const newAttachment = { attachmentId: "att-b", name: "current.csv", bytes: 7 }
 function attachmentCheckpointOptions(files = [previousAttachment, newAttachment]): RuntimeInputOptions {
   return { ...structuredClone(options), initialNodeId: "first", nodeInputs: { first: { source: { kind: "file" } } }, files,
-    checkpoint: { runId: "old", runtimeInputs: { workflowInputs: { subject: [{ kind: "text", value: "previous subject" }] }, nodeInputs: { first: { source: [{ kind: "file", fileRef: { source: "attachment", ...previousAttachment } }] } } } },
+    checkpoint: { runId: "old", handoffPolicy: "explicit", runtimeInputs: { workflowInputs: { subject: [{ kind: "text", value: "previous subject" }] }, nodeInputs: { first: { source: [{ kind: "file", fileRef: { source: "attachment", ...previousAttachment } }] } } } },
   }
 }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done }); return { promise, resolve } }
@@ -47,12 +47,64 @@ async function prepare(runId?: string, binding = false) {
 }
 afterEach(async () => { await act(async () => { root?.unmount() }); root = undefined; container?.remove(); vi.restoreAllMocks() })
 
+it("test_fresh_run_mode_comes_from_definition_and_resume_mode_is_frozen", async () => {
+  const config = { ...options, executionMode: "dag", dagConcurrency: 3, checkpoint: { runId: "old", executionMode: "agent", dagConcurrency: 1 } }
+  const remote = remoteOf()
+  vi.mocked(remote.call).mockImplementation(async () => structuredClone(config))
+  await render(remote)
+  let pending!: ReturnType<PrepareRuntimeInputs>
+  await act(async () => { pending = face.inputs.prepare("session", "flow", undefined, false, true, true) })
+  expect(face.inputs.dialog).toMatchObject({ executionMode: "dag", dagConcurrency: 3, resuming: false })
+  expect(container?.textContent).toContain(zh.runtimeConcurrency)
+  await act(async () => { face.inputs.cancel() })
+  await expect(pending).resolves.toBeNull()
+  await act(async () => { pending = face.inputs.prepare("session", "flow") })
+  expect(face.inputs.dialog).toMatchObject({ executionMode: "agent", dagConcurrency: 1, resuming: true })
+  expect(container?.textContent).toContain(zh.runtimeFrozenMode)
+  const modeLabel = Array.from(container!.querySelectorAll("label")).find((label) => label.textContent?.startsWith(zh.runtimeExecutionMode))!
+  expect(modeLabel.querySelector("select")!.disabled).toBe(true)
+  await act(async () => { face.inputs.cancel() })
+  await expect(pending).resolves.toBeNull()
+})
+
+it("test_explicit_agent_choice_is_submitted_with_new_run_without_altering_file_selection", async () => {
+  const remote = remoteOf(() => ({ runId: "started" }))
+  vi.mocked(remote.call).mockImplementationOnce(async () => ({ ...options, executionMode: "dag", dagConcurrency: 2 }))
+  await render(remote)
+  let started!: Promise<string | null>
+  await act(async () => { started = face.control.startRun("session", "flow", true, true) })
+  await act(async () => { face.inputs.change({ executionMode: "agent" }); await face.inputs.submit() })
+  await expect(started).resolves.toBe("started")
+  expect(vi.mocked(remote.call).mock.calls.find(([name]) => name === EP.EP_RUN)?.[1]).toMatchObject({ freshStart: true, executionMode: "agent", dagConcurrency: 2, runtimeInputs: { workflowInputs: {}, nodeInputs: {} } })
+})
+
 it("test_legacy_normal_run_skips_dialog_and_preserves_original_request", async () => {
   const remote = remoteOf(() => ({ runId: "started" }))
   await render(remote)
   await act(async () => { expect(await face.control.startRun("session", "flow")).toBe("started") })
   expect(face.inputs.dialog).toBeNull()
   expect(vi.mocked(remote.call).mock.calls.find(([name]) => name === EP.EP_RUN)?.[1]).toEqual({ sessionId: "session", flowId: "flow" })
+})
+
+it("test_default_harness_option_does_not_insert_explicit_or_show_input_dialog", async () => {
+  const remote = remoteOf(() => ({ runId: "started" }))
+  vi.mocked(remote.call).mockImplementationOnce(async () => ({ ...options, handoffPolicy: undefined, files: [] }))
+  await render(remote)
+  await act(async () => { expect(await face.control.startRun("session", "flow")).toBe("started") })
+  expect(face.inputs.dialog).toBeNull()
+  expect(vi.mocked(remote.call).mock.calls.find(([name]) => name === EP.EP_RUN)?.[1]).toEqual({ sessionId: "session", flowId: "flow" })
+})
+
+it.each(["explicit", undefined] as const)("test_fresh_start_preserves_only_actually_stored_policy_%s", async (policy) => {
+  const remote = remoteOf()
+  vi.mocked(remote.call).mockImplementationOnce(async () => ({ ...options, handoffPolicy: "explicit", checkpoint: { runId: "old", handoffPolicy: policy } }))
+  await render(remote)
+  let pending!: ReturnType<PrepareRuntimeInputs>
+  await act(async () => { pending = face.inputs.prepare("session", "flow", undefined, false, true, true) })
+  expect(face.inputs.dialog?.handoffPolicy).toBe(policy)
+  expect(face.inputs.dialog?.inputs).toEqual({ workflowInputs: {}, nodeInputs: {} })
+  await act(async () => { face.inputs.cancel() })
+  expect(await pending).toBeNull()
 })
 
 it("test_normal_run_collects_missing_required_input_before_dispatch", async () => {

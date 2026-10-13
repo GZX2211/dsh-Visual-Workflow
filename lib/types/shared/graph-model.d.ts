@@ -42,6 +42,10 @@ export interface NodeExecutionContract {
     requiredFiles?: string[];
     requiredTools?: string[];
     outputFiles?: string[];
+    /** 显式声明产物合同足以证明完成；未声明时文件存在仍需语义验收。 */
+    completion?: "output-files";
+    /** 无法确认交付/外部副作用时，只有显式可安全重试的节点允许自动重跑。 */
+    retrySafe?: boolean;
 }
 /**
  * 角色节点：父代理（kind='parent'）与子代理（kind='agent'）共用的数据形状。
@@ -55,7 +59,7 @@ export interface RoleNode extends BaseNode {
         label: string;
         /** 规划来源与职责边界；旧工作流可省略。 */
         responsibility?: NodeResponsibility;
-        execution?: NodeExecutionContract;
+        execution?: NodeExecutionContract | null;
         /** 系统提示词：场景独立生效，不继承父/子任何一方。 */
         systemPrompt: string;
         /** 服务商（模型提供方，经宿主适配器解析）。 */
@@ -278,16 +282,27 @@ export interface Line {
     condition?: {
         type: ConditionType;
         label?: string;
+        rule?: {
+            path: string[];
+            operator: "eq" | "ne" | "gt" | "gte" | "lt" | "lte" | "exists";
+            value?: string | number | boolean | null;
+        };
     };
 }
 /** 运行模式：模式一编排执行、模式二后台服务。 */
 export type WorkflowMode = 'mode1' | 'mode2';
+/** 固定图由 Runtime 调度；缺省字段的历史文档保留 Agent 编排。 */
+export type ExecutionMode = "dag" | "agent";
+export interface WorkflowExecutionOptions {
+    executionMode?: ExecutionMode;
+    dagConcurrency?: number;
+}
 /**
  * 工作流模板（WorkflowTemplate）：图2 交互改造新增——左侧「工作流模板」列表的
  * 模板实体，与工作流实例同构（nodes/lines 全量内联），但**全局共享、跨会话可见**
  * （不按 sessionId 隔离），拖入画布保存后通过「创建实例」转为当前会话的实例。
  */
-export interface WorkflowTemplate {
+export interface WorkflowTemplate extends WorkflowExecutionOptions {
     /** 模板稳定标识（模板库内唯一）。 */
     id: string;
     /** 运行模式（mode1 模板 / mode2 服务模板）。 */
@@ -341,7 +356,7 @@ export interface LastAgentPatch {
  * 「节点 JSON 即事实源」：nodes/lines 为全量内联快照，不含 templateId 引用
  * （数据模型核心规则）。
  */
-export interface WorkflowDocument {
+export interface WorkflowDocument extends WorkflowExecutionOptions {
     /** 工作流稳定标识（flowId，会话内唯一；按 sessionId + flowId 维度隔离）。 */
     id: string;
     /** 归属会话 id（会话隔离存储）。 */

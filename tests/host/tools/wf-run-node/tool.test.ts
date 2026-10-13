@@ -50,7 +50,7 @@ describe('wf_run_node 注册与 schema', () => {
     expect(def.parameters.additionalProperties).toBeUndefined()
     expect(def.parameters.required).toEqual(['nodeId'])
     const props = def.parameters.properties ?? {}
-    expect(Object.keys(props).sort()).toEqual(['iterationLimit', 'nodeId', 'retryLimit', 'thinking'].sort())
+    expect(Object.keys(props).sort()).toEqual(['flowSources', 'iterationLimit', 'nodeId', 'retryLimit', 'reviews', 'thinking'].sort())
     expect(props.wait).toBeUndefined()
     expect((props.nodeId as JsonSchemaNode).required).toBeUndefined()
   })

@@ -8,7 +8,7 @@ import { ERR_ASSET_BAD_ARGS, ERR_ASSET_NOT_FOUND } from '../shared/protocol.js'
 import { contentFingerprint } from '../assets/index.js'
 import type { AssetKind, AssetVersionEntry, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../shared/asset-types.js'
 import type { RoleTemplate } from '../shared/template-types.js'
-import type { GraphNode, Line } from '../shared/graph-model.js'
+import type { GraphNode, Line, WorkflowExecutionOptions } from '../shared/graph-model.js'
 import type { OrgMeta } from '../shared/org-meta.js'
 import { httpError } from './http.js'
 import { requireAssets, VisualWorkflowApiBase, type ApiHost } from './boundary.js'
@@ -187,6 +187,8 @@ export class AssetEndpoints extends VisualWorkflowApiBase {
       templateId,
       fingerprint: contentFingerprint(template),
       mode: template.mode,
+      executionMode: template.executionMode,
+      dagConcurrency: template.dagConcurrency,
       name: template.name,
       description: template.description,
       nodes: template.nodes,
@@ -214,6 +216,8 @@ export class AssetEndpoints extends VisualWorkflowApiBase {
     const input: WorkflowSaveInput = {
       assetId,
       mode: payload.mode === 'mode2' ? 'mode2' : 'mode1',
+      executionMode: payload.executionMode as WorkflowExecutionOptions["executionMode"],
+      dagConcurrency: payload.dagConcurrency as WorkflowExecutionOptions["dagConcurrency"],
       name,
       description,
       nodes,

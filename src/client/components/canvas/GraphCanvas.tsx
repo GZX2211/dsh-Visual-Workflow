@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Dict } from '../../i18n.js'
+import type { RunNodeStatusView } from "../../lib/run-status-map.js"
 import type { CanvasEdge, CanvasNode } from '../../studio/studio-state.js'
 import { memberLabelOf } from '../../studio/studio-selectors.js'
 import { nodeSizeOf } from '../../lib/card-geometry.js'
@@ -31,7 +32,7 @@ export interface GraphCanvasProps {
   mode: 'mode1' | 'mode2'
   selectedNode: string | null
   selectedEdge: string | null
-  runStatusByNode: Record<string, { status: string; attempts: number; outputSummary: string }>
+  runStatusByNode: Record<string, RunNodeStatusView>
   highlightedNodeIds: string[]
   /**
    * 运行中锁定项（已完成流程不可变更；模式一 running 时由 run-locks 计算）：
@@ -78,7 +79,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
   const [connectionDraft, setConnectionDraft] = useState<{ source: string; sourceHandle: string; clientX: number; clientY: number; start: { x: number; y: number } } | null>(null)
   const byId = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes])
   const highlightedSet = useMemo(() => new Set(highlightedNodeIds), [highlightedNodeIds])
-  const runStatusOf = (id: string): { status: string; attempts: number; outputSummary: string } | null => runStatusByNode[id] ?? null
+  const runStatusOf = (id: string): RunNodeStatusView | null => runStatusByNode[id] ?? null
   /** 锁定判定（未传入视为全解锁）：节点锁角标、连线灰化虚线、点击不选中。 */
   const isLockedNode = (id: string): boolean => lockedNodeIds?.has(id) === true
   // P4：父代理补丁改动标记（数组 → Set，渲染期 O(1) 判定）

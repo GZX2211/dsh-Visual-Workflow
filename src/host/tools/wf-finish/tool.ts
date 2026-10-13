@@ -12,7 +12,7 @@
 // 随后是前置条件/失败语义（WF_* 稳定错误码）/副作用（幂等收尾）；目标 ≤ 120 tokens。
 
 import { WF_FINISH } from '../../shared/protocol.js'
-import { callerOf, type WfToolsHost } from '../infrastructure/caller.js'
+import { callerOf, taskReviewsParameter, type WfToolsHost } from '../infrastructure/caller.js'
 import { defineTool, type ToolDefinitionLike } from '../infrastructure/define-tool.js'
 import { textRender } from '../infrastructure/text-render.js'
 
@@ -36,6 +36,7 @@ export function registerWfFinish(
       'a paused or stopped run is resumed first so the closure is recorded. Repeated calls on a finished run return idempotently. ' +
       'Only the parent agent may call this; child agents are rejected (WF_NOT_ROOT).',
     parameters: {
+      reviews: taskReviewsParameter,
       status: { type: 'string', enum: ['completed', 'failed'] as const, description: 'completed (default) or failed.' },
       summary: { type: 'string', description: 'Short summary: finished nodes, key conclusions, open issues (a few hundred characters).' },
     },

@@ -9,7 +9,18 @@
 // 职责边界：只做纯身份派生与类型契约，不含任何业务执行语义。
 
 import type { CallerInfo, OrchestratorRuntime, RootAgentLike } from '../../orchestrator/index.js'
-import type { ToolExecLike } from './define-tool.js'
+import type { PropertySpec, ToolExecLike } from './define-tool.js'
+
+/** Both scheduling and finishing carry the same one-attempt parent review protocol. */
+export const taskReviewsParameter: PropertySpec = {
+  type: "array", description: "One bounded parent task review per settled attempt; execution completion alone is not business acceptance.",
+  items: { type: "object", additionalProperties: false, properties: {
+    nodeId: { type: "string", required: true }, runId: { type: "string", required: true },
+    childId: { type: "string", required: true }, attempt: { type: "integer", required: true },
+    status: { type: "string", required: true, enum: ["accepted", "needs-input", "failed"] },
+    reason: { type: "string", required: true, description: "Brief evidence against the node task; requests for data are needs-input, not accepted." },
+  } },
+}
 
 /**
  * 从工具执行上下文派生调用方身份（CallerInfo）。

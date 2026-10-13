@@ -20,9 +20,315 @@ import { RuntimeLaunch } from './runtime-launch.js'
 import type { GroupNode, RoleNode, WorkflowDocument } from '../shared/graph-model.js'
 import { preflightNodeInputs } from './execution-inputs.js'
 import { runtimeInputsOf, validateRequiredInputs, nodeInputAttachments } from "./runtime-inputs.js"
-import { boundNodeInputs, effectiveNodeInputs } from "./input-handoff.js"
+import { boundNodeInputs, effectiveNodeInputs, flowNodeContextOf, usesHarnessContext, conditionalRoute } from "./input-handoff.js"
+import { dagFrontierOf, dagReviewResultOf, selectDagRoutes } from "./dag-scheduler.js"
+import { buildDagReviewPrompt, DAG_REVIEW_RULE } from "../prompts/index.js"
+import { executionOf, verifyNodeArtifacts } from "./execution-inputs.js"
+import { lastAssistantText } from "./snapshot.js"
+import type { ChildMeta } from "./seams.js"
+import type { SubagentEndInfo } from "./run-entry.js"
+import { createHash } from "node:crypto"
+import type { TaskAcceptance } from "../shared/run-types.js"
 
-export class RuntimeExecute extends RuntimeLaunch {
+const DAG_DISPATCH = Symbol("dag-dispatch")
+const DAG_RESCHEDULE = Symbol("dag-reschedule")
+
+export abstract class RuntimeExecute extends RuntimeLaunch {
+  private async verifyDagArtifacts(run: RunEntry, node: RoleNode): Promise<void> {
+    if (!executionOf(node).outputFiles?.length) return
+    const record = run.snapshot.nodes.find((entry) => entry.nodeId === node.id)!
+    const attempt = record.attemptHistory?.at(-1)
+    const checked = structuredClone(run.snapshot)
+    await verifyNodeArtifacts(node, checked, this.now())
+    for (const artifact of checked.nodes.find((entry) => entry.nodeId === node.id)!.artifacts ?? []) {
+      const evidence = record.artifacts?.find((entry) => entry.path === artifact.path)
+      if (!evidence?.signature || evidence.signature !== artifact.signature || evidence.runId !== attempt?.runId || evidence.nodeId !== node.id || evidence.attempt !== record.attempts) throw new WfError("声明产物已变化或缺少有效代际证据", "WF_OUTPUT_FILE_STALE")
+    }
+  }
+  /** A settled ordinary task receives at most one isolated, tool-free Harness review. */
+  protected async reviewDagNode(run: RunEntry, nodeId: string): Promise<void> {
+    const key = `dag-review:${nodeId}`
+    const dispatching = run.dispatching ??= new Set<string | symbol>()
+    if (dispatching.has(key)) return
+    dispatching.add(key)
+    try { await this.startDagReview(run, nodeId) } finally { dispatching.delete(key) }
+  }
+
+  private async startDagReview(run: RunEntry, nodeId: string): Promise<void> {
+    if (run.snapshot.status !== "running" || run.controller.signal.aborted) return
+    const record = run.snapshot.nodes.find((node) => node.nodeId === nodeId)
+    const node = nodeById(run.baseFlow, nodeId)
+    const attempt = record?.attemptHistory?.at(-1)
+    if (!record || node?.kind !== "agent" || record.status !== "ok" && record.status !== "react-capped" || !attempt || !record.childId || record.taskAcceptance?.status !== "pending" || record.taskAcceptance.review) return
+    const origin = { runId: attempt.runId ?? run.snapshot.id, nodeId, attempt: record.attempts, childId: record.childId, definitionRunId: run.snapshot.dagDefinitionRunId ?? run.snapshot.id }
+    record.taskAcceptance.origin = origin
+    try { await this.verifyDagArtifacts(run, node) } catch (error) { record.failure = failureOf(error, "run_finish", "WF_OUTPUT_FILE_STALE", this.now()) }
+    if (run.snapshot.status !== "running" || run.controller.signal.aborted || this.runs.get(run.snapshot.id) !== run || record.attemptHistory?.at(-1) !== attempt) return
+    const errors = attempt.toolResults?.filter((tool) => tool.isError) ?? []
+    if (record.failure || errors.length) {
+      const reason = record.failure?.message ?? `本代际存在工具失败：${errors.map((tool) => `${tool.tool}:${tool.errorCode ?? "TOOL_ERROR"}`).join(", ")}`
+      record.taskAcceptance = { status: "failed", source: "runtime", origin, reason, reviewedAt: this.isoNow() }
+      attempt.taskAcceptance = structuredClone(record.taskAcceptance)
+      await this.deps.store.saveRun(run.snapshot)
+      await this.advanceDag(run)
+      return
+    }
+    if (executionOf(node).completion === "output-files") {
+      if (await this.commitDagTask(run, nodeId, { status: "accepted", source: "contract", origin, reason: "已满足显式声明为充分完成条件的产物合同", reviewedAt: this.isoNow() })) await this.advanceDag(run)
+      return
+    }
+    const timeoutMs = this.deps.config.dagReviewTimeoutMs ?? 120000
+    const review = { runId: run.snapshot.id, state: "requested" as const, startedAt: this.isoNow(), timeoutMs, modelCallLimit: 1 as const }
+    record.taskAcceptance = { status: "pending", source: "harness", origin, review }
+    attempt.taskAcceptance = structuredClone(record.taskAcceptance)
+    await this.deps.store.saveRun(run.snapshot)
+    if (run.controller.signal.aborted || this.runs.get(run.snapshot.id) !== run) return
+    const key = `${run.snapshot.id}:${nodeId}:review:${record.attempts}`
+    const waiter = createWaiter()
+    run.waiters.set(key, waiter)
+    const timer = setTimeout(() => {
+      void this.finishDagReview(run, nodeId, "unknown", "语义验收达到超时，需人工处理或以新运行重新启动", "WF_DAG_REVIEW_TIMEOUT").catch((error) => this.log().warn(`DAG 验收超时保存失败：${failureOf(error, "run_finish", "WF_DAG_REVIEW_FAILED", this.now()).message}`))
+    }, timeoutMs)
+    void waiter.promise.then(() => clearTimeout(timer), () => clearTimeout(timer))
+    const assertCurrent = (): void => {
+      if (run.snapshot.status !== "running" || run.controller.signal.aborted || this.runs.get(run.snapshot.id) !== run || record.attempts !== origin.attempt || record.childId !== origin.childId || record.taskAcceptance?.origin?.runId !== origin.runId || record.taskAcceptance.status !== "pending" || !["requested", "running"].includes(record.taskAcceptance.review?.state ?? "")) throw new WfError("验收代际已失效、已超时或运行已暂停", "WF_CANCELLED")
+    }
+    const limit = Math.max(1, Math.min(this.deps.config.documentTextLimit, 16000))
+    const task = JSON.stringify({ role: node.data.systemPrompt, purpose: node.data.responsibility?.purpose, deliverable: node.data.responsibility?.deliverable })
+    const requirements = JSON.stringify({ input: node.data.inputSchema, output: node.data.outputSchema, execution: node.data.execution, inputAttachments: attempt.inputAttachments, upstream: attempt.flowSources?.map((source) => ({ ...source, result: run.snapshot.nodes.find((entry) => entry.nodeId === source.nodeId)?.output.slice(0, limit) })) })
+    const text = buildDagReviewPrompt({ identity: origin, task: task.slice(0, limit), requirements: requirements.slice(0, limit), output: record.output.slice(0, limit), truncated: record.output.length > limit || task.length > limit || requirements.length > limit, artifacts: (record.artifacts ?? []).map(({ path, size }) => ({ path, size })), tools: attempt.toolResults ?? [] })
+    const reviewer: RoleNode = { id: `dag-review:${run.snapshot.id}:${nodeId}:${origin.attempt}`, kind: "agent", position: { x: 0, y: 0 }, data: { label: `DAG review ${nodeId}`, systemPrompt: DAG_REVIEW_RULE, provider: record.provider ?? node.data.provider, model: record.model ?? node.data.model, presetId: null, retryLimit: 0 } }
+    try {
+      assertCurrent()
+      const started = await this.deps.runner.startNodeTask({ runId: run.snapshot.id, attempt: origin.attempt, sessionId: run.snapshot.sessionId, flowId: run.snapshot.flowId, mode: run.snapshot.mode, node: reviewer, blocks: [{ type: "text", text }], modelCallLimit: 1, signal: run.controller.signal, assertActive: assertCurrent,
+        onChildProvisioning: (id) => {
+          assertCurrent()
+          record.taskAcceptance!.review!.childId = id
+          run.inflight.add(id)
+          this.childIndex.set(id, { sessionId: run.snapshot.sessionId, flowId: run.snapshot.flowId, nodeId, runId: run.snapshot.id, attempt: origin.attempt, executionMode: "dag", purpose: "task-review" })
+        } })
+      assertCurrent()
+      const active = record.taskAcceptance!.review!
+      active.childId = started.childId
+      active.state = "running"
+      this.childIndex.set(started.childId, { sessionId: run.snapshot.sessionId, flowId: run.snapshot.flowId, nodeId, runId: run.snapshot.id, attempt: origin.attempt, executionMode: "dag", purpose: "task-review", hostEpochId: this.childEpochs.get(started.childId) })
+      run.inflight.add(started.childId)
+      attempt.taskAcceptance = structuredClone(record.taskAcceptance)
+      await this.deps.store.saveRun(run.snapshot)
+      this.log().info(JSON.stringify({ runId: run.snapshot.id, nodeId, attempt: origin.attempt, childId: origin.childId, reviewChildId: started.childId, phase: "task_review", status: "running", modelCallLimit: 1 }))
+    } catch (error) {
+      if (!run.controller.signal.aborted && this.runs.get(run.snapshot.id) === run) await this.finishDagReview(run, nodeId, "unknown", failureOf(error, "child_start", "WF_DAG_REVIEW_FAILED", this.now()).message, "WF_DAG_REVIEW_FAILED")
+    }
+  }
+
+  protected async handleDagReviewEnd(run: RunEntry, meta: ChildMeta, info: SubagentEndInfo): Promise<void> {
+    const record = run.snapshot.nodes.find((node) => node.nodeId === meta.nodeId)
+    const review = record?.taskAcceptance?.review
+    const origin = record?.taskAcceptance?.origin
+    if (!record || !review || !origin || origin.runId !== record.attemptHistory?.at(-1)?.runId || origin.nodeId !== meta.nodeId || origin.attempt !== record.attempts || origin.childId !== record.childId || origin.definitionRunId !== run.snapshot.dagDefinitionRunId || review.runId !== run.snapshot.id || review.state !== "running" || review.childId !== info.id || meta.runId !== run.snapshot.id || meta.attempt !== record.attempts || meta.hostEpochId && info.runId !== meta.hostEpochId) return
+    try {
+      if (review.errorCode) throw new WfError("语义验收调用了未授权工具，不能接受其结果", "WF_DAG_REVIEW_TOOL_DENIED")
+      if (info.stopReason !== "completed") throw new WfError(`语义验收未正常结束：${String(info.stopReason)}`, "WF_DAG_REVIEW_FAILED")
+      const result = dagReviewResultOf(lastAssistantText(info.lastAssistantMessage, 0))
+      await this.finishDagReview(run, meta.nodeId, result.status, result.reason, result.status === "unknown" ? "WF_DAG_REVIEW_UNKNOWN" : undefined)
+    } catch (error) {
+      const failure = failureOf(error, "run_finish", "WF_DAG_REVIEW_INVALID", this.now())
+      await this.finishDagReview(run, meta.nodeId, "unknown", failure.message, failure.code)
+    }
+  }
+
+  private async finishDagReview(run: RunEntry, nodeId: string, status: "accepted" | "needs-input" | "failed" | "unknown", reason: string, errorCode?: string): Promise<void> {
+    const record = run.snapshot.nodes.find((node) => node.nodeId === nodeId)
+    const task = record?.taskAcceptance
+    const review = task?.review
+    const attempt = record?.attemptHistory?.at(-1)
+    if (!record || !task || !review || !attempt || !["requested", "running"].includes(review.state) || this.runs.get(run.snapshot.id) !== run || run.controller.signal.aborted) return
+    review.state = "settling"
+    const childId = review.childId
+    let committed = false
+    try {
+      committed = await this.commitDagTask(run, nodeId, { ...structuredClone(task), status: status === "unknown" ? "pending" : status, reason, reviewedAt: this.isoNow(), review: { ...review, state: status === "unknown" ? "blocked" : "finished", endedAt: this.isoNow(), ...(errorCode ? { errorCode } : {}) } })
+      if (!committed) return
+    } catch (error) {
+      if (record.taskAcceptance === task && record.attemptHistory?.at(-1) === attempt) {
+        record.taskAcceptance = { ...task, status: "pending", reason: "验收持久化失败，不能推进下游", review: { ...review, state: "blocked", errorCode: "WF_DAG_REVIEW_PERSIST_FAILED" } }
+        attempt.taskAcceptance = structuredClone(record.taskAcceptance)
+      }
+      throw error
+    } finally {
+      if (childId) {
+        run.inflight.delete(childId)
+        const meta = this.childIndex.get(childId)
+        if (meta) this.childIndex.set(childId, { ...meta, retired: true })
+        this.deps.runner.forgetTaskChild?.(childId)
+        if (errorCode) await this.deps.runner.interruptChild(childId, run.snapshot.sessionId)
+      }
+      const key = `${run.snapshot.id}:${nodeId}:review:${attempt.attempt}`
+      run.waiters.get(key)?.resolve({ nodeId, status: committed && status === "accepted" ? "ok" : "fail" })
+      run.waiters.delete(key)
+    }
+    this.log().info(JSON.stringify({ runId: run.snapshot.id, nodeId, attempt: attempt.attempt, childId: record.childId, reviewChildId: childId, phase: "task_review", status, errorCode }))
+    await this.advanceDag(run)
+  }
+
+  /** Reuse the snapshot's atomic file lock; publish acceptance only after the candidate is durable. */
+  private async commitDagTask(run: RunEntry, nodeId: string, acceptance: TaskAcceptance): Promise<boolean> {
+    const runId = run.snapshot.id
+    const record = run.snapshot.nodes.find((node) => node.nodeId === nodeId)
+    const attempt = record?.attemptHistory?.at(-1)
+    const task = record?.taskAcceptance
+    const origin = acceptance.origin
+    const current = (): boolean => !!record && !!attempt && !!task && !!origin && this.runs.get(runId) === run && run.snapshot.id === runId && ["running", "paused"].includes(run.snapshot.status) && !run.controller.signal.aborted
+      && run.snapshot.nodes.find((node) => node.nodeId === nodeId) === record && record.taskAcceptance === task && task.status === "pending" && record.attemptHistory?.at(-1) === attempt && attempt.phase === "settled" && attempt.status === record.status && ["ok", "react-capped"].includes(record.status)
+      && origin.nodeId === nodeId && origin.attempt === record.attempts && origin.childId === record.childId && origin.runId === attempt.runId && attempt.attempt === origin.attempt && attempt.childId === origin.childId && origin.definitionRunId === (run.snapshot.dagDefinitionRunId ?? runId)
+      && task.origin?.runId === origin.runId && task.origin.nodeId === origin.nodeId && task.origin.attempt === origin.attempt && task.origin.childId === origin.childId && task.origin.definitionRunId === origin.definitionRunId && (!task.review || task.review.runId === runId && task.review.state === "settling")
+    // Input binding also stages a detached snapshot; reuse its existing dispatch exclusion.
+    const dispatching = run.dispatching ??= new Set<string | symbol>()
+    const key = Symbol("dag-task-commit")
+    dispatching.add(key)
+    try {
+      if (run.inputBindingDone) await run.inputBindingDone
+      return await this.deps.store.commitRun(runId, () => {
+        if (!current()) return null
+        const next = structuredClone(run.snapshot)
+        const proposed = next.nodes.find((node) => node.nodeId === nodeId)!
+        const accepted = structuredClone(acceptance)
+        const historical = structuredClone(acceptance)
+        proposed.taskAcceptance = accepted
+        proposed.attemptHistory!.at(-1)!.taskAcceptance = historical
+        return { snapshot: next, publish: () => {
+          if (!current()) return false
+          record!.taskAcceptance = accepted
+          attempt!.taskAcceptance = historical
+          return true
+        } }
+      })
+    } finally { dispatching.delete(key) }
+  }
+  /** The existing dispatch set serializes frontier decisions and per-node start windows. */
+  protected async advanceDag(run: RunEntry): Promise<void> {
+    if (run.snapshot.executionMode !== "dag" || run.snapshot.status !== "running" || run.controller.signal.aborted || this.runs.get(run.snapshot.id) !== run) return
+    const dispatching = run.dispatching ??= new Set<string | symbol>()
+    if (dispatching.has(DAG_DISPATCH)) { dispatching.add(DAG_RESCHEDULE); return }
+    dispatching.add(DAG_DISPATCH)
+    const active = (): boolean => this.runs.get(run.snapshot.id) === run && run.snapshot.status === "running" && !run.controller.signal.aborted
+    try {
+      do {
+        dispatching.delete(DAG_RESCHEDULE)
+        if (run.inputBindingDone) await run.inputBindingDone
+        if (!active()) return
+        const flow = run.baseFlow
+        for (const record of run.snapshot.nodes) if (["ok", "react-capped"].includes(record.status) && record.taskAcceptance?.status === "pending" && !record.taskAcceptance.review) {
+          await this.reviewDagNode(run, record.nodeId)
+          if (!active()) return
+        }
+        let routed = false
+        for (const record of run.snapshot.nodes) {
+          const attempt = record.attemptHistory?.at(-1)
+          if (record.taskAcceptance?.status === "accepted" && attempt && attempt.dagRoutes === undefined && flow.lines.some((line) => isFlowLine(line) && line.source === record.nodeId && line.condition)) {
+            attempt.dagRoutes = selectDagRoutes(flow, run.snapshot, record.nodeId)
+            if (!attempt.dagRoutes.length && !flow.lines.some((line) => isFlowLine(line) && line.source === record.nodeId && !line.condition)) throw new WfError("已定义的条件出口均未匹配，不能完成工作流；请修正条件或使用 agent 模式", "WF_DAG_NO_ROUTE")
+            routed = true
+          }
+        }
+        if (routed) await this.deps.store.saveRun(run.snapshot)
+        const blocked = run.snapshot.nodes.find((record) => record.status !== "pending" && (record.taskAcceptance?.status === "needs-input" || record.taskAcceptance?.review?.state === "blocked"))
+        if (blocked) {
+          run.snapshot.status = "paused"
+          run.snapshot.resumeFromNodeId = blocked.nodeId
+          run.snapshot.summary = `${blocked.taskAcceptance?.review?.errorCode ?? "WF_TASK_INPUT_REQUIRED"}：${blocked.taskAcceptance?.reason ?? "需要明确输入或人工处理"}；通过工作台补充合法输入或新建运行`
+          await this.deps.store.saveRun(run.snapshot)
+          return
+        }
+        const exhausted = run.snapshot.nodes.find((record) => (record.status === "fail" || record.taskAcceptance?.status === "failed") && !dispatching.has(record.nodeId))
+        if (exhausted) {
+          const node = nodeById(flow, exhausted.nodeId)
+          const limit = node?.kind === "agent" ? effectiveRetryLimitOf(node, {}, this.deps.config.retryLimitDefault) : 0
+          if (exhausted.status === "fail" && exhausted.failure?.retryable && (exhausted.attemptHistory?.at(-1)?.deliveryAccepted === false || node?.kind === "agent" && executionOf(node).retrySafe === true) && exhausted.attempts < limit + 1) setNodeStatus(run.snapshot, exhausted.nodeId, "pending", { now: this.now() })
+          else {
+            await this.terminateRun(run, { status: "failed", summary: `DAG 节点 ${exhausted.nodeId} 失败：${exhausted.failure?.message ?? exhausted.taskAcceptance?.reason ?? "任务未完成"}`, termination: { source: "runtime", stopReason: "dag-failed", failure: exhausted.failure } })
+            return
+          }
+        }
+        const frontier = dagFrontierOf(flow, run.snapshot)
+        for (const id of frontier.skipped) setNodeStatus(run.snapshot, id, "skipped", { now: this.now() })
+        let changed = frontier.skipped.length > 0 || !!exhausted
+        for (const id of frontier.ready) {
+          if (!active()) return
+          const node = nodeById(flow, id)
+          if (node?.kind === "end") {
+            setNodeStatus(run.snapshot, id, "ok", { now: this.now() })
+            changed = true
+          } else if (node?.kind === "pause") {
+            // A pause barrier drains already-running siblings before freezing the frontier.
+            if (run.inflight.size || run.snapshot.nodes.some((record) => record.status === "running")) continue
+            setNodeStatus(run.snapshot, id, "ok", { now: this.now() })
+            run.snapshot.status = "paused"
+            run.snapshot.resumeFromNodeId = id
+            run.snapshot.summary = "DAG 到达暂停门；通过工作台恢复继续"
+            await this.deps.store.saveRun(run.snapshot)
+            return
+          } else if (node?.kind === "agent") {
+            if (Math.max(run.inflight.size, run.snapshot.nodes.filter((record) => record.status === "running").length) >= (run.snapshot.dagConcurrency ?? 2)) break
+            try {
+              await this.dispatchAgentNode(run, flow, node, usesHarnessContext(flow, node, run.snapshot) ? { flowSources: frontier.sources[id] } : {})
+            } catch (error) {
+              if (!active()) return
+              const failure = failureOf(error, "node_input", "WF_DAG_DISPATCH_FAILED", this.now())
+              if (["WF_INPUT_REQUIRED", "WF_TASK_INPUT_REQUIRED"].includes(failure.code)) {
+                run.snapshot.status = "paused"
+                run.snapshot.resumeFromNodeId = id
+                run.snapshot.summary = `${failure.code}：${failure.message}；尚未派发的节点可通过工作台绑定，否则以新运行携带输入重新启动`
+                await this.deps.store.saveRun(run.snapshot)
+                return
+              }
+              const record = run.snapshot.nodes.find((entry) => entry.nodeId === id)
+              if (record?.status !== "fail") {
+                await this.terminateRun(run, { status: "failed", summary: `${failure.code}：${failure.message}`, termination: { source: "runtime", stopReason: "dag-dispatch-failed", failure } })
+                return
+              }
+            }
+            changed = true
+          }
+        }
+        if (!active()) return
+        if (changed) {
+          await this.deps.store.saveRun(run.snapshot)
+          if (!active()) return
+        }
+        const next = dagFrontierOf(flow, run.snapshot)
+        if (next.complete && !run.inflight.size) {
+          for (const node of flow.nodes) if (node.kind === "agent" && run.snapshot.nodes.find((record) => record.nodeId === node.id)?.taskAcceptance?.status === "accepted") await this.verifyDagArtifacts(run, node)
+          if (!active()) return
+          run.snapshot.status = "completed"
+          run.snapshot.endedAt = this.isoNow()
+          run.snapshot.summary = "DAG 所有生效路径已通过任务合同并完成"
+          run.snapshot.termination = { source: "runtime", stopReason: "dag-completed" }
+          terminalizeNodes(run.snapshot, this.now(), "completed")
+          await this.deps.store.saveRun(run.snapshot)
+          this.rejectWaiters(run)
+          this.rejectAsks(run)
+          this.runs.delete(run.snapshot.id)
+          return
+        }
+        if (dispatching.has(DAG_RESCHEDULE) || run.snapshot.nodes.some((record) => record.status === "fail")) continue
+        // Structural advances and freed slots are consumed without a timer or a model call.
+        if (next.skipped.length || next.ready.some((id) => nodeById(flow, id)?.kind !== "agent" ? !run.inflight.size : Math.max(run.inflight.size, run.snapshot.nodes.filter((record) => record.status === "running").length) < (run.snapshot.dagConcurrency ?? 2))) continue
+        if (!run.inflight.size && !run.snapshot.nodes.some((record) => record.status === "running")) {
+          run.snapshot.status = "paused"
+          run.snapshot.summary = "DAG 等待任务验收或明确输入，未派发后续节点"
+          await this.deps.store.saveRun(run.snapshot)
+        }
+        return
+      } while (active())
+    } catch (error) {
+      if (this.runs.get(run.snapshot.id) === run && !run.controller.signal.aborted) {
+        // An uncommitted completion/pause cannot masquerade as a durable terminal state.
+        run.snapshot.status = "running"
+        await this.terminateRun(run, { status: "failed", summary: `DAG 调度或持久化失败：${failureOf(error, "run_finish", "WF_DAG_SCHEDULER_FAILED", this.now()).message}` })
+      } else this.log().warn(`DAG 已取消；调度或持久化失败：${failureOf(error, "run_finish", "WF_DAG_SCHEDULER_FAILED", this.now()).message}`)
+    } finally { dispatching.delete(DAG_DISPATCH); dispatching.delete(DAG_RESCHEDULE) }
+  }
   // ---- wf_run_node ----------------------------------------------------------
 
   /** 校验调用者为「当前会话根 Agent」并取可直接执行节点的激活运行（必要时自动续跑）。 */
@@ -30,6 +336,7 @@ export class RuntimeExecute extends RuntimeLaunch {
     if (caller.isChild) throw new WfError(`子代理无法调用 ${toolName}（仅当前会话主 Agent 可调度编排）`, 'WF_NOT_ROOT')
     const sessionId = caller.sessionId
     if (!sessionId) throw new WfError('无法识别调用者会话', 'WF_BAD_CALLER')
+    if (this.activeRunForSession(sessionId)?.snapshot.executionMode === "dag") throw new WfError("DAG 由 Runtime 自动调度；请使用工作台停止、绑定或恢复，动态编排请选择 agent 模式", "WF_DAG_MANAGED")
     // 运行锁降权（用户裁决）：本会话存在暂停/已停止/已中断的断点时不报错，
     // 而是自动续跑接管（等价用户在工作台点「运行」）——「继续」由父代理按语义触发。
     const run = await this.ensureActiveRun(sessionId)
@@ -38,6 +345,7 @@ export class RuntimeExecute extends RuntimeLaunch {
       // 此时插件拿不到任何 workflow 实例依据（无断点即无 flowId），只能给出可行动提示。
       throw new WfError('当前没有正在运行的工作流编排，也没有可恢复的断点（请先在画布点击「运行」）', 'WF_NO_ACTIVE_RUN')
     }
+    if (run.snapshot.executionMode === "dag") throw new WfError("DAG 由 Runtime 自动调度，不能通过父代理派发节点", "WF_DAG_MANAGED")
     if (run.snapshot.status !== 'running') {
       // 自动续跑未能生效（例如工作流已不完整）——给出终态文案，不静默
       throw new WfError(`该工作流已${statusText(run.snapshot.status)}，无法继续执行`, 'WF_STOPPED')
@@ -121,10 +429,17 @@ export class RuntimeExecute extends RuntimeLaunch {
     if (node.kind !== 'agent') {
       throw new WfError(`wf_run_node 只接受角色(agent)节点；「${labelOf(node)}」类型为 ${node.kind}`, 'WF_NODE_KIND')
     }
-    const dispatching = run.dispatching ??= new Set<string>()
+    return await this.dispatchAgentNode(run, flow, node, args, callerSignal)
+  }
+
+  private async dispatchAgentNode(run: RunEntry, flow: WorkflowDocument, node: RoleNode, args: RunNodeArgs, callerSignal?: AbortSignal): Promise<RunNodeResult> {
+    const dispatching = run.dispatching ??= new Set<string | symbol>()
     if (dispatching.has(node.id)) throw new WfError(`节点「${labelOf(node)}」正在派发任务`, "WF_BUSY")
     dispatching.add(node.id)
-    try { return await this.runAgentNode(run, flow, node, args, callerSignal) } finally { dispatching.delete(node.id) }
+    try {
+      if (run.snapshot.executionMode !== "dag") await this.applyTaskReviews(run, args.reviews)
+      return await this.runAgentNode(run, flow, node, args, callerSignal)
+    } finally { dispatching.delete(node.id) }
   }
 
   private async runAgentNode(run: RunEntry, flow: WorkflowDocument, node: RoleNode, args: RunNodeArgs, callerSignal?: AbortSignal): Promise<RunNodeResult> {
@@ -160,9 +475,20 @@ export class RuntimeExecute extends RuntimeLaunch {
     const effectiveInputs = await effectiveNodeInputs(flow, node, inputSnapshot)
     validateRequiredInputs(node, effectiveInputs)
     const attachments = await nodeInputAttachments(flow, node, effectiveInputs, access, (file, error) => this.log().warn(JSON.stringify({ runId: run.snapshot.id, nodeId: node.id, phase: "node_input", code: error.code, attachmentId: file.attachmentId })))
+    if (current?.taskAcceptance?.status === "pending") throw new WfError("本节点执行已结束，需先通过 reviews 做一次任务验收，不能直接重复派发", "WF_TASK_REVIEW_REQUIRED")
+    if (run.snapshot.executionMode !== "dag" && current?.taskAcceptance?.status === "needs-input" && !attachments.some((file) => !current.attemptHistory?.at(-1)?.inputAttachments?.some((previous) => previous.attachmentId === file.attachmentId))) throw new WfError("本节点待补充输入且没有新的授权附件；请补充输入或以新运行携带绑定重新启动", "WF_TASK_INPUT_REQUIRED")
+    const flowContext = await flowNodeContextOf(flow, node, inputSnapshot, this.deps.config.documentTextLimit, args.flowSources)
     const outputBaseline = await preflightNodeInputs(flow, node, inputSnapshot, this.deps.store.root, await this.deps.authorizedInputFiles?.(run.snapshot.sessionId), Object.values(effectiveInputs).some((values) => values.length))
     assertActive()
+    const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, entry]) => [key, canonical(entry)])) : value
+    const inputSignature = run.snapshot.executionMode === "dag" ? createHash("sha256").update(JSON.stringify(canonical({ inputs: effectiveInputs, attachments, flowContext, fileBindings: inputSnapshot.fileBindings }))).digest("hex") : undefined
+    if (run.snapshot.executionMode === "dag" && current?.taskAcceptance?.status === "needs-input" && inputSignature === current.attemptHistory?.at(-1)?.inputSignature) throw new WfError("输入内容与授权引用没有变化，不能重复执行待输入任务；请以合法新输入恢复或新建运行", "WF_TASK_INPUT_REQUIRED")
     const assertInputsCurrent = (): void => {
+      for (const source of flowContext) {
+        const before = inputSnapshot.nodes.find((record) => record.nodeId === source.nodeId)
+        const after = run.snapshot.nodes.find((record) => record.nodeId === source.nodeId)
+        if (!before || !after || before.attempts !== after.attempts || before.childId !== after.childId || before.status !== after.status || before.output !== after.output || before.taskAcceptance?.status !== after.taskAcceptance?.status) throw new WfError("Flow 上游在预检期间发生变化，请重新调度", "WF_INPUT_UPSTREAM_UNAVAILABLE")
+      }
       for (const value of Object.values(effectiveInputs).flat()) if (value.origin?.source === "node") {
         const previous = inputSnapshot.nodes.find((record) => record.nodeId === value.origin?.nodeId)
         const current = run.snapshot.nodes.find((record) => record.nodeId === value.origin?.nodeId)
@@ -170,7 +496,7 @@ export class RuntimeExecute extends RuntimeLaunch {
       }
     }
     assertInputsCurrent()
-    const blocks = buildNodeBlocks({ flow, node, snapshot: inputSnapshot, effectiveInputs, hasAttachmentContext: attachments.length > 0, documentTextLimit: this.deps.config.documentTextLimit, systemLanguage: this.deps.systemLanguage?.() ?? DEFAULT_SYSTEM_LANGUAGE })
+    const blocks = buildNodeBlocks({ flow, node, snapshot: inputSnapshot, effectiveInputs, flowContext, hasAttachmentContext: attachments.length > 0, documentTextLimit: this.deps.config.documentTextLimit, systemLanguage: this.deps.systemLanguage?.() ?? DEFAULT_SYSTEM_LANGUAGE })
     run.snapshot.fileBindings = inputSnapshot.fileBindings
 
     // 硬护栏：全局调用上限 + 单节点重试上限
@@ -198,8 +524,13 @@ export class RuntimeExecute extends RuntimeLaunch {
 
     setNodeStatus(run.snapshot, resolvedNodeId, 'running', { attempts: attempt, now: this.now(), provider: node.data.provider || run.snapshot.parentRoute?.provider, model: node.data.model || run.snapshot.parentRoute?.model })
     const history = run.snapshot.nodes.find((record) => record.nodeId === resolvedNodeId)?.attemptHistory?.at(-1)
+    if (history && run.snapshot.executionMode === "dag") history.inputSignature = inputSignature
     if (history && Object.keys(outputBaseline).length) history.outputBaseline = outputBaseline
     if (history && attachments.length) history.inputAttachments = attachments
+    if (history && (run.snapshot.executionMode === "dag" || usesHarnessContext(flow, node, inputSnapshot))) {
+      history.taskReviewRequired = true
+      history.flowSources = flowContext.map(({ nodeId, runId, attempt, childId }) => ({ nodeId, runId, attempt, childId }))
+    }
     this.log().info(JSON.stringify({ runId: run.snapshot.id, nodeId: resolvedNodeId, attempt, phase: "child_start", status: "requested", provider: node.data.provider, model: node.data.model }))
     await this.persistWarn(run)
 
@@ -220,6 +551,11 @@ export class RuntimeExecute extends RuntimeLaunch {
       assertActive()
       assertInputsCurrent()
       const { childId, replacedChildId } = await this.deps.runner.startNodeTask({
+        ...(run.snapshot.executionMode === "dag" ? { onChildProvisioning: (id: string): void => {
+          assertActive()
+          this.childIndex.set(id, { sessionId: run.snapshot.sessionId, flowId: run.snapshot.flowId, nodeId: resolvedNodeId, runId: run.snapshot.id, attempt, executionMode: "dag" })
+          setNodeStatus(run.snapshot, resolvedNodeId, "running", { childId: id, now: this.now() })
+        } } : {}),
         runId: run.snapshot.id,
         attempt,
         sessionId: run.snapshot.sessionId,
@@ -248,16 +584,18 @@ export class RuntimeExecute extends RuntimeLaunch {
       }
       setNodeStatus(run.snapshot, resolvedNodeId, "running", { childId, now: this.now() })
       run.inflight.add(childId)
-      this.childIndex.set(childId, { sessionId: run.snapshot.sessionId, flowId: run.snapshot.flowId, nodeId: resolvedNodeId, runId: run.snapshot.id, attempt, ...(this.childEpochs.has(childId) ? { hostEpochId: this.childEpochs.get(childId) } : {}) })
+      this.childIndex.set(childId, { sessionId: run.snapshot.sessionId, flowId: run.snapshot.flowId, nodeId: resolvedNodeId, runId: run.snapshot.id, attempt, ...(run.snapshot.executionMode === "dag" ? { executionMode: "dag" } : {}), ...(this.childEpochs.has(childId) ? { hostEpochId: this.childEpochs.get(childId) } : {}) })
       this.childByNode.set(resolvedNodeId, childId)
+      if (history) history.deliveryAccepted = true
       this.applyPendingChildRoute(run, resolvedNodeId, childId)
       await this.persistWarn(run)
       this.log().info(JSON.stringify({ runId: run.snapshot.id, nodeId: resolvedNodeId, childId, attempt, phase: "child_execute", status: "started" }))
-      if (!waitRequested) return { nodeId: resolvedNodeId, status: 'started', childId }
+      if (!waitRequested) return { nodeId: resolvedNodeId, status: 'started', childId, ...(run.snapshot.harnessContext ? { runId: run.snapshot.id, attempt } : {}) }
     } catch (error) {
       if (waiter) run.waiters.delete(waitKey)
       if (run.snapshot.status === "running" || run.snapshot.status === "paused") {
         const failure = failureOf(error, "child_start", "WF_CHILD_START_FAILED", this.now())
+        if (history && (error as { accepted?: unknown } | null)?.accepted === false) history.deliveryAccepted = false
         const failedChildId = error instanceof Error && "childId" in error && typeof error.childId === "string" ? error.childId : undefined
         setNodeStatus(run.snapshot, resolvedNodeId, "fail", { attempts: attempt, now: this.now(), failure, childId: failedChildId, stopReason: "start-error", recordTurn: true })
         await this.persistWarn(run)
@@ -455,7 +793,9 @@ export class RuntimeExecute extends RuntimeLaunch {
   async wfFinish(caller: CallerInfo, args: FinishArgs): Promise<FinishResult> {
     if (caller.isChild) throw new WfError('子代理无法调用 wf_finish（仅当前会话主 Agent 可收尾编排）', 'WF_NOT_ROOT')
     const sessionId = caller.sessionId
+    if (sessionId && this.activeRunForSession(sessionId)?.snapshot.executionMode === "dag") throw new WfError("DAG 由 Runtime 自动结束；停止或恢复请使用工作台", "WF_DAG_MANAGED")
     const run = sessionId ? await this.ensureActiveRun(sessionId) : null
+    if (run?.snapshot.executionMode === "dag") throw new WfError("DAG 由 Runtime 自动结束", "WF_DAG_MANAGED")
     // 执行者模式：wf_finish 同样视为父代理自身任务完成（无后续调度、直接收尾的流程）
     if (run) this.markParentExecutorDone(run)
     // 已停止/已完成的幂等：允许对已终止的同会话运行静默返回。
@@ -474,7 +814,9 @@ export class RuntimeExecute extends RuntimeLaunch {
       throw new WfError('当前没有正在运行的工作流编排', 'WF_NO_ACTIVE_RUN')
     }
     const snapshot = run.snapshot
+    await this.applyTaskReviews(run, args?.reviews)
     if (snapshot.status !== 'running') return { ok: true, runId: snapshot.id, status: snapshot.status, idempotent: true }
+    if (this.runs.get(snapshot.id) !== run || run.controller.signal.aborted) throw new WfError("验收期间运行已停止或被恢复替代", "WF_CANCELLED")
     const flow = await this.currentResolvedFlow(run)
     if (snapshot.status !== "running") return { ok: true, runId: snapshot.id, status: snapshot.status, idempotent: true }
     if (args?.status !== "failed" && snapshot.nodes.some((record) => record.status === "running")) {
@@ -484,6 +826,11 @@ export class RuntimeExecute extends RuntimeLaunch {
     const records = new Map(snapshot.nodes.map((record) => [record.nodeId, record]))
     const idOf = (id: string) => mainNodeIdOf(flow, id) ?? id
     const settled = (id: string) => ["ok", "react-capped", "armed"].includes(records.get(idOf(id))?.status ?? "")
+    if (args?.status !== "failed" && snapshot.nodes.some((node) => {
+      if (!node.taskAcceptance || node.taskAcceptance.status === "accepted") return false
+      const recovered = node.taskAcceptance.status !== "pending" && lines.some((line) => idOf(line.source) === node.nodeId && line.condition && line.condition.type !== "pass" && settled(line.target) && records.get(idOf(line.target))?.taskAcceptance?.status === "accepted")
+      return !recovered
+    })) throw new WfError("仍有节点待任务验收或待输入；请通过 reviews 做一次明确判断，或失败收尾", "WF_TASK_REVIEW_REQUIRED")
     const selected = new Set(snapshot.nodes.filter((record) => record.attempts > 0 || settled(record.nodeId)).map((record) => record.nodeId))
     // 无执行次数的 pause/group 等结构节点也可能承载已选择的业务路径。
     for (const id of selected) for (const line of lines) if (!line.condition && idOf(line.target) === id) selected.add(idOf(line.source))
@@ -503,6 +850,8 @@ export class RuntimeExecute extends RuntimeLaunch {
         const target = nodeById(flow, idOf(line.target))
         if (!target || !["agent", "parent", "group"].includes(target.kind)) return false
         const source = nodeById(flow, idOf(line.source))
+        const flowSources = records.get(idOf(line.target))?.attemptHistory?.at(-1)?.flowSources
+        if (source && flowSources && !flowSources.some((entry) => entry.nodeId === source.id) && conditionalRoute(flow, source.id)) return false
         return source && ["agent", "parent", "group", "pause"].includes(source.kind) && !settled(line.source)
       })
       if (missing.length) throw new WfError(`已完成节点的必需前驱尚未完成：${missing.map((line) => line.source).join(", ")}`, "WF_RUN_INCOMPLETE")

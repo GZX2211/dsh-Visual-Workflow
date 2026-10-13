@@ -2,7 +2,7 @@ import type { WorkflowDocument } from '../shared/graph-model.js';
 import type { RunSnapshot, RunStatus } from '../shared/types.js';
 import { type ResumeResult } from './resume.js';
 import { type ExecutorContextFacts } from '../prompts/index.js';
-import type { MilestoneMarkResult, MilestoneRunFacts, OrchestratorDeps, RunEntry } from './run-entry.js';
+import type { MilestoneMarkResult, MilestoneRunFacts, OrchestratorDeps, RunEntry, TerminateOptions } from './run-entry.js';
 import { type ChildMeta, type FlowLockInfo, type OrchestratorLogger, type RootAgentLike, type TurnEndInfo } from './seams.js';
 export declare abstract class RuntimeBase {
     protected readonly deps: OrchestratorDeps;
@@ -16,6 +16,9 @@ export declare abstract class RuntimeBase {
         flowId: string;
         fromRunId?: string;
     }): Promise<ResumeResult>;
+    abstract terminateRun(entry: RunEntry, options: TerminateOptions): Promise<boolean>;
+    protected abstract advanceDag(entry: RunEntry): Promise<void>;
+    protected abstract reviewDagNode(entry: RunEntry, nodeId: string): Promise<void>;
     /** 全部 run（含已终止的历史内存条目；持久化历史另见 store.listRuns）。 */
     readonly runs: Map<string, RunEntry>;
     /** childId → 运行位置反查（subagent/end 观察回写用）。 */
@@ -44,6 +47,24 @@ export declare abstract class RuntimeBase {
     protected disposed: boolean;
     constructor(deps: OrchestratorDeps);
     protected log(): OrchestratorLogger;
+    /** Log the official canonical tool outcome without arguments, contents or another counter database. */
+    recordToolResult(exec: {
+        agent?: {
+            id?: unknown;
+        };
+        name?: unknown;
+        callId?: unknown;
+        rootCallId?: unknown;
+    }, result: {
+        isError?: unknown;
+        error?: {
+            info?: {
+                code?: unknown;
+            };
+        };
+    }): void;
+    /** A parent decision is immutable within one settled attempt; replay is idempotent. */
+    protected applyTaskReviews(entry: RunEntry, raw: unknown): Promise<void>;
     recordModelRoute(agentId: string, route: unknown, options?: {
         pendingChild?: boolean;
     }): Promise<void>;

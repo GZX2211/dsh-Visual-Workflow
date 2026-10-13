@@ -197,7 +197,7 @@ describe('e2e：编排运行全链路与双向同步', () => {
     const flow = (await h.api.handle('getWorkflow', { sessionId: 'session-1', id: 'flow-1' })) as WorkflowDocument
 
     // 1. 启动（API 层）→ 编排指令注入根 Agent（消息 id/source 齐备）
-    const started = (await h.api.handle('run', { sessionId: 'session-1', flowId: flow.id })) as { runId: string; defPath: string }
+    const started = (await h.api.handle('run', { sessionId: 'session-1', flowId: flow.id, handoffPolicy: 'explicit' })) as { runId: string; defPath: string }
     expect(started.runId).toBeTruthy()
     const directive = h.root.messages[0]?.content
     const directiveText = (directive as Array<{ text?: string }>)?.map((m) => m.text ?? '').join('') ?? ''
@@ -240,7 +240,7 @@ describe('e2e：编排运行全链路与双向同步', () => {
       lines: [...flow.lines, { id: 'l3', source: 'n-a1', target: 'n-a2', sourceHandle: 'flow-out', targetHandle: 'flow-in' }],
     }
     await h.store.saveWorkflow(updated, 'session-1', { force: true })
-    const started2 = (await h.api.handle('run', { sessionId: 'session-1', flowId: flow.id })) as { runId: string }
+    const started2 = (await h.api.handle('run', { sessionId: 'session-1', flowId: flow.id, handoffPolicy: 'explicit' })) as { runId: string }
     const second = await h.runtime.wfRunNode({ isChild: false, sessionId: 'session-1' }, { nodeId: 'n-a2' })
     expect(second.status).toBe('started')
     expect(h.runner.calls[1]?.node.id).toBe('n-a2')
@@ -254,7 +254,7 @@ describe('e2e：暂停门与断点续跑', () => {
     const flow = makeFlow(true)
     await saveFlow(h, flow)
 
-    const started = (await h.api.handle('run', { sessionId: 'session-1', flowId: flow.id })) as { runId: string }
+    const started = (await h.api.handle('run', { sessionId: 'session-1', flowId: flow.id, handoffPolicy: 'explicit' })) as { runId: string }
     // 执行 a1 后触碰暂停门
     await runNodeAndFinish(h, 'n-a1')
     const paused = (await h.runtime.wfRunNode({ isChild: false, sessionId: 'session-1' }, { nodeId: 'n-pause' })) as { status: string }
@@ -297,7 +297,7 @@ describe('e2e：wf_ask_agent 越权拒绝与通信闭环', () => {
       nodes: [stage('n-start', 'start'), agent('n-a1', 'A'), agent('n-a2', 'B'), stage('n-end', 'end')],
     }
     await saveFlow(h, flow)
-    await h.api.handle('run', { sessionId: 'session-1', flowId: flow.id })
+    await h.api.handle('run', { sessionId: 'session-1', flowId: flow.id, handoffPolicy: 'explicit' })
 
     // 注册两个节点子代理（childIndex 登记）
     const r1 = (await h.runtime.wfRunNode({ isChild: false, sessionId: 'session-1' }, { nodeId: 'n-a1' })) as { childId: string }

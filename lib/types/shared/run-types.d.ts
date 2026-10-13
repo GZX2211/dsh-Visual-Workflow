@@ -1,5 +1,6 @@
 import type { RuntimeInputs, HandoffPolicy, NodeInputAttachment } from "./runtime-types.js";
 import type { OrgMeta } from './org-meta.js';
+import type { ExecutionMode } from "./graph-model.js";
 /** run 运行状态：运行/暂停/完成/失败/停止/中断（架构文档 §4.3 状态机 + §6.1）。 */
 export type RunStatus = 'running' | 'paused' | 'completed' | 'failed' | 'stopped' | 'interrupted';
 /** 单节点运行状态（架构文档 §6.1 nodes[].status）。 */
@@ -10,6 +11,19 @@ export type NodeRunStatus = 'pending' | 'running' | 'armed' | 'ok' | 'fail' | 's
  * 自旧 run 并标记来源，经 resumedFromRunId 追溯继承链（需求文档 §4.7 规则 2）。
  */
 export interface RunSnapshot {
+    /** 查询视图，由冻结图与快照计算；不作为持久化状态源。 */
+    dagState?: {
+        ready: string[];
+        blocked: Record<string, {
+            reason: "dependency" | "task-review" | "needs-input" | "paused" | "stopped" | "capacity";
+            nodeIds: string[];
+        }>;
+    };
+    /** 创建时冻结；没有字段的历史快照继续使用 Agent 编排。 */
+    executionMode?: ExecutionMode;
+    dagConcurrency?: number;
+    /** 不可变图事实源身份，断点恢复沿用最初运行的定义。 */
+    dagDefinitionRunId?: string;
     /** run 稳定标识（runId）。 */
     id: string;
     /** 关联工作流 id（flowId）。 */
@@ -45,6 +59,8 @@ export interface RunSnapshot {
     fileBindings?: Record<string, string[]>;
     runtimeInputs?: RuntimeInputs;
     handoffPolicy?: HandoffPolicy;
+    /** 新运行的默认 Harness 上下文语义；缺省的旧快照保留原交接/结算规则。 */
+    harnessContext?: true;
     inputRevision?: number;
     workflowInputNodeId?: string;
     /**
@@ -85,6 +101,7 @@ export interface RunSnapshot {
         model?: string;
         failure?: RunFailure;
         attemptHistory?: NodeAttempt[];
+        taskAcceptance?: TaskAcceptance;
         artifacts?: Array<{
             path: string;
             size: number;
@@ -138,6 +155,16 @@ export interface RunFailure {
     occurredAt: string;
 }
 export interface NodeAttempt {
+    inputSignature?: string;
+    deliveryAccepted?: boolean;
+    toolResults?: Array<{
+        tool: string;
+        callId?: string;
+        isError: boolean;
+        errorCode?: string;
+    }>;
+    /** 当前尝试唯一一次接纳的条件路由，使用冻结图的连线 ID。 */
+    dagRoutes?: string[];
     runId?: string;
     attempt: number;
     phase: "child_start" | "child_execute" | "settled";
@@ -153,6 +180,39 @@ export interface NodeAttempt {
     outputBaseline?: Record<string, string | null>;
     /** 本次任务准备交付的授权引用；childId/phase 记录接纳，不代表模型已读取。 */
     inputAttachments?: NodeInputAttachment[];
+    taskAcceptance?: TaskAcceptance;
+    /** 派发时冻结验收要求，画布调整不重新解释已经启动的任务。 */
+    taskReviewRequired?: true;
+    flowSources?: Array<{
+        nodeId: string;
+        runId: string;
+        attempt: number;
+        childId?: string;
+    }>;
+}
+/** 执行结束与父代理对节点任务的有界验收分开记录，不声称机器证明业务正确。 */
+export interface TaskAcceptance {
+    status: "pending" | "accepted" | "needs-input" | "failed";
+    reason?: string;
+    reviewedAt?: string;
+    source?: "contract" | "harness" | "runtime";
+    origin?: {
+        runId: string;
+        nodeId: string;
+        attempt: number;
+        childId: string;
+        definitionRunId: string;
+    };
+    review?: {
+        runId: string;
+        state: "requested" | "running" | "settling" | "finished" | "blocked";
+        startedAt: string;
+        endedAt?: string;
+        childId?: string;
+        errorCode?: string;
+        timeoutMs: number;
+        modelCallLimit: 1;
+    };
 }
 export interface RunTermination {
     source: "parent_error" | "parent_finish" | "user_stop" | "idle_timeout" | "execution_timeout" | "host_restart" | "runtime";

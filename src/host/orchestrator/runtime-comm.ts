@@ -23,7 +23,7 @@ import type { RunEntry } from './run-entry.js'
 import { type CallerInfo, type ChildMeta } from './seams.js'
 import { RuntimeExecute } from './runtime-execute.js'
 
-export class RuntimeComm extends RuntimeExecute {
+export abstract class RuntimeComm extends RuntimeExecute {
   // ---- wf_ask_agent ----------------------------------------------------------
 
   /** 校验调用者会话存在运行且 running（ask/reply 共用；子代理不在此拒绝）。 */

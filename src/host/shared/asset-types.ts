@@ -12,7 +12,7 @@
 // 纯度契约（见 ./AGENTS.md）：本文件只允许 `import type`，不得引入运行时 import，
 // 也不得定义运行时值。
 
-import type { GraphNode, Line, WorkflowMode } from './graph-model.js'
+import type { GraphNode, Line, WorkflowMode, WorkflowExecutionOptions } from './graph-model.js'
 import type { OrgMeta } from './org-meta.js'
 
 /** 资产种类：工作流资产 / 角色资产（V1 只此两类）。 */
@@ -158,7 +158,7 @@ export interface RoleAssetDetail {
 }
 
 /** 工作流资产详情（Active 版本；nodes 已按固定版本把角色节点字段 join 回填）。 */
-export interface WorkflowAssetDetail {
+export interface WorkflowAssetDetail extends WorkflowExecutionOptions {
   assetId: string
   versionId: number
   rowId: string

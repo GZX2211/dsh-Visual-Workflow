@@ -6,6 +6,14 @@ export function parseExecutionContract(raw: unknown): { value?: NodeExecutionCon
   if (typeof raw !== 'object' || Array.isArray(raw)) return { issue: 'execution 必须是对象' }
   const data = raw as Record<string, unknown>
   const value: NodeExecutionContract = {}
+  if (data.completion !== undefined) {
+    if (data.completion !== "output-files" || !Array.isArray(data.outputFiles) || !data.outputFiles.length) return { issue: "completion=output-files 必须声明非空 outputFiles" }
+    value.completion = "output-files"
+  }
+  if (data.retrySafe !== undefined) {
+    if (typeof data.retrySafe !== "boolean") return { issue: "retrySafe 必须为布尔值" }
+    value.retrySafe = data.retrySafe
+  }
   if (data.inputSource !== undefined) {
     if (data.inputSource !== 'ctx' && data.inputSource !== 'workspace' && data.inputSource !== 'runtime') return { issue: 'inputSource 必须为 ctx/workspace/runtime' }
     value.inputSource = data.inputSource

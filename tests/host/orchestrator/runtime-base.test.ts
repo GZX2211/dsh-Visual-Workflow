@@ -12,6 +12,23 @@ import { stage, agent, fileNode, parentNode, makeFlow, FakeRoot, type Harness, m
 // 临时目录：makeHarness 登记，文件结束统一清理
 afterEach(cleanupTempDirs)
 
+it("test_official_tool_result_observation_is_scoped_and_does_not_log_arguments_or_change_budget", async () => {
+  const messages: string[] = []
+  const h = await makeHarness(undefined, { logger: { info: (message) => messages.push(message), warn: () => {}, debug: () => {} } })
+  const { entry } = await start(h, makeFlow())
+  const first = await h.runtime.wfRunNode(caller, { nodeId: "n-a1" })
+  const before = entry.callCount
+  h.runtime.recordToolResult({ agent: { id: "session-1" }, name: "wf_run_node", callId: "parent-fail" }, { isError: true, error: { info: { code: "WF_BAD_ARGS" } } })
+  h.runtime.recordToolResult(Object.assign({ agent: { id: first.childId }, name: "read", callId: "read-1", rootCallId: "outer-1" }, { arguments: { sensitive: "FILE_CONTENT_MUST_NOT_BE_LOGGED" } }), { isError: false })
+  h.runtime.recordToolResult({ agent: { id: "other-session" }, name: "read", callId: "foreign" }, { isError: false })
+  await h.runtime.handleSubagentEnd({ id: first.childId, stopReason: "completed" })
+  h.runtime.recordToolResult({ agent: { id: first.childId }, name: "read", callId: "late" }, { isError: false })
+  const results = messages.map((message) => { try { return JSON.parse(message) } catch { return {} } }).filter((message) => message.phase === "tool_result")
+  expect(results).toMatchObject([{ role: "parent", isError: true, errorCode: "WF_BAD_ARGS" }, { role: "child", childId: first.childId, attempt: 1, tool: "read", callId: "read-1", rootCallId: "outer-1", isError: false }])
+  expect(JSON.stringify(results)).not.toContain("FILE_CONTENT_MUST_NOT_BE_LOGGED")
+  expect(entry.callCount).toBe(before)
+})
+
 describe('运行上下文自动接续（运行锁降权）', () => {
   it('磁盘 stopped 断点：wfRunNode 自动续跑接管（无需工作台点运行）', async () => {
     const h = await makeHarness()

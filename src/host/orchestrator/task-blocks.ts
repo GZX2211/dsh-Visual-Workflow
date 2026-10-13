@@ -78,6 +78,7 @@ export function buildNodeBlocks(input: {
    * 缺省 legacy，保持未启用官方团队时的文案与行为。
    */
   effectiveInputs?: import("../shared/runtime-types.js").InputSlots
+  flowContext?: import("../shared/runtime-types.js").FlowInputContext[]
   hasAttachmentContext?: boolean
   collabChannel?: CollabChannel
 }): Array<{ type: 'text'; text: string }> {
@@ -101,6 +102,7 @@ export function buildNodeBlocks(input: {
       nodeLabel: data.label || node.id,
       upstreamContext,
       runtimeInputs: input.effectiveInputs,
+      flowContext: input.flowContext,
       hasAttachmentContext: input.hasAttachmentContext,
       handoffPolicy: input.snapshot.handoffPolicy,
       filePaths,

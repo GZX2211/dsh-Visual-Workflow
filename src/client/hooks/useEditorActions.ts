@@ -131,6 +131,8 @@ function workflowAssetPayload(state: StudioState, detail: WorkflowAssetDetail): 
       id: detail.assetId,
       sessionId: state.sessionId,
       mode: detail.mode,
+      ...(detail.executionMode ? { executionMode: detail.executionMode } : {}),
+      ...(detail.dagConcurrency !== undefined ? { dagConcurrency: detail.dagConcurrency } : {}),
       name: detail.name,
       description: detail.description,
       nodes: detail.nodes,
@@ -141,6 +143,8 @@ function workflowAssetPayload(state: StudioState, detail: WorkflowAssetDetail): 
   )
   return {
     mode: detail.mode,
+    ...(detail.executionMode ? { executionMode: detail.executionMode } : {}),
+    ...(detail.dagConcurrency !== undefined ? { dagConcurrency: detail.dagConcurrency } : {}),
     name: detail.name,
     description: detail.description,
     nodes: serialized.nodes,

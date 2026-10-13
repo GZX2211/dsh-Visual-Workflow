@@ -35,7 +35,7 @@ export interface RunEntry {
   /** wf_run_node 总调用数（全局硬护栏）。 */
   callCount: number
   /** 同一节点的派发窗口去重；finally 撤销，不进入持久化快照。 */
-  dispatching?: Set<string>
+  dispatching?: Set<string | symbol>
   inputBindingDone?: Promise<void>
   /** 最近活动时间戳（空闲看护基准）。 */
   lastActiveAt: number
@@ -78,6 +78,8 @@ export function createWaiter(): Waiter {
 
 /** wf_run_node 入参（工具参数经 schema 校验后传入；未知字段宽松处理）。 */
 export interface RunNodeArgs {
+  reviews?: unknown
+  flowSources?: unknown
   nodeId?: unknown
   wait?: unknown
   thinking?: unknown
@@ -87,6 +89,9 @@ export interface RunNodeArgs {
 
 /** wf_run_node 返回（三条路径：started 异步 / paused 暂停门 / ok|fail wait 阻塞）。 */
 export interface RunNodeResult {
+  taskAcceptance?: "pending" | "accepted" | "needs-input" | "failed"
+  runId?: string
+  attempt?: number
   nodeId: string
   status: 'started' | 'paused' | 'ok' | 'fail'
   childId?: string
@@ -174,6 +179,8 @@ export interface MilestoneMarkResult {
 }
 
 export interface StartRunOptions {
+  executionMode?: unknown
+  dagConcurrency?: unknown
   runtimeInputs?: unknown
   handoffPolicy?: unknown
   /** 文件节点 id → 实际输入路径数组；由运行边界校验未知 JSON。 */
@@ -193,6 +200,7 @@ export interface StartRunResult {
 }
 
 export interface FinishArgs {
+  reviews?: unknown
   status?: unknown
   summary?: unknown
 }

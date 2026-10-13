@@ -20,6 +20,7 @@ describe('工作流端点', () => {
     const created = (await h.api.handle('createWorkflow', { sessionId: 'session-1', name: '新流程' })) as WorkflowDocument
     expect(created.id).toBeTruthy()
     expect(created.name).toBe('新流程')
+    expect(created.executionMode).toBe("dag")
 
     const list = (await h.api.handle('listWorkflows', { sessionId: 'session-1' })) as WorkflowDocument[]
     expect(list).toHaveLength(1)

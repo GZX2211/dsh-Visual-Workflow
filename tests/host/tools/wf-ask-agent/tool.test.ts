@@ -263,7 +263,7 @@ const stranger = { id: 'stranger', session: { header: { origin: 'subagent', pare
 /** 保存流程并启动运行；启动 n-a1/n-a2 两个节点子代理并登记在线。 */
 async function start(h: Harness): Promise<void> {
   await h.store.saveWorkflow(makeFlow(), 'session-1', { force: true })
-  await h.runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })
+  await h.runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1', handoffPolicy: 'explicit' })
   const runDef = h.tools.definitions.get(WF_RUN_NODE)!
   await runDef.execute({ nodeId: 'n-a1' }, execOf(rootAgent))
   await runDef.execute({ nodeId: 'n-a2' }, execOf(rootAgent))

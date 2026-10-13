@@ -191,6 +191,7 @@ export class VisualWorkflowHost extends Service {
         documentTextLimit: config.documentTextLimit,
         runIdleTimeoutMs: config.runIdleTimeoutMs,
         runExecutionTimeoutMs: config.runExecutionTimeoutMs,
+        dagReviewTimeoutMs: config.dagReviewTimeoutMs,
         retryLimitDefault: config.retryLimitDefault,
         reactIterationLimitDefault: config.reactIterationLimitDefault,
         wfAskAgentTimeoutMs: config.wfAskAgentTimeoutMs,
@@ -265,12 +266,19 @@ export class VisualWorkflowHost extends Service {
    * 权限贡献失败会阻止创建；可选贡献失败只降级对应能力。
    */
   private installChildScope(childCtx: unknown, agentId: string, agent: unknown): () => void {
+    const hardReview = this.reactGuard.bridge.hasHardLimit?.(agentId) === true
     const contributions: Array<(context: unknown) => () => void> = [
-      this.reactGuard.contribution,
+      ...(hardReview ? [] : [this.reactGuard.contribution]),
       this.modelSelection.contribution,
       this.childPrompt.contribution,
     ]
-    const disposers: Array<() => void> = [this.childToolFilter.restore(agentId, childCtx, agent)]
+    const disposers: Array<() => void> = [this.childToolFilter.restore(agentId, childCtx, agent, hardReview)]
+    if (hardReview) {
+      try { disposers.push(this.reactGuard.contribution(childCtx, true)) } catch (error) {
+        for (const dispose of disposers.reverse()) dispose()
+        throw error
+      }
+    }
     for (const contribution of contributions) {
       try {
         const dispose = contribution(childCtx)
@@ -333,6 +341,7 @@ export class VisualWorkflowHost extends Service {
     ) as { data?: { prompt?: ChildPromptState; allow?: string[] } } | undefined
     const pending = this.childPrompt.peekPending()
     const state = pending ?? this.childPromptStates.get(agentId) ?? persisted?.data?.prompt
+    if (state?.modelCallLimit) this.reactGuard.bridge.setHardLimit?.(agentId, state.modelCallLimit)
     if (!state) return
     const allow = pending ? this.childToolFilter.peekPending?.() : persisted?.data?.allow
     this.dropChildScope(agentId)
@@ -515,6 +524,7 @@ export class VisualWorkflowHost extends Service {
       }
     })
     this.ctx.on('subagent/end', (payload) => this.onSubagentEnd(payload))
+    this.ctx.on("tools/result", (exec, result) => this.orchestrator.recordToolResult(exec, result))
     this.ctx.on('agent/error', (payload) => this.onAgentError(payload))
     this.ctx.on("agent/request", async (payload, next) => {
       const route = await next()

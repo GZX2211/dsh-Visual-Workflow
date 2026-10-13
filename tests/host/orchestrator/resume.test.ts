@@ -68,7 +68,7 @@ const rootCaller: CallerInfo = caller
 /** 构造 paused 断点：a1 完成（ok + 产出）→ 暂停门（paused + resumeFromNodeId）。 */
 async function makePausedRun(h: Harness): Promise<void> {
   await h.store.saveWorkflow(makeFlow(), 'session-1', { force: true })
-  await h.runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })
+  await h.runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1', handoffPolicy: 'explicit' })
   await h.runtime.wfRunNode(rootCaller, { nodeId: 'n-a1' })
   await h.runtime.handleSubagentEnd({ id: 'child-1', stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: 'A 的最终产出' }] })
   await h.runtime.wfRunNode(rootCaller, { nodeId: 'n-pause' })

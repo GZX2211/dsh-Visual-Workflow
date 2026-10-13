@@ -1,5 +1,6 @@
 import type { GraphIssue } from '../../graph/index.js';
 import type { OrgMeta } from '../../shared/types.js';
+import type { WorkflowExecutionOptions } from "../../shared/graph-model.js";
 /** 补丁作用域：template = 工作流模板（规划期改模板）；instance = 工作流/服务实例（运行期改实例）。 */
 export type PatchScope = 'template' | 'instance';
 /**
@@ -14,7 +15,7 @@ export type PatchGroup = 'graph' | 'mark';
  * `scope='template'` + `create` = 新建；不带 create 仍是「必须已存在」的更新语义。
  * 允许出现的组合只有：scope=template 且 op 组为 graph（其余组合一律拒绝）。
  */
-export interface NewTemplateSpec {
+export interface NewTemplateSpec extends WorkflowExecutionOptions {
     /** 模板名称（人类可读，必填）。 */
     name: string;
     /** 模板描述（可选）。 */

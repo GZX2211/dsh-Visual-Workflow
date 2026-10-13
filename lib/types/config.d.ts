@@ -19,6 +19,7 @@ export interface Config {
     runIdleTimeoutMs: number;
     /** 运行执行时限，独立于空闲时限；0 表示关闭执行时限。 */
     runExecutionTimeoutMs?: number;
+    dagReviewTimeoutMs?: number;
     /** 运行状态回显轮询间隔毫秒数。 */
     runPollMs: number;
     /** ReAct 迭代次数默认上限（软截停强制收尾）。 */

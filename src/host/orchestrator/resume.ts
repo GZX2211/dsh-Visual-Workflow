@@ -95,8 +95,13 @@ export function buildResumedSnapshot(input: {
     ? prev.resumeFromNodeId : undefined
   const nodes = (flow.nodes ?? []).map((node) => {
     const prevNode = prevByNode.get(node.id)
-    if (prevNode && (prevNode.status === 'ok' || prevNode.status === 'react-capped')) {
+    if (prevNode && (prevNode.status === 'ok' || prevNode.status === 'react-capped') && (!prevNode.taskAcceptance || prevNode.taskAcceptance.status === "accepted")) {
       return { ...structuredClone(prevNode), resumed: true }
+    }
+    if (prev.executionMode === "dag" && prevNode && ["ok", "react-capped"].includes(prevNode.status) && prevNode.taskAcceptance?.status === "pending" && !prevNode.taskAcceptance.review) return { ...structuredClone(prevNode), resumed: true }
+    if (prev.executionMode === "dag" && prevNode && prevNode.attempts > 0) return {
+      ...structuredClone(prevNode), status: "pending" as const, resumed: false, childId: undefined,
+      startedAt: null, endedAt: null, artifacts: undefined,
     }
     return {
       nodeId: node.id,
@@ -124,6 +129,10 @@ export function buildResumedSnapshot(input: {
     checkpointNodeId,
     resumeNodeIds,
     nodes,
+    ...(prev.executionMode ? { executionMode: prev.executionMode } : {}),
+    ...(prev.dagConcurrency !== undefined ? { dagConcurrency: prev.dagConcurrency } : {}),
+    ...(prev.dagDefinitionRunId ? { dagDefinitionRunId: prev.dagDefinitionRunId } : {}),
+    ...(prev.harnessContext ? { harnessContext: prev.harnessContext } : {}),
     ...(prev.milestoneUsed === undefined ? {} : { milestoneUsed: prev.milestoneUsed }),
     // 元参数冻结副本继承（D-13）：续跑沿用旧 run 冻结的预算，不重读模板/实例 meta
     // ——「冻结即冻结」，保证审计与后续评估能还原本次运行当时的约束。

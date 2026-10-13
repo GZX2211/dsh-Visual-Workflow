@@ -26,6 +26,7 @@ import '@deepseek-ai/cordis'
 
 declare module '@deepseek-ai/cordis' {
   interface Events {
+    "tools/result"(exec: { agent?: { id?: unknown }; name?: unknown; callId?: unknown; rootCallId?: unknown }, result: { isError?: unknown; error?: { info?: { code?: unknown } } }): void
     "subagent/start"(payload: { runId?: unknown; provider?: unknown; id?: unknown; local?: unknown }): void
     /** 子代理生命周期结束事件（官方 subagent seam 观察语义，架构文档 §8 #21）。 */
     'subagent/end'(payload: {

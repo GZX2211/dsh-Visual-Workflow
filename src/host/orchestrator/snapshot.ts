@@ -146,6 +146,7 @@ export function setNodeStatus(snapshot: RunSnapshot, nodeId: string, status: Nod
     delete entry.stopReason
     delete entry.artifacts
     delete entry.childId
+    delete entry.taskAcceptance
     if (options.attempts !== undefined) {
       entry.attemptHistory ??= []
       entry.attemptHistory.push({ runId: snapshot.id, attempt: options.attempts, phase: "child_start", status, startedAt: entry.startedAt })

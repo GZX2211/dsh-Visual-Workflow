@@ -1,6 +1,6 @@
 import type { SubagentEndInfo } from './run-entry.js';
 import { RuntimeComm } from './runtime-comm.js';
-export declare class RuntimeObserve extends RuntimeComm {
+export declare abstract class RuntimeObserve extends RuntimeComm {
     /** 仅接纳宿主已识别的 Workflow child，不把官方 epoch ID 当 Workflow runId。 */
     handleSubagentStart(info: Pick<SubagentEndInfo, "id" | "runId">): void;
     /**

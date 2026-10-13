@@ -139,6 +139,12 @@ export declare const zh: {
     runtimeNoPendingNode: string;
     runtimeNoRequirements: string;
     runtimePolicy: string;
+    runtimeExecutionMode: string;
+    runtimeDag: string;
+    runtimeAgent: string;
+    runtimeConcurrency: string;
+    runtimeFrozenMode: string;
+    runtimeHarness: string;
     runtimeRemove: string;
     runtimeRequirements: string;
     runtimeRevisionChanged: string;
@@ -381,6 +387,11 @@ export declare const zh: {
         fail: string;
         skipped: string;
         'react-capped': string;
+        'task-pending': string;
+        'task-accepted': string;
+        ready: string;
+        'task-needs-input': string;
+        'task-failed': string;
         stopped: string;
         completed: string;
         failed: string;
@@ -391,6 +402,17 @@ export declare const zh: {
     resumedFrom: string;
     resumeFromNode: string;
     runDiagnostic: string;
+    runExecutionState: string;
+    runTaskState: string;
+    runInputSources: string;
+    dagBlocking: {
+        dependency: string;
+        "task-review": string;
+        "needs-input": string;
+        paused: string;
+        stopped: string;
+        capacity: string;
+    };
     runAttempt: string;
     runTermination: string;
     resumeRun: string;

@@ -5,7 +5,10 @@ import type { FlowStore } from '../storage/flow-store.js';
 import type { AgentsServiceLike, SubagentsServiceLike } from './runner.js';
 export declare class CordisAgentHost implements AgentHost {
     private readonly ctx;
+    private readonly dagRoots;
     constructor(ctx: Context);
+    /** Official inject records context without starting an idle turn. Disposal restores both methods. */
+    installDagNotificationGate(sessionId: string, ownsChild: (childId: string) => boolean): boolean;
     /** 解析 agents 服务（缺省/不可用时返回 null，调用方给明确错误）。 */
     private agentsService;
     available(): boolean;
