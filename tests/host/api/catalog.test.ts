@@ -331,7 +331,7 @@ describe('呈现语言（systemLanguage 能力缝）', () => {
 
     const catalog = (await h.api.handle('pluginCatalog', {})) as { items: Array<{ name: string; description: string }> }
     const item = catalog.items.find((entry) => entry.name === 'wf_graph_patch')
-    expect(item?.description).toBe('Rewrite the workflow graph (structure / milestone marking); parent only')
+    expect(item?.description).toBe('Rewrite the workflow graph (structure); parent only')
   })
 })
 

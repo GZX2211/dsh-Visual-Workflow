@@ -337,18 +337,6 @@ g.is-locked .wf-graph__edge-hit {
   cursor: help;
 }
 
-/* 里程碑闸门用实线强调边框（普通虚拟节点是虚线） */
-.wf-node.is-gate {
-  border-style: solid;
-  border-color: var(--wf-brand);
-  box-shadow: 0 0 0 1px var(--wf-brand) inset;
-}
-
-.wf-node__proxy-badge.is-gate {
-  color: var(--wf-brand);
-  border-color: var(--wf-brand);
-}
-
 /* P4：父代理补丁改动的节点角标 */
 .wf-node__agent-badge {
   flex: none;

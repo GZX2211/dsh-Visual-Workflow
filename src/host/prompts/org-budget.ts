@@ -31,7 +31,6 @@ export function buildOrgBudgetText(budget: OrgBudget): string {
   } else {
     lines.push(`- 协作组 ${budget.groupUsed}/${UNLIMITED}；组内人数上限 ${budget.membersMax || UNLIMITED}`)
   }
-  lines.push(`- 父代理闸门 ${budget.milestoneUsed}/${budget.milestoneMax || UNLIMITED}（剩余 ${remaining(budget.milestoneRemaining)}）`)
   lines.push(`- 单轮改图幅度上限 ${budget.patchOpsMax || UNLIMITED} op（剩余 ${remaining(budget.patchOpsRemaining)}）`)
   if (budget.parallelBranchMax > 0) {
     lines.push(`- 单列并行分支上限 ${budget.parallelBranchMax}`)

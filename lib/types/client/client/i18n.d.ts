@@ -228,6 +228,7 @@ export declare const zh: {
     outputSchema: string;
     inputSchemaExample: string;
     outputSchemaExample: string;
+    contractRestoreDefault: string;
     fileKind: string;
     fileContent: string;
     fileUnset: string;
@@ -279,11 +280,6 @@ export declare const zh: {
     proxyReadonlyHint: string;
     proxyLabel: string;
     proxyLabelHint: string;
-    proxyRole: string;
-    proxyRoleExecutor: string;
-    proxyRoleMilestone: string;
-    proxyRoleMilestoneHint: string;
-    proxyGateBadge: string;
     agentPatchedBadge: string;
     line: string;
     lineType: string;

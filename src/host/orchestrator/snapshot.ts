@@ -74,7 +74,7 @@ export function createRunSnapshot(input: {
     endedAt: null,
     summary: '',
     // 注意：保留全量节点执行记录——mode2 输入节点承载用户问题（question 预填产出）、
-    // 阶段节点终态化（pending→skipped）、上游 ctx 传递（start/file/db 产出回填）
+    // 阶段节点终态化（pending→skipped）、上游产出回填（start/file 产出作为下游自动注入的来源）
     // 都依赖快照节点记录；「仅角色节点显示状态」由客户端按节点类型过滤，不在此剔除记录。
     nodes: (input.flow.nodes ?? []).map((node) => ({
       nodeId: node.id,

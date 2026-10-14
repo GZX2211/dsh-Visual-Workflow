@@ -30,8 +30,7 @@ import {
   ruleDataNodeComplete,
   ruleDbTarget,
   ruleGroupMembers,
-  ruleMilestoneProxy,
-  ruleNodeDataFlowContract,
+  ruleParentProxyFlowIn,
   ruleProxySource,
   ruleRoleNodeConfigured,
 } from './invariants-rules-nodes.js'
@@ -62,7 +61,6 @@ function issueKey(issue: GraphIssue): string {
  * @param input.meta   生效元参数；缺省则不约束
  * @param input.origin 变更来源；仅 'agent' 启用元参数硬护栏（D-05）
  * @param input.patchOps 本批改图操作数（P1 wf_graph_patch 传入；与 patchOpsMax 比对）
- * @param input.milestoneUsed 父代理闸门已用次数（不含首次编排，D-21）
  */
 export function checkGraphInvariants(input: CheckGraphInput): GraphIssue[] {
   const dag = buildFlowDag(input.flow?.nodes, input.flow?.lines)
@@ -86,10 +84,9 @@ export function checkGraphInvariants(input: CheckGraphInput): GraphIssue[] {
     ...ruleDataNodeComplete(input),
     ...ruleCtxSource(input),
     ...ruleDbTarget(input),
-    // 数据流契约与角色配置（规划期可见性提醒；warning 级不阻断）
-    ...ruleNodeDataFlowContract(input),
+    // 角色配置与虚拟节点（规划期可见性提醒；warning 级不阻断）
     ...ruleRoleNodeConfigured(input),
-    ...ruleMilestoneProxy(input, dag),
+    ...ruleParentProxyFlowIn(input, dag),
     // 元参数与命名维度
     ...ruleDuplicateRoleLabel(input),
     ...ruleNamingConvention(input),

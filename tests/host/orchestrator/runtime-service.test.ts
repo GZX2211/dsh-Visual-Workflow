@@ -192,9 +192,14 @@ describe('用户问题注入', () => {
     expect(lastDirective(h)).not.toContain('User question')
   })
 
-  it('输入节点右出 ctx 连线：下游子代理任务块注入问题', async () => {
+  it('输入节点是子任务的直接流程前驱：任务块自动注入用户问题（无需手动 ctx 连线）', async () => {
     const h = await makeHarness()
-    await h.store.saveService(toService(serviceFlow('svc-1')), 'session-owner')
+    const flow = serviceFlow('svc-1')
+    // 输入节点直连子任务（流程线）：自动注入语义下不需要 ctx 连线
+    flow.lines = flow.lines.filter((l) => l.id !== 'c1').concat([
+      { id: 'l4', source: 'n-in', target: 'n-a1', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+    ])
+    await h.store.saveService(toService(flow), 'session-owner')
     await h.runtime.startRun({ sessionId: 'session-user-1', flowId: 'svc-1', mode: 'mode2', question: '帮我查资料' })
     await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
     const input = h.runner.calls[0]
@@ -202,10 +207,10 @@ describe('用户问题注入', () => {
     expect(blocksText).toContain('帮我查资料')
   })
 
-  it('无 ctx 连线时不注入问题（未连接不传递）', async () => {
+  it('输入节点不是该子任务的流程前驱：用户问题不注入（且旧 ctx 连线不再生效）', async () => {
     const h = await makeHarness()
     const flow = serviceFlow('svc-1')
-    flow.lines = flow.lines.filter((l) => l.id !== 'c1')
+    // 保留原 ctx 连线（n-in → n-a1）：角色/输入节点的 ctx 交接线已退役，不再注入
     await h.store.saveService(toService(flow), 'session-owner')
     await h.runtime.startRun({ sessionId: 'session-user-1', flowId: 'svc-1', mode: 'mode2', question: '秘密问题' })
     await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })

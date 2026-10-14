@@ -47,9 +47,9 @@
 |---|---|---|
 | `idConvention`（三种 id 形状） | `types.ts` → `ID_CONVENTION` | 工具调用必需（`ids` 参数取值） |
 | `detailHint`（两段式调用/召回指引） | `build.ts` → `DETAIL_HINT` | 工具调用必需（何时省略 ids、何时按 id 召回） |
-| `rules.patchContract` 的**提交规则 / op 字段形状 / 角色节点 data 契约 / 错误码语义** | `graph-op-contract.ts` | 写图必需，且与 `wf_graph_patch` 共用同一常量（单一事实源） |
-| `rules.gateMarking`（闸门标记语义） | `graph-op-contract.ts` | 写图必需（`mark_node` 的时机/目标/预算） |
-| `graphSemantics` 的**节点 kind 枚举、连线语义、连接点矩阵、条件线/DAG/数据节点硬规则、提交前自检** | `org-sop.ts` | 本插件自定义语义，模型猜不出，踩中即整批补丁原子失败 |
+| `rules.patchContract` 的**提交规则 / op 字段形状 / 角色节点 data 契约 / 错误码语义** | `graph-op-contract.ts` | 写图必需，且与 `wf_graph_patch` 共用同一常量（单一事实源）。**后续变更**：`outputSchema` 说明改为「输出契约（产出沿流程线自动注入下游，无需 ctx 连线）」，空值语义为「不配置契约」 |
+| `rules.gateMarking`（闸门标记语义） | `graph-op-contract.ts` | 写图必需（`mark_node` 的时机/目标/预算）。**后续变更**：里程碑闸门机制整体退役，该规则段与槽位已删除 |
+| `graphSemantics` 的**节点 kind 枚举、连线语义、连接点矩阵、条件线/DAG/数据节点硬规则、提交前自检** | `org-sop.ts` | 本插件自定义语义，模型猜不出，踩中即整批补丁原子失败。**后续变更**：节点交接改为沿流程线自动注入，手动 ctx 交接退役（角色 `ctx-out` 停用），连线语义与提交前自检已同步改写 |
 | description 里的 `presetId` 强制、骨架省略 systemPrompt、`flow-*`/`role-*` id 形状 | `wf-org-catalog/tool.ts` | 工具调用/写图必需 |
 
 ### 2.3 本工具已完成的改动（复核期间）
@@ -118,7 +118,7 @@
 |---|---|
 | `ops are grouped … one patch uses one group` | **删除**：`PATCH_SUBMISSION_RULES` 第 1 条逐概念等价承载 |
 | `The patch is atomic … its own code` | **删除**：第 2 条是其**超集**（多出 in order / resubmit），且 `ops` 参数描述已含「one group」 |
-| `mark group: mark_node completes the CURRENT milestone gate only (a proxy-driven gate with data.role=milestone)` | **部分删除**：删掉被契约承载的复述部分，**保留调用相位提示** `mark group: use mark_node only to complete the current gate of this turn.`——整仓无第二处定义「什么是闸门」，而「何时可用 mark group」属 §1.2 准入内容 |
+| `mark group: mark_node completes the CURRENT milestone gate only (a proxy-driven gate with data.role=milestone)` | **部分删除**：删掉被契约承载的复述部分，**保留调用相位提示** `mark group: use mark_node only to complete the current gate of this turn.`——整仓无第二处定义「什么是闸门」，而「何时可用 mark group」属 §1.2 准入内容（**后续变更**：里程碑闸门机制整体退役，该相位提示与 `mark group` 已一并删除） |
 | 新建模板的返回字段说明 | 删去 `newTemplate=true and the new targetId are returned` 半句（由 `output.schema` 承载），主句保留 |
 | 批次级错误码选择规则 | **已补入** `ERROR_CODE_SEMANTICS`：`WF_BAD_ARGS` only when every failure is an argument-layer error, `WF_GRAPH_INVALID` as soon as any failure is a graph-semantics error。与实现（`tool.ts` 的 `errors.every(...)` 取码）核对**一致**，并有行为用例锁定 |
 

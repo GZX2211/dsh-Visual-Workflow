@@ -1,9 +1,7 @@
 // tests/host/graph/model.test.ts
 //
 // 图模型运行时测试（原 tests/host/graph-model.test.ts 拆分）：
-//   - 连接点兼容矩阵与拓扑查询助手（入口解析、出/入边、流程线判定、虚拟节点、协作组成员）；
-//   - 虚拟节点角色与闸门语义（P3 里程碑闸门判定与标记目标归一化，
-//     原 tests/host/milestone-gate.test.ts 的纯函数段按镜像规则并入）。
+//   - 连接点兼容矩阵与拓扑查询助手（入口解析、出/入边、流程线判定、虚拟节点、协作组成员）。
 // 校验与归一化（validate.ts）见 ./validate.test.ts；元参数见 ./org-meta.test.ts。
 // 断言依据：架构文档 §4.2 + 需求文档 §4.2/§4.3/§4.2.5。
 
@@ -15,7 +13,7 @@ import {
   HANDLE_PAIRING,
   NODE_HANDLES,
   NODE_KINDS,
-  activeMilestoneGateOf,
+  autoContextSourceIds,
   ctxInEdges,
   dbInEdges,
   entryNodes,
@@ -23,8 +21,6 @@ import {
   flowInEdges,
   isFlowLine,
   isGroupMember,
-  mainNodeIdOf,
-  milestoneProxiesOf,
   newDatabaseNode,
   newFileNode,
   newGroupNode,
@@ -36,11 +32,9 @@ import {
   nodeParticipatesInFlow,
   pairingTargetOf,
   proxiesOf,
-  proxyRoleOf,
-  stageLabel,
-  upstreamCtxNodeIds,
 } from '../../../src/host/graph/index.js'
-import type { GraphNode, Handle, Line, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
+import type { Handle } from '../../../src/host/shared/graph-model.js'
+import { DEFAULT_OUTPUT_CONTRACT_TEXT } from '../../../src/host/shared/protocol.js'
 import { makeFlow } from './fixtures/flow-fixture.js'
 
 describe('连接点兼容矩阵（NODE_HANDLES）', () => {
@@ -59,7 +53,7 @@ describe('连接点兼容矩阵（NODE_HANDLES）', () => {
 })
 
 describe('拓扑助手（连线查询）', () => {
-  it('flowOutEdges/ctxInEdges/dbInEdges/upstreamCtxNodeIds 正确', () => {
+  it('flowOutEdges/ctxInEdges/dbInEdges 正确', () => {
     const a = newRoleNode('agent', 'a')
     const b = newRoleNode('agent', 'b')
     const c = newRoleNode('agent', 'c')
@@ -75,12 +69,111 @@ describe('拓扑助手（连线查询）', () => {
     expect(flowOutEdges(flow, a.id).map((l) => l.target)).toEqual([b.id])
     expect(ctxInEdges(flow, c.id).map((l) => l.source).sort()).toEqual([a.id, f.id].sort())
     expect(dbInEdges(flow, c.id).map((l) => l.source)).toEqual([db.id])
-    expect(upstreamCtxNodeIds(flow, c.id).sort()).toEqual([a.id, f.id].sort())
   })
 })
 
-describe('入口解析与节点归属判定', () => {
-  it('entryNodes：start 即显式入口；缺失时为空（§4.2 入口解析）', () => {
+// ---------------------------------------------------------------------------
+// 自动上下文来源枚举（autoContextSourceIds）
+// ---------------------------------------------------------------------------
+// 语义：下游节点自动接收**直接流程前驱**的最终产出；无产出的阶段节点（pause）被跳过；
+// 协作组与上下游解耦（不作来源也不回溯）；虚拟节点流程线归属主节点。
+
+describe('自动上下文来源枚举（autoContextSourceIds）', () => {
+  it('无流程入边：返回空（含组内成员这类没有流程线的节点）', () => {
+    const a = newRoleNode('agent', 'a')
+    expect(autoContextSourceIds(makeFlow([a]), a.id)).toEqual([])
+  })
+
+  it('单前驱：返回直接流程前驱（角色节点之间的 ctx 连线不算流程前驱）', () => {
+    const a = newRoleNode('agent', 'a')
+    const b = newRoleNode('agent', 'b')
+    const flow = makeFlow([a, b], [newLine(a.id, b.id, 'flow-out', 'flow-in'), newLine(a.id, b.id, 'ctx-out', 'ctx-in')])
+    expect(autoContextSourceIds(flow, b.id)).toEqual([a.id])
+  })
+
+  it('多前驱：按流程线声明顺序返回（保序）', () => {
+    const a1 = newRoleNode('agent', 'a1')
+    const a2 = newRoleNode('agent', 'a2')
+    const a3 = newRoleNode('agent', 'a3')
+    const b = newRoleNode('agent', 'b')
+    const flow = makeFlow(
+      [a1, a2, a3, b],
+      [
+        newLine(a2.id, b.id, 'flow-out', 'flow-in'),
+        newLine(a1.id, b.id, 'flow-out', 'flow-in'),
+        newLine(a3.id, b.id, 'flow-out', 'flow-in'),
+      ],
+    )
+    expect(autoContextSourceIds(flow, b.id)).toEqual([a2.id, a1.id, a3.id])
+  })
+
+  it('重复流程线（同源同目标）：去重', () => {
+    const a = newRoleNode('agent', 'a')
+    const b = newRoleNode('agent', 'b')
+    const flow = makeFlow([a, b], [newLine(a.id, b.id, 'flow-out', 'flow-in'), newLine(a.id, b.id, 'flow-out', 'flow-in')])
+    expect(autoContextSourceIds(flow, b.id)).toEqual([a.id])
+  })
+
+  it('暂停节点无产出：跳过它继续向前找', () => {
+    const a = newRoleNode('agent', 'a')
+    const p = newStageNode('pause', 'mode1')
+    const b = newRoleNode('agent', 'b')
+    const flow = makeFlow([a, p, b], [newLine(a.id, p.id, 'flow-out', 'flow-in'), newLine(p.id, b.id, 'flow-out', 'flow-in')])
+    expect(autoContextSourceIds(flow, b.id)).toEqual([a.id])
+  })
+
+  it('协作组解耦：组卡片既不作来源也不回溯到组的上游', () => {
+    const a = newRoleNode('agent', 'a')
+    const g = newGroupNode('g')
+    const b = newRoleNode('agent', 'b')
+    const flow = makeFlow([a, g, b], [newLine(a.id, g.id, 'flow-out', 'flow-in'), newLine(g.id, b.id, 'flow-out', 'flow-in')])
+    expect(autoContextSourceIds(flow, b.id)).toEqual([])
+  })
+
+  it('虚拟节点前驱：解析为引用的主节点（快照按主节点记账）', () => {
+    const main = newRoleNode('agent', 'main')
+    const proxy = newProxyNode(main.id)
+    const b = newRoleNode('agent', 'b')
+    const flow = makeFlow([main, proxy, b], [newLine(proxy.id, b.id, 'flow-out', 'flow-in')])
+    expect(autoContextSourceIds(flow, b.id)).toEqual([main.id])
+  })
+
+  it('虚拟节点归属：流程线接在虚拟节点上时，主节点同样获得其上游来源', () => {
+    const a = newRoleNode('agent', 'a')
+    const main = newRoleNode('agent', 'main')
+    const proxy = newProxyNode(main.id)
+    const flow = makeFlow([a, main, proxy], [newLine(a.id, proxy.id, 'flow-out', 'flow-in')])
+    expect(autoContextSourceIds(flow, main.id)).toEqual([a.id])
+  })
+
+  it('模式二输入节点（start）是合法来源；模式一启动节点也返回（由消费方按产出过滤）', () => {
+    const s = newStageNode('start', 'mode1')
+    const a = newRoleNode('agent', 'a')
+    const flow = makeFlow([s, a], [newLine(s.id, a.id, 'flow-out', 'flow-in')])
+    expect(autoContextSourceIds(flow, a.id)).toEqual([s.id])
+  })
+
+  it('纯函数：同一图两次枚举结果相同', () => {
+    const a = newRoleNode('agent', 'a')
+    const b = newRoleNode('agent', 'b')
+    const flow = makeFlow([a, b], [newLine(a.id, b.id, 'flow-out', 'flow-in')])
+    expect(autoContextSourceIds(flow, b.id)).toEqual(autoContextSourceIds(flow, b.id))
+  })
+})
+
+describe('角色节点工厂默认值（newRoleNode）', () => {
+  it('agent 节点默认落盘输出契约文本；输入契约为空（默认配置即磁盘真值）', () => {
+    const node = newRoleNode('agent', '新角色')
+    expect(node.data.outputSchema).toBe(DEFAULT_OUTPUT_CONTRACT_TEXT)
+    expect(node.data.inputSchema).toBe('')
+  })
+
+  it('parent 节点不落默认输出契约（父代理不参与节点交接）', () => {
+    expect(newRoleNode('parent', '父代理').data.outputSchema).toBe('')
+  })
+})
+
+describe('入口解析与节点归属判定', () => {  it('entryNodes：start 即显式入口；缺失时为空（§4.2 入口解析）', () => {
     const s = newStageNode('start', 'mode1')
     const a = newRoleNode('agent', 'a')
     expect(entryNodes(makeFlow([s, a])).map((n) => n.id)).toEqual([s.id])
@@ -140,111 +233,6 @@ describe('流程线判定（isFlowLine）与流程参与度', () => {
     // 只有流程出、没有流程入 → 参与流程，但未被驱动
     expect(nodeHasFlowIn(flow, other.id)).toBe(false)
     expect(nodeHasFlowIn(flow, main.id)).toBe(true)
-  })
-})
-
-// ---------------------------------------------------------------------------
-// 虚拟节点角色与闸门语义（P3 里程碑闸门 / 自主编排方案 §5.2 扩展1）
-// 运行时行为（不自动 ok / 显式标记生效 / 预算递减 / 续跑继承）见
-// tests/host/orchestrator/ 与 tests/host/tools/wf-graph-patch/。
-// ---------------------------------------------------------------------------
-
-/** 阶段节点（label 锁定，固定 id 便于断言）。 */
-function stageNode(id: string, kind: 'start' | 'end'): GraphNode {
-  return { id, kind, position: { x: 0, y: 0 }, data: { label: stageLabel(kind, 'mode1') } }
-}
-
-/** 角色节点（固定 id；默认已配置，避免与配置完整性软规则耦合）。 */
-function roleNodeOf(kind: 'parent' | 'agent', id: string, label = id): GraphNode {
-  return {
-    id,
-    kind,
-    position: { x: 0, y: 0 },
-    data: { label, systemPrompt: '', provider: '', model: '', presetId: null, retryLimit: 3, reactLimit: null, inputSchema: '', outputSchema: '', groupId: null },
-  }
-}
-
-/** 虚拟节点（固定 id；data 缺省 = executor）。 */
-function proxyNode(id: string, sourceId: string, data?: { label?: string; role?: 'executor' | 'milestone' }): GraphNode {
-  return { id, kind: 'proxy', position: { x: 0, y: 0 }, proxySourceId: sourceId, ...(data ? { data } : {}) }
-}
-
-function flowLine(id: string, source: string, target: string): Line {
-  return { id, source, target, sourceHandle: 'flow-out', targetHandle: 'flow-in' }
-}
-
-/** 含闸门的最小合法图：start → m1(→p1) → a1 → end。 */
-function gateFlow(role?: 'executor' | 'milestone'): WorkflowDocument {
-  return {
-    id: 'wf-1',
-    sessionId: 'session-1',
-    mode: 'mode1',
-    name: '闸门流程',
-    description: '',
-    revision: 1,
-    nodes: [
-      stageNode('s', 'start'),
-      roleNodeOf('parent', 'p1', 'CEO'),
-      proxyNode('m1', 'p1', role ? { role } : undefined),
-      roleNodeOf('agent', 'a1'),
-      stageNode('e', 'end'),
-    ],
-    lines: [flowLine('l1', 's', 'm1'), flowLine('l2', 'm1', 'a1'), flowLine('l3', 'a1', 'e')],
-  }
-}
-
-describe('虚拟节点角色判定', () => {
-  it('proxyRoleOf：缺省 executor（向后兼容既有画布），显式 milestone 才识别为闸门', () => {
-    expect(proxyRoleOf(proxyNode('m1', 'p1'))).toBe('executor')
-    expect(proxyRoleOf(proxyNode('m1', 'p1', { role: 'executor' }))).toBe('executor')
-    expect(proxyRoleOf(proxyNode('m1', 'p1', { role: 'milestone' }))).toBe('milestone')
-    expect(proxyRoleOf(null)).toBe('executor')
-  })
-
-  it('milestoneProxiesOf：只挑出该主节点的 milestone 虚拟节点', () => {
-    const flow = gateFlow('milestone')
-    flow.nodes.push(proxyNode('x1', 'p1', { role: 'executor' }))
-    expect(milestoneProxiesOf(flow, 'p1').map((n) => n.id)).toEqual(['m1'])
-    expect(milestoneProxiesOf(flow, 'a1')).toEqual([])
-  })
-
-  it('activeMilestoneGateOf：闸门被流程驱动（有 flow-in）才算生效', () => {
-    const live = gateFlow('milestone')
-    expect(activeMilestoneGateOf(live, 'p1')).toEqual({ proxyId: 'm1' })
-    // 去掉流程入口 → 闸门不会被驱动，视为未生效
-    const dead = gateFlow('milestone')
-    dead.lines = dead.lines.filter((line) => line.target !== 'm1')
-    expect(activeMilestoneGateOf(dead, 'p1')).toBeNull()
-  })
-
-  it('activeMilestoneGateOf：executor 角色的虚拟节点不算闸门（保留既有自动完成行为）', () => {
-    expect(activeMilestoneGateOf(gateFlow('executor'), 'p1')).toBeNull()
-    expect(activeMilestoneGateOf(gateFlow(undefined), 'p1')).toBeNull()
-  })
-
-  it('activeMilestoneGateOf：带 label 时一并返回（画布显示名），多个闸门取画布顺序第一个', () => {
-    const flow = gateFlow('milestone')
-    ;(flow.nodes.find((n) => n.id === 'm1') as { data?: { label?: string; role?: 'milestone' } }).data = { label: '里程碑①：方案评审', role: 'milestone' }
-    expect(activeMilestoneGateOf(flow, 'p1')).toEqual({ proxyId: 'm1', label: '里程碑①：方案评审' })
-    flow.nodes.push(proxyNode('m2', 'p1', { role: 'milestone' }))
-    flow.lines.push(flowLine('l4', 'a1', 'm2'))
-    expect(activeMilestoneGateOf(flow, 'p1')?.proxyId).toBe('m1')
-  })
-})
-
-describe('闸门标记目标归一化（mainNodeIdOf）', () => {
-  it('普通节点返回自身 id；虚拟节点返回主节点 id；不存在返回 null', () => {
-    const flow = gateFlow('milestone')
-    expect(mainNodeIdOf(flow, 'p1')).toBe('p1')
-    expect(mainNodeIdOf(flow, 'm1')).toBe('p1')
-    expect(mainNodeIdOf(flow, 'a1')).toBe('a1')
-    expect(mainNodeIdOf(flow, '不存在')).toBeNull()
-  })
-
-  it('悬挂虚拟节点（主节点已移除）返回 null（不把错目标当成闸门）', () => {
-    const flow = gateFlow('milestone')
-    flow.nodes = flow.nodes.filter((n) => n.id !== 'p1')
-    expect(mainNodeIdOf(flow, 'm1')).toBeNull()
   })
 })
 

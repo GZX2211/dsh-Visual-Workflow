@@ -1,10 +1,10 @@
 export { CONDITION_TYPES, HANDLE_PAIRING, NODE_HANDLES, NODE_KINDS, pairingTargetOf } from './model.js';
 export type { NodeHandleDef } from './model.js';
 export { makeLineId, makeNodeId, newDatabaseNode, newFileNode, newGroupNode, newLine, newProxyNode, newRoleNode, newStageNode, stageLabel, } from './model.js';
-export { ctxInEdges, dbInEdges, downstreamFlowNodeIds, entryNodes, flowInEdges, flowOutEdges, lineById, nodeById, proxiesOf, upstreamCtxNodeIds, } from './model.js';
+export { autoContextSourceIds, ctxInEdges, dbInEdges, downstreamFlowNodeIds, entryNodes, flowInEdges, flowOutEdges, lineById, nodeById, proxiesOf, } from './model.js';
 export { isFlowLine } from './dag.js';
 export { nodeHasFlowIn, nodeParticipatesInFlow } from './model.js';
-export { activeMilestoneGateOf, isGroupMember, mainNodeIdOf, memberGroupId, milestoneProxiesOf, proxyRoleOf, } from './model.js';
+export { isGroupMember, memberGroupId, } from './model.js';
 export { buildFlowDag, computeFlowLayers, detectCycleNodes, maxLayerWidth } from './dag.js';
 export type { FlowDag } from './dag.js';
 export { connectionProblem, validateFlow } from './validate.js';

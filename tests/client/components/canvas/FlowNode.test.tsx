@@ -4,11 +4,10 @@
 
 // tests/client/components/canvas/FlowNode.test.tsx
 //
-// FlowNode 角标渲染（P4 体验与沉淀 · 闸门可视化与补丁来源标注）：
-//   ① 闸门虚拟节点（data.role='milestone'）→ 里程碑角标 + is-gate 样式 + 显示名；
-//   ② 普通虚拟节点仍是「↻ 引用」，不带 is-gate；
-//   ③ 显示名为空时回退节点种类名（不渲染空白卡片）；
-//   ④ agentPatched=true → 「AI 调整」角标；缺省不显示。
+// FlowNode 角标渲染（P4 体验与沉淀）：
+//   ① 虚拟节点沿用「↻ 引用」角标（闸门退役后无里程碑角标 / 无 is-gate）；
+//   ② 显示名为空时回退节点种类名（不渲染空白卡片）；
+//   ③ agentPatched=true → 「AI 调整」角标；缺省不显示。
 //
 // 注（治理）：本文件原为 tests/client/p4-experience.test.tsx 的一部分，结构治理后
 // 按源文件归属拆分——FlowNode 用例归入本文件，其余用例分别归入
@@ -59,22 +58,17 @@ function renderFlowNode(node: unknown, extra: Record<string, unknown> = {}): Pro
 }
 
 describe('P4 画布角标（FlowNode）', () => {
-  it('闸门虚拟节点：里程碑角标 + is-gate 样式 + 显示名', async () => {
-    await renderFlowNode(proxyNode({ role: 'milestone', label: '里程碑①' }))
+  it('闸门退役：遗留 data.role=milestone 按普通虚拟节点渲染（无 is-gate / 无里程碑角标）', async () => {
+    await renderFlowNode(proxyNode({ role: 'milestone', label: '遗留节点' }))
     const html = container!.innerHTML
-    expect(html).toContain('is-gate')
-    expect(container!.textContent).toContain(zh.proxyGateBadge)
-    expect(container!.textContent).toContain('里程碑①')
-  })
-
-  it('普通虚拟节点：仍是「↻ 引用」，不带 is-gate', async () => {
-    await renderFlowNode(proxyNode({}))
-    expect(container!.innerHTML).not.toContain('is-gate')
+    expect(html).not.toContain('is-gate')
+    expect(container!.textContent).not.toContain('🚩')
+    expect(container!.textContent).toContain('遗留节点')
     expect(container!.textContent).toContain('↻ 引用')
   })
 
   it('显示名为空时回退节点种类名（不渲染空白卡片）', async () => {
-    await renderFlowNode(proxyNode({ role: 'milestone', label: '   ' }))
+    await renderFlowNode(proxyNode({ label: '   ' }))
     expect(container!.textContent).toContain(String(zh.nodeKinds.agent))
   })
 

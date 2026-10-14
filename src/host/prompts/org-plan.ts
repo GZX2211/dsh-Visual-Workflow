@@ -14,8 +14,8 @@
 //
 // 提示词裁剪原则（用户裁决 2026.09，按「这句是否必要」逐句过）：
 //   只保留「模型无法从训练数据推断」与「工具报错无法自我修正」的内容。
-//   已删除：一次补丁只用一组 op / 不写坐标 / 检查器 error 修复指引——三者都写在工具
-//   schema 里，且违反时由参数层报错（WF_PATCH_MIXED_GROUPS / WF_BAD_ARGS / WF_GRAPH_INVALID
+//   已删除：不写坐标 / 检查器 error 修复指引——两者都写在工具
+//   schema 里，且违反时由参数层报错（WF_BAD_ARGS / WF_GRAPH_INVALID
 //   附修复建议）精确回指，写进提示词是纯 token 浪费。
 
 import { HEAD_MARKER, MID_MARKER, TAIL_MARKER, TAIL_RESTATE_MARKER } from './markers.js'
@@ -121,8 +121,8 @@ export const ORG_RULES_SOURCE_NOTE =
 const PRE_SUBMIT_CHECKLIST = [
   '提交前自检（逐条确认，任一不成立就先补齐再提交）：',
   '- 交付物清单：每份交付物都有对应节点，且节点之间没有重复职责。',
-  '- 落盘路径与消费方：每份交付物写明写到哪个文件，以及谁会读它；没有消费方的终端产出不必建 ctx 线。',
-  '- 读取通道：每个下游节点都知道去哪里读上游产出（有 ctx 连线，或上游产出已写成文件且路径已在任务里说明）。',
+  '- 落盘路径与消费方：每份交付物写明写到哪个文件，以及谁会读它（上游产出会自动注入其流程下游，不需要为此建 ctx 线）。',
+  '- 读取通道：每个下游节点都知道去哪里读上游产出（自动注入的上游产出，或已写成文件且路径已在任务里说明）。',
   '- 节点配置：每个 agent 节点都有 systemPrompt 与非空 presetId（工具组合）。',
 ].join('\n')
 

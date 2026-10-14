@@ -23,8 +23,6 @@ export declare const ORG_META_NORMALIZE_CAPS: {
     readonly membersMax: 50;
     /** 并行分支上限的安全网。 */
     readonly parallelBranchMax: 50;
-    /** 闸门次数上限的安全网。 */
-    readonly milestoneMax: 50;
     /** 单轮改图 op 上限的安全网。 */
     readonly patchOpsMax: 200;
     /** 每节点协作消息上限的安全网。 */

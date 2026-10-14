@@ -295,6 +295,8 @@ export declare const ENDPOINT_NAMES: readonly ["listWorkflows", "getWorkflow", "
  * （`Intl` 解析出的任意 IANA 名），字面量联合会让 includes/unshift 需要窄化断言。
  */
 export declare const SCHEDULER_TIMEZONE_SUGGESTIONS: readonly string[];
+/** 输出契约的默认文本（新建 agent 节点时写入 `data.outputSchema`）。 */
+export declare const DEFAULT_OUTPUT_CONTRACT_TEXT = "\u7ED3\u8BBA / \u4EA7\u51FA\u6587\u4EF6\u8DEF\u5F84 / \u5173\u952E\u51B3\u7B56 / \u672A\u51B3\u95EE\u9898";
 /** 乐观锁冲突：资源在客户端加载后已被别的写入修改（HTTP 409）。 */
 export declare const ERR_REVISION_CONFLICT = "FLOW_REVISION_CONFLICT";
 /**

@@ -103,7 +103,9 @@ export interface RoleAssetDetail {
     presetId?: string | null;
     retryLimit: number;
     reactLimit?: number | null;
+    /** 输入契约（柔性文本，可空）。 */
     inputSchema?: string;
+    /** 输出契约（柔性文本，可空）。 */
     outputSchema?: string;
     systemPromptSource?: string;
     injectSystemPrompt?: boolean;

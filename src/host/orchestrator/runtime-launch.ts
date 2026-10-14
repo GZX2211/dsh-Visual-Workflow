@@ -20,13 +20,11 @@ import { RuntimeBase } from './runtime-base.js'
 /**
  * 本次运行「组织预算」末段文本（自主编排方案 §6.4；P2 正式接入）。
  * 口径 = 快照冻结元参数（D-13 第三层：运行期不再重读模板/实例）+ 当前图规模 → **剩余量**。
- * 闸门已用次数据快照的 `milestoneUsed`（D-21：不含首次编排；P3 起由 mark_node 递增）。
  * 纯函数：同一快照与图两次调用字节相同；预算文本不是运行必需条件，调用侧不因它失败。
  */
 function orgBudgetTextOf(snapshot: RunSnapshot, flow: WorkflowDocument): string {
   const meta = normalizeOrgMeta(snapshot.meta ?? {})
-  const milestoneUsed = Math.max(0, Math.floor(Number(snapshot.milestoneUsed) || 0))
-  return buildOrgBudgetText(orgBudgetOf(meta, orgUsageOf(flow, { milestoneUsed })))
+  return buildOrgBudgetText(orgBudgetOf(meta, orgUsageOf(flow)))
 }
 
 export class RuntimeLaunch extends RuntimeBase {
@@ -289,7 +287,7 @@ export class RuntimeLaunch extends RuntimeBase {
     // 三情况组装与 startRun 一致；prepareParentExecutor 内部对已 ok/react-capped 的
     // 继承态直接返回 null（不重跑）→ buildParentRunPrompt 按「父单元已完成」以
     // orchestrator 变体组装（剩余运行只有编排/收尾，无自执行任务内容）。
-    // 执行单元登记（父代理节点 running / 闸门识别）是运行事实初始化，静默接续同样必须执行。
+    // 执行单元登记（父代理节点 running）是运行事实初始化，静默接续同样必须执行。
     const executor = await this.prepareParentExecutor(flow, entry)
     if (silent) {
       // 静默接续：只接管运行事实与锁；不向会话注入编排指令，父代理在自身回合内继续调度

@@ -12,11 +12,12 @@ export interface NodeTaskBlockParams {
          */
         nodeLabel: string;
         /**
-         * 上游产出上下文（ctx 连线注入）：上游节点最终产出摘要/产物文本，作为下游节点的
-         * 上下文注入。数组元素为「来源 → 内容」键值；可为空（无 ctx 连线即不注入）。
+         * 上游产出上下文（全链路自动注入）：上游节点最终产出摘要/产物文本，作为下游节点的
+         * 上下文注入。数组元素为「来源名称 + 来源节点 id + 内容」；可为空（无上游产出即不注入）。
          * 长文本（文档/上游产物）统一置于中段（lost-in-the-middle 处置）。
          */
         upstreamContext: Array<{
+            nodeId: string;
             source: string;
             content: string;
         }>;
@@ -42,21 +43,17 @@ export interface NodeTaskBlockParams {
          */
         collabChannel?: CollabChannel;
         /**
-         * 输入结构说明（节点配置 data.inputSchema）：告诉该子代理「应当收到什么输入」，
+         * 输入契约（节点配置 data.inputSchema）：告诉该子代理「应当收到什么输入」，
          * 避免它重复索要上游已提供的信息。为空则不组装该段。
          */
         inputContract: string;
         /**
-         * 交接契约（节点配置 data.outputSchema，或系统的默认结构）：该子代理的最终回复
-         * 会被下游 ctx 连线节点**直接读取**，故须按此结构组织。为空则不组装该段。
+         * 输出契约（节点配置 data.outputSchema）：该子代理的最终回复必须按其组织。
+         * 为空则不组装该段（= 节点不配置契约）。默认文本在新建节点时已落盘，
+         * 因此这里不做任何兜底、也不与默认文本叠加（用户裁决 2026-10）。
          * 注意这是**柔性文本契约**（用户裁决 A3：不做结构校验），只影响提示词，不参与校验。
          */
         outputContract: string;
-        /**
-         * 交接契约是否来自系统默认结构（节点未配置 outputSchema，且该节点存在 ctx-out 出线）。
-         * true 时声明中提到「本结构由系统默认给出」，便于模型区分用户定制与默认。
-         */
-        outputContractDefaulted: boolean;
         /**
          * 系统语言名（如 '中文' / 'English'；从 DSH 用户设置读取）。
          * 注入「所有对话回复、注释、思考过程必须使用该语言」规则。
@@ -74,13 +71,6 @@ export declare const NODE_HARD_CONSTRAINTS: {
     /** 协作组内通信必须经官方 Team 邮箱（official 通道的组内成员注入）。 */
     readonly collabSendOnly: "与队友和 Lead 的一切协作消息必须使用 send_message（target 填对方成员名，Lead 为 \"lead\"）";
 };
-/**
- * 默认交接契约的字段清单（系统兜底用；用户裁决：有 ctx-out 出线且未配置 outputSchema 时注入）。
- * 为什么是这四项：下游节点经 ctx 连线读到的就是本节点的**最终回复文本**，
- * 它需要能据此判断「结论是什么、产物在哪、有哪些已定决策、还剩什么没定」——
- * 大产物本身一律落盘（写在路径里），不靠回复正文传递。
- */
-export declare const DEFAULT_OUTPUT_CONTRACT = "\u7ED3\u8BBA / \u4EA7\u51FA\u6587\u4EF6\u8DEF\u5F84 / \u5173\u952E\u51B3\u7B56 / \u672A\u51B3\u95EE\u9898";
 /**
  * 节点任务块构建器（纯函数）。
  *

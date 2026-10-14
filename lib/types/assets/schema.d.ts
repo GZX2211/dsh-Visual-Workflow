@@ -6,8 +6,8 @@ export declare const ASSET_DB_FILE = "assets.db";
  * idx_role_history_status 需要可索引的等值列做「已引用」过滤，JSON 数组长度判断
  * 无法走索引；该列由引用统计在写入时同步刷新，与数组长度恒一致（不变量）。
  *
- * input_schema / output_schema 不带 json_valid 约束：这两列承载的是「交接契约」说明文本
- * （见 shared/graph-model.ts 的 RoleNode.data），语义为**柔性文本、不做结构校验**，
+ * input_schema / output_schema 不带 json_valid 约束：这两列承载的是「节点输入/输出契约」
+ * 说明文本（见 shared/graph-model.ts 的 RoleNode.data），语义为**柔性文本、不做结构校验**，
  * 空值即未配置。若按 JSON 校验，节点默认空串与自由文本表述（如「上游结论；产出文件路径」）
  * 都会被拒绝，入库整体失败。
  */

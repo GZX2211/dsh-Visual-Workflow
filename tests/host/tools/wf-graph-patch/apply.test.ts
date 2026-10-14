@@ -1,18 +1,15 @@
 // tests/host/tools/wf-graph-patch/apply.test.ts
 //
 // wf_graph_patch 纯函数内核的**虚拟节点 data 归一化**用例
-// （原 tests/host/milestone-gate.test.ts 的"补丁层 proxy data 归一化"段，
-//   按 tests/AGENTS.md 的镜像规则迁到被测源文件 apply.ts 旁）：
-//   - create_node：虚拟节点只保留 label / role 两个字段；
-//   - role 越界 → WF_GRAPH_INVALID（错误文本给出取值域）；
-//   - update_node_data：提升为闸门 / 清空退回 executor（data 整体删除）；
+//   - create_node：虚拟节点只保留 label 一个字段（未知字段静默丢弃）；
+//   - update_node_data：清空 label → data 整体删除；
 //   - proxySourceId 顶层字段语义不变；引用不存在的主节点 → 拒绝。
-// 角色语义判定（proxyRoleOf 等）与闸门归一化（mainNodeIdOf）见 tests/host/graph/model.test.ts。
 
 import { describe, expect, it, vi } from 'vitest'
-import { applyGraphOps, applyGraphOpsTolerant, applyMarkOp } from '../../../../src/host/tools/wf-graph-patch/apply.js'
-import { proxyRoleOf, stageLabel } from '../../../../src/host/graph/index.js'
+import { applyGraphOps, applyGraphOpsTolerant } from '../../../../src/host/tools/wf-graph-patch/apply.js'
+import { stageLabel } from '../../../../src/host/graph/index.js'
 import { WfError } from '../../../../src/host/orchestrator/index.js'
+import { DEFAULT_OUTPUT_CONTRACT_TEXT } from '../../../../src/host/shared/protocol.js'
 import type { GraphPatchOp } from '../../../../src/host/tools/wf-graph-patch/types.js'
 import type { GraphNode, Line, WorkflowDocument } from '../../../../src/host/shared/graph-model.js'
 
@@ -42,7 +39,7 @@ function parentNode(id: string, label = id): GraphNode {
   }
 }
 
-function proxyNode(id: string, sourceId: string, data?: { label?: string; role?: 'executor' | 'milestone' }): GraphNode {
+function proxyNode(id: string, sourceId: string, data?: { label?: string }): GraphNode {
   return { id, kind: 'proxy', position: { x: 0, y: 0 }, proxySourceId: sourceId, ...(data ? { data } : {}) }
 }
 
@@ -79,16 +76,16 @@ function managedFileNode(id: string, label = id): GraphNode {
   }
 }
 
-/** 含闸门的最小合法图：start → m1(→p1) → a1 → end。 */
-function gateFlow(role?: 'executor' | 'milestone'): WorkflowDocument {
+/** 最小含虚拟节点的合法图：start → m1(→p1) → a1 → end。 */
+function proxyFlow(): WorkflowDocument {
   return {
     id: 'wf-1',
     sessionId: 'session-1',
     mode: 'mode1',
-    name: '闸门流程',
+    name: '虚拟节点流程',
     description: '',
     revision: 1,
-    nodes: [stage('s', 'start'), parentNode('p1', 'CEO'), proxyNode('m1', 'p1', role ? { role } : undefined), agentNode('a1'), stage('e', 'end')],
+    nodes: [stage('s', 'start'), parentNode('p1', 'CEO'), proxyNode('m1', 'p1'), agentNode('a1'), stage('e', 'end')],
     lines: [flowLine('l1', 's', 'm1'), flowLine('l2', 'm1', 'a1'), flowLine('l3', 'a1', 'e')],
   }
 }
@@ -166,48 +163,34 @@ describe('file 节点：写图只产文本型（D-07）', () => {
 })
 
 describe('补丁层 proxy data 归一化（applyGraphOps 纯函数）', () => {
-  it('create_node：虚拟节点的 label / role 落盘（只保留这两个字段）', () => {
-    const doc = gateFlow('milestone')
+  it('create_node：虚拟节点只保留 label（role 等未知字段静默丢弃）', () => {
+    const doc = proxyFlow()
     const { doc: next } = applyGraphOps({
       doc,
-      ops: [{ op: 'create_node', node: { id: 'm2', kind: 'proxy', proxySourceId: 'p1', data: { label: '里程碑②', role: 'milestone', junk: 1 } } }],
+      ops: [{ op: 'create_node', node: { id: 'm2', kind: 'proxy', proxySourceId: 'p1', data: { label: '复核点', role: 'milestone', junk: 1 } } }],
     })
     const created = (next.nodes as GraphNode[]).find((n) => n.id === 'm2') as { data?: Record<string, unknown> }
-    expect(created.data).toEqual({ label: '里程碑②', role: 'milestone' })
+    expect(created.data).toEqual({ label: '复核点' })
   })
 
-  it('create_node：role 越界 → WF_GRAPH_INVALID（错误文本给出取值域）', () => {
-    const doc = gateFlow('milestone')
-    expect(() => applyGraphOps({ doc, ops: [{ op: 'create_node', node: { id: 'm2', kind: 'proxy', proxySourceId: 'p1', data: { role: 'gate' } } }] }))
-      .toThrowError(/executor|milestone/)
-    try {
-      applyGraphOps({ doc, ops: [{ op: 'create_node', node: { id: 'm2', kind: 'proxy', proxySourceId: 'p1', data: { role: 'gate' } } }] })
-    } catch (error) {
-      expect((error as WfError).code).toBe('WF_GRAPH_INVALID')
-    }
-  })
-
-  it('update_node_data：可把普通虚拟节点提升为闸门（并支持清空 role 退回 executor）', () => {
-    const doc = gateFlow('executor')
-    const up = applyGraphOps({ doc, ops: [{ op: 'update_node_data', nodeId: 'm1', data: { role: 'milestone', label: '闸门' } }] })
-    const upNodes = up.doc.nodes
-    expect(proxyRoleOf(upNodes.find((n) => n.id === 'm1'))).toBe('milestone')
-    // 清空 role / label → data 整体删除，退回缺省 executor
-    const down = applyGraphOps({ doc: up.doc, ops: [{ op: 'update_node_data', nodeId: 'm1', data: { role: null, label: '' } }] })
-    const downNodes = down.doc.nodes
-    const node = downNodes.find((n) => n.id === 'm1') as { data?: unknown }
-    expect(node.data).toBeUndefined()
-    expect(proxyRoleOf(downNodes.find((n) => n.id === 'm1'))).toBe('executor')
+  it('update_node_data：清空 label → data 整体删除（保持文档形状最小）', () => {
+    const doc = proxyFlow()
+    const up = applyGraphOps({ doc, ops: [{ op: 'update_node_data', nodeId: 'm1', data: { label: '复核点' } }] })
+    const upNode = up.doc.nodes.find((n) => n.id === 'm1') as { data?: unknown }
+    expect(upNode.data).toEqual({ label: '复核点' })
+    const down = applyGraphOps({ doc: up.doc, ops: [{ op: 'update_node_data', nodeId: 'm1', data: { label: '' } }] })
+    const downNode = down.doc.nodes.find((n) => n.id === 'm1') as { data?: unknown }
+    expect(downNode.data).toBeUndefined()
   })
 
   it('update_node_data：虚拟节点仍可改引用主节点（回归：proxySourceId 顶层字段语义不变）', () => {
-    const doc = gateFlow('milestone')
+    const doc = proxyFlow()
     const up = applyGraphOps({ doc, ops: [{ op: 'update_node_data', nodeId: 'm1', data: { proxySourceId: 'a1' } }] })
     expect((((up.doc.nodes as GraphNode[]).find((n) => n.id === 'm1')) as { proxySourceId?: string }).proxySourceId).toBe('a1')
   })
 
   it('update_node_data：引用不存在的主节点 → 拒绝（既有校验保留）', () => {
-    const doc = gateFlow('milestone')
+    const doc = proxyFlow()
     expect(() => applyGraphOps({ doc, ops: [{ op: 'update_node_data', nodeId: 'm1', data: { proxySourceId: '不存在' } }] }))
       .toThrowError(/must reference an existing role node/)
   })
@@ -247,11 +230,28 @@ describe('角色节点 data 补全（normalizeRoleNodeData）', () => {
     expect(data.provider).toBe('')
     expect(data.model).toBe('')
     expect(data.inputSchema).toBe('')
-    expect(data.outputSchema).toBe('')
+    // 输出契约默认文本随创建落盘（与画布新建 newRoleNode 一致：界面显示即实际注入的内容）
+    expect(data.outputSchema).toBe(DEFAULT_OUTPUT_CONTRACT_TEXT)
     expect(data.groupId).toBeNull()
     // 官方系统提示词段与工具散文段固定关闭：父代理不可配置（画布属性栏所有）
     expect(data.injectSystemPrompt).toBe(false)
     expect(data.injectToolSections).toBe(false)
+  })
+
+  it('create_node：父代理节点不落默认输出契约（父代理不参与节点交接）', () => {
+    const { doc } = applyGraphOps({
+      doc: flowOf([stage('s', 'start')]),
+      ops: [{ op: 'create_node', node: { id: 'p1', kind: 'parent', position: { x: 0, y: 0 }, data: { label: '父代理' } } }],
+    })
+    expect(roleDataOf(doc, 'p1').outputSchema).toBe('')
+  })
+
+  it('create_node：显式传入空串 = 明确清空，不落默认契约', () => {
+    const { doc } = applyGraphOps({
+      doc: flowOf([stage('s', 'start')]),
+      ops: [{ op: 'create_node', node: { id: 'a1', kind: 'agent', position: { x: 0, y: 0 }, data: { label: 'L', outputSchema: '' } } }],
+    })
+    expect(roleDataOf(doc, 'a1').outputSchema).toBe('')
   })
 
   it('create_node：可配置字段原样保留（空串 / 显式值不被归一覆盖）', () => {
@@ -468,7 +468,7 @@ function mixedOps(): GraphPatchOp[] {
     { op: 'create_group', groupId: 'g2', label: '坏组', memberIds: ['不存在'] },
     { op: 'set_group_members', groupId: 'g2', memberIds: ['a1'] },
     { op: 'disconnect', lineId: 'l3' },
-    { op: 'update_node_data', nodeId: 'm1', data: { proxySourceId: 'a1', role: 'gate' } },
+    { op: 'update_node_data', nodeId: 'm1', data: { proxySourceId: '缺失' } },
     { op: 'create_node', node: { id: 'a1', kind: 'agent', data: {} } },
     { op: 'update_node_data', nodeId: '缺失', data: { label: 'x' } },
     { op: 'remove_node', nodeId: 'a2' },
@@ -503,7 +503,7 @@ describe('容错应用 · 单份副本就地应用（D03-13）', () => {
   })
 
   it('混合批次（成功 + 失败）：结果与「逐条严格应用」逐字节等价', () => {
-    const doc = gateFlow('milestone')
+    const doc = proxyFlow()
     const ops = mixedOps()
 
     const tolerant = applyGraphOpsTolerant({ doc, ops })
@@ -527,7 +527,7 @@ describe('容错应用 · 单份副本就地应用（D03-13）', () => {
 
   it('失败 op 不留半成品：成员校验失败后组不存在，后续针对该组的 op 仍失败', () => {
     const { result, errors } = applyGraphOpsTolerant({
-      doc: gateFlow('milestone'),
+      doc: proxyFlow(),
       ops: [
         { op: 'create_group', groupId: 'g2', label: '坏组', memberIds: ['不存在'] },
         { op: 'set_group_members', groupId: 'g2', memberIds: ['a1'] },
@@ -539,52 +539,22 @@ describe('容错应用 · 单份副本就地应用（D03-13）', () => {
     expect(result.doc.nodes.some((node) => node.id === 'g2')).toBe(false)
   })
 
-  it('失败 op 不留半成品：引用与 role 同时非法时，引用字段保持原值', () => {
+  it('失败 op 不留半成品：引用非法时，同一 op 的其它字段保持原值', () => {
     const { result, errors } = applyGraphOpsTolerant({
-      doc: gateFlow('milestone'),
-      ops: [{ op: 'update_node_data', nodeId: 'm1', data: { proxySourceId: 'a1', role: 'gate' } }],
+      doc: proxyFlow(),
+      ops: [{ op: 'update_node_data', nodeId: 'm1', data: { proxySourceId: '不存在', label: '改名' } }],
     })
     expect(errors).toHaveLength(1)
-    // role 越界在规范化阶段抛错；此时 proxySourceId 不得已经被改掉
-    const m1 = result.doc.nodes.find((node) => node.id === 'm1') as { proxySourceId?: string }
+    // 引用校验在改动前抛错；此时 label 不得已经被改掉
+    const m1 = result.doc.nodes.find((node) => node.id === 'm1') as { proxySourceId?: string; data?: { label?: string } }
     expect(m1.proxySourceId).toBe('p1')
+    expect(m1.data).toBeUndefined()
   })
 
   it('严格应用器不改写入参（一次拷贝语义不变）', () => {
-    const doc = gateFlow('milestone')
+    const doc = proxyFlow()
     const before = JSON.stringify(doc)
     applyGraphOps({ doc, ops: [{ op: 'create_node', node: { id: 'a2', kind: 'agent', data: { label: '分析' } } }] })
     expect(JSON.stringify(doc)).toBe(before)
-  })
-})
-
-// ---------------------------------------------------------------------------
-// 运行状态标记（applyMarkOp）：status 取值属**入参**错误
-// ---------------------------------------------------------------------------
-
-describe('applyMarkOp · status 取值校验', () => {
-  it('status 不是 ok/fail → WF_BAD_ARGS（要改的是入参，不是图）', () => {
-    // 模型可见入参是自由对象：status 在这个分支被拦下时，它的问题在调用参数上，
-    // 报 WF_GRAPH_INVALID 会把模型引向「去改图」这条错误修正路径。
-    const op = { op: 'mark_node', nodeId: 'a1', status: 'done' } as never
-    let error: WfError | undefined
-    try {
-      applyMarkOp({ op, runId: 'run-1', nodeIds: ['a1'] })
-    } catch (caught) {
-      error = caught as WfError
-    }
-    expect(error?.code).toBe('WF_BAD_ARGS')
-    expect(error?.message).toContain('mark_node status must be ok or fail')
-  })
-
-  it('nodeId 不在运行快照内 → 仍先报 WF_MILESTONE_INVALID（运行事实优先于入参形状）', () => {
-    const op = { op: 'mark_node', nodeId: '不存在', status: 'done' } as never
-    let error: WfError | undefined
-    try {
-      applyMarkOp({ op, runId: 'run-1', nodeIds: ['a1'] })
-    } catch (caught) {
-      error = caught as WfError
-    }
-    expect(error?.code).toBe('WF_MILESTONE_INVALID')
   })
 })

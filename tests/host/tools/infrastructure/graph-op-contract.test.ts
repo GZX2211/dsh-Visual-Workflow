@@ -3,40 +3,45 @@
 // 写图契约的完整性与单一来源守卫：
 //   - 每个 op 名都有字段形状（新增 op 忘了补契约会在此失败）；
 //   - 契约全文覆盖提交规则 / op 形状 / 角色 data 契约 / 错误码语义；
-//   - 契约指引点名 catalog rules 的两个键（键名漂移会在此失败）。
+//   - 契约指引点名 catalog rules 的契约键（键名漂移会在此失败）。
 
 import { describe, expect, it } from 'vitest'
 import {
   ERROR_CODE_SEMANTICS,
-  GATE_MARKING_SEMANTICS,
   GRAPH_OP_FIELD_TEXT,
-  MARK_OP_FIELD_TEXT,
   OP_FIELD_SHAPES,
   PATCH_CONTRACT_TEXT,
   PATCH_SUBMISSION_RULES,
   ROLE_NODE_DATA_CONTRACT,
 } from '../../../../src/host/tools/infrastructure/graph-op-contract.js'
-import { GRAPH_OP_NAMES, MARK_OP_NAMES, opGroupOf } from '../../../../src/host/tools/wf-graph-patch/types.js'
+import { GRAPH_OP_NAMES, opGroupOf } from '../../../../src/host/tools/wf-graph-patch/types.js'
 import { PARENT_UNCONFIGURABLE_ROLE_FIELDS } from '../../../../src/host/tools/wf-graph-patch/apply.js'
 
 describe('写图契约（graph-op-contract）', () => {
   it('op 名清单与字段形状一一对应（新增图结构 op 必须同步补形状）', () => {
     expect(Object.keys(OP_FIELD_SHAPES).sort()).toEqual([...GRAPH_OP_NAMES].sort())
-    for (const name of [...GRAPH_OP_NAMES, ...MARK_OP_NAMES]) {
-      expect(opGroupOf({ op: name })).not.toBeNull()
-      expect(GRAPH_OP_FIELD_TEXT.includes(name) || MARK_OP_FIELD_TEXT.includes(name)).toBe(true)
+    for (const name of GRAPH_OP_NAMES) {
+      expect(opGroupOf({ op: name })).toBe('graph')
+      expect(GRAPH_OP_FIELD_TEXT.includes(name)).toBe(true)
     }
+    // 闸门退役：mark_node 不再是任何 op 组，按未知 op 拒绝
+    expect(opGroupOf({ op: 'mark_node' })).toBeNull()
   })
 
-  it('契约全文由四段同源文本组成', () => {
+  it('契约全文由三段同源文本组成', () => {
     expect(PATCH_CONTRACT_TEXT).toContain(PATCH_SUBMISSION_RULES)
     expect(PATCH_CONTRACT_TEXT).toContain(GRAPH_OP_FIELD_TEXT)
     expect(PATCH_CONTRACT_TEXT).toContain(ROLE_NODE_DATA_CONTRACT)
     expect(PATCH_CONTRACT_TEXT).toContain(ERROR_CODE_SEMANTICS)
   })
 
-  it('提交规则写明整批原子、一组一次与坐标不填', () => {
-    expect(PATCH_SUBMISSION_RULES).toContain('ONE group only')
+  it('闸门退役：契约不再承载闸门标记语义与 mark 组', () => {
+    expect(PATCH_CONTRACT_TEXT).not.toContain('mark_node')
+    expect(PATCH_CONTRACT_TEXT).not.toContain('milestone')
+    expect(PATCH_CONTRACT_TEXT).not.toContain('WF_MILESTONE_INVALID')
+  })
+
+  it('提交规则写明整批原子与坐标不填', () => {
     expect(PATCH_SUBMISSION_RULES).toContain('nothing is persisted')
     expect(PATCH_SUBMISSION_RULES).toContain('coordinates are not accepted')
   })
@@ -60,22 +65,6 @@ describe('写图契约（graph-op-contract）', () => {
     expect(ROLE_NODE_DATA_CONTRACT).toContain('copy both columns of the model catalog')
     expect(ROLE_NODE_DATA_CONTRACT).toContain('not to provider')
     expect(ROLE_NODE_DATA_CONTRACT).toContain('rejected by the patch')
-  })
-
-  it('闸门标记语义独立成段并写明只对当前闸门有效', () => {
-    expect(GATE_MARKING_SEMANTICS).toContain('mark_node')
-    expect(GATE_MARKING_SEMANTICS).toContain('milestone')
-    expect(GATE_MARKING_SEMANTICS).toContain('exactly 1')
-  })
-
-  it('闸门标记语义写明校验顺序：闸门身份先于 status 取值（同错时报 WF_MILESTONE_INVALID）', () => {
-    // 与实现同源的执行顺序：runMarkGroup 先判目标是否为当前闸门，applyMarkOp 再判 status 取值。
-    // 这一优先级必须常驻文本——否则模型会在目标不是当前闸门时去改 status（改错方向）。
-    // 不锁定整句（措辞可演进），但要求同一句里同时出现两条路径的码与优先级词。
-    const orderLine = String(GATE_MARKING_SEMANTICS).split('\n')
-      .find((line) => line.includes('WF_MILESTONE_INVALID') && line.includes('WF_BAD_ARGS'))
-    expect(orderLine).toBeDefined()
-    expect(orderLine).toMatch(/before|first|priorit/i)
   })
 
   it('错误码语义写明批次级取码规则：全参数层错才 WF_BAD_ARGS，含任一条图语义错即 WF_GRAPH_INVALID', () => {

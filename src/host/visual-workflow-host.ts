@@ -647,7 +647,7 @@ export class VisualWorkflowHost extends Service {
       this.ctx.logger.warn(`[visual-workflow] 数据工具注册失败：${error instanceof Error ? error.message : String(error)}`)
     }
 
-    // 自主编排工具注册：wf_org_catalog（只读勘察）+ wf_graph_patch（写图 / 闸门标记两组）。
+    // 自主编排工具注册：wf_org_catalog（只读勘察）+ wf_graph_patch（写图）。
     // 两者**默认开启**（与其他工具同口径；历史「默认关闭种子」已被用户裁决删除），
     // 由用户在组合管理中按需关闭。
     // **父代理专属**：子代理侧经 CHILD_AGENT_HIDDEN_TOOLS 永久隐藏（allow 剔除 +
@@ -778,13 +778,7 @@ export class VisualWorkflowHost extends Service {
           return []
         }
       },
-      // 闸门计数（D-21）：口径唯一来源是运行快照的 milestoneUsed（P3 落地，可审计 + 续跑继承）
-      milestoneUsedOf: (sessionId: string) => this.orchestrator.milestoneUsedForSession(sessionId),
       orchestrator: this.orchestrator,
-      persistRun: async (runId: string) => {
-        const entry = this.orchestrator.entryFor(runId)
-        if (entry) await this.orchestrator.persistRunSnapshot(entry)
-      },
     }
   }
 

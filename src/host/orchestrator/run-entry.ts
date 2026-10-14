@@ -46,14 +46,6 @@ export interface RunEntry {
    */
   executorParentId?: string
   /**
-   * 执行者模式：本轮父代理执行单元是否为**里程碑闸门**（proxy.data.role='milestone'）。
-   * true 时 `markParentExecutorDone` 不生效——闸门只能由 wf_graph_patch(mark_node) 显式
-   * 标记完成（D-07）。内存态：startRun/resumeRun 时按当前画布重新推导。
-   */
-  executorIsMilestone?: boolean
-  /** 当前闸门虚拟节点 id（executorIsMilestone 时给出；mark_node 接受它或父代理节点 id）。 */
-  milestoneProxyId?: string
-  /**
    * 上次同步给编排的拓扑基线（画布保存后的「编排语义是否变更」判定用）。
    *
    * 为什么是内存事实：它只在本次运行期内有意义（重启后 run 转 interrupted，不再有保存
@@ -150,28 +142,6 @@ export interface OrchestratorDeps {
   newRunId?: () => string
   /** 消息 id 生成注入（缺省 randomUUID）。 */
   uuid?: () => string
-}
-
-/**
- * 闸门标记所需的运行事实（只读；wf_graph_patch 的 mark_node 路径消费）。
- * 快照归编排器所有，工具层据此裁决预算与目标合法性，不再直读 RunEntry/snapshot。
- */
-export interface MilestoneRunFacts {
-  runId: string
-  executorParentId: string
-  executorIsMilestone: boolean
-  milestoneProxyId?: string
-  nodeIds: string[]
-  milestoneUsed: number
-  milestoneMax: number
-}
-
-/** 闸门节点标记结果（markMilestoneNode 返回；milestoneUsed 为递增后的已用次数）。 */
-export interface MilestoneMarkResult {
-  nodeId: string
-  status: 'ok' | 'fail'
-  runId: string
-  milestoneUsed: number
 }
 
 export interface StartRunOptions {

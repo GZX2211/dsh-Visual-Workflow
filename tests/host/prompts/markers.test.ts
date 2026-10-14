@@ -65,7 +65,7 @@ describe('T-005 共享段落标记常量（供测试与后续组装引用）', (
     expect(buildNodeTaskBlock({ facts: nodeFacts })).not.toContain(TAIL_RESTATE_MARKER)
     // 给了契约则重申标记必然出现且唯一
     const withContract = buildNodeTaskBlock({
-      facts: { ...nodeFacts, outputContract: '结论 / 产出文件路径', outputContractDefaulted: true },
+      facts: { ...nodeFacts, outputContract: '结论 / 产出文件路径' },
     })
     expect(occurrences(withContract, TAIL_RESTATE_MARKER)).toBe(1)
   })

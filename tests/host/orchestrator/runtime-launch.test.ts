@@ -207,7 +207,7 @@ describe('startRun 启动与运行锁', () => {
   it('组织预算注入（P2 §6.4）：冻结元参数 → 剩余量文本，且只在末段', async () => {
     const h = await makeHarness()
     const flow = makeFlow()
-    flow.meta = { nodeMax: 5, groupMax: 2, membersMax: 4, milestoneMax: 3, patchOpsMax: 10 }
+    flow.meta = { nodeMax: 5, groupMax: 2, membersMax: 4, patchOpsMax: 10 }
     await start(h, flow)
     const text = h.agents.roots.get('session-1')!.messages[0].content[0].text
     const tailAt = text.indexOf(TAIL_MARKER)
@@ -410,12 +410,12 @@ describe('模式二链路：服务文档 meta → 工作流视图', () => {
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
       status: 'stopped',
-      meta: { nodeMax: 7, milestoneMax: 2 },
+      meta: { nodeMax: 7, groupMax: 2 },
     } as unknown as ServiceState
     await h.store.saveService(service, 'session-1', { force: true })
     const flow = await h.store.getServiceAsFlow('svc-1')
     expect(flow?.mode).toBe('mode2')
-    expect(flow?.meta).toEqual({ nodeMax: 7, milestoneMax: 2 })
+    expect(flow?.meta).toEqual({ nodeMax: 7, groupMax: 2 })
   })
 })
 

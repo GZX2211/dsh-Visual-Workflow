@@ -67,10 +67,7 @@ export function GroupForm({ data, copy, members, onPatch, onLoadMd, onRemoveMemb
 }
 
 /**
- * 虚拟节点表单：引用主节点只读，另可编辑
- *   - 显示名（画布上替代角色名，如「里程碑①：方案评审」）；
- *   - 角色：普通执行入口（缺省，沿用自动完成）或里程碑闸门（不自动完成，
- *     只能由父代理 `wf_graph_patch(mark_node)` 显式标记）。
+ * 虚拟节点表单：引用主节点只读，另可编辑显示名（画布上替代节点种类名）。
  */
 export function ProxyForm({ data, copy, onPatch, mainLabel }: {
   data: Record<string, unknown>
@@ -78,7 +75,6 @@ export function ProxyForm({ data, copy, onPatch, mainLabel }: {
   onPatch(patch: Record<string, unknown>): void
   mainLabel: string
 }) {
-  const isMilestone = data.role === 'milestone'
   return (
     <div>
       <h3>{copy.nodeKinds.proxy}</h3>
@@ -93,20 +89,6 @@ export function ProxyForm({ data, copy, onPatch, mainLabel }: {
           placeholder={String(copy.proxyLabelHint)}
           onChange={(event) => onPatch({ label: event.target.value })}
         />
-      </Field>
-      <Field label={String(copy.proxyRole)}>
-        <div className="wf-form-stack">
-          <label className="wf-form-check">
-            <input
-              type="checkbox"
-              className="wf-form-check__box"
-              checked={isMilestone}
-              onChange={(event) => onPatch({ role: event.target.checked ? 'milestone' : null })}
-            />
-            <span>{isMilestone ? copy.proxyRoleMilestone : copy.proxyRoleExecutor}</span>
-          </label>
-          <span className="wf-hint">{copy.proxyRoleMilestoneHint}</span>
-        </div>
       </Field>
       <span className="wf-hint">{copy.proxyReadonlyHint}</span>
     </div>

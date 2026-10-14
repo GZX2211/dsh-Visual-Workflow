@@ -5,8 +5,6 @@
 export declare const OP_FIELD_SHAPES: Record<string, string>;
 /** 图结构组的全部 op 形状（一段可整体引用的文本）。 */
 export declare const GRAPH_OP_FIELD_TEXT: string;
-/** 标记组的 op 形状。 */
-export declare const MARK_OP_FIELD_TEXT = "{ op:'mark_node', nodeId:string, status:'ok'|'fail' } (marks the CURRENT gate only; one patch carries exactly 1 mark op)";
 /**
  * 角色节点（agent / parent）的 data 字段契约。
  * 为什么必须显式写清 presetId：它为空意味着该节点运行期**零工具**（连读写文件都调不到），
@@ -17,8 +15,6 @@ export declare const ROLE_NODE_DATA_CONTRACT: string;
 export declare const PATCH_SUBMISSION_RULES: string;
 /** 稳定错误码语义（按「该改什么」分组，模型据此选择修正方向）。 */
 export declare const ERROR_CODE_SEMANTICS: string;
-/** 闸门标记语义（mark_node 的适用时机与判定）。 */
-export declare const GATE_MARKING_SEMANTICS: string;
 /**
  * 写图契约全文（`wf_org_catalog` 的 rules.patchContract 直接引用这一段）。
  * 顺序即阅读顺序：先怎么提交，再各 op 形状，再节点 data 契约，最后错误码语义。

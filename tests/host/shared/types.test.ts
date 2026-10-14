@@ -90,7 +90,6 @@ describe('shared/types 契约形态', () => {
     nodeUsed: 0, nodeMax: 12, nodeRemaining: 12,
     groupUsed: 0, groupMax: 0, groupRemaining: null,
     membersMax: 0, parallelBranchMax: 0,
-    milestoneUsed: 0, milestoneMax: 0, milestoneRemaining: null,
     patchOpsMax: 0, patchOpsRemaining: null,
     forbiddenShapes: [], namingConvention: null,
   }

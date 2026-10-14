@@ -24,10 +24,8 @@ export interface OrgMeta {
     roleGranularity?: 'broad' | 'narrow';
     /** 同角色多实例（proxy 复用）是否允许（软约束）。 */
     roleReuse?: 'forbid' | 'allow';
-    /** 父代理闸门次数上限（**不含首次编排**，D-21；超限 → WF_MILESTONE_INVALID）。 */
-    milestoneMax?: number;
     /** 允许触发的介入方式（软约束；本阶段仅作预算展示，不实现触发机制）。 */
-    interveneTrigger?: Array<'user' | 'threshold' | 'milestone'>;
+    interveneTrigger?: Array<'user' | 'threshold'>;
     /** 单轮改图 op 上限（硬护栏：超过 → metaLimitExceeded）。 */
     patchOpsMax?: number;
     /** 每节点最多发多少条协作消息（软约束，提示词注入）。 */
@@ -70,12 +68,6 @@ export interface OrgBudget {
     membersMax: number;
     /** 单列并行分支上限（0 = 不限制）。 */
     parallelBranchMax: number;
-    /** 父代理闸门已用次数（不含首次编排，D-21）。 */
-    milestoneUsed: number;
-    /** 父代理闸门上限（0 = 不限制）。 */
-    milestoneMax: number;
-    /** 父代理闸门剩余（无上限时为 null）。 */
-    milestoneRemaining: number | null;
     /** 单轮改图 op 上限（0 = 不限制）。 */
     patchOpsMax: number;
     /** 单轮改图 op 剩余。 */

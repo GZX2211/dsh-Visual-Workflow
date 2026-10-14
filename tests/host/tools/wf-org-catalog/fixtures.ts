@@ -66,7 +66,7 @@ export function roleAssetDetailFixture(overrides: Partial<RoleAssetDetail> = {})
   }
 }
 
-/** 覆盖全部节点种类与数据源字段的工作流资产详情（含内联协作组、闸门虚拟节点、服务器库）。 */
+/** 覆盖全部节点种类与数据源字段的工作流资产详情（含内联协作组、虚拟节点、服务器库）。 */
 export function workflowAssetDetailFixture(overrides: Partial<WorkflowAssetDetail> = {}): WorkflowAssetDetail {
   const nodes: GraphNode[] = [
     { id: 's', kind: 'start', position: { x: 0, y: 0 }, data: { label: '启动' } },
@@ -102,7 +102,7 @@ export function workflowAssetDetailFixture(overrides: Partial<WorkflowAssetDetai
       kind: 'proxy',
       position: { x: 0, y: 0 },
       proxySourceId: 'a1',
-      data: { label: '里程碑复核', role: 'milestone' },
+      data: { label: '复核点' },
     },
     { id: 'f1', kind: 'file', position: { x: 0, y: 0 }, data: { label: '基线说明', fileKind: 'text', content: '基线正文' } },
     {

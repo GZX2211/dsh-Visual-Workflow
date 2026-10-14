@@ -11,7 +11,7 @@
 import { nodeParticipatesInFlow } from '../../graph/index.js'
 import { labelOf } from '../../orchestrator/index.js'
 import { ORG_SOP_DESIGN_METHOD, ORG_SOP_L1_GRAPH_SEMANTICS } from '../../prompts/index.js'
-import { GATE_MARKING_SEMANTICS, PATCH_CONTRACT_TEXT } from '../infrastructure/graph-op-contract.js'
+import { PATCH_CONTRACT_TEXT } from '../infrastructure/graph-op-contract.js'
 import { CATALOG_LIMITS, ID_CONVENTION, INLINE_ROLE_SEPARATOR, INSTANCE_ID } from './types.js'
 import type {
   CatalogComboEntry,
@@ -132,7 +132,6 @@ export function buildIndex(input: {
       graphSemantics: ORG_SOP_L1_GRAPH_SEMANTICS,
       designMethod: ORG_SOP_DESIGN_METHOD,
       patchContract: PATCH_CONTRACT_TEXT,
-      gateMarking: GATE_MARKING_SEMANTICS,
     },
     truncated:
       workflows.truncated
@@ -441,7 +440,6 @@ function nodeEntryOf(
         kind: 'proxy',
         label: textOf(node.data?.label) || node.proxySourceId,
         proxySourceId: node.proxySourceId,
-        role: node.data?.role === 'milestone' ? 'milestone' : 'executor',
       }
       return entry
     }

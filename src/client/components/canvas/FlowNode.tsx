@@ -105,8 +105,6 @@ function metaLinesOf(node: CanvasNode, copy: Dict & { modeName(id: string | null
 export const FlowNode = memo(function FlowNode({ node, copy, mode, selected, highlighted, dragging, runStatus, locked, lockHint, agentPatched, onPointerDown, onHandlePointerDown, onToggleSwap }: FlowNodeProps) {
   const kind = node.kind
   const isProxy = kind === 'proxy'
-  // 里程碑闸门：proxy.data.role='milestone' 时用里程碑样式 + 角标（label 已在名称行渲染）
-  const isGate = isProxy && (node.data as { role?: unknown }).role === 'milestone'
   // 名称回退：label 为空（含空白）时显示节点种类名（避免虚拟节点显示为空白卡片）
   const nodeLabel = String(node.data.label ?? '').trim() || String(copy.nodeKinds[isProxy ? 'agent' : kind] ?? '')
   // 阶段节点（启动/结束/暂停）：单/双流程连接点，交换无意义且会产生死数据（审查 BUG-1），
@@ -128,7 +126,6 @@ export const FlowNode = memo(function FlowNode({ node, copy, mode, selected, hig
     selected ? 'is-selected' : '',
     highlighted ? 'is-highlighted' : '',
     isProxy ? 'is-proxy' : '',
-    isGate ? 'is-gate' : '',
     locked ? 'is-locked' : '',
   ].filter(Boolean).join(' ')
 
@@ -178,11 +175,7 @@ export const FlowNode = memo(function FlowNode({ node, copy, mode, selected, hig
           {agentPatched ? <span className="wf-node__agent-badge" title={String(copy.agentPatchedBadge)}>{String(copy.agentPatchedBadge)}</span> : null}
         </div>
         <div className="wf-node__label">
-          {isProxy
-            ? (isGate
-                ? <span className="wf-node__proxy-badge is-gate">{String(copy.proxyGateBadge)}</span>
-                : <span className="wf-node__proxy-badge">{String(copy.proxyBadge)}</span>)
-            : null}
+          {isProxy ? <span className="wf-node__proxy-badge">{String(copy.proxyBadge)}</span> : null}
           {nodeLabel}
         </div>
         {metaLines.length > 0 ? <div className="wf-node__prompt">{metaText}</div> : null}

@@ -37,13 +37,6 @@ export interface RunSnapshot {
      * 未配置元参数时不写（保持既有快照形状，旧数据兼容）。
      */
     meta?: OrgMeta;
-    /**
-     * 本 run 已完成的父代理闸门次数（D-21：**不含首次编排**）。
-     * 落位说明（P3）：放在快照而不是内存 RunEntry —— 预算必须可审计、且续跑要继承
-     * （`buildResumedSnapshot` 深拷贝旧快照即自动带上）；仅由 `wf_graph_patch(mark_node)`
-     * 标记 ok 时递增，父代理的自动完成路径永远不会写它。
-     */
-    milestoneUsed?: number;
     /** 节点执行记录列表（仅可执行 agent 节点；协作组/阶段/文件/数据库不做执行记录）。 */
     nodes: Array<{
         /** 节点 id。 */
@@ -78,8 +71,8 @@ export interface RunSnapshot {
     }>;
 }
 /**
- * 节点输出记录：运行快照中单节点产出的独立视图，供断点续跑回填 ctx 连线上下文
- * （需求文档 §4.7 规则 6：已 ok 节点完整输出随断点重新可用，作为 ctx 连线注入后续节点）。
+ * 节点输出记录：运行快照中单节点产出的独立视图，供断点续跑回填上游产出
+ * （需求文档 §4.7 规则 6：已 ok 节点完整输出随断点重新可用，作为下游节点的自动注入来源）。
  * 与 RunSnapshot.nodes[i] 同源，抽取为独立接口便于 resume 任务（T-027）复用。
  */
 export interface NodeOutputRecord {

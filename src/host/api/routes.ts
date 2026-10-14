@@ -86,7 +86,6 @@ export const ERROR_STATUS: Record<string, number> = {
   WF_BAD_CALLER: 400, // 请求体自报的 sessionId 缺失（本 API 无应用层鉴权，故不是 401）
   WF_MODE_MISMATCH: 400, // 调用面与运行模式不匹配（mode1 工具撞 mode2 运行）
   WF_SCOPE_INVALID: 400, // 补丁 scope 与真实目标类型不匹配
-  WF_PATCH_MIXED_GROUPS: 400, // 一次补丁混用不同 op 组（拆成多次调用即可）
   WF_NODE_KIND: 400, // 传入的 nodeId 指向非 agent 节点（入参与画布事实不符）
   WF_NO_ASK_TARGET: 400, // wf_ask 未给出提问目标
   WF_EXPERIENCE_WRONG_TYPE: 400, // 经验类型取值不在闭集（agent / orchestrator）
@@ -114,7 +113,6 @@ export const ERROR_STATUS: Record<string, number> = {
   WF_CANCELLED: 409,
   WF_BUSY: 409,
   WF_RETRY_LIMIT: 409,
-  WF_MILESTONE_INVALID: 409,
   WF_PATCH_CONFLICT: 409,
   WF_ROOT_INACTIVE: 409,
   WF_ROOT_BUSY: 409,

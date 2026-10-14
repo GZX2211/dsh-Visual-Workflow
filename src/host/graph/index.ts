@@ -32,6 +32,7 @@ export {
 
 // ── 拓扑查询（只读，不改变图）─────────────────────────────────────────────
 export {
+  autoContextSourceIds,
   ctxInEdges,
   dbInEdges,
   downstreamFlowNodeIds,
@@ -41,21 +42,16 @@ export {
   lineById,
   nodeById,
   proxiesOf,
-  upstreamCtxNodeIds,
 } from './model.js'
 
 // ── 图结构判定 ───────────────────────────────────────────────────────────
 export { isFlowLine } from './dag.js'
 export { nodeHasFlowIn, nodeParticipatesInFlow } from './model.js'
 
-// ── 虚拟节点（闸门）与协作组语义 ──────────────────────────────────────────
+// ── 虚拟节点与协作组语义 ──────────────────────────────────────────────────
 export {
-  activeMilestoneGateOf,
   isGroupMember,
-  mainNodeIdOf,
   memberGroupId,
-  milestoneProxiesOf,
-  proxyRoleOf,
 } from './model.js'
 
 // ── 流程子图算法（图论纯函数）─────────────────────────────────────────────

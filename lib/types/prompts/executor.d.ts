@@ -2,8 +2,9 @@
 export interface ExecutorContextFacts {
     /** 节点人类可读名称。 */
     nodeLabel: string;
-    /** 上游产出上下文（ctx 连线注入；数组元素为「来源 → 内容」键值，可为空）。 */
+    /** 上游产出上下文（全链路自动注入；数组元素为「来源名称 + 来源节点 id + 内容」，可为空）。 */
     upstreamContext: Array<{
+        nodeId: string;
         source: string;
         content: string;
     }>;

@@ -53,15 +53,22 @@ export declare function validateFlowForRun(flow: WorkflowDocument): WfError | nu
  * 节点执行上下文组装（纯函数）：上游产出 / 文件路径索引 / 数据库工具说明。
  * buildNodeBlocks（子代理任务块）与 prepareParentExecutor（父代理执行单元）共用，
  * 保证同一节点的上下文注入完全一致。
+ *
+ * 上游来源有两条（用户裁决 2026-10）：
+ *   - 数据源：file 节点经 ctx 出线注入的文本（截断直通）或受管文件路径索引——
+ *     file 无流程线，只能靠手动连线，故该通道保留；
+ *   - 流程前驱产出：全链路自动注入（autoContextSourceIds），无需手动连线。
+ * 角色节点之间的旧 ctx 交接线已停用（静默忽略）；协作组与上下游解耦，不参与注入。
  */
 export declare function buildNodeContextFacts(input: {
     flow: WorkflowDocument;
     node: RoleNode;
-    /** 运行快照：上游角色节点最终产出（ctx 连线显式注入）的读取源。 */
+    /** 运行快照：上游角色节点最终产出（自动注入）的读取源。 */
     snapshot: RunSnapshot;
     documentTextLimit: number;
 }): {
     upstreamContext: Array<{
+        nodeId: string;
         source: string;
         content: string;
     }>;

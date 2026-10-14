@@ -266,7 +266,7 @@ proxy
 * `database`：提供数据库检索能力。
 * `start/end/pause`：Workflow 生命周期控制节点。
 * `group`：Workflow 内的协作单元，也就是 Agent team。
-* `proxy`：引用已有执行节点的虚拟节点，可用于复用或里程碑闸门。
+* `proxy`：引用已有执行节点的虚拟节点，用于复用同一角色实例与它已有的上下文。
 
 ---
 
@@ -687,10 +687,20 @@ checkGraphInvariants
 
 边界：
 
-* **持有运行事实的唯一写者**：`RunSnapshot`、运行锁、子代理/等待器/协作通信的内存表只由 orchestrator 方法改写；工具层需要写运行状态时必须经语义化方法（如 `markMilestoneNode`），不得直接改写快照。
+* **持有运行事实的唯一写者**：`RunSnapshot`、运行锁、子代理/等待器/协作通信的内存表只由 orchestrator 方法改写；外部需要写运行状态时必须经语义化方法（如 `wf_run_node` 的节点状态推进），不得直接改写快照。
 * **不做 Agent 语义判断**：是否需要重规划、换人、汇报由 Agent 决定；orchestrator 只提供确定性事实（状态、锁、终态、错误码、事件回写）。
 * **不持有工作流文档写权**：文档读写归 storage 与写图工具；orchestrator 只读最新文档并刷新运行事实源文件。
 * **不反向依赖具体实现**：数据工具（索引预建）与 Agent（角色 Prompt 读取）能力经依赖缝注入，模块外统一从 `index.ts` 导入。
+
+节点间上下文交接（2026-10）：
+
+* **产出自动注入**：下游节点自动接收**直接流程前驱**的最终产出，不需要手动连线。
+  组装格式为「上游节点名称（id：节点ID）：产出内容」，多前驱按流程线声明顺序分别列出；
+  无产出的阶段节点（pause）被跳过并继续向前找；协作组与上下游解耦（既不注入也不回溯）。
+* **手动 ctx 交接退役**：角色节点（agent/parent/proxy）的 `ctx-out` 保留为连接点但不再生效
+  （技术债标记）；`ctx` 通道现仅剩「file 数据源 → 角色」的文本直通与受管路径索引注入。
+* **节点契约**：`inputSchema` / `outputSchema` 即「输入契约 / 输出契约」，柔性文本、不做结构校验；
+  agent 节点新建时默认落盘默认输出契约文本（界面显示即实际生效），清空即不配置；父代理不参与节点交接。
 
 文件职责（详见 `src/host/orchestrator/AGENTS.md`）：
 
@@ -709,7 +719,7 @@ run-entry.ts         RunEntry 与运行接口契约
 ask-protocol.ts      三态协议类型与消息文本纯函数
 snapshot.ts          运行快照纯函数（截断口径唯一来源）
 graph-facts.ts       图推导与节点上下文事实（纯函数）
-task-blocks.ts       节点任务块与交接契约（纯函数）
+task-blocks.ts       节点任务块与节点契约（纯函数）
 directive.ts         父代理提示词变体与编排指令组装（纯函数）
 node-params.ts       节点级执行参数解析（纯函数）
 resume.ts            断点候选查找与继承快照构建

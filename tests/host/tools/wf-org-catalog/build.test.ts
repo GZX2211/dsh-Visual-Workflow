@@ -20,7 +20,7 @@ import {
   maskConnection,
 } from '../../../../src/host/tools/wf-org-catalog/build.js'
 import { CATALOG_LIMITS, ID_CONVENTION } from '../../../../src/host/tools/wf-org-catalog/types.js'
-import { GATE_MARKING_SEMANTICS, PATCH_CONTRACT_TEXT } from '../../../../src/host/tools/infrastructure/graph-op-contract.js'
+import { PATCH_CONTRACT_TEXT } from '../../../../src/host/tools/infrastructure/graph-op-contract.js'
 import { ORG_SOP_DESIGN_METHOD, ORG_SOP_L1_GRAPH_SEMANTICS } from '../../../../src/host/prompts/index.js'
 import { collabGroupList, orchestrationNodeList } from '../../../../src/host/orchestrator/index.js'
 import {
@@ -99,7 +99,8 @@ describe('buildIndex（资产索引装配）', () => {
     expect(index.rules.graphSemantics).toBe(ORG_SOP_L1_GRAPH_SEMANTICS)
     expect(index.rules.designMethod).toBe(ORG_SOP_DESIGN_METHOD)
     expect(index.rules.patchContract).toBe(PATCH_CONTRACT_TEXT)
-    expect(index.rules.gateMarking).toBe(GATE_MARKING_SEMANTICS)
+    // 闸门退役：契约段不再有闸门标记语义槽位
+    expect(index.rules).not.toHaveProperty('gateMarking')
     expect(index.idConvention).toEqual(ID_CONVENTION)
     expect(DETAIL_HINT).toBe(index.detailHint)
   })
@@ -280,9 +281,9 @@ describe('buildWorkflowDetail（骨架自足性）', () => {
     expect(group).toEqual({ id: 'g1', kind: 'group', label: '评审组', collabPrompt: '组员互相评审', memberIds: ['a1'], schedulable: false })
   })
 
-  it('虚拟节点给出引用主节点与闸门角色', () => {
+  it('虚拟节点给出引用主节点与显示名（不再有角色字段）', () => {
     const proxy = detail.nodes.find((node) => node.id === 'p1')
-    expect(proxy).toEqual({ id: 'p1', kind: 'proxy', label: '里程碑复核', proxySourceId: 'a1', role: 'milestone' })
+    expect(proxy).toEqual({ id: 'p1', kind: 'proxy', label: '复核点', proxySourceId: 'a1' })
   })
 
   it('文件节点正文一次性给全（没有二次召回通道）', () => {

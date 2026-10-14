@@ -44,11 +44,10 @@ export {
   type ParentTaskSpecParams,
 } from './executor.js'
 
-// 节点任务块构建器（子代理任务文本）：含交接契约（outputContract）与输入结构（inputContract）。
+// 节点任务块构建器（子代理任务文本）：含输出契约（outputContract）与输入契约（inputContract）。
 export {
   buildNodeTaskBlock,
   NODE_HARD_CONSTRAINTS,
-  DEFAULT_OUTPUT_CONTRACT,
   type NodeTaskBlockParams,
 } from './node-task.js'
 

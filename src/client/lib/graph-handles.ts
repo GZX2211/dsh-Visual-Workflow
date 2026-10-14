@@ -8,6 +8,8 @@ import type { NodeKind } from '../../host/shared/graph-model.js'
 
 export type HandleSpec = { inputs: string[]; outputs: string[] }
 
+// 技术债（ctx-out 停用）：角色节点（parent/agent/proxy）仍保留 ctx-out 出点，连线也仍合法，
+// 但连上不再产生注入效果——上游产出改由流程线自动注入下游。见 host graph/model.ts 同标记。
 export const HANDLES: Record<string, HandleSpec> = {
   parent: { inputs: ['db-in', 'ctx-in', 'flow-in'], outputs: ['ctx-out', 'flow-out'] },
   agent: { inputs: ['db-in', 'ctx-in', 'flow-in'], outputs: ['ctx-out', 'flow-out'] },

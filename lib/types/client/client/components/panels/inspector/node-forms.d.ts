@@ -18,10 +18,7 @@ export declare function GroupForm({ data, copy, members, onPatch, onLoadMd, onRe
     onRemoveMember(memberId: string): void;
 }): import("react").JSX.Element;
 /**
- * 虚拟节点表单：引用主节点只读，另可编辑
- *   - 显示名（画布上替代角色名，如「里程碑①：方案评审」）；
- *   - 角色：普通执行入口（缺省，沿用自动完成）或里程碑闸门（不自动完成，
- *     只能由父代理 `wf_graph_patch(mark_node)` 显式标记）。
+ * 虚拟节点表单：引用主节点只读，另可编辑显示名（画布上替代节点种类名）。
  */
 export declare function ProxyForm({ data, copy, onPatch, mainLabel }: {
     data: Record<string, unknown>;

@@ -111,9 +111,9 @@ function groupNode(id: string, memberIds: string[]): GraphNode {
   return { id, kind: 'group', position: { x: 0, y: 0 }, data: { label: id, collabPrompt: '', memberIds } }
 }
 
-/** 虚拟节点（P3：可选 data.role 区分「执行入口」与「里程碑闸门」）。 */
-function proxyNode(id: string, proxySourceId: string, role?: 'executor' | 'milestone'): GraphNode {
-  return { id, kind: 'proxy', position: { x: 0, y: 0 }, proxySourceId, ...(role ? { data: { role } } : {}) }
+/** 虚拟节点（引用主节点 id）。 */
+function proxyNode(id: string, proxySourceId: string): GraphNode {
+  return { id, kind: 'proxy', position: { x: 0, y: 0 }, proxySourceId }
 }
 
 const LINE_KIND: Record<string, { sourceHandle: Line['sourceHandle']; targetHandle: Line['targetHandle'] }> = {
@@ -139,14 +139,12 @@ function check(input: {
   meta?: OrgMeta
   origin?: 'agent' | 'user'
   patchOps?: number
-  milestoneUsed?: number
 }): GraphIssue[] {
   return checkGraphInvariants({
     flow: input.flow,
     origin: input.origin ?? 'agent',
     ...(input.meta ? { meta: input.meta } : {}),
     ...(input.patchOps !== undefined ? { patchOps: input.patchOps } : {}),
-    ...(input.milestoneUsed !== undefined ? { milestoneUsed: input.milestoneUsed } : {}),
   })
 }
 
@@ -446,45 +444,14 @@ describe('规则矩阵（每个 code 一例）', () => {
     expect(codes(check({ flow: doc }))).toContain('endHasFlowOut')
   })
 
-  it('milestoneProxyInvalid：指向父代理的虚拟节点无流程入口（warning）', () => {
+  it('parentProxyNoFlowIn：指向父代理的虚拟节点无流程入口（warning）', () => {
     const doc = flow(
       [stage('s', 'start'), parent('p1', 'CEO'), agent('a1'), proxyNode('m1', 'p1'), stage('e', 'end')],
       [line('l1', 's', 'a1'), line('l2', 'a1', 'e')],
     )
     const issues = check({ flow: doc })
-    expect(codes(issues)).toContain('milestoneProxyInvalid')
-    expect(issues.find((i) => i.code === 'milestoneProxyInvalid')?.level).toBe('warning')
-  })
-
-  it('milestoneProxyInvalid：闸门数超过元参数上限（warning）', () => {
-    const doc = flow(
-      [stage('s', 'start'), parent('p1', 'CEO'), agent('a1'), proxyNode('m1', 'p1', 'milestone'), stage('e', 'end')],
-      [line('l1', 's', 'a1'), line('l2', 'a1', 'm1'), line('l3', 'm1', 'e')],
-    )
-    // 闸门被流程驱动 → 只有「超上限」这一条；milestoneMax=0 视为不限制
-    expect(codes(check({ flow: doc, meta: { milestoneMax: 0 } }))).not.toContain('milestoneProxyInvalid')
-    const twoGates = flow(
-      [stage('s', 'start'), parent('p1', 'CEO'), agent('a1'), proxyNode('m1', 'p1', 'milestone'), proxyNode('m2', 'p1', 'milestone'), stage('e', 'end')],
-      [line('l1', 's', 'a1'), line('l2', 'a1', 'm1'), line('l3', 'm1', 'm2'), line('l4', 'm2', 'e')],
-    )
-    expect(codes(check({ flow: twoGates, meta: { milestoneMax: 1 } }))).toContain('milestoneProxyInvalid')
-    // P3：闸门以 data.role 判别——缺省 executor 的虚拟节点不占闸门预算（向后兼容既有画布）
-    const executors = flow(
-      [stage('s', 'start'), parent('p1', 'CEO'), agent('a1'), proxyNode('x1', 'p1', 'executor'), proxyNode('x2', 'p1', 'executor'), stage('e', 'end')],
-      [line('l1', 's', 'a1'), line('l2', 'a1', 'x1'), line('l3', 'x1', 'x2'), line('l4', 'x2', 'e')],
-    )
-    expect(codes(check({ flow: executors, meta: { milestoneMax: 1 } }))).not.toContain('milestoneProxyInvalid')
-  })
-
-  it("milestoneProxyInvalid：data.role='milestone' 却指向非父代理节点（warning）", () => {
-    const doc = flow(
-      [stage('s', 'start'), parent('p1', 'CEO'), agent('a1'), proxyNode('m1', 'a1', 'milestone'), stage('e', 'end')],
-      [line('l1', 's', 'a1'), line('l2', 'a1', 'e')],
-    )
-    const issue = check({ flow: doc }).find((i) => i.code === 'milestoneProxyInvalid')
-    expect(issue).toBeDefined()
-    expect(issue?.message).toContain('is not a parent node')
-    expect(issue?.level).toBe('warning')
+    expect(codes(issues)).toContain('parentProxyNoFlowIn')
+    expect(issues.find((i) => i.code === 'parentProxyNoFlowIn')?.level).toBe('warning')
   })
 
   it('metaLimitExceeded：可执行节点数超过 nodeMax（origin=agent）', () => {
@@ -544,7 +511,7 @@ describe('规则矩阵（每个 code 一例）', () => {
     expect(issues.find((i) => i.code === 'namingConvention')?.level).toBe('warning')
 
     // 全部满足前缀 → 无任何问题（空数组，锁定「不误报」）
-    // 注意：两条软规则（nodeNoUpstream / roleNode*）也要满足，故给 a2 连一条 ctx 输入线
+    // 注意：角色节点配置类软规则（roleNode*）仍要满足，故给 a2 连一条 ctx 输入线
     const satisfied = flow(
       [stage('s', 'start'), agent('a1', '阶段一'), agent('a2', '阶段二'), stage('e', 'end')],
       [line('l1', 's', 'a1'), line('l2', 'a1', 'a2'), line('l3', 'a2', 'e'), line('c1', 'a1', 'a2', 'ctx')],
@@ -563,16 +530,7 @@ describe('规则矩阵（每个 code 一例）', () => {
     expect(codes(check({ flow: satisfied, meta: { namingConvention: '/^\\d/' } }))).toContain('namingConvention')
   })
 
-  it('nodeNoUpstream：多前置且无输入通道 → warning；单前置线性流水线不报（不误伤首节点）', () => {
-    // 线性流水线（每个节点只有一个可执行前置）→ 两条数据流规则都不报
-    const linear = flow(
-      [stage('s', 'start'), agent('a1'), agent('a2'), stage('e', 'end')],
-      [line('l1', 's', 'a1'), line('l2', 'a1', 'a2'), line('l3', 'a2', 'e')],
-    )
-    expect(codes(check({ flow: linear }))).not.toContain('nodeNoUpstream')
-    expect(codes(check({ flow: linear }))).not.toContain('nodeNoConsumer')
-
-    // 扇出后汇聚：汇聚节点有 a1/a2 两个可执行前置却无任何输入通道 → 提示
+  it('nodeNoUpstream 已退役：多前置汇聚不再产出该告警（产出自动注入，无需人工补线）', () => {
     const converge = flow(
       [stage('s', 'start'), agent('a1'), agent('a2'), agent('j'), stage('e', 'end')],
       [
@@ -580,58 +538,20 @@ describe('规则矩阵（每个 code 一例）', () => {
         line('l3', 'a1', 'j'), line('l4', 'a2', 'j'), line('l5', 'j', 'e'),
       ],
     )
-    const issues = check({ flow: converge })
-    expect(issues.filter((i) => i.code === 'nodeNoUpstream').flatMap((i) => i.nodeIds ?? [])).toEqual(['j'])
-    expect(issues.filter((i) => i.code === 'nodeNoUpstream').every((i) => i.level === 'warning')).toBe(true)
-
-    // 给汇聚节点补一条 ctx 入线后不再报
-    const withCtx = flow(
-      [stage('s', 'start'), agent('a1'), agent('a2'), agent('j'), stage('e', 'end')],
-      [
-        line('l1', 's', 'a1'), line('l2', 's', 'a2'),
-        line('l3', 'a1', 'j'), line('l4', 'a2', 'j'), line('l5', 'j', 'e'),
-        line('c1', 'a1', 'j', 'ctx'),
-      ],
-    )
-    expect(codes(check({ flow: withCtx }))).not.toContain('nodeNoUpstream')
+    expect(codes(check({ flow: converge }))).not.toContain('nodeNoUpstream')
   })
 
-  it('nodeNoConsumer：声明了输出结构但下游都没接入 ctx → warning；未声明则不报', () => {
-    const base = [
-      stage('s', 'start') as GraphNode,
-      agent('a1', '分析', { outputSchema: '结论 / 产出文件路径' }),
-      agent('a2', '成稿'),
-      stage('e', 'end') as GraphNode,
-    ]
-    const lines = [line('l1', 's', 'a1'), line('l2', 'a1', 'a2'), line('l3', 'a2', 'e')]
-    const issues = check({ flow: flow(base, lines) })
-    expect(issues.filter((i) => i.code === 'nodeNoConsumer').flatMap((i) => i.nodeIds ?? [])).toEqual(['a1', 'a2'])
-    // 未声明 outputSchema 的同类图不报（本规则只在「契约与图形不一致」时发声）
-    const undeclared = flow(
-      [stage('s', 'start'), agent('a1', '分析'), agent('a2', '成稿'), stage('e', 'end')],
+  it('nodeNoConsumer 已退役：声明了输出契约但下游未接 ctx 不再产出该告警', () => {
+    const declared = flow(
+      [stage('s', 'start'), agent('a1', '分析', { outputSchema: '结论 / 产出文件路径' }), agent('a2', '成稿'), stage('e', 'end')],
       [line('l1', 's', 'a1'), line('l2', 'a1', 'a2'), line('l3', 'a2', 'e')],
     )
-    expect(codes(check({ flow: undeclared }))).not.toContain('nodeNoConsumer')
-    // 接上 ctx 线后一致，不再报
-    expect(codes(check({ flow: flow(base, [...lines, line('c1', 'a1', 'a2', 'ctx')]) }))).not.toContain('nodeNoConsumer')
+    expect(codes(check({ flow: declared }))).not.toContain('nodeNoConsumer')
   })
 
-  it('nodeNoUpstream：file / db 入线也算输入通道（不误报）', () => {
-    const withFile = flow(
-      [
-        stage('s', 'start'),
-        fileNode('f1'),
-        agent('a1'),
-        agent('a2'),
-        stage('e', 'end'),
-      ],
-      [
-        line('l1', 's', 'a1'), line('l2', 's', 'a2'),
-        line('l3', 'a1', 'a2'), line('l4', 'a2', 'e'),
-        line('c1', 'f1', 'a2', 'ctx'),
-      ],
-    )
-    expect(codes(check({ flow: withFile }))).not.toContain('nodeNoUpstream')
+  it('两条退役 code 已从注册表移除', () => {
+    expect(invariantCodeInfo('nodeNoUpstream')).toBeNull()
+    expect(invariantCodeInfo('nodeNoConsumer')).toBeNull()
   })
 
   it('roleNodeNoPreset / roleNodeNoPrompt：角色节点缺工具组合或缺 System Prompt → warning', () => {
@@ -750,27 +670,17 @@ describe('流程子图纯函数（dag.ts）', () => {
 // ---------------------------------------------------------------------------
 
 /**
- * 产出一条 nodeNoConsumer 的画布：
- * s → a1 → a2 与 a1 → a3，a2 / a3 都汇入 e；a2 另有第二条可执行前置（a3），
- * a1 声明了 outputSchema 但它的流程下游都没接 ctx → nodeNoConsumer。
- * 不用自环 ctx 线：`source === targetId && targetHandle === 'ctx-in'` 会被规则视为
- * 「该下游已经接了 ctx」而消掉本规则，自环画布反而测不到它。
+ * 产出一条 warning 的画布（注册表运行不变式用）：两个可执行节点同名。
+ * 为什么不用退役前的 nodeNoConsumer 画布：那两条规则已随产出自动注入退役。
  */
-function nodeNoConsumerFlow(): WorkflowDocument {
+function duplicateLabelFlow(): WorkflowDocument {
   return flow(
-    [stage('s', 'start'), agent('a1', 'a1', { outputSchema: '{"type":"object"}' }), agent('a2', 'a2'), agent('a3', 'a3'), stage('e', 'end')],
-    [line('l1', 's', 'a1'), line('l2', 'a1', 'a2'), line('l3', 'a1', 'a3'), line('l4', 'a2', 'e'), line('l5', 'a3', 'e')],
+    [stage('s', 'start'), agent('a1', '重复名'), agent('a2', '重复名'), stage('e', 'end')],
+    [line('l1', 's', 'a1'), line('l2', 'a1', 'a2'), line('l3', 'a2', 'e')],
   )
 }
 
 describe('检查器 code 注册表（D02-01）', () => {
-  it('nodeNoConsumer 已登记且级别为 warning', () => {
-    const info = invariantCodeInfo('nodeNoConsumer')
-    expect(info).not.toBeNull()
-    expect(info?.level).toBe('warning')
-    expect(String(info?.description ?? '').trim().length).toBeGreaterThan(0)
-  })
-
   it('静态不变式：规则文件里产出的每个 code 字面量都已登记进 GRAPH_INVARIANT_CODES', () => {
     const rulesDir = fileURLToPath(new URL('../../../src/host/graph/', import.meta.url))
     const files = readdirSync(rulesDir).filter((name) => name.startsWith('invariants-rules-') && name.endsWith('.ts'))
@@ -786,19 +696,31 @@ describe('检查器 code 注册表（D02-01）', () => {
     expect(unregistered, `以下 code 产出但未登记进 GRAPH_INVARIANT_CODES：${unregistered.join(', ')}`).toEqual([])
   })
 
-  it('运行不变式：该画布确实产出 nodeNoConsumer，且其 code 可反查', () => {
-    const issues = check({ flow: nodeNoConsumerFlow() })
-    const targets = issues.filter((issue) => issue.code === 'nodeNoConsumer')
-    expect(targets.length, '构造的画布必须触发 nodeNoConsumer，否则本用例退化为空转').toBeGreaterThan(0)
-    // a1 的产出无人消费，其全部流程下游（a2/a3）都被点名
-    expect(targets.flatMap((issue) => issue.nodeIds ?? []).sort()).toEqual(['a1', 'a2', 'a3'])
+  it('规则文件里不再出现两条退役 code 字面量（ctx 交接时代产物）', () => {
+    const rulesDir = fileURLToPath(new URL('../../../src/host/graph/', import.meta.url))
+    const files = readdirSync(rulesDir).filter((name) => name.startsWith('invariants-rules-') && name.endsWith('.ts'))
+    expect(files.length).toBeGreaterThan(0)
+    for (const file of files) {
+      const text = readFileSync(join(rulesDir, file), 'utf8')
+      expect(text, `${file} 仍含退役 code：nodeNoUpstream`).not.toContain('nodeNoUpstream')
+      expect(text, `${file} 仍含退役 code：nodeNoConsumer`).not.toContain('nodeNoConsumer')
+    }
+  })
+
+  it('运行不变式：画布产出的每个 code 都能反查注册表', () => {
+    const issues = check({ flow: duplicateLabelFlow() })
+    expect(issues.length, '构造的画布必须产出问题，否则本用例退化为空转').toBeGreaterThan(0)
     for (const issue of issues) {
       expect(invariantCodeInfo(issue.code), `code 未登记进 GRAPH_INVARIANT_CODES：${issue.code}`).not.toBeNull()
     }
   })
 
   it('forbiddenShapes 能把已登记的 warning 提升为 error（登记与生效同一份契约）', () => {
-    const issues = check({ flow: nodeNoConsumerFlow(), meta: { forbiddenShapes: ['nodeNoConsumer'] } })
-    expect(issues.filter((issue) => issue.code === 'nodeNoConsumer').map((issue) => issue.level)).toEqual(['error'])
+    const doc = duplicateLabelFlow()
+    expect(codes(check({ flow: doc }))).toContain('duplicateRoleLabel')
+    const issues = check({ flow: doc, meta: { forbiddenShapes: ['duplicateRoleLabel'] } })
+    const levels = issues.filter((issue) => issue.code === 'duplicateRoleLabel').map((issue) => issue.level)
+    expect(levels.length).toBeGreaterThan(0)
+    expect(levels.every((level) => level === 'error')).toBe(true)
   })
 })

@@ -31,8 +31,6 @@ export interface CheckGraphInput {
      * 拓扑再校验已由 checkGraphInvariants 自身完成。
      */
     patchOps?: number;
-    /** 父代理闸门已用次数（不含首次编排，D-21）；与 meta.milestoneMax 比对。 */
-    milestoneUsed?: number;
 }
 /** code 注册表条目。 */
 export interface IssueCodeInfo {

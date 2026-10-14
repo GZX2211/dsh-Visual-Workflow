@@ -9,7 +9,7 @@
 // 稳定布局（§13.1）：
 //   ① 首段 = 该节点真正需要强调的**软约束固化**（AI 有选择权、值得强调的行为规则）
 //             ——系统语言规则 + 协作组成员必须经 wf_ask_agent 通信（仅组内节点注入）；
-//   ② 中段 = 过程性信息（上游产出上下文（ctx 连线注入）/ 文件路径索引 / 数据库工具说明）
+//   ② 中段 = 过程性信息（上游产出（沿流程线自动注入）/ 文件路径索引 / 输入契约 / 数据库工具说明）
 //   ③ 末段 = 软约束重申（W-02 双位）
 //
 // 构建器为纯函数：不读 Date.now/随机源，同一 params 两次构建字节相同。
@@ -31,11 +31,11 @@ export interface NodeTaskBlockParams {
      */
     nodeLabel: string
     /**
-     * 上游产出上下文（ctx 连线注入）：上游节点最终产出摘要/产物文本，作为下游节点的
-     * 上下文注入。数组元素为「来源 → 内容」键值；可为空（无 ctx 连线即不注入）。
+     * 上游产出上下文（全链路自动注入）：上游节点最终产出摘要/产物文本，作为下游节点的
+     * 上下文注入。数组元素为「来源名称 + 来源节点 id + 内容」；可为空（无上游产出即不注入）。
      * 长文本（文档/上游产物）统一置于中段（lost-in-the-middle 处置）。
      */
-    upstreamContext: Array<{ source: string; content: string }>
+    upstreamContext: Array<{ nodeId: string; source: string; content: string }>
     /**
      * 文件路径索引：非文本文件节点连线注入的受管文件路径（data/files/），子代理经
      * 官方读取工具自行读取（不直通模型上下文）。可为空。
@@ -58,21 +58,17 @@ export interface NodeTaskBlockParams {
      */
     collabChannel?: CollabChannel
     /**
-     * 输入结构说明（节点配置 data.inputSchema）：告诉该子代理「应当收到什么输入」，
+     * 输入契约（节点配置 data.inputSchema）：告诉该子代理「应当收到什么输入」，
      * 避免它重复索要上游已提供的信息。为空则不组装该段。
      */
     inputContract: string
     /**
-     * 交接契约（节点配置 data.outputSchema，或系统的默认结构）：该子代理的最终回复
-     * 会被下游 ctx 连线节点**直接读取**，故须按此结构组织。为空则不组装该段。
+     * 输出契约（节点配置 data.outputSchema）：该子代理的最终回复必须按其组织。
+     * 为空则不组装该段（= 节点不配置契约）。默认文本在新建节点时已落盘，
+     * 因此这里不做任何兜底、也不与默认文本叠加（用户裁决 2026-10）。
      * 注意这是**柔性文本契约**（用户裁决 A3：不做结构校验），只影响提示词，不参与校验。
      */
     outputContract: string
-    /**
-     * 交接契约是否来自系统默认结构（节点未配置 outputSchema，且该节点存在 ctx-out 出线）。
-     * true 时声明中提到「本结构由系统默认给出」，便于模型区分用户定制与默认。
-     */
-    outputContractDefaulted: boolean
     /**
      * 系统语言名（如 '中文' / 'English'；从 DSH 用户设置读取）。
      * 注入「所有对话回复、注释、思考过程必须使用该语言」规则。
@@ -100,25 +96,6 @@ function collabConstraintOf(channel: CollabChannel | undefined): {
   return channel === 'official'
     ? { head: NODE_HARD_CONSTRAINTS.collabSendOnly, restate: NODE_HARD_CONSTRAINTS.collabSendOnly }
     : { head: NODE_HARD_CONSTRAINTS.collabAskOnly, restate: NODE_HARD_CONSTRAINTS.collabAskOnly }
-}
-
-/**
- * 默认交接契约的字段清单（系统兜底用；用户裁决：有 ctx-out 出线且未配置 outputSchema 时注入）。
- * 为什么是这四项：下游节点经 ctx 连线读到的就是本节点的**最终回复文本**，
- * 它需要能据此判断「结论是什么、产物在哪、有哪些已定决策、还剩什么没定」——
- * 大产物本身一律落盘（写在路径里），不靠回复正文传递。
- */
-export const DEFAULT_OUTPUT_CONTRACT =
-  '结论 / 产出文件路径 / 关键决策 / 未决问题'
-
-/**
- * 交接契约声明句（末段复用默认结构短语；术语一致性由 DEFAULT_OUTPUT_CONTRACT 保证）。
- * 模块内部 helper（仅本文件使用，不经公共入口公开）。
- * @param defaulted true = 这段结构是系统默认给出的（节点未配置），可用但可自行细化
- */
-function outputContractRule(defaulted: boolean): string {
-  const base = `你的最终回复会被下游节点直接读取，必须包含：${DEFAULT_OUTPUT_CONTRACT}`
-  return defaulted ? `${base}（这套结构是本节点的默认交接格式）` : base
 }
 
 /**
@@ -162,7 +139,7 @@ export function buildNodeTaskBlock(params: NodeTaskBlockParams): string {
   if (facts.upstreamContext.length > 0) {
     midParts.push('', '上游产出：')
     for (const entry of facts.upstreamContext) {
-      midParts.push(`- ${entry.source}：${entry.content}`)
+      midParts.push(`- ${entry.source}（id：${entry.nodeId}）：${entry.content}`)
     }
   } else {
     midParts.push('', '上游产出：（无）')
@@ -176,7 +153,7 @@ export function buildNodeTaskBlock(params: NodeTaskBlockParams): string {
   }
 
   if (facts.inputContract.trim()) {
-    midParts.push('', '输入结构（你应当收到的输入）：', facts.inputContract.trim())
+    midParts.push('', '输入契约（你应当收到的输入）：', facts.inputContract.trim())
   }
 
   if (facts.dbToolHint.trim()) {
@@ -185,17 +162,15 @@ export function buildNodeTaskBlock(params: NodeTaskBlockParams): string {
 
   const mid = midParts.join('\n')
 
-  // —— 末段：软约束重申（W-02 双位） + 交接契约（注意力末位 = 最终回复格式的最后一次提醒）——
+  // —— 末段：软约束重申（W-02 双位） + 输出契约（注意力末位 = 最终回复格式的最后一次提醒）——
   const tailLines: string[] = [TAIL_MARKER, '']
   const restate: string[] = []
   if (facts.isGroupMember) restate.push(`- ${collabConstraintOf(facts.collabChannel).restate}。`)
   const outputContract = facts.outputContract.trim()
   if (outputContract) {
-    // 节点自配置时逐字使用其结构；未配置（系统兜底）时同时给出标准字段清单，
-    // 避免下游契约退化成「随便说说」。
-    restate.push(facts.outputContractDefaulted
-      ? `- ${outputContractRule(true)}：${outputContract}。`
-      : `- 你的最终回复会被下游节点直接读取，必须包含：${outputContract}。`)
+    // 逐字使用节点配置的契约（不叠加默认文本）；措辞不断言「下游会读取」——
+    // 终端节点同样注入本段（用户裁决 2026-10：统一注入、可注入为空）。
+    restate.push(`- 输出契约（你的最终回复必须按其组织）：${outputContract}。`)
   }
   if (restate.length > 0) tailLines.push(TAIL_RESTATE_MARKER, ...restate)
   const tail = tailLines.join('\n')

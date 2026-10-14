@@ -1,12 +1,13 @@
 // src/client/components/panels/inspector/role-form.tsx
 //
-// 角色表单（父/子代理；父代理高级项只含 ReAct/重试，无输入/输出 Schema）：
+// 角色表单（父/子代理；父代理高级项只含 ReAct/重试，无输入/输出契约）：
 // System Prompt + 开关 + Provider/模型/模式/思考强度 + 高级项。
 // 模式（presetId）语义：父/子代理都可编辑——官方只在工作流运行开始前读取该选择，
 // 运行中改动不影响行为，故不下拉锁死；组合（combo）只给子代理，父代理只见官方 preset。
 
 import type { Dict } from '../../../i18n.js'
 import type { PresetItem, ModelItem } from '../../../studio/studio-state.js'
+import { DEFAULT_OUTPUT_CONTRACT_TEXT } from '../../../../host/shared/protocol.js'
 import { Field } from '../form-field.js'
 import { NameField, TextAreaField } from './form-primitives.js'
 
@@ -184,6 +185,10 @@ export function RoleForm({ data, copy, presets, models, combos, onPatch, onLoadM
             <>
               <TextAreaField label={copy.inputSchema} value={data.inputSchema} placeholder={copy.inputSchemaExample} onChange={(value) => onPatch({ inputSchema: value })} />
               <TextAreaField label={copy.outputSchema} value={data.outputSchema} placeholder={copy.outputSchemaExample} onChange={(value) => onPatch({ outputSchema: value })} />
+              {/* 输出契约默认文本落盘：清空后不配置契约，需要时用本操作写回默认文本 */}
+              <button type="button" className="wf-btn wf-btn--xs" onClick={() => onPatch({ outputSchema: DEFAULT_OUTPUT_CONTRACT_TEXT })}>
+                {copy.contractRestoreDefault}
+              </button>
             </>
           )}
         </div>

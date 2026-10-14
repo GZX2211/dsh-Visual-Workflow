@@ -81,12 +81,9 @@ describe('wfRunNode 异步路径与护栏', () => {
     expect(text.match(/data\/files\/a\.pdf/g)).toHaveLength(1)
   })
 
-  it('ctx-in 角色节点：上游 ok/react-capped 产出注入下游（截断），来源标签正确', async () => {
+  it('流程前驱产出自动注入：a1 → pause → a2 跳过暂停节点取上游产出（截断），来源标签正确', async () => {
     const h = await makeHarness()
-    const flow = makeFlow()
-    // a1 ctx-out → a2 ctx-in：显式连线传递上游最终产出（需求 §4.1.2 规则 5）
-    flow.lines.push({ id: 'l-ctx-agent', source: 'n-a1', target: 'n-a2', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' })
-    await start(h, flow)
+    await start(h, makeFlow())
     // 先完成 a1（产出为超长文本，验证截断）
     await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
     await h.runtime.handleSubagentEnd({
@@ -102,11 +99,9 @@ describe('wfRunNode 异步路径与护栏', () => {
     expect(text).toContain('子任务A') // 来源标签（labelOf）
   })
 
-  it('ctx-in 角色节点：上游 fail/pending 无产出不注入；无连线完全不传', async () => {
+  it('流程前驱无产出不注入；没有流程前驱产出语义的节点不注入', async () => {
     const h = await makeHarness()
-    const flow = makeFlow()
-    flow.lines.push({ id: 'l-ctx-agent', source: 'n-a1', target: 'n-a2', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' })
-    await start(h, flow)
+    await start(h, makeFlow())
     // a1 未完成（pending）→ a2 启动时不注入任何上游内容
     await h.runtime.wfRunNode(caller, { nodeId: 'n-a2' })
     const first = h.runner.calls[0].blocks[0].text
@@ -117,25 +112,43 @@ describe('wfRunNode 异步路径与护栏', () => {
     await h.runtime.wfRunNode(caller, { nodeId: 'n-a2' })
     const second = h.runner.calls[2].blocks[0].text
     expect(second).not.toContain('子任务A')
-    // 无 ctx 连线的节点（n-pause 后的常规 a1 启动）不注入上游内容
+    // n-a1 的流程前驱只有启动节点（模式一无产出）→ 不注入任何上游内容
     await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
     const third = h.runner.calls[3].blocks[0].text
     expect(third).not.toContain('子任务B')
   })
 
-  it('ctx-in 虚拟节点：解析主节点产出注入（共享执行实例语义）', async () => {
+  it('流程前驱为虚拟节点：解析主节点产出注入（共享执行实例语义）', async () => {
     const h = await makeHarness()
-    const flow = makeFlow()
-    // a2 的虚拟节点 n-proxy-a2 作为上游：产出 = a2 的产出（快照按主节点记账）
-    flow.lines.push({ id: 'l-ctx-proxy', source: 'n-proxy-a2', target: 'n-a1', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' })
+    // 单独构造：proxy(n-main) → n-target，避免与标准流程成环
+    const flow: WorkflowDocument = {
+      id: 'flow-1',
+      sessionId: 'session-1',
+      mode: 'mode1',
+      name: '虚拟节点前驱流程',
+      description: '测试目标',
+      revision: 1,
+      nodes: [
+        stage('n-start', 'start', 'mode1'),
+        agent('n-main', '主节点'),
+        { id: 'n-proxy-main', kind: 'proxy', position: { x: 0, y: 0 }, proxySourceId: 'n-main' },
+        agent('n-target', '下游节点'),
+        stage('n-end', 'end', 'mode1'),
+      ],
+      lines: [
+        { id: 'l1', source: 'n-start', target: 'n-main', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+        { id: 'l2', source: 'n-proxy-main', target: 'n-target', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+        { id: 'l3', source: 'n-target', target: 'n-end', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+      ],
+    }
     await start(h, flow)
-    await h.runtime.wfRunNode(caller, { nodeId: 'n-proxy-a2' }) // 解析为 n-a2
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-proxy-main' }) // 解析为 n-main
     await h.runtime.handleSubagentEnd({
       id: 'child-1',
       stopReason: 'completed',
       lastAssistantMessage: [{ type: 'text', text: '虚拟节点上游产出' }],
     })
-    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-target' })
     expect(h.runner.calls[1].blocks[0].text).toContain('虚拟节点上游产出')
   })
 

@@ -1,5 +1,5 @@
 import type { GraphNode, WorkflowDocument } from '../../shared/graph-model.js';
-import type { GraphPatchOp, GraphPatchResult, MarkPatchOp, MarkPatchResult, PatchOpFailure } from './types.js';
+import type { GraphPatchOp, GraphPatchResult, PatchOpFailure } from './types.js';
 /** 深拷贝文档骨架（保持元数据字段；节点/连线走 JSON 深拷贝避免共享引用）。 */
 export declare function cloneDoc(doc: WorkflowDocument): WorkflowDocument;
 /**
@@ -32,6 +32,12 @@ export declare const PARENT_UNCONFIGURABLE_ROLE_FIELDS: readonly ["retryLimit", 
  * 重试与 ReAct 上限取系统默认。
  */
 export declare function applyRoleNodeCreateDefaults(raw: unknown): Record<string, unknown>;
+/**
+ * 创建路径的输出契约默认值：agent 节点未提供 outputSchema 时写入默认契约文本，
+ * 与画布新建（graph/model.ts 的 newRoleNode）保持一致——界面显示、运行期注入与磁盘同值。
+ * 父代理不参与节点交接，故不落默认；显式传入（含空串）一律不覆盖，空串即「明确清空」。
+ */
+export declare function applyRoleNodeOutputContractDefault(data: Record<string, unknown>, kind: 'parent' | 'agent'): Record<string, unknown>;
 /**
  * 角色节点 data 补全（图结构补丁的**唯一规范化入口**）。
  *
@@ -74,18 +80,3 @@ export declare function applyGraphOpsTolerant(input: {
     result: GraphPatchResult;
     errors: PatchOpFailure[];
 };
-/**
- * 运行状态标记（C 组）纯函数：校验节点存在 + 闸门预算，给出标记结果。
- * 状态机分工（P3）：**「必须是当前闸门轮 / 当前闸门节点」由 runMarkGroup 判定**
- * （需要入口 entry 与解析后的画布），本函数只负责与单据无关的校验——
- * status 取值（入参层）、节点是否在快照内、以及 status=ok 时的闸门预算（D-21：不含首次编排）。
- */
-export declare function applyMarkOp(input: {
-    op: MarkPatchOp;
-    runId: string;
-    nodeIds: string[];
-    /** 已用闸门次数（P3 预算判定用；本轮由宿主缝给出 0）。 */
-    milestoneUsed?: number;
-    /** 元参数闸门上限（0 = 不限制）。 */
-    milestoneMax?: number;
-}): MarkPatchResult;

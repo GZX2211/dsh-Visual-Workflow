@@ -9,8 +9,6 @@ export interface OrgUsage {
     maxGroupMembers: number;
     /** 单列最大并行分支数（可选）。 */
     parallelBranchMax?: number;
-    /** 父代理闸门已用次数（不含首次编排，D-21）。 */
-    milestoneUsed: number;
     /** 本批改图 op 数（可选）。 */
     patchOps?: number;
 }
@@ -22,7 +20,6 @@ export declare function groupCount(nodes: GraphNode[] | null | undefined): numbe
 export declare function maxGroupMembers(nodes: GraphNode[] | null | undefined): number;
 /** 由图文档直接推导已用量（检查器/P1 工具的统一入口）。 */
 export declare function orgUsageOf(flow: Pick<WorkflowDocument, 'nodes'> | null | undefined, options?: {
-    milestoneUsed?: number;
     parallelBranchMax?: number;
     patchOps?: number;
 }): OrgUsage;

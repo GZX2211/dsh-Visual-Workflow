@@ -5,6 +5,7 @@
 
 import { useCallback, useMemo } from 'react'
 import type { Dispatch } from 'react'
+import { DEFAULT_OUTPUT_CONTRACT_TEXT } from '../../host/shared/protocol.js'
 import type { RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate } from '../../host/shared/types.js'
 import type { Drafted, StudioAction, TemplateKind } from '../studio/studio-state.js'
 import type { RemoteFace } from './useRemote.js'
@@ -27,7 +28,8 @@ function draftOf(kind: TemplateKind, name: string): AnyTemplate {
   if (kind === 'role') {
     return {
       id, kind: 'agent', name, systemPrompt: '', provider: '', model: '',
-      presetId: null, retryLimit: 3, reactLimit: null, inputSchema: '', outputSchema: '',
+      // 输出契约默认文本随新建落盘：界面显示、运行期注入与磁盘同值（清空即无契约）
+      presetId: null, retryLimit: 3, reactLimit: null, inputSchema: '', outputSchema: DEFAULT_OUTPUT_CONTRACT_TEXT,
       injectSystemPrompt: true, injectToolSections: true, promptFilePath: undefined, createdAt: now, updatedAt: now,
       // 草稿标记：前端 UI 状态，后端 putTemplate 经 stripClientMeta 剥除、绝不落盘
       _draft: true,

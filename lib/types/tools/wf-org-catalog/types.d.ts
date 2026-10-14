@@ -97,8 +97,6 @@ export interface CatalogRules {
     designMethod: string;
     /** 写图契约：op 字段形状、角色节点 data 契约、提交规则、错误码语义。 */
     patchContract: string;
-    /** 闸门标记语义（mark_node 的适用时机与判定）。 */
-    gateMarking: string;
 }
 /** 资产索引（第一次调用的返回体）。 */
 export interface CatalogIndex {
@@ -157,13 +155,12 @@ export interface CatalogRoleNodeEntry {
      */
     roleVersionId?: number;
 }
-/** 虚拟节点条目（主节点别名引用 + 闸门角色）。 */
+/** 虚拟节点条目（主节点别名引用 + 画布显示名）。 */
 export interface CatalogProxyNodeEntry {
     id: string;
     kind: 'proxy';
     label: string;
     proxySourceId: string;
-    role: 'executor' | 'milestone';
 }
 /** 协作组条目（collabPrompt 不可二次召回，一次性给全）。 */
 export interface CatalogGroupNodeEntry {

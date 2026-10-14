@@ -24,9 +24,9 @@ export interface RoleTemplate {
     retryLimit: number;
     /** ReAct 迭代次数上限（可选）。 */
     reactLimit?: number | null;
-    /** 输入结构描述（可选）。 */
+    /** 输入契约（可选；空即不配置）。 */
     inputSchema?: string;
-    /** 输出结构描述（可选）。 */
+    /** 输出契约（可选；空即不配置）；新建角色模板默认落盘为默认契约文本。 */
     outputSchema?: string;
     /** System Prompt 来源文件名（从 .md 加载时记录，左侧栏卡片展示用，需求文档 §4.2.3.1）。 */
     systemPromptSource?: string;

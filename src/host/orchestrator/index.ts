@@ -44,8 +44,6 @@ export {
   createWaiter,
   type FinishArgs,
   type FinishResult,
-  type MilestoneMarkResult,
-  type MilestoneRunFacts,
   type OrchestratorDeps,
   type RunEntry,
   type RunNodeArgs,
@@ -84,7 +82,7 @@ export {
   validateFlowForRun,
 } from './graph-facts.js'
 
-// 节点任务块与交接契约（纯函数）
+// 节点任务块与节点契约（纯函数）
 export { buildNodeBlocks, inputContractOf, outputContractOf } from './task-blocks.js'
 
 // 父代理提示词变体与编排指令组装（纯函数）

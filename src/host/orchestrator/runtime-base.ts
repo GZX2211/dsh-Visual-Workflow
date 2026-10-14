@@ -14,7 +14,7 @@
 // RuntimeObserve ← RuntimeLifecycle ← OrchestratorRuntime（runtime.ts 收口）。
 
 import { randomUUID } from 'node:crypto'
-import { activeMilestoneGateOf, isGroupMember, normalizeOrgMeta } from '../graph/index.js'
+import { isGroupMember } from '../graph/index.js'
 import type { RoleNode, WorkflowDocument } from '../shared/graph-model.js'
 import type { RunSnapshot, RunStatus } from '../shared/types.js'
 import { cloneSnapshot, setNodeStatus } from './snapshot.js'
@@ -26,7 +26,7 @@ import { summarizeFlowChange } from './flow-diff.js'
 import { buildNodeContextFacts } from './graph-facts.js'
 import { parentExecutorOf } from './directive.js'
 import { WfError, messageOf } from './errors.js'
-import type { MilestoneMarkResult, MilestoneRunFacts, OrchestratorDeps, RunEntry } from './run-entry.js'
+import type { OrchestratorDeps, RunEntry } from './run-entry.js'
 import {
   type ChildMeta,
   type FlowLockInfo,
@@ -116,19 +116,10 @@ export abstract class RuntimeBase {
   }
 
   /**
-   * 持久化运行快照（公开包装；自主编排的 mark_node 路径在改写节点状态后调用）。
-   * 为什么需要公开入口：`persistWarn` 是 protected（内部状态机专用），而工具层只应
-   * 「改状态 → 落盘」两步，不应为落盘再复制一遍错误容忍逻辑。
-   */
-  async persistRunSnapshot(entry: RunEntry): Promise<void> {
-    await this.persistWarn(entry)
-  }
-
-  /**
    * 父代理执行单元准备（startRun/resumeRun 共用；情况2 hybrid / 情况3 executor）：
    *   - 父代理节点被流程线连接 → 登记 executorParentId，快照中该节点标记 running
    *     （续跑已 ok 则跳过——继承不重跑）；
-   *   - 组装父代理执行单元上下文（复用 buildNodeContextFacts：上游 ctx 产出/文件
+   *   - 组装父代理执行单元上下文（复用 buildNodeContextFacts：上游产出（自动注入）/文件
    *     文本与路径索引/db 提示），返回结构化上下文供 hybrid 的【你的节点任务】与
    *     executor（情况3）提示词构建使用；
    *   - 情况1 纯调度者返回 null（指令不含执行单元内容）。
@@ -146,17 +137,6 @@ export abstract class RuntimeBase {
     // 续跑继承：已 ok/react-capped 的父代理节点不再注入执行单元（断点产出已随快照继承）
     if (existing && (existing.status === 'ok' || existing.status === 'react-capped')) return null
     entry.executorParentId = executor.nodeId
-    // P3 闸门识别（§5.2 扩展2）：父代理本轮若由**闸门虚拟节点**驱动，则不登记为
-    // 「自动完成」的执行单元——闸门必须由 wf_graph_patch(mark_node) 显式标记（D-07）。
-    const gate = activeMilestoneGateOf(flow, executor.nodeId)
-    if (gate) {
-      entry.executorIsMilestone = true
-      entry.milestoneProxyId = gate.proxyId
-    } else {
-      // 非闸门轮：清掉可能残留的闸门标记（续跑/重入时不得沿用上一轮判定）
-      delete entry.executorIsMilestone
-      delete entry.milestoneProxyId
-    }
     if (!existing || existing.status !== 'running') {
       setNodeStatus(snapshot, executor.nodeId, 'running', { now: this.now() })
     }
@@ -179,11 +159,8 @@ export abstract class RuntimeBase {
 
   /**
    * 父代理执行者收尾：开始调度（首次 wf_run_node / wf_finish）时把父代理节点标记 ok。
-   * P3：**闸门轮（executorIsMilestone）不生效**——闸门的完成只能由
-   * `wf_graph_patch(mark_node)` 写入（D-07），否则自动标记会把闸门静默放过。
    */
   protected markParentExecutorDone(entry: RunEntry): void {
-    if (entry.executorIsMilestone) return
     const nodeId = entry.executorParentId
     if (!nodeId) return
     const snapshot = entry.snapshot
@@ -201,16 +178,6 @@ export abstract class RuntimeBase {
       recordTurn: true,
       stopReason: 'completed',
     })
-  }
-
-  /**
-   * 本会话在编运行已完成的门闸数（D-21：不含首次编排）。
-   * 口径唯一来源是快照的 `milestoneUsed`（可审计 + 续跑继承），无活跃 run 时为 0。
-   * 供 wf_graph_patch 的闸门预算判定复用。
-   */
-  milestoneUsedForSession(sessionId: string): number {
-    const entry = this.activeRunForSession(sessionId)
-    return Math.max(0, Math.floor(Number(entry?.snapshot?.milestoneUsed) || 0))
   }
 
   /** 空闲看护门限（watchdog.ts 引用）。 */
@@ -495,60 +462,6 @@ export abstract class RuntimeBase {
       if (s.sessionId === meta.sessionId && s.flowId === meta.flowId && s.status === 'running') return entry
     }
     return null
-  }
-
-  /**
-   * 闸门标记所需的运行事实（只读，D-07/D-21）：闸门轮身份 + 快照节点清单 + 预算口径。
-   * 为什么收敛在此：快照归编排器所有，工具层不应直读 RunEntry/snapshot；预算上限的
-   * 判定仍由调用方（wf_graph_patch 的纯函数）按本事实裁决，本方法不做语义判断。
-   */
-  milestoneFactsFor(sessionId: string): MilestoneRunFacts | null {
-    const entry = this.activeRunForSession(sessionId)
-    if (!entry) return null
-    const snapshot = entry.snapshot
-    const meta = normalizeOrgMeta(snapshot.meta ?? {})
-    return {
-      runId: snapshot.id,
-      executorParentId: String(entry.executorParentId ?? ''),
-      executorIsMilestone: entry.executorIsMilestone === true,
-      ...(entry.milestoneProxyId ? { milestoneProxyId: entry.milestoneProxyId } : {}),
-      nodeIds: snapshot.nodes.map((node) => node.nodeId),
-      milestoneUsed: Math.max(0, Math.floor(Number(snapshot.milestoneUsed) || 0)),
-      milestoneMax: Number(meta.milestoneMax) || 0,
-    }
-  }
-
-  /**
-   * 闸门节点状态标记（**运行快照写者的唯一入口**，P3 / D-07）：写节点状态、回合明细
-   * 与结束时间，并按 status='ok' 递增快照 milestoneUsed（D-21：不含首次编排）。
-   * 写前防御校验：运行存在且 running、nodeId 在当前快照内、status 合法；**不落盘**——
-   * 持久化时机由调用方决定，保持「逐项标记、末尾落盘一次」的既有语义。
-   * 时间源用注入时钟（this.now），与快照其他时间戳口径一致。
-   */
-  markMilestoneNode(
-    sessionId: string,
-    input: { nodeId: string; status: 'ok' | 'fail' },
-  ): MilestoneMarkResult {
-    const entry = this.activeRunForSession(sessionId)
-    if (!entry || entry.snapshot.status !== 'running') {
-      throw new WfError('WF_MILESTONE_INVALID: no running orchestration in this session (gate marking only makes sense during a run)', 'WF_MILESTONE_INVALID')
-    }
-    const { nodeId, status } = input
-    // status 取值属**入参**错误（WF_BAD_ARGS）：入库值越界时该改的是调用参数，不是图。
-    // 本分支当前不可达——输入静态类型已收窄为 'ok' | 'fail'，且全仓唯一调用方
-    // （wf_graph_patch 工具层）传入的是 applyMarkOp 已校验过的返回值；保留它作为
-    // 运行期兜底，避免非法值被静默写进快照。
-    if (status !== 'ok' && status !== 'fail') {
-      throw new WfError('WF_BAD_ARGS: mark_node status must be ok or fail', 'WF_BAD_ARGS')
-    }
-    const snapshot = entry.snapshot
-    if (!snapshot.nodes.some((node) => node.nodeId === nodeId)) {
-      throw new WfError(`WF_MILESTONE_INVALID: node "${nodeId}" is not in the current run snapshot`, 'WF_MILESTONE_INVALID')
-    }
-    setNodeStatus(snapshot, nodeId, status, { now: this.now(), stopReason: 'milestone', recordTurn: true })
-    const milestoneUsed = Math.max(0, Math.floor(Number(snapshot.milestoneUsed) || 0)) + (status === 'ok' ? 1 : 0)
-    snapshot.milestoneUsed = milestoneUsed
-    return { nodeId, status, runId: snapshot.id, milestoneUsed }
   }
 
   // ---- 运行时读取 --------------------------------------------------------------

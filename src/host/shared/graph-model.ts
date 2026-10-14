@@ -63,9 +63,14 @@ export interface RoleNode extends BaseNode {
     retryLimit: number
     /** ReAct 迭代次数上限（软截停语义；null 表示不设限）。 */
     reactLimit?: number | null
-    /** 输入结构描述（模型理解占位，不强校验）。 */
+    /**
+     * 输入契约（柔性文本，不强校验）：告诉子代理「应当收到什么输入」；空串即不配置（不注入）。
+     */
     inputSchema?: string
-    /** 输出结构描述（同上，占位不强校验）。 */
+    /**
+     * 输出契约（柔性文本）：子代理最终回复必须按其组织；空串即不配置（不注入该段）。
+     * 新建 agent 节点时默认落盘为 shared/protocol.ts 的 DEFAULT_OUTPUT_CONTRACT_TEXT。
+     */
     outputSchema?: string
     /** System Prompt 来源文件名（从 .md 加载时记录，左侧栏卡片展示用）。 */
     systemPromptSource?: string
@@ -213,17 +218,10 @@ export interface ProxyNode extends BaseNode {
   kind: 'proxy'
   /** 引用主节点的 id（虚拟节点不存储独立配置，仅此一个引用字段）。 */
   proxySourceId: string
-  /**
-   * 可选视图/识别数据（**全部可选，向后兼容**）。
-   * 为什么需要它：同一个父代理可以被多个虚拟节点引用，运行时必须能区分
-   * 「普通执行入口」与「里程碑闸门」——闸门那一轮**不自动完成**，只能由
-   * `wf_graph_patch(mark_node)` 显式标记。
-   */
+  /** 可选视图数据（仅画布展示，不参与运行判定）。 */
   data?: {
-    /** 画布显示名（如「里程碑①：方案评审」）。 */
+    /** 画布显示名（如「阶段复核」）。 */
     label?: string
-    /** 角色：缺省 = executor（沿用既有自动完成行为）；milestone = 闸门（不自动 ok）。 */
-    role?: 'executor' | 'milestone'
   }
 }
 
