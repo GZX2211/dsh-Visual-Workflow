@@ -331,7 +331,7 @@ describe('模板 CRUD（全局共享）与子类过滤', () => {
     expect((await store.listTemplates('role')).length).toBe(1)
   })
 
-  it('协作组模板增删查（groups/ 目录，全局共享）', async () => {
+  it('Team 模板增删查（groups/ 目录，全局共享）', async () => {
     const group: GroupTemplate = { id: 'gt1', name: '审查组', collabPrompt: '你们是双 Agent Team' }
     await store.saveTemplate('group', group)
     expect((await store.listTemplates('group')).map((t) => t.id)).toEqual(['gt1'])

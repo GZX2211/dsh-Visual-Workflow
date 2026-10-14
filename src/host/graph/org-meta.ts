@@ -21,7 +21,7 @@ import type { OrgUsage } from './org-meta-usage.js'
 export const ORG_META_LIMIT_DEFAULTS = {
   /** 可执行节点数上限（自主编排方案 §6.4 示例：12）。 */
   nodeMax: 12,
-  /** 协作组数量上限（示例：3）。 */
+  /** Team 数量上限（示例：3）。 */
   groupMax: 3,
   /** 组内人数上限（示例：5）。 */
   membersMax: 5,
@@ -34,7 +34,7 @@ export const ORG_META_LIMIT_DEFAULTS = {
 export const ORG_META_NORMALIZE_CAPS = {
   /** 可执行节点数上限的安全网。 */
   nodeMax: 200,
-  /** 协作组数量上限的安全网。 */
+  /** Team 数量上限的安全网。 */
   groupMax: 50,
   /** 组内人数上限的安全网（画布 UI 既有上限为 30，此处放宽）。 */
   membersMax: 50,

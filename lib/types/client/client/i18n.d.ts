@@ -233,7 +233,7 @@ export declare const zh: {
     fileContent: string;
     fileUnset: string;
     /** 文件多选提示（已选文件列表显示在按钮下方）。 */
-    /** 协作组拖拽悬停提示（放开以入组）。 */
+    /** Team 拖拽悬停提示（放开以入组）。 */
     groupDropHint: string;
     /** 角色卡元信息「模型」前缀。 */
     nodeMetaModel: string;

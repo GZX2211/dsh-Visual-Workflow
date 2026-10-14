@@ -30,7 +30,7 @@ export function connectionProblem(nodes: CanvasNode[], lines: CanvasEdge[], conn
   if (!targetDef.inputs.includes(targetHandle)) return { valid: false, code: 'invalidHandle' }
   const channel = sourceHandle.replace(/-out$/, '')
   if (targetHandle !== `${channel}-in`) return { valid: false, code: 'channelMismatch' }
-  // 协作组成员不能连流程线：角色在组内时仅 ctx/db 连接点
+  // Team 成员不能连流程线：角色在组内时仅 ctx/db 连接点
   const memberSource = (sourceKind === 'parent' || sourceKind === 'agent') && Boolean((source as { data?: { groupId?: unknown } }).data?.groupId)
   const memberTarget = (targetKind === 'parent' || targetKind === 'agent') && Boolean((target as { data?: { groupId?: unknown } }).data?.groupId)
   if (channel === 'flow' && (memberSource || memberTarget)) return { valid: false, code: 'groupMemberFlow' }

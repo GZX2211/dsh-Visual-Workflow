@@ -9,7 +9,7 @@ export type LibTab = 'workflow' | 'role' | 'data' | 'other';
 export type LibrarySource = 'template' | 'asset';
 /** 左侧库选中种类（模板 kind + 固定卡片 + 工作流模板 + 资产 + 经验）。 */
 export type LibSelKind = 'workflow' | 'service' | 'workflowTemplate' | 'role' | 'file' | 'database' | 'parentTemplate' | 'stage' | 'groupTemplate' | 'flowAsset' | 'roleAsset' | 'experience';
-/** 模板种类（与后端 listTemplates 契约一致；group 为 协作组模板）。 */
+/** 模板种类（与后端 listTemplates 契约一致；group 为 Team 模板）。 */
 export type TemplateKind = 'role' | 'file' | 'database' | 'group';
 /**
  * 画布节点/连线投影类型的**本体在 lib/canvas-model.ts**（渲染、布局、连接校验共用
@@ -250,7 +250,7 @@ export interface EditorData {
     nodeId?: string;
     /** 虚拟节点主节点名称。 */
     mainLabel?: string;
-    /** 协作组成员（画布节点解析）。 */
+    /** Team 成员（画布节点解析）。 */
     members?: Array<{
         id: string;
         label: string;

@@ -1,7 +1,7 @@
 // tests/client/components/canvas/geometry.test.ts
 //
 // 画布渲染几何纯函数（Team/阶段节点适配）：阶段节点紧凑尺寸；组内成员连线锚点；
-// 协作组卡片流程接点居中；成员 → 组 预建索引（连线几何不得逐边全节点扫描）。
+// Team 卡片流程接点居中；成员 → 组 预建索引（连线几何不得逐边全节点扫描）。
 //
 // 注（治理）：卡片尺寸常量与尺寸解析的唯一本体是 lib/card-geometry.ts（含
 // GRAPH_STAGE_WIDTH / GRAPH_STAGE_HEIGHT / nodeSizeOf），因此该部分用例按源文件归属移至
@@ -51,7 +51,7 @@ describe('画布几何（Team/阶段）', () => {
     expect(index.get('nobody')).toBeUndefined()
   })
 
-  it('memberAnchor：成员行中心位于 协作组卡片左右边缘', () => {
+  it('memberAnchor：成员行中心位于 Team 卡片左右边缘', () => {
     const group = nodeOf('g', 'group', { memberIds: ['a1', 'a2'], size: { w: 300, h: 220 } })
     const left = memberAnchor(group, 'a2', 'left')
     const right = memberAnchor(group, 'a2', 'right')

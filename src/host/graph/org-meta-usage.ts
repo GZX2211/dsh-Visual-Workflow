@@ -1,6 +1,6 @@
 // src/host/graph/org-meta-usage.ts
 //
-// 元参数「已用量」统计口径（自主编排方案 §6.4）：可执行节点数 / 协作组数 / 最大组内
+// 元参数「已用量」统计口径（自主编排方案 §6.4）：可执行节点数 / Team 数 / 最大组内
 // 人数 / 单列并行分支数 / 本批 op 数。
 // 独立成文件的原因：口径是本功能最易漂移的部分（检查器、P1 写图工具、客户端预算展示
 // 三处必须一致），集中一处便于单测锁定。
@@ -13,7 +13,7 @@ import type { GraphNode, WorkflowDocument } from '../shared/graph-model.js'
 export interface OrgUsage {
   /** 可执行节点（agent/parent/group）已用数。 */
   nodeCount: number
-  /** 协作组已用数。 */
+  /** Team 已用数。 */
   groupCount: number
   /** 最大组内人数。 */
   maxGroupMembers: number
@@ -28,12 +28,12 @@ export function executableUnitCount(nodes: GraphNode[] | null | undefined): numb
   return (nodes ?? []).filter((node) => EXECUTABLE_UNIT_KINDS.includes(node.kind)).length
 }
 
-/** 协作组卡片计数。 */
+/** Team 卡片计数。 */
 export function groupCount(nodes: GraphNode[] | null | undefined): number {
   return (nodes ?? []).filter((node) => node.kind === 'group').length
 }
 
-/** 单个 协作组的最大已配置人数（无组时 0；memberIds 重复 id 只计一次）。 */
+/** 单个 Team 的最大已配置人数（无组时 0；memberIds 重复 id 只计一次）。 */
 export function maxGroupMembers(nodes: GraphNode[] | null | undefined): number {
   let max = 0
   for (const node of nodes ?? []) {

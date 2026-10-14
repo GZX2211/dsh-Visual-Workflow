@@ -174,15 +174,15 @@ describe('buildNodeBlocks 契约段位', () => {
   })
 })
 
-describe('协作组成员任务块（协作通道差异）', () => {
-  /** 协作组流程：成员 m1（groupId）包在 协作组卡片 g1 内，卡片带用户填写的协作说明。 */
+describe('Team 成员任务块（协作通道差异）', () => {
+  /** Team 流程：成员 m1（groupId）包在 Team 卡片 g1 内，卡片带用户填写的协作说明。 */
   function teamFlow(): WorkflowDocument {
     const member = role('m1', 'agent', { groupId: 'g1' })
     return {
       id: 'flow-team',
       sessionId: 'session-1',
       mode: 'mode1',
-      name: '协作组流程',
+      name: 'Team 流程',
       description: '',
       revision: 1,
       nodes: [

@@ -104,7 +104,7 @@ export class VisualWorkflowHost extends Service {
   private readonly childPrompt = createChildPromptSetup()
   /**
    * 子代理工具白名单装配（创建窗口内安装 allow）。
-   * 普通节点子代理由官方创建请求携带白名单；协作组成员无法携带，只能由本装配在窗口内安装。
+   * 普通节点子代理由官方创建请求携带白名单；Team 成员无法携带，只能由本装配在窗口内安装。
    */
   private readonly childToolFilter = createChildToolFilterSetup()
   /**
@@ -165,7 +165,7 @@ export class VisualWorkflowHost extends Service {
       store: this.store,
       agents: () => agentsServiceLike(ctx),
       subagents: () => subagentsServiceLike(ctx),
-      // 官方 Agent 协作组服务（协作组成员路径）；未挂载时返回 null，成员降级为普通子代理
+      // 官方 Agent Team 服务（Team 成员路径）；未挂载时返回 null，成员降级为普通子代理
       teams: () => agentTeamsServiceLike(ctx),
       // 官方会话级成员名额上限的镜像（新建成员前预检；须与部署层 agent-team.maxMembers 同步）
       teamMemberLimit: config.teamMemberLimit,

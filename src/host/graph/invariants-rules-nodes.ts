@@ -1,6 +1,6 @@
 // src/host/graph/invariants-rules-nodes.ts
 //
-// 图质量规则（自主编排方案 §6.2 规则表）第二期：**节点维度**——协作组一致性、虚拟节点
+// 图质量规则（自主编排方案 §6.2 规则表）第二期：**节点维度**——Team 一致性、虚拟节点
 // 引用、数据节点完整性、上下文/数据库连线合法性、父代理虚拟节点的流程驱动。
 // 流程/阶段维度见 invariants-rules-flow.ts；元参数维度见 invariants-rules-meta.ts。
 //
@@ -17,7 +17,7 @@ function nodeMapOf(flow: CheckGraphInput['flow']): Map<string, GraphNode> {
   return new Map((flow?.nodes ?? []).map((node) => [node.id, node]))
 }
 
-/** a) 协作组一致性：无成员 / 悬空成员 / 无流程线。 */
+/** a) Team 一致性：无成员 / 悬空成员 / 无流程线。 */
 export function ruleGroupMembers(input: CheckGraphInput, dag: FlowDag): GraphIssue[] {
   const { flow } = input
   const byId = nodeMapOf(flow)

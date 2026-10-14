@@ -181,12 +181,12 @@ describe('shared/protocol 工具名常量与可见性', () => {
     expect(allNames).not.toContain('wf_experience')
   })
 
-  it('官方 Agent 协作组工具集：9 个齐全且无重复', () => {
+  it('官方 Agent Team 工具集：9 个齐全且无重复', () => {
     expect(TEAM_TOOL_NAMES).toHaveLength(9)
     expect(new Set(TEAM_TOOL_NAMES).size).toBe(9)
   })
 
-  it('官方 协作组工具不得进入子代理永久隐藏集（不可限制的自身层注册工具）', () => {
+  it('官方 Team 工具不得进入子代理永久隐藏集（不可限制的自身层注册工具）', () => {
     for (const t of TEAM_TOOL_NAMES) {
       expect(CHILD_AGENT_HIDDEN_TOOLS).not.toContain(t)
     }
@@ -257,7 +257,7 @@ describe('shared/protocol 状态/模式/颜色/口径常量', () => {
     expect(_runStatusExhaustive).toBe(true)
   })
 
-  it('NODE_STATUSES 与 NodeRunStatus 双向穷尽（含 协作组非终态 armed）', () => {
+  it('NODE_STATUSES 与 NodeRunStatus 双向穷尽（含 Team 非终态 armed）', () => {
     expect(NODE_STATUSES).toEqual([
       'pending', 'running', 'armed', 'ok', 'fail', 'skipped', 'react-capped',
     ])

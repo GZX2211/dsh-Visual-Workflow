@@ -31,7 +31,7 @@ describe('连接校验', () => {
     expect(problem.code).toBe('channelMismatch')
   })
 
-  it('非法：协作组成员不可连流程线（仅 ctx/db）', () => {
+  it('非法：Team 成员不可连流程线（仅 ctx/db）', () => {
     const groupNodes: CanvasNode[] = [
       { id: 'g', kind: 'group', position: { x: 0, y: 0 }, data: { label: '组', memberIds: ['m'] } },
       { id: 'm', kind: 'agent', position: { x: 0, y: 0 }, data: { label: '成员', groupId: 'g' } },

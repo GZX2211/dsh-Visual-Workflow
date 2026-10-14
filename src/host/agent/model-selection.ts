@@ -100,7 +100,7 @@ export interface ModelSelectionSetup {
    *
    * 为什么需要：selection 默认在创建完成后才写入，而创建即开始首轮推理——首条请求会落到
    * 创建时的路由（父代理的 provider/model）。对无法经官方创建参数携带路由的子代理
-   * （协作组成员由官方 协作组服务建立，不接受 agentOptions），必须在创建窗口内就让
+   * （Team 成员由官方 Team 服务建立，不接受 agentOptions），必须在创建窗口内就让
    * selection 就位，否则首个步骤用错模型。非该场景无需使用本方法。
    */
   withPending<T>(selection: ModelSelectionLike | undefined, operation: () => Promise<T>): Promise<T>

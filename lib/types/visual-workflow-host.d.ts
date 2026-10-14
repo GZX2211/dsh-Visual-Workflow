@@ -53,7 +53,7 @@ export declare class VisualWorkflowHost extends Service {
     private readonly childPrompt;
     /**
      * 子代理工具白名单装配（创建窗口内安装 allow）。
-     * 普通节点子代理由官方创建请求携带白名单；协作组成员无法携带，只能由本装配在窗口内安装。
+     * 普通节点子代理由官方创建请求携带白名单；Team 成员无法携带，只能由本装配在窗口内安装。
      */
     private readonly childToolFilter;
     /**

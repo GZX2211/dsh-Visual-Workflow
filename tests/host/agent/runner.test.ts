@@ -177,7 +177,7 @@ async function makeHarness(): Promise<RunnerHarness> {
 }
 
 /**
- * 协作组成员路径依赖桩：本文件只验证普通节点路径，故官方 协作组视为未挂载（teams 返回 null），
+ * Team 成员路径依赖桩：本文件只验证普通节点路径，故官方 Team 视为未挂载（teams 返回 null），
  * 工具白名单装配为无操作。成员路径自身的行为由其专属测试文件覆盖。
  */
 function fakeMemberDeps(): { teams: () => null; teamMemberLimit: number; toolFilter: ChildToolFilterSetup } {
@@ -933,15 +933,15 @@ describe('CordisToolsView / preset standing scope（acquireScope 租约）', () 
 })
 
 // ---------------------------------------------------------------------------
-// 协作组成员路径：成员 childId 的登记与释放 / 官方不可用时的降级
+// Team 成员路径：成员 childId 的登记与释放 / 官方不可用时的降级
 // ---------------------------------------------------------------------------
-// 为什么锁定此处：成员由官方 协作组创建（spawnTeammate），不经 ensureNodeChild，
+// 为什么锁定此处：成员由官方 Team 创建（spawnTeammate），不经 ensureNodeChild，
 // 因此其 childId 必须由本类显式登记——否则 dispose 时 drop 不到，护栏的 limits/cappedFlags
 // 条目在宿主生命周期内只增不减（每子代理状态必须有释放条件与上界）。
-// 官方 协作组不可用时成员必须降级为普通可延续子代理（同一登记语义、同一释放路径）。
+// 官方 Team 不可用时成员必须降级为普通可延续子代理（同一登记语义、同一释放路径）。
 
-describe('协作组成员路径：childId 登记、释放与降级', () => {
-  /** 成员 harness：官方 协作组可用性与官方工具面可控。 */
+describe('Team 成员路径：childId 登记、释放与降级', () => {
+  /** 成员 harness：官方 Team 可用性与官方工具面可控。 */
   async function makeMemberHarness(options: { teams?: boolean; toolFace?: boolean } = {}): Promise<{
     runner: NodeAgentRunner
     subagents: FakeSubagents
@@ -971,7 +971,7 @@ describe('协作组成员路径：childId 登记、释放与降级', () => {
       },
     }
     const toolsView = new FakeToolsView()
-    // 官方 协作组工具面：判据要求父代理 scope 可见 spawn_teammate（官方工具与策略在成员 scope 注册）
+    // 官方 Team 工具面：判据要求父代理 scope 可见 spawn_teammate（官方工具与策略在成员 scope 注册）
     toolsView.agentTools = options.toolFace === false
       ? ['read', 'write', 'edit']
       : ['read', 'write', 'edit', 'spawn_teammate', 'send_message']
@@ -1024,7 +1024,7 @@ describe('协作组成员路径：childId 登记、释放与降级', () => {
     expect(h.members).toHaveLength(1)
   })
 
-  it('降级：官方 协作组服务不可用时走普通可延续子代理路径', async () => {
+  it('降级：官方 Team 服务不可用时走普通可延续子代理路径', async () => {
     const h = await makeMemberHarness({ teams: false })
     const started = await h.runner.startNodeTask(memberTaskInput('n-m1'))
 
@@ -1032,7 +1032,7 @@ describe('协作组成员路径：childId 登记、释放与降级', () => {
     expect(h.subagents.started).toHaveLength(1)
   })
 
-  it('降级：官方 协作组工具面未下发（只挂领域服务）时同样走普通子代理路径', async () => {
+  it('降级：官方 Team 工具面未下发（只挂领域服务）时同样走普通子代理路径', async () => {
     const h = await makeMemberHarness({ toolFace: false })
     const started = await h.runner.startNodeTask(memberTaskInput('n-m1'))
 

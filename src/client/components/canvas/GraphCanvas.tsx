@@ -3,7 +3,7 @@
 // 自研 SVG 画布。
 // 节点为绝对定位 HTML 卡片（左 db/ctx/flow 入点、右 ctx/flow/db 出点），连线为
 // SVG 贝塞尔曲线；支持拖拽、平移、缩放、连线、条件标签、运行态高亮、空画布引导。
-// 协作组卡片渲染成员迷你列表（组内成员节点以迷你形态叠加于组内）。
+// Team 卡片渲染成员迷你列表（组内成员节点以迷你形态叠加于组内）。
 //
 // 职责拆分（本文件 = 交互编排 + 组装）：
 //   - 视口（平移/缩放/适配/坐标换算）：./use-canvas-viewport.ts
@@ -44,7 +44,7 @@ export interface GraphCanvasProps {
   onInit(api: import('./use-canvas-viewport.js').CanvasApi): void
   onNodeDragStart(): void
   onNodeMove(id: string, position: { x: number; y: number }): void
-  /** 角色节点拖入协作组。 */
+  /** 角色节点拖入 Team。 */
   onNodeDropToGroup(nodeId: string, groupId: string): void
   onNodeSelect(id: string): void
   onEdgeSelect(id: string): void
@@ -54,7 +54,7 @@ export interface GraphCanvasProps {
   onGroupResize(id: string, size: { w: number; h: number }): void
   /** 交换节点左右连接点（用户批注：美化布线防交叉）。 */
   onSwapPorts(id: string): void
-  /** 左栏拖拽悬停的协作组 id（协作组卡片高亮 + 「放开以入组」提示）。 */
+  /** 左栏拖拽悬停的 Team id（Team 卡片高亮 + 「放开以入组」提示）。 */
   dropTargetGroupId?: string | null
   fitLabel: string
   zoomInLabel: string
@@ -73,7 +73,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
   } = props
   const { rootRef, viewport, viewportRef, fitView, panning, beginPan, zoomBy, screenToWorld } = useCanvasViewport(nodes, onInit)
   const [draggingNode, setDraggingNode] = useState<{ nodeId: string; startClientX: number; startClientY: number; originX: number; originY: number } | null>(null)
-  /** 画布内节点拖拽时悬停的协作组 id（协作组卡片高亮 + 「放开以入组」提示）。 */
+  /** 画布内节点拖拽时悬停的 Team id（Team 卡片高亮 + 「放开以入组」提示）。 */
   const [dragHoverGroupId, setDragHoverGroupId] = useState<string | null>(null)
   const [connectionDraft, setConnectionDraft] = useState<{ source: string; sourceHandle: string; clientX: number; clientY: number; start: { x: number; y: number } } | null>(null)
   const byId = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes])
@@ -126,14 +126,14 @@ export function GraphCanvas(props: GraphCanvasProps) {
         x: Math.round(draggingNode.originX + dx),
         y: Math.round(draggingNode.originY + dy),
       })
-      // 悬停检测：仅「角色节点」拖到 协作组表面才高亮（排除被拖拽本体；连接点不具入组功能；
+      // 悬停检测：仅「角色节点」拖到 Team 表面才高亮（排除被拖拽本体；连接点不具入组功能；
       // 角色以外的卡片（文件/数据库/阶段/虚拟）不显示悬浮提示、也不能入组，用户批注）
       const dragged = byId.get(draggingNode.nodeId)
       const canJoinGroup = !!dragged && (dragged.kind === 'parent' || dragged.kind === 'agent')
       setDragHoverGroupId(canJoinGroup ? groupSurfaceUnderPoint(event.clientX, event.clientY, draggingNode.nodeId) : null)
     }
     const onUp = (event: PointerEvent): void => {
-      // 拖入协作组：角色节点落在 协作组表面（不含连接点）时入组；被拖拽节点已排除，
+      // 拖入 Team：角色节点落在 Team 表面（不含连接点）时入组；被拖拽节点已排除，
       // 避免「节点覆盖在组上方」导致 elementFromPoint 命中自身而无法入组（用户批注）。
       const node = byId.get(draggingNode.nodeId)
       const groupId = groupSurfaceUnderPoint(event.clientX, event.clientY, draggingNode.nodeId)
@@ -201,7 +201,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
     }
   }, [connectionDraft, onConnect, onConnectionRejected])
 
-  // ---- 协作组拉伸 ----
+  // ---- Team 拉伸 ----
   const [groupResize, setGroupResize] = useState<{ nodeId: string; startX: number; startY: number; startSize: { w: number; h: number } } | null>(null)
   const beginGroupResize = useCallback((event: React.PointerEvent, nodeId: string): void => {
     if (event.button !== undefined && event.button !== 0) return
@@ -252,7 +252,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
       ? { x: (connectionDraft.clientX - rect.left - current.x) / current.zoom, y: (connectionDraft.clientY - rect.top - current.y) / current.zoom }
       : connectionDraft.start
     // 草稿线起始控制点方向跟随源端口朝向（与 edgeGeometry 一致；仅出点可发起连线）。
-    // 源为组内成员时出点固定在 协作组卡片右缘（+1）；交换节点出点在左缘（-1）；默认右缘（+1）。
+    // 源为组内成员时出点固定在 Team 卡片右缘（+1）；交换节点出点在左缘（-1）；默认右缘（+1）。
     const sourceNode = byId.get(connectionDraft.source)
     const draftStartDir = sourceNode ? (memberGroups.get(sourceNode.id) ? 1 : (swappedOf(sourceNode) ? -1 : 1)) : 1
     const bend = Math.max(54, Math.abs(mouseWorld.x - connectionDraft.start.x) * 0.46)
@@ -279,7 +279,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
     }
     return ids
   }, [groupNodes])
-  // 组内成员仅在 协作组卡片内显示迷你卡（不在画布重复渲染大卡）
+  // 组内成员仅在 Team 卡片内显示迷你卡（不在画布重复渲染大卡）
   const standalone = useMemo(
     () => renderedNodes.filter((node) => node.kind !== 'group' && !memberIdsOf.has(node.id)),
     [renderedNodes, memberIdsOf],
@@ -348,7 +348,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
               selected={node.id === selectedNode}
               highlighted={highlightedSet.has(node.id)}
               dragging={draggingNode?.nodeId === node.id}
-              // 用户批注：仅角色（agent/parent）节点显示/记录状态；阶段/文件/数据库/协作组卡片不渲染状态徽标。
+              // 用户批注：仅角色（agent/parent）节点显示/记录状态；阶段/文件/数据库/Team 卡片不渲染状态徽标。
               // parent 为编排执行单元（父代理节点），快照同样记录其状态，必须一并回显
               // （否则仅 parent 节点的工作流在画布上永远看不到节点运行状态）。
               runStatus={node.kind === 'agent' || node.kind === 'parent' ? runStatusOf(node.id) : null}

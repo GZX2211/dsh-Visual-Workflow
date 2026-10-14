@@ -48,7 +48,7 @@ export {
 export { isFlowLine } from './dag.js'
 export { nodeHasFlowIn, nodeParticipatesInFlow } from './model.js'
 
-// ── 虚拟节点与 协作组语义 ──────────────────────────────────────────────────
+// ── 虚拟节点与 Team 语义 ──────────────────────────────────────────────────
 export {
   isGroupMember,
   memberGroupId,

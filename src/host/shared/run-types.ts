@@ -28,7 +28,7 @@ export type RunStatus =
 export type NodeRunStatus =
   | 'pending' // 待执行
   | 'running' // 执行中
-  | 'armed' // 待命（协作组成员：回合结束但仍在 协作组内可被唤醒，非终态；父代理 wf_finish 后终态化。修复 P0-1）
+  | 'armed' // 待命（Team 成员：回合结束但仍在 Team 内可被唤醒，非终态；父代理 wf_finish 后终态化。修复 P0-1）
   | 'ok' // 成功（产出可回填）
   | 'fail' // 失败（异常/终止；非 ok 不继承，续跑重试）
   | 'skipped' // 已跳过

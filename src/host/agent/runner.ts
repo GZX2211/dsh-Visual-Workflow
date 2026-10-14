@@ -244,11 +244,11 @@ export interface ToolsView {
    */
   agentToolNames(sessionId?: string): Promise<string[]>
   /**
-   * 某会话父代理 scope 的**同步**工具名视图（官方 协作组工具面判据专用）。
+   * 某会话父代理 scope 的**同步**工具名视图（官方 Team 工具面判据专用）。
    *
    * 与 agentToolNames 同源（同一 scope key 语义），只做同步可达的部分：全局层 ∪ 该 agent
    * 自身 scope。为什么需要同步版本：成员启动路径判据（teamAvailable）是同步契约；而官方
-   * 协作组工具注册在**成员自身 scope**，不经过 preset standing scope，故判据不需要异步取用。
+   * Team 工具注册在**成员自身 scope**，不经过 preset standing scope，故判据不需要异步取用。
    */
   agentToolNamesSync(sessionId?: string): string[]
 }
@@ -430,7 +430,7 @@ export interface ResolveToolsInput {
 const CHILD_BLOCKED_TOOLS: readonly string[] = CHILD_AGENT_HIDDEN_TOOLS
 
 /**
- * 官方 协作组工具名（永不进入 allow 名单）。
+ * 官方 Team 工具名（永不进入 allow 名单）。
  *
  * 运行事实：官方包把这 9 个工具注册在成员**自身作用域层**，而 `tools.restrict` 的 allow/deny
  * 只针对「可限制的全局工具名」校验并只过滤继承面——名字一旦进入名单，创建子代理时官方校验
@@ -523,19 +523,19 @@ export interface NodeAgentRunnerDeps {
   /** subagents 服务惰性解析（调用时求值）。 */
   subagents: () => SubagentsServiceLike | null
   /**
-   * 官方 Agent 协作组服务惰性解析（协作组成员路径用）。
+   * 官方 Agent Team 服务惰性解析（Team 成员路径用）。
    * 返回 null 表示官方团队未挂载：成员节点降级为普通可延续子代理（协作通信走 wf_ask_agent）。
    */
   teams: () => AgentTeamsServiceLike | null
   /**
-   * 官方 协作组会话级成员名额上限（部署层 agent-team.maxMembers 的镜像）。
+   * 官方 Team 会话级成员名额上限（部署层 agent-team.maxMembers 的镜像）。
    * 官方语义是「本团队累计创建过的 teammate 数（含失败的）」；新建成员前用它预检，
    * 把运行期的官方类型化失败提前成可行动错误。
    */
   teamMemberLimit: number
   /** 工具视图（白名单解析）。 */
   toolsView: ToolsView
-  /** 子代理工具白名单装配（协作组成员的创建窗口内安装；节点路径由官方创建请求携带）。 */
+  /** 子代理工具白名单装配（Team 成员的创建窗口内安装；节点路径由官方创建请求携带）。 */
   toolFilter: ChildToolFilterSetup
   /** 软截停护栏桥（guards.ts）。 */
   react: ReactGuardBridge
@@ -562,11 +562,11 @@ export interface NodeAgentRunnerDeps {
 export class NodeAgentRunner implements NodeRunner {
   /** 子代理表：复用键 → { childId, signature }。 */
   private readonly nodeChildren = new Map<string, { childId: string; signature: string }>()
-  /** 本类持有护栏登记的全部 childId（普通节点路径 + 协作组成员路径）；dispose 据此释放。 */
+  /** 本类持有护栏登记的全部 childId（普通节点路径 + Team 成员路径）；dispose 据此释放。 */
   private readonly childIds = new Set<string>()
   /** 软截停消费适配（NodeRunner 契约）。 */
   readonly consumeReactCapped: NonNullable<NodeRunner['consumeReactCapped']>
-  /** 协作组成员启动器（官方 协作组路径；与普通节点路径共用同一套装配对象）。 */
+  /** Team 成员启动器（官方 Team 路径；与普通节点路径共用同一套装配对象）。 */
   private readonly members: TeamMemberLauncher
 
   constructor(private readonly deps: NodeAgentRunnerDeps) {
@@ -601,14 +601,14 @@ export class NodeAgentRunner implements NodeRunner {
     })
   }
 
-  // ---- NodeRunner 官方 协作组契约 ---------------------------------------------
+  // ---- NodeRunner 官方 Team 契约 ---------------------------------------------
 
-  /** 官方 协作组路径是否可用（成员启动路径选择与协作块文案的判据）。 */
+  /** 官方 Team 路径是否可用（成员启动路径选择与协作块文案的判据）。 */
   teamAvailable(sessionId: string): boolean {
     return this.members.available(sessionId)
   }
 
-  /** 官方 协作组成员的当前状态（成员运行态权威读源；非成员或官方不可用返回 null）。 */
+  /** 官方 Team 成员的当前状态（成员运行态权威读源；非成员或官方不可用返回 null）。 */
   teamMemberStatusOf(sessionId: string, nodeId: string): 'running' | 'inactive' | 'provisioning' | 'failed' | null {
     return this.members.memberStatusOf(sessionId, nodeId)
   }
@@ -623,7 +623,7 @@ export class NodeAgentRunner implements NodeRunner {
    *   - 完成事件由编排器监听 subagent/end 更新快照，本方法不等待执行结果。
    */
   async startNodeTask(input: NodeStartInput): Promise<{ childId: string; created: boolean; replacedChildId?: string }> {
-    // 协作组成员节点：官方 协作组可用时启动为官方 teammate（成员身份/消息/任务板/状态全交官方）；
+    // Team 成员节点：官方 Team 可用时启动为官方 teammate（成员身份/消息/任务板/状态全交官方）；
     // 官方不可用时静默降级到下面的普通可延续子代理路径（协作通信走 wf_ask_agent）。
     if (input.teamMember === true && this.members.available(input.sessionId)) {
       const member: TeamMemberStartResult | null = await this.members.start(input)

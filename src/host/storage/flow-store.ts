@@ -356,7 +356,7 @@ export class FlowStore {
   async listTemplates(kind: 'file'): Promise<FileTemplate[]>
   /** 列出数据库模板（data/ 下按字段判别过滤）。 */
   async listTemplates(kind: 'database'): Promise<DatabaseTemplate[]>
-  /** 列出 协作组模板（groups/ 目录）。 */
+  /** 列出 Team 模板（groups/ 目录）。 */
   async listTemplates(kind: 'group'): Promise<GroupTemplate[]>
   /** 列出某类模板（kind 联合兜底；具体子类型请用窄签名）。 */
   async listTemplates(kind: TemplateKind): Promise<Template[]>

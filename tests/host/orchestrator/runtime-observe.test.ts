@@ -1,6 +1,6 @@
 // tests/host/orchestrator/runtime-observe.test.ts
 //
-// 观察回写层单测（subagent/end）：迟到缓冲、节点状态回写、软截停、协作组聚合与 armed。
+// 观察回写层单测（subagent/end）：迟到缓冲、节点状态回写、软截停、Team 聚合与 armed。
 // 装配与测试替身见 fixtures/harness.ts（共享，不在本文件内重复）。
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -12,7 +12,7 @@ import { makeFlow, makeHarness, caller, start, cleanupTempDirs } from './fixture
 afterEach(cleanupTempDirs)
 
 /**
- * 流程变体：n-a1 入组为 协作组成员（成员无流程连线，仅 协作组卡片有 flow 出入），n-a2 保持普通 agent。
+ * 流程变体：n-a1 入组为 Team 成员（成员无流程连线，仅 Team 卡片有 flow 出入），n-a2 保持普通 agent。
  * 供「组成员回合结束」相关用例共用，避免同一图在多个用例里重复拼装。
  */
 function flowWithGroupMember(): WorkflowDocument {
@@ -28,7 +28,7 @@ function flowWithGroupMember(): WorkflowDocument {
     position: { x: 0, y: 0 },
     data: { label: 'Team', collabPrompt: '', memberIds: ['n-a1'] },
   })
-  // 移除 a1 的流程连线（组内成员不能连流程线），改由 协作组卡片 flow 出入
+  // 移除 a1 的流程连线（组内成员不能连流程线），改由 Team 卡片 flow 出入
   flow.lines = flow.lines.filter((l) => l.source !== 'n-a1' && l.target !== 'n-a1')
   flow.lines.push(
     { id: 'lg1', source: 'n-start', target: 'n-group', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
@@ -191,10 +191,10 @@ describe('subagent/end 观察回写（§8 #21）', () => {
     expect(h.runner.capped.has('child-1')).toBe(false)
   })
 
-  it('协作组卡片不参与运行事实：成员产出不回写组状态（无聚合）', async () => {
+  it('Team 卡片不参与运行事实：成员产出不回写组状态（无聚合）', async () => {
     const h = await makeHarness()
     const flow = makeFlow()
-    // a1/a2 入组（成员无 flow 连线，仅 协作组卡片 flow 出入——校验规则 §4.2.5.2 规则 4）
+    // a1/a2 入组（成员无 flow 连线，仅 Team 卡片 flow 出入——校验规则 §4.2.5.2 规则 4）
     flow.nodes = flow.nodes.map((n): GraphNode =>
       n.id === 'n-a1' || n.id === 'n-a2'
         ? { ...n, data: { ...(n as RoleNode).data, groupId: 'n-group' } } as RoleNode
@@ -217,7 +217,7 @@ describe('subagent/end 观察回写（§8 #21）', () => {
     await h.runtime.wfRunNode(caller, { nodeId: 'n-a2' })
     await h.runtime.handleSubagentEnd({ id: 'child-2', stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: 'B' }] })
 
-    // 成员各自落待命态；协作组卡片（包裹层）始终保持 pending：不做任何聚合写入
+    // 成员各自落待命态；Team 卡片（包裹层）始终保持 pending：不做任何聚合写入
     expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-a1')!.status).toBe('armed')
     expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-a2')!.status).toBe('armed')
     expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-group')!.status).toBe('pending')

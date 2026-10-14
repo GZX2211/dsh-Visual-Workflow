@@ -1,6 +1,6 @@
 // tests/host/agent/member-launcher.test.ts
 //
-// 协作组成员启动器单测（官方 Agent 协作组路径）：
+// Team 成员启动器单测（官方 Agent Team 路径）：
 //   - available 判据：官方服务 / 根 Agent / provider / **官方工具面** 任一缺失即不可用；
 //   - 创建路径：调用官方 spawnTeammate，首条 prompt = 官方身份前缀 + 插件任务块，
 //     成员级组成（角色提示词 / 模型选择 / 工具白名单）在创建窗口内生效；

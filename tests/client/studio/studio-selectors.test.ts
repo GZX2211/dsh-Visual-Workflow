@@ -3,7 +3,7 @@
 // studio 选择器单测：
 //   ① P4 代理补丁来源标注：agentPatchedNodeIdsOf 读取当前文档 lastPatch.nodeIds
 //      （去重 + 过滤空值 + 非数组安全）；无 lastPatch（用户保存后）→ 空数组；模板态同样生效；
-//   ② 协作组成员显示名：memberLabelOf 的 fallback 规则（成员存在取 label、不存在回退 id、
+//   ② Team 成员显示名：memberLabelOf 的 fallback 规则（成员存在取 label、不存在回退 id、
 //      label 为空字符串时不幻觉出名字）；
 //   ③ editorDataOf 的资产语义投影：归档标记（决定归档按钮是否置灰）与画布角色节点的
 //      来源资产绑定（决定是否给出与左侧栏一致的回滚按钮）。
@@ -48,7 +48,7 @@ describe('P4 代理补丁标注（agentPatchedNodeIdsOf）', () => {
   })
 })
 
-describe('协作组成员显示名（memberLabelOf）', () => {
+describe('Team 成员显示名（memberLabelOf）', () => {
   function member(label?: unknown): CanvasNode {
     return { id: 'm-1', kind: 'agent', position: { x: 0, y: 0 }, data: label === undefined ? {} : { label } } as CanvasNode
   }

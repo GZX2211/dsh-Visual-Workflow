@@ -1,6 +1,6 @@
 // src/client/hooks/useTeamMemberLimit.ts
 //
-// 宿主下发的 协作组成员上限（只读投影）：画布入组交互据此拒绝超限。
+// 宿主下发的 Team 成员上限（只读投影）：画布入组交互据此拒绝超限。
 //
 // 为什么经端点取而不是画布常量：官方名额是会话级累计值（agent-team.maxMembers），
 // 由部署层决定；画布只有跟同一个值才谈得上「画布放得下 = 运行期排得进」。
@@ -11,7 +11,7 @@ import { resolveTeamMemberLimit, TEAM_MEMBER_LIMIT_FALLBACK } from '../lib/group
 import { EP } from '../lib/remote.js'
 import type { RemoteFace } from './useRemote.js'
 
-/** 订阅宿主下发的 协作组成员上限；请求中止与卸载校验由本 effect 负责。 */
+/** 订阅宿主下发的 Team 成员上限；请求中止与卸载校验由本 effect 负责。 */
 export function useTeamMemberLimit(remote: RemoteFace): number {
   const [limit, setLimit] = useState(TEAM_MEMBER_LIMIT_FALLBACK)
 

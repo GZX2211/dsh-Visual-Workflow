@@ -3,7 +3,7 @@
 // wf_org_catalog 的**纯函数装配层**：把工具层已取到的数据组装成索引/详情返回体。
 // 不触盘、不读时钟、不读全局——同一入参必同输出（需要外部事实时一律经回调注入）。
 //
-// 关键契约（用户裁决）：骨架必须自足——不可二次召回的内容（阶段节点、协作组配置、
+// 关键契约（用户裁决）：骨架必须自足——不可二次召回的内容（阶段节点、Team 配置、
 // 连线、数据节点正文与连接信息）一次性给全，保证「索引 + 多次详情召回」能拼出与
 // 工作流资产等价的完整信息；**唯一按需召回的长字段是角色 systemPrompt**，由骨架里的
 // 复合 id 指向。
@@ -450,7 +450,7 @@ function nodeEntryOf(
         label: labelOf(node),
         collabPrompt: textOf(node.data.collabPrompt),
         memberIds: Array.isArray(node.data.memberIds) ? node.data.memberIds.map(textOf) : [],
-        // 协作组卡片是包裹层，不是调度目标（用户裁决 2026-10）：恒为 false，避免诱导父代理对
+        // Team 卡片是包裹层，不是调度目标（用户裁决 2026-10）：恒为 false，避免诱导父代理对
         // 组 id 调用 wf_run_node（会被运行时拒绝）。成员节点各自带自己的 schedulable。
         schedulable: false,
       }

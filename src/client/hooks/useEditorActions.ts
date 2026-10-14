@@ -242,7 +242,7 @@ export function useEditorActions(
       return
     }
     if (kind === 'groupTemplate') {
-      // 协作组模板点击：右侧属性栏显示模板内容（名称/协作 Prompt），可保存/删除（用户批注）
+      // Team 模板点击：右侧属性栏显示模板内容（名称/协作 Prompt），可保存/删除（用户批注）
       selection.selectEditor({ source: 'template', kind: 'group', id })
       return
     }

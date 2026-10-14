@@ -22,7 +22,7 @@ export interface OrgMeta {
   nodeMin?: number
   /** 可执行节点数上限（硬护栏：超出 → metaLimitExceeded）。 */
   nodeMax?: number
-  /** 协作组数量上限（硬护栏）。 */
+  /** Team 数量上限（硬护栏）。 */
   groupMax?: number
   /** 组内人数下限（提示级）。 */
   membersMin?: number
@@ -79,13 +79,13 @@ export interface OrgBudget {
   nodeMax: number
   /** 可执行节点剩余（无上限时为 null）。 */
   nodeRemaining: number | null
-  /** 协作组已用数。 */
+  /** Team 已用数。 */
   groupUsed: number
-  /** 协作组上限（0 = 不限制）。 */
+  /** Team 上限（0 = 不限制）。 */
   groupMax: number
-  /** 协作组剩余。 */
+  /** Team 剩余。 */
   groupRemaining: number | null
-  /** 单个 协作组内人数上限（0 = 不限制）。 */
+  /** 单个 Team 内人数上限（0 = 不限制）。 */
   membersMax: number
   /** 单列并行分支上限（0 = 不限制）。 */
   parallelBranchMax: number

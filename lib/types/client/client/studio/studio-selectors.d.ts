@@ -74,8 +74,8 @@ export declare function instanceRunBadgesOf(flows: ReadonlyArray<{
     } | null;
 }, index: ReadonlyMap<string, ActiveRunBadge>): Map<string, InstanceRunBadge>;
 /**
- * 协作组成员显示名（唯一本体）：成员节点缺失或 label 缺失/为 null 时回退成员 id。
- * 画布 协作组卡片（GraphCanvas）与右侧属性栏（editorDataOf）共用，避免两处各写一份回退规则。
+ * Team 成员显示名（唯一本体）：成员节点缺失或 label 缺失/为 null 时回退成员 id。
+ * 画布 Team 卡片（GraphCanvas）与右侧属性栏（editorDataOf）共用，避免两处各写一份回退规则。
  * 只接受已解析出的成员节点，节点的查找方式（Map / find）由调用方决定。
  */
 export declare function memberLabelOf(member: CanvasNode | undefined, memberId: string): string;

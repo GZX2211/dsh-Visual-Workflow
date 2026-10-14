@@ -141,7 +141,7 @@ export interface CatalogRoleNodeEntry {
      *
      * 为什么需要显式标注：画布允许存在「未接流程线」的孤立节点（用户留作草稿/备选），
      * 而骨架按定义返回全量节点——没有本字段，父代理只能自行从 lines 推断，proxy 与
-     * 协作组卡片这类间接连线极易推错。取值口径与运行期编排清单（orchestrationNodeList）
+     * Team 卡片这类间接连线极易推错。取值口径与运行期编排清单（orchestrationNodeList）
      * 完全同源，等价于把服务端过滤改为显式标注。
      * 仅 agent 标注：parent 是编排者本人，其执行身份由运行期指令给出，不属「可调度单元」。
      */
@@ -162,7 +162,7 @@ export interface CatalogProxyNodeEntry {
     label: string;
     proxySourceId: string;
 }
-/** 协作组条目（collabPrompt 不可二次召回，一次性给全）。 */
+/** Team 条目（collabPrompt 不可二次召回，一次性给全）。 */
 export interface CatalogGroupNodeEntry {
     id: string;
     kind: 'group';
@@ -170,7 +170,7 @@ export interface CatalogGroupNodeEntry {
     collabPrompt: string;
     memberIds: string[];
     /**
-     * 恒为 false：协作组卡片是包裹层，不是调度目标（对它调用 wf_run_node 会被运行时拒绝）。
+     * 恒为 false：Team 卡片是包裹层，不是调度目标（对它调用 wf_run_node 会被运行时拒绝）。
      * 成员节点才是可调度单元，各自带自己的 schedulable。
      */
     schedulable?: boolean;

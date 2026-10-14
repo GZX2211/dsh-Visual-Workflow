@@ -1,7 +1,7 @@
 // tests/client/lib/card-geometry.test.ts
 //
 // 卡片尺寸几何单测（lib/card-geometry.ts —— 卡片尺寸常量与尺寸函数的唯一本体）：
-// 阶段节点（启动/结束/暂停）使用紧凑尺寸；角色节点使用标准卡片尺寸；协作组使用自身尺寸。
+// 阶段节点（启动/结束/暂停）使用紧凑尺寸；角色节点使用标准卡片尺寸；Team 使用自身尺寸。
 //
 // 注（治理）：本用例原在 tests/client/components/canvas/geometry.test.ts 中，因常量与
 // nodeSizeOf 的唯一本体已收敛到 lib/card-geometry.ts，按源文件归属迁至本文件，

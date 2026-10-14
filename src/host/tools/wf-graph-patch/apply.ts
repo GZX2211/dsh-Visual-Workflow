@@ -5,7 +5,7 @@
 //     分支必须原子：先校验后改动）；
 //   - applyGraphOps：按序应用图结构操作，返回新文档（不改写入参，**一次**深拷贝语义）；
 //   - applyGraphOpsTolerant：逐条容错（失败 op 记入 errors，其余继续；整批只深拷贝一次）；
-//   - ensureGroupConsistency：协作组与成员的 groupId 双向一致（复用画布侧同款语义）。
+//   - ensureGroupConsistency：Team 与成员的 groupId 双向一致（复用画布侧同款语义）。
 // 不触盘、不读时钟/随机源——落盘与校验在 tool.ts 执行层。
 
 import {
@@ -96,7 +96,7 @@ function wantsManagedFile(raw: Record<string, unknown>): boolean {
 }
 
 /**
- * 协作组一致性：成员节点的 groupId 与组的 memberIds 双向对齐。
+ * Team 一致性：成员节点的 groupId 与组的 memberIds 双向对齐。
  * 入组：写 node.data.groupId；出组：置 null。组不存在或成员不存在 → 稳定错误。
  */
 export function ensureGroupConsistency(nodes: GraphNode[], groupId: string, memberIds: string[]): GraphNode[] {
@@ -337,7 +337,7 @@ function applyGraphOpsInPlace(
             label: String(data.label ?? node.id),
             collabPrompt: String(data.collabPrompt ?? ''),
             memberIds: [],
-            // 协作组卡片尺寸（视图数据；缺省与画布默认一致）
+            // Team 卡片尺寸（视图数据；缺省与画布默认一致）
             size: (data.size as { w: number; h: number } | undefined) ?? { w: 300, h: 220 },
           }
         }
@@ -366,7 +366,7 @@ function applyGraphOpsInPlace(
         }
         doc.lines = doc.lines.filter((line) => !removed.has(line.source) && !removed.has(line.target))
         doc.nodes = doc.nodes.filter((item) => !removed.has(item.id))
-        // 组内成员被删：从各组成员清单移除（协作组卡片保持可用）
+        // 组内成员被删：从各组成员清单移除（Team 卡片保持可用）
         doc.nodes = doc.nodes.map((item) => {
           if (item.kind !== 'group') return item
           const members = (item.data.memberIds ?? []).filter((memberId) => !removed.has(memberId))
@@ -375,7 +375,7 @@ function applyGraphOpsInPlace(
             : { ...item, data: { ...item.data, memberIds: members } } as GraphNode
         })
         if (node.kind === 'group') {
-          // 删除 协作组卡片：成员出组（groupId 置 null）
+          // 删除 Team 卡片：成员出组（groupId 置 null）
           doc.nodes = doc.nodes.map((item) => {
             if (item.kind !== 'agent' && item.kind !== 'parent') return item
             return (item.data.groupId === nodeId) ? { ...item, data: { ...item.data, groupId: null } } as GraphNode : item

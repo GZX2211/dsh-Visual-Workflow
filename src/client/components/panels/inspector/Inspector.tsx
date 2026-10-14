@@ -155,7 +155,7 @@ export function Inspector(props: InspectorProps) {
     // 复制按钮：画布角色节点（含父代理节点）可创建虚拟节点；
     // 模板与父代理模板不可复制，角色资产与经验（都不在画布上）同样不可复制
     const canCopyProxy = kind === 'role' && !editorData.template && !isAsset
-    // 入库：仅工作流模版与角色模版（文件/数据库/协作组模板不显示；资产态与经验不显示）
+    // 入库：仅工作流模版与角色模版（文件/数据库/Team 模板不显示；资产态与经验不显示）
     const canPromote = !isAsset && !isExperienceEditor && editorData.template === true && (kind === 'workflow' || kind === 'role') && onPromote !== undefined
     if (!isStage) {
       footer.push(

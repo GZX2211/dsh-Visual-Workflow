@@ -214,10 +214,10 @@ describe('Studio 交互', () => {
     expect(resume?.args).toMatchObject({ sessionId: 's-1', runId: 'run-9' })
   })
 
-  it('Team：画布角色节点拖入 协作组卡片 → 组内迷你成员显示、画布大卡隐藏', async () => {
+  it('Team：画布角色节点拖入 Team 卡片 → 组内迷你成员显示、画布大卡隐藏', async () => {
     await renderStudio()
     await createDraft()
-    // 拖入 协作组卡片（其他 Tab）
+    // 拖入 Team 卡片（其他 Tab）
     await act(async () => {
       libTab('其他')?.click()
     })
@@ -232,7 +232,7 @@ describe('Studio 交互', () => {
     const roleNode = document.querySelector<HTMLDivElement>('.wf-graph__node .wf-node--agent')
     expect(roleNode).toBeTruthy()
 
-    // 把画布角色节点拖到 协作组卡片上（mock elementsFromPoint：jsdom 无布局命中）
+    // 把画布角色节点拖到 Team 卡片上（mock elementsFromPoint：jsdom 无布局命中）
     const groupEl = document.querySelector('.wf-group-node') as HTMLElement
     const original = document.elementFromPoint
     const originalMany = document.elementsFromPoint
@@ -265,7 +265,7 @@ describe('Studio 交互', () => {
   it('Team：删除单个成员只移出一个，其余保留（用户批注：点了 1 个却移出多个）', async () => {
     await renderStudio()
     await createDraft()
-    // 放入协作组（其他 tab）
+    // 放入 Team（其他 tab）
     await act(async () => {
       libTab('其他')?.click()
     })
@@ -290,7 +290,7 @@ describe('Studio 交互', () => {
       document.elementsFromPoint = originalMany
     }
 
-    // 选中协作组 → 右侧团队成员应有 3 个
+    // 选中 Team → 右侧团队成员应有 3 个
     await act(async () => {
       groupCard.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 500, clientY: 300, button: 0 }))
       window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 500, clientY: 300, button: 0 }))

@@ -14,7 +14,7 @@ import type { Dict } from '../i18n.js';
 /** 画布保存选项。 */
 export interface SaveCanvasOptions {
     /**
-     * 纯几何改动的自动保存（节点拖动 / 协作组卡片缩放的防抖保存）：
+     * 纯几何改动的自动保存（节点拖动 / Team 卡片缩放的防抖保存）：
      * 跳过「运行中保存」二次确认、跳过成功 toast（避免拖动即弹窗/刷屏）。
      * 它不是「编排变更」通道：若画布内容没变，宿主侧 diff 也不会向父代理注入。
      */
@@ -54,7 +54,7 @@ export interface DocumentActionsFace {
     selectWorkflow(id: string): void;
     /** 打开工作流模板（未保存守卫后切换）。 */
     selectFlowTemplate(id: string): void;
-    /** 新建（工作流 Tab / 角色 / 数据分区 / 协作组分区；+ 号新建模板）。 */
+    /** 新建（工作流 Tab / 角色 / 数据分区 / Team 分区；+ 号新建模板）。 */
     createNew(tab: LibTab, section?: 'file' | 'database' | 'flowTemplate' | 'group'): void;
 }
 /** 文档生命周期面（保存失败抛错/提示由保存路径处理）。 */

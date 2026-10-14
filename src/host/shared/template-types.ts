@@ -128,7 +128,7 @@ export interface DatabaseTemplate {
 }
 
 /**
- * 协作组模板（架构文档 §6.4 BundleV2.embedded.groups 引用）。
+ * Team 模板（架构文档 §6.4 BundleV2.embedded.groups 引用）。
  * 架构文档 §6.3 未单独列出 GroupTemplate，此接口为架构文档 §6.4 嵌入式 groups
  * 的约束形状；协作 Prompt 追加到组内成员**首条用户消息（任务块）末尾**、不注入
  * 系统提示词，且无论文本是否为空都默认列出组内全部成员 ID + 角色名
@@ -171,7 +171,7 @@ export interface ToolCombo {
  * 格式升级为 v2（含数据库节点/Team/虚拟节点/双模式标记），不兼容旧文件
  * （需求文档 §9.1 导入导出行 / Q22）。
  * 语义不对称（跨模块契约）：`embedded.groups` 仅在导出时随包携带（由 group 节点推导），
- * 导入时不重建模板库——协作组信息已内联在图节点中，重建会产生第二份事实源。
+ * 导入时不重建模板库——Team 信息已内联在图节点中，重建会产生第二份事实源。
  */
 export interface BundleV2 {
   /** 格式标识：固定 'dsh-vw-bundle'。 */
@@ -184,7 +184,7 @@ export interface BundleV2 {
   workflow?: { name: string; description: string; nodes: GraphNode[]; lines: Line[] }
   /** 服务 payload（模式二导入导出；与 workflow 二选一）。 */
   service?: { name: string; description: string; nodes: GraphNode[]; lines: Line[] }
-  /** 嵌入式资源（角色/文件/数据库/协作组模板与工具组合；导入时解耦创建模板）。 */
+  /** 嵌入式资源（角色/文件/数据库/Team 模板与工具组合；导入时解耦创建模板）。 */
   embedded: {
     roles?: RoleTemplate[]
     files?: FileTemplate[]

@@ -4,8 +4,8 @@
 
 // tests/client/components/canvas/GroupCard.test.tsx
 //
-// 协作组卡片渲染：
-//   - 协作组卡片自身**永无**运行状态徽标（包裹层不是执行主体，不进入运行事实）；
+// Team 卡片渲染：
+//   - Team 卡片自身**永无**运行状态徽标（包裹层不是执行主体，不进入运行事实）；
 //   - 联动高亮（highlighted）加高亮类；
 //   - 成员迷你卡照常渲染成员名与成员状态点（状态事实来源不变）。
 
@@ -68,7 +68,7 @@ function renderCard(overrides: Partial<React.ComponentProps<typeof GroupCard>> =
 }
 
 describe('GroupCard 状态与高亮', () => {
-  it('协作组卡片永不渲染运行状态徽标（包裹层不是执行主体，不进入运行事实）', () => {
+  it('Team 卡片永不渲染运行状态徽标（包裹层不是执行主体，不进入运行事实）', () => {
     const card = renderCard()
 
     expect(card.querySelector('.wf-node__kind .wf-status-dot')).toBeNull()
@@ -87,7 +87,7 @@ describe('GroupCard 状态与高亮', () => {
     expect(memberCards).toHaveLength(2)
     expect(memberCards[0].textContent).toContain('后端开发工程师')
     expect(memberCards[1].textContent).toContain('后端代码审查专家')
-    // 成员自身状态点（非 协作组卡片徽标）按成员状态渲染
+    // 成员自身状态点（非 Team 卡片徽标）按成员状态渲染
     expect(memberCards[0].querySelector('.wf-status-dot')?.className).toContain('is-running')
     expect(memberCards[1].querySelector('.wf-status-dot')).toBeNull()
   })

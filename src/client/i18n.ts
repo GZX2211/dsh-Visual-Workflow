@@ -28,8 +28,8 @@ export const zh = {
   databases: '数据库',
   stages: '阶段',
   groupTemplates: 'Team',
-  groupMemberLimitHint: '协作组成员数量已达上限（上限由部署层 agent-team.maxMembers 决定）',
-  toastGroupMemberAdded: '已加入协作组',
+  groupMemberLimitHint: 'Team 成员数量已达上限（上限由部署层 agent-team.maxMembers 决定）',
+  toastGroupMemberAdded: '已加入 Team',
   stagePinHint: '固定模板',
   newTemplate: '新建模板',
   libEmptyTemplates: '暂无模板，点击右侧 + 新建',
@@ -244,8 +244,8 @@ export const zh = {
   fileContent: '文件内容',
   fileUnset: '未选择文件',
   /** 文件多选提示（已选文件列表显示在按钮下方）。 */
-  /** 协作组拖拽悬停提示（放开以入组）。 */
-  groupDropHint: '放开以加入协作组',
+  /** Team 拖拽悬停提示（放开以入组）。 */
+  groupDropHint: '放开以加入 Team',
   /** 角色卡元信息「模型」前缀。 */
   nodeMetaModel: '模型',
   /** 画布节点元信息「组合」前缀（显示选择的模式或组合）。 */
@@ -281,9 +281,9 @@ export const zh = {
   dbAdvancedHint: '召回条数=每次返回命中数(默认5,上限50)\n分块窗口/重叠=索引分块大小(384/128)\n相似度阈值=仅保留更高分(默认0)\n索引容量=单库最多索引行数(默认10000)',
   stageReadonlyHint: '阶段节点属性固定（名称硬编码），不支持编辑；删除按钮仅移除画布节点',
   collabPrompt: '协作 Prompt',
-  collabPromptHint: '追加到 协作组成员的任务消息：官方 协作组可用时作为「团队协作说明」注入（协作规则由官方 team:policy 承担）；官方不可用时连同成员清单与 wf_ask_agent 通信指引一并注入',
+  collabPromptHint: '追加到 Team 成员的任务消息：官方 Team 可用时作为「团队协作说明」注入（协作规则由官方 team:policy 承担）；官方不可用时连同成员清单与 wf_ask_agent 通信指引一并注入',
   groupMembers: '团队成员',
-  groupMemberHint: '把角色拖入 协作组内（或删除成员以移出）',
+  groupMemberHint: '把角色拖入 Team 内（或删除成员以移出）',
   groupDefaultName: 'Team',
   /** 卡片右上角「交换左右连接点」按钮提示（用户批注：美化布线防交叉）。 */
   swapPorts: '交换左右连接点',
@@ -311,7 +311,7 @@ export const zh = {
   newWorkflow: '新建工作流',
   deleteFlow: '删除工作流',
   // 模板
-  templateDefaultName: { workflow: '未命名工作流', role: '新角色模板', file: '新文件模板', database: '新数据库模板', group: '新 协作组模板' },
+  templateDefaultName: { workflow: '未命名工作流', role: '新角色模板', file: '新文件模板', database: '新数据库模板', group: '新 Team 模板' },
   // 草稿默认名（本地草稿未命名时使用；与模板默认名分开——实例/模板语义不同）
   untitledWorkflow: '未命名工作流',
   untitledService: '未命名服务',
@@ -369,7 +369,7 @@ export const zh = {
   selfLoop: '不允许自环',
   duplicateConnection: '重复连线',
   proxyParallel: '主节点与虚拟节点不得同时连入同一连接点',
-  groupMemberFlowLine: '协作组成员不能连流程线，仅可连上下文/数据库线',
+  groupMemberFlowLine: 'Team 成员不能连流程线，仅可连上下文/数据库线',
   // 运行状态
   status: {
     pending: '等待',

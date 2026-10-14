@@ -36,11 +36,11 @@ export interface LayoutBox {
  * 语义：新节点默认写哨兵坐标（或干脆不写），打开/接收文档时据此自动重排一次。
  */
 export declare function needsAutoLayout(nodes: LayoutBoxNode[] | null | undefined): boolean;
-/** 协作组成员的 id 集合（以组的 memberIds 为准；用于排除重复渲染节点）。 */
+/** Team 成员的 id 集合（以组的 memberIds 为准；用于排除重复渲染节点）。 */
 export declare function groupMemberIdsOf(nodes: LayoutBoxNode[] | null | undefined): Set<string>;
 /**
- * 实际渲染盒子清单：协作组卡片 + 独立节点（组内成员不独立渲染；虚拟节点独立占位，参与判定）。
- * 为什么排除组内成员：GraphCanvas 只渲染 协作组卡片与独立节点（组内成员以迷你卡渲染在卡片内），
+ * 实际渲染盒子清单：Team 卡片 + 独立节点（组内成员不独立渲染；虚拟节点独立占位，参与判定）。
+ * 为什么排除组内成员：GraphCanvas 只渲染 Team 卡片与独立节点（组内成员以迷你卡渲染在卡片内），
  * 对它们做重叠判定会产生「永远重叠」的假告警。
  */
 export declare function layoutBoxesOf(nodes: LayoutBoxNode[] | null | undefined, sizeOf: (node: LayoutBoxNode) => {
@@ -54,7 +54,7 @@ export declare function boxesOverlap(a: LayoutBox, b: LayoutBox): boolean;
 /** 全部重叠对（id 对按字典序归一，便于断言与去重）。 */
 export declare function findLayoutOverlaps(boxes: LayoutBox[] | null | undefined): Array<[string, string]>;
 /**
- * 布局中被折叠（不占位置槽）的节点 id 集合：仅 协作组成员。
+ * 布局中被折叠（不占位置槽）的节点 id 集合：仅 Team 成员。
  * 与 layout.ts 的折叠规则同源（虚拟节点独立占位，不再折叠到主节点）；供重叠判定与 UI 使用。
  */
 export declare function collapsedIdsOf(inputs: Array<{

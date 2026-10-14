@@ -106,7 +106,7 @@ function dbNode(id: string, data: Record<string, unknown> = {}): GraphNode {
   }
 }
 
-/** 协作组节点。 */
+/** Team 节点。 */
 function groupNode(id: string, memberIds: string[]): GraphNode {
   return { id, kind: 'group', position: { x: 0, y: 0 }, data: { label: id, collabPrompt: '', memberIds } }
 }
@@ -311,7 +311,7 @@ describe('规则矩阵（每个 code 一例）', () => {
     expect(codes(issues)).toContain('groupNoFlow')
   })
 
-  it('groupMemberMissing：协作组成员 id 不存在', () => {
+  it('groupMemberMissing：Team 成员 id 不存在', () => {
     const doc = flow(
       [stage('s', 'start'), agent('a1'), groupNode('g1', ['a1', 'ghost']), stage('e', 'end')],
       [line('l1', 's', 'g1'), line('l2', 'g1', 'e')],
@@ -465,7 +465,7 @@ describe('规则矩阵（每个 code 一例）', () => {
     expect(issues.find((i) => i.code === 'metaLimitExceeded')?.level).toBe('error')
   })
 
-  it('metaLimitExceeded：协作组数 / 组内人数 / 并行分支 / 单轮 op 超限', () => {
+  it('metaLimitExceeded：Team 数 / 组内人数 / 并行分支 / 单轮 op 超限', () => {
     const groupHeavy = flow(
       [stage('s', 'start'), agent('m1'), agent('m2'), groupNode('g1', ['m1', 'm2']), stage('e', 'end')],
       [line('l1', 's', 'g1'), line('l2', 'g1', 'e')],

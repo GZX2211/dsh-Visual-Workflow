@@ -1,6 +1,6 @@
 // src/client/lib/card-geometry.ts
 //
-// 卡片尺寸几何（纯常量 + 纯函数）：节点 / 阶段 / 协作组卡片的基础尺寸与「实际渲染尺寸」
+// 卡片尺寸几何（纯常量 + 纯函数）：节点 / 阶段 / Team 卡片的基础尺寸与「实际渲染尺寸」
 // 解析。渲染层与布局层共用本模块，保证「布局算出的尺寸」与「渲染尺寸」口径唯一、不漂移。
 // 为什么不放在组件层：lib（布局、重叠判定、图模型）需要同一本体，而 lib 不得反向
 // 依赖 UI 模块；渲染侧的几何原语（接点位置、贝塞尔连线、命中换算）仍留在画布组件层。
@@ -28,10 +28,10 @@ export const GRAPH_GROUP_HEIGHT = 220
  *  由 tests/client/components/canvas/GroupCard.test.tsx 与样式片段对锁，两处不得各自漂移。 */
 export const GROUP_MEMBER_ROW_H = 41
 export const GROUP_MEMBER_LIST_TOP = 78
-/** 协作组卡片内成员横向留白（渲染尺寸与布局坐标共用同一常量）。 */
+/** Team 卡片内成员横向留白（渲染尺寸与布局坐标共用同一常量）。 */
 export const GROUP_MEMBER_PADDING = 10
 
-/** 节点实际尺寸（协作组卡片可拉伸，尺寸存 data.size；阶段节点用紧凑卡）。 */
+/** 节点实际尺寸（Team 卡片可拉伸，尺寸存 data.size；阶段节点用紧凑卡）。 */
 export function nodeSizeOf(node: SizedNodeLike): { w: number; h: number } {
   if (node.kind === 'group') {
     const size = (node.data?.size ?? {}) as { w?: unknown; h?: unknown }
@@ -46,7 +46,7 @@ export function nodeSizeOf(node: SizedNodeLike): { w: number; h: number } {
 }
 
 /**
- * 协作组卡片最小尺寸（容纳成员列表所需高度；宽度保持用户拉伸值）。
+ * Team 卡片最小尺寸（容纳成员列表所需高度；宽度保持用户拉伸值）。
  * 布局与自动布局判定共用同一口径，避免「布局算出的高度」与「渲染高度」漂移。
  * 纯函数：只读 data.memberIds / data.size，不读时钟/随机源。
  */

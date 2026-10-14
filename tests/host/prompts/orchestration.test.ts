@@ -49,7 +49,7 @@ describe('T-005 编排父代理提示词（情况1 纯编排）', () => {
     expect(a).not.toBe(b)
   })
 
-  it('协作组存在与否改变输出（结构差异，不对文案断言）', () => {
+  it('Team 存在与否改变输出（结构差异，不对文案断言）', () => {
     const withGroup = buildOrchestratorPrompt({ facts: orchFacts, dynamic: {} })
     const without = buildOrchestratorPrompt({ facts: { ...orchFacts, collabGroups: [] }, dynamic: {} })
     expect(withGroup.length).toBeGreaterThan(0)
@@ -57,7 +57,7 @@ describe('T-005 编排父代理提示词（情况1 纯编排）', () => {
     expect(withGroup).not.toBe(without)
   })
 
-  it('协作通道决定 协作组段：official 指示整组启动官方团队并禁止自行拉人；legacy 指示逐节点并行启动', () => {
+  it('协作通道决定 Team 段：official 指示整组启动官方团队并禁止自行拉人；legacy 指示逐节点并行启动', () => {
     const official = buildOrchestratorPrompt({ facts: { ...orchFacts, collabChannel: 'official' as const }, dynamic: {} })
     const legacy = buildOrchestratorPrompt({ facts: { ...orchFacts, collabChannel: 'legacy' as const }, dynamic: {} })
     expect(official).not.toBe(legacy)

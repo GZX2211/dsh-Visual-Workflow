@@ -524,7 +524,7 @@ describe('editorDataOf', () => {
     expect(editorDataOf(selected)?.kind).toBe('edge')
   })
 
-  it('flowToCanvas：重复节点 id 去重（保留最后出现者，修复历史 协作组重复追加缺陷）', () => {
+  it('flowToCanvas：重复节点 id 去重（保留最后出现者，修复历史 Team 重复追加缺陷）', () => {
     const projected = flowToCanvas({
       id: 'f', sessionId: 's', mode: 'mode1', name: 'f', description: '',
       nodes: [
@@ -539,7 +539,7 @@ describe('editorDataOf', () => {
     expect((projected.nodes.find((n) => n.id === 'g')?.data as { memberIds?: string[] }).memberIds).toEqual(['a'])
   })
 
-  it('协作组成员移除：仅移除目标成员（模拟 removeGroupMember 的两次 patch）', () => {
+  it('Team 成员移除：仅移除目标成员（模拟 removeGroupMember 的两次 patch）', () => {
     let state = baseState()
     state = studioReducer(state, {
       type: 'GRAPH_REPLACED',

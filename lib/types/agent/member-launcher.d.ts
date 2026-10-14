@@ -31,7 +31,7 @@ export interface TeamMemberLauncherDeps {
     agents: () => AgentsServiceLike | null;
     /** subagents 服务惰性解析（provider 探测）。 */
     subagents: () => SubagentsServiceLike | null;
-    /** 官方 协作组服务惰性解析；返回 null 即不可用，调用方降级为普通子代理路径。 */
+    /** 官方 Team 服务惰性解析；返回 null 即不可用，调用方降级为普通子代理路径。 */
     teams: () => AgentTeamsServiceLike | null;
     toolsView: ToolsView;
     /** 全局关闭工具快照（取值前由宿主保证已跨进程刷新）。 */
@@ -41,7 +41,7 @@ export interface TeamMemberLauncherDeps {
     toolFilter: ChildToolFilterSetup;
     promptSetup: ChildPromptSetup;
     /**
-     * 官方 协作组会话级成员名额上限（部署层 agent-team.maxMembers 的镜像）。
+     * 官方 Team 会话级成员名额上限（部署层 agent-team.maxMembers 的镜像）。
      * 官方语义是「累计创建过的 teammate 数，含创建失败的」；插件在新建成员前预检，
      * 把运行期类型化失败提前成可行动错误。
      */
@@ -63,7 +63,7 @@ export interface TeamMemberLauncherDeps {
     signatureOf: (node: RoleNode, resolvedTools: string[], rolePrompt: string, injectSystemPrompt: boolean, injectToolSections: boolean, collabPrompt: string) => string;
 }
 /**
- * 协作组成员启动器（官方 Agent 协作组路径；官方不可用时由调用方降级为普通子代理）。
+ * Team 成员启动器（官方 Agent Team 路径；官方不可用时由调用方降级为普通子代理）。
  *
  * 无状态持有者之外的唯一内存表是成员组成签名（官方成员在会话内不可重建，签名变化只能告警）。
  */
@@ -77,12 +77,12 @@ export declare class TeamMemberLauncher {
     private readonly memberSignatures;
     constructor(deps: TeamMemberLauncherDeps);
     /**
-     * 官方 协作组路径是否可用（成员启动路径选择与协作块文案的唯一判据）。
+     * 官方 Team 路径是否可用（成员启动路径选择与协作块文案的唯一判据）。
      *
-     * 条件：官方 协作组服务可用 + **官方 协作组工具面确实下发给成员** + 会话根 Agent 存活
+     * 条件：官方 Team 服务可用 + **官方 Team 工具面确实下发给成员** + 会话根 Agent 存活
      * + 存在可用的延续子代理 provider。
      *
-     * 为什么必须校验工具面：官方 协作组由两个独立包组成——领域服务（agent-team）与工具/策略包
+     * 为什么必须校验工具面：官方 Team 由两个独立包组成——领域服务（agent-team）与工具/策略包
      * （tool-agent-team）。只挂载领域服务时成员会被创建为 teammate，却拿不到九个官方工具与
      * team:policy，此时按 official 通道注入「用 send_message 通信」的文案必然失效。官方工具
      * 注册在每个成员自身 scope，故只需看父代理（同为成员）scope 是否可见该工具。
@@ -91,7 +91,7 @@ export declare class TeamMemberLauncher {
     /**
      * 启动（或复用）一个成员节点的官方 teammate 并派发本轮任务。
      *
-     * @returns 成员启动结果；官方 协作组服务或根 Agent 不可用时返回 null（调用方降级为普通子代理）。
+     * @returns 成员启动结果；官方 Team 服务或根 Agent 不可用时返回 null（调用方降级为普通子代理）。
      * @throws 成员名已被失败成员占用、成员仍在创建中、名额耗尽、无可用 provider、官方未返回成员标识等可行动错误。
      */
     start(input: NodeStartInput): Promise<TeamMemberStartResult | null>;
@@ -99,7 +99,7 @@ export declare class TeamMemberLauncher {
     private rootAgentOf;
     /**
      * 某成员节点在官方 roster 中的当前状态（成员运行态的**唯一权威读源**）。
-     * 返回 null：官方 协作组不可用，或该节点尚无对应成员（未创建 / 已降级为普通子代理）。
+     * 返回 null：官方 Team 不可用，或该节点尚无对应成员（未创建 / 已降级为普通子代理）。
      */
     memberStatusOf(sessionId: string, nodeId: string): TeamMemberViewLike['status'] | null;
     /**

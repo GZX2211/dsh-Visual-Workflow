@@ -16,15 +16,15 @@ export interface OrchestrationDirectiveParams {
             id: string;
             label: string;
         }>;
-        /** 协作组卡片与成员清单（画布含 协作组卡片时组装该段；空数组 = 不组装该段）。 */
+        /** Team 卡片与成员清单（画布含 Team 卡片时组装该段；空数组 = 不组装该段）。 */
         collabGroups: Array<{
             groupId: string;
             label: string;
             memberIds: string[];
         }>;
         /**
-         * 协作通道（协作组段文案的分支依据）：
-         *   - official = 官方 Agent 协作组可用 → 成员以官方 teammate 身份启动，协作与任务板走官方工具；
+         * 协作通道（Team 段文案的分支依据）：
+         *   - official = 官方 Agent Team 可用 → 成员以官方 teammate 身份启动，协作与任务板走官方工具；
          *   - legacy = 官方团队不可用 → 成员降级为普通子代理，组内通信用 wf_ask_agent。
          * 缺省 legacy。
          */

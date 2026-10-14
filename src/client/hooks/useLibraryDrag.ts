@@ -1,7 +1,7 @@
 // src/client/hooks/useLibraryDrag.ts
 //
 // 左侧库卡片拖拽（pointer 事件）：拖拽预览、
-// 协作组卡片悬停高亮，落点在画布内放置节点 / 落点在 协作组卡片表面入组。
+// Team 卡片悬停高亮，落点在画布内放置节点 / 落点在 Team 卡片表面入组。
 // 返回 beginLibraryDrag 与拖拽状态（dragPreview / dropGroupId）。
 
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -51,7 +51,7 @@ export function useLibraryDrag(
         drag.preview = { x: moveEvent.clientX, y: moveEvent.clientY }
         setDragPreview({ x: moveEvent.clientX, y: moveEvent.clientY, label: payload.label })
       }
-      // 拖拽悬停检测：仅 协作组卡片表面（非连接点）→ 高亮 + 提示；
+      // 拖拽悬停检测：仅 Team 卡片表面（非连接点）→ 高亮 + 提示；
       // 只有角色模板（含 onDropIntoGroup）才提示，其他卡片（文件/数据库/阶段）不显示悬浮提示、不能入组
       setDropGroupId(payload.onDropIntoGroup ? groupSurfaceUnderPoint(moveEvent.clientX, moveEvent.clientY) : null)
     }
@@ -79,7 +79,7 @@ export function useLibraryDrag(
       if (!rect || lastClient.x < rect.left || lastClient.x > rect.right || lastClient.y < rect.top || lastClient.y > rect.bottom) {
         return
       }
-      // 左栏角色模板直接拖入协作组：仅落点为 协作组卡片表面（非连接点）时生成节点并入组
+      // 左栏角色模板直接拖入 Team：仅落点为 Team 卡片表面（非连接点）时生成节点并入组
       const groupId = groupSurfaceUnderPoint(lastClient.x, lastClient.y) ?? ''
       if (groupId && payload.onDropIntoGroup) {
         payload.onDropIntoGroup(groupId)

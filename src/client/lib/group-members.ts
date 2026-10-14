@@ -1,11 +1,11 @@
 // src/client/lib/group-members.ts
 //
-// 协作组成员关系：重复 协作组卡片合并、原子入组、成员入组时的流程线清理。
+// Team 成员关系：重复 Team 卡片合并、原子入组、成员入组时的流程线清理。
 // 全部为纯函数（返回新数组，不改写入参），供左栏模板拖入与画布内节点拖入两条路径共用。
 // 入参只要求「id + data」最小形状，画布节点（CanvasNode）与任意同形投影均可直接传入。
 
 /**
- * 协作组成员上限的**回退值**（宿主未下发 runtimeConfig.teamMemberLimit 时使用）。
+ * Team 成员上限的**回退值**（宿主未下发 runtimeConfig.teamMemberLimit 时使用）。
  *
  * 为什么由宿主下发而不是画布硬编码：成员在运行期由官方 `spawnTeammate` 创建，名额是**会话级
  * 累计**的（`agent-team.maxMembers`，官方默认 16、bundle 层 8、部署层可再覆盖）——画布放得下
@@ -15,7 +15,7 @@
 export const TEAM_MEMBER_LIMIT_FALLBACK = 8
 
 /**
- * 解析宿主下发的 协作组成员上限（缺失 / 形态非法 / 非正整数一律回退回退值）。
+ * 解析宿主下发的 Team 成员上限（缺失 / 形态非法 / 非正整数一律回退回退值）。
  * 与 resolveRunPollMs 同口径：下发值不可信时宁可用保守值，也不把非法值当上限用。
  */
 export function resolveTeamMemberLimit(value: unknown): number {
@@ -24,10 +24,10 @@ export function resolveTeamMemberLimit(value: unknown): number {
 }
 
 /**
- * 合并重复节点（修复历史数据中 协作组节点被重复追加的缺陷）：
- *  - 同 id 的 协作组节点合并为一个，memberIds 取**并集**（不丢任何成员），其余字段保留后出现者；
- *  - 每个 协作组节点的 memberIds **一律去重**（即便单组内出现重复 id，也会被清理）。
- * 非 协作组节点同 id 直接保留最后出现者。返回合并后的新数组。
+ * 合并重复节点（修复历史数据中 Team 节点被重复追加的缺陷）：
+ *  - 同 id 的 Team 节点合并为一个，memberIds 取**并集**（不丢任何成员），其余字段保留后出现者；
+ *  - 每个 Team 节点的 memberIds **一律去重**（即便单组内出现重复 id，也会被清理）。
+ * 非 Team 节点同 id 直接保留最后出现者。返回合并后的新数组。
  */
 export function consolidateGroups<T extends { id: string; data: Record<string, unknown> }>(nodes: T[]): T[] {
   const result: T[] = []
@@ -51,7 +51,7 @@ export function consolidateGroups<T extends { id: string; data: Record<string, u
       result[idx] = node
     }
   }
-  // 第一遍：合并同 id 组；第二遍：给每个 协作组节点去重 memberIds（即便单组）
+  // 第一遍：合并同 id 组；第二遍：给每个 Team 节点去重 memberIds（即便单组）
   const merged = (() => { for (const node of nodes) forEachNode(node); return result })()
   return merged.map((n) => ((n as { kind?: unknown }).kind === 'group'
     ? { ...n, data: { ...n.data, memberIds: [...new Set(Array.isArray(n.data.memberIds) ? n.data.memberIds as string[] : [])] } } as T
@@ -61,7 +61,7 @@ export function consolidateGroups<T extends { id: string; data: Record<string, u
 /**
  * 原子入组：一次变更同时设置「成员节点 data.groupId」与「Team data.memberIds（追加去重）」。
  * 入组限定角色节点（parent/agent），返回新 nodes 数组；非角色/非组则原样返回。
- * 先把重复的 协作组节点合并（并集），再在**唯一**的组上追加，杜绝「删 1 个移出多个 / 只显示一个」的不一致。
+ * 先把重复的 Team 节点合并（并集），再在**唯一**的组上追加，杜绝「删 1 个移出多个 / 只显示一个」的不一致。
  * 供左栏模板拖入与画布内节点拖入两条路径共用。
  */
 export function joinNodeToGroup<T extends { id: string; data: Record<string, unknown> }>(nodes: T[], nodeId: string, groupId: string): T[] {
@@ -82,7 +82,7 @@ export function joinNodeToGroup<T extends { id: string; data: Record<string, unk
 }
 
 /**
- * 移除指定节点的流程连线（角色拖入 协作组后仅保留上下文/数据库线）：
+ * 移除指定节点的流程连线（角色拖入 Team 后仅保留上下文/数据库线）：
  * 组内成员只有上下文/数据库连接点，无流程接点；已连的流程线在入组时自动断开。
  */
 export function dropNodeFlowLines<T extends { source: string; target: string; sourceHandle?: string; targetHandle?: string }>(lines: T[], nodeId: string): T[] {

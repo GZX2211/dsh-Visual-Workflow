@@ -345,7 +345,7 @@ describe('孤立节点：单独成列排在流程最右侧之外', () => {
 // ---------------------------------------------------------------------------
 
 describe('Team：仍为超级节点，卡片包住成员', () => {
-  it('协作组卡片按主轴居中，成员坐标落在卡片矩形内且按 memberIds 顺序排列', () => {
+  it('Team 卡片按主轴居中，成员坐标落在卡片矩形内且按 memberIds 顺序排列', () => {
     const nodes = [
       node('s', 'start'),
       node('g1', 'group', { memberIds: ['a1', 'a2'] }),
@@ -364,9 +364,9 @@ describe('Team：仍为超级节点，卡片包住成员', () => {
       expect(member.y).toBeLessThanOrEqual(group.y + height)
     }
     expect((result.positions.get('a1') as { y: number }).y).toBeLessThan((result.positions.get('a2') as { y: number }).y)
-    // 协作组卡片中心落在主轴上
+    // Team 卡片中心落在主轴上
     expect(group.y + height / 2).toBe(result.axisY)
-    // 协作组卡片是超级节点：组员不参与重叠判定
+    // Team 卡片是超级节点：组员不参与重叠判定
     expect(renderBoxes(nodes, result.positions).map((box) => box.id).sort()).toEqual(['e', 'g1', 's'])
   })
 })

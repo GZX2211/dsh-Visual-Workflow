@@ -31,18 +31,18 @@ export interface NodeRunner {
     /** 尽力中断某子代理当前回合（保留会话；官方 interrupt 语义）。 */
     interruptChild(childId: string, sessionId: string): Promise<void>;
     /**
-     * 官方 Agent 协作组能力是否可用（协作组成员启动路径与协作块通道文案的唯一判据）。
+     * 官方 Agent Team 能力是否可用（Team 成员启动路径与协作块通道文案的唯一判据）。
      *
-     * 可用 = 官方 协作组服务已挂载且能力齐全 + 官方 协作组工具与协作策略确实会下发给成员
+     * 可用 = 官方 Team 服务已挂载且能力齐全 + 官方 Team 工具与协作策略确实会下发给成员
      * （父代理 scope 可见 spawn_teammate）+ 该会话根 Agent 存活 + 存在可用的延续子代理
      * provider。任一不满足时团队成员节点必须回退到普通可延续子代理路径（降级通信走
      * wf_ask_agent）。
      */
     teamAvailable?(sessionId: string): boolean;
     /**
-     * 官方 协作组成员的当前状态（成员运行态的**权威读源**；插件不自建成员状态机）。
+     * 官方 Team 成员的当前状态（成员运行态的**权威读源**；插件不自建成员状态机）。
      *
-     * 返回 null：该节点不是官方成员，或官方 协作组不可用（调用方按降级语义处理）。
+     * 返回 null：该节点不是官方成员，或官方 Team 不可用（调用方按降级语义处理）。
      * 状态取值域与官方 roster 逐字一致：running / inactive / provisioning / failed。
      */
     teamMemberStatusOf?(sessionId: string, nodeId: string): 'running' | 'inactive' | 'provisioning' | 'failed' | null;
@@ -75,12 +75,12 @@ export interface NodeStartInput {
     thinking?: string;
     /** 节点级 ReAct 迭代上限覆盖（缺省继承节点配置）。 */
     iterationLimit?: number;
-    /** Team Prompt（协作组卡片 data.collabPrompt；非组内成员为空字符串）。 */
+    /** Team Prompt（Team 卡片 data.collabPrompt；非组内成员为空字符串）。 */
     collabPrompt?: string;
     /**
-     * 该节点是 协作组成员（画布上 data.groupId 非空）。
+     * 该节点是 Team 成员（画布上 data.groupId 非空）。
      *
-     * 为 true 且官方 协作组可用时，引擎把该节点启动为官方 teammate（官方 spawnTeammate /
+     * 为 true 且官方 Team 可用时，引擎把该节点启动为官方 teammate（官方 spawnTeammate /
      * 复用 sendMessage），成员身份、消息、任务与状态全部由官方机制承担；官方不可用时
      * **静默降级**为普通可延续子代理（与为 false 同路径）。为 false / 缺省时永远走普通子代理。
      */

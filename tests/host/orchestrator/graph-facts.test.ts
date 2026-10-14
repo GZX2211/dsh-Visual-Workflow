@@ -7,7 +7,7 @@
 // 的 id 调用 → WF_DB_BAD_DATA「数据节点不存在或已从画布移除」。
 //
 // 上游产出自动注入（buildNodeContextFacts）：手动 ctx 交接线退役后，下游节点自动接收
-// **直接流程前驱**的最终产出；无产出的阶段节点（pause）被跳过继续向前找；协作组与
+// **直接流程前驱**的最终产出；无产出的阶段节点（pause）被跳过继续向前找；Team 与
 // 上下游解耦（既不作来源也不回溯）；file 节点的 ctx 注入（文本/受管路径）保留；
 // 组装格式固定为「名称（id：节点ID）：产出」，多前驱时据此区分产出归属。
 import { describe, expect, it } from 'vitest'
@@ -147,7 +147,7 @@ describe('上游产出自动注入（buildNodeContextFacts）', () => {
     return { id, kind, position: { x: 0, y: 0 }, data: { label } }
   }
 
-  /** 协作组节点（成员仅登记 id，不参与流程线）。 */
+  /** Team 节点（成员仅登记 id，不参与流程线）。 */
   function group(id: string, label: string, memberIds: string[] = []): GraphNode {
     return { id, kind: 'group', position: { x: 0, y: 0 }, data: { label, collabPrompt: '', memberIds } }
   }
@@ -249,7 +249,7 @@ describe('上游产出自动注入（buildNodeContextFacts）', () => {
     expect(context.upstreamContext).toEqual([{ nodeId: 'a1', source: '需求分析', content: '需求结论' }])
   })
 
-  it('协作组与上下游解耦：组前驱不注入，也不回溯到组的上游', () => {
+  it('Team 与上下游解耦：组前驱不注入，也不回溯到组的上游', () => {
     const flow = baseFlow(
       [role('a1', 'agent', '需求分析'), group('g1', '评审组', ['m1']), role('m1', 'agent', '评审员'), role('a2', 'agent', '方案设计')],
       [flowLine('l1', 'a1', 'g1'), flowLine('l2', 'g1', 'a2')],

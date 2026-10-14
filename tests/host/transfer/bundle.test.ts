@@ -262,7 +262,7 @@ describe('bundle 嵌入资源（roles/files/databases/combos）', () => {
 
     const json = await exportWorkflowBundle(store, 'session-1', 'flow-1')
     const bundle = JSON.parse(json) as { embedded?: { groups?: Array<{ id?: string; name?: string; collabPrompt?: string }> } }
-    expect(bundle.embedded?.groups).toEqual([{ id: 'g1', name: '协作组一', collabPrompt: '成员互相质询' }])
+    expect(bundle.embedded?.groups).toEqual([{ id: 'g1', name: 'Team 一', collabPrompt: '成员互相质询' }])
 
     // 导入：g1 仍随节点内联（工作流节点里可见），但不作为独立模板重建
     const target = await makeStore()

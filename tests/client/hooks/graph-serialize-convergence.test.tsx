@@ -44,7 +44,7 @@ afterEach(() => {
 
 /**
  * 画布夹具：覆盖四种真实漂移面——虚拟节点（data 为空对象）、阶段节点（data 仅 label）、
- * 角色节点（data 携带多字段 + data.kind 历史残留）、协作组节点（memberIds/size），
+ * 角色节点（data 携带多字段 + data.kind 历史残留）、Team 节点（memberIds/size），
  * 以及带条件/不带条件两种连线。
  */
 const canvasNodes: CanvasNode[] = [

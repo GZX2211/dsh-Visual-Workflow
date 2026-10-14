@@ -39,7 +39,7 @@ pnpm typecheck && pnpm test && pnpm build
 |---|---|---|
 | `wf_ask` | ✅ 已改 | 对所有代理开放（删除「仅子代理」「必须活跃运行」护栏，改为身份自动分派）；错误消息英文+码；新增 `WF_NO_ASK_TARGET` |
 | `wf_run_node` / `wf_run_node_wait` / `wf_finish` | ✅ 已改 | 描述精简（删内部实现说明、子代理拒绝声明、泛泛失败清单）；`wf_db_query` 的 139 词偏差收敛回 ≤130 词门禁 |
-| `wf_ask_agent` | ✅ 已改 | 文案精简；**修真实缺陷**：过期 ask 不再永久阻塞 协作组聚合；删除只写不读的 `PendingAsk.audit`；修正「阻塞/三态/resolve」过时声明 |
+| `wf_ask_agent` | ✅ 已改 | 文案精简；**修真实缺陷**：过期 ask 不再永久阻塞 Team 聚合；删除只写不读的 `PendingAsk.audit`；修正「阻塞/三态/resolve」过时声明 |
 | `wf_db_query` | ✅ 已复核并修复 | 四项缺陷清零（双错误码 / `truncated` 三处口径统一 / SQLite 表数上限 / 实例定位判定），见 backlog §4 |
 | `wf_org_catalog` | ✅ 已改 | 删除字段禁令句与「仅父代理可调用」；`ids` 报错统一；**记录 SOP 中文与方法论待重做**（backlog §2）——用户定案暂不动 |
 | `wf_graph_patch` | ✅ 已改 | 首轮删 3 句（契约指针、DAG 建模、坐标禁令）；本轮再删 2 句契约复述 + mark 句只留相位提示，并补写批次级取码规则；description 525 → 243 字符 |
@@ -47,17 +47,17 @@ pnpm typecheck && pnpm test && pnpm build
 | `wf_experience_recall` | ✅ 已改 | 删工具分工句、±20% 内部权重、实现说明、`source` 解释句；`type` 说明提为共享常量；655→522 tokens |
 | `wf_experience_feedback` | ✅ 已改 | 删工具间导航句与重复的 evidence 说明；Side effects 整句改写为一句不可逆警示；1193→1109 tokens |
 
-### 1.1 本轮架构变更（2026-10-11，Lead + Agent 协作组执行）
+### 1.1 本轮架构变更（2026-10-11，Lead + Agent Team 执行）
 
 | 项 | 结果 |
 |---|---|
 | `team` 经验类型退役 | `ExperienceType` 收窄两值；两表 CHECK 收窄 + 幂等迁移（换表重建、混合态收口、列校验）；存量 team 行与 `ep-team-v1` 物理删除 |
 | 父代理护栏永久移除 | 类型由调用方按「此刻执行的内容」自选；子代理护栏保留（只能用 `agent`），且不再要求身处编排运行实例内 |
-| 协作组经验注入链删除 | 「召回一次 → 追加给每个成员」整链 + 三个源文件 + 旧护栏事实链（`markTeamStarted` / `graphPatched` / `GraphPatchLogStore` / `recordGraphPatch` / `graph-patches` 死目录）全部移除 |
+| Team 经验注入链删除 | 「召回一次 → 追加给每个成员」整链 + 三个源文件 + 旧护栏事实链（`markTeamStarted` / `graphPatched` / `GraphPatchLogStore` / `recordGraphPatch` / `graph-patches` 死目录）全部移除 |
 | 经验体系解绑运行时 | 初始化态不再随运行终态清空（`onRunTerminal` 通知链整链删除），改为宿主 `dispose()` 整体清空 |
 | 验证 | `pnpm typecheck` 0 error；`pnpm test` **218 文件 / 2684 用例全绿**；`pnpm build` 已重建 `lib/`；独立复核（多轮对抗性取证）结论「通过、无阻断」 |
 
-### 1.2 本轮缺陷清理（2026-10-11 第二轮，Lead + Agent 协作组执行）
+### 1.2 本轮缺陷清理（2026-10-11 第二轮，Lead + Agent Team 执行）
 
 用户定案范围：**只修已知缺陷；方法论与提示词正文不动**。三条并行流 + Lead 收口。
 
@@ -92,7 +92,7 @@ pnpm typecheck && pnpm test && pnpm build
 
 ### B. 结构类（待用户统一安排，已记录）
 
-1. **`org-sop.ts` 的 SOP**（backlog §2）：`rules.designMethod`（规划方法论、中文）、`graphSemantics` 第四节（选择判据）与 kind 语义描述——属方法论/已过时（含 `wf_ask_agent` 旧说法，官方 协作组通道应为 `send_message`）；`dynamic.userSop` 注入点**从未落地**。
+1. **`org-sop.ts` 的 SOP**（backlog §2）：`rules.designMethod`（规划方法论、中文）、`graphSemantics` 第四节（选择判据）与 kind 语义描述——属方法论/已过时（含 `wf_ask_agent` 旧说法，官方 Team 通道应为 `send_message`）；`dynamic.userSop` 注入点**从未落地**。
 2. **两份生成 Prompt 正文**（`assets/experience-seeds.ts`，1681 / 2369 字符，**中文**）：属方法论（按需注入合规），但与英文常驻面混排 → 统一语言 + 明确方法论/契约分界。（原第三份 `team` 已随类型退役删除。）
 3. **契约正文语言**：`graph-op-contract.ts` 已英文 ✅；`invariants-rules-*` / `validate.ts` 已英文 ✅（本轮完成）。
 
@@ -153,4 +153,4 @@ pnpm typecheck && pnpm test && pnpm build
 | `d1c3e3a` | **架构变更**：`team` 类型退役 + 父代理护栏永久移除 + 经验体系与运行时解绑（含独立复核发现项的修正、`lib/` 重建） |
 | `e5e904a` | **缺陷清理**：experience 域错误消息全量英文化 + `wf_db_query` 四项缺陷 + `wf_graph_patch` 精简与取码规则 + 通则 G1/G3（33 文件；仅按本团队路径暂存，`lib/` 待统一重建） |
 
-> 工作区中 `reports/` 属另一会话的 Agent 协作组审查产物，**不要触碰、不要提交**。
+> 工作区中 `reports/` 属另一会话的 Agent Team 审查产物，**不要触碰、不要提交**。

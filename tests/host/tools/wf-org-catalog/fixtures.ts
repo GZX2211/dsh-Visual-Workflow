@@ -66,7 +66,7 @@ export function roleAssetDetailFixture(overrides: Partial<RoleAssetDetail> = {})
   }
 }
 
-/** 覆盖全部节点种类与数据源字段的工作流资产详情（含内联协作组、虚拟节点、服务器库）。 */
+/** 覆盖全部节点种类与数据源字段的工作流资产详情（含内联 Team、虚拟节点、服务器库）。 */
 export function workflowAssetDetailFixture(overrides: Partial<WorkflowAssetDetail> = {}): WorkflowAssetDetail {
   const nodes: GraphNode[] = [
     { id: 's', kind: 'start', position: { x: 0, y: 0 }, data: { label: '启动' } },
@@ -186,13 +186,13 @@ export function instanceFlowFixture(overrides: Partial<WorkflowDocument> = {}): 
       id: 'g1',
       kind: 'group',
       position: { x: 0, y: 0 },
-      data: { label: '流程内协作组', collabPrompt: '组内互相评审', memberIds: ['a1'] },
+      data: { label: '流程内 Team', collabPrompt: '组内互相评审', memberIds: ['a1'] },
     },
     {
       id: 'g2',
       kind: 'group',
       position: { x: 0, y: 0 },
-      data: { label: '孤立协作组', collabPrompt: '未接线', memberIds: [] },
+      data: { label: '孤立 Team', collabPrompt: '未接线', memberIds: [] },
     },
     { id: 'e', kind: 'end', position: { x: 0, y: 0 }, data: { label: '结束' } },
   ]

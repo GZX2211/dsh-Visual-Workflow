@@ -1,7 +1,7 @@
 // tests/host/graph/model.test.ts
 //
 // 图模型运行时测试（原 tests/host/graph-model.test.ts 拆分）：
-//   - 连接点兼容矩阵与拓扑查询助手（入口解析、出/入边、流程线判定、虚拟节点、协作组成员）。
+//   - 连接点兼容矩阵与拓扑查询助手（入口解析、出/入边、流程线判定、虚拟节点、Team 成员）。
 // 校验与归一化（validate.ts）见 ./validate.test.ts；元参数见 ./org-meta.test.ts。
 // 断言依据：架构文档 §4.2 + 需求文档 §4.2/§4.3/§4.2.5。
 
@@ -76,7 +76,7 @@ describe('拓扑助手（连线查询）', () => {
 // 自动上下文来源枚举（autoContextSourceIds）
 // ---------------------------------------------------------------------------
 // 语义：下游节点自动接收**直接流程前驱**的最终产出；无产出的阶段节点（pause）被跳过；
-// 协作组与上下游解耦（不作来源也不回溯）；虚拟节点流程线归属主节点。
+// Team 与上下游解耦（不作来源也不回溯）；虚拟节点流程线归属主节点。
 
 describe('自动上下文来源枚举（autoContextSourceIds）', () => {
   it('无流程入边：返回空（含组内成员这类没有流程线的节点）', () => {
@@ -122,7 +122,7 @@ describe('自动上下文来源枚举（autoContextSourceIds）', () => {
     expect(autoContextSourceIds(flow, b.id)).toEqual([a.id])
   })
 
-  it('协作组解耦：协作组卡片既不作来源也不回溯到组的上游', () => {
+  it('Team 解耦：Team 卡片既不作来源也不回溯到组的上游', () => {
     const a = newRoleNode('agent', 'a')
     const g = newGroupNode('g')
     const b = newRoleNode('agent', 'b')

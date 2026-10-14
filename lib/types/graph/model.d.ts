@@ -14,7 +14,7 @@ export interface NodeHandleDef {
  *   - 启动/输入（start）：无左入，右出 流程出 + 上下文出（上下文出仅模式二输入节点，§4.2.5.1）
  *   - 结束/输出（end）：左入 流程入（+ 上下文入仅模式二输出节点），无右出（§4.2.5.1）
  *   - 暂停（pause）：左入 流程入，右出 流程出（流程门语义，仅模式一，§4.2.5.1）
- *   - Team（group）：左入 流程入，右出 流程出；协作组卡片不提供 ctx/db 连接点（§4.2.5.2）
+ *   - Team（group）：左入 流程入，右出 流程出；Team 卡片不提供 ctx/db 连接点（§4.2.5.2）
  *   - 虚拟节点（proxy）：与主节点（角色）一致——运行时解析为主节点共享执行实例（§4.2.3.2 规则 7）
  *
  * 模式差异（mode1/mode2）不在此矩阵体现，由 validate.ts 按 flow.mode 做额外约束
@@ -116,7 +116,7 @@ export declare function newStageNode(kind: 'start' | 'end' | 'pause', mode: Work
 }): StageNode;
 /** 阶段节点硬编码名称（§4.2.5.1 卡片设计表：启动/输入、结束/输出、暂停）。 */
 export declare function stageLabel(kind: 'start' | 'end' | 'pause', mode: WorkflowMode): string;
-/** 新建 协作组节点（§4.2.5.2）。 */
+/** 新建 Team 节点（§4.2.5.2）。 */
 export declare function newGroupNode(label: string, position?: {
     x: number;
     y: number;
@@ -164,7 +164,7 @@ export declare function dbInEdges(flow: Partial<WorkflowDocument>, nodeId: strin
  * 语义（用户裁决 2026-10）：节点交接不再依赖手动 ctx 连线，下游节点自动接收
  * **直接流程前驱**的最终产出。三条边界：
  *   - 无产出的阶段节点（pause）不携带交接内容，跳过它继续向前找；
- *   - 协作组与上下游解耦（输入与产出由父代理协调），遇到它既不取来源也不回溯，
+ *   - Team 与上下游解耦（输入与产出由父代理协调），遇到它既不取来源也不回溯，
  *     否则会把组的上游产出越权塞给组的下游；
  *   - 虚拟节点的流程线归属其主节点（与 nodeParticipatesInFlow 同源），proxy 前驱
  *     解析为它引用的主节点——快照按主节点记账。
@@ -181,7 +181,7 @@ export declare function nodeById(flow: Partial<WorkflowDocument>, nodeId: string
 export declare function lineById(flow: Partial<WorkflowDocument>, lineId: string): Line | undefined;
 /** 某主节点的全部虚拟节点（§4.2.3.2 规则 4：复制按钮生成）。 */
 export declare function proxiesOf(flow: Partial<WorkflowDocument>, nodeId: string): GraphNode[];
-/** 某角色节点所属协作组 id（不在组内返回 null）。 */
+/** 某角色节点所属 Team id（不在组内返回 null）。 */
 export declare function memberGroupId(flow: Partial<WorkflowDocument>, nodeId: string): string | null;
-/** 判断角色节点是否为 协作组成员（§4.2.5.2 规则 4：组内成员仅 ctx/db 连接点）。 */
+/** 判断角色节点是否为 Team 成员（§4.2.5.2 规则 4：组内成员仅 ctx/db 连接点）。 */
 export declare function isGroupMember(flow: Partial<WorkflowDocument>, nodeId: string): boolean;

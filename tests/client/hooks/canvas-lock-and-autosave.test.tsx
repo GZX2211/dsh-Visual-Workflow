@@ -6,7 +6,7 @@
 //
 // 新机制单测（用户裁决 2026-02）：
 //   ① 运行中保存实例 → 二次确认（保存会改变父代理后续编排），确认后才落库；
-//   ② 纯 XY 拖动 / 协作组卡片缩放 → 防抖自动保存（不弹确认、静默、草稿态跳过）；
+//   ② 纯 XY 拖动 / Team 卡片缩放 → 防抖自动保存（不弹确认、静默、草稿态跳过）；
 //   ③ 运行中画布锁定 → 已完成节点/其连线不可删除、执行中节点左入口不可改；
 //      清空画布不再二次确认（运行中由工具栏禁用）。
 //
@@ -344,7 +344,7 @@ describe('运行中保存实例的二次确认（需求 b）', () => {
 // ② 纯几何拖动：防抖自动保存
 // ---------------------------------------------------------------------------
 
-describe('纯 XY 拖动 / 协作组卡片缩放：防抖自动保存（需求 2 补充裁决）', () => {
+describe('纯 XY 拖动 / Team 卡片缩放：防抖自动保存（需求 2 补充裁决）', () => {
   it('节点拖动 → NODE_MOVED + 防抖后静默保存一次', async () => {
     vi.useFakeTimers()
     const { state } = runningState()
@@ -386,7 +386,7 @@ describe('纯 XY 拖动 / 协作组卡片缩放：防抖自动保存（需求 2 
 
   })
 
-  it('协作组卡片缩放 → 同样防抖自动保存', async () => {
+  it('Team 卡片缩放 → 同样防抖自动保存', async () => {
     vi.useFakeTimers()
     const { state } = runningState()
     const saveCanvas = vi.fn(async () => null)
@@ -522,7 +522,7 @@ describe('运行中画布锁定（需求 c）', () => {
     expect(replaced?.nodes).toEqual([])
   })
 
-  it('锁定节点拖入协作组：被忽略（入组会断开其流程连线，等于改写已跑完流程）', async () => {
+  it('锁定节点拖入 Team：被忽略（入组会断开其流程连线，等于改写已跑完流程）', async () => {
     const { state } = runningState()
     const groupNode = { id: 'g-1', kind: 'group' as const, position: { x: 0, y: 0 }, data: { label: '组', collabPrompt: '', memberIds: [], size: { w: 300, h: 220 } } }
     const withGroup: StudioState = { ...state, canvas: { nodes: [...state.canvas.nodes, groupNode], edges: state.canvas.edges } }
@@ -536,7 +536,7 @@ describe('运行中画布锁定（需求 c）', () => {
     expect(dispatch.mock.calls.some(([action]) => (action as { type: string }).type === 'GRAPH_REPLACED')).toBe(true)
   })
 
-  it('锁定成员移出协作组：被忽略', async () => {
+  it('锁定成员移出 Team：被忽略', async () => {
     const { state } = runningState()
     const member = { ...state.canvas.nodes[0]!, data: { ...state.canvas.nodes[0]!.data, groupId: 'g-1' } }
     const groupNode = { id: 'g-1', kind: 'group' as const, position: { x: 0, y: 0 }, data: { label: '组', collabPrompt: '', memberIds: ['n-done'], size: { w: 300, h: 220 } } }

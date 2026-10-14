@@ -17,7 +17,7 @@
 * 可持久化的 Workflow 结构
 * 可视化的 DAG 编排
 * Parent Agent 驱动的 Workflow 执行
-* Child Agent / Agent 协作组执行单元
+* Child Agent / Agent Team 执行单元
 * Workflow 状态持久化与断点续跑
 * 运行中的 Workflow 结构调整
 * API Service 模式
@@ -179,7 +179,7 @@ Child Agent 可以发现：
 经验（Experience）是独立存在的长期资产，其主要依附载体是插件工作台的 GUI。
 
 * 经验体系**不得**与工作流的运行时或运行状态强绑定；
-* **不得**存在以运行事实（是否正在运行、是否改过图、是否启动过协作组、是否身处某个运行实例）为前提的护栏去阻止经验工具的调用；
+* **不得**存在以运行事实（是否正在运行、是否改过图、是否启动过 Team、是否身处某个运行实例）为前提的护栏去阻止经验工具的调用；
 * 运行事实只允许用于**溯源**（如来源 run id），且缺失时按「无来源」表达，而不是拒绝调用；
 * 类型的归属由调用方按「此刻正在执行的内容」自选（正在执行具体任务 → `agent`；父代理正在执行编排 → `orchestrator`），引擎不反推调用方身份；
 * 唯一保留的主体边界是「子代理恒为 `agent`」；
@@ -270,7 +270,7 @@ proxy
 
 ---
 
-# 4. Agent、协作组与 Workflow
+# 4. Agent、Team 与 Workflow
 
 ## 4.1 Agent
 
@@ -291,9 +291,9 @@ Agent 负责完成局部任务，而不负责整个 Workflow 的结构治理。
 
 ## 4.2 Team（group）
 
-Agent 协作组是多个 Agent 构成的动态协作单元。
+Agent Team 是多个 Agent 构成的动态协作单元。
 
-协作组内部拥有：
+Team 内部拥有：
 
 * 成员
 * 消息通信
@@ -301,7 +301,7 @@ Agent 协作组是多个 Agent 构成的动态协作单元。
 * 协作关系
 * 成员生命周期
 
-协作组内部的动态任务结构属于 协作组的协作状态，而不是 Workflow 的长期结构。
+Team 内部的动态任务结构属于 Team 的协作状态，而不是 Workflow 的长期结构。
 
 因此：
 
@@ -315,53 +315,53 @@ Workflow
           └── Agent
 ```
 
-Workflow 可以把 协作组当作一个执行单元。
+Workflow 可以把 Team 当作一个执行单元。
 
-协作组内部如何协调由 dsh 的协作组 Runtime 负责。
+Team 内部如何协调由 dsh 的 Team Runtime 负责。
 
-### 4.2.1 实现契约（官方 Agent 协作组接入）
+### 4.2.1 实现契约（官方 Agent Team 接入）
 
-协作组节点直接使用官方 Agent Team（`ctx.agentTeams`）作为执行与协作机制，插件只决定成员。
+Team 节点直接使用官方 Agent Team（`ctx.agentTeams`）作为执行与协作机制，插件只决定成员。
 
 职责划分：
 
 ```text
-插件（决定成员）                          官方协作组 Runtime（决定执行过程）
+插件（决定成员）                          官方 Team Runtime（决定执行过程）
 ├── 成员身份映射（节点 id → 官方成员名）       ├── roster 与成员生命周期
 ├── 成员角色名 / System Prompt            ├── 持久邮箱（send_message）
 ├── 成员模型（provider/model/reasoning）   ├── 共享任务板（team_task_*）
 └── 成员工具组合（presetId 解析）          └── wait_agent / interrupt_agent / 浏览器 roster
 ```
 
-启动路径（协作组卡片不是执行主体，成员节点才是）：
+启动路径（Team 卡片不是执行主体，成员节点才是）：
 
 1. 父代理**逐个**对成员节点调用 `wf_run_node(<成员节点 id>)`（仅模式一）；
-   对 协作组卡片本身调用会被拒绝（`WF_NODE_KIND`，错误消息给出成员清单）；
+   对 Team 卡片本身调用会被拒绝（`WF_NODE_KIND`，错误消息给出成员清单）；
 2. 插件对成员节点调用官方 `spawnTeammate`（Lead = 会话根 Agent），首条消息 =
    官方身份前缀（逐字复刻官方 `spawn_teammate` 模板）+ 插件组装的成员任务块；
 3. 成员级组成在**子代理创建窗口内**装配（角色 Prompt 段 / 模型选择 / 工具白名单），
    因为官方创建请求不接受成员级模型与工具白名单；
-4. 成员自带官方九个 协作组工具与 `team:policy`（官方按成员作用域安装），协作与任务板
+4. 成员自带官方九个 Team 工具与 `team:policy`（官方按成员作用域安装），协作与任务板
    全部走官方机制；成员运行态以官方 roster（`listMembers`）为权威读源，成员产出仍经
-   `subagent/end` 事件记录（下游自动注入与断点续跑需要）；协作组卡片不写运行状态。
+   `subagent/end` 事件记录（下游自动注入与断点续跑需要）；Team 卡片不写运行状态。
 
 官方硬约束（决定了插件的成员复用策略）：
 
-* 成员名必须为小写短横线形式、长度 ≤ 64、不得为 `lead`；成员名在同一会话的 协作组内**永久不可复用**；
+* 成员名必须为小写短横线形式、长度 ≤ 64、不得为 `lead`；成员名在同一会话的 Team 内**永久不可复用**；
 * 同名成员已存在 → 复用（`send_message` 派发本轮任务），不再创建；
 * 同名成员创建失败（`failed`）→ 既不能复用也不能重建，报可行动错误（新建会话或改节点 id）；
 * 成员组成在创建时确定，签名变化无法重建，只告警；
-* roster 是**会话级**的（`TeamId` = 根会话 id），所有 协作组共用一张成员表，受官方 `maxMembers`
+* roster 是**会话级**的（`TeamId` = 根会话 id），所有 Team 共用一张成员表，受官方 `maxMembers`
   上限（会话级累计，含创建失败的成员）约束；插件以 `teamMemberLimit` 与部署层同值预检；
-* 判定「官方 协作组可用」除服务与 provider 外，还要求官方**工具/策略包**确实下发给成员
+* 判定「官方 Team 可用」除服务与 provider 外，还要求官方**工具/策略包**确实下发给成员
   （父代理 scope 可见 `spawn_teammate`）——只挂领域服务时成员拿不到官方九工具。
 
-降级路径：官方 协作组能力不可用（服务未挂载 / 官方工具包未挂载 / 根 Agent 不存在 /
+降级路径：官方 Team 能力不可用（服务未挂载 / 官方工具包未挂载 / 根 Agent 不存在 /
 无可用子代理 provider）时，成员节点降级为普通可延续子代理（同一 `wf_run_node` 入口、
 同一登记与释放语义），成员间用插件自建协作工具（`wf_ask_agent`）通信；协作块
 （成员清单 + 通信指引）只在降级通道注入。
 
-模式二完全不支持协作组：协作组卡片与 协作组成员节点在 `wf_run_node_wait` 通道下均被拒绝
+模式二完全不支持 Team：Team 卡片与 Team 成员节点在 `wf_run_node_wait` 通道下均被拒绝
 （阻塞等待语义与团队异步协作不匹配）。
 
 ---
@@ -384,7 +384,7 @@ Workflow
 Meta-Orchestration
 ```
 
-> **协作组管理协作状态；Workflow 管理持久化执行结构（组织状态）。**
+> **Team 管理协作状态；Workflow 管理持久化执行结构（组织状态）。**
 
 ---
 
@@ -400,7 +400,7 @@ Parent 采用事件驱动的等待模型。
 * Child 失败
 * Child timeout
 * Child message
-* 协作组状态变化
+* Team 状态变化
 * Workflow 状态变化
 * 用户输入
 * 组织结构变化
@@ -706,7 +706,7 @@ checkGraphInvariants
 
 * **产出自动注入**：下游节点自动接收**直接流程前驱**的最终产出，不需要手动连线。
   组装格式为「上游节点名称（id：节点ID）：产出内容」，多前驱按流程线声明顺序分别列出；
-  无产出的阶段节点（pause）被跳过并继续向前找；协作组与上下游解耦（既不注入也不回溯）。
+  无产出的阶段节点（pause）被跳过并继续向前找；Team 与上下游解耦（既不注入也不回溯）。
 * **手动 ctx 交接退役**：角色节点（agent/parent/proxy）的 `ctx-out` 保留为连接点但不再生效
   （技术债标记）；`ctx` 通道现仅剩「file 数据源 → 角色」的文本直通与受管路径索引注入。
 * **节点契约**：`inputSchema` / `outputSchema` 即「输入契约 / 输出契约」，柔性文本、不做结构校验；
@@ -719,8 +719,8 @@ index.ts             唯一公共入口（barrel）
 runtime.ts           OrchestratorRuntime 收口类（继承链最终类）
 runtime-base.ts      字段/查询/上下文自动接续/清理/父代理配置注入
 runtime-launch.ts    startRun / resumeRun
-runtime-execute.ts   wf_run_node / wf_finish（协作组卡片拒绝、成员节点分流）
-runtime-comm.ts      wf_ask_agent 两态非阻塞协议（ask/reply；协作组降级通道）
+runtime-execute.ts   wf_run_node / wf_finish（Team 卡片拒绝、成员节点分流）
+runtime-comm.ts      wf_ask_agent 两态非阻塞协议（ask/reply；Team 降级通道）
 runtime-observe.ts   subagent/end 回写（含成员待命态）
 runtime-lifecycle.ts 终止 / 停止 / 挂起
 seams.ts             依赖缝、常量、配置与身份类型
@@ -751,14 +751,14 @@ watchdog.ts          空闲看护、扫描与宿主重启对账
 * Reasoning
 * ReAct limits
 * Child Context
-* 协作组启动（一个 协作组节点 ⇄ 一批官方 teammate）
+* Team 启动（一个 Team 节点 ⇄ 一批官方 teammate）
 
 Agent Runtime 建立在 Harness 官方 Agent / Subagent 能力之上。
 
-协作组路径的关键文件：
+Team 路径的关键文件：
 
 ```text
-member-launcher.ts      协作组成员启动器（成员参数翻译 / 复用判定 / 官方创建与派发）
+member-launcher.ts      Team 成员启动器（成员参数翻译 / 复用判定 / 官方创建与派发）
 child-tool-filter.ts     子代理工具白名单创建窗口装配（官方创建请求不接受时的替代通道）
 model-selection.ts       模型选择装配（创建窗口夹持 + 按 childId 重发布重装）
 ```
@@ -767,9 +767,9 @@ model-selection.ts       模型选择装配（创建窗口夹持 + 按 childId �
 
 ## 7.5.1 team
 
-负责把官方 Agent 协作组能力适配为插件可消费的最小面：
+负责把官方 Agent Team 能力适配为插件可消费的最小面：
 
-* 解析并守卫官方 协作组服务（`ctx.agentTeams`），能力缺失返回 null 由调用方回退；
+* 解析并守卫官方 Team 服务（`ctx.agentTeams`），能力缺失返回 null 由调用方回退；
 * 把画布节点 id 确定性地映射为官方 teammate 名（小写短横线、长度与保留名校验）；
 * 提供成员查找等纯派生函数。
 

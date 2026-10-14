@@ -40,7 +40,7 @@
         embeddingModelDir: null
         # 外部 OpenAI 兼容 /embeddings 端点；null 表示优先本地嵌入（不可用才降级 BM25）。
         embeddingEndpoint: null
-        # 协作组成员上限（官方 agent-team.maxMembers 的镜像）：会话级累计名额，含创建失败的成员。
+        # Team 成员上限（官方 agent-team.maxMembers 的镜像）：会话级累计名额，含创建失败的成员。
         # 画布入组交互与启动成员前的预检都以此为准，必须与部署层 agent-team.maxMembers 同值
         # （官方默认 16、官方 bundle 层压到 8）。
         teamMemberLimit: 8

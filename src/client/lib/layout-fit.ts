@@ -2,7 +2,7 @@
 //
 // 自动布局判定与重叠检测：
 //   - needsAutoLayout：节点缺坐标或坐标为哨兵 {0,0} → 需要自动布局一次；
-//   - layoutBoxesOf：**实际渲染盒子**清单——协作组卡片 + 独立节点（组内成员不独立渲染、
+//   - layoutBoxesOf：**实际渲染盒子**清单——Team 卡片 + 独立节点（组内成员不独立渲染、
 //     不参与重叠判定，见 layout.ts 头部说明；虚拟节点已独立占位，仍参与判定）；
 //   - findLayoutOverlaps：盒子两两相交检测（非阻断提示「建议整理布局」）；
 //   - boxesOverlap / applyLayout：几何工具与「把坐标写回节点」的纯函数。
@@ -55,7 +55,7 @@ export function needsAutoLayout(nodes: LayoutBoxNode[] | null | undefined): bool
   return (nodes ?? []).some((node) => isSentinelPosition(node?.position))
 }
 
-/** 协作组成员的 id 集合（以组的 memberIds 为准；用于排除重复渲染节点）。 */
+/** Team 成员的 id 集合（以组的 memberIds 为准；用于排除重复渲染节点）。 */
 export function groupMemberIdsOf(nodes: LayoutBoxNode[] | null | undefined): Set<string> {
   const members = new Set<string>()
   for (const node of nodes ?? []) {
@@ -68,8 +68,8 @@ export function groupMemberIdsOf(nodes: LayoutBoxNode[] | null | undefined): Set
 }
 
 /**
- * 实际渲染盒子清单：协作组卡片 + 独立节点（组内成员不独立渲染；虚拟节点独立占位，参与判定）。
- * 为什么排除组内成员：GraphCanvas 只渲染 协作组卡片与独立节点（组内成员以迷你卡渲染在卡片内），
+ * 实际渲染盒子清单：Team 卡片 + 独立节点（组内成员不独立渲染；虚拟节点独立占位，参与判定）。
+ * 为什么排除组内成员：GraphCanvas 只渲染 Team 卡片与独立节点（组内成员以迷你卡渲染在卡片内），
  * 对它们做重叠判定会产生「永远重叠」的假告警。
  */
 export function layoutBoxesOf(
@@ -110,7 +110,7 @@ export function findLayoutOverlaps(boxes: LayoutBox[] | null | undefined): Array
 }
 
 /**
- * 布局中被折叠（不占位置槽）的节点 id 集合：仅 协作组成员。
+ * 布局中被折叠（不占位置槽）的节点 id 集合：仅 Team 成员。
  * 与 layout.ts 的折叠规则同源（虚拟节点独立占位，不再折叠到主节点）；供重叠判定与 UI 使用。
  */
 export function collapsedIdsOf(inputs: Array<{ id: string; kind: string; sourceId?: string; memberIds?: string[] }>): Set<string> {

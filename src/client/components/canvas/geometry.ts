@@ -54,7 +54,7 @@ export function memberGroupIndexOf(byId: Map<string, CanvasNode>): MemberGroupIn
   return index
 }
 
-/** 组内成员连线锚点（协作组卡片左/右边缘 + 成员行中心）。 */
+/** 组内成员连线锚点（Team 卡片左/右边缘 + 成员行中心）。 */
 export function memberAnchor(group: CanvasNode, memberId: string, side: 'left' | 'right'): { x: number; y: number } | null {
   const memberIds = (group.data.memberIds as string[] | undefined) ?? []
   const index = memberIds.indexOf(memberId)
@@ -72,7 +72,7 @@ export function swappedOf(node: CanvasNode | null | undefined): boolean {
   return (node?.data as { swapPorts?: unknown } | undefined)?.swapPorts === true
 }
 
-/** 连线贝塞尔几何（源端口 → 目标端口；协作组卡片流程接点居中，组内成员锚到成员行）。
+/** 连线贝塞尔几何（源端口 → 目标端口；Team 卡片流程接点居中，组内成员锚到成员行）。
  *  交换过连接点的节点：源出点改在左边缘（start.x=左侧），目标入点改在右边缘（end.x=右侧）。
  *  控制点方向跟随端口所在边缘（右缘向外 +x、左缘向外 -x），连线从正确一侧进出，不会
  *  穿入卡片体被遮挡（用户批注：连线方向应当根据连接点确定，而非默认朝右）。 */
@@ -98,7 +98,7 @@ export function edgeGeometry(edge: CanvasEdge, byId: Map<string, CanvasNode>, me
     y: target.position.y + targetSize.h * (target.kind === 'group' ? 0.5 : handleY(edge.targetHandle ?? 'flow-in')),
   }
   // 端口朝向（端口所在边缘的外法向）：右缘 +1、左缘 -1。组内成员沿用固定侧
-  // （成员出点=协作组卡片右缘、入点=协作组卡片左缘，见 memberAnchor）。
+  // （成员出点=Team 卡片右缘、入点=Team 卡片左缘，见 memberAnchor）。
   // 用户批注：连线方向应当根据连接点（左缘/右缘）确定，而非默认朝右。
   const startDir = sourceAnchor ? 1 : (sourceSwapped ? -1 : 1)
   const endDir = targetAnchor ? -1 : (targetSwapped ? 1 : -1)

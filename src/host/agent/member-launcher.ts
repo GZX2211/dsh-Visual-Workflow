@@ -1,10 +1,10 @@
 // src/host/agent/member-launcher.ts
 //
-// 协作组成员启动器：把一个画布成员节点启动为官方 Agent 协作组的 teammate。
+// Team 成员启动器：把一个画布成员节点启动为官方 Agent Team 的 teammate。
 //
 // 职责边界（与 runner.ts 的普通节点路径对照）：
 //   - 普通节点路径：一个角色节点 ⇄ 一个可延续子代理（官方 startContinuable）；
-//   - 成员路径：一个成员节点 ⇄ 一个官方 teammate（官方 协作组服务 spawnTeammate），
+//   - 成员路径：一个成员节点 ⇄ 一个官方 teammate（官方 Team 服务 spawnTeammate），
 //     成员身份、成员间消息、共享任务板、等待与中断全部由官方机制承担——本模块**不建第二套**。
 //
 // 插件只做官方工具不做、且只有插件能做的两件事：
@@ -69,7 +69,7 @@ export interface TeamMemberLauncherDeps {
   agents: () => AgentsServiceLike | null
   /** subagents 服务惰性解析（provider 探测）。 */
   subagents: () => SubagentsServiceLike | null
-  /** 官方 协作组服务惰性解析；返回 null 即不可用，调用方降级为普通子代理路径。 */
+  /** 官方 Team 服务惰性解析；返回 null 即不可用，调用方降级为普通子代理路径。 */
   teams: () => AgentTeamsServiceLike | null
   toolsView: ToolsView
   /** 全局关闭工具快照（取值前由宿主保证已跨进程刷新）。 */
@@ -79,7 +79,7 @@ export interface TeamMemberLauncherDeps {
   toolFilter: ChildToolFilterSetup
   promptSetup: ChildPromptSetup
   /**
-   * 官方 协作组会话级成员名额上限（部署层 agent-team.maxMembers 的镜像）。
+   * 官方 Team 会话级成员名额上限（部署层 agent-team.maxMembers 的镜像）。
    * 官方语义是「累计创建过的 teammate 数，含创建失败的」；插件在新建成员前预检，
    * 把运行期类型化失败提前成可行动错误。
    */
@@ -109,7 +109,7 @@ export interface TeamMemberLauncherDeps {
 }
 
 /**
- * 协作组成员启动器（官方 Agent 协作组路径；官方不可用时由调用方降级为普通子代理）。
+ * Team 成员启动器（官方 Agent Team 路径；官方不可用时由调用方降级为普通子代理）。
  *
  * 无状态持有者之外的唯一内存表是成员组成签名（官方成员在会话内不可重建，签名变化只能告警）。
  */
@@ -124,12 +124,12 @@ export class TeamMemberLauncher {
   constructor(private readonly deps: TeamMemberLauncherDeps) {}
 
   /**
-   * 官方 协作组路径是否可用（成员启动路径选择与协作块文案的唯一判据）。
+   * 官方 Team 路径是否可用（成员启动路径选择与协作块文案的唯一判据）。
    *
-   * 条件：官方 协作组服务可用 + **官方 协作组工具面确实下发给成员** + 会话根 Agent 存活
+   * 条件：官方 Team 服务可用 + **官方 Team 工具面确实下发给成员** + 会话根 Agent 存活
    * + 存在可用的延续子代理 provider。
    *
-   * 为什么必须校验工具面：官方 协作组由两个独立包组成——领域服务（agent-team）与工具/策略包
+   * 为什么必须校验工具面：官方 Team 由两个独立包组成——领域服务（agent-team）与工具/策略包
    * （tool-agent-team）。只挂载领域服务时成员会被创建为 teammate，却拿不到九个官方工具与
    * team:policy，此时按 official 通道注入「用 send_message 通信」的文案必然失效。官方工具
    * 注册在每个成员自身 scope，故只需看父代理（同为成员）scope 是否可见该工具。
@@ -145,7 +145,7 @@ export class TeamMemberLauncher {
   /**
    * 启动（或复用）一个成员节点的官方 teammate 并派发本轮任务。
    *
-   * @returns 成员启动结果；官方 协作组服务或根 Agent 不可用时返回 null（调用方降级为普通子代理）。
+   * @returns 成员启动结果；官方 Team 服务或根 Agent 不可用时返回 null（调用方降级为普通子代理）。
    * @throws 成员名已被失败成员占用、成员仍在创建中、名额耗尽、无可用 provider、官方未返回成员标识等可行动错误。
    */
   async start(input: NodeStartInput): Promise<TeamMemberStartResult | null> {
@@ -156,12 +156,12 @@ export class TeamMemberLauncher {
     const subagents = this.deps.subagents()
     if (!subagents) return null
     const provider = this.deps.detectProvider(subagents)
-    if (!provider) throw new Error('没有可用的子代理 provider（协作组成员无法创建）')
+    if (!provider) throw new Error('没有可用的子代理 provider（Team 成员无法创建）')
 
     const node = input.node as RoleNode
     const name = teammateNameOf(node.id)
     if (!isTeammateNameValid(name)) {
-      throw new Error(`协作组成员名不合法：${name}（来自节点 ${node.id}）`)
+      throw new Error(`Team 成员名不合法：${name}（来自节点 ${node.id}）`)
     }
     const disabledTools = await this.deps.toolSwitches?.()
     // 成员清单只读一次并**按本次新建结果就地补充**：同一批调用里重复名字不得重复创建
@@ -186,12 +186,12 @@ export class TeamMemberLauncher {
       if (existing.status === 'failed') {
         // 官方成员名不可复用、失败成员不可寻址：无法复用也无法重建，只能换会话或改名
         throw new Error(
-          `协作组成员「${name}」此前创建失败且名字已被占用（官方成员名在同一会话内不可复用）。` +
+          `Team 成员「${name}」此前创建失败且名字已被占用（官方成员名在同一会话内不可复用）。` +
           '请新建会话后重新运行，或修改该成员节点的 id 以生成新名字。',
         )
       }
       if (existing.status === 'provisioning') {
-        throw new Error(`协作组成员「${name}」仍在创建中，请稍后重试`)
+        throw new Error(`Team 成员「${name}」仍在创建中，请稍后重试`)
       }
       const childId = String(existing.id ?? '')
       await teams.sendMessage(root, { target: name, content: input.blocks, signal: input.signal })
@@ -205,7 +205,7 @@ export class TeamMemberLauncher {
     const created = roster.filter((member) => String(member?.role ?? '') === 'teammate').length
     if (created >= this.deps.memberLimit) {
       throw new Error(
-        `官方 协作组成员名额已用尽（已创建 ${created} / 上限 ${this.deps.memberLimit}）。` +
+        `官方 Team 成员名额已用尽（已创建 ${created} / 上限 ${this.deps.memberLimit}）。` +
         '该上限按会话累计（含创建失败的成员），且官方成员不可删除：请提高部署层 agent-team.maxMembers，' +
         '或新建会话后重新运行。',
       )
@@ -226,7 +226,7 @@ export class TeamMemberLauncher {
             signal: input.signal,
           }))))
     const childId = String(spawned?.member?.id ?? '')
-    if (!childId) throw new Error(`官方 协作组未返回成员标识：${name}`)
+    if (!childId) throw new Error(`官方 Team 未返回成员标识：${name}`)
     this.applyMemberComposition(childId, selection, tools, input.iterationLimit)
     this.rememberSignature(name, signature)
     return { childId, target: name, created: true }
@@ -241,7 +241,7 @@ export class TeamMemberLauncher {
 
   /**
    * 某成员节点在官方 roster 中的当前状态（成员运行态的**唯一权威读源**）。
-   * 返回 null：官方 协作组不可用，或该节点尚无对应成员（未创建 / 已降级为普通子代理）。
+   * 返回 null：官方 Team 不可用，或该节点尚无对应成员（未创建 / 已降级为普通子代理）。
    */
   memberStatusOf(sessionId: string, nodeId: string): TeamMemberViewLike['status'] | null {
     const teams = this.deps.teams()
@@ -288,7 +288,7 @@ export class TeamMemberLauncher {
     if (previous === signature) return
     this.memberSignatures.set(name, signature)
     this.deps.logger?.warn(
-      `[visual-workflow] 协作组成员「${name}」的组成（角色提示词/模型/工具/协作说明）已变化，` +
+      `[visual-workflow] Team 成员「${name}」的组成（角色提示词/模型/工具/协作说明）已变化，` +
       '但官方成员在会话内不可重建；本次仍沿用既有组成，新建会话后生效。',
     )
   }

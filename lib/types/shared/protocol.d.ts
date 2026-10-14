@@ -200,7 +200,7 @@ export declare const TEAM_TASK_LIST = "team_task_list";
 export declare const TEAM_TASK_GET = "team_task_get";
 /** 共享任务板：按 revision 更新任务。 */
 export declare const TEAM_TASK_UPDATE = "team_task_update";
-/** 官方 协作组工具全量清单（9 个；组合管理页展示与全局开关的目标集）。 */
+/** 官方 Team 工具全量清单（9 个；组合管理页展示与全局开关的目标集）。 */
 export declare const TEAM_TOOL_NAMES: readonly ["spawn_teammate", "send_message", "list_agents", "wait_agent", "interrupt_agent", "team_task_create", "team_task_list", "team_task_get", "team_task_update"];
 /**
  * 首次安装（tool-switches.json 尚不存在）时写入磁盘的默认关闭清单。
@@ -228,8 +228,8 @@ export declare const RESERVED_TRANSPORT_TOOL = "run_code";
  */
 export declare const RUN_STATUSES: readonly ["running", "paused", "completed", "failed", "stopped", "interrupted"];
 /**
- * 节点状态枚举（NODE_STATUSES）：与 run-types.js 的 NodeRunStatus 逐字一致（七态，含协作组「待命」armed——
- * 非终态：回合结束但仍在 协作组内可被唤醒，父代理 wf_finish 后终态化）。
+ * 节点状态枚举（NODE_STATUSES）：与 run-types.js 的 NodeRunStatus 逐字一致（七态，含 Team「待命」armed——
+ * 非终态：回合结束但仍在 Team 内可被唤醒，父代理 wf_finish 后终态化）。
  * react-capped 为 ReAct 软截停（非失败，正常产出）。
  * 与该类型的双向穷尽由测试的编译期断言锁定（禁止固定长度断言）。
  */
@@ -238,7 +238,7 @@ export declare const NODE_STATUSES: readonly ["pending", "running", "armed", "ok
 export declare const MODES: readonly ["mode1", "mode2"];
 /**
  * 可执行单元节点种类（元参数规模统计口径）：
- * 子代理（agent）、父代理（parent）与 协作组卡片（group，组内成员并行执行为一单元）。
+ * 子代理（agent）、父代理（parent）与 Team 卡片（group，组内成员并行执行为一单元）。
  * 为什么放在协议常量层而不是纯形状层：该口径是 Host 检查器 / 写图工具 / 客户端预算
  * 展示共用的跨层契约常量，改一处必须三端一致；纯形状文件不得含运行时值。
  * 口径漂移会直接导致预算判定与展示不一致，故以 NodeKind 标注类型并由测试锁定取值。

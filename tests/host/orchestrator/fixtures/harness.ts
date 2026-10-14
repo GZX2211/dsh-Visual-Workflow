@@ -76,7 +76,7 @@ export function fileNode(id: string, label: string, extra: Partial<FileNode['dat
   }
 }
 
-/** 协作组节点（成员为角色节点 id；成员 data.groupId 与组 id 双向一致）。 */
+/** Team 节点（成员为角色节点 id；成员 data.groupId 与组 id 双向一致）。 */
 export function groupNode(id: string, label: string, memberIds: string[]): GroupNode {
   return {
     id,
@@ -181,8 +181,8 @@ export class FakeRunner implements NodeRunner {
    */
   nextReplacedChildId: string | null = null
   /**
-   * 官方 Agent 协作组可用性。缺省 false：既有用例保持「成员降级为普通子代理」的语义与文案；
-   * 官方 协作组路径用例显式置 true。
+   * 官方 Agent Team 可用性。缺省 false：既有用例保持「成员降级为普通子代理」的语义与文案；
+   * 官方 Team 路径用例显式置 true。
    */
   teamEnabled = false
   /**

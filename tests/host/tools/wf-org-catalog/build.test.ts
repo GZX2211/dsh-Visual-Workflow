@@ -276,7 +276,7 @@ describe('buildWorkflowDetail（骨架自足性）', () => {
     expect(role.label).toBe('分析员')
   })
 
-  it('协作组节点给全 collabPrompt 与成员清单', () => {
+  it('Team 节点给全 collabPrompt 与成员清单', () => {
     const group = detail.nodes.find((node) => node.id === 'g1')
     expect(group).toEqual({ id: 'g1', kind: 'group', label: '评审组', collabPrompt: '组员互相评审', memberIds: ['a1'], schedulable: false })
   })
@@ -420,12 +420,12 @@ describe('buildInstanceDetail（instance 召回的第 2 层：当前运行实例
 })
 
 describe('schedulable（孤立节点标注：与既有编排清单同口径）', () => {
-  it('参与流程的 agent 标 true、孤立 agent 标 false；协作组卡片恒 false（包裹层不是调度目标）', () => {
+  it('参与流程的 agent 标 true、孤立 agent 标 false；Team 卡片恒 false（包裹层不是调度目标）', () => {
     const detail = instanceSkeletonOf(instanceFlowFixture())
     const byId = new Map(detail.nodes.map((node) => [node.id, node]))
     expect(byId.get('a1')).toMatchObject({ schedulable: true })
     expect(byId.get('a2')).toMatchObject({ schedulable: false })
-    // 协作组卡片无论是否参与流程都不可调度：对它调用 wf_run_node 会被运行时拒绝
+    // Team 卡片无论是否参与流程都不可调度：对它调用 wf_run_node 会被运行时拒绝
     expect(byId.get('g1')).toMatchObject({ schedulable: false })
     expect(byId.get('g2')).toMatchObject({ schedulable: false })
   })
@@ -437,7 +437,7 @@ describe('schedulable（孤立节点标注：与既有编排清单同口径）',
     }
   })
 
-  it('agent 口径等价于 orchestrationNodeList；协作组卡片恒不可调度', () => {
+  it('agent 口径等价于 orchestrationNodeList；Team 卡片恒不可调度', () => {
     const flow = instanceFlowFixture()
     const detail = instanceSkeletonOf(flow)
     const schedulableAgents = detail.nodes
@@ -445,7 +445,7 @@ describe('schedulable（孤立节点标注：与既有编排清单同口径）',
       .map((node) => node.id)
       .sort()
     expect(schedulableAgents).toEqual(orchestrationNodeList(flow).map((node) => node.id).sort())
-    // 协作组卡片不是调度单元：collabGroupList 给出的 协作组卡片全部 schedulable=false
+    // Team 卡片不是调度单元：collabGroupList 给出的 Team 卡片全部 schedulable=false
     const groupIds = collabGroupList(flow).map((group) => group.groupId)
     for (const groupId of groupIds) {
       expect(detail.nodes.find((node) => node.id === groupId)).toMatchObject({ schedulable: false })

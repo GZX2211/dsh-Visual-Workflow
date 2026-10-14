@@ -1,10 +1,10 @@
 // src/client/components/canvas/GroupCard.tsx
 //
-// 协作组卡片：组标签 + 成员迷你列表（可滚动）+ 右下角拉伸把手。
+// Team 卡片：组标签 + 成员迷你列表（可滚动）+ 右下角拉伸把手。
 // 成员节点为组内角色（data.groupId = 组 id），作为迷你卡片渲染于组内（见 GraphCanvas）；
-// 协作组卡片仅提供流程入/出连接点（跨组上下文连线走成员接点）。
+// Team 卡片仅提供流程入/出连接点（跨组上下文连线走成员接点）。
 //
-// 为什么 协作组卡片没有运行状态徽标：协作组卡片是包裹层、不是执行主体（用户裁决 2026-10），
+// 为什么 Team 卡片没有运行状态徽标：Team 卡片是包裹层、不是执行主体（用户裁决 2026-10），
 // 它不进入运行事实；运行状态只属于成员节点（每个成员各自有状态徽标）。
 
 import { memo } from 'react'
@@ -22,7 +22,7 @@ interface GroupCardProps {
   highlighted?: boolean
   /** 拖拽悬停目标（左栏角色卡拖入时高亮并提示「放开以入组」）。 */
   dropTarget: boolean
-  /** 协作组卡片自身运行中锁定（已完成/执行中）：锁角标 + 悬停提示。 */
+  /** Team 卡片自身运行中锁定（已完成/执行中）：锁角标 + 悬停提示。 */
   locked?: boolean
   lockHint?: string
   onPointerDown(event: React.PointerEvent, id: string): void
@@ -39,7 +39,7 @@ export const GroupCard = memo(function GroupCard({ node, copy, members, selected
   const size = nodeSizeOf(node)
   // 去重计数（历史数据可能残留重复 memberIds，避免计数虚高）
   const memberIds = [...new Set((node.data.memberIds as string[] | undefined) ?? [])]
-  // 协作组卡片提供流程入/出接点（居中；成员节点的上下文/数据库连线走成员自身接点）
+  // Team 卡片提供流程入/出接点（居中；成员节点的上下文/数据库连线走成员自身接点）
   return (
     <div
       className={`wf-graph__node wf-group-node${dropTarget ? ' is-drop-target' : ''}`}
@@ -75,7 +75,7 @@ export const GroupCard = memo(function GroupCard({ node, copy, members, selected
                       <span className="wf-hint">{statusLabelOf(copy, member.status)}</span>
                     </span>
                   ) : null}
-                  {/* 组内成员仅数据库/上下文接点，无流程接点（流程由 协作组卡片承担）；
+                  {/* 组内成员仅数据库/上下文接点，无流程接点（流程由 Team 卡片承担）；
                       成员为缩小版角色卡：仅名称 + 状态（用户批注） */}
                   <span
                     className="wf-graph__handle wf-graph__handle--target wf-graph__handle--mini wf-graph__handle--member-db-in"

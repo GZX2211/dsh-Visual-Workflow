@@ -92,7 +92,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
   useFlowTemplatesPolling(dispatch, remote)
   // 模式二服务状态轮询：宿主侧进程崩溃/被回收时把运行事实拉回界面（此前只在动作后刷新）
   useServiceStatusPolling(state, dispatch, remote)
-  // 协作组成员上限（宿主下发，与部署层 agent-team.maxMembers 同值）：画布入组交互据此拒绝超限
+  // Team 成员上限（宿主下发，与部署层 agent-team.maxMembers 同值）：画布入组交互据此拒绝超限
   const teamMemberLimit = useTeamMemberLimit(remote)
 
   // 活跃 run 摘要索引（实例列表运行徽标 + 运行对账共用）：一次建 Map，避免「每个实例一次全量

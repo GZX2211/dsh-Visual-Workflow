@@ -3,7 +3,7 @@ import type { GraphNode, WorkflowDocument } from '../shared/graph-model.js';
 export interface OrgUsage {
     /** 可执行节点（agent/parent/group）已用数。 */
     nodeCount: number;
-    /** 协作组已用数。 */
+    /** Team 已用数。 */
     groupCount: number;
     /** 最大组内人数。 */
     maxGroupMembers: number;
@@ -14,9 +14,9 @@ export interface OrgUsage {
 }
 /** 可执行单元计数（agent/parent/group；与检查器、P1 工具、客户端共用同一口径）。 */
 export declare function executableUnitCount(nodes: GraphNode[] | null | undefined): number;
-/** 协作组卡片计数。 */
+/** Team 卡片计数。 */
 export declare function groupCount(nodes: GraphNode[] | null | undefined): number;
-/** 单个 协作组的最大已配置人数（无组时 0；memberIds 重复 id 只计一次）。 */
+/** 单个 Team 的最大已配置人数（无组时 0；memberIds 重复 id 只计一次）。 */
 export declare function maxGroupMembers(nodes: GraphNode[] | null | undefined): number;
 /** 由图文档直接推导已用量（检查器/P1 工具的统一入口）。 */
 export declare function orgUsageOf(flow: Pick<WorkflowDocument, 'nodes'> | null | undefined, options?: {

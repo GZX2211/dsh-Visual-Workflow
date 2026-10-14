@@ -8,7 +8,7 @@ export interface CollabBlockParams {
         label: string;
         target?: string;
     }>;
-    /** 协作组卡片上用户自定义的协作说明文本（可为空；空则不追加说明段）。 */
+    /** Team 卡片上用户自定义的协作说明文本（可为空；空则不追加说明段）。 */
     custom: string;
     /**
      * 协作通道（成员是官方 teammate 还是普通子代理）。

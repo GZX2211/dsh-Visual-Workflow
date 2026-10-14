@@ -69,7 +69,7 @@ export function makeFlow(): WorkflowDocument {
   }
 }
 
-/** 含 协作组节点的图文档（验证 embedded.groups 内联语义）。 */
+/** 含 Team 节点的图文档（验证 embedded.groups 内联语义）。 */
 export function makeFlowWithGroup(): WorkflowDocument {
   const flow = makeFlow()
   return {
@@ -80,7 +80,7 @@ export function makeFlowWithGroup(): WorkflowDocument {
         id: 'g1',
         kind: 'group',
         position: { x: 0, y: 0 },
-        data: { label: '协作组一', collabPrompt: '成员互相质询', memberIds: ['n-a1', 'n-a2'] },
+        data: { label: 'Team 一', collabPrompt: '成员互相质询', memberIds: ['n-a1', 'n-a2'] },
       },
     ] as WorkflowDocument['nodes'],
   }

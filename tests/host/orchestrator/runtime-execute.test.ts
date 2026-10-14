@@ -416,15 +416,15 @@ describe('wait 阻塞（§4.4.2 规则 1，模式二调度）', () => {
   })
 })
 
-describe('wfRunNode 协作组卡片与成员路径', () => {
-  /** 协作组流程：start → g1（成员 dev/rev）→ end。协作组卡片是包裹层，成员节点才是执行主体。 */
+describe('wfRunNode Team 卡片与成员路径', () => {
+  /** Team 流程：start → g1（成员 dev/rev）→ end。Team 卡片是包裹层，成员节点才是执行主体。 */
   function teamFlow(memberIds: string[] = ['n-dev', 'n-rev']): WorkflowDocument {
     const labels: Record<string, string> = { 'n-dev': '后端开发工程师', 'n-rev': '后端代码审查专家' }
     return {
       id: 'flow-g',
       sessionId: 'session-1',
       mode: 'mode1',
-      name: '协作组流程',
+      name: 'Team 流程',
       description: '协作目标',
       revision: 1,
       nodes: [
@@ -440,14 +440,14 @@ describe('wfRunNode 协作组卡片与成员路径', () => {
     }
   }
 
-  it('协作组卡片不是执行主体：wf_run_node(组 id) 明确拒绝并给出成员清单', async () => {
+  it('Team 卡片不是执行主体：wf_run_node(组 id) 明确拒绝并给出成员清单', async () => {
     const h = await makeHarness()
     h.runner.teamEnabled = true
     const { entry } = await start(h, teamFlow())
 
     await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-g1' })).rejects.toMatchObject({ code: 'WF_NODE_KIND' })
     await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-g1' })).rejects.toThrow(/n-dev, n-rev/)
-    // 协作组卡片不参与运行事实：既不被置为 running，也不发起任何子代理
+    // Team 卡片不参与运行事实：既不被置为 running，也不发起任何子代理
     expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-g1')!.status).toBe('pending')
     expect(h.runner.calls).toHaveLength(0)
   })
@@ -485,7 +485,7 @@ describe('wfRunNode 协作组卡片与成员路径', () => {
     expect(text).not.toContain('本组成员为')
   })
 
-  it('官方 协作组不可用（降级）：成员任务块回到 wf_ask_agent 协作指引', async () => {
+  it('官方 Team 不可用（降级）：成员任务块回到 wf_ask_agent 协作指引', async () => {
     const h = await makeHarness()
     await start(h, teamFlow())
     await h.runtime.wfRunNode(caller, { nodeId: 'n-dev' })
@@ -529,7 +529,7 @@ describe('wfRunNode 协作组卡片与成员路径', () => {
     await h.runtime.handleSubagentEnd({ id: 'child-1', stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: '开发完成' }] })
 
     expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-dev')!.status).toBe('armed')
-    // 协作组卡片不参与运行事实：不存在聚合写入，始终保持 pending
+    // Team 卡片不参与运行事实：不存在聚合写入，始终保持 pending
     expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-g1')!.status).toBe('pending')
   })
 

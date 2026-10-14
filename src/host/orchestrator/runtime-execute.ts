@@ -98,7 +98,7 @@ export class RuntimeExecute extends RuntimeLaunch {
       return { nodeId, status: 'paused' }
     }
 
-    // 协作组卡片是包裹层，不是执行主体（用户裁决 2026-10）：它只能是流程上的位置锚点，
+    // Team 卡片是包裹层，不是执行主体（用户裁决 2026-10）：它只能是流程上的位置锚点，
     // 成员节点才是执行单元。以组 id 启动整组属已退役的旧语义，明确拒绝并给出成员清单。
     if (node.kind === 'group') {
       const memberIds = [...new Set(((node.data.memberIds ?? []) as unknown[]).map((id) => String(id ?? '')).filter(Boolean))]
@@ -112,7 +112,7 @@ export class RuntimeExecute extends RuntimeLaunch {
     if (node.kind !== 'agent') {
       throw new WfError(`WF_NODE_KIND: wf_run_node only accepts an agent node; "${labelOf(node)}" is ${node.kind}`, 'WF_NODE_KIND')
     }
-    // 模式二完全不支持协作组（用户裁决 2026-10）：阻塞等待语义与团队异步协作不匹配，
+    // 模式二完全不支持 Team（用户裁决 2026-10）：阻塞等待语义与团队异步协作不匹配，
     // 成员节点在 wf_run_node_wait 通道下同样拒绝（模式一才允许）。
     if (run.snapshot.mode === 'mode2' && isGroupMember(flow, node.id)) {
       throw new WfError(
@@ -147,7 +147,7 @@ export class RuntimeExecute extends RuntimeLaunch {
     }
 
     setNodeStatus(run.snapshot, resolvedNodeId, 'running', { attempts: attempt, now: this.now() })
-    // 协作组成员节点：协作通道只对它有意义（official = 官方 teammate，成员自带官方工具与
+    // Team 成员节点：协作通道只对它有意义（official = 官方 teammate，成员自带官方工具与
     // 协作策略，故不注入插件自建协作块；legacy = 官方不可用降级为普通子代理，需注入
     // wf_ask_agent 协作指引）。
     const teamMember = isGroupMember(flow, node.id)

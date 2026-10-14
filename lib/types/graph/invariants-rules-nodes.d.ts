@@ -1,6 +1,6 @@
 import type { FlowDag } from './dag.js';
 import type { CheckGraphInput, GraphIssue } from './invariants-types.js';
-/** a) 协作组一致性：无成员 / 悬空成员 / 无流程线。 */
+/** a) Team 一致性：无成员 / 悬空成员 / 无流程线。 */
 export declare function ruleGroupMembers(input: CheckGraphInput, dag: FlowDag): GraphIssue[];
 /** b) 虚拟节点引用缺失或指向非角色节点。 */
 export declare function ruleProxySource({ flow }: CheckGraphInput): GraphIssue[];

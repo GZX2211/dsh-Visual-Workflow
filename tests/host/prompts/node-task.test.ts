@@ -17,7 +17,7 @@ import { DEFAULT_OUTPUT_CONTRACT_TEXT } from '../../../src/host/shared/protocol.
 import { nodeFacts } from './fixtures/prompt-facts.js'
 
 describe('T-005 节点任务块模板（软约束双位 + 过程性信息中段 + 条件注入）', () => {
-  it('协作组成员才注入 wf_ask_agent 软约束；非组成员不注入（经导出常量引用）', () => {
+  it('Team 成员才注入 wf_ask_agent 软约束；非组成员不注入（经导出常量引用）', () => {
     const member = buildNodeTaskBlock({ facts: { ...nodeFacts, isGroupMember: true } })
     expect(member).toContain(NODE_HARD_CONSTRAINTS.collabAskOnly)
     const plain = buildNodeTaskBlock({ facts: nodeFacts })
@@ -26,7 +26,7 @@ describe('T-005 节点任务块模板（软约束双位 + 过程性信息中段 
 
   it('official 通道：成员是官方 teammate，插件不再注入任何协作通信约束（协作规则以官方 team:policy 为准）', () => {
     const member = buildNodeTaskBlock({ facts: { ...nodeFacts, isGroupMember: true, collabChannel: 'official' } })
-    // 官方 teammate 自带九个 协作组工具与 team:policy；插件再注入等价约束会形成第二份协作契约
+    // 官方 teammate 自带九个 Team 工具与 team:policy；插件再注入等价约束会形成第二份协作契约
     expect(member).not.toContain(NODE_HARD_CONSTRAINTS.collabAskOnly)
     expect(member).not.toContain('send_message')
   })

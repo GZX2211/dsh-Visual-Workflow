@@ -26,7 +26,7 @@ export type NodeKind =
   | 'start' // 启动阶段节点（模式一入口）
   | 'end' // 结束阶段节点（模式一出口）
   | 'pause' // 暂停阶段节点（流程门）
-  | 'group' // 协作组节点：协作组卡片 + 组内角色并行
+  | 'group' // Team 节点：Team 卡片 + 组内角色并行
   | 'proxy' // 虚拟节点：主节点别名引用，无独立配置
 
 /** 节点公共基座：所有节点的共有最小字段。 */
@@ -104,7 +104,7 @@ export interface RoleNode extends BaseNode {
      * 未改动时复用原子代理、不重复读取。为空则直接使用 systemPrompt 文本。
      */
     promptFilePath?: string
-    /** 所属协作组 id（组内成员节点字段）。 */
+    /** 所属 Team id（组内成员节点字段）。 */
     groupId?: string | null
     /**
      * 来源角色资产 id（可选；仅「从资产拖入画布」时写入，从模版/实例拖入不写）。
@@ -189,8 +189,8 @@ export interface StageNode extends BaseNode {
 }
 
 /**
- * 协作组节点：协作组卡片 + 组内角色并行执行。
- * 组内成员节点经 memberIds 关联；协作组卡片仅提供流程入/出连接点。
+ * Team 节点：Team 卡片 + 组内角色并行执行。
+ * 组内成员节点经 memberIds 关联；Team 卡片仅提供流程入/出连接点。
  */
 export interface GroupNode extends BaseNode {
   kind: 'group'

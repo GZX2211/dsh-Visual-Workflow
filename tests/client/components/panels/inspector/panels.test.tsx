@@ -173,7 +173,7 @@ describe('Inspector 底部按钮分录（模版态 / 资产态）', () => {
     expect(footerLabels()).toEqual([zh.inspectorSave, zh.inspectorDelete, zh.assetPromote])
   })
 
-  it('文件 / 数据库 / 协作组模板：只有保存 + 删除（不显示入库）', async () => {
+  it('文件 / 数据库 / Team 模板：只有保存 + 删除（不显示入库）', async () => {
     for (const kind of ['file', 'database', 'group'] as const) {
       await render(React.createElement(Inspector, {
         ...common,

@@ -8,7 +8,7 @@
 //   - 文件节点卡：文本类型显示内容（超两行省略）；文件类型显示所选文件名列表；
 //   - 虚拟节点「↻ 引用」徽标只渲染一处；
 //   - 输入/输出节点各只保留一个连接点（模式二：输入=flow-out、输出=flow-in）；
-//   - 连接点按入口/出口区分颜色；交换左右连接点（swapPorts）随节点持久化，协作组卡片不提供该按钮。
+//   - 连接点按入口/出口区分颜色；交换左右连接点（swapPorts）随节点持久化，Team 卡片不提供该按钮。
 
 import { memo } from 'react'
 import type { Dict } from '../../i18n.js'
@@ -108,7 +108,7 @@ export const FlowNode = memo(function FlowNode({ node, copy, mode, selected, hig
   // 名称回退：label 为空（含空白）时显示节点种类名（避免虚拟节点显示为空白卡片）
   const nodeLabel = String(node.data.label ?? '').trim() || String(copy.nodeKinds[isProxy ? 'agent' : kind] ?? '')
   // 阶段节点（启动/结束/暂停）：单/双流程连接点，交换无意义且会产生死数据（审查 BUG-1），
-  // 与 协作组一致不渲染交换按钮。
+  // 与 Team 一致不渲染交换按钮。
   const isStage = kind === 'start' || kind === 'end' || kind === 'pause'
   // 交换状态随节点持久化（用户批注：作为节点属性保存，重载后保持）
   const swapped = (node.data as { swapPorts?: unknown }).swapPorts === true

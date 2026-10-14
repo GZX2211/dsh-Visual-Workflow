@@ -30,7 +30,7 @@ export interface ExecutorContextFacts {
   filePaths: string[]
   /** 数据库工具说明（db-in 连线存在时非空），可为空。 */
   dbToolHint: string
-  /** 协作组成员标记：注入组内通信必须经 wf_ask_agent 的软约束。 */
+  /** Team 成员标记：注入组内通信必须经 wf_ask_agent 的软约束。 */
   isGroupMember: boolean
 }
 
@@ -102,7 +102,7 @@ export function buildParentTaskSpec(params: ParentTaskSpecParams): string {
 /**
  * 情况3 纯执行父代理提示词构建器（纯函数）：
  * 首段身份 + 执行约定 + 收尾协议；中段过程性信息；末段重申 + 运行上下文动态态。
- * 不含任何编排/流程调度措辞（事实源、待编排节点、协作组并行、调用协议等一律剔除）。
+ * 不含任何编排/流程调度措辞（事实源、待编排节点、Team 并行、调用协议等一律剔除）。
  */
 export function buildParentExecutorPrompt(params: ParentExecutorPromptParams): string {
   const { workflowName, facts, runContextText, systemLanguage } = params

@@ -65,7 +65,7 @@ describe('wf_run_node 注册与 schema', () => {
     expect((schema.properties ?? {}).status).toMatchObject({ enum: ['started', 'paused'] })
   })
 
-  it('output.schema 只有单节点字段：无 members（协作组卡片不是执行主体，不返回成员清单）', async () => {
+  it('output.schema 只有单节点字段：无 members（Team 卡片不是执行主体，不返回成员清单）', async () => {
     const h = await makeHarness()
     const schema = h.tools.definitions.get(WF_RUN_NODE)!.output.schema as JsonSchemaNode
     expect(Object.keys(schema.properties ?? {}).sort()).toEqual(['childId', 'nodeId', 'status'])

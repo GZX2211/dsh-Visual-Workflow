@@ -3,7 +3,7 @@ import type { GraphPatchOp, GraphPatchResult, PatchOpFailure } from './types.js'
 /** 深拷贝文档骨架（保持元数据字段；节点/连线走 JSON 深拷贝避免共享引用）。 */
 export declare function cloneDoc(doc: WorkflowDocument): WorkflowDocument;
 /**
- * 协作组一致性：成员节点的 groupId 与组的 memberIds 双向对齐。
+ * Team 一致性：成员节点的 groupId 与组的 memberIds 双向对齐。
  * 入组：写 node.data.groupId；出组：置 null。组不存在或成员不存在 → 稳定错误。
  */
 export declare function ensureGroupConsistency(nodes: GraphNode[], groupId: string, memberIds: string[]): GraphNode[];

@@ -39,7 +39,7 @@ export function buildNodeBlocks(input: {
   /** 系统语言名（从 DSH 用户设置读取；注入「回复/注释/思考必须使用该语言」规则）。 */
   systemLanguage: string
   /**
-   * 协作通道（仅组内成员有意义）：official = 官方 Agent 协作组邮箱；legacy = 插件自建协作工具。
+   * 协作通道（仅组内成员有意义）：official = 官方 Agent Team 邮箱；legacy = 插件自建协作工具。
    * 缺省 legacy，保持未启用官方团队时的文案与行为。
    */
   collabChannel?: CollabChannel
@@ -53,7 +53,7 @@ export function buildNodeBlocks(input: {
     documentTextLimit: input.documentTextLimit,
   })
   const outputContract = outputContractOf(node)
-  // 协作通道缺省 legacy（未启用官方 协作组时保持既有文案与行为）
+  // 协作通道缺省 legacy（未启用官方 Team 时保持既有文案与行为）
   const channel: CollabChannel = input.collabChannel ?? 'legacy'
 
   const text = buildNodeTaskBlock({
@@ -70,7 +70,7 @@ export function buildNodeBlocks(input: {
     },
   })
   // 协作信息只在**降级通道**追加完整协作块（成员清单 + 通信指引）：成员是官方 teammate 时，
-  // 官方为其注入 team:policy 与九个 协作组工具（list_agents / send_message / 任务板），插件再列
+  // 官方为其注入 team:policy 与九个 Team 工具（list_agents / send_message / 任务板），插件再列
   // 一份成员清单与通信指引就是第二份协作契约（用户裁决 2026-10：与官方重复的定义以官方为准）。
   // 但用户填写的组卡片协作说明不是官方已定义的内容，官方通道下仍作为「团队协作说明」注入。
   const custom = collabPromptOf(flow, node.id)

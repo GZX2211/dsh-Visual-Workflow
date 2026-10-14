@@ -9,7 +9,7 @@
 //   3. 连接点兼容矩阵：sourceHandle 必须是源节点出点、targetHandle 必须是目标节点入点，
 //      且三通道配对（flow-out→flow-in / ctx-out→ctx-in / db-out→db-in）；
 //   4. 条件仅流程线（§4.3 规则 4）；content 条件必须带 label（§4.3 规则 2）；
-//   5. 协作组边界（§4.2.5.2 规则 4）：组成员仅 ctx/db 连接点；协作组卡片仅 flow 连接点；
+//   5. Team 边界（§4.2.5.2 规则 4）：组成员仅 ctx/db 连接点；Team 卡片仅 flow 连接点；
 //   6. 阶段节点唯一：start/end 各至多一个（§4.2.5.1 说明段）；pause 仅模式一；
 //   7. 父代理唯一：至多一个；模式二必须恰好一个（§4.2.3.1 / §4.1.3 规则 4）；
 //   8. 虚拟节点引用存在且主节点为角色节点；主/虚不得同时连入同一目标同一连接点（§4.2.3.2 规则 6）；
@@ -219,7 +219,7 @@ export function validateFlow(flow: Partial<WorkflowDocument>): ValidateResult {
       }
     }
 
-    // 协作组边界（§4.2.5.2 规则 4）：组内成员仅 ctx/db 连接点；协作组卡片仅 flow
+    // Team 边界（§4.2.5.2 规则 4）：组内成员仅 ctx/db 连接点；Team 卡片仅 flow
     const source = nodeMap.get(line.source)
     const target = nodeMap.get(line.target)
     const sourceInGroup = source && (source.kind === 'parent' || source.kind === 'agent') && Boolean(source.data.groupId)
@@ -230,8 +230,8 @@ export function validateFlow(flow: Partial<WorkflowDocument>): ValidateResult {
     if (targetInGroup && line.targetHandle === channelIn('flow')) {
       issues.push({ code: 'groupMemberFlowHandle', message: `Team member ${line.target} only has context ports, no flow-in`, id: line.id })
     }
-    // 协作组卡片仅 flow 连接点：矩阵（NODE_HANDLES.group 只有 flow-in/flow-out）已在
-    // connectionProblem 层拦截 协作组卡片的 ctx/db 连线（invalidHandle/handleMismatch），
+    // Team 卡片仅 flow 连接点：矩阵（NODE_HANDLES.group 只有 flow-in/flow-out）已在
+    // connectionProblem 层拦截 Team 卡片的 ctx/db 连线（invalidHandle/handleMismatch），
     // 此处无需重复检查（避免死代码）。
 
     // 模式差异（§4.2.5.1）：mode1 的 start 无 ctx-out；mode1 的 end 无 ctx-in
@@ -262,7 +262,7 @@ export function validateFlow(flow: Partial<WorkflowDocument>): ValidateResult {
     issues.push({ code: 'parentRequiredMode2', message: 'a mode2 workflow must contain a parent-agent node' })
   }
 
-  // —— 协作组成员一致性：成员 id 必须真实存在（§4.2.5.2）——
+  // —— Team 成员一致性：成员 id 必须真实存在（§4.2.5.2）——
   // 幽灵组员防护：角色节点声明 groupId 指向不存在的组 id 时必须报错。
   const groupIds = new Set(nodes.filter((n) => n.kind === 'group').map((n) => n.id))
   for (const node of nodes) {

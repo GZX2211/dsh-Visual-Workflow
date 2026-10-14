@@ -14,7 +14,7 @@ interface GroupCardProps {
     highlighted?: boolean;
     /** 拖拽悬停目标（左栏角色卡拖入时高亮并提示「放开以入组」）。 */
     dropTarget: boolean;
-    /** 协作组卡片自身运行中锁定（已完成/执行中）：锁角标 + 悬停提示。 */
+    /** Team 卡片自身运行中锁定（已完成/执行中）：锁角标 + 悬停提示。 */
     locked?: boolean;
     lockHint?: string;
     onPointerDown(event: React.PointerEvent, id: string): void;

@@ -249,9 +249,9 @@ export const CHILD_AGENT_HIDDEN_TOOLS = [
 ] as const
 
 // ---------------------------------------------------------------------------
-// 官方 Agent 协作组工具名常量
+// 官方 Agent Team 工具名常量
 // ---------------------------------------------------------------------------
-// 运行事实：官方 tool-agent-team 包在**每个 协作组成员作用域**（含 Lead 自身）注册
+// 运行事实：官方 tool-agent-team 包在**每个 Team 成员作用域**（含 Lead 自身）注册
 // 9 个同名工具，并注入固定协作策略段。名字即官方对外契约，插件只消费不转写。
 //
 // 两个机制事实决定了插件侧的处理方式（改代码前必须遵守）：
@@ -281,7 +281,7 @@ export const TEAM_TASK_GET = 'team_task_get'
 /** 共享任务板：按 revision 更新任务。 */
 export const TEAM_TASK_UPDATE = 'team_task_update'
 
-/** 官方 协作组工具全量清单（9 个；组合管理页展示与全局开关的目标集）。 */
+/** 官方 Team 工具全量清单（9 个；组合管理页展示与全局开关的目标集）。 */
 export const TEAM_TOOL_NAMES = [
   TEAM_SPAWN_TEAMMATE,
   TEAM_SEND_MESSAGE,
@@ -334,15 +334,15 @@ export const RUN_STATUSES = [
 ] as const
 
 /**
- * 节点状态枚举（NODE_STATUSES）：与 run-types.js 的 NodeRunStatus 逐字一致（七态，含协作组「待命」armed——
- * 非终态：回合结束但仍在 协作组内可被唤醒，父代理 wf_finish 后终态化）。
+ * 节点状态枚举（NODE_STATUSES）：与 run-types.js 的 NodeRunStatus 逐字一致（七态，含 Team「待命」armed——
+ * 非终态：回合结束但仍在 Team 内可被唤醒，父代理 wf_finish 后终态化）。
  * react-capped 为 ReAct 软截停（非失败，正常产出）。
  * 与该类型的双向穷尽由测试的编译期断言锁定（禁止固定长度断言）。
  */
 export const NODE_STATUSES = [
   'pending', // 待执行
   'running', // 执行中
-  'armed', // 待命（协作组成员非终态）
+  'armed', // 待命（Team 成员非终态）
   'ok', // 成功
   'fail', // 失败
   'skipped', // 已跳过
@@ -358,7 +358,7 @@ export const MODES = ['mode1', 'mode2'] as const
 
 /**
  * 可执行单元节点种类（元参数规模统计口径）：
- * 子代理（agent）、父代理（parent）与 协作组卡片（group，组内成员并行执行为一单元）。
+ * 子代理（agent）、父代理（parent）与 Team 卡片（group，组内成员并行执行为一单元）。
  * 为什么放在协议常量层而不是纯形状层：该口径是 Host 检查器 / 写图工具 / 客户端预算
  * 展示共用的跨层契约常量，改一处必须三端一致；纯形状文件不得含运行时值。
  * 口径漂移会直接导致预算判定与展示不一致，故以 NodeKind 标注类型并由测试锁定取值。

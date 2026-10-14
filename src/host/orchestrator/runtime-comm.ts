@@ -68,7 +68,7 @@ export class RuntimeComm extends RuntimeExecute {
     }
     const nodes = flow.nodes ?? []
     const isFlowNode = nodes.some((n) => n.id === rawTo)
-    // 发起者所在 协作组的成员 id 清单（组内可发消息对象）
+    // 发起者所在 Team 的成员 id 清单（组内可发消息对象）
     const group = nodes.find(
       (n) => n.kind === 'group' && ((n.data.memberIds ?? []) as string[]).includes(metaFrom.nodeId),
     ) as { data?: { memberIds?: string[]; label?: string } } | undefined

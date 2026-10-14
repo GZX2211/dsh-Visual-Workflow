@@ -15,7 +15,7 @@
 //
 // 稳定布局（前缀稳定 + 关键约束双位 + 动态值仅注入末尾）：
 //   ① 首段 = 硬约束（身份/调度协议/完成判定信号/收尾/失败语义/条件连线/组内通信）
-//   ② 中段 = 过程性信息（拓扑召回入口 / 工作流目标 / 协作组并行说明，协作组按需输出）
+//   ② 中段 = 过程性信息（拓扑召回入口 / 工作流目标 / Team 并行说明，Team 按需输出）
 //   ③ 末段 = 关键约束重申 + 本次动态状态（断点继续 / 暂停 / 运行参数 / 情况2的
 //            父代理自执行单元任务块等动态值仅在此注入）
 //
@@ -40,11 +40,11 @@ export interface OrchestrationDirectiveParams {
     workflowGoal: string
     /** 节点清单：流程中参与流程的可调度 agent 节点（id + 人类可读名称）。 */
     nodes: Array<{ id: string; label: string }>
-    /** 协作组卡片与成员清单（画布含 协作组卡片时组装该段；空数组 = 不组装该段）。 */
+    /** Team 卡片与成员清单（画布含 Team 卡片时组装该段；空数组 = 不组装该段）。 */
     collabGroups: Array<{ groupId: string; label: string; memberIds: string[] }>
     /**
-     * 协作通道（协作组段文案的分支依据）：
-     *   - official = 官方 Agent 协作组可用 → 成员以官方 teammate 身份启动，协作与任务板走官方工具；
+     * 协作通道（Team 段文案的分支依据）：
+     *   - official = 官方 Agent Team 可用 → 成员以官方 teammate 身份启动，协作与任务板走官方工具；
      *   - legacy = 官方团队不可用 → 成员降级为普通子代理，组内通信用 wf_ask_agent。
      * 缺省 legacy。
      */
@@ -202,7 +202,7 @@ function buildMidSection(facts: OrchestrationDirectiveParams['facts']): string {
   ]
   const goal = String(facts.workflowGoal ?? '').trim()
   if (goal) midParts.push('', `工作流目标：${goal}`)
-  // 协作组段仅在画布存在 协作组卡片时组装。
+  // Team 段仅在画布存在 Team 卡片时组装。
   if (facts.collabGroups.length > 0) {
     const official = facts.collabChannel === 'official'
     const collabText = facts.collabGroups
@@ -212,15 +212,15 @@ function buildMidSection(facts: OrchestrationDirectiveParams['facts']): string {
     if (official) {
       midParts.push(
         '',
-        '协作组卡片是包裹层、不是执行单元：逐个调用 wf_run_node(成员节点 id) 启动成员；直接对 协作组卡片调用会被拒绝。',
-        '成员以官方 teammate 身份运行，自带官方 协作组工具（list_agents / send_message / team_task_*）与官方协作策略；'
+        'Team 卡片是包裹层、不是执行单元：逐个调用 wf_run_node(成员节点 id) 启动成员；直接对 Team 卡片调用会被拒绝。',
+        '成员以官方 teammate 身份运行，自带官方 Team 工具（list_agents / send_message / team_task_*）与官方协作策略；'
         + '分工与交接用官方任务板登记（team_task_create → claim → complete，按 revision 做 CAS 更新），不要自建任务清单。',
         '成员由画布定义、由插件创建：不要自行调用 spawn_teammate 创建成员，也不要给成员改名。',
       )
     } else {
       midParts.push(
         '',
-        '官方 协作组不可用：成员降级为普通子代理，逐个用 wf_run_node 启动；组内通信用 wf_ask_agent。',
+        '官方 Team 不可用：成员降级为普通子代理，逐个用 wf_run_node 启动；组内通信用 wf_ask_agent。',
       )
     }
   }
