@@ -39,7 +39,7 @@ export interface Config {
   runIdleTimeoutMs: number
   /** 运行状态回显轮询间隔毫秒数（经 runtimeConfig 端点下发前端，由前端自持 600ms 缺省回退）。 */
   runPollMs: number
-  /** ReAct 迭代次数默认上限（软截停强制收尾）。 */
+  /** ReAct 迭代次数默认上限（软截停强制收尾）；0 = 不设限。 */
   reactIterationLimitDefault: number
   /** 单节点回流重试次数默认上限。 */
   retryLimitDefault: number
@@ -64,7 +64,7 @@ export const Config: z<Config> = z.object({
   wfAskAgentTimeoutMs: z.natural().default(0),
   runIdleTimeoutMs: z.natural().default(1800000),
   runPollMs: z.natural().default(2000),
-  reactIterationLimitDefault: z.natural().default(50),
+  reactIterationLimitDefault: z.natural().default(0),
   retryLimitDefault: z.natural().default(3),
   outputFullLimit: z.natural().default(102400),
   documentTextLimit: z.natural().default(20000),

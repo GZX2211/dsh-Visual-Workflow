@@ -284,7 +284,7 @@ export async function makeHarness(
       documentTextLimit: 200,
       runIdleTimeoutMs: 500,
       retryLimitDefault: 3,
-      reactIterationLimitDefault: 50,
+      reactIterationLimitDefault: 0,
       wfAskAgentTtlMs: 500,
       ...options.config,
     },

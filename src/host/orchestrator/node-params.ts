@@ -31,7 +31,9 @@ export function effectiveRetryLimitOf(node: NodeParamsInput, args: RunNodeArgs, 
   return fallback
 }
 
-/** 节点级 ReAct 迭代上限解析：参数覆盖 > 节点配置（null=不设限）> 配置默认。 */
+/**
+ * 节点级 ReAct 迭代上限解析：参数覆盖 > 节点配置（null=不设限）> 配置默认（<1=不设限）。
+ */
 export function effectiveReactLimitOf(node: NodeParamsInput, args: RunNodeArgs, fallback: number): number | undefined {
   const fromArgs = Number(args?.iterationLimit)
   if (Number.isFinite(fromArgs) && fromArgs >= 1) return fromArgs
@@ -39,7 +41,8 @@ export function effectiveReactLimitOf(node: NodeParamsInput, args: RunNodeArgs, 
   if (fromNode === null) return undefined // 节点显式不设限（V-01）
   const numeric = Number(fromNode)
   if (Number.isFinite(numeric) && numeric >= 1) return numeric
-  return fallback
+  // 配置默认 0 = 不设限：必须归一为 undefined——0 会被引擎当成「0 轮上限」，第一步即软截停
+  return fallback >= 1 ? fallback : undefined
 }
 
 /** 节点级思考强度解析：参数覆盖 > 节点配置 reasoning。 */

@@ -27,8 +27,9 @@
         # 运行状态回显（编排 → 画布双向同步）的轮询间隔毫秒数；前端经 runtimeConfig 端点
         # 消费本键，未下发 / 下发失败 / 取值非法时回退其自持缺省 600ms。
         runPollMs: 2000
-        # ReAct 迭代次数默认上限（软截停强制收尾，代理达到上限后不再发起工具调用）。
-        reactIterationLimitDefault: 50
+        # ReAct 迭代次数默认上限（软截停强制收尾）；0 = 不设限（插件不设私有护栏，
+        # 未设置时迭代交给官方运行时行为约束）。
+        reactIterationLimitDefault: 0
         # 单节点回流重试次数默认上限（超限按护栏终止该节点）。
         retryLimitDefault: 3
         # 节点完整输出持久化的字节上限（默认 100KB，需求 §4.7 可配置）。

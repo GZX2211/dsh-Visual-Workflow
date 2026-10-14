@@ -161,6 +161,14 @@ describe('wfRunNode 异步路径与护栏', () => {
     expect(text).not.toContain('ReAct 迭代上限')
   })
 
+  it('迭代上限缺省不设限：节点未配置且配置默认为 0 时，不向引擎透传 iterationLimit', async () => {
+    const h = await makeHarness()
+    await start(h, makeFlow())
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    // 不设限 = 引擎层收到 undefined（护栏完全旁路），迭代交由官方运行时行为约束。
+    expect(h.runner.calls[0].iterationLimit).toBeUndefined()
+  })
+
   it('护栏：nodeId 缺失 WF_BAD_ARGS；节点不存在 WF_NODE_MISSING；非 agent 节点 WF_NODE_KIND', async () => {
     const h = await makeHarness()
     await start(h, makeFlow())

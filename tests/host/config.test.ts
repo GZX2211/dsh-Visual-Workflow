@@ -118,3 +118,17 @@ describe('resolveConfig：schema 默认值逐键填充', () => {
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// ReAct 迭代上限默认值
+// ---------------------------------------------------------------------------
+
+describe('resolveConfig：ReAct 迭代上限默认不设限', () => {
+  it('缺省解析：reactIterationLimitDefault 为 0（0 = 不设限，插件不兜底私有上限）', () => {
+    expect(resolveConfig({}).reactIterationLimitDefault).toBe(0)
+  })
+
+  it('显式配置的全局默认上限仍然生效（只改默认值，不废除可配置性）', () => {
+    expect(resolveConfig({ reactIterationLimitDefault: 30 }).reactIterationLimitDefault).toBe(30)
+  })
+})

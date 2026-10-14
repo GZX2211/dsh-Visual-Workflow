@@ -25,7 +25,7 @@ function makeConfig(dir: string): Config {
     wfAskAgentTtlMs: 120000,
     runIdleTimeoutMs: 1800000,
     runPollMs: 2000,
-    reactIterationLimitDefault: 50,
+    reactIterationLimitDefault: 0,
     retryLimitDefault: 3,
     outputFullLimit: 102400,
     documentTextLimit: 20000,

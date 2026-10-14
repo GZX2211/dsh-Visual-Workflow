@@ -56,7 +56,7 @@ describe('subagent/end 迟到缓冲（wait:true 死锁回归）', () => {
       agents: h.agents,
       config: {
         outputFullLimit: 400, documentTextLimit: 200, runIdleTimeoutMs: 500,
-        retryLimitDefault: 3, reactIterationLimitDefault: 50, wfAskAgentTtlMs: 500,
+        retryLimitDefault: 3, reactIterationLimitDefault: 0, wfAskAgentTtlMs: 500,
       },
       logger: { warn: (message) => h.warnings.push(message), info: () => {}, debug: () => {} },
       now: () => h.clock.now,

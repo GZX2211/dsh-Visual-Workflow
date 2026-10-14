@@ -440,7 +440,7 @@ Default values can be overridden in `cordis.patch.yml`:
         maxConcurrentPerService: 50
         wfAskAgentTtlMs: 120000
         runIdleTimeoutMs: 1800000
-        reactIterationLimitDefault: 50
+        reactIterationLimitDefault: 0
         retryLimitDefault: 3
         outputFullLimit: 102400
         documentTextLimit: 20000
