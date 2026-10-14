@@ -68,7 +68,7 @@ const COPY_BASELINE: ReadonlyArray<{ readonly file: string; readonly reason: str
     file: 'lib/layout.ts',
     reason: 'Internal layout diagnostics: no UI consumer exists in src/client; behavior remains covered by layout tests and is outside the UI-copy migration',
     copies: [
-      'Team「${}」卡片高度不足，建议加高到 ${}px 以容纳 ${} 名成员',
+      '团队「${}」卡片高度不足，建议加高到 ${}px 以容纳 ${} 名成员',
       '数据节点「${}」未关联任何角色节点，已放到流程最右侧的独立列',
     ],
   },

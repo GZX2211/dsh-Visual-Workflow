@@ -39,7 +39,7 @@ export const DATA_KINDS: ReadonlySet<string> = new Set(['file', 'database'])
  */
 const orphanDataWarning = (id: string): string => `数据节点「${id}」未关联任何角色节点，已放到流程最右侧的独立列`
 const groupHeightWarning = (id: string, needed: number, memberCount: number): string =>
-  `Team「${id}」卡片高度不足，建议加高到 ${needed}px 以容纳 ${memberCount} 名成员`
+  `团队「${id}」卡片高度不足，建议加高到 ${needed}px 以容纳 ${memberCount} 名成员`
 
 /** 仅流程线参与主干分层（ctx-out→ctx-in / db-out→db-in 不参与）。 */
 export function isFlowLine(line: Line): boolean {

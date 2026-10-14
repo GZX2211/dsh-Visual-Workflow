@@ -95,7 +95,7 @@ describe('Studio 装配', () => {
     })
     const otherGroups = textOf('.wf-docgroup').join('|')
     expect(otherGroups).toContain('阶段')
-    expect(otherGroups).toContain('Team')
+    expect(otherGroups).toContain('团队')
   })
 
   it('画布空态引导 + 角色模板列表 + 选中进入右侧属性面板', async () => {
