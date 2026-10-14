@@ -102,14 +102,14 @@ function wantsManagedFile(raw: Record<string, unknown>): boolean {
 export function ensureGroupConsistency(nodes: GraphNode[], groupId: string, memberIds: string[]): GraphNode[] {
   const group = nodes.find((node) => node.id === groupId)
   if (!group || group.kind !== 'group') {
-    throw new WfError(`WF_GRAPH_INVALID: collaboration group not found: ${groupId}`, 'WF_GRAPH_INVALID')
+    throw new WfError(`WF_GRAPH_INVALID: Team not found: ${groupId}`, 'WF_GRAPH_INVALID')
   }
   const unique = [...new Set(memberIds.map(String).filter(Boolean))]
   for (const memberId of unique) {
     const member = nodes.find((node) => node.id === memberId)
-    if (!member) throw new WfError(`WF_GRAPH_INVALID: collaboration group member not found: ${memberId}`, 'WF_GRAPH_INVALID')
+    if (!member) throw new WfError(`WF_GRAPH_INVALID: Team member not found: ${memberId}`, 'WF_GRAPH_INVALID')
     if (member.kind !== 'agent' && member.kind !== 'parent') {
-      throw new WfError(`WF_GRAPH_INVALID: a collaboration group member must be a role node (${memberId} is ${member.kind})`, 'WF_GRAPH_INVALID')
+      throw new WfError(`WF_GRAPH_INVALID: a Team member must be a role node (${memberId} is ${member.kind})`, 'WF_GRAPH_INVALID')
     }
   }
   return nodes.map((node) => {
@@ -337,7 +337,7 @@ function applyGraphOpsInPlace(
             label: String(data.label ?? node.id),
             collabPrompt: String(data.collabPrompt ?? ''),
             memberIds: [],
-            // 组卡片尺寸（视图数据；缺省与画布默认一致）
+            // 协作组卡片尺寸（视图数据；缺省与画布默认一致）
             size: (data.size as { w: number; h: number } | undefined) ?? { w: 300, h: 220 },
           }
         }
@@ -366,7 +366,7 @@ function applyGraphOpsInPlace(
         }
         doc.lines = doc.lines.filter((line) => !removed.has(line.source) && !removed.has(line.target))
         doc.nodes = doc.nodes.filter((item) => !removed.has(item.id))
-        // 组内成员被删：从各组成员清单移除（组卡片保持可用）
+        // 组内成员被删：从各组成员清单移除（协作组卡片保持可用）
         doc.nodes = doc.nodes.map((item) => {
           if (item.kind !== 'group') return item
           const members = (item.data.memberIds ?? []).filter((memberId) => !removed.has(memberId))
@@ -375,7 +375,7 @@ function applyGraphOpsInPlace(
             : { ...item, data: { ...item.data, memberIds: members } } as GraphNode
         })
         if (node.kind === 'group') {
-          // 删除组卡片：成员出组（groupId 置 null）
+          // 删除 协作组卡片：成员出组（groupId 置 null）
           doc.nodes = doc.nodes.map((item) => {
             if (item.kind !== 'agent' && item.kind !== 'parent') return item
             return (item.data.groupId === nodeId) ? { ...item, data: { ...item.data, groupId: null } } as GraphNode : item

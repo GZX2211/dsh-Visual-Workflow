@@ -22,7 +22,7 @@ export declare const GRAPH_GROUP_HEIGHT = 220;
  *  由 tests/client/components/canvas/GroupCard.test.tsx 与样式片段对锁，两处不得各自漂移。 */
 export declare const GROUP_MEMBER_ROW_H = 41;
 export declare const GROUP_MEMBER_LIST_TOP = 78;
-/** 组卡片内成员横向留白（渲染尺寸与布局坐标共用同一常量）。 */
+/** 协作组卡片内成员横向留白（渲染尺寸与布局坐标共用同一常量）。 */
 export declare const GROUP_MEMBER_PADDING = 10;
 /** 节点实际尺寸（协作组卡片可拉伸，尺寸存 data.size；阶段节点用紧凑卡）。 */
 export declare function nodeSizeOf(node: SizedNodeLike): {

@@ -55,8 +55,8 @@ const DEFAULT_ROLE_TEMPLATES = [
   { id: 'r-3', kind: 'agent', name: '全栈开发工程师', systemPrompt: '' },
 ]
 
-/** 默认协作组模板（拖入「协作组」卡建组节点）。 */
-const DEFAULT_GROUP_TEMPLATES = [{ id: 'g-1', name: '协作组', collabPrompt: '' }]
+/** 默认 协作组模板（拖入「Team」卡建组节点）。 */
+const DEFAULT_GROUP_TEMPLATES = [{ id: 'g-1', name: 'Team', collabPrompt: '' }]
 
 /**
  * 构造远端桩：端点集合为全集（唯一本体），取值由 options 决定；

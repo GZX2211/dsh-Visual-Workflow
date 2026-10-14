@@ -37,7 +37,7 @@ export interface RunSnapshot {
      * 未配置元参数时不写（保持既有快照形状，旧数据兼容）。
      */
     meta?: OrgMeta;
-    /** 节点执行记录列表（仅可执行 agent 节点；协作组/阶段/文件/数据库不做执行记录）。 */
+    /** 节点执行记录列表（仅可执行 agent 节点；Team/阶段/文件/数据库不做执行记录）。 */
     nodes: Array<{
         /** 节点 id。 */
         nodeId: string;

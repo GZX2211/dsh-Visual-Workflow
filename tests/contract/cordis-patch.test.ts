@@ -39,7 +39,7 @@ const entryText =
   readFileSync(resolve(root, 'src/host/config.ts'), 'utf8') +
   readFileSync(resolve(root, 'src/host/visual-workflow-host.ts'), 'utf8')
 
-// 架构文档 §2.2 的 13 个 config 键 → 文本级期望值。
+// 架构文档 §2.2 的 config 键 → 文本级期望值。
 //   key: 期望出现的「键: 值」片段（弱匹配，容忍 !!js 标签；null 值匹配字面 null）。
 const CONFIG_KEYS: Array<[string, string]> = [
   ['dataDir', "dshHomePath('visual-workflow')"],
@@ -55,6 +55,7 @@ const CONFIG_KEYS: Array<[string, string]> = [
   ['documentTextLimit', '20000'],
   ['embeddingModelDir', 'null'],
   ['embeddingEndpoint', 'null'],
+  ['teamMemberLimit', '8'],
 ]
 
 /** 解析 cordis.patch.yml 中 config 块的顶层键（按缩进识别，不引 yaml 运行期依赖）。 */

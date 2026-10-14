@@ -122,7 +122,7 @@ describe('自动上下文来源枚举（autoContextSourceIds）', () => {
     expect(autoContextSourceIds(flow, b.id)).toEqual([a.id])
   })
 
-  it('协作组解耦：组卡片既不作来源也不回溯到组的上游', () => {
+  it('协作组解耦：协作组卡片既不作来源也不回溯到组的上游', () => {
     const a = newRoleNode('agent', 'a')
     const g = newGroupNode('g')
     const b = newRoleNode('agent', 'b')

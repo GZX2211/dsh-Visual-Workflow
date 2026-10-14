@@ -23,7 +23,7 @@
 | # | 事项 | 状态 |
 |---|---|---|
 | G1 | **画布所有字段的禁令句**（`retryLimit / reactLimit / promptFilePath / injectSystemPrompt / injectToolSections / sourceAssetId`）：`wf_org_catalog` 描述里的那句已删除（`e48e4bb`）；`ROLE_NODE_DATA_CONTRACT` 的**后果句已删除**（`cannot be configured through the graph tool: they are ignored when passed on create and preserved on update`），**字段枚举保留**为 `… are not configurable here.`——依据：该枚举在契约其它句零提及，整句删除即信息缺口，且「这些字段不归图工具管」属「怎么调用」而非冗余复述 | ✅ 已执行（保留枚举，偏差已备案） |
-| G2 | `reports/audit/VERIFY-ROUND2.md:272` 曾以「模型被明确告知不要传」为依据判定某条不构成契约漏洞；若 G1 的第二句也删掉，该依据失效（`apply.ts` 的 `PARENT_UNCONFIGURABLE_ROLE_FIELDS` 行为不变，结论实质不受影响） | 已告知 Team |
+| G2 | `reports/audit/VERIFY-ROUND2.md:272` 曾以「模型被明确告知不要传」为依据判定某条不构成契约漏洞；若 G1 的第二句也删掉，该依据失效（`apply.ts` 的 `PARENT_UNCONFIGURABLE_ROLE_FIELDS` 行为不变，结论实质不受影响） | 已告知协作组 |
 | G3 | 同一事实两个错误码：`wf_db_query` 的 `WF_BAD_CALLER`（不可达死防御）与 `WF_BAD_ARGS`（入口守卫） | ✅ 已执行：删死防御，`WF_BAD_CALLER` 唯一码（见 §4.1） |
 | G4 | **错误消息清点口径**：必须按「出口」找（`WfError` 构造点 + 所有封装构造函数如 `invalid(...)`），只扫字面量会漏（本轮已漏过 experience 域，见 §6.6） | 已写入治理规则 §3 |
 
@@ -36,7 +36,7 @@
 | 条目 | 位置 | 体量（≈tokens） | 语言 | 问题 | 处置建议 |
 |---|---|---|---|---|---|
 | `rules.designMethod`（设计方法三段式） | `src/host/prompts/org-sop.ts` → `ORG_SOP_DESIGN_METHOD` | 142 | **中文** | **纯规划方法论**：交付物清单 → 落盘路径与消费方 → 并行/规模判定。与工具调用无关；且其中的成本模型（"两次子代理开销 + 一次上下文交接"）与当前实现是否一致未再核对 | 重做：要么删除、要么下沉为「可选的规划指引」；同时确定语言（建议与工具描述统一为英文） |
-| `rules.graphSemantics` 第四节「协作组与虚拟节点的选择判据」 | `ORG_SOP_L1_GRAPH_SEMANTICS` 第 52-55 行 | ~110 | **中文** | **何时用 group / 何时用 proxy** 属选择方法论；且其中「成员之间可互发消息」「组员之间用 wf_ask_agent 互相发消息」在官方 Agent Team 通道下**已过时**（`collab.ts` 按 channel 分派：official → `send_message`） | 重做：判据部分改为与 `collab.ts` 通道语义一致的措辞（或改为按通道动态生成） |
+| `rules.graphSemantics` 第四节「协作组与虚拟节点的选择判据」 | `ORG_SOP_L1_GRAPH_SEMANTICS` 第 52-55 行 | ~110 | **中文** | **何时用 group / 何时用 proxy** 属选择方法论；且其中「成员之间可互发消息」「组员之间用 wf_ask_agent 互相发消息」在官方 Agent 协作组通道下**已过时**（`collab.ts` 按 channel 分派：official → `send_message`） | 重做：判据部分改为与 `collab.ts` 通道语义一致的措辞（或改为按通道动态生成） |
 | `rules.graphSemantics` 第一节中第 5、6 条的语义描述 | 同上 第 32-33 行 | ~40 | **中文** | 「父代理既是调度中枢也是执行单元…通常执行规划型任务」「组员之间用 wf_ask_agent 互相发消息」= 实现说明 + 过时工具名 | 重做：只保留 kind 取值与硬规则（kind 枚举本身属写图必需），删掉方法论/过时工具名 |
 | `rules.graphSemantics` 整体语言 | 同上 | 496（其中 CJK 997 字） | **中文** | 与同一返回体内英文的 `patchContract`/`gateMarking`、以及英文工具描述**中英混排**；每次 `omit ids` 调用全额灌入 | 重做时统一语言（建议英文），并考虑把「写图必需」与「方法论」拆成两段（方法论可按需召回而不是每次灌入） |
 | 文件头注释里的 L3 注入点 | `org-sop.ts` 第 8-9 行（`dynamic.userSop`，org-plan.ts TODO） | — | — | **未落地**：规划变体入参至今无消费方 | 与技术债一起清理或补实现 |
@@ -335,7 +335,7 @@
 | 护栏 | 父代理侧职责门禁全部删除；子代理护栏保留（工具层 + 域层双保险，只能 `agent`），且**不再要求**子代理处于编排运行实例内 |
 | 解析入口 | 写入/读取合并为单一 `resolveExperienceSubject`（原差异只剩被取消的那条子代理门禁） |
 | 端口 | `ExperienceRuntimePort` 删 `hasTeamInCurrentRun` / `hasGraphPatch` / `hasActiveRun`；宿主 `graphPatchedSessions` / `GraphPatchLogStore` / `recordGraphPatch` 与 `DIRS` 的 `graph-patches` 死目录整链移除 |
-| 注入链 | 「team 经验召回一次 → 渲染同一段文本追加给协作组每个成员」整链删除（`orchestrator/team-experience.ts`、`prompts/team-experience.ts`、`experience/team-context.ts` 及全部消费点） |
+| 注入链 | 「team 经验召回一次 → 渲染同一段文本追加给 协作组每个成员」整链删除（`orchestrator/team-experience.ts`、`prompts/team-experience.ts`、`experience/team-context.ts` 及全部消费点） |
 | 生命周期 | 经验初始化态**不再随运行终态清空**（`onRunTerminal` seam 与其通知链整链删除），改为宿主 `dispose()` 时整体清空 |
 
 ### 9.2 新增治理原则（用户裁决，已固化）

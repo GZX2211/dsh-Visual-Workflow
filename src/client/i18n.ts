@@ -1,9 +1,6 @@
 // src/client/i18n.ts
 //
-// 中英双语文案（覆盖模式/服务/断点/协作组/虚拟节点等需求模型的全部界面文案）。
-
-// 上限数值只有一处本体（画布交互约束），文案插值引用它，避免「改了上限忘了改提示」。
-import { GROUP_MEMBER_LIMIT } from './lib/group-members.js'
+// 中英双语文案（覆盖模式/服务/断点/Team/虚拟节点等需求模型的全部界面文案）。
 
 export const zh = {
   // 标题顶栏
@@ -30,8 +27,8 @@ export const zh = {
   files: '文件',
   databases: '数据库',
   stages: '阶段',
-  groupTemplates: '协作组',
-  groupMemberLimitHint: `协作组成员数量上限为 ${GROUP_MEMBER_LIMIT}`,
+  groupTemplates: 'Team',
+  groupMemberLimitHint: '协作组成员数量已达上限（上限由部署层 agent-team.maxMembers 决定）',
   toastGroupMemberAdded: '已加入协作组',
   stagePinHint: '固定模板',
   newTemplate: '新建模板',
@@ -200,7 +197,7 @@ export const zh = {
     pause: '暂停',
     input: "输入",
     output: "输出",
-    group: '协作组',
+    group: 'Team',
     proxy: '虚拟节点',
   },
   fileKindLabel: { text: '文本', file: '文件' },
@@ -248,7 +245,7 @@ export const zh = {
   fileUnset: '未选择文件',
   /** 文件多选提示（已选文件列表显示在按钮下方）。 */
   /** 协作组拖拽悬停提示（放开以入组）。 */
-  groupDropHint: '放开以入组',
+  groupDropHint: '放开以加入协作组',
   /** 角色卡元信息「模型」前缀。 */
   nodeMetaModel: '模型',
   /** 画布节点元信息「组合」前缀（显示选择的模式或组合）。 */
@@ -284,10 +281,10 @@ export const zh = {
   dbAdvancedHint: '召回条数=每次返回命中数(默认5,上限50)\n分块窗口/重叠=索引分块大小(384/128)\n相似度阈值=仅保留更高分(默认0)\n索引容量=单库最多索引行数(默认10000)',
   stageReadonlyHint: '阶段节点属性固定（名称硬编码），不支持编辑；删除按钮仅移除画布节点',
   collabPrompt: '协作 Prompt',
-  collabPromptHint: '追加注入到组内成员的用户消息；无论此处文本是否为空都默认列出组内全部成员（告知协作对象与可发消息对象）',
-  groupMembers: '组合成员',
-  groupMemberHint: '把角色拖入组内（或删除成员以移出）',
-  groupDefaultName: '协作组',
+  collabPromptHint: '追加到 协作组成员的任务消息：官方 协作组可用时作为「团队协作说明」注入（协作规则由官方 team:policy 承担）；官方不可用时连同成员清单与 wf_ask_agent 通信指引一并注入',
+  groupMembers: '团队成员',
+  groupMemberHint: '把角色拖入 协作组内（或删除成员以移出）',
+  groupDefaultName: 'Team',
   /** 卡片右上角「交换左右连接点」按钮提示（用户批注：美化布线防交叉）。 */
   swapPorts: '交换左右连接点',
   proxyMainLabel: '主节点',
@@ -314,7 +311,7 @@ export const zh = {
   newWorkflow: '新建工作流',
   deleteFlow: '删除工作流',
   // 模板
-  templateDefaultName: { workflow: '未命名工作流', role: '新角色模板', file: '新文件模板', database: '新数据库模板', group: '新协作组模板' },
+  templateDefaultName: { workflow: '未命名工作流', role: '新角色模板', file: '新文件模板', database: '新数据库模板', group: '新 协作组模板' },
   // 草稿默认名（本地草稿未命名时使用；与模板默认名分开——实例/模板语义不同）
   untitledWorkflow: '未命名工作流',
   untitledService: '未命名服务',
@@ -562,9 +559,9 @@ export const en: Dict = {
   files: 'Files',
   databases: 'Databases',
   stages: 'Stages',
-  groupTemplates: 'Groups',
-  groupMemberLimitHint: `A group supports up to ${GROUP_MEMBER_LIMIT} members`,
-  toastGroupMemberAdded: 'Added to group',
+  groupTemplates: 'Teams',
+  groupMemberLimitHint: 'Team member limit reached (the limit comes from agent-team.maxMembers in the deployment layer)',
+  toastGroupMemberAdded: 'Added to Team',
   stagePinHint: 'Fixed template',
   newTemplate: 'New template',
   libEmptyTemplates: 'No templates yet — click + to create',
@@ -724,7 +721,7 @@ export const en: Dict = {
     pause: 'Pause',
     input: "Input",
     output: "Output",
-    group: 'Group',
+    group: 'Team',
     proxy: 'Proxy',
   },
   fileKindLabel: { text: 'Text', file: 'File' },
@@ -769,7 +766,7 @@ export const en: Dict = {
   fileKind: 'File kind',
   fileContent: 'File content',
   fileUnset: 'No file selected',
-  groupDropHint: 'Drop to join the group',
+  groupDropHint: 'Drop to join the Team',
   nodeMetaModel: 'Model',
   nodeMetaPreset: 'Preset',
   description: 'Description',
@@ -803,10 +800,10 @@ export const en: Dict = {
   dbAdvancedHint: 'Top-K: hits per search (default 5, max 50)\nchunk size/overlap: index window (384/128)\nthreshold: keep only higher scores (default 0)\nindex rows cap: rows indexed per DB (default 10000)',
   stageReadonlyHint: 'Stage node attributes are fixed (hardcoded label); delete removes the canvas node only',
   collabPrompt: 'Collab prompt',
-  collabPromptHint: 'Appended to every member user message; always lists all group members (who you can message)',
-  groupMembers: 'Members',
-  groupMemberHint: 'Drag agents into the group (or remove members to exit)',
-  groupDefaultName: 'Group',
+  collabPromptHint: 'Appended to each Team member task message: with the official Team it is injected as a "team collaboration note" (the collaboration rules come from the official team:policy); without it the member roster and the wf_ask_agent guidance are injected together',
+  groupMembers: 'Team members',
+  groupMemberHint: 'Drag agents into the Team (or remove members to exit)',
+  groupDefaultName: 'Team',
   swapPorts: 'Swap left/right ports',
   proxyMainLabel: 'Main node',
   proxyReadonlyHint: 'Proxy nodes share the main node instance; edits on the main node sync automatically',
@@ -829,7 +826,7 @@ export const en: Dict = {
   meta: 'Status',
   newWorkflow: 'New workflow',
   deleteFlow: 'Delete workflow',
-  templateDefaultName: { workflow: 'Untitled workflow', role: 'New agent template', file: 'New file template', database: 'New database template', group: 'New group template' },
+  templateDefaultName: { workflow: 'Untitled workflow', role: 'New agent template', file: 'New file template', database: 'New database template', group: 'New Team template' },
   // Draft default names (used when a local draft has no name; separate from template defaults)
   untitledWorkflow: 'Untitled workflow',
   untitledService: 'Untitled service',
@@ -882,7 +879,7 @@ export const en: Dict = {
   selfLoop: 'Self loops are not allowed',
   duplicateConnection: 'Duplicate connection',
   proxyParallel: 'Main node and its proxies cannot share the same target handle',
-  groupMemberFlowLine: 'Group members can only connect context/database lines, not flow lines',
+  groupMemberFlowLine: 'Team members can only connect context/database lines, not flow lines',
   status: {
     pending: 'Pending',
     running: 'Running',

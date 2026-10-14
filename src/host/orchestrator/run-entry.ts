@@ -38,7 +38,7 @@ export interface RunEntry {
   lastActiveAt: number
   /** 阻塞等待表：`${runId}:${nodeId}` → waiter（wait:true 路径）。 */
   waiters: Map<string, Waiter>
-  /** 待回复登记表：askId → PendingAsk（wf_ask_agent 路径；非阻塞，供 reply 归属校验与组聚合判定）。 */
+  /** 待回复登记表：askId → PendingAsk（wf_ask_agent 路径；非阻塞，供 reply 归属校验）。 */
   asks: Map<string, PendingAsk>
   /**
    * 执行者模式：父代理节点 id（父代理被流程线连接，作为执行单元先执行自身任务）。
@@ -89,11 +89,6 @@ export interface RunNodeResult {
   status: 'started' | 'paused' | 'ok' | 'fail'
   childId?: string
   output?: string
-  /**
-   * 协作组启动路径的成员清单（仅当被启动节点是协作组卡片时给出）。
-   * childId 缺省：一个协作组对应多个成员会话，无单一 child。
-   */
-  members?: Array<{ nodeId: string; target: string; childId: string }>
 }
 
 /** 官方 subagent/end 观察 payload（全字段可选，运行时守卫）。 */

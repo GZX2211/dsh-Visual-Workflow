@@ -7,7 +7,7 @@ import { buildNodeTaskBlock, type CollabChannel } from '../prompts/index.js'
 import { isGroupMember } from '../graph/index.js'
 import type { RoleNode, WorkflowDocument } from '../shared/graph-model.js'
 import type { RunSnapshot } from '../shared/types.js'
-import { buildNodeContextFacts, collabBlockOf } from './graph-facts.js'
+import { buildNodeContextFacts, collabBlockOf, collabPromptOf } from './graph-facts.js'
 
 /**
  * 解析节点任务块的输入契约（data.inputSchema）。
@@ -39,7 +39,7 @@ export function buildNodeBlocks(input: {
   /** 系统语言名（从 DSH 用户设置读取；注入「回复/注释/思考必须使用该语言」规则）。 */
   systemLanguage: string
   /**
-   * 协作通道（仅组内成员有意义）：official = 官方 Agent Team 邮箱；legacy = 插件自建协作工具。
+   * 协作通道（仅组内成员有意义）：official = 官方 Agent 协作组邮箱；legacy = 插件自建协作工具。
    * 缺省 legacy，保持未启用官方团队时的文案与行为。
    */
   collabChannel?: CollabChannel
@@ -53,6 +53,8 @@ export function buildNodeBlocks(input: {
     documentTextLimit: input.documentTextLimit,
   })
   const outputContract = outputContractOf(node)
+  // 协作通道缺省 legacy（未启用官方 协作组时保持既有文案与行为）
+  const channel: CollabChannel = input.collabChannel ?? 'legacy'
 
   const text = buildNodeTaskBlock({
     facts: {
@@ -61,14 +63,19 @@ export function buildNodeBlocks(input: {
       filePaths,
       dbToolHint,
       isGroupMember: isGroupMember(flow, node.id),
-      collabChannel: input.collabChannel ?? 'legacy',
+      collabChannel: channel,
       inputContract: inputContractOf(node),
       outputContract,
       systemLanguage: input.systemLanguage,
     },
   })
-  // 协作组成员：把成员清单块（含成员标识 + 角色名 + 自定义说明）追加到首条用户消息。
-  // 协作信息不作为系统提示词段注入，只进用户消息。
-  const collabBlock = collabBlockOf(flow, node.id, input.collabChannel ?? 'legacy')
+  // 协作信息只在**降级通道**追加完整协作块（成员清单 + 通信指引）：成员是官方 teammate 时，
+  // 官方为其注入 team:policy 与九个 协作组工具（list_agents / send_message / 任务板），插件再列
+  // 一份成员清单与通信指引就是第二份协作契约（用户裁决 2026-10：与官方重复的定义以官方为准）。
+  // 但用户填写的组卡片协作说明不是官方已定义的内容，官方通道下仍作为「团队协作说明」注入。
+  const custom = collabPromptOf(flow, node.id)
+  const collabBlock = channel === 'legacy'
+    ? collabBlockOf(flow, node.id, channel)
+    : (custom ? `团队协作说明：\n${custom}` : '')
   return [{ type: 'text', text: collabBlock ? `${text}\n\n${collabBlock}` : text }]
 }

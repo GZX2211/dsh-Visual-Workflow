@@ -207,7 +207,10 @@ export interface CatalogGroupNodeEntry {
   label: string
   collabPrompt: string
   memberIds: string[]
-  /** 是否参与流程（未接线的孤立组卡片不得启动）。口径见 CatalogRoleNodeEntry.schedulable。 */
+  /**
+   * 恒为 false：协作组卡片是包裹层，不是调度目标（对它调用 wf_run_node 会被运行时拒绝）。
+   * 成员节点才是可调度单元，各自带自己的 schedulable。
+   */
   schedulable?: boolean
 }
 

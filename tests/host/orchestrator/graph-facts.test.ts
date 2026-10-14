@@ -256,7 +256,7 @@ describe('上游产出自动注入（buildNodeContextFacts）', () => {
     )
     const context = factsOf(flow, 'a2', snapshotOf([
       { nodeId: 'a1', status: 'ok', output: '需求结论' },
-      { nodeId: 'g1', status: 'ok', output: '（协作组）全部成员已完成' },
+      { nodeId: 'g1', status: 'ok', output: '（Team）全部成员已完成' },
       { nodeId: 'm1', status: 'armed', output: '评审意见' },
     ]))
     expect(context.upstreamContext).toEqual([])

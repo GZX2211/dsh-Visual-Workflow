@@ -71,7 +71,7 @@ export function useAutoLayout(
     }
 
     // ② 已布局：只检测重叠并提示（非阻断，不自动重排）
-    // 排除「重复渲染」的节点（组内成员写入组卡片内、虚拟节点与主节点同坐标）：否则会永远告警
+    // 排除「重复渲染」的节点（组内成员写入 协作组卡片内、虚拟节点与主节点同坐标）：否则会永远告警
     const inputs = toLayoutInputs(nodes, (node) => groupCardSizeOf(node))
     const excluded = collapsedIdsOf(inputs)
     const boxes = layoutBoxesOf(nodes, (node) => groupCardSizeOf(node), excluded)

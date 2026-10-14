@@ -170,8 +170,8 @@ export interface StageNode extends BaseNode {
     };
 }
 /**
- * 协作组节点：组卡片 + 组内角色并行执行。
- * 组内成员节点经 memberIds 关联；组卡片仅提供流程入/出连接点。
+ * 协作组节点：协作组卡片 + 组内角色并行执行。
+ * 组内成员节点经 memberIds 关联；协作组卡片仅提供流程入/出连接点。
  */
 export interface GroupNode extends BaseNode {
     kind: 'group';

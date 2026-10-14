@@ -192,7 +192,7 @@ export declare abstract class RuntimeBase {
     currentResolvedFlow(entry: RunEntry): Promise<WorkflowDocument>;
     /**
      * 刷新实例保存后的运行编排基线（双向同步①「画布→编排」的闭环补全）：
-     * 保存后若**编排语义确有变更**（flow-diff 判定，纯坐标拖动/组卡片缩放等几何改动不算），
+     * 保存后若**编排语义确有变更**（flow-diff 判定，纯坐标拖动/协作组卡片缩放等几何改动不算），
      * 且该 run 正在运行（running），立即向父代理注入【编排变更】通知（steer 插队优先，
      * 父代理空闲时 followupRoot 唤醒），父代理据此重新召回实例骨架并调整后续编排。
      *

@@ -15,7 +15,7 @@ function nodeOf(id: string, kind: CanvasNode['kind'], extra: Record<string, unkn
   return { id, kind, position: { x: 100, y: 200 }, data: { label: id, ...extra } } as CanvasNode
 }
 
-describe('画布几何（协作组/阶段）', () => {
+describe('画布几何（Team/阶段）', () => {
   it('阶段节点使用紧凑尺寸；角色/组使用各自尺寸', () => {
     expect(nodeSizeOf(nodeOf('s', 'start'))).toEqual({ w: 168, h: 88 })
     expect(nodeSizeOf(nodeOf('e', 'end'))).toEqual({ w: 168, h: 88 })

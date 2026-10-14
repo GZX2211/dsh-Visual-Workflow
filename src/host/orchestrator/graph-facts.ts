@@ -54,9 +54,9 @@ export function pauseNodeIdsOf(flow: WorkflowDocument): string[] {
  * 编排指令 facts 的节点清单（仅可执行且参与流程的 agent 节点；父代理即编排者本人不列）。
  * 「参与流程」判定：节点自身或其虚拟节点作为任一流程线（flow-out/flow-in）的源/目标；
  * 未参与流程的 agent 节点 = 用户批注的「不执行任务的无关节点」，不进入清单。
- * 协作组是包裹层（无执行，只注入协作协议），proxy 镜像主节点 agent id 相同，
+ * 协作组卡片是包裹层（不是执行主体），proxy 镜像主节点 agent id 相同，
  * 阶段/文件/数据库均非可执行节点——一律不列入待编排节点（用户批注，图3）。
- * 协作组并行说明见 collabGroupList（单独成段，不并入节点清单）。
+ * 协作组成员节点不连流程线（组内成员仅 ctx/db 连接点），其启动清单由 collabGroupList 单独成段给出。
  */
 export function orchestrationNodeList(flow: WorkflowDocument): Array<{ id: string; label: string }> {
   return flow.nodes
@@ -64,14 +64,17 @@ export function orchestrationNodeList(flow: WorkflowDocument): Array<{ id: strin
     .map((n) => ({ id: n.id, label: labelOf(n) }))
 }
 
-/** 编排指令 facts 的协作组说明（组内成员并行启动提示；仅列参与流程的协作组卡片）。 */
+/**
+ * 编排指令 facts 的 协作组说明（协作组卡片 + 成员节点 id；仅列参与流程的 协作组卡片）。
+ * 协作组卡片只标出团队的执行位置，父代理按此逐个调度其成员节点（协作组卡片本身不可作为调度目标）。
+ */
 export function collabGroupList(flow: WorkflowDocument): Array<{ groupId: string; label: string; memberIds: string[] }> {
   return flow.nodes
     .filter((n): n is GroupNode => n.kind === 'group' && nodeParticipatesInFlow(flow, n.id))
     .map((n) => ({ groupId: n.id, label: n.data.label || n.id, memberIds: n.data.memberIds ?? [] }))
 }
 
-/** 读取某角色节点所属协作组的协作 Prompt（组卡片 data.collabPrompt；非组内成员返回空串）。 */
+/** 读取某角色节点所属 协作组的协作 Prompt（协作组卡片 data.collabPrompt；非组内成员返回空串）。 */
 export function collabPromptOf(flow: WorkflowDocument, nodeId: string): string {
   const group = flow.nodes.find(
     (n): n is GraphNode & { data: { collabPrompt?: string; memberIds?: string[] } } =>

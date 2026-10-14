@@ -36,9 +36,8 @@ export interface AskAgentDelivery {
 
 /**
  * 待回复登记记录（注册于 RunEntry.asks）。
- * 只承担两件事：reply 的归属校验（谁问的、问的谁、问的哪一题）+ 协作组聚合判定
- * （组内是否仍有未回复的 ask）。不含 Promise/timer/状态机：ask 不挂起，故无等待受体，
- * 记录到期由 TTL 惰性清理。
+ * 只承担一件事：reply 的归属校验（谁问的、问的谁、问的哪一题）。不含 Promise/timer/状态机：
+ * ask 不挂起，故无等待受体，记录到期由 TTL 惰性清理。
  */
 export interface PendingAsk {
   askId: string
@@ -47,7 +46,7 @@ export interface PendingAsk {
   fromNodeId: string
   toNodeId: string
   message: string
-  /** 记录保留时长（到期后惰性清理，停止接受该 askId 的 reply，且不再阻塞组聚合）。 */
+  /** 记录保留时长（到期后惰性清理，停止接受该 askId 的 reply）。 */
   ttlMs: number
   expiresAt: number
 }

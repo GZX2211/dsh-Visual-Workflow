@@ -332,7 +332,7 @@ describe('模板 CRUD（全局共享）与子类过滤', () => {
   })
 
   it('协作组模板增删查（groups/ 目录，全局共享）', async () => {
-    const group: GroupTemplate = { id: 'gt1', name: '审查组', collabPrompt: '你们是双 Agent 协作组' }
+    const group: GroupTemplate = { id: 'gt1', name: '审查组', collabPrompt: '你们是双 Agent Team' }
     await store.saveTemplate('group', group)
     expect((await store.listTemplates('group')).map((t) => t.id)).toEqual(['gt1'])
     expect(await store.getTemplate('group', 'gt1')).not.toBeNull()

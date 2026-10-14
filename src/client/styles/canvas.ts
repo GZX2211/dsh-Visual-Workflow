@@ -1,6 +1,6 @@
 // src/client/styles/canvas.ts
 //
-// 画布域。画布容器与网格背景、图舞台（连线 / 箭头 / 接点 / 缩放控件）、节点卡片与协作组卡片、画布内文件列表与空态提示。
+// 画布域。画布容器与网格背景、图舞台（连线 / 箭头 / 接点 / 缩放控件）、节点卡片与 协作组卡片、画布内文件列表与空态提示。
 //
 // 本文件内规则顺序即覆盖顺序（同特异性下后写的覆盖先写的），禁止重排。
 
@@ -480,7 +480,7 @@ g.is-locked .wf-graph__edge-hit {
   height: 220px;
 }
 
-/* 拖拽悬停入组高亮（卡片插入协作组卡片区域即识别为入组） */
+/* 拖拽悬停入组高亮（卡片插入 协作组卡片区域即识别为入组） */
 .wf-group-node.is-drop-target .wf-node--group {
   border-color: var(--wf-pass);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--wf-pass) 26%, transparent), 0 0 22px color-mix(in srgb, var(--wf-pass) 32%, transparent);
@@ -570,7 +570,7 @@ g.is-locked .wf-graph__edge-hit {
   border-width: 1px;
 }
 
-/* 组卡片流程接点（居中）：位置随语义类下沉，不得退回内联样式 */
+/* 协作组卡片流程接点（居中）：位置随语义类下沉，不得退回内联样式 */
 .wf-graph__handle--group-flow {
   top: 50%;
 }

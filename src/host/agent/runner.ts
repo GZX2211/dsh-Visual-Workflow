@@ -20,14 +20,15 @@ import { readFile } from 'node:fs/promises'
 import { dbInEdges } from '../graph/index.js'
 import type { FlowStore } from '../storage/flow-store.js'
 import type { GraphNode, RoleNode } from '../shared/graph-model.js'
-import type { NodeRunner, NodeStartInput, OrchestratorLogger, GroupStartInput, GroupStartResult } from '../orchestrator/index.js'
+import type { NodeRunner, NodeStartInput, OrchestratorLogger } from '../orchestrator/index.js'
 import { consumeReactCappedOf, type ReactGuardBridge } from './guards.js'
 import { CHILD_AGENT_HIDDEN_TOOLS, RESERVED_TRANSPORT_TOOL, TEAM_TOOL_NAMES, WF_FINISH, WF_RUN_NODE, WF_RUN_NODE_WAIT } from '../shared/protocol.js'
 import type { ModelSelectionLike, ModelSelectionSetup, SelectionChildContext } from './model-selection.js'
 import type { ChildPromptSetup, ChildPromptState } from './prompt-setup.js'
 import type { ChildToolFilterSetup } from './child-tool-filter.js'
 import type { AgentTeamsServiceLike } from '../team/index.js'
-import { TeamGroupRunner } from './group-runner.js'
+import type { TeamMemberStartResult } from './member-launcher.js'
+import { TeamMemberLauncher } from './member-launcher.js'
 
 // ---------------------------------------------------------------------------
 // 纯函数（签名/复用键/provider 选择）
@@ -242,6 +243,14 @@ export interface ToolsView {
    * 无 agent/服务缺失回退全局层。
    */
   agentToolNames(sessionId?: string): Promise<string[]>
+  /**
+   * 某会话父代理 scope 的**同步**工具名视图（官方 协作组工具面判据专用）。
+   *
+   * 与 agentToolNames 同源（同一 scope key 语义），只做同步可达的部分：全局层 ∪ 该 agent
+   * 自身 scope。为什么需要同步版本：成员启动路径判据（teamAvailable）是同步契约；而官方
+   * 协作组工具注册在**成员自身 scope**，不经过 preset standing scope，故判据不需要异步取用。
+   */
+  agentToolNamesSync(sessionId?: string): string[]
 }
 
 /**
@@ -357,6 +366,10 @@ export class CordisToolsView implements ToolsView {
   }
 
   async agentToolNames(sessionId?: string): Promise<string[]> {
+    return this.agentToolNamesSync(sessionId)
+  }
+
+  agentToolNamesSync(sessionId?: string): string[] {
     const tools = this.toolsService()
     if (!tools) return []
     // 优先取当前会话父代理（root agent）scope 视图：全局层 ∪ 父代理链注册工具。
@@ -417,7 +430,7 @@ export interface ResolveToolsInput {
 const CHILD_BLOCKED_TOOLS: readonly string[] = CHILD_AGENT_HIDDEN_TOOLS
 
 /**
- * 官方 Team 工具名（永不进入 allow 名单）。
+ * 官方 协作组工具名（永不进入 allow 名单）。
  *
  * 运行事实：官方包把这 9 个工具注册在成员**自身作用域层**，而 `tools.restrict` 的 allow/deny
  * 只针对「可限制的全局工具名」校验并只过滤继承面——名字一旦进入名单，创建子代理时官方校验
@@ -510,10 +523,16 @@ export interface NodeAgentRunnerDeps {
   /** subagents 服务惰性解析（调用时求值）。 */
   subagents: () => SubagentsServiceLike | null
   /**
-   * 官方 Agent Team 服务惰性解析（协作组路径用）。
-   * 返回 null 表示官方团队未挂载：协作组回退到逐节点启动的既有路径。
+   * 官方 Agent 协作组服务惰性解析（协作组成员路径用）。
+   * 返回 null 表示官方团队未挂载：成员节点降级为普通可延续子代理（协作通信走 wf_ask_agent）。
    */
   teams: () => AgentTeamsServiceLike | null
+  /**
+   * 官方 协作组会话级成员名额上限（部署层 agent-team.maxMembers 的镜像）。
+   * 官方语义是「本团队累计创建过的 teammate 数（含失败的）」；新建成员前用它预检，
+   * 把运行期的官方类型化失败提前成可行动错误。
+   */
+  teamMemberLimit: number
   /** 工具视图（白名单解析）。 */
   toolsView: ToolsView
   /** 子代理工具白名单装配（协作组成员的创建窗口内安装；节点路径由官方创建请求携带）。 */
@@ -543,16 +562,16 @@ export interface NodeAgentRunnerDeps {
 export class NodeAgentRunner implements NodeRunner {
   /** 子代理表：复用键 → { childId, signature }。 */
   private readonly nodeChildren = new Map<string, { childId: string; signature: string }>()
-  /** 本类持有护栏登记的全部 childId（节点路径 + 协作组路径）；dispose 据此释放。 */
+  /** 本类持有护栏登记的全部 childId（普通节点路径 + 协作组成员路径）；dispose 据此释放。 */
   private readonly childIds = new Set<string>()
   /** 软截停消费适配（NodeRunner 契约）。 */
   readonly consumeReactCapped: NonNullable<NodeRunner['consumeReactCapped']>
-  /** 协作组启动器（官方 Team 路径；与节点路径共用同一套依赖与装配对象）。 */
-  private readonly groups: TeamGroupRunner
+  /** 协作组成员启动器（官方 协作组路径；与普通节点路径共用同一套装配对象）。 */
+  private readonly members: TeamMemberLauncher
 
   constructor(private readonly deps: NodeAgentRunnerDeps) {
     this.consumeReactCapped = consumeReactCappedOf(deps.react)
-    this.groups = new TeamGroupRunner({
+    this.members = new TeamMemberLauncher({
       store: deps.store,
       agents: deps.agents,
       subagents: deps.subagents,
@@ -563,9 +582,18 @@ export class NodeAgentRunner implements NodeRunner {
       modelSelection: deps.modelSelection,
       toolFilter: deps.toolFilter,
       promptSetup: deps.promptSetup,
+      memberLimit: deps.teamMemberLimit,
       ...(deps.logger ? { logger: deps.logger } : {}),
-      // 纯函数注入：与节点路径同源，杜绝成员与节点两套白名单/提示词口径
-      resolveTools: resolveAgentTools,
+      // 纯函数注入：与普通节点路径同源，杜绝成员与节点两套白名单/提示词口径
+      resolveTools: (input) => resolveAgentTools({
+        store: deps.store,
+        toolsView: deps.toolsView,
+        sessionId: input.sessionId,
+        flowId: input.flowId,
+        node: input.node,
+        ...(input.disabledTools ? { disabledTools: input.disabledTools } : {}),
+        ...(input.mode ? { mode: input.mode } : {}),
+      }),
       resolveRolePrompt,
       detectProvider: detectSubagentProvider,
       signatureOf: (node, resolvedTools, rolePrompt, injectSystemPrompt, injectToolSections, collabPrompt) =>
@@ -573,26 +601,16 @@ export class NodeAgentRunner implements NodeRunner {
     })
   }
 
-  // ---- NodeRunner 协作组契约 -------------------------------------------------
+  // ---- NodeRunner 官方 协作组契约 ---------------------------------------------
 
-  /** 官方 Agent Team 路径是否可用（协作块文案与执行路径选择的判据）。 */
+  /** 官方 协作组路径是否可用（成员启动路径选择与协作块文案的判据）。 */
   teamAvailable(sessionId: string): boolean {
-    return this.groups.available(sessionId)
+    return this.members.available(sessionId)
   }
 
-  /** 把整个协作组启动为官方 Agent Team（不可用时返回 null，由编排器回退）。 */
-  async startGroupTask(input: GroupStartInput): Promise<GroupStartResult | null> {
-    const result = await this.groups.start(input)
-    // 组成员由官方 Team 直接创建（不经 ensureNodeChild），其 childId 必须在此补登记：
-    // 否则 dispose 遍历 childIds 时永远 drop 不到它们，护栏登记（limits/cappedFlags）
-    // 在宿主生命周期内只增不减——每子代理状态必须有释放条件与上界。
-    // 复用成员一并登记（Set 幂等），使组路径与节点路径的释放语义完全一致。
-    if (result) {
-      for (const member of result.members) {
-        if (member.childId) this.childIds.add(member.childId)
-      }
-    }
-    return result
+  /** 官方 协作组成员的当前状态（成员运行态权威读源；非成员或官方不可用返回 null）。 */
+  teamMemberStatusOf(sessionId: string, nodeId: string): 'running' | 'inactive' | 'provisioning' | 'failed' | null {
+    return this.members.memberStatusOf(sessionId, nodeId)
   }
 
   // ---- NodeRunner 契约 -------------------------------------------------------
@@ -605,6 +623,16 @@ export class NodeAgentRunner implements NodeRunner {
    *   - 完成事件由编排器监听 subagent/end 更新快照，本方法不等待执行结果。
    */
   async startNodeTask(input: NodeStartInput): Promise<{ childId: string; created: boolean; replacedChildId?: string }> {
+    // 协作组成员节点：官方 协作组可用时启动为官方 teammate（成员身份/消息/任务板/状态全交官方）；
+    // 官方不可用时静默降级到下面的普通可延续子代理路径（协作通信走 wf_ask_agent）。
+    if (input.teamMember === true && this.members.available(input.sessionId)) {
+      const member: TeamMemberStartResult | null = await this.members.start(input)
+      if (member) {
+        // childId 登记与普通路径同源：dispose 据此回收护栏登记，每子代理状态必须有上界
+        this.childIds.add(member.childId)
+        return { childId: member.childId, created: member.created }
+      }
+    }
     const { childId, created, replacedChildId } = await this.ensureNodeChild(input)
     // 每轮派发前刷新护栏上限与模型选择（节点级参数可按次覆盖；官方 selection 可变态）。
     // 【时序】setLimit 必须位于任何 await 之前：子代理本轮第一步推理的 pre-step 事件

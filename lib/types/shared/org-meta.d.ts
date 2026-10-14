@@ -64,7 +64,7 @@ export interface OrgBudget {
     groupMax: number;
     /** 协作组剩余。 */
     groupRemaining: number | null;
-    /** 单个协作组内人数上限（0 = 不限制）。 */
+    /** 单个 协作组内人数上限（0 = 不限制）。 */
     membersMax: number;
     /** 单列并行分支上限（0 = 不限制）。 */
     parallelBranchMax: number;

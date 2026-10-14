@@ -356,11 +356,11 @@ export class FlowStore {
   async listTemplates(kind: 'file'): Promise<FileTemplate[]>
   /** 列出数据库模板（data/ 下按字段判别过滤）。 */
   async listTemplates(kind: 'database'): Promise<DatabaseTemplate[]>
-  /** 列出协作组模板（groups/ 目录）。 */
+  /** 列出 协作组模板（groups/ 目录）。 */
   async listTemplates(kind: 'group'): Promise<GroupTemplate[]>
   /** 列出某类模板（kind 联合兜底；具体子类型请用窄签名）。 */
   async listTemplates(kind: TemplateKind): Promise<Template[]>
-  /** 列出某类模板（roles/ 角色；groups/ 协作组；data/ 文件+数据库按字段判别过滤）。 */
+  /** 列出某类模板（roles/ 角色；groups/ Team；data/ 文件+数据库按字段判别过滤）。 */
   async listTemplates(kind: TemplateKind): Promise<Template[]> {
     const dir = join(this.root, templateDir(kind))
     const names = await readDirNames(dir)

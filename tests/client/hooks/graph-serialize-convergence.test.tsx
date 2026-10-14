@@ -51,7 +51,7 @@ const canvasNodes: CanvasNode[] = [
   { id: 'p1', kind: 'proxy', position: { x: 10, y: 20 }, data: {}, proxySourceId: 'n1' },
   { id: 's1', kind: 'start', position: { x: 0, y: 0 }, data: { label: '启动' } },
   { id: 'n1', kind: 'agent', position: { x: 40, y: 0 }, data: { label: '节点一', kind: 'agent', systemPrompt: '', retryLimit: 3 } },
-  { id: 'g1', kind: 'group', position: { x: 80, y: 0 }, data: { label: '协作组', collabPrompt: '', memberIds: ['n1'], size: { w: 300, h: 220 } } },
+  { id: 'g1', kind: 'group', position: { x: 80, y: 0 }, data: { label: 'Team', collabPrompt: '', memberIds: ['n1'], size: { w: 300, h: 220 } } },
 ]
 
 const canvasEdges: CanvasEdge[] = [
@@ -64,7 +64,7 @@ const goldenNodes = [
   { id: 'p1', kind: 'proxy', position: { x: 10, y: 20 }, data: {}, proxySourceId: 'n1' },
   { id: 's1', kind: 'start', position: { x: 0, y: 0 }, data: { label: '启动' } },
   { id: 'n1', kind: 'agent', position: { x: 40, y: 0 }, data: { label: '节点一', kind: 'agent', systemPrompt: '', retryLimit: 3 } },
-  { id: 'g1', kind: 'group', position: { x: 80, y: 0 }, data: { label: '协作组', collabPrompt: '', memberIds: ['n1'], size: { w: 300, h: 220 } } },
+  { id: 'g1', kind: 'group', position: { x: 80, y: 0 }, data: { label: 'Team', collabPrompt: '', memberIds: ['n1'], size: { w: 300, h: 220 } } },
 ]
 
 const goldenLines = [

@@ -48,7 +48,7 @@ export interface GraphCanvasProps {
     }): void;
     /** 交换节点左右连接点（用户批注：美化布线防交叉）。 */
     onSwapPorts(id: string): void;
-    /** 左栏拖拽悬停的协作组 id（组卡片高亮 + 「放开以入组」提示）。 */
+    /** 左栏拖拽悬停的协作组 id（协作组卡片高亮 + 「放开以入组」提示）。 */
     dropTargetGroupId?: string | null;
     fitLabel: string;
     zoomInLabel: string;

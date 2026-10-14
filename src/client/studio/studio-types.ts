@@ -12,14 +12,14 @@ import type { ServiceState, RoleTemplate, FileTemplate, DatabaseTemplate, GroupT
 import type { AssetKind, AssetVersionEntry, ExperienceEntry, RoleAssetDetail, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../../host/shared/asset-types.js'
 import type { CanvasEdge, CanvasNode } from '../lib/canvas-model.js'
 
-/** 左侧栏 Tab：工作流 / 角色 / 数据（文件+数据库）/ 其他（阶段+协作组）。
+/** 左侧栏 Tab：工作流 / 角色 / 数据（文件+数据库）/ 其他（阶段+Team）。
  *  资产态下「数据」以「经验」呈现（同一 Tab key，语义与内容随库来源切换）。 */
 export type LibTab = 'workflow' | 'role' | 'data' | 'other'
 /** 左侧库来源：模版（可随意修改的草稿）/ 资产（带版本控制的晋升形态）。 */
 export type LibrarySource = 'template' | 'asset'
 /** 左侧库选中种类（模板 kind + 固定卡片 + 工作流模板 + 资产 + 经验）。 */
 export type LibSelKind = 'workflow' | 'service' | 'workflowTemplate' | 'role' | 'file' | 'database' | 'parentTemplate' | 'stage' | 'groupTemplate' | 'flowAsset' | 'roleAsset' | 'experience'
-/** 模板种类（与后端 listTemplates 契约一致；group 为协作组模板）。 */
+/** 模板种类（与后端 listTemplates 契约一致；group 为 协作组模板）。 */
 export type TemplateKind = 'role' | 'file' | 'database' | 'group'
 
 /**

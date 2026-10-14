@@ -32,12 +32,12 @@ export interface NodeTaskBlockParams {
          */
         dbToolHint: string;
         /**
-         * 协作组成员标记：该节点为协作组成员时注入「组内通信必须走本通道」的软约束。
+         * 协作组成员标记：该节点为 协作组成员时注入「组内通信必须走本通道」的软约束。
          */
         isGroupMember: boolean;
         /**
          * 协作通道（isGroupMember 时决定注入哪条通信约束）：
-         *   - official = 官方 Agent Team 邮箱（send_message + 成员名）；
+         *   - official = 官方 Agent 协作组邮箱（send_message + 成员名）；
          *   - legacy = 插件自建协作工具（wf_ask_agent + 成员节点 id）。
          * 缺省 legacy：未启用官方团队时保持既有文案与行为。
          */
@@ -66,10 +66,8 @@ export interface NodeTaskBlockParams {
  * 面向模型中文（W-04）；只保留「软约束固化」类条目（AI 有选择权、值得强调的行为规则）。
  */
 export declare const NODE_HARD_CONSTRAINTS: {
-    /** 协作组内通信必须经插件自建协作工具（legacy 通道的组内成员注入）。 */
+    /** 协作组内通信必须经插件自建协作工具（**降级通道**的组内成员注入）。 */
     readonly collabAskOnly: "与组内成员的一切协作消息必须使用 wf_ask_agent（ask / reply）";
-    /** 协作组内通信必须经官方 Team 邮箱（official 通道的组内成员注入）。 */
-    readonly collabSendOnly: "与队友和 Lead 的一切协作消息必须使用 send_message（target 填对方成员名，Lead 为 \"lead\"）";
 };
 /**
  * 节点任务块构建器（纯函数）。

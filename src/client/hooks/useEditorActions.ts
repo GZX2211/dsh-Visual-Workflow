@@ -62,7 +62,7 @@ export interface EditorActionsOptions {
 
 /**
  * 模版态「入库」目标（纯函数）：工作流模版 → workflow、角色模版 → role；
- * 其余模版（文件/数据库/协作组）与实例态/资产态均无入库目标（返回 null）。
+ * 其余模版（文件/数据库/Team）与实例态/资产态均无入库目标（返回 null）。
  */
 export function promoteTargetOf(state: StudioState): { kind: AssetKind; templateId: string } | null {
   const editor = state.editor

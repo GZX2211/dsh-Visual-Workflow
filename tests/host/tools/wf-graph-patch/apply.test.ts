@@ -463,7 +463,7 @@ function mixedOps(): GraphPatchOp[] {
     { op: 'connect', source: 'a2', target: '不存在' },
     { op: 'update_node_data', nodeId: 'a2', data: { label: '分析②' } },
     { op: 'create_node', node: { id: 'f1', kind: 'file', data: { label: '交付', fileKind: 'file', managedPath: 'data/files/x.md' } } },
-    { op: 'create_group', groupId: 'g1', label: '协作组', memberIds: ['a1'] },
+    { op: 'create_group', groupId: 'g1', label: 'Team', memberIds: ['a1'] },
     { op: 'set_group_members', groupId: 'g1', memberIds: ['a1', 'a2'] },
     { op: 'create_group', groupId: 'g2', label: '坏组', memberIds: ['不存在'] },
     { op: 'set_group_members', groupId: 'g2', memberIds: ['a1'] },

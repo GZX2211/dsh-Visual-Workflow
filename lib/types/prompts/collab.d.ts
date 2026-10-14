@@ -8,13 +8,12 @@ export interface CollabBlockParams {
         label: string;
         target?: string;
     }>;
-    /** 组卡片上用户自定义的协作说明文本（可为空；空则不追加说明段）。 */
+    /** 协作组卡片上用户自定义的协作说明文本（可为空；空则不追加说明段）。 */
     custom: string;
     /**
-     * 协作通道：告诉成员「用什么工具、填什么标识」与队友通信。
-     *   - official = 官方 Agent Team 邮箱（send_message，target 为成员名）；
-     *   - legacy = 插件自建协作工具（wf_ask_agent，targetChildId 为成员节点 id）。
-     * 缺省 legacy：未启用官方团队时保持既有文案与行为。
+     * 协作通道（成员是官方 teammate 还是普通子代理）。
+     * 注意 official 分支当前**没有调用方**：官方通道不注入协作块（官方 team:policy 承担协作
+     * 规则与寻址），成员清单与通信指引只在降级通道注入。该分支保留为完整模板备用。
      */
     channel?: CollabChannel;
 }

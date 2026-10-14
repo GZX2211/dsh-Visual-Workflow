@@ -450,7 +450,9 @@ function nodeEntryOf(
         label: labelOf(node),
         collabPrompt: textOf(node.data.collabPrompt),
         memberIds: Array.isArray(node.data.memberIds) ? node.data.memberIds.map(textOf) : [],
-        schedulable: schedulableOf(node.id),
+        // 协作组卡片是包裹层，不是调度目标（用户裁决 2026-10）：恒为 false，避免诱导父代理对
+        // 组 id 调用 wf_run_node（会被运行时拒绝）。成员节点各自带自己的 schedulable。
+        schedulable: false,
       }
       return entry
     }

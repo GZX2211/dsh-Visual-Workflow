@@ -12,7 +12,7 @@ export interface Config {
     apiKey: string | null;
     /** 模式二单服务并发请求上限。 */
     maxConcurrentPerService: number;
-    /** wf_ask_agent 待回复登记的 TTL 毫秒数（到期后不再接受 reply，也不再阻塞组聚合）。 */
+    /** wf_ask_agent 待回复登记的 TTL 毫秒数（到期后不再接受 reply）。 */
     wfAskAgentTtlMs: number;
     /**
      * @deprecated 旧键名（历史命名把「待回复登记 TTL」写成了 Timeout）。
@@ -35,6 +35,17 @@ export interface Config {
     embeddingModelDir: string | null;
     /** 外部 OpenAI 兼容 /embeddings 端点；null 优先本地嵌入。 */
     embeddingEndpoint: string | null;
+    /**
+     * 官方 协作组会话级成员名额上限（部署层 `agent-team.maxMembers` 的镜像）。
+     *
+     * 官方语义是「本团队累计创建过的 teammate 数，含创建失败的」，且成员名永久不可复用；
+     * 插件在新建成员前用它预检，把运行期的官方类型化失败提前成可行动错误。改本键必须同步
+     * 部署层 `agent-team.maxMembers`，否则预检与实际名额不一致。
+     *
+     * 默认取官方 bundle 层的 8（官方包默认 16，本机部署层压到 8/30 不等）；部署层高于本值时
+     * 预检过于保守，应显式上调本键。
+     */
+    teamMemberLimit: number;
 }
 /** 导出的 Config schema，供 Loader 校验与默认值填充。 */
 export declare const Config: z<Config>;

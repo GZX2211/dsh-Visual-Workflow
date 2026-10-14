@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { FlowStore } from '../storage/flow-store.js';
 import type { GraphNode, RoleNode } from '../shared/graph-model.js';
-import type { NodeRunner, NodeStartInput, OrchestratorLogger, GroupStartInput, GroupStartResult } from '../orchestrator/index.js';
+import type { NodeRunner, NodeStartInput, OrchestratorLogger } from '../orchestrator/index.js';
 import { type ReactGuardBridge } from './guards.js';
 import type { ModelSelectionSetup } from './model-selection.js';
 import type { ChildPromptSetup } from './prompt-setup.js';
@@ -135,6 +135,14 @@ export interface ToolsView {
      * 无 agent/服务缺失回退全局层。
      */
     agentToolNames(sessionId?: string): Promise<string[]>;
+    /**
+     * 某会话父代理 scope 的**同步**工具名视图（官方 协作组工具面判据专用）。
+     *
+     * 与 agentToolNames 同源（同一 scope key 语义），只做同步可达的部分：全局层 ∪ 该 agent
+     * 自身 scope。为什么需要同步版本：成员启动路径判据（teamAvailable）是同步契约；而官方
+     * 协作组工具注册在**成员自身 scope**，不经过 preset standing scope，故判据不需要异步取用。
+     */
+    agentToolNamesSync(sessionId?: string): string[];
 }
 /**
  * 真实工具视图适配：并集 = 全局层 ∪ 每个存活 agent 的 scope 视图 ∪ 每个 agent
@@ -151,6 +159,7 @@ export declare class CordisToolsView implements ToolsView {
     visibleToolNames(sessionId?: string): Promise<string[]>;
     presetToolNames(presetId: string): Promise<string[] | null>;
     agentToolNames(sessionId?: string): Promise<string[]>;
+    agentToolNamesSync(sessionId?: string): string[];
 }
 /** 白名单解析入参。 */
 export interface ResolveToolsInput {
@@ -191,10 +200,16 @@ export interface NodeAgentRunnerDeps {
     /** subagents 服务惰性解析（调用时求值）。 */
     subagents: () => SubagentsServiceLike | null;
     /**
-     * 官方 Agent Team 服务惰性解析（协作组路径用）。
-     * 返回 null 表示官方团队未挂载：协作组回退到逐节点启动的既有路径。
+     * 官方 Agent 协作组服务惰性解析（协作组成员路径用）。
+     * 返回 null 表示官方团队未挂载：成员节点降级为普通可延续子代理（协作通信走 wf_ask_agent）。
      */
     teams: () => AgentTeamsServiceLike | null;
+    /**
+     * 官方 协作组会话级成员名额上限（部署层 agent-team.maxMembers 的镜像）。
+     * 官方语义是「本团队累计创建过的 teammate 数（含失败的）」；新建成员前用它预检，
+     * 把运行期的官方类型化失败提前成可行动错误。
+     */
+    teamMemberLimit: number;
     /** 工具视图（白名单解析）。 */
     toolsView: ToolsView;
     /** 子代理工具白名单装配（协作组成员的创建窗口内安装；节点路径由官方创建请求携带）。 */
@@ -224,17 +239,17 @@ export declare class NodeAgentRunner implements NodeRunner {
     private readonly deps;
     /** 子代理表：复用键 → { childId, signature }。 */
     private readonly nodeChildren;
-    /** 本类持有护栏登记的全部 childId（节点路径 + 协作组路径）；dispose 据此释放。 */
+    /** 本类持有护栏登记的全部 childId（普通节点路径 + 协作组成员路径）；dispose 据此释放。 */
     private readonly childIds;
     /** 软截停消费适配（NodeRunner 契约）。 */
     readonly consumeReactCapped: NonNullable<NodeRunner['consumeReactCapped']>;
-    /** 协作组启动器（官方 Team 路径；与节点路径共用同一套依赖与装配对象）。 */
-    private readonly groups;
+    /** 协作组成员启动器（官方 协作组路径；与普通节点路径共用同一套装配对象）。 */
+    private readonly members;
     constructor(deps: NodeAgentRunnerDeps);
-    /** 官方 Agent Team 路径是否可用（协作块文案与执行路径选择的判据）。 */
+    /** 官方 协作组路径是否可用（成员启动路径选择与协作块文案的判据）。 */
     teamAvailable(sessionId: string): boolean;
-    /** 把整个协作组启动为官方 Agent Team（不可用时返回 null，由编排器回退）。 */
-    startGroupTask(input: GroupStartInput): Promise<GroupStartResult | null>;
+    /** 官方 协作组成员的当前状态（成员运行态权威读源；非成员或官方不可用返回 null）。 */
+    teamMemberStatusOf(sessionId: string, nodeId: string): 'running' | 'inactive' | 'provisioning' | 'failed' | null;
     /**
      * 异步启动一个节点任务（消息驱动，立即返回）：
      *   - 首次创建：任务块已在首条 prompt 注入，子代理立即开始执行；

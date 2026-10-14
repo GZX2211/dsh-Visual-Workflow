@@ -109,11 +109,14 @@ describe('parentPromptVariantOf 三情况判定', () => {
     expect(parentPromptVariantOf(f)).toBe('hybrid')
   })
 
-  it('情况2：父代理参与流程且协作组卡片参与流程（成员无需自身连线）→ hybrid', () => {
+  it('情况2：父代理参与流程且画布有 协作组成员（成员自身无流程线）→ hybrid', () => {
+    const base = roleNode('m1', 'agent', '组员1')
+    const member = { ...base, data: { ...base.data, groupId: 'g1' } } as GraphNode
     const f = flow(
-      [roleNode('p1', 'parent', '父代理'), roleNode('m1', 'agent', '组员1'), groupNode('g1', '协作组', ['m1'])],
+      [roleNode('p1', 'parent', '父代理'), member, groupNode('g1', 'Team', ['m1'])],
       [flowLine('s-p1', 'start', 'p1'), flowLine('p1-g1', 'p1', 'g1'), flowLine('g1-end', 'g1', 'end')],
     )
+    // 协作组成员是执行主体（父代理要逐个调度它），协作组卡片本身不是
     expect(parentPromptVariantOf(f)).toBe('hybrid')
   })
 
@@ -139,9 +142,9 @@ describe('orchestrationNodeList / collabGroupList 只列参与流程的执行单
     expect(ids).not.toContain('a2')
   })
 
-  it('未参与流程的协作组卡片不进入协作组清单', () => {
+  it('未参与流程的 协作组卡片不进入 协作组清单', () => {
     const f = flow(
-      [roleNode('a1', 'agent', '参与A'), roleNode('m1', 'agent', '组员1'), groupNode('g1', '协作组', ['m1'])],
+      [roleNode('a1', 'agent', '参与A'), roleNode('m1', 'agent', '组员1'), groupNode('g1', 'Team', ['m1'])],
       [flowLine('s-a1', 'start', 'a1'), flowLine('a1-end', 'a1', 'end')],
     )
     expect(collabGroupList(f)).toHaveLength(0)

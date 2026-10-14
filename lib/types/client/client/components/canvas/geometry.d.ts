@@ -38,7 +38,7 @@ export interface EdgeGeometry {
 export type MemberGroupIndex = Map<string, CanvasNode>;
 /** 由画布节点表预建成员 → 组索引（一次全量扫描，替代逐边反查）。 */
 export declare function memberGroupIndexOf(byId: Map<string, CanvasNode>): MemberGroupIndex;
-/** 组内成员连线锚点（组卡片左/右边缘 + 成员行中心）。 */
+/** 组内成员连线锚点（协作组卡片左/右边缘 + 成员行中心）。 */
 export declare function memberAnchor(group: CanvasNode, memberId: string, side: 'left' | 'right'): {
     x: number;
     y: number;
@@ -48,7 +48,7 @@ export declare function memberAnchor(group: CanvasNode, memberId: string, side: 
  * 交换后：出点移到左侧、入点移到右侧；节点 JSON 即事实源，swapPorts 随节点持久化。
  */
 export declare function swappedOf(node: CanvasNode | null | undefined): boolean;
-/** 连线贝塞尔几何（源端口 → 目标端口；组卡片流程接点居中，组内成员锚到成员行）。
+/** 连线贝塞尔几何（源端口 → 目标端口；协作组卡片流程接点居中，组内成员锚到成员行）。
  *  交换过连接点的节点：源出点改在左边缘（start.x=左侧），目标入点改在右边缘（end.x=右侧）。
  *  控制点方向跟随端口所在边缘（右缘向外 +x、左缘向外 -x），连线从正确一侧进出，不会
  *  穿入卡片体被遮挡（用户批注：连线方向应当根据连接点确定，而非默认朝右）。 */

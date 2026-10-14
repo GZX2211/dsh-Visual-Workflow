@@ -12,7 +12,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { CallerInfo, OrchestratorRuntime } from '../../../src/host/orchestrator/index.js'
 import type { ServiceState } from '../../../src/host/shared/types.js'
-import type { RoleNode, StageNode, WorkflowDocument, Line } from '../../../src/host/shared/graph-model.js'
+import type { GraphNode, RoleNode, StageNode, WorkflowDocument, Line } from '../../../src/host/shared/graph-model.js'
 import { stageLabel } from '../../../src/host/graph/index.js'
 import {
   cleanupTempDirs,
@@ -242,5 +242,46 @@ describe('resumeRun mode2（服务断点续跑）', () => {
     expect(input?.resumed).toBe(true)
     // 断点继续指令
     expect(lastDirective(h)).toContain('正在恢复先前运行')
+  })
+})
+
+describe('mode2 不支持协作组（用户裁决 2026-10）', () => {
+  /** 含 协作组卡片的服务文档：协作组卡片串在流程上，成员节点无流程线（组内成员仅 ctx/db 连接点）。 */
+  function teamServiceFlow(serviceId: string): WorkflowDocument {
+    const flow = serviceFlow(serviceId)
+    const member = flow.nodes.find((n) => n.id === 'n-a1') as RoleNode
+    member.data.groupId = 'n-team'
+    return {
+      ...flow,
+      nodes: [
+        ...flow.nodes,
+        {
+          id: 'n-team',
+          kind: 'group',
+          position: { x: 0, y: 0 },
+          data: { label: 'Team', collabPrompt: '', memberIds: ['n-a1'], size: { w: 300, h: 220 } },
+        } as GraphNode,
+      ],
+      // 成员退出流程线：n-parent → 协作组卡片 → n-out
+      lines: [
+        { id: 'l1', source: 'n-in', target: 'n-parent', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+        { id: 'l2', source: 'n-parent', target: 'n-team', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+        { id: 'l3', source: 'n-team', target: 'n-out', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+      ],
+    }
+  }
+
+  it('协作组卡片与其成员节点在 wf_run_node_wait 通道下均被拒绝（WF_NODE_KIND）', async () => {
+    const h = await makeHarness()
+    await h.store.saveService(toService(teamServiceFlow('svc-team')), 'session-owner')
+    await h.runtime.startRun({ sessionId: SERVICE_SESSION, flowId: 'svc-team', mode: 'mode2' })
+
+    // 协作组卡片：始终不是执行主体
+    await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-team' }, undefined, { expectedMode: 'mode2' }))
+      .rejects.toMatchObject({ code: 'WF_NODE_KIND' })
+    // 成员节点：模式二完全不支持协作组，阻塞等待通道同样拒绝
+    await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-a1' }, undefined, { expectedMode: 'mode2' }))
+      .rejects.toMatchObject({ code: 'WF_NODE_KIND' })
+    expect(h.runner.calls).toHaveLength(0)
   })
 })

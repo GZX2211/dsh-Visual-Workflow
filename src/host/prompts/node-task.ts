@@ -8,7 +8,7 @@
 //
 // 稳定布局（§13.1）：
 //   ① 首段 = 该节点真正需要强调的**软约束固化**（AI 有选择权、值得强调的行为规则）
-//             ——系统语言规则 + 协作组成员必须经 wf_ask_agent 通信（仅组内节点注入）；
+//             ——系统语言规则 + 协作组内通信通道（仅降级通道注入；官方通道由 team:policy 承担）；
 //   ② 中段 = 过程性信息（上游产出（沿流程线自动注入）/ 文件路径索引 / 输入契约 / 数据库工具说明）
 //   ③ 末段 = 软约束重申（W-02 双位）
 //
@@ -47,12 +47,12 @@ export interface NodeTaskBlockParams {
      */
     dbToolHint: string
     /**
-     * 协作组成员标记：该节点为协作组成员时注入「组内通信必须走本通道」的软约束。
+     * 协作组成员标记：该节点为 协作组成员时注入「组内通信必须走本通道」的软约束。
      */
     isGroupMember: boolean
     /**
      * 协作通道（isGroupMember 时决定注入哪条通信约束）：
-     *   - official = 官方 Agent Team 邮箱（send_message + 成员名）；
+     *   - official = 官方 Agent 协作组邮箱（send_message + 成员名）；
      *   - legacy = 插件自建协作工具（wf_ask_agent + 成员节点 id）。
      * 缺省 legacy：未启用官方团队时保持既有文案与行为。
      */
@@ -82,19 +82,21 @@ export interface NodeTaskBlockParams {
  * 面向模型中文（W-04）；只保留「软约束固化」类条目（AI 有选择权、值得强调的行为规则）。
  */
 export const NODE_HARD_CONSTRAINTS = {
-  /** 协作组内通信必须经插件自建协作工具（legacy 通道的组内成员注入）。 */
+  /** 协作组内通信必须经插件自建协作工具（**降级通道**的组内成员注入）。 */
   collabAskOnly: '与组内成员的一切协作消息必须使用 wf_ask_agent（ask / reply）',
-  /** 协作组内通信必须经官方 Team 邮箱（official 通道的组内成员注入）。 */
-  collabSendOnly: '与队友和 Lead 的一切协作消息必须使用 send_message（target 填对方成员名，Lead 为 "lead"）',
 } as const
 
-/** 按协作通道取组内通信约束（未标注通道按 legacy 处理，保持既有文案）。 */
-function collabConstraintOf(channel: CollabChannel | undefined): {
-  head: string
-  restate: string
-} {
+/**
+ * 按协作通道取组内通信约束（未标注通道按 legacy 处理，保持既有文案）。
+ *
+ * official（成员是官方 teammate）：官方为其注册九个 协作组工具并注入 team:policy，协作规则
+ * 以官方为唯一契约源；插件再注入一条等价约束会形成第二份协作契约，且官方策略变更后两边
+ * 必然漂移，故不注入。
+ * legacy（官方 协作组不可用，成员降级为普通子代理）：插件自建协作工具是唯一通道，必须注入。
+ */
+function collabConstraintOf(channel: CollabChannel | undefined): { head: string; restate: string } {
   return channel === 'official'
-    ? { head: NODE_HARD_CONSTRAINTS.collabSendOnly, restate: NODE_HARD_CONSTRAINTS.collabSendOnly }
+    ? { head: '', restate: '' }
     : { head: NODE_HARD_CONSTRAINTS.collabAskOnly, restate: NODE_HARD_CONSTRAINTS.collabAskOnly }
 }
 
@@ -123,9 +125,12 @@ export function buildNodeTaskBlock(params: NodeTaskBlockParams): string {
   }
 
   if (facts.isGroupMember) {
-    // 若已有语言规则，编号顺延为 2；否则为 1
-    const idx = facts.systemLanguage.trim() ? 2 : 1
-    headLines.push(`${idx}. ${collabConstraintOf(facts.collabChannel).head}。`)
+    const constraint = collabConstraintOf(facts.collabChannel)
+    if (constraint.head) {
+      // 若已有语言规则，编号顺延为 2；否则为 1
+      const idx = facts.systemLanguage.trim() ? 2 : 1
+      headLines.push(`${idx}. ${constraint.head}。`)
+    }
   }
 
   const head = headLines.join('\n')
@@ -165,7 +170,10 @@ export function buildNodeTaskBlock(params: NodeTaskBlockParams): string {
   // —— 末段：软约束重申（W-02 双位） + 输出契约（注意力末位 = 最终回复格式的最后一次提醒）——
   const tailLines: string[] = [TAIL_MARKER, '']
   const restate: string[] = []
-  if (facts.isGroupMember) restate.push(`- ${collabConstraintOf(facts.collabChannel).restate}。`)
+  if (facts.isGroupMember) {
+    const constraint = collabConstraintOf(facts.collabChannel).restate
+    if (constraint) restate.push(`- ${constraint}。`)
+  }
   const outputContract = facts.outputContract.trim()
   if (outputContract) {
     // 逐字使用节点配置的契约（不叠加默认文本）；措辞不断言「下游会读取」——

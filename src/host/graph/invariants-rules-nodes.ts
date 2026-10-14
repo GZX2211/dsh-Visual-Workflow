@@ -35,7 +35,7 @@ export function ruleGroupMembers(input: CheckGraphInput, dag: FlowDag): GraphIss
       issues.push({
         code: 'groupNoMembers',
         level: 'error',
-        message: `collaboration group "${label}" has no members`,
+        message: `Team "${label}" has no members`,
         nodeIds: [node.id],
         suggestion: 'drop role nodes into the group, or delete the empty group card',
       })
@@ -45,7 +45,7 @@ export function ruleGroupMembers(input: CheckGraphInput, dag: FlowDag): GraphIss
       issues.push({
         code: 'groupMemberMissing',
         level: 'error',
-        message: `collaboration group "${label}" references members that do not exist: ${missing.join(', ')}`,
+        message: `Team "${label}" references members that do not exist: ${missing.join(', ')}`,
         nodeIds: [node.id, ...missing],
         suggestion: 'remove the dangling member ids (their nodes were deleted) and pick the group members again',
       })
@@ -54,7 +54,7 @@ export function ruleGroupMembers(input: CheckGraphInput, dag: FlowDag): GraphIss
       issues.push({
         code: 'groupNoFlow',
         level: 'error',
-        message: `collaboration group "${label}" has no flow edge`,
+        message: `Team "${label}" has no flow edge`,
         nodeIds: [node.id],
         suggestion: 'connect a flow-in and a flow-out on the group card: the group card carries the flow gate, while members are wired by context edges only',
       })

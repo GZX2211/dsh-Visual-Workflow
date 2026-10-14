@@ -31,7 +31,7 @@ import { createChildToolFilterSetup, type ChildToolFilterSetup } from '../../../
 import { createModelSelectionSetup, type ModelSelectionSetup } from '../../../src/host/agent/model-selection.js'
 import { createChildPromptSetup, type ChildPromptSetup } from '../../../src/host/agent/prompt-setup.js'
 import type { AgentTeamsServiceLike, TeamMemberViewLike } from '../../../src/host/team/index.js'
-import type { GroupStartInput, NodeStartInput } from '../../../src/host/orchestrator/index.js'
+import type { NodeStartInput } from '../../../src/host/orchestrator/index.js'
 import type { RoleNode, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
 import { CHILD_AGENT_HIDDEN_TOOLS } from '../../../src/host/shared/protocol.js'
 
@@ -133,6 +133,9 @@ class FakeToolsView implements ToolsView {
     return this.presets.get(presetId) ?? null
   }
   async agentToolNames(): Promise<string[]> {
+    return this.agentToolNamesSync()
+  }
+  agentToolNamesSync(): string[] {
     return this.agentTools ?? this.visible.filter((name) => name !== 'run_code' && name !== 'str_replace_editor')
   }
 }
@@ -165,7 +168,7 @@ async function makeHarness(): Promise<RunnerHarness> {
     agents: () => agents,
     subagents: () => subagents,
     toolsView,
-    ...fakeGroupDeps(),
+    ...fakeMemberDeps(),
     react: react as unknown as ReactGuardBridge,
     modelSelection: modelSelection as unknown as ModelSelectionSetup,
     promptSetup: promptSetup as unknown as ChildPromptSetup,
@@ -174,12 +177,13 @@ async function makeHarness(): Promise<RunnerHarness> {
 }
 
 /**
- * 协作组路径依赖桩：本文件只验证节点路径，故官方 Team 视为未挂载（teams 返回 null），
- * 工具白名单装配为无操作。协作组自身的行为由其专属测试文件覆盖。
+ * 协作组成员路径依赖桩：本文件只验证普通节点路径，故官方 协作组视为未挂载（teams 返回 null），
+ * 工具白名单装配为无操作。成员路径自身的行为由其专属测试文件覆盖。
  */
-function fakeGroupDeps(): { teams: () => null; toolFilter: ChildToolFilterSetup } {
+function fakeMemberDeps(): { teams: () => null; teamMemberLimit: number; toolFilter: ChildToolFilterSetup } {
   return {
     teams: () => null,
+    teamMemberLimit: 8,
     toolFilter: {
       contribution: () => () => {},
       withPending: async <T>(_allow: readonly string[] | undefined, operation: () => Promise<T>): Promise<T> => operation(),
@@ -515,7 +519,7 @@ describe('NodeAgentRunner 创建/复用/派发', () => {
       agents: () => null,
       subagents: () => new FakeSubagents(),
       toolsView: h2.toolsView,
-      ...fakeGroupDeps(),
+      ...fakeMemberDeps(),
       react: h2.react as unknown as ReactGuardBridge,
       modelSelection: h2.modelSelection as unknown as ModelSelectionSetup,
       promptSetup: h2.promptSetup as unknown as ChildPromptSetup,
@@ -765,7 +769,7 @@ describe('DSH 0.1.2 子代理 seam（getProvider 探测 / childSetup 安装 / se
       agents: () => h.agents,
       subagents: () => rc1,
       toolsView: h.toolsView,
-      ...fakeGroupDeps(),
+      ...fakeMemberDeps(),
       react: h.react as unknown as ReactGuardBridge,
       modelSelection: h.modelSelection as unknown as ModelSelectionSetup,
       promptSetup: h.promptSetup as unknown as ChildPromptSetup,
@@ -787,7 +791,7 @@ describe('DSH 0.1.2 子代理 seam（getProvider 探测 / childSetup 安装 / se
       agents: () => h.agents,
       subagents: () => rc1,
       toolsView: h.toolsView,
-      ...fakeGroupDeps(),
+      ...fakeMemberDeps(),
       react: h.react as unknown as ReactGuardBridge,
       modelSelection: h.modelSelection as unknown as ModelSelectionSetup,
       promptSetup: h.promptSetup as unknown as ChildPromptSetup,
@@ -816,7 +820,7 @@ describe('DSH 0.1.2 子代理 seam（getProvider 探测 / childSetup 安装 / se
       agents: () => h.agents,
       subagents: () => queueOnly,
       toolsView: h.toolsView,
-      ...fakeGroupDeps(),
+      ...fakeMemberDeps(),
       react: h.react as unknown as ReactGuardBridge,
       modelSelection: h.modelSelection as unknown as ModelSelectionSetup,
       promptSetup: h.promptSetup as unknown as ChildPromptSetup,
@@ -929,81 +933,118 @@ describe('CordisToolsView / preset standing scope（acquireScope 租约）', () 
 })
 
 // ---------------------------------------------------------------------------
-// 协作组路径：成员护栏登记的持有与释放
+// 协作组成员路径：成员 childId 的登记与释放 / 官方不可用时的降级
 // ---------------------------------------------------------------------------
-// 为什么锁定此处：组成员由官方 Team 直接创建（spawnTeammate），不经 ensureNodeChild，
-// 因此其 childId 不会进入本类的登记集合——dispose 时 drop 不到，护栏的 limits/cappedFlags
-// 条目在宿主生命周期内只增不减。成员状态必须有释放条件与上界（agent 模块规则）。
+// 为什么锁定此处：成员由官方 协作组创建（spawnTeammate），不经 ensureNodeChild，
+// 因此其 childId 必须由本类显式登记——否则 dispose 时 drop 不到，护栏的 limits/cappedFlags
+// 条目在宿主生命周期内只增不减（每子代理状态必须有释放条件与上界）。
+// 官方 协作组不可用时成员必须降级为普通可延续子代理（同一登记语义、同一释放路径）。
 
-describe('协作组路径：成员 childId 随宿主 dispose 释放', () => {
-  /** 协作组 harness：官方 Team 可用性可控，成员逐个创建并返回新的 childId。 */
-  async function makeGroupHarness(options: { teams?: boolean } = {}): Promise<{ runner: NodeAgentRunner; drop: ReturnType<typeof vi.fn> }> {
-    const dir = await mkdtemp(join(tmpdir(), 'vw-runner-group-'))
+describe('协作组成员路径：childId 登记、释放与降级', () => {
+  /** 成员 harness：官方 协作组可用性与官方工具面可控。 */
+  async function makeMemberHarness(options: { teams?: boolean; toolFace?: boolean } = {}): Promise<{
+    runner: NodeAgentRunner
+    subagents: FakeSubagents
+    drop: ReturnType<typeof vi.fn>
+    members: TeamMemberViewLike[]
+  }> {
+    const dir = await mkdtemp(join(tmpdir(), 'vw-runner-member-'))
     cleanups.push(() => rm(dir, { recursive: true, force: true }))
     const store = new FlowStore(dir)
     await store.init()
-    // 成员节点的 presetId 指向真实组合：工具白名单解析需要组合存在（与节点路径同源）
+    // 成员节点的 presetId 指向真实组合：工具白名单解析需要组合存在（与普通节点路径同源）
     await store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read'], mcpServers: [] })
     const subagents = new FakeSubagents()
     const agents = new FakeAgentsService()
     agents.parents.set('session-1', { id: 'session-1' })
     const react = { setLimit: vi.fn(), drop: vi.fn(), consumeCapped: vi.fn(() => false) }
+    const members: TeamMemberViewLike[] = []
     let seq = 0
     const teams: AgentTeamsServiceLike = {
-      listMembers: () => [],
+      listMembers: () => members,
       sendMessage: async () => ({ messageId: 'msg-1', status: 'accepted' }),
       spawnTeammate: async (_caller, request) => {
         seq += 1
         const member: TeamMemberViewLike = { id: `member-child-${seq}`, name: request.name, role: 'teammate', status: 'inactive' }
+        members.push(member)
         return { member }
       },
     }
+    const toolsView = new FakeToolsView()
+    // 官方 协作组工具面：判据要求父代理 scope 可见 spawn_teammate（官方工具与策略在成员 scope 注册）
+    toolsView.agentTools = options.toolFace === false
+      ? ['read', 'write', 'edit']
+      : ['read', 'write', 'edit', 'spawn_teammate', 'send_message']
     const runner = new NodeAgentRunner({
       store,
       agents: () => agents,
       subagents: () => subagents,
       teams: () => ((options.teams ?? true) ? teams : null),
-      toolsView: new FakeToolsView(),
+      teamMemberLimit: 8,
+      toolsView,
       toolFilter: createChildToolFilterSetup(),
       react: react as unknown as ReactGuardBridge,
       modelSelection: createModelSelectionSetup(),
       promptSetup: createChildPromptSetup(),
     })
-    return { runner, drop: react.drop }
+    return { runner, subagents, drop: react.drop, members }
   }
 
-  function groupStartInput(): GroupStartInput {
+  function memberTaskInput(nodeId: string, extra: Partial<NodeStartInput> = {}): NodeStartInput {
     return {
       sessionId: 'session-1',
       flowId: 'flow-1',
       mode: 'mode1',
-      groupId: 'n-g',
-      collabPrompt: '组内协作',
-      members: [
-        { node: agentNode('n-m1'), blocks: blocks('任务1') },
-        { node: agentNode('n-m2'), blocks: blocks('任务2') },
-      ],
+      node: agentNode(nodeId),
+      blocks: blocks('任务1'),
+      teamMember: true,
       signal: new AbortController().signal,
+      ...extra,
     }
   }
 
-  it('整组启动创建的成员 childId 一并登记，dispose 时全部释放', async () => {
-    const h = await makeGroupHarness()
-    const result = await h.runner.startGroupTask(groupStartInput())
-    expect(result?.members.map((member) => member.childId)).toEqual(['member-child-1', 'member-child-2'])
+  it('成员路径：官方 teammate 创建成功，childId 登记且 dispose 释放', async () => {
+    const h = await makeMemberHarness()
+    const started = await h.runner.startNodeTask(memberTaskInput('n-m1'))
+
+    expect(started).toEqual({ childId: 'member-child-1', created: true })
+    // 两条路径互斥：官方成员路径不得同时触发普通子代理创建
+    expect(h.subagents.started).toHaveLength(0)
 
     h.runner.dispose()
-
     expect(h.drop).toHaveBeenCalledWith('member-child-1')
-    expect(h.drop).toHaveBeenCalledWith('member-child-2')
   })
 
-  it('官方 Team 不可用（返回 null）：不产生成员登记，dispose 无残留释放动作', async () => {
-    const h = await makeGroupHarness({ teams: false })
-    expect(await h.runner.startGroupTask(groupStartInput())).toBeNull()
+  it('成员复用：已存在同名成员时改派消息，created=false 且不重复创建', async () => {
+    const h = await makeMemberHarness()
+    await h.runner.startNodeTask(memberTaskInput('n-m1'))
+    const again = await h.runner.startNodeTask(memberTaskInput('n-m1'))
 
-    h.runner.dispose()
+    expect(again).toEqual({ childId: 'member-child-1', created: false })
+    expect(h.members).toHaveLength(1)
+  })
 
-    expect(h.drop).not.toHaveBeenCalled()
+  it('降级：官方 协作组服务不可用时走普通可延续子代理路径', async () => {
+    const h = await makeMemberHarness({ teams: false })
+    const started = await h.runner.startNodeTask(memberTaskInput('n-m1'))
+
+    expect(started.created).toBe(true)
+    expect(h.subagents.started).toHaveLength(1)
+  })
+
+  it('降级：官方 协作组工具面未下发（只挂领域服务）时同样走普通子代理路径', async () => {
+    const h = await makeMemberHarness({ toolFace: false })
+    const started = await h.runner.startNodeTask(memberTaskInput('n-m1'))
+
+    expect(started.created).toBe(true)
+    expect(h.subagents.started).toHaveLength(1)
+  })
+
+  it('teamMember 缺省：普通节点永不进入官方成员路径', async () => {
+    const h = await makeMemberHarness()
+    const started = await h.runner.startNodeTask(memberTaskInput('n-m1', { teamMember: undefined }))
+
+    expect(started.created).toBe(true)
+    expect(h.subagents.started).toHaveLength(1)
   })
 })

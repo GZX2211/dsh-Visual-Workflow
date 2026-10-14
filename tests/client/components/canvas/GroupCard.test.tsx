@@ -4,9 +4,9 @@
 
 // tests/client/components/canvas/GroupCard.test.tsx
 //
-// 协作组卡片渲染（运行状态与高亮）：
-//   - 组卡片自身状态徽标（状态点 + 词典文案）按快照状态渲染，无状态时不渲染；
-//   - 运行中（running）加高亮类；联动高亮（highlighted）同样加高亮类；
+// 协作组卡片渲染：
+//   - 协作组卡片自身**永无**运行状态徽标（包裹层不是执行主体，不进入运行事实）；
+//   - 联动高亮（highlighted）加高亮类；
 //   - 成员迷你卡照常渲染成员名与成员状态点（状态事实来源不变）。
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -15,7 +15,6 @@ import { createRoot, type Root } from 'react-dom/client'
 import React from 'react'
 import { GroupCard } from '../../../../src/client/components/canvas/GroupCard.js'
 import { zh } from '../../../../src/client/i18n.js'
-import { statusLabelOf } from '../../../../src/client/lib/status-label.js'
 import { GROUP_MEMBER_ROW_H } from '../../../../src/client/lib/card-geometry.js'
 import { canvasStyles } from '../../../../src/client/styles/canvas.js'
 import type { CanvasNode } from '../../../../src/client/studio/studio-state.js'
@@ -54,7 +53,6 @@ function renderCard(overrides: Partial<React.ComponentProps<typeof GroupCard>> =
     members,
     selected: false,
     highlighted: false,
-    runStatus: null,
     dropTarget: false,
     onPointerDown: () => {},
     onHandlePointerDown: () => {},
@@ -69,25 +67,8 @@ function renderCard(overrides: Partial<React.ComponentProps<typeof GroupCard>> =
   return container!.querySelector('.wf-node') as HTMLElement
 }
 
-describe('GroupCard 运行状态与高亮', () => {
-  it('running：组卡片渲染状态点与词典文案，并加运行中高亮类', () => {
-    const card = renderCard({ runStatus: { status: 'running', attempts: 1 } })
-
-    expect(card.className).toContain('is-running')
-    const dot = card.querySelector('.wf-node__kind .wf-status-dot')
-    expect(dot?.className).toContain('is-running')
-    expect(card.querySelector('.wf-node__kind')?.textContent).toContain(statusLabelOf(zh, 'running'))
-  })
-
-  it('ok：渲染状态徽标但不加运行中高亮类', () => {
-    const card = renderCard({ runStatus: { status: 'ok', attempts: 1 } })
-
-    expect(card.className).not.toContain('is-running')
-    expect(card.querySelector('.wf-node__kind .wf-status-dot')?.className).toContain('is-ok')
-    expect(card.querySelector('.wf-node__kind')?.textContent).toContain(statusLabelOf(zh, 'ok'))
-  })
-
-  it('无运行状态：不渲染状态徽标（组卡片不伪造状态）', () => {
+describe('GroupCard 状态与高亮', () => {
+  it('协作组卡片永不渲染运行状态徽标（包裹层不是执行主体，不进入运行事实）', () => {
     const card = renderCard()
 
     expect(card.querySelector('.wf-node__kind .wf-status-dot')).toBeNull()
@@ -99,14 +80,14 @@ describe('GroupCard 运行状态与高亮', () => {
     expect(card.className).toContain('is-highlighted')
   })
 
-  it('成员迷你卡不受组状态影响：成员名与成员状态点照常渲染', () => {
-    const card = renderCard({ runStatus: { status: 'running', attempts: 1 } })
+  it('成员状态照常渲染：成员名与成员状态点按各自快照状态显示', () => {
+    const card = renderCard()
 
     const memberCards = card.querySelectorAll('.wf-group__member')
     expect(memberCards).toHaveLength(2)
     expect(memberCards[0].textContent).toContain('后端开发工程师')
     expect(memberCards[1].textContent).toContain('后端代码审查专家')
-    // 成员自身状态点（非组卡片徽标）按成员状态渲染
+    // 成员自身状态点（非 协作组卡片徽标）按成员状态渲染
     expect(memberCards[0].querySelector('.wf-status-dot')?.className).toContain('is-running')
     expect(memberCards[1].querySelector('.wf-status-dot')).toBeNull()
   })

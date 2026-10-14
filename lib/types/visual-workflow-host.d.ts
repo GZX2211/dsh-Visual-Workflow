@@ -181,11 +181,12 @@ export declare class VisualWorkflowHost extends Service {
     /** 嵌入引擎（数据工具向量检索用）。 */
     get engine(): EmbeddingService;
     /**
-     * 运行期配置下发（API 边界缝）：只透传配置事实，前端据以调整轮询节奏。
+     * 运行期配置下发（API 边界缝）：只透传配置事实，前端据以调整轮询节奏与画布约束。
      * 前端在缺失/非法时的缺省回退由前端决定，Host 不在此伪造取值。
      */
     runtimeConfig(): {
         runPollMs: number;
+        teamMemberLimit: number;
     };
     /** 启动装配（Service.init 语义：初始化失败让 fiber 失败，不吞错）。 */
     [Service.init](): Promise<void>;

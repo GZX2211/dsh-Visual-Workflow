@@ -21,6 +21,7 @@ import { useGraphHistory } from '../hooks/useGraphHistory.js'
 import { useUnsavedGuard } from '../hooks/useUnsavedGuard.js'
 import { useRunControl } from '../hooks/useRunControl.js'
 import { useRunPolling } from '../hooks/useRunPolling.js'
+import { useTeamMemberLimit } from '../hooks/useTeamMemberLimit.js'
 import { useActiveRunsPolling } from '../hooks/useActiveRunsPolling.js'
 import { useFlowTemplatesPolling } from '../hooks/useFlowTemplatesPolling.js'
 import { useServiceStatusPolling } from '../hooks/useServiceStatusPolling.js'
@@ -91,6 +92,8 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
   useFlowTemplatesPolling(dispatch, remote)
   // 模式二服务状态轮询：宿主侧进程崩溃/被回收时把运行事实拉回界面（此前只在动作后刷新）
   useServiceStatusPolling(state, dispatch, remote)
+  // 协作组成员上限（宿主下发，与部署层 agent-team.maxMembers 同值）：画布入组交互据此拒绝超限
+  const teamMemberLimit = useTeamMemberLimit(remote)
 
   // 活跃 run 摘要索引（实例列表运行徽标 + 运行对账共用）：一次建 Map，避免「每个实例一次全量
   // 线性查找」（n 个实例 × m 条活跃 run）。按 activeRuns 引用记忆化：state 因其他原因变化时
@@ -209,7 +212,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
   const assets = useAssets(remote, dispatch, notify, toastError, t, state)
   // 经验面（资产态「经验」Tab）：列表 / 保存 / 归档 / 恢复；同样先于 editor 装配。
   const experiences = useExperiences(remote, dispatch, notify, toastError, t, state)
-  const canvas = useCanvasActions(state, dispatch, notify, history, t, { locks: runLocks, saveCanvas: doc.saveCanvas })
+  const canvas = useCanvasActions(state, dispatch, notify, history, t, { locks: runLocks, saveCanvas: doc.saveCanvas, teamMemberLimit })
   const editor = useEditorActions(state, dispatch, notify, toastError, t, workflows, flowTemplates, templates, assets, experiences, selection, remote, doc.saveCanvas, canvas.removeSelected, canvas.removeLine, doc.selectWorkflow, doc.selectFlowTemplate, { locks: runLocks })
   const run = useRunActions(state, dispatch, notify, toastError, t, remote, runControl, serviceControl, doc.saveCanvas, doc.createInstanceFromCanvas)
   const transfer = useStudioTransfer(state, dispatch, notify, toastError, t, remote, templates, flowTemplates, workflows, editor.patchEditor, editorData, personaInputRef, groupMdInputRef)

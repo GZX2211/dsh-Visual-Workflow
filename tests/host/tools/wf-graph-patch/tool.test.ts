@@ -330,9 +330,9 @@ describe('wf_graph_patch · 图结构变更组', () => {
     expect(node.data?.presetId).toBe('combo-1')
   })
 
-  it('remove_node：级联删除虚拟节点与其连线，并从协作组成员清单移除', async () => {
+  it('remove_node：级联删除虚拟节点与其连线，并从 协作组成员清单移除', async () => {
     const { host, storeState } = makeHost()
-    // 基线：s → a1 → g1 → e；a2/a3 为组内成员（无流程线，但组成员由组卡片承载）
+    // 基线：s → a1 → g1 → e；a2/a3 为组内成员（无流程线，但组成员由 协作组卡片承载）
     storeState.workflows.set('wf-1', makeFlow('wf-1', {
       nodes: [stageNode('s', 'start'), roleNode('a1'), groupNode('g1', ['a2', 'a3']), roleNode('a2'), roleNode('a3'), proxyNode('p2', 'a2'), stageNode('e', 'end')],
       lines: [
@@ -382,7 +382,7 @@ describe('wf_graph_patch · 图结构变更组', () => {
   it('create_group + set_group_members：成员 groupId 与组 memberIds 双向一致', async () => {
     const { host, storeState } = makeHost()
     // 基线：s → g1（空组，流程门）→ e；a1 → a2 走上下文线（两者都不参与流程，但非孤儿）。
-    // 说明：组卡片只有流程连接点、组内成员只有 ctx/db 连接点（§4.2.5.2 规则 4），
+    // 说明：协作组卡片只有流程连接点、组内成员只有 ctx/db 连接点（§4.2.5.2 规则 4），
     // 故"把 a1/a2 入组"不会破坏结构校验。
     storeState.workflows.set('wf-1', makeFlow('wf-1', {
       nodes: [stageNode('s', 'start'), groupNode('g1', []), roleNode('a1'), roleNode('a2'), stageNode('e', 'end')],

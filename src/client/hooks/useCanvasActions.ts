@@ -1,7 +1,7 @@
 // src/client/hooks/useCanvasActions.ts
 //
-// 画布编辑操作面：节点放置（模板深拷贝/父代理/阶段/协作组/入组）、连线
-// 校验与增删、删除级联、整理布局、清空画布、虚拟节点复制与协作组成员
+// 画布编辑操作面：节点放置（模板深拷贝/父代理/阶段/Team/入组）、连线
+// 校验与增删、删除级联、整理布局、清空画布、虚拟节点复制与 协作组成员
 // 移除。变更统一走 dispatch；涉及图标量变化前先 history.remember()。
 //
 // 本次改造（用户裁决）：
@@ -21,13 +21,13 @@ import type { SaveCanvasOptions } from './useDocumentActions.js'
 import type { RunLockSet } from '../lib/run-locks.js'
 import type { Dict } from '../i18n.js'
 import { connectionProblem, connectionProblemMessage } from '../lib/connection-rules.js'
-import { GROUP_MEMBER_LIMIT, consolidateGroups, dropNodeFlowLines, joinNodeToGroup } from '../lib/group-members.js'
+import { TEAM_MEMBER_LIMIT_FALLBACK, consolidateGroups, dropNodeFlowLines, joinNodeToGroup } from '../lib/group-members.js'
 import { layoutNodes } from '../lib/layout-fit.js'
 import { stageTemplateKinds } from '../lib/graph-handles.js'
 import { templateToNodeData } from '../lib/template-to-node.js'
 import { roleAssetNodeKind, roleAssetToNodeData } from '../lib/asset-to-node.js'
 
-/** 几何拖动（节点拖动 / 组卡片缩放）自动保存的防抖窗口（毫秒）。 */
+/** 几何拖动（节点拖动 / 协作组卡片缩放）自动保存的防抖窗口（毫秒）。 */
 export const GEOMETRY_AUTOSAVE_DEBOUNCE_MS = 400
 
 /**
@@ -38,12 +38,17 @@ function stringEntriesOf(dict: Dict): Record<string, string> {
   return Object.fromEntries(Object.entries(dict).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
 }
 
-/** 画布编辑面的外部依赖注入（锁定判定 + 自动保存）。 */
+/** 画布编辑面的外部依赖注入（锁定判定 + 自动保存 + 宿主下发的成员上限）。 */
 export interface CanvasActionsOptions {
   /** 运行中实例画布锁定判定集（模式一 running；未启用时全部解锁）。 */
   locks: RunLockSet
   /** 画布保存入口（纯几何改动的防抖自动保存用；auto:true = 静默落库）。 */
   saveCanvas(options?: SaveCanvasOptions): Promise<unknown>
+  /**
+   * 宿主下发的 协作组成员上限（部署层 agent-team.maxMembers 的镜像）。
+   * 缺省回退 TEAM_MEMBER_LIMIT_FALLBACK：入组交互据此拒绝超限，避免画布放得下而运行期排不进。
+   */
+  teamMemberLimit?: number
 }
 
 export interface CanvasActionsFace {
@@ -63,7 +68,7 @@ export interface CanvasActionsFace {
   placeParentNode(templateId: string, position: { x: number; y: number }): void
   placeStageNode(kind: string, position: { x: number; y: number }): void
   placeGroupNode(position: { x: number; y: number }): void
-  /** 协作组模板拖入画布：按模板名称/协作 Prompt 生成协作组节点。 */
+  /** 协作组模板拖入画布：按模板名称/协作 Prompt 生成 协作组节点。 */
   placeGroupFromTemplate(templateId: string, position: { x: number; y: number }): void
   placeTemplateIntoGroup(kind: 'role', templateId: string, groupId: string, position: { x: number; y: number }): void
   onGroupResize(id: string, size: { w: number; h: number }): void
@@ -84,6 +89,7 @@ export function useCanvasActions(
   options: CanvasActionsOptions,
 ): CanvasActionsFace {
   const { locks, saveCanvas } = options
+  const teamMemberLimit = options.teamMemberLimit ?? TEAM_MEMBER_LIMIT_FALLBACK
   /** 几何自动保存防抖计时器（跨渲染保持；卸载时清理，避免迟到保存）。 */
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -320,7 +326,7 @@ export function useCanvasActions(
     notify('success', t.toastNodeAdded)
   }, [dispatch, history, notify, state.canvas.nodes, state.currentId, state.mode, t.nodeKinds, t.stageDuplicatedHint, t.toastNodeAdded])
 
-  /** 放置协作组节点。 */
+  /** 放置 协作组节点。 */
   const placeGroupNode = useCallback((position: { x: number; y: number }) => {
     if (!state.currentId) return
     const node: CanvasNode = {
@@ -335,7 +341,7 @@ export function useCanvasActions(
     notify('success', t.toastNodeAdded)
   }, [dispatch, history, notify, state.currentId, t.groupDefaultName, t.toastNodeAdded])
 
-  /** 协作组模板拖入画布：按模板内容生成协作组节点（用户批注：协作组模板列表）。 */
+  /** 协作组模板拖入画布：按模板内容生成 协作组节点（用户批注：协作组模板列表）。 */
   const placeGroupFromTemplate = useCallback((templateId: string, position: { x: number; y: number }) => {
     if (!state.currentId) return
     const template = state.templates.group.find((item) => item.id === templateId)
@@ -366,7 +372,7 @@ export function useCanvasActions(
     const group = state.canvas.nodes.find((item) => item.id === groupId)
     if (!template || !group || group.kind !== 'group') return
     const members = (group.data.memberIds as string[] | undefined) ?? []
-    if (members.length >= GROUP_MEMBER_LIMIT) {
+    if (members.length >= teamMemberLimit) {
       notify('error', t.groupMemberLimitHint)
       return
     }
@@ -383,7 +389,7 @@ export function useCanvasActions(
     dispatch({ type: 'GRAPH_REPLACED', nodes, edges: dropNodeFlowLines(state.canvas.edges, node.id), dirty: true })
     dispatch({ type: 'SELECT_NODE', id: node.id })
     notify('success', t.toastGroupMemberAdded)
-  }, [dispatch, history, notify, state.canvas.edges, state.canvas.nodes, state.currentId, state.templates, t.groupMemberLimitHint, t.toastGroupMemberAdded])
+  }, [dispatch, history, notify, state.canvas.edges, state.canvas.nodes, state.currentId, state.templates, t.groupMemberLimitHint, t.toastGroupMemberAdded, teamMemberLimit])
 
   const onGroupResize = useCallback((id: string, size: { w: number; h: number }) => {
     dispatch({ type: 'NODE_DATA_PATCH', id, patch: { size } })
@@ -402,7 +408,7 @@ export function useCanvasActions(
     if (!node || (node.kind !== 'parent' && node.kind !== 'agent')) return
     const members = (group.data.memberIds as string[] | undefined) ?? []
     if (members.includes(nodeId)) return
-    if (members.length >= GROUP_MEMBER_LIMIT) {
+    if (members.length >= teamMemberLimit) {
       notify('error', t.groupMemberLimitHint)
       return
     }
@@ -410,7 +416,7 @@ export function useCanvasActions(
     // 入组时自动断开该节点原有的流程连线（组内成员仅上下文/数据库线）
     dispatch({ type: 'GRAPH_REPLACED', nodes: joinNodeToGroup(state.canvas.nodes, nodeId, groupId), edges: dropNodeFlowLines(state.canvas.edges, nodeId), dirty: true })
     notify('success', t.toastGroupMemberAdded)
-  }, [dispatch, history, locks, notify, state.canvas.edges, state.canvas.nodes, t.groupMemberLimitHint, t.toastGroupMemberAdded])
+  }, [dispatch, history, locks, notify, state.canvas.edges, state.canvas.nodes, t.groupMemberLimitHint, t.toastGroupMemberAdded, teamMemberLimit])
 
   // ---------- 虚拟节点（复制） ----------
   const copyToProxy = useCallback(() => {
@@ -434,11 +440,11 @@ export function useCanvasActions(
   }, [dispatch, history, notify, state.canvas.nodes, state.selection.nodeId, t.toastProxyCreated])
 
   // ---------- 协作组成员移除 ----------
-  // 先合并重复协作组节点（memberIds 并集，且对每个组去重），得到**唯一**权威组；
+  // 先合并重复 协作组节点（memberIds 并集，且对每个组去重），得到**唯一**权威组；
   // 再从去重后的成员列表里移除该成员（一次只删一个，即使历史数据里该 id 重复出现），
   // 同时只清空目标成员的 groupId —— 杜绝「删 1 个却移出多个 / 无论点哪个都移出 2 个」。
   const removeGroupMember = useCallback((memberId: string) => {
-    // 运行中锁定：已完成/执行中成员退出协作组会改变已跑完/执行中的协作结构 → 忽略
+    // 运行中锁定：已完成/执行中成员退出 协作组会改变已跑完/执行中的协作结构 → 忽略
     if (locks.isNodeLocked(memberId)) return
     const base = consolidateGroups(state.canvas.nodes)
     const member = base.find((item) => item.id === memberId)

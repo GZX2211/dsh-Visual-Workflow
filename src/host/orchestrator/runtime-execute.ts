@@ -8,7 +8,7 @@
 // 指令、不要求父代理空闲），不再以 WF_PAUSED/WF_STOPPED 阻断，也不再需要人工点「运行」。
 
 import { WF_RUN_NODE_WAIT } from '../shared/protocol.js'
-import { nodeById } from '../graph/index.js'
+import { isGroupMember, nodeById } from '../graph/index.js'
 import { DEFAULT_SYSTEM_LANGUAGE } from '../system-language.js'
 import { collabPromptOf, labelOf } from './graph-facts.js'
 import { effectiveReactLimitOf, effectiveRetryLimitOf, effectiveThinkingOf } from './node-params.js'
@@ -16,9 +16,8 @@ import { buildNodeBlocks } from './task-blocks.js'
 import { WfError } from './errors.js'
 import { createWaiter, type FinishArgs, type FinishResult, type RunEntry, type RunNodeArgs, type RunNodeResult, type Waiter } from './run-entry.js'
 import { setNodeStatus, terminalizeNodes } from './snapshot.js'
-import { GLOBAL_RUN_CALL_LIMIT, type CallerInfo, type GroupMemberPlan, type GroupStartResult } from './seams.js'
+import { GLOBAL_RUN_CALL_LIMIT, type CallerInfo } from './seams.js'
 import { RuntimeLaunch } from './runtime-launch.js'
-import type { GroupNode, RoleNode, WorkflowDocument } from '../shared/graph-model.js'
 
 export class RuntimeExecute extends RuntimeLaunch {
   // ---- wf_run_node ----------------------------------------------------------
@@ -99,20 +98,27 @@ export class RuntimeExecute extends RuntimeLaunch {
       return { nodeId, status: 'paused' }
     }
 
-    // 协作组：整组交给官方 Agent Team（成员数量与成员参数由画布决定）。
-    // 仅模式一支持：模式二的阻塞等待语义与团队异步协作不匹配，保持既有「非 agent 节点」拒绝。
+    // 协作组卡片是包裹层，不是执行主体（用户裁决 2026-10）：它只能是流程上的位置锚点，
+    // 成员节点才是执行单元。以组 id 启动整组属已退役的旧语义，明确拒绝并给出成员清单。
     if (node.kind === 'group') {
-      if (run.snapshot.mode !== 'mode1') {
-        throw new WfError(
-          `WF_NODE_KIND: wf_run_node_wait does not accept a collaboration-group node; start its member nodes one by one ("${labelOf(node)}")`,
-          'WF_NODE_KIND',
-        )
-      }
-      return await this.runGroupNode(run, flow, node, args)
+      const memberIds = [...new Set(((node.data.memberIds ?? []) as unknown[]).map((id) => String(id ?? '')).filter(Boolean))]
+      throw new WfError(
+        `WF_NODE_KIND: "${labelOf(node)}" is a Team card (a wrapper, not an execution unit). `
+        + `Start its member nodes one by one with wf_run_node: [${memberIds.join(', ') || '(no members)'}].`,
+        'WF_NODE_KIND',
+      )
     }
 
     if (node.kind !== 'agent') {
       throw new WfError(`WF_NODE_KIND: wf_run_node only accepts an agent node; "${labelOf(node)}" is ${node.kind}`, 'WF_NODE_KIND')
+    }
+    // 模式二完全不支持协作组（用户裁决 2026-10）：阻塞等待语义与团队异步协作不匹配，
+    // 成员节点在 wf_run_node_wait 通道下同样拒绝（模式一才允许）。
+    if (run.snapshot.mode === 'mode2' && isGroupMember(flow, node.id)) {
+      throw new WfError(
+        `WF_NODE_KIND: wf_run_node_wait does not accept a Team member node ("${labelOf(node)}"); Team collaboration is available in mode1 only`,
+        'WF_NODE_KIND',
+      )
     }
     // 虚拟节点解析后一切以主节点 key 记账（共享同一子代理执行实例与快照记录）
     const resolvedNodeId = node.id
@@ -141,12 +147,17 @@ export class RuntimeExecute extends RuntimeLaunch {
     }
 
     setNodeStatus(run.snapshot, resolvedNodeId, 'running', { attempts: attempt, now: this.now() })
+    // 协作组成员节点：协作通道只对它有意义（official = 官方 teammate，成员自带官方工具与
+    // 协作策略，故不注入插件自建协作块；legacy = 官方不可用降级为普通子代理，需注入
+    // wf_ask_agent 协作指引）。
+    const teamMember = isGroupMember(flow, node.id)
     const blocks = buildNodeBlocks({
       flow,
       node,
       snapshot: run.snapshot,
       documentTextLimit: this.deps.config.documentTextLimit,
       systemLanguage: this.deps.systemLanguage?.() ?? DEFAULT_SYSTEM_LANGUAGE,
+      ...(teamMember ? { collabChannel: this.collabChannelOf(run.snapshot.sessionId) } : {}),
     })
 
     // wait:true 阻塞等待器必须先于启动注册（subagent/end 可能在启动返回前到达）
@@ -170,6 +181,7 @@ export class RuntimeExecute extends RuntimeLaunch {
         blocks,
         signal: run.controller.signal,
         collabPrompt: collabPromptOf(flow, node.id),
+        ...(teamMember ? { teamMember: true } : {}),
         ...(thinking !== undefined ? { thinking } : {}),
         ...(effectiveReactLimit !== undefined ? { iterationLimit: effectiveReactLimit } : {}),
       })
@@ -206,138 +218,6 @@ export class RuntimeExecute extends RuntimeLaunch {
       return await waiter!.promise
     } finally {
       callerSignal?.removeEventListener('abort', onAbort)
-    }
-  }
-
-  // ---- 协作组（官方 Agent Team） ---------------------------------------------
-
-  /**
-   * 协作组节点执行：把整组启动为官方 Agent Team。
-   *
-   * 语义边界：
-   *   - 成员数量与成员级参数（角色提示词/模型/工具白名单）由画布与子代理引擎决定，
-   *     本方法只负责解析成员、组装成员任务块、登记事件归属与快照状态；
-   *   - 协作过程（消息邮箱、任务板、等待、中断、成员状态）全部由官方机制负责，
-   *     本方法不注入任何协作协议文本；
-   *   - 官方团队不可用时不擅自启动成员：报可行动错误，指示父代理逐个启动成员节点
-   *     （既有语义），避免两条路径同时存在导致成员被启动两次。
-   *   - 成员会话是官方 Lead（会话根 Agent）的直接可延续子代理，其 subagent/end 事件
-   *     经 childIndex 回写成员节点状态，组卡片由既有聚合逻辑标 ok。
-   *
-   * @param run - 当前运行条目。
-   * @param flow - 最新工作流快照。
-   * @param group - 协作组节点。
-   * @param args - 工具入参（thinking / iterationLimit / retryLimit 作用于本组）。
-   * @returns started 路径结果（含成员清单；一个组对应多个成员会话，故无单一 childId）。
-   */
-  private async runGroupNode(
-    run: RunEntry,
-    flow: WorkflowDocument,
-    group: GroupNode,
-    args: RunNodeArgs,
-  ): Promise<RunNodeResult> {
-    const sessionId = run.snapshot.sessionId
-    const groupId = group.id
-    const memberIds = [...new Set(((group.data.memberIds ?? []) as unknown[]).map((id) => String(id ?? '')).filter(Boolean))]
-    if (memberIds.length === 0) {
-      throw new WfError(`WF_GROUP_EMPTY: collaboration group "${labelOf(group)}" has no members`, 'WF_GROUP_EMPTY')
-    }
-    const runner = this.deps.runner
-    const startGroup = runner.startGroupTask
-    if (typeof startGroup !== 'function' || runner.teamAvailable?.(sessionId) !== true) {
-      throw new WfError(
-        `WF_TEAM_UNAVAILABLE: the official Agent Team capability is not available, so collaboration group "${labelOf(group)}" cannot be started as a whole. ` +
-        `Start its member nodes one by one with wf_run_node: [${memberIds.join(', ')}].`,
-        'WF_TEAM_UNAVAILABLE',
-      )
-    }
-
-    // 硬护栏与单节点路径同口径（全局调用上限 + 组级尝试计数 + 组级参数覆盖）
-    run.callCount += 1
-    if (run.callCount > GLOBAL_RUN_CALL_LIMIT) {
-      throw new WfError(`WF_GLOBAL_LIMIT: orchestration exceeded the global call limit (${GLOBAL_RUN_CALL_LIMIT} wf_run_node calls); stopped automatically`, 'WF_GLOBAL_LIMIT')
-    }
-    const attempt = (run.attempts.get(groupId) ?? 0) + 1
-    run.attempts.set(groupId, attempt)
-    const effectiveRetryLimit = effectiveRetryLimitOf(group, args, this.deps.config.retryLimitDefault)
-    if (attempt > effectiveRetryLimit + 1) {
-      throw new WfError(`WF_RETRY_LIMIT: collaboration group "${labelOf(group)}" exceeded its retry limit (at most ${effectiveRetryLimit} retries)`, 'WF_RETRY_LIMIT')
-    }
-    const effectiveReactLimit = effectiveReactLimitOf(group, args, this.deps.config.reactIterationLimitDefault)
-    const thinking = effectiveThinkingOf(group, args)
-    run.lastActiveAt = this.now()
-
-    // 成员解析与护栏校验：整组启动的唯一前置（在任何状态写入之前拒绝非法组）。
-    // 已校验的成员节点一并收窄并收集，供下方计划循环直接复用（不二次查找、不重复守卫）。
-    const members: Array<{ id: string; node: RoleNode }> = []
-    for (const memberId of memberIds) {
-      const member = nodeById(flow, memberId)
-      if (!member || member.kind !== 'agent') {
-        throw new WfError(`WF_NODE_KIND: a collaboration-group member must be an agent node: ${memberId}`, 'WF_NODE_KIND')
-      }
-      members.push({ id: memberId, node: member })
-    }
-
-    // 成员任务块：与单节点路径同一构建器；协作块使用官方通道文案（send_message + 成员名）
-    const plans: GroupMemberPlan[] = []
-    for (const { id: memberId, node: member } of members) {
-      // 成员 db-in 索引预建：与单节点路径同一时机（启动前吸收构建耗时；best-effort）
-      if (this.deps.dbIndexer) await this.deps.dbIndexer.ensureIndexes(memberId, flow)
-      const blocks = buildNodeBlocks({
-        flow,
-        node: member,
-        snapshot: run.snapshot,
-        documentTextLimit: this.deps.config.documentTextLimit,
-        systemLanguage: this.deps.systemLanguage?.() ?? DEFAULT_SYSTEM_LANGUAGE,
-        collabChannel: 'official',
-      })
-      plans.push({
-        node: member,
-        blocks,
-        ...(thinking !== undefined ? { thinking } : {}),
-        ...(effectiveReactLimit !== undefined ? { iterationLimit: effectiveReactLimit } : {}),
-      })
-    }
-
-    setNodeStatus(run.snapshot, groupId, 'running', { attempts: attempt, now: this.now() })
-    let result: GroupStartResult | null
-    try {
-      result = await startGroup.call(runner, {
-        sessionId,
-        flowId: run.snapshot.flowId,
-        mode: 'mode1',
-        groupId,
-        collabPrompt: String(group.data.collabPrompt ?? ''),
-        members: plans,
-        signal: run.controller.signal,
-      })
-    } catch (error) {
-      if (run.snapshot.status === 'running') {
-        setNodeStatus(run.snapshot, groupId, 'fail', { attempts: attempt, now: this.now() })
-      }
-      throw error
-    }
-    if (!result) {
-      // 启动瞬间能力消失（服务卸载/根 Agent 退出）：回退指令要显式，不静默留下 running 组卡片
-      setNodeStatus(run.snapshot, groupId, 'fail', { attempts: attempt, now: this.now() })
-      throw new WfError(
-        `WF_TEAM_UNAVAILABLE: the official Agent Team became unavailable while starting collaboration group "${labelOf(group)}"; ` +
-        `start its member nodes one by one with wf_run_node: [${memberIds.join(', ')}].`,
-        'WF_TEAM_UNAVAILABLE',
-      )
-    }
-
-    // 登记成员会话归属：成员 subagent/end 据此回写各自节点状态（与单节点路径同一张表）
-    for (const member of result.members) {
-      run.inflight.add(member.childId)
-      this.childIndex.set(member.childId, { sessionId, flowId: run.snapshot.flowId, nodeId: member.nodeId })
-      this.childByNode.set(member.nodeId, member.childId)
-    }
-    await this.persistWarn(run)
-    return {
-      nodeId: groupId,
-      status: 'started',
-      members: result.members.map((member) => ({ nodeId: member.nodeId, target: member.target, childId: member.childId })),
     }
   }
 

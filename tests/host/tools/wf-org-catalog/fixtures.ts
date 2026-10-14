@@ -155,7 +155,7 @@ export function inlineRoleNodeFixture(): RoleNode {
 
 /**
  * 当前运行实例样本（`instance` 骨架召回的第 2 层）。
- * 刻意同时放入**参与流程**与**孤立**的 agent / 协作组，用于锁定 schedulable 的过滤口径：
+ * 刻意同时放入**参与流程**与**孤立**的 agent / Team，用于锁定 schedulable 的过滤口径：
  *   - 参与流程：a1（s→a1→g1→e 流程链）、g1；
  *   - 孤立（用户留在画布上但不执行）：a2、g2。
  */

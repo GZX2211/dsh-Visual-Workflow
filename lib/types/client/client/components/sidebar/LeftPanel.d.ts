@@ -18,7 +18,7 @@ export interface DragPayload {
         x: number;
         y: number;
     }): void;
-    /** 拖拽落点为协作组卡片时：生成节点并直接入组（角色模板）。 */
+    /** 拖拽落点为 协作组卡片时：生成节点并直接入组（角色模板）。 */
     onDropIntoGroup?(groupId: string, position?: {
         x: number;
         y: number;
@@ -103,7 +103,7 @@ export interface LeftPanelProps {
         x: number;
         y: number;
     }): void;
-    /** 协作组模板拖入画布：按模板内容生成协作组节点。 */
+    /** 协作组模板拖入画布：按模板内容生成 协作组节点。 */
     onPlaceGroupFromTemplate(id: string, position: {
         x: number;
         y: number;

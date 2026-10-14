@@ -95,7 +95,7 @@ describe('Studio 装配', () => {
     })
     const otherGroups = textOf('.wf-docgroup').join('|')
     expect(otherGroups).toContain('阶段')
-    expect(otherGroups).toContain('协作组')
+    expect(otherGroups).toContain('Team')
   })
 
   it('画布空态引导 + 角色模板列表 + 选中进入右侧属性面板', async () => {
@@ -214,14 +214,14 @@ describe('Studio 交互', () => {
     expect(resume?.args).toMatchObject({ sessionId: 's-1', runId: 'run-9' })
   })
 
-  it('协作组：画布角色节点拖入组卡片 → 组内迷你成员显示、画布大卡隐藏', async () => {
+  it('Team：画布角色节点拖入 协作组卡片 → 组内迷你成员显示、画布大卡隐藏', async () => {
     await renderStudio()
     await createDraft()
-    // 拖入协作组卡片（其他 Tab）
+    // 拖入 协作组卡片（其他 Tab）
     await act(async () => {
       libTab('其他')?.click()
     })
-    await dragCardTo('协作组', 500, 300)
+    await dragCardTo('Team', 500, 300)
     expect(document.querySelector('.wf-node--group')).toBeTruthy()
 
     // 拖入角色节点（角色 Tab）
@@ -232,7 +232,7 @@ describe('Studio 交互', () => {
     const roleNode = document.querySelector<HTMLDivElement>('.wf-graph__node .wf-node--agent')
     expect(roleNode).toBeTruthy()
 
-    // 把画布角色节点拖到组卡片上（mock elementsFromPoint：jsdom 无布局命中）
+    // 把画布角色节点拖到 协作组卡片上（mock elementsFromPoint：jsdom 无布局命中）
     const groupEl = document.querySelector('.wf-group-node') as HTMLElement
     const original = document.elementFromPoint
     const originalMany = document.elementsFromPoint
@@ -262,14 +262,14 @@ describe('Studio 交互', () => {
     expect(standaloneRoles.length).toBe(0)
   })
 
-  it('协作组：删除单个成员只移出一个，其余保留（用户批注：点了 1 个却移出多个）', async () => {
+  it('Team：删除单个成员只移出一个，其余保留（用户批注：点了 1 个却移出多个）', async () => {
     await renderStudio()
     await createDraft()
     // 放入协作组（其他 tab）
     await act(async () => {
       libTab('其他')?.click()
     })
-    await dragCardTo('协作组', 500, 300)
+    await dragCardTo('Team', 500, 300)
     const groupCard = document.querySelector('.wf-group-node') as HTMLElement
     expect(groupCard).toBeTruthy()
 
@@ -290,7 +290,7 @@ describe('Studio 交互', () => {
       document.elementsFromPoint = originalMany
     }
 
-    // 选中协作组 → 右侧组合成员应有 3 个
+    // 选中协作组 → 右侧团队成员应有 3 个
     await act(async () => {
       groupCard.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 500, clientY: 300, button: 0 }))
       window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 500, clientY: 300, button: 0 }))

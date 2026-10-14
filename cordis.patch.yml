@@ -20,7 +20,7 @@
         apiKey: null
         # 模式二单服务并发请求上限（超出返回 429，需求 §4.1.3 默认 50）。
         maxConcurrentPerService: 50
-        # wf_ask_agent 待回复登记的 TTL 毫秒数（到期后不再接受 reply，也不再阻塞组聚合；默认 120s）。
+        # wf_ask_agent 待回复登记的 TTL 毫秒数（到期后不再接受 reply；默认 120s）。
         wfAskAgentTtlMs: 120000
         # 运行空闲超时毫秒数（无 in-flight 时的看护门限，默认 30 分钟）。
         runIdleTimeoutMs: 1800000
@@ -40,3 +40,7 @@
         embeddingModelDir: null
         # 外部 OpenAI 兼容 /embeddings 端点；null 表示优先本地嵌入（不可用才降级 BM25）。
         embeddingEndpoint: null
+        # 协作组成员上限（官方 agent-team.maxMembers 的镜像）：会话级累计名额，含创建失败的成员。
+        # 画布入组交互与启动成员前的预检都以此为准，必须与部署层 agent-team.maxMembers 同值
+        # （官方默认 16、官方 bundle 层压到 8）。
+        teamMemberLimit: 8

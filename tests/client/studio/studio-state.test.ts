@@ -5,7 +5,7 @@
 // tests/client/studio/studio-state.test.ts
 //
 // 状态机纯函数单测（照搬/适配旧项目行为 + 新数据模型）：
-// 画布投影、增删改、编辑器数据（角色/文件/数据库/阶段/协作组/虚拟节点）、
+// 画布投影、增删改、编辑器数据（角色/文件/数据库/阶段/Team/虚拟节点）、
 // 撤销重做、面板几何与打开文档的选中/编辑器重置。
 
 import { describe, expect, it } from 'vitest'
@@ -501,7 +501,7 @@ describe('editorDataOf', () => {
     expect(proxyData?.mainLabel).toBe('主')
   })
 
-  it('协作组 → kind group + members 解析', () => {
+  it('Team → kind group + members 解析', () => {
     const state = openWith(baseState(), [
       node({ id: 'g1', kind: 'group', data: { label: '组', memberIds: ['a1'] } }),
       node({ id: 'a1', kind: 'agent', data: { label: '成员' } }),
@@ -524,7 +524,7 @@ describe('editorDataOf', () => {
     expect(editorDataOf(selected)?.kind).toBe('edge')
   })
 
-  it('flowToCanvas：重复节点 id 去重（保留最后出现者，修复历史协作组重复追加缺陷）', () => {
+  it('flowToCanvas：重复节点 id 去重（保留最后出现者，修复历史 协作组重复追加缺陷）', () => {
     const projected = flowToCanvas({
       id: 'f', sessionId: 's', mode: 'mode1', name: 'f', description: '',
       nodes: [

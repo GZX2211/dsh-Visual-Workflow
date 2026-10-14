@@ -19,15 +19,15 @@ export declare class RuntimeObserve extends RuntimeComm {
      */
     private deferSubagentEnd;
     /**
-     * 协作组聚合：某成员产出一轮后，若其所属协作组全部成员均已「产出一轮」
-     * （armed/ok/react-capped），且该组当前无待回复 ask，把组卡片标记为 ok
-     * （只影响运行回显，不干预父代理调度）。组卡片单向推进：仅 pending → ok；
-     * 成员后续重试/失败不回退组卡片。流程读取失败时跳过聚合（下一次成员完成事件重试）。
+     * 成员回合结束的「待命（armed）」判定——成员运行的权威读源是**官方 roster**。
+     *
+     * 语义：成员一轮产出结束、但在团队内仍可被 send_message 唤醒，故不是终态。
+     *   - 官方 协作组可用：查官方成员状态，只有 `inactive`（当前无回合在执行）才算待命；
+     *     running/provisioning 说明仍在执行或创建，failed 说明成员已不可用（落 ok 会掩盖失败）。
+     *   - 官方不可用（成员已降级为普通可延续子代理）：退回图判定——是团队成员即待命。
+     * 查询/读图失败时保守返回 false（不阻断回写，落 ok，保留旧行为）。
+     *
+     * 协作组卡片（包裹层）不参与运行事实：本层不再聚合、不再写组状态（用户裁决 2026-10）。
      */
-    private markGroupOkIfComplete;
-    /**
-     * 判断某 agent 节点是否属于某协作组（P0-1：组成员回合结束落 armed 而非 ok）。
-     * 流程读取失败时保守返回 false（不阻断，落 ok，保留旧行为）。
-     */
-    private isGroupMemberOf;
+    private teamMemberArmed;
 }

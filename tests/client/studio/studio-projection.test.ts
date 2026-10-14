@@ -53,7 +53,7 @@ describe('文档 → 画布投影', () => {
     expect(flow.nodes.find((node) => node.id === 'n1')?.position).toEqual({ x: 10, y: 20 })
   })
 
-  it('重复协作组节点合并为一条且成员并集去重；连线按字段口径投影', () => {
+  it('重复 协作组节点合并为一条且成员并集去重；连线按字段口径投影', () => {
     const flow = flowToCanvas(asFlow())
     const groups = flow.nodes.filter((node) => node.kind === 'group')
     expect(groups).toHaveLength(1)

@@ -40,12 +40,12 @@ export interface OrchestrationDirectiveParams {
     workflowGoal: string
     /** 节点清单：流程中参与流程的可调度 agent 节点（id + 人类可读名称）。 */
     nodes: Array<{ id: string; label: string }>
-    /** 协作组成员说明（画布含协作组时组装该段；空数组 = 不组装协作组段）。 */
+    /** 协作组卡片与成员清单（画布含 协作组卡片时组装该段；空数组 = 不组装该段）。 */
     collabGroups: Array<{ groupId: string; label: string; memberIds: string[] }>
     /**
      * 协作通道（协作组段文案的分支依据）：
-     *   - official = 官方 Agent Team 可用 → 指示父代理对协作组卡片调用 wf_run_node 启动官方团队；
-     *   - legacy = 官方团队不可用 → 指示父代理逐个启动成员节点（既有语义）。
+     *   - official = 官方 Agent 协作组可用 → 成员以官方 teammate 身份启动，协作与任务板走官方工具；
+     *   - legacy = 官方团队不可用 → 成员降级为普通子代理，组内通信用 wf_ask_agent。
      * 缺省 legacy。
      */
     collabChannel?: CollabChannel
@@ -187,7 +187,7 @@ function buildTailSection(langRule: string, dynamic: OrchestrationDirectiveParam
   ].join('\n')
 }
 
-/** 中段过程性信息（情况1/2 共用）：拓扑召回入口 + 目标 + 协作组（按需）。 */
+/** 中段过程性信息（情况1/2 共用）：拓扑召回入口 + 目标 + Team（按需）。 */
 function buildMidSection(facts: OrchestrationDirectiveParams['facts']): string {
   const midParts: string[] = [
     MID_MARKER,
@@ -202,18 +202,26 @@ function buildMidSection(facts: OrchestrationDirectiveParams['facts']): string {
   ]
   const goal = String(facts.workflowGoal ?? '').trim()
   if (goal) midParts.push('', `工作流目标：${goal}`)
-  // 协作组段仅在画布存在协作组时组装。
+  // 协作组段仅在画布存在 协作组卡片时组装。
   if (facts.collabGroups.length > 0) {
     const official = facts.collabChannel === 'official'
     const collabText = facts.collabGroups
-      .map((g) => (official
-        ? `- ${g.groupId}（${g.label}）：调用 wf_run_node("${g.groupId}") 启动该协作组；成员由插件创建为官方 teammate，成员节点 id 为 [${g.memberIds.join(', ')}]`
-        : `- ${g.groupId}（${g.label}）：并行启动成员 [${g.memberIds.join(', ')}]`))
+      .map((g) => `- ${g.groupId}（${g.label}）：成员节点 [${g.memberIds.join(', ')}]`)
       .join('\n')
-    midParts.push('', official ? '协作组（官方团队）：' : '协作组（并行成员）：', collabText)
+    midParts.push('', official ? 'Team（官方团队）：' : 'Team（降级通道）：', collabText)
     if (official) {
-      // 成员由插件决定：父代理只负责启动与协作，自行拉人会绕过插件的成员编排
-      midParts.push('', '协作组成员由插件按画布配置创建；不要自行调用 spawn_teammate 创建成员。')
+      midParts.push(
+        '',
+        '协作组卡片是包裹层、不是执行单元：逐个调用 wf_run_node(成员节点 id) 启动成员；直接对 协作组卡片调用会被拒绝。',
+        '成员以官方 teammate 身份运行，自带官方 协作组工具（list_agents / send_message / team_task_*）与官方协作策略；'
+        + '分工与交接用官方任务板登记（team_task_create → claim → complete，按 revision 做 CAS 更新），不要自建任务清单。',
+        '成员由画布定义、由插件创建：不要自行调用 spawn_teammate 创建成员，也不要给成员改名。',
+      )
+    } else {
+      midParts.push(
+        '',
+        '官方 协作组不可用：成员降级为普通子代理，逐个用 wf_run_node 启动；组内通信用 wf_ask_agent。',
+      )
     }
   }
   return midParts.join('\n')

@@ -200,12 +200,12 @@ describe('validateFlow 全量校验', () => {
     expect(validateFlow(makeFlow([g, member, outside], [line])).ok).toBe(true)
   })
 
-  it('协作组卡片 ctx/db 连线被矩阵层拒绝（组卡片仅 flow 连接点，§4.2.5.2）', () => {
+  it('协作组卡片 ctx/db 连线被矩阵层拒绝（协作组卡片仅 flow 连接点，§4.2.5.2）', () => {
     const g = newGroupNode('g')
     const a = newRoleNode('agent', 'a')
-    // 组卡片无 ctx-out：源侧矩阵拒绝
+    // 协作组卡片无 ctx-out：源侧矩阵拒绝
     const l1 = newLine(g.id, a.id, 'ctx-out', 'ctx-in')
-    // 组卡片无 ctx-in：目标侧矩阵拒绝
+    // 协作组卡片无 ctx-in：目标侧矩阵拒绝
     const l2 = newLine(a.id, g.id, 'ctx-out', 'ctx-in')
     const cs = codes(makeFlow([g, a], [l1, l2]))
     expect(cs).toContain('invalidHandle')

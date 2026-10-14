@@ -66,7 +66,7 @@ describe('协作组成员（原子入组 / 一致显示）', () => {
     expect(out.map((l) => l.id)).toEqual(['e2', 'e4']) // 仅保留 ctx/db 线
   })
 
-  it('consolidateGroups：重复协作组节点合并为唯一组，memberIds 取并集（不丢成员）', () => {
+  it('consolidateGroups：重复 协作组节点合并为唯一组，memberIds 取并集（不丢成员）', () => {
     const nodes: N[] = [
       node('g', 'group', { memberIds: ['bug'] }),
       node('g', 'group', { memberIds: ['test', 'full'] }),

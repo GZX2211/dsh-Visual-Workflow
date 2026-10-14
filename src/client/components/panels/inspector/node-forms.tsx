@@ -1,6 +1,6 @@
 // src/client/components/panels/inspector/node-forms.tsx
 //
-// 阶段 / 协作组 / 虚拟节点表单。
+// 阶段 / Team / 虚拟节点表单。
 
 import type { Dict } from '../../../i18n.js'
 import { Field } from '../form-field.js'
@@ -20,7 +20,7 @@ export function StageForm({ data, copy, nodeLabel }: { data: Record<string, unkn
   )
 }
 
-/** 协作组（名称/协作 Prompt/成员列表删除）。模板态无成员（成员在画布内拖入登记），隐藏成员区。 */
+/** Team（名称/协作 Prompt/成员列表删除）。模板态无成员（成员在画布内拖入登记），隐藏成员区。 */
 export function GroupForm({ data, copy, members, onPatch, onLoadMd, onRemoveMember }: {
   data: Record<string, unknown>
   copy: Dict

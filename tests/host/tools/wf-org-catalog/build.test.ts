@@ -3,7 +3,7 @@
 // 索引 / 详情装配纯函数单测：
 //   - 索引：组合携带完整工具清单、模型携带思考强度档位、资产条目只给「够不够参考」的判据、
 //     规则与 ID 约定同源、三段 ID 约定齐全且不含模版措辞；
-//   - 骨架：阶段节点 / 角色 / 协作组 / 虚拟节点 / 数据节点正文 / 连接信息脱敏 / 连线 /
+//   - 骨架：阶段节点 / 角色 / Team / 虚拟节点 / 数据节点正文 / 连接信息脱敏 / 连线 /
 //     可召回内联角色清单 / 角色节点的fixed version（roleAssetId + roleVersionId）；
 //   - 骨架的字段取舍：角色 systemPrompt 必须缺席（走按需召回），其余不可召回内容必须给全；
 //   - 角色 / 内联角色详情：最长字段完整不截断，可选字段缺省时省略。
@@ -420,12 +420,13 @@ describe('buildInstanceDetail（instance 召回的第 2 层：当前运行实例
 })
 
 describe('schedulable（孤立节点标注：与既有编排清单同口径）', () => {
-  it('参与流程的 agent / group 标 true，孤立节点标 false', () => {
+  it('参与流程的 agent 标 true、孤立 agent 标 false；协作组卡片恒 false（包裹层不是调度目标）', () => {
     const detail = instanceSkeletonOf(instanceFlowFixture())
     const byId = new Map(detail.nodes.map((node) => [node.id, node]))
     expect(byId.get('a1')).toMatchObject({ schedulable: true })
     expect(byId.get('a2')).toMatchObject({ schedulable: false })
-    expect(byId.get('g1')).toMatchObject({ schedulable: true })
+    // 协作组卡片无论是否参与流程都不可调度：对它调用 wf_run_node 会被运行时拒绝
+    expect(byId.get('g1')).toMatchObject({ schedulable: false })
     expect(byId.get('g2')).toMatchObject({ schedulable: false })
   })
 
@@ -436,18 +437,18 @@ describe('schedulable（孤立节点标注：与既有编排清单同口径）',
     }
   })
 
-  it('口径等价于 orchestrationNodeList / collabGroupList 的过滤结果', () => {
+  it('agent 口径等价于 orchestrationNodeList；协作组卡片恒不可调度', () => {
     const flow = instanceFlowFixture()
     const detail = instanceSkeletonOf(flow)
     const schedulableAgents = detail.nodes
       .filter((node) => node.kind === 'agent' && node.schedulable === true)
       .map((node) => node.id)
       .sort()
-    const schedulableGroups = detail.nodes
-      .filter((node) => node.kind === 'group' && node.schedulable === true)
-      .map((node) => node.id)
-      .sort()
     expect(schedulableAgents).toEqual(orchestrationNodeList(flow).map((node) => node.id).sort())
-    expect(schedulableGroups).toEqual(collabGroupList(flow).map((group) => group.groupId).sort())
+    // 协作组卡片不是调度单元：collabGroupList 给出的 协作组卡片全部 schedulable=false
+    const groupIds = collabGroupList(flow).map((group) => group.groupId)
+    for (const groupId of groupIds) {
+      expect(detail.nodes.find((node) => node.id === groupId)).toMatchObject({ schedulable: false })
+    }
   })
 })

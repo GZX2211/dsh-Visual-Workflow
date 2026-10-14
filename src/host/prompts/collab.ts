@@ -1,11 +1,12 @@
 // src/host/prompts/collab.ts
 //
-// 协作成员清单块构建器（T-005 基线之一，需求变更后重写）。
+// 协作成员清单块构建器（**降级通道**的协作块；用户裁决 2026-10 后收窄）。
 //
-// 背景：此前把「协作 Prompt」作为 `collab:` 段追加到组内成员 System Prompt 末尾。
-//       需求变更：协作信息**改为追加到成员的用户消息**（首条任务块），且**无论
-//       用户写了什么（即使空白）都默认追加组内所有成员的 ID + 角色名称清单**，
-//       用于告知成员「你在和谁协作、能向谁发送协作消息（wf_ask_agent）」。
+// 现状：官方 协作组可用时成员是官方 teammate，官方为其注册九个 协作组工具并注入 team:policy，
+//       插件不再注入协作块（避免第二份协作契约）；本构建器只服务**降级通道**——官方协作组
+//       不可用、成员降级为普通子代理时，用插件自建工具（wf_ask_agent）协作。
+//       用户在 协作组卡片上填写的协作说明在两条通道下都会随任务消息注入（官方通道下作为
+//       「团队协作说明」），只是官方通道不再列成员清单与通信指引。
 //
 // 纯函数：输入 members/custom 不变则输出字节不变。
 
@@ -15,13 +16,12 @@
 export interface CollabBlockParams {
   /** 成员清单：组内每个角色节点的 id + 人类可读名称（始终注入，即使 custom 为空）。 */
   members: Array<{ id: string; label: string; target?: string }>
-  /** 组卡片上用户自定义的协作说明文本（可为空；空则不追加说明段）。 */
+  /** 协作组卡片上用户自定义的协作说明文本（可为空；空则不追加说明段）。 */
   custom: string
   /**
-   * 协作通道：告诉成员「用什么工具、填什么标识」与队友通信。
-   *   - official = 官方 Agent Team 邮箱（send_message，target 为成员名）；
-   *   - legacy = 插件自建协作工具（wf_ask_agent，targetChildId 为成员节点 id）。
-   * 缺省 legacy：未启用官方团队时保持既有文案与行为。
+   * 协作通道（成员是官方 teammate 还是普通子代理）。
+   * 注意 official 分支当前**没有调用方**：官方通道不注入协作块（官方 team:policy 承担协作
+   * 规则与寻址），成员清单与通信指引只在降级通道注入。该分支保留为完整模板备用。
    */
   channel?: CollabChannel
 }
@@ -42,7 +42,7 @@ export type CollabChannel = 'official' | 'legacy'
 export function buildCollabBlock(params: CollabBlockParams): string {
   const channel: CollabChannel = params?.channel === 'official' ? 'official' : 'legacy'
   const lines: string[] = [
-    '你是协作组的成员。本组成员为：',
+    '你是 协作组的成员。本组成员为：',
   ]
   const members = Array.isArray(params?.members) ? params.members : []
   if (members.length === 0) {

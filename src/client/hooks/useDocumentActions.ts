@@ -427,7 +427,7 @@ export function useDocumentActions(
       return
     }
     if (tab === 'other' && section === 'group') {
-      // 用户批注：协作组像其他列表一样，标题右侧 + 号新建协作组模板。
+      // 用户批注：协作组像其他列表一样，标题右侧 + 号新建 协作组模板。
       const template = templates.createTemplateDraft('group', t.templateDefaultName.group)
       selection.selectEditor({ source: 'template', kind: 'group', id: template.id })
       selection.selectLib('groupTemplate', (template as { id: string }).id)

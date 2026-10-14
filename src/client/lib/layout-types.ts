@@ -7,11 +7,11 @@
 import type { GroupNode } from '../../host/shared/graph-model.js'
 import { GROUP_MEMBER_LIST_TOP, GROUP_MEMBER_PADDING, GROUP_MEMBER_ROW_H } from './card-geometry.js'
 
-/** 组卡片内成员横向留白（布局专用；本体在 lib/card-geometry.ts，与卡片最小高度共用同一常量）。 */
+/** 协作组卡片内成员横向留白（布局专用；本体在 lib/card-geometry.ts，与卡片最小高度共用同一常量）。 */
 export { GROUP_MEMBER_PADDING }
 
 /**
- * 组卡片最小高度（容纳成员列表；用户手动设的更大高度优先）。
+ * 协作组卡片最小高度（容纳成员列表；用户手动设的更大高度优先）。
  * 与 card-geometry.groupCardSizeOf 同一口径（同一常量），两侧不会漂移。
  */
 export function groupCardMinHeight(group: GroupNode | { data?: { memberIds?: string[]; size?: { h?: unknown } } }): number {
@@ -30,7 +30,7 @@ export interface LayoutNodeInput {
   height: number
   /** 虚拟节点引用的主节点 id（kind='proxy' 时必填）。 */
   sourceId?: string
-  /** 协作组成员所属组 id，或协作组卡片的成员清单（kind='group' 时必填）。 */
+  /** 协作组成员所属组 id，或 协作组卡片的成员清单（kind='group' 时必填）。 */
   groupId?: string | null
   memberIds?: string[]
 }

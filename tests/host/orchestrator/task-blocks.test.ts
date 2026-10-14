@@ -173,3 +173,54 @@ describe('buildNodeBlocks 契约段位', () => {
     expect(text).not.toContain('下游节点直接读取')
   })
 })
+
+describe('协作组成员任务块（协作通道差异）', () => {
+  /** 协作组流程：成员 m1（groupId）包在 协作组卡片 g1 内，卡片带用户填写的协作说明。 */
+  function teamFlow(): WorkflowDocument {
+    const member = role('m1', 'agent', { groupId: 'g1' })
+    return {
+      id: 'flow-team',
+      sessionId: 'session-1',
+      mode: 'mode1',
+      name: '协作组流程',
+      description: '',
+      revision: 1,
+      nodes: [
+        member,
+        {
+          id: 'g1',
+          kind: 'group',
+          position: { x: 0, y: 0 },
+          data: { label: '评审组', collabPrompt: '成员互相质询', memberIds: ['m1'], size: { w: 300, h: 220 } },
+        },
+      ],
+      lines: [],
+    }
+  }
+
+  function memberBlock(channel: 'official' | 'legacy'): string {
+    const flow = teamFlow()
+    return buildNodeBlocks({
+      flow,
+      node: flow.nodes[0] as RoleNode,
+      snapshot: emptySnapshot,
+      documentTextLimit: 20000,
+      systemLanguage: '中文',
+      collabChannel: channel,
+    })[0].text
+  }
+
+  it('official 通道：不注入成员清单与通信指引（官方 team:policy 承担），仅注入用户填写的团队协作说明', () => {
+    const text = memberBlock('official')
+    expect(text).toContain('成员互相质询')
+    expect(text).not.toContain('本组成员为')
+    expect(text).not.toContain('wf_ask_agent')
+  })
+
+  it('legacy 通道：注入成员清单与 wf_ask_agent 通信指引（成员已降级为普通子代理）', () => {
+    const text = memberBlock('legacy')
+    expect(text).toContain('本组成员为')
+    expect(text).toContain('wf_ask_agent')
+    expect(text).toContain('成员互相质询')
+  })
+})

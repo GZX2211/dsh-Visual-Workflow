@@ -16,8 +16,6 @@ import {
   type AgentHost,
   type CallerInfo,
   type CoordinatorMessage,
-  type GroupStartInput,
-  type GroupStartResult,
   type NodeRunner,
   type NodeStartInput,
   type OrchestratorConfig,
@@ -183,18 +181,16 @@ export class FakeRunner implements NodeRunner {
    */
   nextReplacedChildId: string | null = null
   /**
-   * 官方 Agent Team 可用性。缺省 false：既有用例保持「协作组回退逐节点启动」的旧语义与文案；
-   * 协作组路径用例显式置 true。
+   * 官方 Agent 协作组可用性。缺省 false：既有用例保持「成员降级为普通子代理」的语义与文案；
+   * 官方 协作组路径用例显式置 true。
    */
   teamEnabled = false
-  /** 协作组启动记录（startGroupTask 入参）。 */
-  groupCalls: GroupStartInput[] = []
-  /** 下一次 startGroupTask 返回 null（模拟启动瞬间官方 Team 能力消失）。 */
-  groupStartUnavailable = false
-  /** 下一次 startGroupTask 抛出的错误（模拟启动通道异常）。 */
-  groupStartFail: unknown = null
+  /**
+   * 官方 roster 状态模拟（nodeId → 官方成员状态）：成员运行态的权威读源。
+   * 未登记的节点视为「不是官方成员」（teamMemberStatusOf 返回 null → 调用方退回图判定）。
+   */
+  teamMemberStatus = new Map<string, 'running' | 'inactive' | 'provisioning' | 'failed'>()
   private seq = 0
-  private groupSeq = 0
   async startNodeTask(input: NodeStartInput): Promise<{ childId: string; created: boolean; replacedChildId?: string }> {
     this.calls.push(input)
     if (this.nextFail !== null) {
@@ -216,25 +212,8 @@ export class FakeRunner implements NodeRunner {
   teamAvailable(): boolean {
     return this.teamEnabled
   }
-  async startGroupTask(input: GroupStartInput): Promise<GroupStartResult | null> {
-    this.groupCalls.push(input)
-    if (this.groupStartFail !== null) {
-      const error = this.groupStartFail
-      this.groupStartFail = null
-      throw error instanceof Error ? error : new Error(String(error))
-    }
-    if (this.groupStartUnavailable) return null
-    return {
-      members: input.members.map((plan) => {
-        this.groupSeq += 1
-        return {
-          nodeId: plan.node.id,
-          target: `m-${plan.node.id}`,
-          childId: `g-child-${this.groupSeq}`,
-          reused: false,
-        }
-      }),
-    }
+  teamMemberStatusOf(_sessionId: string, nodeId: string): 'running' | 'inactive' | 'provisioning' | 'failed' | null {
+    return this.teamMemberStatus.get(nodeId) ?? null
   }
 }
 

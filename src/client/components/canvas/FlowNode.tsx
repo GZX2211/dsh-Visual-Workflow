@@ -108,7 +108,7 @@ export const FlowNode = memo(function FlowNode({ node, copy, mode, selected, hig
   // 名称回退：label 为空（含空白）时显示节点种类名（避免虚拟节点显示为空白卡片）
   const nodeLabel = String(node.data.label ?? '').trim() || String(copy.nodeKinds[isProxy ? 'agent' : kind] ?? '')
   // 阶段节点（启动/结束/暂停）：单/双流程连接点，交换无意义且会产生死数据（审查 BUG-1），
-  // 与协作组一致不渲染交换按钮。
+  // 与 协作组一致不渲染交换按钮。
   const isStage = kind === 'start' || kind === 'end' || kind === 'pause'
   // 交换状态随节点持久化（用户批注：作为节点属性保存，重载后保持）
   const swapped = (node.data as { swapPorts?: unknown }).swapPorts === true

@@ -4,10 +4,10 @@ import type { WorkflowDocument } from '../shared/graph-model.js';
  * 父代理提示词变体判定（三情况，纯函数）：
  *   - orchestrator：纯编排——无父代理节点，或父代理（含其虚拟节点）未被流程线驱动
  *     （无 flow-in 入边）；
- *   - hybrid：编排 + 自执行——父代理被流程线驱动，且画布中**还存在其他参与流程的
- *     可执行单元**（agent 角色或其虚拟节点、协作组卡片任一参与流程线）；
- *   - executor：纯执行——父代理是唯一参与流程的可执行单元；画布上允许存在未参与
- *     流程的无关 agent/协作组节点（不执行任务，不进入编排清单）。
+ *   - hybrid：编排 + 自执行——父代理被流程线驱动，且画布中**还存在其他成员执行主体**
+ *     （参与流程的 agent 角色或其虚拟节点，或属于某个 协作组的成员节点）；
+ *   - executor：纯执行——父代理是唯一执行主体；画布上允许存在未参与流程、也不属于任何协作组
+ *     的无关 agent 节点（不执行任务，不进入编排清单）。
  */
 export declare function parentPromptVariantOf(flow: WorkflowDocument): ParentPromptVariant;
 /**
@@ -39,7 +39,7 @@ export declare function directiveParams(flow: WorkflowDocument, mode: 'mode1' | 
     systemLanguage?: string;
     /** 「本次组织预算」末段文本（冻结快照 → 剩余量口径；P2 注入）。 */
     orgBudgetText?: string;
-    /** 协作通道（官方 Agent Team 可用性；决定协作组段文案与启动方式）。 */
+    /** 协作通道（官方 Agent 协作组可用性；决定 协作组段文案与启动方式）。 */
     collabChannel?: CollabChannel;
 }): OrchestrationDirectiveParams;
 /**
@@ -73,6 +73,6 @@ export declare function buildParentRunPrompt(input: {
     systemLanguage: string;
     /** 「本次组织预算」末段文本（冻结快照 → 剩余量口径；P2 起由 startRun/resumeRun 注入）。 */
     orgBudgetText?: string;
-    /** 协作通道（官方 Agent Team 可用性；决定协作组段文案与启动方式）。 */
+    /** 协作通道（官方 Agent 协作组可用性；决定 协作组段文案与启动方式）。 */
     collabChannel?: CollabChannel;
 }): string;

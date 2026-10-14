@@ -5,13 +5,13 @@
 // 与 runner 的既有路径的关系：
 //   - 普通节点子代理经官方 `startContinuable({ request: { toolFilter } })` 传入白名单，
 //     由官方在创建窗口内 `tools.restrict({ allow })`；
-//   - 协作组成员由官方 Team 服务建立，该服务的创建请求**不接受** toolFilter，
+//   - 协作组成员由官方 协作组服务建立，该服务的创建请求**不接受** toolFilter，
 //     因此白名单必须由宿主在 `agent/created` 创建窗口内自行安装（官方语义等价：
 //     restrict 是作用域级声明式掩码，安装即对该子代理生效）。
 //
 // 名单来源与约束：
 //   - 名单由 resolveAgentTools 解析（已剔除永不进子代理的工具、官方保留传输名与
-//     官方 Team 工具名——后两者进入 restrict 名单会被官方「未知全局工具」校验拒绝）；
+//     官方 协作组工具名——后两者进入 restrict 名单会被官方「未知全局工具」校验拒绝）；
 //   - 空名单不安装 restrict（与官方路径一致：空表示不限制继承面）；
 //   - restrict 抛错按「尽力而为」处理：不阻断子代理创建，工具可见性退回继承面，
 //     并保留 childVisibilityContribution 的 deny 双保险。
@@ -29,7 +29,7 @@ export interface ChildToolFilterSetup {
   contribution(childCtx: unknown): () => void
   /**
    * 在创建窗口内夹住本次子代理的工具白名单。
-   * 为什么需要：白名单无法经官方 Team 服务的创建请求传递，只能由本装配在窗口内取得。
+   * 为什么需要：白名单无法经官方 协作组服务的创建请求传递，只能由本装配在窗口内取得。
    */
   withPending<T>(allow: readonly string[] | undefined, operation: () => Promise<T>): Promise<T>
   /**

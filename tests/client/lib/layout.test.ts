@@ -128,7 +128,7 @@ describe('布局不变量：分层与列序', () => {
 })
 
 // ---------------------------------------------------------------------------
-// ④ 无重叠（含组卡片实际尺寸）
+// ④ 无重叠（含 协作组卡片实际尺寸）
 // ---------------------------------------------------------------------------
 
 describe('布局不变量：几何', () => {
@@ -149,7 +149,7 @@ describe('布局不变量：几何', () => {
     for (const rect of rects) {
       expect(Number.isFinite(rect.x) && Number.isFinite(rect.y)).toBe(true)
     }
-    // 重叠判定只看实际渲染盒子（组卡片 + 独立节点；组内成员与虚拟节点不独立渲染）
+    // 重叠判定只看实际渲染盒子（协作组卡片 + 独立节点；组内成员与虚拟节点不独立渲染）
     // 说明：这里刻意用「带 memberIds 的折叠清单」而不是 data——StudioState.CanvasNode 的
     // 投影把成员关系放在节点 data 里，而 Host 图模型放在 LayoutNodeInput.memberIds 上。
     const collapsed = collapsedIdsOf(nodes.map((item) => ({ id: item.id, kind: item.kind, memberIds: item.memberIds, sourceId: item.sourceId })))
@@ -162,7 +162,7 @@ describe('布局不变量：几何', () => {
       },
       collapsed,
     )
-    // 组卡片 + 独立节点全部两两不重叠
+    // 协作组卡片 + 独立节点全部两两不重叠
     expect(findLayoutOverlaps(boxes)).toEqual([])
     expect(boxes.map((box) => box.id)).not.toContain('a4')
   })
@@ -177,10 +177,10 @@ describe('布局不变量：几何', () => {
 })
 
 // ---------------------------------------------------------------------------
-// ⑤～⑦ 虚拟节点 / 协作组 / 孤立节点
+// ⑤～⑦ 虚拟节点 / Team / 孤立节点
 // ---------------------------------------------------------------------------
 
-describe('布局不变量：虚拟节点 / 协作组 / 孤立节点', () => {
+describe('布局不变量：虚拟节点 / Team / 孤立节点', () => {
   it('⑤ proxy 独立占位：主节点列号只由自身拓扑决定，虚拟节点不推主节点、不再与主节点重叠（回归 §7.1 缺陷 1）', () => {
     const base = [node('s', 'start'), node('m', 'agent'), node('n', 'agent'), node('e', 'end')]
     // 无 proxy：s → m → n → e
@@ -217,7 +217,7 @@ describe('布局不变量：虚拟节点 / 协作组 / 孤立节点', () => {
     expect(findLayoutOverlaps(boxes)).toEqual([])
   })
 
-  it('⑥ 协作组卡片包住成员：成员坐标落在组卡片矩形内（顺序 = memberIds）', () => {
+  it('⑥ 协作组卡片包住成员：成员坐标落在 协作组卡片矩形内（顺序 = memberIds）', () => {
     const nodes = [
       node('s', 'start'),
       node('g1', 'group', { memberIds: ['a1', 'a2', 'a3'] }),
@@ -238,7 +238,7 @@ describe('布局不变量：虚拟节点 / 协作组 / 孤立节点', () => {
     // 成员按 memberIds 顺序纵向排列
     expect(positions.get('a1')!.y).toBeLessThan(positions.get('a2')!.y)
     expect(positions.get('a2')!.y).toBeLessThan(positions.get('a3')!.y)
-    // 组卡片高度不足时给出告警（300×220 容纳 3 名成员：78 + 3×38 + 10 = 202 < 220 → 无告警）
+    // 协作组卡片高度不足时给出告警（300×220 容纳 3 名成员：78 + 3×38 + 10 = 202 < 220 → 无告警）
     expect(layoutGraph([...nodes], lines).warnings).toEqual([])
     // 成员很多时卡片高度不足 → 非阻断告警
     const many = ['m1', 'm2', 'm3', 'm4', 'm5']

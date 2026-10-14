@@ -51,7 +51,7 @@ export interface NodeHandleDef {
  *   - 启动/输入（start）：无左入，右出 流程出 + 上下文出（上下文出仅模式二输入节点，§4.2.5.1）
  *   - 结束/输出（end）：左入 流程入（+ 上下文入仅模式二输出节点），无右出（§4.2.5.1）
  *   - 暂停（pause）：左入 流程入，右出 流程出（流程门语义，仅模式一，§4.2.5.1）
- *   - 协作组（group）：左入 流程入，右出 流程出；组卡片不提供 ctx/db 连接点（§4.2.5.2）
+ *   - Team（group）：左入 流程入，右出 流程出；协作组卡片不提供 ctx/db 连接点（§4.2.5.2）
  *   - 虚拟节点（proxy）：与主节点（角色）一致——运行时解析为主节点共享执行实例（§4.2.3.2 规则 7）
  *
  * 模式差异（mode1/mode2）不在此矩阵体现，由 validate.ts 按 flow.mode 做额外约束
@@ -256,7 +256,7 @@ export function stageLabel(kind: 'start' | 'end' | 'pause', mode: WorkflowMode):
   return '暂停'
 }
 
-/** 新建协作组节点（§4.2.5.2）。 */
+/** 新建 协作组节点（§4.2.5.2）。 */
 export function newGroupNode(label: string, position = { x: 120, y: 80 }): GroupNode {
   return {
     id: makeNodeId(),
@@ -423,7 +423,7 @@ export function memberGroupId(flow: Partial<WorkflowDocument>, nodeId: string): 
   return n && (n.kind === 'parent' || n.kind === 'agent') ? (n.data.groupId ?? null) : null
 }
 
-/** 判断角色节点是否为协作组成员（§4.2.5.2 规则 4：组内成员仅 ctx/db 连接点）。 */
+/** 判断角色节点是否为 协作组成员（§4.2.5.2 规则 4：组内成员仅 ctx/db 连接点）。 */
 export function isGroupMember(flow: Partial<WorkflowDocument>, nodeId: string): boolean {
   return memberGroupId(flow, nodeId) !== null
 }

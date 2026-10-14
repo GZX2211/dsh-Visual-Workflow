@@ -33,7 +33,7 @@ export function groupCount(nodes: GraphNode[] | null | undefined): number {
   return (nodes ?? []).filter((node) => node.kind === 'group').length
 }
 
-/** 单个协作组的最大已配置人数（无组时 0；memberIds 重复 id 只计一次）。 */
+/** 单个 协作组的最大已配置人数（无组时 0；memberIds 重复 id 只计一次）。 */
 export function maxGroupMembers(nodes: GraphNode[] | null | undefined): number {
   let max = 0
   for (const node of nodes ?? []) {

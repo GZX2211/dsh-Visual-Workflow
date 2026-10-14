@@ -31,6 +31,7 @@ function makeConfig(dir: string): Config {
     documentTextLimit: 20000,
     embeddingModelDir: null,
     embeddingEndpoint: null,
+    teamMemberLimit: 8,
   }
 }
 

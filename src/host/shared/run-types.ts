@@ -28,7 +28,7 @@ export type RunStatus =
 export type NodeRunStatus =
   | 'pending' // 待执行
   | 'running' // 执行中
-  | 'armed' // 待命（协作组成员：回合结束但仍在协作组内可被唤醒，非终态；父代理 wf_finish 后终态化。修复 P0-1）
+  | 'armed' // 待命（协作组成员：回合结束但仍在 协作组内可被唤醒，非终态；父代理 wf_finish 后终态化。修复 P0-1）
   | 'ok' // 成功（产出可回填）
   | 'fail' // 失败（异常/终止；非 ok 不继承，续跑重试）
   | 'skipped' // 已跳过
@@ -68,7 +68,7 @@ export interface RunSnapshot {
    * 未配置元参数时不写（保持既有快照形状，旧数据兼容）。
    */
   meta?: OrgMeta
-  /** 节点执行记录列表（仅可执行 agent 节点；协作组/阶段/文件/数据库不做执行记录）。 */
+  /** 节点执行记录列表（仅可执行 agent 节点；Team/阶段/文件/数据库不做执行记录）。 */
   nodes: Array<{
     /** 节点 id。 */
     nodeId: string

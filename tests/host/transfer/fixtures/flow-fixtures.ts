@@ -69,7 +69,7 @@ export function makeFlow(): WorkflowDocument {
   }
 }
 
-/** 含协作组节点的图文档（验证 embedded.groups 内联语义）。 */
+/** 含 协作组节点的图文档（验证 embedded.groups 内联语义）。 */
 export function makeFlowWithGroup(): WorkflowDocument {
   const flow = makeFlow()
   return {

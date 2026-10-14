@@ -68,7 +68,7 @@ export class TransferError extends Error {
   }
 }
 
-/** 从工作流节点提取协作组模板（协作 Prompt 的独立管理视图）。 */
+/** 从工作流节点提取 协作组模板（协作 Prompt 的独立管理视图）。 */
 function groupsOf(flow: WorkflowDocument): GroupTemplate[] {
   return (flow.nodes ?? [])
     .filter((node) => node.kind === 'group')

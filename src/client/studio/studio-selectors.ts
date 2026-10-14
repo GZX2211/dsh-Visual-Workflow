@@ -151,7 +151,7 @@ export function instanceRunBadgesOf(
 
 /**
  * 协作组成员显示名（唯一本体）：成员节点缺失或 label 缺失/为 null 时回退成员 id。
- * 画布组卡片（GraphCanvas）与右侧属性栏（editorDataOf）共用，避免两处各写一份回退规则。
+ * 画布 协作组卡片（GraphCanvas）与右侧属性栏（editorDataOf）共用，避免两处各写一份回退规则。
  * 只接受已解析出的成员节点，节点的查找方式（Map / find）由调用方决定。
  */
 export function memberLabelOf(member: CanvasNode | undefined, memberId: string): string {
@@ -326,7 +326,7 @@ export function panelsFullyCollapsedOf(state: StudioState): boolean {
 /**
  * 右侧属性栏是否显示：默认隐藏（折叠），仅当选中「具备属性」的对象时才展开。
  * 判定 = 编辑对象存在且其属性栏类型不是「阶段」（阶段节点/侧栏阶段卡片不具备属性，不弹）；
- * 其余（实例/工作流/服务/模板/角色/文件/数据库/协作组/连线/画布角色节点含父代理节点/虚拟节点）都弹。
+ * 其余（实例/工作流/服务/模板/角色/文件/数据库/Team/连线/画布角色节点含父代理节点/虚拟节点）都弹。
  * 注意：父代理模板也具备属性（属性栏显示模板内容），此处一并弹出。
  */
 export function inspectorOpenOf(state: StudioState): boolean {
