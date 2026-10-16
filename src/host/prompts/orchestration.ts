@@ -20,6 +20,8 @@
 //
 // 构建器均为纯函数：不读 Date.now/随机源，同一 params 两次构建字节相同。
 
+import { isEnglishSystemLanguage } from '../system-language.js'
+import { buildEnglishOrchestration } from './english.js'
 import { HEAD_MARKER, MID_MARKER, TAIL_MARKER, TAIL_RESTATE_MARKER } from './markers.js'
 import { languageRuleLine } from './prompt-rules.js'
 import type { CollabChannel } from './collab.js'
@@ -111,6 +113,7 @@ export const ORCH_HARD_CONSTRAINTS = {
  * 首段仅编排身份 + 完成判定信号 + 调度协议；不包含执行者模式条目。
  */
 export function buildOrchestratorPrompt(params: OrchestrationDirectiveParams): string {
+  if (isEnglishSystemLanguage(params.facts.systemLanguage)) return buildEnglishOrchestration(params)
   const { facts, dynamic } = params
   const langRule = languageRuleLine(facts.systemLanguage)
 
@@ -133,6 +136,7 @@ export function buildOrchestratorPrompt(params: OrchestrationDirectiveParams): s
  * dynamic.parentTaskBlock 为父代理自执行单元任务块（buildParentTaskSpec 输出）。
  */
 export function buildHybridPrompt(params: OrchestrationDirectiveParams): string {
+  if (isEnglishSystemLanguage(params.facts.systemLanguage)) return buildEnglishOrchestration(params, true)
   const { facts, dynamic } = params
   const parent = facts.parentNode
   const langRule = languageRuleLine(facts.systemLanguage)

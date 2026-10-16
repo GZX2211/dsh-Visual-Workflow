@@ -18,6 +18,8 @@
 //   schema 里，且违反时由参数层报错（WF_PATCH_MIXED_GROUPS / WF_BAD_ARGS / WF_GRAPH_INVALID
 //   附修复建议）精确回指，写进提示词是纯 token 浪费。
 
+import { isEnglishSystemLanguage } from '../system-language.js'
+import { buildEnglishPlan } from './english.js'
 import { HEAD_MARKER, MID_MARKER, TAIL_MARKER, TAIL_RESTATE_MARKER } from './markers.js'
 import { systemLanguageRule } from './prompt-rules.js'
 
@@ -132,6 +134,7 @@ const PRE_SUBMIT_CHECKLIST = [
  * @returns 完整提示词文本：HEAD 硬约束 → MID（L1 + 设计方法）→ TAIL（重申 + 自检 + 动态状态）
  */
 export function buildOrgPlanPrompt(params: OrgPlanPromptParams): string {
+  if (isEnglishSystemLanguage(params.facts.systemLanguage)) return buildEnglishPlan(params)
   const { facts, dynamic } = params
   const lang = String(facts.systemLanguage ?? '').trim()
   const langRule = lang ? systemLanguageRule(lang) + '。' : ''

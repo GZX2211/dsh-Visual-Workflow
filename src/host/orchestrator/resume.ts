@@ -29,6 +29,8 @@ export const RESUMABLE_STATUSES = ['paused', 'interrupted', 'stopped'] as const
 
 /** 断点续跑入参（工具路径静默接续与端点/调度器显式续跑共用）。 */
 export interface ResumeInput {
+  /** Explicit UI language on resume; otherwise inherit the checkpoint language. */
+  systemLanguage?: string
   sessionId: string
   flowId: string
   /** 指定恢复的旧 run id；缺省取该工作流最近的可恢复记录。 */

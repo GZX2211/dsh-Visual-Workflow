@@ -9,6 +9,9 @@
 //
 // 纯函数：输入 members/custom 不变则输出字节不变。
 
+import { isEnglishSystemLanguage } from '../system-language.js'
+import { buildEnglishCollab } from './english.js'
+
 /**
  * 协作成员清单块入参（中文注释每个字段）。
  */
@@ -23,6 +26,7 @@ export interface CollabBlockParams {
    *   - legacy = 插件自建协作工具（wf_ask_agent，targetChildId 为成员节点 id）。
    * 缺省 legacy：未启用官方团队时保持既有文案与行为。
    */
+  systemLanguage?: string
   channel?: CollabChannel
 }
 
@@ -40,6 +44,7 @@ export type CollabChannel = 'official' | 'legacy'
  * @returns 追加到成员用户消息的协作块（面向模型，中文）。
  */
 export function buildCollabBlock(params: CollabBlockParams): string {
+  if (isEnglishSystemLanguage(params.systemLanguage)) return buildEnglishCollab(params)
   const channel: CollabChannel = params?.channel === 'official' ? 'official' : 'legacy'
   const lines: string[] = [
     '你是协作组的成员。本组成员为：',

@@ -7,6 +7,7 @@
 //   - 节点执行上下文事实：dbToolHintOf、buildNodeContextFacts（上游产出/文件路径/db 提示）。
 // 全部为纯函数（不读时钟/随机源），不依赖全局状态。
 
+import { isEnglishSystemLanguage } from '../system-language.js'
 import { buildCollabBlock, type CollabChannel } from '../prompts/index.js'
 import { ctxInEdges, dbInEdges, nodeById, nodeParticipatesInFlow, validateFlow } from '../graph/index.js'
 import type { DatabaseNode, GraphNode, GroupNode, RoleNode, WorkflowDocument } from '../shared/graph-model.js'
@@ -27,12 +28,13 @@ const DB_TOOL_HINT_MODES =
  * - 无 db-in 连线时返回空串（工具白名单也不注入 wf_db_query）。
  * 纯函数：输入同则输出同，不读时钟/随机源。
  */
-export function dbToolHintOf(flow: WorkflowDocument, nodeId: string): string {
+export function dbToolHintOf(flow: WorkflowDocument, nodeId: string, systemLanguage?: string): string {
   const sources = dbInEdges(flow, nodeId)
     .map((line) => nodeById(flow, line.source))
     .filter((n): n is DatabaseNode => n?.kind === 'database')
   if (sources.length === 0) return ''
   const ids = sources.map((n) => `${n.id} (${labelOf(n)})`).join('; ')
+  if (isEnglishSystemLanguage(systemLanguage)) return `Connected database nodes: ${ids}. Access databases only through wf_db_query: mode "search" for vector retrieval, mode "query" for read-only SELECT with LIMIT, and mode "schema" for table structure. Do not read database files directly.`
   return `已连接数据库节点：${ids}。${DB_TOOL_HINT_MODES}`
 }
 
@@ -89,7 +91,7 @@ export function collabPromptOf(flow: WorkflowDocument, nodeId: string): string {
  * @param nodeId - 角色节点 id。
  * @param channel - 协作通道：official 时成员以官方成员名寻址，否则以节点 id 寻址。
  */
-export function collabBlockOf(flow: WorkflowDocument, nodeId: string, channel: CollabChannel = 'legacy'): string {
+export function collabBlockOf(flow: WorkflowDocument, nodeId: string, channel: CollabChannel = 'legacy', systemLanguage?: string): string {
   const group = flow.nodes.find(
     (n): n is GraphNode & { data: { collabPrompt?: string; memberIds?: string[] } } =>
       n.kind === 'group' && ((n.data.memberIds ?? []) as string[]).includes(nodeId),
@@ -99,7 +101,7 @@ export function collabBlockOf(flow: WorkflowDocument, nodeId: string, channel: C
     const member = nodeById(flow, id)
     return { id, label: member ? labelOf(member) : id, target: teammateNameOf(id) }
   })
-  return buildCollabBlock({ members, custom: String(group.data.collabPrompt ?? ''), channel })
+  return buildCollabBlock({ members, custom: String(group.data.collabPrompt ?? ''), channel, systemLanguage })
 }
 
 /** 运行前完整性检查：缺失的启动/结束节点（按模式渲染中文名）。 */
@@ -130,6 +132,7 @@ export function buildNodeContextFacts(input: {
   /** 运行快照：上游角色节点最终产出（ctx 连线显式注入）的读取源。 */
   snapshot: RunSnapshot
   documentTextLimit: number
+  systemLanguage?: string
 }): { upstreamContext: Array<{ source: string; content: string }>; filePaths: string[]; dbToolHint: string } {
   const { flow, node } = input
   // 上游上下文（ctx-in 显式连线）：
@@ -194,5 +197,5 @@ export function buildNodeContextFacts(input: {
       content: truncateText(output, input.documentTextLimit),
     })
   }
-  return { upstreamContext, filePaths, dbToolHint: dbToolHintOf(flow, node.id) }
+  return { upstreamContext, filePaths, dbToolHint: dbToolHintOf(flow, node.id, input.systemLanguage ?? input.snapshot.systemLanguage) }
 }

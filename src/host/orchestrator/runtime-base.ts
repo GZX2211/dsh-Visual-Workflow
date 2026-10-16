@@ -21,7 +21,7 @@ import { cloneSnapshot, setNodeStatus } from './snapshot.js'
 import { RESUMABLE_STATUSES, type ResumeInput, type ResumeResult } from './resume.js'
 import { buildOrchestrationChangeText, type ExecutorContextFacts } from '../prompts/index.js'
 import { effectiveRetryLimitOf } from './node-params.js'
-import { DEFAULT_SYSTEM_LANGUAGE } from '../system-language.js'
+import { DEFAULT_SYSTEM_LANGUAGE, isEnglishSystemLanguage } from '../system-language.js'
 import { coordinatorMessage } from './ask-protocol.js'
 import { summarizeFlowChange } from './flow-diff.js'
 import { buildNodeContextFacts } from './graph-facts.js'
@@ -174,7 +174,7 @@ export abstract class RuntimeBase {
       nodeId: executor.nodeId,
       nodeLabel: executor.nodeLabel,
       task: { ...context, nodeLabel: executor.nodeLabel, isGroupMember: isGroupMember(flow, executor.nodeId) },
-      runContextText: `runId=${snapshot.id}; attempt ${(existing?.attempts ?? 0) + 1}/${retryBudget}（父代理执行单元）`,
+      runContextText: `runId=${snapshot.id}; attempt ${(existing?.attempts ?? 0) + 1}/${retryBudget}${isEnglishSystemLanguage(snapshot.systemLanguage) ? ' (parent execution unit)' : '（父代理执行单元）'}`,
     }
   }
 
@@ -618,7 +618,7 @@ export abstract class RuntimeBase {
       const text = buildOrchestrationChangeText({
         workflowName: flow.name ?? flow.id,
         definitionPath: this.deps.store.orchestrationFilePath(entry.snapshot.id),
-        systemLanguage: this.deps.systemLanguage?.() ?? DEFAULT_SYSTEM_LANGUAGE,
+        systemLanguage: entry.snapshot.systemLanguage ?? this.deps.systemLanguage?.() ?? DEFAULT_SYSTEM_LANGUAGE,
       })
       const id = this.deps.uuid?.() ?? randomUUID()
       if (root.status === 'running' && typeof root.steer === 'function') {

@@ -33,10 +33,10 @@ afterEach(async () => {
   vi.useRealTimers()
 })
 
-async function renderRemote(copy: Dict): Promise<RemoteFace> {
+async function renderRemote(copy: Dict, language?: string): Promise<RemoteFace> {
   let remote: RemoteFace | null = null
   function Harness(): null {
-    remote = useRemote(copy)
+    remote = useRemote(copy, language)
     return null
   }
   await act(async () => {
@@ -135,5 +135,22 @@ describe("useRemote 成功响应体校验", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true, value: null }), { status: 200 })))
     const remote = await renderRemote(en)
     expect(await remote.call("deleteWorkflow")).toBeNull()
+  })
+})
+
+describe('active workflow locale', () => {
+  it.each(['run', 'runResume'])('sends the active locale on %s', async endpoint => {
+    const fetch = vi.fn(async (_url: unknown, _init?: RequestInit) => new Response(JSON.stringify({ ok: true, value: {} })))
+    vi.stubGlobal('fetch', fetch)
+    const remote = await renderRemote(en, 'en-US')
+    await remote.call(endpoint, { sessionId: 's1', flowId: 'f1' })
+    expect(JSON.parse(fetch.mock.calls[0]![1]!.body as string).args).toEqual({ sessionId: 's1', flowId: 'f1', language: 'en-US' })
+  })
+  it('does not add locale fields to unrelated endpoints', async () => {
+    const fetch = vi.fn(async (_url: unknown, _init?: RequestInit) => new Response(JSON.stringify({ ok: true, value: {} })))
+    vi.stubGlobal('fetch', fetch)
+    const remote = await renderRemote(zh, 'zh')
+    await remote.call('list', { sessionId: 's1' })
+    expect(JSON.parse(fetch.mock.calls[0]![1]!.body as string).args).toEqual({ sessionId: 's1' })
   })
 })

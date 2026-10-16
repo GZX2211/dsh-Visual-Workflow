@@ -1,6 +1,8 @@
 import type { Dict } from '../i18n.js';
 import { type RemoteFace } from '../hooks/useRemote.js';
 export interface StudioProps {
+    /** Active DSH locale, including automatic browser/native selection. */
+    language?: string;
     /** 文案词典。 */
     t: Dict;
     /** 绑定的会话 id。 */
@@ -14,4 +16,4 @@ export interface StudioProps {
      */
     onRunImmersive?: () => void;
 }
-export declare function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: StudioProps): import("react").JSX.Element;
+export declare function Studio({ t, sessionId, remote: remoteProp, onRunImmersive, language }: StudioProps): import("react").JSX.Element;

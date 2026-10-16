@@ -14,6 +14,8 @@
 //
 // 构建器为纯函数：不读 Date.now/随机源，同一 params 两次构建字节相同。
 
+import { isEnglishSystemLanguage } from '../system-language.js'
+import { buildEnglishNodeTask, EN_DEFAULT_OUTPUT_CONTRACT } from './english.js'
 import { HEAD_MARKER, MID_MARKER, TAIL_MARKER, TAIL_RESTATE_MARKER } from './markers.js'
 import { systemLanguageRule } from './prompt-rules.js'
 import type { CollabChannel } from './collab.js'
@@ -131,6 +133,7 @@ function outputContractRule(defaulted: boolean): string {
  * @returns 注入子代理的任务文本（面向模型，中文）。
  */
 export function buildNodeTaskBlock(params: NodeTaskBlockParams): string {
+  if (isEnglishSystemLanguage(params.facts.systemLanguage)) return buildEnglishNodeTask(params)
   const { facts } = params
 
   // —— 首段：软约束固化（注意力位置第一位；仅保留 AI 有选择权的行为规则）——
@@ -201,4 +204,8 @@ export function buildNodeTaskBlock(params: NodeTaskBlockParams): string {
   const tail = tailLines.join('\n')
 
   return `${head}\n\n${mid}\n\n${tail}\n`
+}
+/** Default handoff fields in the run language; custom schemas remain caller-owned. */
+export function defaultOutputContractOf(systemLanguage: string): string {
+  return isEnglishSystemLanguage(systemLanguage) ? EN_DEFAULT_OUTPUT_CONTRACT : DEFAULT_OUTPUT_CONTRACT
 }

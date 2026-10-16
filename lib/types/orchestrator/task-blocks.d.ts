@@ -18,7 +18,7 @@ export declare function inputContractOf(node: RoleNode): string;
  *   - 已配置 outputSchema → 以配置为准，默认结构作为「至少包含」的补充。
  * 纯函数；不做任何结构校验（用户裁决 A3：柔性文本契约）。
  */
-export declare function outputContractOf(flow: WorkflowDocument, node: RoleNode): {
+export declare function outputContractOf(flow: WorkflowDocument, node: RoleNode, systemLanguage?: string): {
     text: string;
     defaulted: boolean;
 };

@@ -49,6 +49,7 @@ export {
   buildNodeTaskBlock,
   NODE_HARD_CONSTRAINTS,
   DEFAULT_OUTPUT_CONTRACT,
+  defaultOutputContractOf,
   type NodeTaskBlockParams,
 } from './node-task.js'
 
@@ -76,3 +77,6 @@ export {
   type OrgPlanPromptParams,
   type OrgPlanTargetKind,
 } from './org-plan.js'
+
+// English anchors and shared rules for prompt contract verification.
+export { EN_PROMPT_MARKERS, EN_ORCH_CONSTRAINTS, EN_DEFAULT_OUTPUT_CONTRACT } from './english.js'

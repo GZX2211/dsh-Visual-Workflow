@@ -16,6 +16,8 @@
 //
 // 构建器均为纯函数：不读 Date.now/随机源，同一 params 两次构建字节相同。
 
+import { isEnglishSystemLanguage } from '../system-language.js'
+import { buildEnglishExecutor, buildEnglishParentTask } from './english.js'
 import { HEAD_MARKER, MID_MARKER, TAIL_MARKER, TAIL_RESTATE_MARKER } from './markers.js'
 import { NODE_HARD_CONSTRAINTS } from './node-task.js'
 import { languageRuleLine } from './prompt-rules.js'
@@ -89,6 +91,7 @@ function renderContextSection(facts: ExecutorContextFacts): string {
  * 不含「# 硬性约束」等块级标题（避免与编排指令嵌套冲突），只列过程性信息与运行上下文。
  */
 export function buildParentTaskSpec(params: ParentTaskSpecParams): string {
+  if (isEnglishSystemLanguage(params.systemLanguage)) return buildEnglishParentTask(params)
   const { facts, runContextText } = params
   const lines: string[] = [
     `严格按照规范执行节点「${facts.nodeLabel}」。`,
@@ -105,6 +108,7 @@ export function buildParentTaskSpec(params: ParentTaskSpecParams): string {
  * 不含任何编排/流程调度措辞（事实源、待编排节点、协作组并行、调用协议等一律剔除）。
  */
 export function buildParentExecutorPrompt(params: ParentExecutorPromptParams): string {
+  if (isEnglishSystemLanguage(params.systemLanguage)) return buildEnglishExecutor(params)
   const { workflowName, facts, runContextText, systemLanguage } = params
   const langRule = languageRuleLine(systemLanguage)
 

@@ -10,6 +10,8 @@
 //   - 只给事实源路径，不内联整份拓扑（文件即事实源，避免两套来源漂移）；
 //   - 纯函数：不读时钟/随机源，同一入参输出字节相同（架构文档 §13）。
 
+import { isEnglishSystemLanguage } from '../system-language.js'
+import { buildEnglishChange } from './english.js'
 import { systemLanguageRule } from './prompt-rules.js'
 
 /** 编排变更通知标题标记（父代理与单测据此识别消息性质）。 */
@@ -30,6 +32,7 @@ export interface OrchestrationChangeParams {
  * 通知本身不是新任务：只要求父代理重读最新事实源并按新拓扑调整后续调度。
  */
 export function buildOrchestrationChangeText(params: OrchestrationChangeParams): string {
+  if (isEnglishSystemLanguage(params.systemLanguage)) return buildEnglishChange(params)
   const language = String(params.systemLanguage ?? '').trim()
   const lines: string[] = [
     `${ORCH_CHANGE_MARKER}用户刚刚保存了正在运行的工作流「${params.workflowName}」的画布，编排定义已更新。`,

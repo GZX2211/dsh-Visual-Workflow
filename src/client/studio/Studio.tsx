@@ -51,6 +51,8 @@ import { computeRunLocks } from '../lib/run-locks.js'
 import { keepInstanceOptions } from './instance-options.js'
 
 export interface StudioProps {
+  /** Active DSH locale, including automatic browser/native selection. */
+  language?: string
   /** 文案词典。 */
   t: Dict
   /** 绑定的会话 id。 */
@@ -65,8 +67,8 @@ export interface StudioProps {
   onRunImmersive?: () => void
 }
 
-export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: StudioProps) {
-  const defaultRemote = useRemote(t)
+export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive, language }: StudioProps) {
+  const defaultRemote = useRemote(t, language)
   const remote = remoteProp ?? defaultRemote
   const { state, dispatch } = useStudioState(sessionId)
   const { toast, toastError } = useToast(dispatch)

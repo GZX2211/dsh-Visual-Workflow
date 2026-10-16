@@ -26,7 +26,7 @@ import { RuntimeBase } from './runtime-base.js'
 function orgBudgetTextOf(snapshot: RunSnapshot, flow: WorkflowDocument): string {
   const meta = normalizeOrgMeta(snapshot.meta ?? {})
   const milestoneUsed = Math.max(0, Math.floor(Number(snapshot.milestoneUsed) || 0))
-  return buildOrgBudgetText(orgBudgetOf(meta, orgUsageOf(flow, { milestoneUsed })))
+  return buildOrgBudgetText(orgBudgetOf(meta, orgUsageOf(flow, { milestoneUsed })), snapshot.systemLanguage)
 }
 
 export class RuntimeLaunch extends RuntimeBase {
@@ -90,6 +90,7 @@ export class RuntimeLaunch extends RuntimeBase {
 
     const runId = this.deps.newRunId?.() ?? `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     const snapshot = createRunSnapshot({ runId, flow, sessionId: runSessionId, mode, now: this.now() })
+    snapshot.systemLanguage = input.systemLanguage ?? this.deps.systemLanguage?.() ?? DEFAULT_SYSTEM_LANGUAGE
     // 元参数三层之第三层（D-13）：把「有效值（模板 ← 实例覆盖）」冻结进快照。
     // 为什么在 startRun 冻结而非每次读取：运行期预算须可审计、可还原；此后改模板/实例
     // 的 meta 不影响本次运行（续跑继承旧冻结值，见 resume.ts 的 buildResumedSnapshot）。
@@ -146,7 +147,7 @@ export class RuntimeLaunch extends RuntimeBase {
       mode,
       ...(question ? { question } : {}),
       executor,
-      systemLanguage: this.deps.systemLanguage?.() ?? DEFAULT_SYSTEM_LANGUAGE,
+      systemLanguage: snapshot.systemLanguage,
       orgBudgetText: orgBudgetTextOf(snapshot, flow),
       collabChannel: this.collabChannelOf(runSessionId),
     })
@@ -238,6 +239,7 @@ export class RuntimeLaunch extends RuntimeBase {
 
     const runId = this.deps.newRunId?.() ?? `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     const snapshot = buildResumedSnapshot({ prev, runId, flow, sessionId, mode: prev.mode, now: this.now() })
+    snapshot.systemLanguage = input.systemLanguage ?? prev.systemLanguage ?? this.deps.systemLanguage?.() ?? DEFAULT_SYSTEM_LANGUAGE
     const entry: RunEntry = {
       controller: new AbortController(),
       snapshot,
@@ -286,7 +288,7 @@ export class RuntimeLaunch extends RuntimeBase {
         mode: prev.mode,
         resume: { resumeFromNodeId: snapshot.resumeFromNodeId, resumedFromRunId: prev.id },
         executor,
-        systemLanguage: this.deps.systemLanguage?.() ?? DEFAULT_SYSTEM_LANGUAGE,
+        systemLanguage: snapshot.systemLanguage,
         orgBudgetText: orgBudgetTextOf(snapshot, flow),
         collabChannel: this.collabChannelOf(sessionId),
       })

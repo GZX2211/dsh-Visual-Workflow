@@ -9,11 +9,14 @@
 //
 // 纯度：纯函数，无 IO / 时钟 / 随机源（同一入参输出字节相同）。
 
+import { isEnglishSystemLanguage } from '../system-language.js'
+
 /**
  * 系统语言规则短语（面向模型中文；各提示词构建器共用）。
  * 从 DSH 用户设置读取语言名，注入「所有对话回复、注释、思考过程必须使用该语言」。
  */
 export function systemLanguageRule(language: string): string {
+  if (isEnglishSystemLanguage(language)) return 'Use English for all replies, comments, and explanations'
   return `所有对话回复、注释、思考过程必须使用${language}`
 }
 
@@ -22,5 +25,5 @@ export function systemLanguageRule(language: string): string {
  * 各编排系构建器复用同一判断，避免「有的注入有的不注入」这类口径漂移。
  */
 export function languageRuleLine(systemLanguage: string): string {
-  return String(systemLanguage ?? '').trim() ? `${systemLanguageRule(systemLanguage)}。` : ''
+  return String(systemLanguage ?? '').trim() ? `${systemLanguageRule(systemLanguage)}${isEnglishSystemLanguage(systemLanguage) ? '.' : '。'}` : ''
 }

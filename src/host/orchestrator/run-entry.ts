@@ -166,6 +166,8 @@ export interface MilestoneMarkResult {
 }
 
 export interface StartRunOptions {
+  /** Resolved UI language; omitted for headless callers using Host settings. */
+  systemLanguage?: string
   /** 运行模式（缺省 mode1；模式二由服务管理器传入 mode2）。 */
   mode?: 'mode1' | 'mode2'
   /** 模式二：本次外部请求的用户问题（注入输入节点产出 + 编排指令动态段）。 */

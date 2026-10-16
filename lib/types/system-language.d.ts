@@ -16,3 +16,7 @@ export declare function systemLanguageOf(settings: SettingsServiceLike | null | 
  * 纯函数。
  */
 export declare function isChineseSystemLanguage(language: string): boolean;
+/** Recognize English locale IDs and the resolved model-facing language name. */
+export declare function isEnglishSystemLanguage(language: string | undefined): boolean;
+/** Resolve supported client locale IDs; unknown values leave Host fallback in control. */
+export declare function systemLanguageFromLocale(locale: unknown): string | undefined;

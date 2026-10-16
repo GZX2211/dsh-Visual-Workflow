@@ -15,7 +15,7 @@
 //   ③ 提供运行联动的沉浸式回调（官方右侧 Sidebar 若处于全屏则缩回普通态；非全屏保持原状）。
 
 import { useEffect, useState } from 'react'
-import type { Dict } from '../i18n.js'
+import { detectLanguage, type Dict } from '../i18n.js'
 import { Studio } from './Studio.js'
 import { currentSessionOf, rootSessionIdOf, type SessionsServiceLike } from '../sidebar/session-root.js'
 import { shrinkOfficialSidebarIfFullscreen } from '../sidebar/workbench-tab.js'
@@ -54,5 +54,5 @@ export function WorkbenchHost({ ctx, t }: { ctx: WorkbenchHostContext; t: Dict }
     }
   }, [ctx])
 
-  return <Studio t={t} sessionId={sessionId} onRunImmersive={shrinkOfficialSidebarIfFullscreen} />
+  return <Studio language={detectLanguage(ctx.get?.('locale'))} t={t} sessionId={sessionId} onRunImmersive={shrinkOfficialSidebarIfFullscreen} />
 }

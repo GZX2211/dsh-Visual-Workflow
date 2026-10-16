@@ -140,7 +140,7 @@ interface Harness {
   root: FakeRoot
 }
 
-async function makeHarness(): Promise<Harness> {
+async function makeHarness(systemLanguage: () => string = () => '中文'): Promise<Harness> {
   const dir = await mkdtemp(join(tmpdir(), 'vw-e2e-'))
   cleanups.push(() => rm(dir, { recursive: true, force: true }))
   const store = new FlowStore(dir)
@@ -156,6 +156,7 @@ async function makeHarness(): Promise<Harness> {
   const runDefaults = resolveConfig({ dataDir: dir })
   const runtime = new OrchestratorRuntime({
     store,
+    systemLanguage,
     runner,
     agents,
     config: {
@@ -445,5 +446,42 @@ describe('e2e：服务侧组合（fork 参数 / serve patch / 会话映射持久
     expect(patch).toContain('disabled: true')
     expect(patch).toContain('apiKey: null')
     expect(patch).toContain('visual-workflow-service')
+  })
+})
+
+describe('UI locale propagates through real run assembly', () => {
+  it.each([['en', 'English', '# Mandatory constraints'], ['zh', '中文', '# 硬性约束']])('%s is shared by parent, children, checkpoint and resume', async (language, resolved, heading) => {
+    // Deliberately disagree with the UI: automatic Client locale wins for this run.
+    const h = await makeHarness(() => language === 'en' ? '中文' : 'English')
+    const flow = makeFlow(true)
+    flow.name = 'Instagram Post Helper'
+    flow.description = 'Prepare an Instagram post'
+    for (const node of flow.nodes) if (node.kind === 'agent') node.data.label = node.id
+    flow.lines.push({ id: 'ctx', source: 'n-a1', target: 'n-a2', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' })
+    await saveFlow(h, flow)
+    const start = await h.api.handle('run', { sessionId: flow.sessionId, flowId: flow.id, language }) as { runId: string }
+    const parent = h.root.messages[0]!.content.map(item => item.text).join('')
+    expect(parent).toContain(heading)
+    if (language === 'en') expect(parent).not.toMatch(/[\u3400-\u9fff]/)
+    expect(h.runtime.runSnapshot(start.runId)?.systemLanguage).toBe(resolved)
+    const child = await h.runtime.wfRunNode({ isChild: false, sessionId: flow.sessionId }, { nodeId: 'n-a1' })
+    const text = h.runner.calls[0]!.blocks.map(block => block.text).join('')
+    expect(text).toContain(heading)
+    if (language === 'en') {
+      expect(text).toContain('Conclusion / Output file paths / Key decisions / Open questions')
+      expect(text).not.toMatch(/[\u3400-\u9fff]/)
+    }
+    await h.runtime.handleSubagentEnd({ id: child.childId, stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: 'Research complete' }] })
+    await h.runtime.wfRunNode({ isChild: false, sessionId: flow.sessionId }, { nodeId: 'n-pause' })
+    expect((await h.store.getRun(start.runId))?.systemLanguage).toBe(resolved)
+    // A headless resume inherits the persisted run language, even if Host settings disagree.
+    const resumed = await h.runtime.resumeRun({ sessionId: flow.sessionId, flowId: flow.id, fromRunId: start.runId })
+    expect(h.runtime.runSnapshot(resumed.runId)?.systemLanguage).toBe(resolved)
+    expect(h.root.messages.at(-1)!.content[0]!.text).toContain(heading)
+    await h.runtime.stopRun(resumed.runId)
+    // An explicit UI change applies to the new resumed run only.
+    const switched = await h.api.handle('runResume', { sessionId: flow.sessionId, flowId: flow.id, runId: resumed.runId, language: language === 'en' ? 'zh' : 'en' }) as { runId: string }
+    expect(h.runtime.runSnapshot(switched.runId)?.systemLanguage).toBe(resolved === 'English' ? '中文' : 'English')
+    await h.runtime.stopRun(switched.runId)
   })
 })

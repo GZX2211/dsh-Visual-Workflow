@@ -16,6 +16,7 @@ export interface CollabBlockParams {
      *   - legacy = 插件自建协作工具（wf_ask_agent，targetChildId 为成员节点 id）。
      * 缺省 legacy：未启用官方团队时保持既有文案与行为。
      */
+    systemLanguage?: string;
     channel?: CollabChannel;
 }
 /** 协作通道类型（官方团队 / 插件自建）。 */

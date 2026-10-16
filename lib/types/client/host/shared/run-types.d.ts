@@ -9,6 +9,8 @@ export type NodeRunStatus = 'pending' | 'running' | 'armed' | 'ok' | 'fail' | 's
  * 自旧 run 并标记来源，经 resumedFromRunId 追溯继承链（需求文档 §4.7 规则 2）。
  */
 export interface RunSnapshot {
+    /** Language frozen for this run; old snapshots fall back to Host settings. */
+    systemLanguage?: string;
     /** run 稳定标识（runId）。 */
     id: string;
     /** 关联工作流 id（flowId）。 */

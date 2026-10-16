@@ -91,3 +91,5 @@ export declare const DEFAULT_OUTPUT_CONTRACT = "\u7ED3\u8BBA / \u4EA7\u51FA\u658
  * @returns 注入子代理的任务文本（面向模型，中文）。
  */
 export declare function buildNodeTaskBlock(params: NodeTaskBlockParams): string;
+/** Default handoff fields in the run language; custom schemas remain caller-owned. */
+export declare function defaultOutputContractOf(systemLanguage: string): string;

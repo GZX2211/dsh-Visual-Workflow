@@ -7,6 +7,8 @@
 // 注入点：编排运行时启动层（startRun/resumeRun 组装 directiveParams.dynamic.orgBudgetText，
 // 见 orchestrator/runtime-launch.ts），由父代理提示词末段渲染。
 
+import { isEnglishSystemLanguage } from '../system-language.js'
+import { buildEnglishBudget } from './english.js'
 import type { OrgBudget } from '../shared/types.js'
 
 /** 「不限」文案（上限为 0 = 未配置上限时使用）。 */
@@ -22,7 +24,8 @@ function remaining(value: number | null): string {
  * @param budget 组织预算（orgBudgetOf 的输出：生效元参数 + 已用量 → 剩余量）
  * @returns 提示词段文本（中文；无任何可约束维度时仍输出头部与禁用拓扑两行，保持结构稳定）
  */
-export function buildOrgBudgetText(budget: OrgBudget): string {
+export function buildOrgBudgetText(budget: OrgBudget, systemLanguage?: string): string {
+  if (isEnglishSystemLanguage(systemLanguage)) return buildEnglishBudget(budget)
   const lines: string[] = []
   lines.push('本次组织预算：')
   lines.push(`- 可执行节点 ${budget.nodeUsed}/${budget.nodeMax || UNLIMITED}（剩余 ${remaining(budget.nodeRemaining)}）`)
