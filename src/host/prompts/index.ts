@@ -63,6 +63,9 @@ export {
   PATCH_OPS_MAX,
 } from './texts/rule-patch-contract.js'
 
+// 职责提示词：父代理五维职责（父代理节点 systemPrompt 的资产播种初值，中文单份、无变量）。
+export { PARENT_ROLE_DUTIES } from './texts/parent-role-duties.js'
+
 // 规则文本：ReAct 软截停护栏指令 / 消息投递包装 / 数据库工具说明。
 export { REACT_CAP_MESSAGE, REACT_CAP_DENY_REASON } from './texts/rule-soft-stop.js'
 export { NOTICE_SEND_MESSAGE } from './texts/notice-send-message.js'

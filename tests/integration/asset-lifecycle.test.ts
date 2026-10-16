@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { VisualWorkflowHost, VisualWorkflowHostServiceName } from '../../src/host/index.js'
 import { resolveConfig } from '../../src/host/config.js'
-import { contentFingerprint, type AssetStore } from '../../src/host/assets/index.js'
+import { PARENT_DUTIES_ASSET_ID, contentFingerprint, type AssetStore } from '../../src/host/assets/index.js'
 import { executeOrgCatalog, type OrgCatalogHost } from '../../src/host/tools/wf-org-catalog/tool.js'
 import type { CatalogDetails, CatalogIndex, CatalogWorkflowDetail } from '../../src/host/tools/wf-org-catalog/types.js'
 import type { ExperienceInsertRow } from '../../src/host/shared/asset-types.js'
@@ -141,7 +141,8 @@ describe('资产闭环（宿主装配 + SQLite + 勘察召回）', () => {
     })
 
     // ③ 去重命中：不新建第二个角色资产，既有 standalone 资产被引用后升为 shared
-    const roleAssets = await host.assets!.listRoleAssets()
+    // 排除宿主装配时播种的内置父代理资产（PARENT_DUTIES_ASSET_ID），只看本用例自己引入的角色资产
+    const roleAssets = (await host.assets!.listRoleAssets()).filter((item) => item.assetId !== PARENT_DUTIES_ASSET_ID)
     expect(roleAssets).toHaveLength(1)
     expect(roleAssets[0].assetId).toBe(rolePromotion.assetId)
     expect(roleAssets[0].roleAssetType).toBe('shared')
@@ -225,7 +226,12 @@ describe('资产闭环（宿主装配 + SQLite + 勘察召回）', () => {
     const retiredIndex = (await executeOrgCatalog(seam, {})) as CatalogIndex
     expect(retiredIndex.assets.workflows).toEqual([])
     // 流程归档不触发角色资产归档（流程与角色解耦）：工作流带来的内联角色资产仍是活跃资产
-    expect(retiredIndex.assets.roles.map((item) => item.roleAssetType)).toEqual(['inline'])
+    // 内置父代理资产（standalone）由宿主播种，不属于本用例的流程角色，故按其类型过滤后比对
+    expect(
+      retiredIndex.assets.roles
+        .filter((item) => item.id !== PARENT_DUTIES_ASSET_ID)
+        .map((item) => item.roleAssetType),
+    ).toEqual(['inline'])
     // 归档经验在召回面读取处即不可见（语义在读取处生效，不靠调用方自觉过滤）
     expect(await assets.getRows([experienceId], { activeOnly: true })).toEqual([])
 
