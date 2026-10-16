@@ -6,7 +6,6 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  buildCollabBlock,
   buildHybridPrompt,
   buildNodeTaskBlock,
   buildOrgPlanPrompt,
@@ -14,7 +13,7 @@ import {
   buildParentExecutorPrompt,
   buildParentTaskSpec,
 } from '../../../src/host/prompts/index.js'
-import { TEAM_SEND_MESSAGE, WF_ASK_AGENT, WF_FINISH, WF_RUN_NODE } from '../../../src/host/shared/protocol.js'
+import { WF_FINISH, WF_RUN_NODE } from '../../../src/host/shared/protocol.js'
 import { nodeFacts, orchFacts } from './fixtures/prompt-facts.js'
 
 describe('父代理提示词构建器（三模式结构）', () => {
@@ -49,15 +48,12 @@ describe('父代理提示词构建器（三模式结构）', () => {
     expect(out).not.toContain(WF_RUN_NODE)
   })
 
-  it('Team 段随 collabGroups 与通道变化（official 走官方通信工具，legacy 走自建工具）', () => {
-    const official = buildOrchestratorPrompt({ facts: { ...orchFacts, collabChannel: 'official' }, dynamic: {} })
-    const legacy = buildOrchestratorPrompt({ facts: { ...orchFacts, collabChannel: 'legacy' }, dynamic: {} })
+  it('Team 段随 collabGroups 变化（含成员节点 id；无 Team 卡片则不组装该段）', () => {
+    const withTeam = buildOrchestratorPrompt({ facts: orchFacts, dynamic: {} })
     const withoutTeam = buildOrchestratorPrompt({ facts: { ...orchFacts, collabGroups: [] }, dynamic: {} })
 
-    expect(official).toContain(TEAM_SEND_MESSAGE)
-    expect(official).not.toContain(WF_ASK_AGENT)
-    expect(legacy).toContain(WF_ASK_AGENT)
-    expect(legacy).not.toContain(TEAM_SEND_MESSAGE)
+    expect(withTeam).toContain(orchFacts.collabGroups[0].groupId)
+    expect(withTeam).toContain(orchFacts.collabGroups[0].memberIds[0])
     expect(withoutTeam).not.toContain(orchFacts.collabGroups[0].groupId)
   })
 
@@ -86,35 +82,13 @@ describe('子代理任务块与协作块（数据与通道结构）', () => {
     expect(empty).not.toContain('结论 / 置信度')
   })
 
-  it('legacy 通道的组内成员注入自建协作工具名；official 通道不注入', () => {
-    const legacy = buildNodeTaskBlock({ facts: { ...nodeFacts, isGroupMember: true, collabChannel: 'legacy' } })
-    const official = buildNodeTaskBlock({ facts: { ...nodeFacts, isGroupMember: true, collabChannel: 'official' } })
-    expect(legacy).toContain(WF_ASK_AGENT)
-    expect(official).not.toContain(WF_ASK_AGENT)
-  })
-
-  it('协作块列出全部成员的可寻址标识，自定义说明追加在成员清单之后', () => {
-    const members = [
-      { id: 'node-a', label: '分析节点' },
-      { id: 'node-b', label: '总结节点' },
-    ]
-    const block = buildCollabBlock({ members, custom: '组内互相质询' })
-    for (const member of members) {
-      expect(block).toContain(member.id)
-      expect(block).toContain(member.label)
+  it('可通信对象清单：commTargets 的标识全部进入任务块，且不再出现退役工具名', () => {
+    const out = buildNodeTaskBlock({ facts: nodeFacts })
+    for (const target of nodeFacts.commTargets) {
+      expect(out).toContain(target.id)
+      expect(out).toContain(target.label)
     }
-    expect(block.indexOf(members[1].id)).toBeLessThan(block.indexOf('组内互相质询'))
-    expect(block).toContain(WF_ASK_AGENT)
-  })
-
-  it('official 通道以成员名寻址（target 数据出现在协作块中）', () => {
-    const block = buildCollabBlock({
-      members: [{ id: 'n-x', label: 'X', target: 'm-x' }],
-      custom: '',
-      channel: 'official',
-    })
-    expect(block).toContain('m-x')
-    expect(block).not.toContain(WF_ASK_AGENT)
+    expect(out).not.toContain('wf_ask_agent')
   })
 })
 

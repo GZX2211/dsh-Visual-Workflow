@@ -4,7 +4,7 @@
 // ensureNodeChild（创建/签名重建）/startNodeTask（相邻 Agent 通道派发）/interruptChild/
 // 软截停消费/可见性双保险。
 //
-// DoD（任务清单 T-022）：签名重建、白名单∩父代理工具集、wf_ask/wf_ask_agent 仅
+// DoD（任务清单 T-022）：签名重建、白名单∩父代理工具集、wf_ask_user/wf_send_message 仅
 // 勾选注入、wf_run_node/wf_finish 子代理不可见、ReAct 软截停输出结论（guards 单测）。
 // 断言依据：架构文档 §4.2 L218-219、需求文档 §4.4.2 规则 7 / §4.4.3 规则 5。
 
@@ -122,7 +122,7 @@ class FakeToolsView implements ToolsView {
   // scope），但不在父代理 scope 视图（简单模式未启用），运行时被兜底剔除；
   // wf_run_node_wait / wf_org_catalog / wf_graph_patch：CHILD_AGENT_HIDDEN_TOOLS 成员，
   // 即使被组合勾选也永不进 allow（父代理专属）
-  visible: string[] = ['read', 'write', 'edit', 'wf_ask', 'wf_ask_agent', 'wf_db_query', 'wf_run_node', 'wf_run_node_wait', 'wf_finish', 'wf_org_catalog', 'wf_graph_patch', 'run_code', 'str_replace_editor', 'mcp__srv1__a', 'mcp__srv1__b']
+  visible: string[] = ['read', 'write', 'edit', 'wf_ask_user', 'wf_send_message', 'wf_db_query', 'wf_run_node', 'wf_run_node_wait', 'wf_finish', 'wf_org_catalog', 'wf_graph_patch', 'run_code', 'str_replace_editor', 'mcp__srv1__a', 'mcp__srv1__b']
   presets = new Map<string, string[] | null>()
   /** 父代理 scope 视图（默认=可见集去掉 run_code 与幽灵工具；测试可覆盖）。 */
   agentTools: string[] | null = null
@@ -264,7 +264,7 @@ describe('resolveAgentTools 白名单解析（§4.2 L219）', () => {
 
   it('combo：勾选 ∩ 可见（父代理工具集）+ 所选 MCP 前缀工具；CHILD_AGENT_HIDDEN_TOOLS/run_code/str_replace_editor 被白名单天然排除', async () => {
     const h = await makeHarness()
-    await saveCombo(h, 'combo-c1', ['read', 'not-visible', 'wf_ask', 'wf_run_node', 'wf_run_node_wait', 'wf_finish', 'wf_org_catalog', 'wf_graph_patch', 'run_code', 'str_replace_editor'], ['srv1'])
+    await saveCombo(h, 'combo-c1', ['read', 'not-visible', 'wf_ask_user', 'wf_run_node', 'wf_run_node_wait', 'wf_finish', 'wf_org_catalog', 'wf_graph_patch', 'run_code', 'str_replace_editor'], ['srv1'])
     const tools = await resolveAgentTools({
       store: h.store, toolsView: h.toolsView, sessionId: 'session-1', flowId: 'flow-1',
       node: agentNode('n-a1'),
@@ -278,7 +278,7 @@ describe('resolveAgentTools 白名单解析（§4.2 L219）', () => {
     // str_replace_editor：官方简单模式专用工具，当前父代理视图（简单模式未启用）不含它
     // → 运行时兜底剔除，避免官方 tools.restrict 抛 "names unknown global tool"
     expect(tools).not.toContain('str_replace_editor')
-    expect(tools.sort()).toEqual(['mcp__srv1__a', 'mcp__srv1__b', 'read', 'wf_ask'])
+    expect(tools.sort()).toEqual(['mcp__srv1__a', 'mcp__srv1__b', 'read', 'wf_ask_user'])
   })
 
   it('str_replace_editor：父代理视图含它（简单模式启用）→ 保留进 allow', async () => {
@@ -293,15 +293,15 @@ describe('resolveAgentTools 白名单解析（§4.2 L219）', () => {
     expect(tools).toContain('read')
   })
 
-  it('wf_ask/wf_ask_agent 仅勾选注入（无强制追加，PRD §4.4.2 规则 7）', async () => {
+  it('wf_ask_user/wf_send_message 仅勾选注入（无强制追加，PRD §4.4.2 规则 7）', async () => {
     const h = await makeHarness()
     await saveCombo(h, 'combo-c1', ['read'])
     const tools = await resolveAgentTools({
       store: h.store, toolsView: h.toolsView, sessionId: 'session-1', flowId: 'flow-1',
       node: agentNode('n-a1'),
     })
-    expect(tools).not.toContain('wf_ask')
-    expect(tools).not.toContain('wf_ask_agent')
+    expect(tools).not.toContain('wf_ask_user')
+    expect(tools).not.toContain('wf_send_message')
     expect(tools).toContain('read')
   })
 
@@ -413,14 +413,14 @@ describe('resolveAgentTools 白名单解析（§4.2 L219）', () => {
 
   it('全局关闭工具：组合勾选亦被剔除（父代理不可用 → 子代理不得携带，双保险第二层）', async () => {
     const h = await makeHarness()
-    await saveCombo(h, 'combo-c1', ['read', 'write', 'wf_ask'], ['srv1'])
+    await saveCombo(h, 'combo-c1', ['read', 'write', 'wf_ask_user'], ['srv1'])
     const tools = await resolveAgentTools({
       store: h.store, toolsView: h.toolsView, sessionId: 'session-1', flowId: 'flow-1',
       node: agentNode('n-a1'),
       disabledTools: new Set(['write', 'mcp__srv1__a']),
     })
     expect(tools).toContain('read')
-    expect(tools).toContain('wf_ask')
+    expect(tools).toContain('wf_ask_user')
     expect(tools).toContain('mcp__srv1__b')
     expect(tools).not.toContain('write')
     expect(tools).not.toContain('mcp__srv1__a')
@@ -454,7 +454,7 @@ describe('resolveAgentTools 白名单解析（§4.2 L219）', () => {
 describe('NodeAgentRunner 创建/复用/派发', () => {
   it('首次创建：startContinuable 调用（provider 首选/任务块首条注入/不再传 persona/白名单/agentOptions）+ 护栏登记', async () => {
     const h = await makeHarness()
-    await h.store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read', 'wf_ask'], mcpServers: [] })
+    await h.store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read', 'wf_ask_user'], mcpServers: [] })
     const result = await h.runner.startNodeTask(taskInput({ thinking: 'high' }))
 
     expect(result).toEqual({ childId: 'child-1', created: true })
@@ -464,7 +464,7 @@ describe('NodeAgentRunner 创建/复用/派发', () => {
     expect(spec.label).toBe('节点n-a1')
     expect(spec.request.prompt).toEqual([{ type: 'text', text: '任务块' }]) // 首条消息=完整任务块
     expect(spec.request.persona).toBeUndefined() // 角色 Prompt 改为 system prompt 段，不再传官方 persona
-    expect(spec.request.toolFilter).toEqual({ allow: ['read', 'wf_ask'] }) // 勾选∩可见（wf_ask 勾选注入）
+    expect(spec.request.toolFilter).toEqual({ allow: ['read', 'wf_ask_user'] }) // 勾选∩可见（wf_ask_user 勾选注入）
     expect(spec.request.agentOptions).toEqual({ provider: 'deepseek', model: 'deepseek-chat' })
     expect(h.react.setLimit).toHaveBeenCalledWith('child-1', 7)
   })

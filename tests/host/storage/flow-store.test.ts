@@ -424,7 +424,7 @@ describe('运行历史（runs/<runId>.json）', () => {
 
 describe('工具组合（combos.json）', () => {
   function combo(id: string): ToolCombo {
-    return { id: id as `combo-${string}`, name: '组合', tools: ['wf_ask'], mcpServers: [] }
+    return { id: id as `combo-${string}`, name: '组合', tools: ['wf_ask_user'], mcpServers: [] }
   }
 
   it('保存→列出→删除；id 必须 combo- 前缀', async () => {

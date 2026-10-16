@@ -51,25 +51,24 @@ export {
   type Waiter,
 } from './run-entry.js'
 
-// wf_ask_agent 两态通信协议（类型/常量/文本纯函数）
+// wf_send_message 单向持久消息协议（类型/常量/文本纯函数）
 export {
-  ASK_MESSAGE_LIMIT,
-  buildAskText,
-  buildReplyText,
+  PARENT_TARGET,
+  SEND_MESSAGE_LIMIT,
+  buildSendMessageText,
   coordinatorMessage,
-  type AskAgentArgs,
-  type AskAgentCmd,
-  type AskAgentDelivery,
-  type AskAgentResult,
-  type PendingAsk,
-} from './ask-protocol.js'
+  type SendMessageArgs,
+  type SendMessageDelivery,
+  type SendMessageResult,
+  type SendMessageStatus,
+} from './send-message-protocol.js'
 
 // 图推导与节点上下文事实（纯函数）
 export {
   buildNodeContextFacts,
-  collabBlockOf,
   collabGroupList,
   collabPromptOf,
+  commTargetsOf,
   dbToolHintOf,
   labelOf,
   missingStageLabels,

@@ -14,8 +14,7 @@ export const name = 'dsh-visual-workflow'
 export const inject: string[] = []
 
 // ── Config schema ────────────────────────────────────────────────────────
-// 与 cordis.patch.yml 的 13 个配置键逐键对应，默认值逐字一致；schema 另有 1 个退役只读键
-// wfAskAgentTimeoutMs（@deprecated，仅读取兼容），不出现在 patch 中（patch 并非 schema 全集）。默认值收敛在
+// 与 cordis.patch.yml 的配置键逐键对应，默认值逐字一致。默认值收敛在
 // schema：任何部署可能需要改变的值都应成为配置而非源码常量。
 
 /** Host 插件的全部可配置键（已含默认值，应用后为必填）。 */
@@ -28,13 +27,6 @@ export interface Config {
   apiKey: string | null
   /** 模式二单服务并发请求上限。 */
   maxConcurrentPerService: number
-  /** wf_ask_agent 待回复登记的 TTL 毫秒数（到期后不再接受 reply）。 */
-  wfAskAgentTtlMs: number
-  /**
-   * @deprecated 旧键名（历史命名把「待回复登记 TTL」写成了 Timeout）。
-   * 仅供读取兼容：resolveConfig 在 >0 时把它投影到 wfAskAgentTtlMs，禁止新增写入。
-   */
-  wfAskAgentTimeoutMs?: number
   /** 运行空闲超时毫秒数（无 in-flight 看护门限）。 */
   runIdleTimeoutMs: number
   /** 运行状态回显轮询间隔毫秒数（经 runtimeConfig 端点下发前端，由前端自持 600ms 缺省回退）。 */
@@ -70,9 +62,6 @@ export const Config: z<Config> = z.object({
   servicePortBase: z.natural().default(7860),
   apiKey: z.union([z.string(), z.const(null)]).default(null),
   maxConcurrentPerService: z.natural().default(50),
-  wfAskAgentTtlMs: z.natural().default(120000),
-  /** 旧键名（读取兼容；0 表示未设置。resolveConfig 投影到 wfAskAgentTtlMs，禁止新增写入）。 */
-  wfAskAgentTimeoutMs: z.natural().default(0),
   runIdleTimeoutMs: z.natural().default(1800000),
   runPollMs: z.natural().default(2000),
   reactIterationLimitDefault: z.natural().default(0),
@@ -96,14 +85,7 @@ export const Config: z<Config> = z.object({
  * null——否则调用方拿到的是「接口说必填、运行时缺键」的失真对象，只能各自 `?? null` 兜底。
  */
 export function resolveConfig(input: Partial<Config>): Config {
-  // 旧键读取兼容：早期把「待回复登记 TTL」命名为 wfAskAgentTimeoutMs；只在解析入口投影到
-  // 新键（新键优先），既有部署的旧配置继续生效，消费侧只见 wfAskAgentTtlMs。
-  const { wfAskAgentTimeoutMs: legacy, ...rest } = input
-  const merged: Partial<Config> =
-    rest.wfAskAgentTtlMs === undefined && typeof legacy === 'number' && legacy > 0
-      ? { ...rest, wfAskAgentTtlMs: legacy }
-      : rest
-  const resolved = (Config as unknown as (value: Partial<Config>) => Config)(merged)
+  const resolved = (Config as unknown as (value: Partial<Config>) => Config)(input)
   return {
     ...resolved,
     apiKey: resolved.apiKey ?? null,

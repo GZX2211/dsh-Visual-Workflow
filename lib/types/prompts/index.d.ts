@@ -1,10 +1,10 @@
 export { renderTemplate, flag, type TemplateVars } from './render.js';
 export { buildOrchestratorPrompt, buildHybridPrompt, buildParentExecutorPrompt, buildParentTaskSpec, type OrchestrationDirectiveParams, type ParentPromptVariant, type ExecutorContextFacts, type ParentExecutorPromptParams, type ParentTaskSpecParams, } from './parents.js';
-export { buildNodeTaskBlock, buildCollabBlock, type NodeTaskBlockParams, type CollabBlockParams, type CollabChannel, } from './child.js';
+export { buildNodeTaskBlock, type CommTarget, type NodeTaskBlockParams, } from './child.js';
 export { buildOrgPlanPrompt, type OrgPlanPromptParams, type OrgPlanTargetKind, } from './planner.js';
 export { ORG_SOP_L1_GRAPH_SEMANTICS, ORG_SOP_DESIGN_METHOD, ORCH_CHANGE_MARKER, ORCH_CHANGE_TEXT, } from './rules.js';
 export { OP_FIELD_SHAPES, GRAPH_OP_FIELD_TEXT, ROLE_NODE_DATA_CONTRACT, PATCH_SUBMISSION_RULES, ERROR_CODE_SEMANTICS, PATCH_CONTRACT_TEXT, PATCH_OPS_MAX, } from './texts/rule-patch-contract.js';
 export { REACT_CAP_MESSAGE, REACT_CAP_DENY_REASON } from './texts/rule-soft-stop.js';
-export { ASK_MESSAGE, ASK_REPLY } from './texts/notice-ask-message.js';
+export { NOTICE_SEND_MESSAGE } from './texts/notice-send-message.js';
 export { RULE_DB_TOOL } from './texts/rule-db-tool.js';
 export { TASK_FALLBACK } from './texts/task-fallback.js';

@@ -7,7 +7,6 @@ import { randomUUID } from 'node:crypto'
 import { buildResumedSnapshot, findResumableRun, type ResumeInput, type ResumeResult } from './resume.js'
 import { createRunSnapshot, setNodeStatus, statusText } from './snapshot.js'
 import { effectiveOrgMeta, freezeOrgMeta, metaOfDocument } from '../graph/index.js'
-import type { CollabChannel } from '../prompts/index.js'
 import { buildParentRunPrompt } from './directive.js'
 import { missingStageLabels, validateFlowForRun } from './graph-facts.js'
 import { WfError, messageOf } from './errors.js'
@@ -25,16 +24,6 @@ export class RuntimeLaunch extends RuntimeBase {
    * 仍由运行锁（runs 表）负责，两者语义不同、必须并存。
    */
   private readonly launching = new Set<string>()
-
-  /**
-   * 协作通道判定（编排指令与成员任务块的唯一分支依据）：
-   * 官方 Agent Team 可用（服务已挂载 + 根 Agent 存活 + 有可用 provider）→ official；
-   * 否则 legacy（父代理逐个启动成员节点，成员间用插件自建协作工具）。
-   * 判据由子代理引擎提供，编排器不直接触达官方服务。
-   */
-  protected collabChannelOf(sessionId: string): CollabChannel {
-    return this.deps.runner.teamAvailable?.(sessionId) === true ? 'official' : 'legacy'
-  }
 
   // ---- 编排启动 --------------------------------------------------------------
 
@@ -134,7 +123,6 @@ export class RuntimeLaunch extends RuntimeBase {
       callCount: 0,
       lastActiveAt: this.now(),
       waiters: new Map(),
-      asks: new Map(),
     }
     // 运行锁登记（check-then-act 竞态收口）：重检 + runs.set 在同一同步块内完成
     // （Node 单线程内无交错），保证同工作流最多一个激活 run。
@@ -158,7 +146,6 @@ export class RuntimeLaunch extends RuntimeBase {
       ...(question ? { question } : {}),
       executor,
       systemLanguage: this.deps.systemLanguage?.() ?? DEFAULT_SYSTEM_LANGUAGE,
-      collabChannel: this.collabChannelOf(runSessionId),
     })
     try {
       this.deps.agents.followupRoot(root, {
@@ -258,7 +245,6 @@ export class RuntimeLaunch extends RuntimeBase {
       callCount: 0,
       lastActiveAt: this.now(),
       waiters: new Map(),
-      asks: new Map(),
     }
     // 运行锁登记（check-then-act 竞态收口）：并发 resumeRun/startRun 可能已在本
     // 请求的 await 期间登记同一 flowId 的 run；重检 + 写入同一同步块内完成。
@@ -288,7 +274,6 @@ export class RuntimeLaunch extends RuntimeBase {
         resume: { resumeFromNodeId: snapshot.resumeFromNodeId, resumedFromRunId: prev.id },
         executor,
         systemLanguage: this.deps.systemLanguage?.() ?? DEFAULT_SYSTEM_LANGUAGE,
-        collabChannel: this.collabChannelOf(sessionId),
       })
       try {
         this.deps.agents.followupRoot(root, {
@@ -318,7 +303,6 @@ export class RuntimeLaunch extends RuntimeBase {
           // 忽略清理期错误
         }
         this.rejectWaiters(oldEntry)
-        this.rejectAsks(oldEntry)
         this.releaseRunMemory(oldId)
       }
     }

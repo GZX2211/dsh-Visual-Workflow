@@ -1,4 +1,3 @@
-import type { CollabChannel } from './child.js';
 /** 父代理提示词变体（三情况组装分发）：orchestrator=纯编排 / hybrid=编排+自执行 / executor=纯执行。 */
 export type ParentPromptVariant = 'orchestrator' | 'hybrid' | 'executor';
 /**
@@ -17,8 +16,6 @@ export interface OrchestrationDirectiveParams {
             label: string;
             memberIds: string[];
         }>;
-        /** 协作通道：official = 官方 Agent Team 可用；legacy = 成员降级为普通子代理。缺省 legacy。 */
-        collabChannel?: CollabChannel;
         /** 情况2（hybrid）：父代理自身执行单元身份；情况1 缺省 null。 */
         parentNode?: {
             nodeId: string;
@@ -59,8 +56,6 @@ export interface ExecutorContextFacts {
     filePaths: string[];
     /** 数据库工具说明（db-in 连线存在时非空），可为空。 */
     dbToolHint: string;
-    /** Team 成员标记：注入组内通信必须经 wf_ask_agent 的软约束。 */
-    isGroupMember: boolean;
 }
 /** 情况2 父代理自执行单元任务块入参。 */
 export interface ParentTaskSpecParams {

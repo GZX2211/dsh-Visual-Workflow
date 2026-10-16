@@ -1,34 +1,11 @@
 // tests/host/config.test.ts
 //
-// 配置解析单测（resolveConfig）：默认值填充、null 默认键的显式补全，与
-// 「待回复登记 TTL」旧键名的读取兼容。
-// 兼容契约：旧键 wfAskAgentTimeoutMs 仅在 >0 时投影到新键 wfAskAgentTtlMs，新键优先。
+// 配置解析单测（resolveConfig）：默认值填充、null 默认键的显式补全，以及
+// 退役配置键（旧部署 patch 中残留）的读取兼容——未知键既不抛错也不进入解析结果。
 // 必填契约：apiKey / embeddingModelDir / embeddingEndpoint 声明为必填（string | null），
 // 缺省解析必须显式产出 null（schemastery 不填 null 默认）。
 import { describe, expect, it } from 'vitest'
 import { Config, resolveConfig } from '../../src/host/config.js'
-
-describe('resolveConfig：wf_ask_agent TTL 键名迁移', () => {
-  it('缺省：新键取默认 120000', () => {
-    expect(resolveConfig({}).wfAskAgentTtlMs).toBe(120000)
-  })
-
-  it('新键生效', () => {
-    expect(resolveConfig({ wfAskAgentTtlMs: 5000 }).wfAskAgentTtlMs).toBe(5000)
-  })
-
-  it('旧键（>0）读取兼容：投影到新键', () => {
-    expect(resolveConfig({ wfAskAgentTimeoutMs: 7000 }).wfAskAgentTtlMs).toBe(7000)
-  })
-
-  it('两键同时给出：新键优先', () => {
-    expect(resolveConfig({ wfAskAgentTtlMs: 5000, wfAskAgentTimeoutMs: 7000 }).wfAskAgentTtlMs).toBe(5000)
-  })
-
-  it('旧键为 0（未设置）不覆盖默认值', () => {
-    expect(resolveConfig({ wfAskAgentTimeoutMs: 0 }).wfAskAgentTtlMs).toBe(120000)
-  })
-})
 
 // ---------------------------------------------------------------------------
 // schema 默认值的表驱动覆盖
@@ -100,11 +77,8 @@ describe('resolveConfig：schema 默认值逐键填充', () => {
 
     const resolved = resolveConfig(overrides as unknown as Partial<Config>) as unknown as Record<string, unknown>
     for (const key of Object.keys(dict)) {
-      // 退役键只读兼容、不写回（见下方单独断言），其余键必须原值生效
-      if (key === 'wfAskAgentTimeoutMs') continue
       expect(resolved[key], `显式值被 schema 默认值覆盖：${key}`).toEqual(overrides[key])
     }
-    expect(resolved.wfAskAgentTimeoutMs, '退役键不得写回解析结果').toBe(0)
   })
 
   it('未知键：解析不抛错，也不影响已知键的缺省值填充', () => {
@@ -116,6 +90,15 @@ describe('resolveConfig：schema 默认值逐键填充', () => {
       if (schema.meta.default === null) continue
       expect(resolved[key], `未知键干扰了 ${key} 的缺省值`).toEqual(schema.meta.default)
     }
+  })
+
+  it('退役键（wf_ask_agent 时代的 TTL）：旧部署 patch 中残留不抛错（实测：schemastery 透传未知键）', () => {
+    // 兼容契约：键已从 Config 接口与 schema 删除，既有部署的 cordis.patch 仍可能写着它。
+    // 实测结论：schemastery 对未知键既不校验也不剥离（原样透传到解析结果），
+    // 故升级不会让既有部署启动失败；透传值没有任何读取方（键已无消费者）。
+    const resolved = resolveConfig({ wfAskAgentTtlMs: 120000, wfAskAgentTimeoutMs: 7000 } as never) as unknown as Record<string, unknown>
+    expect(resolved.runIdleTimeoutMs, '已知键的缺省值不受未知键干扰').toBe(1800000)
+    expect('wfAskAgentTtlMs' in resolved, '实测：未知键被透传而非剥离').toBe(true)
   })
 })
 

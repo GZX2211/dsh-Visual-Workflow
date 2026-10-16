@@ -9,9 +9,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { registerTool, requireToolsService } from '../../../../src/host/tools/infrastructure/register-tool.js'
 import type { ToolDefinitionLike } from '../../../../src/host/tools/infrastructure/define-tool.js'
-import { WF_FINISH, WF_ASK } from '../../../../src/host/shared/protocol.js'
-import { registerWfAsk } from '../../../../src/host/tools/wf-ask/tool.js'
-import { registerWfAskAgent } from '../../../../src/host/tools/wf-ask-agent/tool.js'
+import { WF_FINISH, WF_ASK_USER } from '../../../../src/host/shared/protocol.js'
+import { registerWfAskUser } from '../../../../src/host/tools/wf-ask-user/tool.js'
+import { registerWfSendMessage } from '../../../../src/host/tools/wf-send-message/tool.js'
 import { registerWfDbQuery } from '../../../../src/host/tools/wf-db-query/tool.js'
 import { registerWfExperienceFeedback } from '../../../../src/host/tools/wf-experience-feedback/tool.js'
 import { registerWfExperienceLearn } from '../../../../src/host/tools/wf-experience-learn/tool.js'
@@ -40,8 +40,8 @@ const tools: Array<[string, (ctx: { get(name: string): unknown }, host: never) =
   ['wf_run_node', registerWfRunNode],
   ['wf_run_node_wait', registerWfRunNodeWait],
   ['wf_finish', registerWfFinish],
-  ['wf_ask', registerWfAsk],
-  ['wf_ask_agent', registerWfAskAgent],
+  ['wf_ask_user', registerWfAskUser],
+  ['wf_send_message', registerWfSendMessage],
   ['wf_db_query', registerWfDbQuery],
   ['wf_org_catalog', registerWfOrgCatalog],
   ['wf_graph_patch', registerWfGraphPatch],
@@ -57,8 +57,8 @@ describe('requireToolsService：统一服务守卫', () => {
   })
 
   it('服务存在但 register 不是函数时同样抛统一错误（形状漂移不退化成 TypeError）', () => {
-    const error = captureError(() => requireToolsService({ get: () => ({ register: 'nope' }) }, WF_ASK))
-    expect((error as Error).message).toBe('[visual-workflow] tools 服务不可用，无法注册 wf_ask')
+    const error = captureError(() => requireToolsService({ get: () => ({ register: 'nope' }) }, WF_ASK_USER))
+    expect((error as Error).message).toBe('[visual-workflow] tools 服务不可用，无法注册 wf_ask_user')
   })
 
   it('服务可用时返回该服务（调用方据此注册）', () => {

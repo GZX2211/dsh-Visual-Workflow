@@ -6,7 +6,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { GLOBAL_RUN_CALL_LIMIT, OUTPUT_SUMMARY_LIMIT, buildNodeBlocks, createRunSnapshot } from '../../../src/host/orchestrator/index.js'
 import { DEFAULT_SYSTEM_LANGUAGE } from '../../../src/host/system-language.js'
-import { TEAM_SEND_MESSAGE, WF_ASK_AGENT } from '../../../src/host/shared/protocol.js'
+import { WF_SEND_MESSAGE } from '../../../src/host/shared/protocol.js'
 import type { RoleNode, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
 import { agent, fileNode, groupNode, makeFlow, stage, type Harness, makeHarness, caller, childCaller, start, cleanupTempDirs } from './fixtures/harness.js'
 
@@ -464,26 +464,26 @@ describe('wfRunNode Team 卡片与成员路径', () => {
     expect(h.runner.calls[0]?.teamMember).toBeUndefined()
   })
 
-  it('成员任务块走官方协作通道：官方可用时不重复注入插件自建协作块', async () => {
+  it('成员任务块注入可通信对象清单（父代理 + 组内其他成员；不再按官方可用性分叉）', async () => {
     const h = await makeHarness()
     h.runner.teamEnabled = true
     await start(h, teamFlow())
     await h.runtime.wfRunNode(caller, { nodeId: 'n-dev' })
 
     const text = h.runner.calls[0]!.blocks[0]!.text
-    // 官方 teammate 自带九个工具与 team:policy，故插件不再注入成员清单与通信指引
-    expect(text).not.toContain(WF_ASK_AGENT)
-    expect(text).not.toContain(TEAM_SEND_MESSAGE)
-    expect(text).not.toContain('本组成员为')
+    expect(text).toContain(WF_SEND_MESSAGE)
+    expect(text).toContain('n-rev')
+    expect(text).toContain('parent')
+    expect(text).not.toContain('wf_ask_agent')
   })
 
-  it('官方 Team 不可用（降级）：成员任务块回到 wf_ask_agent 协作指引', async () => {
+  it('官方 Team 不可用（降级）：任务块结构不变（通道分叉已删除）', async () => {
     const h = await makeHarness()
     await start(h, teamFlow())
     await h.runtime.wfRunNode(caller, { nodeId: 'n-dev' })
 
     const text = h.runner.calls[0]!.blocks[0]!.text
-    expect(text).toContain(WF_ASK_AGENT)
+    expect(text).toContain(WF_SEND_MESSAGE)
     expect(text).toContain('n-rev')
     // 编排器仍按图标记成员身份，是否降级由引擎按官方可用性裁决
     expect(h.runner.calls[0]!.teamMember).toBe(true)
@@ -505,7 +505,6 @@ describe('wfRunNode Team 卡片与成员路径', () => {
       // 与 harness 装配的 config.documentTextLimit 同值（makeHarness 默认 200）
       documentTextLimit: 200,
       systemLanguage: DEFAULT_SYSTEM_LANGUAGE,
-      collabChannel: 'official',
     })
     expect(h.runner.calls[0]!.blocks).toEqual(expected)
     expect(h.runner.calls[0]!.blocks).toHaveLength(1)

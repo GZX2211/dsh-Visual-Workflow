@@ -223,7 +223,6 @@ export async function makeEnv(options: TestEnvOptions = {}): Promise<TestEnv> {
       runIdleTimeoutMs: 500,
       retryLimitDefault: 3,
       reactIterationLimitDefault: 0,
-      wfAskAgentTtlMs: 500,
       ...options.config,
     },
     logger: options.logger ?? { warn: () => {}, info: () => {}, debug: () => {} },

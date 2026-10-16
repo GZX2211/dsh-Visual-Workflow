@@ -30,13 +30,11 @@ export {
   type ParentTaskSpecParams,
 } from './parents.js'
 
-// 子代理任务块（含输入/输出契约）与降级通道协作块。
+// 子代理任务块（含输入/输出契约与可通信对象清单）。
 export {
   buildNodeTaskBlock,
-  buildCollabBlock,
+  type CommTarget,
   type NodeTaskBlockParams,
-  type CollabBlockParams,
-  type CollabChannel,
 } from './child.js'
 
 // 规划期父代理提示词（/arrange）。
@@ -65,9 +63,9 @@ export {
   PATCH_OPS_MAX,
 } from './texts/rule-patch-contract.js'
 
-// 规则文本：ReAct 软截停护栏指令 / wf_ask_agent 协作消息 / 数据库工具说明。
+// 规则文本：ReAct 软截停护栏指令 / 消息投递包装 / 数据库工具说明。
 export { REACT_CAP_MESSAGE, REACT_CAP_DENY_REASON } from './texts/rule-soft-stop.js'
-export { ASK_MESSAGE, ASK_REPLY } from './texts/notice-ask-message.js'
+export { NOTICE_SEND_MESSAGE } from './texts/notice-send-message.js'
 export { RULE_DB_TOOL } from './texts/rule-db-tool.js'
 
 // 任务文本：子代理任务块为空时的兜底首条消息。

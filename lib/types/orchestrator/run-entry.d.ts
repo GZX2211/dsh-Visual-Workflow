@@ -2,7 +2,6 @@ import type { FlowStore } from '../storage/flow-store.js';
 import type { RoleNode, WorkflowDocument } from '../shared/graph-model.js';
 import type { RunSnapshot, RunStatus } from '../shared/types.js';
 import type { AgentHost, NodeRunner, OrchestratorConfig, OrchestratorLogger, ParentModelSelectionLike, ParentPromptSetupLike } from './seams.js';
-import type { PendingAsk } from './ask-protocol.js';
 /** 单次运行的内存条目（旧项目 entry 同构：快照 + 护栏计数 + in-flight 表）。 */
 export interface RunEntry {
     /** 运行级取消控制器（停止/终止/插件卸载时 abort；阻塞中的 wait/提问随之取消）。 */
@@ -21,8 +20,6 @@ export interface RunEntry {
     lastActiveAt: number;
     /** 阻塞等待表：`${runId}:${nodeId}` → waiter（wait:true 路径）。 */
     waiters: Map<string, Waiter>;
-    /** 待回复登记表：askId → PendingAsk（wf_ask_agent 路径；非阻塞，供 reply 归属校验）。 */
-    asks: Map<string, PendingAsk>;
     /**
      * 执行者模式：父代理节点 id（父代理被流程线连接，作为执行单元先执行自身任务）。
      * 启动时登记；父代理开始调度（首次 wf_run_node/wf_finish）时把该节点标记 ok。

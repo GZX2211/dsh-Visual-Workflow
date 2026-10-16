@@ -2,16 +2,16 @@
 //
 // 图推导与节点上下文「事实」纯函数（供运行时与单测共用）：
 //   - 节点/流程推导：labelOf、pauseNodeIdsOf、orchestrationNodeList、collabGroupList、
-//     collabPromptOf、collabBlockOf（协作成员清单块）；
+//     collabPromptOf、commTargetsOf（可通信对象清单）；
 //   - 运行前完整性：missingStageLabels、validateFlowForRun；
 //   - 节点执行上下文事实：dbToolHintOf、buildNodeContextFacts（上游产出/文件路径/db 提示）。
 // 全部为纯函数（不读时钟/随机源），不依赖全局状态。
 
-import { buildCollabBlock, renderTemplate, RULE_DB_TOOL, type CollabChannel } from '../prompts/index.js'
+import { renderTemplate, RULE_DB_TOOL, type CommTarget } from '../prompts/index.js'
 import { autoContextSourceIds, ctxInEdges, dbInEdges, nodeById, nodeParticipatesInFlow, validateFlow } from '../graph/index.js'
 import type { DatabaseNode, GraphNode, GroupNode, RoleNode, WorkflowDocument } from '../shared/graph-model.js'
 import type { RunSnapshot } from '../shared/types.js'
-import { teammateNameOf } from '../team/index.js'
+import { PARENT_TARGET } from './send-message-protocol.js'
 import { hasProducedOutput, truncateText } from './snapshot.js'
 import { WfError } from './errors.js'
 
@@ -82,25 +82,24 @@ export function collabPromptOf(flow: WorkflowDocument, nodeId: string): string {
 }
 
 /**
- * 构建某角色节点的协作成员清单块（追加到其首条用户消息）。
- * 始终列出本组全部成员（名称 + 可寻址标识，告知协作对象与可发消息对象），再追加自定义协作说明。
- * 非组内成员返回空串（不注入）。
+ * 某节点的可通信对象清单（注入子代理任务块的「可通信对象」段）。
  *
- * @param flow - 工作流文档。
- * @param nodeId - 角色节点 id。
- * @param channel - 协作通道：official 时成员以官方成员名寻址，否则以节点 id 寻址。
+ * 组成（用户裁决 2026-10）：父代理固定别名 + 本组其他成员节点；非组内成员只有父代理。
+ * 上下游节点的 id 不进本清单——可通信面只由组关系决定，不由数据流决定。
+ * 不列节点自身：wf_send_message 拒绝自投，列出只会误导模型。
  */
-export function collabBlockOf(flow: WorkflowDocument, nodeId: string, channel: CollabChannel = 'legacy'): string {
+export function commTargetsOf(flow: WorkflowDocument, nodeId: string): CommTarget[] {
+  const targets: CommTarget[] = [{ label: '父代理', id: PARENT_TARGET }]
   const group = flow.nodes.find(
-    (n): n is GraphNode & { data: { collabPrompt?: string; memberIds?: string[] } } =>
-      n.kind === 'group' && ((n.data.memberIds ?? []) as string[]).includes(nodeId),
+    (n): n is GroupNode => n.kind === 'group' && ((n.data.memberIds ?? []) as string[]).includes(nodeId),
   )
-  if (!group) return ''
-  const members = (group.data.memberIds ?? []).map((id) => {
+  if (!group) return targets
+  for (const id of group.data.memberIds ?? []) {
+    if (id === nodeId) continue
     const member = nodeById(flow, id)
-    return { id, label: member ? labelOf(member) : id, target: teammateNameOf(id) }
-  })
-  return buildCollabBlock({ members, custom: String(group.data.collabPrompt ?? ''), channel })
+    targets.push({ label: member ? labelOf(member) : id, id })
+  }
+  return targets
 }
 
 /** 运行前完整性检查：缺失的启动/结束节点（按模式渲染中文名）。 */

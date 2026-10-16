@@ -152,7 +152,9 @@ describe('全局工具开关批量端点', () => {
     expect(state.disabledTools).toEqual([...DEFAULT_DISABLED_ON_FIRST_INSTALL])
     expect(await h.host.toolSwitches.readDisabled()).toEqual([...DEFAULT_DISABLED_ON_FIRST_INSTALL])
     // 用户可在组合管理页手动开启（默认值不是不可逆约束）
-    await h.api.handle('toolSwitchPut', { name: DEFAULT_DISABLED_ON_FIRST_INSTALL[0], disabled: false })
+    for (const name of DEFAULT_DISABLED_ON_FIRST_INSTALL) {
+      await h.api.handle('toolSwitchPut', { name, disabled: false })
+    }
     const reopened = (await h.api.handle('pluginCatalog', {})) as { disabledTools?: string[] }
     expect(reopened.disabledTools).toEqual([])
   })

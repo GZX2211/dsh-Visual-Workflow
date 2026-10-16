@@ -6,7 +6,7 @@
 //   1. API → run → 编排指令注入（硬约束双位）→ wf_run_node → subagent/end 回写
 //      → wf_finish → 磁盘历史；运行中改图保存后重读新快照（双向同步）。
 //   2. 暂停门 → paused 断点持久化 → resumeRun：已 ok 节点继承不重跑、续跑继承链。
-//   3. wf_ask_agent 越权拒绝（非成员 ask → WF_ASK_FORBIDDEN；陌生目标 → 未知）
+//   3. wf_send_message 越权拒绝（调用方非本运行节点子代理 → 身份不合法；陌生目标 → 未知）
 //      与正常 ask→deliver(steer)→reply 解锁闭环；工具注册签名合规（英文 description）。
 //   4. 服务全链路：SessionMap 持久化隔离 / fork 组合参数 / serve patch 渲染。
 
@@ -30,8 +30,8 @@ import type { StageNode, RoleNode, WorkflowDocument, Line } from '../../src/host
 import { stageLabel } from '../../src/host/graph/index.js'
 import { VisualWorkflowApi, type ApiHost } from '../../src/host/api/index.js'
 import { SessionMap, ServiceManager, renderServePatch } from '../../src/host/service/index.js'
-import { registerWfAskAgent } from '../../src/host/tools/wf-ask-agent/tool.js'
-import { WF_ASK_AGENT } from '../../src/host/shared/protocol.js'
+import { registerWfSendMessage } from '../../src/host/tools/wf-send-message/tool.js'
+import { WF_SEND_MESSAGE } from '../../src/host/shared/protocol.js'
 
 const cleanups: Array<() => Promise<void>> = []
 
@@ -163,7 +163,6 @@ async function makeHarness(): Promise<Harness> {
       runIdleTimeoutMs: 60_000,
       retryLimitDefault: runDefaults.retryLimitDefault,
       reactIterationLimitDefault: runDefaults.reactIterationLimitDefault,
-      wfAskAgentTtlMs: 60_000,
     },
     logger: { warn: () => {}, info: () => {}, debug: () => {} },
     newRunId: () => `run-${++seq}`,
@@ -291,8 +290,8 @@ describe('e2e：暂停门与断点续跑', () => {
   })
 })
 
-describe('e2e：wf_ask_agent 越权拒绝与通信闭环', () => {
-  it('ask→steer 投递→reply 解锁；非运营子代理 ask 被拒；陌生目标未知', async () => {
+describe('e2e：wf_send_message 越权拒绝与通信闭环', () => {
+  it('子代理→子代理、子代理→父代理、父代理→子代理三向投递；非本运行子代理与陌生目标被拒', async () => {
     const h = await makeHarness()
     const flow: WorkflowDocument = {
       ...makeFlow(),
@@ -306,59 +305,70 @@ describe('e2e：wf_ask_agent 越权拒绝与通信闭环', () => {
     const r1 = (await h.runtime.wfRunNode({ isChild: false, sessionId: 'session-1' }, { nodeId: 'n-a1' })) as { childId: string }
     const r2 = (await h.runtime.wfRunNode({ isChild: false, sessionId: 'session-1' }, { nodeId: 'n-a2' })) as { childId: string }
 
-    // 正常 ask（非阻塞）：返回受理凭证，deliver 被调用（steer 投递）
-    const delivered: Array<{ to: string; text: string }> = []
+    const textOf = (input: { message?: { content?: Array<{ text?: string }> } }): string =>
+      (input.message?.content ?? []).map((c) => c.text ?? '').join('')
+    const toChild: Array<{ childId: string; text: string }> = []
+    const toParent: Array<{ text: string }> = []
     const delivery = {
-      deliver: vi.fn(async (input: { to: string; message: { content?: Array<{ text?: string }> } }) => {
-        delivered.push({
-          to: input.to,
-          text: (input.message.content ?? []).map((c) => c.text ?? '').join(''),
-        })
+      deliverToChild: vi.fn(async (input: { childId: string; message: { content?: Array<{ text?: string }> } }) => {
+        toChild.push({ childId: input.childId, text: textOf(input) })
+        return 'delivered' as const
       }),
+      deliverToParent: vi.fn(async (input: { message: { content?: Array<{ text?: string }> } }) => {
+        toParent.push({ text: textOf(input) })
+        return 'delivered' as const
+      }),
+      deliverToTeammate: vi.fn(async () => {}),
     }
-    const askResult = await h.runtime.wfAskAgent(
+
+    // 子代理 → 子代理（nodeId 寻址，resolved 解析为对方 childId）
+    const toPeer = await h.runtime.wfSendMessage(
       { isChild: true, sessionId: 'session-1' },
       r1.childId,
-      { cmd: 'ask', targetChildId: r2.childId, message: '请提供数据' },
+      { target: 'n-a2', message: '请提供数据' },
       delivery as never,
     )
-    expect(askResult).toMatchObject({ cmd: 'ask', from: r1.childId, to: r2.childId })
-    expect(delivered).toHaveLength(1)
-    expect(delivered[0]?.to).toBe(r2.childId)
-    const askId = askResult.askId ?? ''
-    expect(askId).toBeTruthy()
-    expect(delivered[0]?.text).toContain(askId)
+    expect(toPeer).toEqual({ target: 'n-a2', resolved: r2.childId, status: 'delivered' })
+    expect(toChild[0]?.childId).toBe(r2.childId)
+    expect(toChild[0]?.text).toContain('请提供数据')
 
-    // reply 反向投递：回复作为新消息送达发起者（非调用结果）
-    const replyResult = await h.runtime.wfAskAgent(
+    // 子代理 → 父代理（固定别名）
+    const toRoot = await h.runtime.wfSendMessage(
       { isChild: true, sessionId: 'session-1' },
-      r2.childId,
-      { cmd: 'reply', askId, targetChildId: r1.childId, message: '数据在此' },
+      r1.childId,
+      { target: 'parent', message: '需要你的决定' },
       delivery as never,
     )
-    expect(replyResult).toMatchObject({ cmd: 'reply', askId, from: r2.childId, to: r1.childId })
-    expect(delivered).toHaveLength(2)
-    expect(delivered[1]?.to).toBe(r1.childId)
-    expect(delivered[1]?.text).toContain('数据在此')
+    expect(toRoot).toEqual({ target: 'parent', resolved: 'parent', status: 'delivered' })
+    expect(toParent[0]?.text).toContain('需要你的决定')
 
-    // 越权拒绝：非本运行子代理 ask（childIndex 未登记）→ 禁止
-    await expect(h.runtime.wfAskAgent(
+    // 父代理 → 子代理
+    const fromRoot = await h.runtime.wfSendMessage(
+      { isChild: false, sessionId: 'session-1' },
+      'session-1',
+      { target: 'n-a1', message: '补充指令' },
+      delivery as never,
+    )
+    expect(fromRoot).toEqual({ target: 'n-a1', resolved: r1.childId, status: 'delivered' })
+
+    // 越权拒绝：非本运行子代理（childIndex 未登记）→ 身份不合法
+    await expect(h.runtime.wfSendMessage(
       { isChild: true, sessionId: 'session-1' },
       'stranger-child',
-      { cmd: 'ask', targetChildId: r2.childId, message: 'hi' },
+      { target: 'n-a2', message: 'hi' },
       delivery as never,
-    )).rejects.toMatchObject({ code: 'WF_ASK_FORBIDDEN' })
+    )).rejects.toMatchObject({ code: 'WF_SEND_BAD_ARGS' })
 
     // 陌生目标：目标非本运行节点子代理 → 目标未知
-    await expect(h.runtime.wfAskAgent(
+    await expect(h.runtime.wfSendMessage(
       { isChild: true, sessionId: 'session-1' },
       r1.childId,
-      { cmd: 'ask', targetChildId: 'ghost-child', message: 'hi' },
+      { target: 'ghost-child', message: 'hi' },
       delivery as never,
-    )).rejects.toMatchObject({ code: 'WF_ASK_TARGET_UNKNOWN' })
+    )).rejects.toMatchObject({ code: 'WF_SEND_TARGET_UNKNOWN' })
   })
 
-  it('工具注册真身：wf_ask_agent 定义签名合规（description 英文标准写法、name 常量）', () => {
+  it('工具注册真身：wf_send_message 定义签名合规（description 英文标准写法、name 常量）', () => {
     const registered: Array<{ name?: string; description?: string; parameters?: unknown }> = []
     const ctx = { get: (name: string) => (name === 'tools' ? {
       register(def: { name?: string; description?: string; parameters?: unknown }) {
@@ -366,10 +376,16 @@ describe('e2e：wf_ask_agent 越权拒绝与通信闭环', () => {
         return () => {}
       },
     } : null) }
-    const dispose = registerWfAskAgent(ctx as never, { orchestrator: null as never, followupChild: null as never } as never)
-    expect(registered[0]?.name).toBe(WF_ASK_AGENT)
+    const dispose = registerWfSendMessage(ctx as never, {
+      orchestrator: null as never,
+      getChildAgent: null as never,
+      followupRoot: null as never,
+      followupChild: null as never,
+      sendToTeammate: null as never,
+    } as never)
+    expect(registered[0]?.name).toBe(WF_SEND_MESSAGE)
     const desc = String(registered[0]?.description ?? '')
-    expect(desc).toMatch(/^Exchange messages/) // 英文标准写法：何时调用开头
+    expect(desc).toMatch(/^Send one durable message/) // 英文标准写法：何时调用开头
     expect(desc.length).toBeLessThan(700)
     dispose()
   })

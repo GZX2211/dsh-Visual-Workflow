@@ -14,14 +14,13 @@
 // RuntimeObserve ← RuntimeLifecycle ← OrchestratorRuntime（runtime.ts 收口）。
 
 import { randomUUID } from 'node:crypto'
-import { isGroupMember } from '../graph/index.js'
 import type { RoleNode, WorkflowDocument } from '../shared/graph-model.js'
 import type { RunSnapshot, RunStatus } from '../shared/types.js'
 import { cloneSnapshot, setNodeStatus } from './snapshot.js'
 import { RESUMABLE_STATUSES, type ResumeInput, type ResumeResult } from './resume.js'
 import { ORCH_CHANGE_TEXT, type ExecutorContextFacts } from '../prompts/index.js'
 import { effectiveRetryLimitOf } from './node-params.js'
-import { coordinatorMessage } from './ask-protocol.js'
+import { coordinatorMessage } from './send-message-protocol.js'
 import { summarizeFlowChange } from './flow-diff.js'
 import { buildNodeContextFacts } from './graph-facts.js'
 import { parentExecutorOf } from './directive.js'
@@ -47,7 +46,7 @@ export abstract class RuntimeBase {
   readonly runs = new Map<string, RunEntry>()
   /** childId → 运行位置反查（subagent/end 观察回写用）。 */
   protected readonly childIndex = new Map<string, ChildMeta>()
-  /** nodeId → childId 反向索引（wf_ask_agent 节点 id 寻址 O(1)，P2-4）。 */
+  /** nodeId → childId 反向索引（wf_send_message 节点 id 寻址 O(1)，P2-4）。 */
   protected readonly childByNode = new Map<string, string>()
   /**
    * 断点静默接续去重表（sessionId → 进行中的运行上下文接续 Promise）。
@@ -152,7 +151,7 @@ export abstract class RuntimeBase {
     return {
       nodeId: executor.nodeId,
       nodeLabel: executor.nodeLabel,
-      task: { ...context, nodeLabel: executor.nodeLabel, isGroupMember: isGroupMember(flow, executor.nodeId) },
+      task: { ...context, nodeLabel: executor.nodeLabel },
       runContextText: `runId=${snapshot.id}; attempt ${(existing?.attempts ?? 0) + 1}/${retryBudget}（父代理执行单元）`,
     }
   }
@@ -467,7 +466,7 @@ export abstract class RuntimeBase {
   // ---- 运行时读取 --------------------------------------------------------------
 
   /**
-   * 触碰运行的空闲基准（工具层调用）：wf_ask 提问等长阻塞交互期间持续
+   * 触碰运行的空闲基准（工具层调用）：wf_ask_user 提问等长阻塞交互期间持续
    * 刷新 lastActiveAt，防止空闲看护（runIdleTimeoutMs）把等待用户的运行误判为空闲
    * 并自动停止。
    */
@@ -548,7 +547,7 @@ export abstract class RuntimeBase {
   /**
    * 向父代理注入【编排变更】通知（运行中画布保存且编排语义变更时调用）。
    * 通道选择（用户裁决）：父代理回合进行中（status='running'）且具备 steer → 插队
-   * 注入（下一步边界即见，与 wf_ask_agent 超时通知同通道）；否则用 followupRoot 唤醒
+   * 注入（下一步边界即见，与 wf_send_message 超时通知同通道）；否则用 followupRoot 唤醒
    * （父代理空闲时也能收到）。注入失败仅告警，绝不阻断画布保存主流程。
    */
   protected notifyOrchestrationChange(entry: RunEntry): void {
@@ -595,7 +594,6 @@ export abstract class RuntimeBase {
         // 忽略清理期错误
       }
       this.rejectWaiters(entry)
-      this.rejectAsks(entry)
     }
     this.runs.clear()
     this.childIndex.clear()
@@ -634,17 +632,6 @@ export abstract class RuntimeBase {
       waiter.reject(new WfError('WF_CANCELLED: the run has been stopped', 'WF_CANCELLED'))
     }
     entry.waiters.clear()
-  }
-
-  /**
-   * 释放某运行的全部待回复协作登记（终止/替换/卸载路径）。
-   * 非阻塞协议下登记不含等待受体，故无拒绝语义：仅清表 + 写审计（幂等）。
-   */
-  protected rejectAsks(entry: RunEntry): void {
-    for (const pending of entry.asks.values()) {
-      this.log().info(`[visual-workflow] wf_ask_agent audit: askId=${pending.askId} released`)
-    }
-    entry.asks.clear()
   }
 
   /** 持久化 run 快照（尽力而为：失败仅告警，不阻断状态机）。 */

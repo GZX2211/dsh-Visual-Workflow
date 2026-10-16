@@ -2,8 +2,8 @@
 #
 # T-002：insert 块声明插件行。id 是配置树中稳定的行身份（后层按 id 覆盖前层），
 # name 是 Cordis Loader 可解析的 Node 包名（对应本包 main 入口 lib/index.js）。
-# config 的 13 个键是 patch 层实际暴露的全部键，与 src/host/index.ts 导出的 Config schema 逐键对应
-# （默认值一致）；schema 另有 1 个退役只读键 wfAskAgentTimeoutMs，不出现在本文件。
+# config 的 12 个键是 patch 层实际暴露的全部键，与 src/host/index.ts 导出的 Config schema 逐键对应
+# （默认值一致）。
 # 键义逐条见下方中文注释；形态与架构文档 §2.2 逐字一致。
 - insert:
     - id: visual-workflow
@@ -20,8 +20,6 @@
         apiKey: null
         # 模式二单服务并发请求上限（超出返回 429，需求 §4.1.3 默认 50）。
         maxConcurrentPerService: 50
-        # wf_ask_agent 待回复登记的 TTL 毫秒数（到期后不再接受 reply；默认 120s）。
-        wfAskAgentTtlMs: 120000
         # 运行空闲超时毫秒数（无 in-flight 时的看护门限，默认 30 分钟）。
         runIdleTimeoutMs: 1800000
         # 运行状态回显（编排 → 画布双向同步）的轮询间隔毫秒数；前端经 runtimeConfig 端点

@@ -155,10 +155,11 @@ describe('buildNodeBlocks 契约注入（只断言数据，不断言文案）', 
   })
 })
 
-describe('Team 成员任务块（协作通道差异）', () => {
-  /** Team 流程：成员 m1（groupId）包在 Team 卡片 g1 内，卡片带用户填写的协作说明。 */
+describe('Team 成员任务块（可通信对象清单统一注入）', () => {
+  /** Team 流程：成员 m1、m2 包在 Team 卡片 g1 内，卡片带用户填写的协作说明。 */
   function teamFlow(): WorkflowDocument {
     const member = role('m1', 'agent', { groupId: 'g1' })
+    const peer = role('m2', 'agent', { groupId: 'g1' })
     return {
       id: 'flow-team',
       sessionId: 'session-1',
@@ -168,40 +169,43 @@ describe('Team 成员任务块（协作通道差异）', () => {
       revision: 1,
       nodes: [
         member,
+        peer,
         {
           id: 'g1',
           kind: 'group',
           position: { x: 0, y: 0 },
-          data: { label: '评审组', collabPrompt: '成员互相质询', memberIds: ['m1'], size: { w: 300, h: 220 } },
+          data: { label: '评审组', collabPrompt: '成员互相质询', memberIds: ['m1', 'm2'], size: { w: 300, h: 220 } },
         },
       ],
       lines: [],
     }
   }
 
-  function memberBlock(channel: 'official' | 'legacy'): string {
-    const flow = teamFlow()
+  function blockOf(flow: WorkflowDocument, nodeId: string): string {
+    const node = flow.nodes.find((item) => item.id === nodeId) as RoleNode
     return buildNodeBlocks({
       flow,
-      node: flow.nodes[0] as RoleNode,
+      node,
       snapshot: emptySnapshot,
       documentTextLimit: 20000,
       systemLanguage: '中文',
-      collabChannel: channel,
     })[0].text
   }
 
-  it('official 通道：不注入成员清单与通信指引（官方 team:policy 承担），仅注入用户填写的团队协作说明', () => {
-    const text = memberBlock('official')
-    expect(text).toContain('成员互相质询')
-    expect(text).not.toContain('本组成员为')
+  it('组内成员：清单含父代理与组内其他成员（nodeId 寻址），不列自身、不列上下游', () => {
+    const text = blockOf(teamFlow(), 'm1')
+    expect(text).toContain('parent')
+    expect(text).toContain('m2')
+    expect(text).not.toContain('- 节点m1')
+    expect(text).toContain('wf_send_message')
     expect(text).not.toContain('wf_ask_agent')
+    // Team 卡片上的用户自定义说明作为「组内说明」并入同一段
+    expect(text).toContain('成员互相质询')
   })
 
-  it('legacy 通道：注入成员清单与 wf_ask_agent 通信指引（成员已降级为普通子代理）', () => {
-    const text = memberBlock('legacy')
-    expect(text).toContain('本组成员为')
-    expect(text).toContain('wf_ask_agent')
-    expect(text).toContain('成员互相质询')
+  it('非组内成员：清单只有父代理（可通信面不由数据流决定）', () => {
+    const text = blockOf(makeFlow({ nodes: [role('a1'), role('a2')] }), 'a1')
+    expect(text).toContain('parent')
+    expect(text).not.toContain('- 节点a2')
   })
 })

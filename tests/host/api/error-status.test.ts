@@ -90,7 +90,6 @@ describe('稳定错误码 → HTTP 状态穷举（IF-10）', () => {
       WF_GRAPH_INVALID: 422,
       WF_SCOPE_INVALID: 400,
       WF_NOT_ROOT: 403,
-      WF_ASK_FORBIDDEN: 403,
       WF_NO_ACTIVE_RUN: 409,
     }
     for (const [code, expected] of Object.entries(callerErrors)) {

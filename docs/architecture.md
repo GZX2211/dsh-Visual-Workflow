@@ -788,7 +788,7 @@ Workflow execution
     ├── wf_run_node
     ├── wf_run_node_wait
     ├── wf_finish
-    └── wf_ask
+    └── wf_ask_user
 
 Data
     └── wf_db_query

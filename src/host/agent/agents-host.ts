@@ -83,7 +83,7 @@ export class CordisAgentHost implements AgentHost {
     return raw as RootAgentLike
   }
 
-  /** 按会话 id 取子代理 agent（wf_ask_agent 投递缝用；未激活返回 null）。 */
+  /** 按会话 id 取子代理 agent（wf_send_message 投递缝用；未激活返回 null）。 */
   getChildAgent(childId: string): RootAgentLike | null {
     const service = this.agentsService()
     if (!service) return null

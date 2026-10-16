@@ -189,7 +189,7 @@ export interface ResolveToolsInput {
  *   - 官方 preset → standing scope 工具名 ∩ 可见（服务缺失回退全部可见）；
  *   - db-in 连线存在 → 追加 wf_db_query（§4.4.3 规则 5）；
  *   - CHILD_AGENT_HIDDEN_TOOLS 无条件剔除（即便被组合勾选也不进入子代理）。
- * 注意：无强制追加——wf_ask/wf_ask_agent 仅在组合勾选时进入（PRD §4.4.2 规则 7）。
+ * 注意：无强制追加——wf_ask_user/wf_send_message 仅在组合勾选时进入（PRD §4.4.2 规则 7）。
  */
 export declare function resolveAgentTools(input: ResolveToolsInput): Promise<string[]>;
 /** runner 依赖（官方服务以惰性函数注入，缺省时报明确错误）。 */
@@ -201,7 +201,7 @@ export interface NodeAgentRunnerDeps {
     subagents: () => SubagentsServiceLike | null;
     /**
      * 官方 Agent Team 服务惰性解析（Team 成员路径用）。
-     * 返回 null 表示官方团队未挂载：成员节点降级为普通可延续子代理（协作通信走 wf_ask_agent）。
+     * 返回 null 表示官方团队未挂载：成员节点降级为普通可延续子代理（协作通信走 wf_send_message）。
      */
     teams: () => AgentTeamsServiceLike | null;
     /**

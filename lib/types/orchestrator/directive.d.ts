@@ -1,4 +1,4 @@
-import { type CollabChannel, type ExecutorContextFacts, type OrchestrationDirectiveParams, type ParentPromptVariant } from '../prompts/index.js';
+import { type ExecutorContextFacts, type OrchestrationDirectiveParams, type ParentPromptVariant } from '../prompts/index.js';
 import type { WorkflowDocument } from '../shared/graph-model.js';
 /**
  * 父代理提示词变体判定（三情况，纯函数）：
@@ -37,8 +37,6 @@ export declare function directiveParams(flow: WorkflowDocument, mode: 'mode1' | 
     parentTaskBlock?: string;
     /** 系统语言名（从 DSH 用户设置读取；注入语言规则）。 */
     systemLanguage?: string;
-    /** 协作通道（官方 Agent Team 可用性；决定 Team 段文案与启动方式）。 */
-    collabChannel?: CollabChannel;
 }): OrchestrationDirectiveParams;
 /**
  * 父代理运行提示词统一组装（startRun/resumeRun 共用；三情况整体替换组装）：
@@ -69,6 +67,4 @@ export declare function buildParentRunPrompt(input: {
     } | null;
     /** 系统语言名（从 DSH 用户设置读取；注入语言规则）。 */
     systemLanguage: string;
-    /** 协作通道（官方 Agent Team 可用性；决定 Team 段文案与启动方式）。 */
-    collabChannel?: CollabChannel;
 }): string;

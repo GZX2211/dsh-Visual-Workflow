@@ -31,12 +31,12 @@ export interface NodeRunner {
     /** 尽力中断某子代理当前回合（保留会话；官方 interrupt 语义）。 */
     interruptChild(childId: string, sessionId: string): Promise<void>;
     /**
-     * 官方 Agent Team 能力是否可用（Team 成员启动路径与协作块通道文案的唯一判据）。
+     * 官方 Agent Team 能力是否可用（Team 成员启动路径与消息投递通道的唯一判据）。
      *
      * 可用 = 官方 Team 服务已挂载且能力齐全 + 官方 Team 工具与协作策略确实会下发给成员
      * （父代理 scope 可见 spawn_teammate）+ 该会话根 Agent 存活 + 存在可用的延续子代理
-     * provider。任一不满足时团队成员节点必须回退到普通可延续子代理路径（降级通信走
-     * wf_ask_agent）。
+     * provider。任一不满足时团队成员节点必须回退到普通可延续子代理路径（消息投递走
+     * wf_send_message 的普通子代理通道）。
      */
     teamAvailable?(sessionId: string): boolean;
     /**
@@ -99,9 +99,9 @@ export interface RootInjectedMessage {
     };
 }
 /**
- * 协作通信消息（wf_ask_agent 投递/通知用）：source 使用官方「merge-extensible」
- * 扩展 kind（'coordinator' 不在官方 MessageSourceMap 内，官方消费端按未知 kind
- * fall-through，与旧项目 relay 语义一致）。
+ * 协作通信消息（wf_send_message 投递 / 编排变更通知用）：source 使用官方
+ * 「merge-extensible」扩展 kind（'coordinator' 不在官方 MessageSourceMap 内，官方
+ * 消费端按未知 kind fall-through，与旧项目 relay 语义一致）。
  */
 export interface CoordinatorMessage {
     id: string;
@@ -165,8 +165,6 @@ export interface OrchestratorConfig {
     retryLimitDefault: number;
     /** ReAct 迭代次数默认上限（节点未配置时兜底）。 */
     reactIterationLimitDefault: number;
-    /** wf_ask_agent 待回复登记的 TTL 毫秒数。 */
-    wfAskAgentTtlMs: number;
 }
 /** 日志缝（默认 console；单测注入收集器断言 warn 路径）。 */
 export interface OrchestratorLogger {
@@ -235,7 +233,7 @@ export interface ChildMeta {
      *
      * 为什么必须显式退役而不是直接删表项：删掉后旧 child 的 subagent/end 会走
      * 「childIndex 未登记」的迟到重试路径（有界重试 + 告警），既浪费事件循环又产出
-     * 误导性告警；且 wf_ask_agent 的越权校验会把「已退役的子代理」误报成「不属于本运行」。
+     * 误导性告警；且 wf_send_message 的越权校验会把「已退役的子代理」误报成「不属于本运行」。
      * 保留表项 + 退役标记，可把这类事件判定为「已知无主、静默丢弃」。
      * 表项仍随 run 生命周期统一清理（上界 = 本轮运行内的重建次数）。
      */

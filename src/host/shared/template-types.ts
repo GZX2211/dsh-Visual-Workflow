@@ -156,7 +156,7 @@ export interface ToolCombo {
   id: `combo-${string}`
   /** 组合名称。 */
   name: string
-  /** 工具勾选清单（含可选注入的 dsh-vw 工具 wf_ask/wf_ask_agent，需求文档 §4.6 规则 6）。 */
+  /** 工具勾选清单（含可选注入的 dsh-vw 工具 wf_ask_user/wf_send_message，需求文档 §4.6 规则 6）。 */
   tools: string[]
   /** 所选 MCP 服务器 id 列表（工具以 mcp__<server>__* 前缀解析，需求文档 §4.6 规则 4）。 */
   mcpServers: string[]

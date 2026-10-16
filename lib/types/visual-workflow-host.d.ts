@@ -2,7 +2,7 @@ import { Context, Service } from '@deepseek-ai/cordis';
 import type { Config } from './config.js';
 import { FlowStore } from './storage/flow-store.js';
 import { AssetStore } from './assets/index.js';
-import { OrchestratorRuntime, type RootAgentLike } from './orchestrator/index.js';
+import { OrchestratorRuntime, type RootAgentLike, type RootInjectedMessage } from './orchestrator/index.js';
 import { CordisAgentHost, NodeAgentRunner } from './agent/index.js';
 import { ToolSwitchStore } from './tools/index.js';
 import type { ExperienceDomainFace } from './api/index.js';
@@ -142,11 +142,24 @@ export declare class VisualWorkflowHost extends Service {
      * 统一清理。
      */
     private onAgentDisposed;
-    /** 按会话 id 取子代理 agent（wf_ask_agent 投递缝用；转发至 agents 适配）。 */
+    /** 按会话 id 取子代理 agent（wf_send_message 投递缝用；转发至 agents 适配）。 */
     getChildAgent(childId: string): RootAgentLike | null;
     /** 冷态投递：复用子代理派发协作消息（subagents 服务惰性解析；缺失报明确错误）。 */
     followupChild(parent: RootAgentLike, childId: string, content: unknown[], options: {
         source: unknown;
+        signal?: AbortSignal;
+    }): Promise<unknown>;
+    /** 父代理空闲时唤醒投递（wf_send_message 投递缝；转发至 agents 适配）。 */
+    followupRoot(agent: RootAgentLike, message: RootInjectedMessage): void;
+    /**
+     * 官方 Team 成员投递（wf_send_message 的成员通道）：按官方成员名寻址，直接调用官方
+     * Team 服务。
+     *
+     * 为什么不走官方 send_message 工具：工具通道可被全局工具开关关闭（插件默认关闭官方
+     * send_message），而成员间通信必须继续可用；宿主直接调用官方服务不经过工具注册与
+     * 开关，因此不受影响。
+     */
+    sendToTeammate(parent: RootAgentLike, memberName: string, content: unknown[], options: {
         signal?: AbortSignal;
     }): Promise<unknown>;
     /** 数据根目录（数据工具索引落盘位置）。 */

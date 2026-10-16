@@ -72,7 +72,7 @@ describe('shared/types 契约形态', () => {
     id: 'd1', name: 'd', description: '', dbType: 'server', dbKind: 'mysql', conn: { host: 'h', port: 3306, user: 'u', password: 'p', db: 'x' },
   }
   const _groupTemplate: GroupTemplate = { id: 'g1', name: 'g', collabPrompt: '' }
-  const _combo: ToolCombo = { id: 'combo-1', name: 'c', tools: ['wf_ask'], mcpServers: [] }
+  const _combo: ToolCombo = { id: 'combo-1', name: 'c', tools: ['wf_ask_user'], mcpServers: [] }
   const _bundle: BundleV2 = {
     format: 'dsh-vw-bundle', version: 2, mode: 'mode1',
     workflow: { name: 'w', description: '', nodes: [_minRoleNode], lines: [] },

@@ -39,7 +39,7 @@ describe('startRun 并发运行锁（TOCTOU 竞态回归）', () => {
       agents: h.agents,
       config: {
         outputFullLimit: 400, documentTextLimit: 200, runIdleTimeoutMs: 500,
-        retryLimitDefault: 3, reactIterationLimitDefault: 0, wfAskAgentTtlMs: 500,
+        retryLimitDefault: 3, reactIterationLimitDefault: 0,
       },
       logger: { warn: (message) => h.warnings.push(message), info: () => {}, debug: () => {} },
       now: () => h.clock.now,
@@ -409,13 +409,14 @@ function resumeReleaseFlow(): WorkflowDocument {
   }
 }
 
-/** 协作投递缝 fake：只记录投递调用（用于断言「未投递」）。 */
-function recordingDelivery(): { calls: unknown[]; deliver(input: unknown): Promise<void> } {
+/** 消息投递缝 fake：只记录投递调用（用于断言「未投递」）。 */
+function recordingDelivery(): { calls: unknown[]; deliverToChild(input: unknown): Promise<string> } {
   const calls: unknown[] = []
   return {
     calls,
-    async deliver(input: unknown): Promise<void> {
+    async deliverToChild(input: unknown): Promise<string> {
       calls.push(input)
+      return 'delivered'
     },
   }
 }
@@ -441,7 +442,7 @@ describe('resumeRun 释放旧 paused 条目', () => {
     expect((await h.store.getRun(start.runId))?.status).toBe('paused')
   })
 
-  it('续跑退役旧 run 的子代理归属：旧 child 不再能发起协作（判别性断言）', async () => {
+  it('续跑退役旧 run 的子代理归属：旧 child 不再能发送消息（判别性断言）', async () => {
     const h = await makeHarness()
     await h.store.saveWorkflow(resumeReleaseFlow(), 'session-1', { force: true })
     const started = await h.runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })
@@ -453,18 +454,18 @@ describe('resumeRun 释放旧 paused 条目', () => {
     const resumed = await h.runtime.resumeRun({ sessionId: 'session-1', flowId: 'flow-1', fromRunId: started.runId })
     expect(resumed.runId).not.toBe(started.runId)
 
-    // 行为判据：旧 child 的归属已随旧 run 条目释放 → 投给旧同伴的协作请求被拒。
+    // 行为判据：旧 child 的归属已随旧 run 条目释放 → 以旧 child 身份发消息被拒。
     // 若归属残留，同一 sessionId/flowId 会通过越权校验并把消息投给已废弃的子代理会话
     // （目标按节点 id 经 childByNode 仍能解析到旧 child-2）。
     const delivery = recordingDelivery()
     await expect(
-      h.runtime.wfAskAgent(
+      h.runtime.wfSendMessage(
         { isChild: true, sessionId: 'session-1' },
         'child-1',
-        { cmd: 'ask', targetChildId: 'n-a2', message: '还在吗' },
+        { target: 'n-a2', message: '还在吗' },
         delivery as never,
       ),
-    ).rejects.toMatchObject({ code: 'WF_ASK_FORBIDDEN' })
+    ).rejects.toMatchObject({ code: 'WF_SEND_BAD_ARGS' })
     expect(delivery.calls).toEqual([])
 
     // 状态判据：归属索引里不再残留旧 child（与运行条目同生共死）

@@ -37,7 +37,7 @@ pnpm typecheck && pnpm test && pnpm build
 
 | 工具 | 状态 | 关键改动 |
 |---|---|---|
-| `wf_ask` | ✅ 已改 | 对所有代理开放（删除「仅子代理」「必须活跃运行」护栏，改为身份自动分派）；错误消息英文+码；新增 `WF_NO_ASK_TARGET` |
+| `wf_ask_user` | ✅ 已改 | 对所有代理开放（删除「仅子代理」「必须活跃运行」护栏，改为身份自动分派）；错误消息英文+码；新增 `WF_NO_ASK_TARGET` |
 | `wf_run_node` / `wf_run_node_wait` / `wf_finish` | ✅ 已改 | 描述精简（删内部实现说明、子代理拒绝声明、泛泛失败清单）；`wf_db_query` 的 139 词偏差收敛回 ≤130 词门禁 |
 | `wf_ask_agent` | ✅ 已改 | 文案精简；**修真实缺陷**：过期 ask 不再永久阻塞 Team 聚合；删除只写不读的 `PendingAsk.audit`；修正「阻塞/三态/resolve」过时声明 |
 | `wf_db_query` | ✅ 已复核并修复 | 四项缺陷清零（双错误码 / `truncated` 三处口径统一 / SQLite 表数上限 / 实例定位判定），见 backlog §4 |
@@ -102,8 +102,8 @@ pnpm typecheck && pnpm test && pnpm build
 
 ### D. 未复核工具（继续按同一流程）
 
-`wf_ask` → `wf_run_node` → `wf_run_node_wait` → `wf_finish` → `wf_ask_agent`
-（`wf_ask` 与 `wf_ask_agent` 已在本轮整改过文案，但**尚未按复核流程出报告**。）
+`wf_ask_user` → `wf_run_node` → `wf_run_node_wait` → `wf_finish` → `wf_ask_agent`
+（`wf_ask_user` 与 `wf_ask_agent` 已在本轮整改过文案，但**尚未按复核流程出报告**。）
 
 ---
 

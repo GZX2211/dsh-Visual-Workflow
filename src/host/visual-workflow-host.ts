@@ -14,6 +14,7 @@ import {
   scheduleIdleWatchdog,
   type OrchestratorLogger,
   type RootAgentLike,
+  type RootInjectedMessage,
 } from './orchestrator/index.js'
 import {
   CordisAgentHost,
@@ -36,8 +37,7 @@ import {
   ToolSwitchStore,
   ensureDatabaseIndexes,
   registerToolSwitchFilter,
-  registerWfAsk,
-  registerWfAskAgent,
+  registerWfAskUser,
   registerWfDbQuery,
   registerWfExperienceFeedback,
   registerWfExperienceLearn,
@@ -47,6 +47,7 @@ import {
   registerWfOrgCatalog,
   registerWfRunNode,
   registerWfRunNodeWait,
+  registerWfSendMessage,
   type GraphPatchHost,
   type OrgCatalogHost,
   type WfExperienceHost,
@@ -196,7 +197,6 @@ export class VisualWorkflowHost extends Service {
         runIdleTimeoutMs: config.runIdleTimeoutMs,
         retryLimitDefault: config.retryLimitDefault,
         reactIterationLimitDefault: config.reactIterationLimitDefault,
-        wfAskAgentTtlMs: config.wfAskAgentTtlMs,
       },
       // 索引预建能力经缝注入（具体数据工具域实现不进编排器；best-effort 语义由其内部保证）
       dbIndexer: {
@@ -393,7 +393,7 @@ export class VisualWorkflowHost extends Service {
     this.dropChildScope(agentId)
   }
 
-  /** 按会话 id 取子代理 agent（wf_ask_agent 投递缝用；转发至 agents 适配）。 */
+  /** 按会话 id 取子代理 agent（wf_send_message 投递缝用；转发至 agents 适配）。 */
   getChildAgent(childId: string): RootAgentLike | null {
     return this.agents.getChildAgent(childId)
   }
@@ -420,6 +420,36 @@ export class VisualWorkflowHost extends Service {
       return subagents.queuePrompt(parent, childId, blocks, options.source, options.signal)
     }
     throw new Error('subagents 服务不支持协作投递（缺少 sendMessage/queuePrompt）')
+  }
+
+  /** 父代理空闲时唤醒投递（wf_send_message 投递缝；转发至 agents 适配）。 */
+  followupRoot(agent: RootAgentLike, message: RootInjectedMessage): void {
+    this.agents.followupRoot(agent, message)
+  }
+
+  /**
+   * 官方 Team 成员投递（wf_send_message 的成员通道）：按官方成员名寻址，直接调用官方
+   * Team 服务。
+   *
+   * 为什么不走官方 send_message 工具：工具通道可被全局工具开关关闭（插件默认关闭官方
+   * send_message），而成员间通信必须继续可用；宿主直接调用官方服务不经过工具注册与
+   * 开关，因此不受影响。
+   */
+  async sendToTeammate(
+    parent: RootAgentLike,
+    memberName: string,
+    content: unknown[],
+    options: { signal?: AbortSignal },
+  ): Promise<unknown> {
+    const teams = agentTeamsServiceLike(this.ctx)
+    if (!teams) throw new Error('官方 Team 服务不可用，无法投递消息给成员')
+    const blocks = (Array.isArray(content) ? content : []) as Array<{ type: 'text'; text: string }>
+    // 官方投递请求要求 signal 必填；调用方缺省时给一个永不中止的信号（投递本身即刻返回）
+    return teams.sendMessage(parent as never, {
+      target: memberName,
+      content: blocks,
+      signal: options.signal ?? new AbortController().signal,
+    })
   }
 
   /** 数据根目录（数据工具索引落盘位置）。 */
@@ -610,7 +640,7 @@ export class VisualWorkflowHost extends Service {
       this.ctx.logger.warn('[visual-workflow] subagents 服务不可用：子代理执行/护栏将受限（运行时按需报错或降级）')
     }
 
-    // wf_* 工具注册：全局层按工具分别注册 wf_run_node / wf_run_node_wait / wf_finish / wf_ask；
+    // wf_* 工具注册：全局层按工具分别注册 wf_run_node / wf_run_node_wait / wf_finish / wf_ask_user；
     // 子代理侧可见性由白名单解析 + tools.restrict 双保险控制。每个注册返回的 disposer 归
     // ctx.effect —— 服务卸载时工具随 fiber 注销；注册失败按工具隔离（单个工具失败不影响其余）。
     try {
@@ -629,16 +659,16 @@ export class VisualWorkflowHost extends Service {
       this.ctx.logger.warn(`[visual-workflow] wf_finish 工具注册失败：${error instanceof Error ? error.message : String(error)}`)
     }
     try {
-      this.ctx.effect(() => registerWfAsk(this.ctx, this), 'visualWorkflowHost.wfAsk')
+      this.ctx.effect(() => registerWfAskUser(this.ctx, this), 'visualWorkflowHost.wfAsk')
     } catch (error) {
-      this.ctx.logger.warn(`[visual-workflow] wf_ask 工具注册失败：${error instanceof Error ? error.message : String(error)}`)
+      this.ctx.logger.warn(`[visual-workflow] wf_ask_user 工具注册失败：${error instanceof Error ? error.message : String(error)}`)
     }
 
-    // wf_ask_agent 注册（协作成员间 ask/reply 两态非阻塞通信；子代理可选注入，父代理侧无可用命令）。
+    // wf_send_message 注册（单向持久消息；父代理与子代理均可调用，可选注入）。
     try {
-      this.ctx.effect(() => registerWfAskAgent(this.ctx, this), 'visualWorkflowHost.wfAskAgent')
+      this.ctx.effect(() => registerWfSendMessage(this.ctx, this), 'visualWorkflowHost.wfSendMessage')
     } catch (error) {
-      this.ctx.logger.warn(`[visual-workflow] wf_ask_agent 注册失败：${error instanceof Error ? error.message : String(error)}`)
+      this.ctx.logger.warn(`[visual-workflow] wf_send_message 注册失败：${error instanceof Error ? error.message : String(error)}`)
     }
 
     // 数据工具注册：wf_db_query（单工具三模式）。子代理侧可见性由白名单按

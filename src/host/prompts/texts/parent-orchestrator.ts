@@ -3,8 +3,7 @@
 // 父代理提示词 · **情况1 纯编排**
 // 适用：无父代理节点，或父代理未被流程线驱动（无 flow-in 入边）——父代理只调度、不执行。
 // 注入位置：用户消息 followup（startRun / resumeRun 一次性注入父代理会话）。
-// 变量：workflowName / systemLanguage / workflowGoal /
-//       teamChannelLabel / teamGroups / teamOfficial / teamLegacy / question
+// 变量：workflowName / systemLanguage / workflowGoal / teamGroups / question
 
 export const PARENT_ORCHESTRATOR = `# 硬性约束
 
@@ -24,16 +23,11 @@ export const PARENT_ORCHESTRATOR = `# 硬性约束
 工作流目标：{{workflowGoal}}
 {{/if}}{{#if teamGroups}}
 
-Team（{{teamChannelLabel}}）：
+Team：
 
 {{teamGroups}}
-{{#if teamOfficial}}
-根据实际任务情况按需调用 wf_run_node(成员节点 id) 启动 Team 成员；
-
-成员以 teammate 身份运行，自带 Team 工具（list_agents / send_message / team_task_*）与协作策略；分工与交接用官方任务板登记（team_task_create → claim → complete，按 revision 做 CAS 更新），不要自建任务清单。
-{{/if}}{{#if teamLegacy}}
-官方 Team 不可用：成员降级为普通子代理，逐个用 wf_run_node 启动；组内通信用 wf_ask_agent。
-{{/if}}{{/if}}{{#if question}}
+根据实际任务情况按需调用 wf_run_node(成员节点 id) 启动 Team 成员；成员之间以及成员与父代理之间的消息统一用 wf_send_message 投递（成员以 nodeId 寻址，父代理用 target "parent"）；分工与交接用官方任务板登记（team_task_create → claim → complete，按 revision 做 CAS 更新），不要自建任务清单。
+{{/if}}{{#if question}}
 
 用户问题（服务模式）：{{question}}
 {{/if}}`

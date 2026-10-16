@@ -1,10 +1,10 @@
-// src/host/tools/wf-ask/tool.ts
+// src/host/tools/wf-ask-user/tool.ts
 //
-// wf_ask 工具注册（子代理向主会话用户提问）。
+// wf_ask_user 工具注册（子代理向主会话用户提问）。
 //
 // 职责边界：
 //   - 本文件只做「注册（defineTool DSL）+ 身份派生（callerOf）+ 提问身份分派 + 参数归一化」；
-//   - wf_ask 直接借用官方 userQuestions.ask：官方只接受「精确存活的 runtime root」
+//   - wf_ask_user 直接借用官方 userQuestions.ask：官方只接受「精确存活的 runtime root」
 //     （agents.roots() 只含无 owner 的顶层 agent），子代理传自己必然 DELEGATED_CALLER，
 //     故子代理路径借其会话的 root 身份，其它 agent 直接用自身（见 execute）。
 //
@@ -15,7 +15,7 @@
 // 随后是失败语义（WF_* 稳定错误码，码随错误文本一并可见）/副作用（阻塞提问）；
 // 目标 ≤ 120 tokens。
 
-import { WF_ASK } from '../../shared/protocol.js'
+import { WF_ASK_USER } from '../../shared/protocol.js'
 import { WfError } from '../../orchestrator/index.js'
 import { callerOf, type WfToolsHost } from '../infrastructure/caller.js'
 import { defineTool } from '../infrastructure/define-tool.js'
@@ -31,7 +31,7 @@ interface UserQuestionsServiceLike {
   }): Promise<{ answers?: unknown[] }>
 }
 
-/** 规范化 wf_ask 的 questions（旧项目逻辑完整复制：id 回退/选项过滤/多选映射）。 */
+/** 规范化 wf_ask_user 的 questions（旧项目逻辑完整复制：id 回退/选项过滤/多选映射）。 */
 function normalizeQuestions(raw: unknown[]): Array<Record<string, unknown>> {
   const questions: Array<Record<string, unknown>> = []
   for (let index = 0; index < raw.length; index += 1) {
@@ -67,17 +67,17 @@ function combinedSignal(runSignal: AbortSignal, callerSignal: AbortSignal): Abor
 }
 
 /**
- * 注册 wf_ask（全局层；ctx.tools.register）。
+ * 注册 wf_ask_user（全局层；ctx.tools.register）。
  * 返回 disposer：注销失败尽力而为。
  */
-export function registerWfAsk(
+export function registerWfAskUser(
   ctx: { get(name: string): unknown },
   host: WfToolsHost,
 ): () => void {
-  const tools = requireToolsService(ctx, WF_ASK)
+  const tools = requireToolsService(ctx, WF_ASK_USER)
 
   const definition = defineTool({
-    name: WF_ASK,
+    name: WF_ASK_USER,
     description:
       'Ask the user questions and wait for an answer. ' +
       'Use when a decision or fact cannot be resolved from files, code, or other tools: shows an official question card in the main session and blocks until the user answers or cancels it. ' +

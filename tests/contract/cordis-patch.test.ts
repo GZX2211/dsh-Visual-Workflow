@@ -46,7 +46,6 @@ const CONFIG_KEYS: Array<[string, string]> = [
   ['servicePortBase', '7860'],
   ['apiKey', 'null'],
   ['maxConcurrentPerService', '50'],
-  ['wfAskAgentTtlMs', '120000'],
   ['runIdleTimeoutMs', '1800000'],
   ['runPollMs', '2000'],
   ['reactIterationLimitDefault', '0'],
@@ -132,11 +131,8 @@ describe('T-002 cordis.patch.yml（insert 行语义）', () => {
     // patch 的每个键都必须在 schema 中真实存在（patch 键在新 schema 上静默失效即失败）。
     const unknownInPatch = patchKeys.filter((key) => !schemaKeys.includes(key))
     expect(unknownInPatch, 'patch 中出现 schema 不认识的 config 键').toEqual([])
-    // schema 允许比 patch 多出「退役只读键」：它必须存在，且**不得**出现在 patch 中
-    // （出现即意味着又把已退役键写进部署配置）。当前唯一退役键见 src/host/config.ts 的 @deprecated。
-    expect(schemaKeys).toContain('wfAskAgentTimeoutMs')
-    expect(patchKeys).not.toContain('wfAskAgentTimeoutMs')
-    expect(schemaKeys.length - patchKeys.length).toBe(1)
+    // 双向一致：schema 不得再保留任何 patch 未暴露的键（退役只读键已随 wf_ask_agent 一并删除）。
+    expect([...schemaKeys].sort(), 'schema 键集合与 patch 键集合必须逐键一致').toEqual([...patchKeys].sort())
   })
 })
 
@@ -146,7 +142,7 @@ describe('T-002 Host 入口契约（index/config/visual-workflow-host 拆分后�
     expect(entryText).toMatch(/export const inject: string\[\] = \[\]/)
   })
 
-  it('导出 apply(ctx, config) 与 Config schema（z.object + 13 键默认值）', () => {
+  it('导出 apply(ctx, config) 与 Config schema（z.object + 12 键默认值）', () => {
     expect(entryText).toMatch(/export function apply\(ctx: Context, config: Config\)/)
     expect(entryText).toMatch(/export const Config: z<Config> = z\.object\(\{/)
     for (const [key] of CONFIG_KEYS) {
@@ -156,7 +152,6 @@ describe('T-002 Host 入口契约（index/config/visual-workflow-host 拆分后�
     const numericDefaults: Array<[string, number]> = [
       ['servicePortBase', 7860],
       ['maxConcurrentPerService', 50],
-      ['wfAskAgentTtlMs', 120000],
       ['runIdleTimeoutMs', 1800000],
       ['runPollMs', 2000],
       ['reactIterationLimitDefault', 0],

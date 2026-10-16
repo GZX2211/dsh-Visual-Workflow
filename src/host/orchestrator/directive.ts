@@ -12,7 +12,6 @@ import {
   buildOrchestratorPrompt,
   buildParentExecutorPrompt,
   buildParentTaskSpec,
-  type CollabChannel,
   type ExecutorContextFacts,
   type OrchestrationDirectiveParams,
   type ParentPromptVariant,
@@ -73,8 +72,6 @@ export function directiveParams(
     parentTaskBlock?: string
     /** 系统语言名（从 DSH 用户设置读取；注入语言规则）。 */
     systemLanguage?: string
-    /** 协作通道（官方 Agent Team 可用性；决定 Team 段文案与启动方式）。 */
-    collabChannel?: CollabChannel
   },
 ): OrchestrationDirectiveParams {
   return {
@@ -82,7 +79,6 @@ export function directiveParams(
       workflowName: flow.name ?? flow.id,
       workflowGoal: flow.description ?? '',
       collabGroups: collabGroupList(flow),
-      collabChannel: extra?.collabChannel ?? 'legacy',
       parentNode: extra?.parentNode ?? null,
       systemLanguage: extra?.systemLanguage ?? '',
     },
@@ -122,13 +118,10 @@ export function buildParentRunPrompt(input: {
   executor: { nodeId: string; nodeLabel: string; task: ExecutorContextFacts; runContextText: string } | null
   /** 系统语言名（从 DSH 用户设置读取；注入语言规则）。 */
   systemLanguage: string
-  /** 协作通道（官方 Agent Team 可用性；决定 Team 段文案与启动方式）。 */
-  collabChannel?: CollabChannel
 }): string {
   const { flow, mode, executor, systemLanguage } = input
   const variant = parentPromptVariantOf(flow)
   const resume = input.resume
-  const collabChannel = input.collabChannel ?? 'legacy'
 
   // 情况3：纯执行（父代理为唯一参与流程的执行单元，且有执行单元内容）
   if (variant === 'executor' && executor) {
@@ -146,7 +139,6 @@ export function buildParentRunPrompt(input: {
       directiveParams(flow, mode, {
         ...(resume ? { resume } : {}),
         ...(input.question ? { question: input.question } : {}),
-        collabChannel,
         parentNode: { nodeId: executor.nodeId, nodeLabel: executor.nodeLabel },
         parentTaskBlock: buildParentTaskSpec({ facts: executor.task, runContextText: executor.runContextText, systemLanguage }),
         systemLanguage,
@@ -159,7 +151,6 @@ export function buildParentRunPrompt(input: {
     directiveParams(flow, mode, {
       ...(resume ? { resume } : {}),
       ...(input.question ? { question: input.question } : {}),
-      collabChannel,
       systemLanguage,
     }),
   )

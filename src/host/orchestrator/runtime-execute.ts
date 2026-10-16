@@ -147,17 +147,13 @@ export class RuntimeExecute extends RuntimeLaunch {
     }
 
     setNodeStatus(run.snapshot, resolvedNodeId, 'running', { attempts: attempt, now: this.now() })
-    // Team 成员节点：协作通道只对它有意义（official = 官方 teammate，成员自带官方工具与
-    // 协作策略，故不注入插件自建协作块；legacy = 官方不可用降级为普通子代理，需注入
-    // wf_ask_agent 协作指引）。
-    const teamMember = isGroupMember(flow, node.id)
+    // 任务块统一组装：可通信对象清单对成员与非成员同一段注入（不再按协作通道分叉）
     const blocks = buildNodeBlocks({
       flow,
       node,
       snapshot: run.snapshot,
       documentTextLimit: this.deps.config.documentTextLimit,
       systemLanguage: this.deps.systemLanguage?.() ?? DEFAULT_SYSTEM_LANGUAGE,
-      ...(teamMember ? { collabChannel: this.collabChannelOf(run.snapshot.sessionId) } : {}),
     })
 
     // wait:true 阻塞等待器必须先于启动注册（subagent/end 可能在启动返回前到达）
@@ -181,7 +177,7 @@ export class RuntimeExecute extends RuntimeLaunch {
         blocks,
         signal: run.controller.signal,
         collabPrompt: collabPromptOf(flow, node.id),
-        ...(teamMember ? { teamMember: true } : {}),
+        ...(isGroupMember(flow, node.id) ? { teamMember: true } : {}),
         ...(thinking !== undefined ? { thinking } : {}),
         ...(effectiveReactLimit !== undefined ? { iterationLimit: effectiveReactLimit } : {}),
       })

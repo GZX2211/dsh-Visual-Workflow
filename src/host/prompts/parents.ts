@@ -9,7 +9,6 @@ import { flag, renderTemplate, type TemplateVars } from './render.js'
 import { PARENT_ORCHESTRATOR } from './texts/parent-orchestrator.js'
 import { PARENT_HYBRID } from './texts/parent-hybrid.js'
 import { PARENT_EXECUTOR, PARENT_TASK_SPEC } from './texts/parent-executor.js'
-import type { CollabChannel } from './child.js'
 
 /** 父代理提示词变体（三情况组装分发）：orchestrator=纯编排 / hybrid=编排+自执行 / executor=纯执行。 */
 export type ParentPromptVariant = 'orchestrator' | 'hybrid' | 'executor'
@@ -26,8 +25,6 @@ export interface OrchestrationDirectiveParams {
     workflowGoal: string
     /** Team 卡片与成员清单（画布含 Team 卡片时组装该段；空数组 = 不组装该段）。 */
     collabGroups: Array<{ groupId: string; label: string; memberIds: string[] }>
-    /** 协作通道：official = 官方 Agent Team 可用；legacy = 成员降级为普通子代理。缺省 legacy。 */
-    collabChannel?: CollabChannel
     /** 情况2（hybrid）：父代理自身执行单元身份；情况1 缺省 null。 */
     parentNode?: { nodeId: string; nodeLabel: string } | null
     /** 系统语言名（如 '中文' / 'English'；从 DSH 用户设置读取）。 */
@@ -62,8 +59,6 @@ export interface ExecutorContextFacts {
   filePaths: string[]
   /** 数据库工具说明（db-in 连线存在时非空），可为空。 */
   dbToolHint: string
-  /** Team 成员标记：注入组内通信必须经 wf_ask_agent 的软约束。 */
-  isGroupMember: boolean
 }
 
 /** 情况2 父代理自执行单元任务块入参。 */
@@ -109,15 +104,10 @@ function executorContextVars(facts: ExecutorContextFacts): TemplateVars {
 
 /** Team 段变量（无 Team 卡片时不出现该段）。 */
 function teamVarsOf(facts: OrchestrationDirectiveParams['facts']): TemplateVars {
-  const groups = facts.collabGroups ?? []
-  const official = facts.collabChannel === 'official'
   return {
-    teamGroups: groups
+    teamGroups: (facts.collabGroups ?? [])
       .map((group) => `- ${group.groupId}（${group.label}）：成员节点 [${group.memberIds.join(', ')}]`)
       .join('\n'),
-    teamChannelLabel: official ? '官方团队' : '降级通道',
-    teamOfficial: flag(official),
-    teamLegacy: flag(!official),
   }
 }
 
@@ -174,7 +164,6 @@ export function buildParentExecutorPrompt(params: ParentExecutorPromptParams): s
   return renderTemplate(PARENT_EXECUTOR, {
     workflowName,
     systemLanguage: String(systemLanguage ?? '').trim(),
-    isGroupMember: flag(facts.isGroupMember),
     runContextText: String(runContextText ?? '').trim() || '（无）',
     ...executorContextVars(facts),
   })

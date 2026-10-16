@@ -422,7 +422,7 @@ REACT_CAP_DENY_REASON = 'ReAct iteration limit reached — conclude this turn wi
 | `wf_run_node` | 异步启动 agent 节点；Team 成员走官方 teammate 路径；暂停/停止/中断运行会先恢复；暂停节点 id 触发暂停门 | 英文 | 待复核（backlog §3 顺序 5） |
 | `wf_run_node_wait` | 模式二阻塞启动 | 英文 | 待复核 |
 | `wf_finish` | 收尾一次；已完成运行幂等 | 英文 | 待复核 |
-| `wf_ask` | 向用户提问并等待 | 英文 | 待复核 |
+| `wf_ask_user` | 向用户提问并等待 | 英文 | 待复核 |
 | `wf_ask_agent` | 降级通道成员通信（ask 不等待 / reply 反投；官方 Team 生效时改用 send_message） | 英文 | 待复核 |
 | `wf_db_query` | 三模式；首次 search 建索引；父子可用性与 db-in 前提 | 英文 | ✅ 已复核修复（§4） |
 | `wf_org_catalog` | 只读勘察；索引 vs 详情；`rules.patchContract` 指针；presetId 强制；骨架省略 systemPrompt | 英文 | ✅ 已复核（§2） |

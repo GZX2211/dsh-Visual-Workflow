@@ -1,5 +1,14 @@
-/** 协作通道类型（官方团队 / 插件自建）。 */
-export type CollabChannel = 'official' | 'legacy';
+/**
+ * 可通信对象（子代理可经 wf_send_message 触达的对象）。
+ * 父代理是固定别名 `parent`；组内成员以 nodeId 寻址（同一套 ID 覆盖普通子代理与
+ * Team 成员，投递通道由插件内部解析）。
+ */
+export interface CommTarget {
+    /** 角色名称（父代理为「父代理」）。 */
+    label: string;
+    /** 寻址标识（父代理为 'parent'，成员节点为 nodeId）。 */
+    id: string;
+}
 /** 节点任务块的入参（facts 为同一 run 内字节稳定的静态事实）。 */
 export interface NodeTaskBlockParams {
     facts: {
@@ -15,10 +24,13 @@ export interface NodeTaskBlockParams {
         filePaths: string[];
         /** 数据库工具说明（存在 db-in 连线时说明 wf_db_query 三模式），无则空字符串。 */
         dbToolHint: string;
-        /** Team 成员标记。 */
-        isGroupMember: boolean;
-        /** 协作通道（isGroupMember 时决定注入哪条通信约束）；缺省 legacy。 */
-        collabChannel?: CollabChannel;
+        /**
+         * 可通信对象清单：父代理 + 本组其他成员节点（非组内成员只有父代理）。
+         * 上下游节点 id 不进本清单——可通信面只由组关系决定。
+         */
+        commTargets: CommTarget[];
+        /** Team 卡片上用户自定义的协作说明（为空则不组装该段）。 */
+        collabNote?: string;
         /** 输入契约（节点配置 data.inputSchema）；为空则不组装该段。 */
         inputContract: string;
         /** 输出契约（节点配置 data.outputSchema）；为空则不组装该段。 */
@@ -27,20 +39,5 @@ export interface NodeTaskBlockParams {
         systemLanguage: string;
     };
 }
-/** 协作成员清单块入参。 */
-export interface CollabBlockParams {
-    /** 成员清单：组内每个角色节点的 id + 人类可读名称。 */
-    members: Array<{
-        id: string;
-        label: string;
-        target?: string;
-    }>;
-    /** Team 卡片上用户自定义的协作说明文本（可为空）。 */
-    custom: string;
-    /** 协作通道（official 分支当前无调用方，保留为完整模板备用）。 */
-    channel?: CollabChannel;
-}
-/** 节点任务块构建器（纯函数）：注入子代理「本轮该干什么 + 手上有什么」的完整文本。 */
+/** 节点任务块构建器（纯函数）：注入子代理「本轮该干什么 + 手上有什么 + 能找谁」的完整文本。 */
 export declare function buildNodeTaskBlock(params: NodeTaskBlockParams): string;
-/** 协作成员清单块构建器（纯函数）：追加到成员首条用户消息末尾。 */
-export declare function buildCollabBlock(params: CollabBlockParams): string;

@@ -1,4 +1,3 @@
-import { type CollabChannel } from '../prompts/index.js';
 import type { RoleNode, WorkflowDocument } from '../shared/graph-model.js';
 import type { RunSnapshot } from '../shared/types.js';
 /**
@@ -15,7 +14,13 @@ export declare function inputContractOf(node: RoleNode): string;
  * 不与默认文本叠加（默认文本在新建节点时已落盘，界面显示与实际注入是同一个值）。
  */
 export declare function outputContractOf(node: RoleNode): string;
-/** 节点任务块组装：角色任务上下文 + 输入/输出契约 + 软约束 + 执行与交付约定。 */
+/**
+ * 节点任务块组装：角色任务上下文 + 输入/输出契约 + 可通信对象 + 软约束 + 执行与交付约定。
+ *
+ * 可通信对象清单**统一注入、不再区分通道**（用户裁决 2026-10）：成员与非成员走同一段，
+ * 成员额外列出组内其他成员；团队自定义说明（Team 卡片 data.collabPrompt）作为「组内说明」
+ * 并入同一段。此前按 official / legacy 分叉的协作块注入已删除。
+ */
 export declare function buildNodeBlocks(input: {
     flow: WorkflowDocument;
     node: RoleNode;
@@ -24,11 +29,6 @@ export declare function buildNodeBlocks(input: {
     documentTextLimit: number;
     /** 系统语言名（从 DSH 用户设置读取；注入「回复/注释/思考必须使用该语言」规则）。 */
     systemLanguage: string;
-    /**
-     * 协作通道（仅组内成员有意义）：official = 官方 Agent Team 邮箱；legacy = 插件自建协作工具。
-     * 缺省 legacy，保持未启用官方团队时的文案与行为。
-     */
-    collabChannel?: CollabChannel;
 }): Array<{
     type: 'text';
     text: string;
