@@ -1221,6 +1221,9 @@ describe('wf_graph_patch · 工具注册面回归', () => {
     // 契约条款的复述句由 rules.patchContract 单点承载，常驻描述不再重复
     expect(description).not.toMatch(/ops are grouped/i)
     expect(description).not.toMatch(/atomic/i)
+    // 图构成规则（start / 执行单元 / end）与「op 按数组顺序生效」同样由契约承载
+    expect(description).not.toMatch(/start \+ executable units \+ end/)
+    expect(ops).not.toMatch(/array order/i)
     // 闸门退役：常驻描述不再保留标记组的调用相位提示
     expect(description).not.toContain('mark group')
     expect(description).not.toContain('mark_node')
