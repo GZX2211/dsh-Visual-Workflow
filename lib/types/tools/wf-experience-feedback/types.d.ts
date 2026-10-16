@@ -17,3 +17,12 @@ export interface FeedbackResult {
     accepted: FeedbackAcceptedEntry[];
     skipped: FeedbackSkippedEntry[];
 }
+/**
+ * 评分标准（按需召回）：`evaluations` 传空数组时返回，正文是四维逐级行为定义。
+ * 为什么按需而不是常驻：锚点表是「评分规范」，只在评分那一刻需要（与 wf_experience_learn
+ * 的「空集取生成 Prompt」同构）；判据本体仍在经验域，工具层不另写一份定义文本。
+ */
+export interface FeedbackScoringStandard {
+    kind: 'scoringStandard';
+    scoringStandard: string;
+}

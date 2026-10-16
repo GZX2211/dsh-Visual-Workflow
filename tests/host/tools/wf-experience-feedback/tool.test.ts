@@ -155,25 +155,34 @@ describe('wf_experience_feedback：注册与 schema', () => {
     expect(description).toContain('can never be edited or deleted')
   })
 
-  it('test_description_逐级注入四维行为锚点_使评分者按行为而非数字打分', async () => {
+  it('test_评分标准按需召回_不再常驻在 description', async () => {
     const h = await makeHarness()
     const description = h.tools.definitions.get(WF_EXPERIENCE_FEEDBACK)!.description
 
-    // 锚点表必须整份注入（本体来自经验域，工具层不另写一份定义文本）：
-    // §36 要求「所有评分维度拥有明确行为锚点」，只给数值清单等于让模型凭感觉挑数字。
-    expect(description).toContain(renderAnchorGlossary())
-    // 四维参数名与逐级行为定义都要真的出现在模型可见面
-    for (const parameter of ['fit', 'decision_effect', 'information_gain', 'causal_confidence']) {
-      expect(description).toContain(parameter)
+    // 锚点表是「评分规范」，只在评分那一刻需要：改为空数组按需召回，不再常驻
+    expect(description).not.toContain(renderAnchorGlossary())
+    expect(description).toContain('empty evaluations array')
+    // 常驻 description 仍每次请求付费，保留数量级膨胀护栏（按需化后上限下调）
+    expect(description.length).toBeLessThan(2000)
+  })
+
+  it('test_空数组取评分标准_返回四维逐级行为定义且不写库', async () => {
+    const h = await makeHarness()
+    const result = (await execute(h, { type: 'orchestrator', evaluations: [] })) as {
+      kind: string
+      scoringStandard: string
     }
-    expect(description).toContain('0.75 = ')
-    expect(description).toContain('-1 = ')
-    // 工具 description 是每次请求都付费的常驻文本，这条是**数量级膨胀护栏**，不是质量阈值：
-    // 它度量的是与外部数据无关的固定源码文本（不存在可校准的分布），失败时响亮且全量，
-    // 也不可能误杀合法输入；若不设它，压缩后的长度就没有回归保护、可以无阻再膨胀。
-    // 数字来源：当前实测 3356 字符（其中 §36 要求的四维二十级锚点表占约 1.7k），上限 3500 留约 4% 余量；
-    // 一旦宿主对 description 的长度上限被实测确认，应改为「宿主上限 − 余量」由契约推导。
-    expect(description.length).toBeLessThan(3500)
+
+    expect(result.kind).toBe('scoringStandard')
+    // 判据本体来自经验域（工具层不另写一份定义文本）
+    expect(result.scoringStandard).toBe(renderAnchorGlossary())
+    for (const parameter of ['fit', 'decision_effect', 'information_gain', 'causal_confidence']) {
+      expect(result.scoringStandard).toContain(parameter)
+    }
+    expect(result.scoringStandard).toContain('0.75 = ')
+    expect(result.scoringStandard).toContain('-1 = ')
+    // 取标准是只读动作：不触发任何评价写入
+    expect(h.host.feedbackCalls).toHaveLength(0)
   })
 })
 
@@ -360,13 +369,13 @@ describe('wf_experience_feedback：锚点与参数校验', () => {
     expect(h.host.feedbackCalls[0].evaluations).toHaveLength(MAX_EVALUATIONS_PER_CALL)
   })
 
-  it('test_evaluations非数组或空数组_拒绝且不产生空写入', async () => {
+  it('test_evaluations非数组_拒绝且不产生空写入（空数组是取评分标准路径，不在此列）', async () => {
     const h = await makeHarness()
-    const cases: unknown[] = [undefined, null, 'ex-1', {}, [], [[]]]
+    const cases: unknown[] = [undefined, null, 'ex-1', {}, [[]]]
 
     for (const evaluations of cases) {
       const failure = await failureOf(execute(h, { type: 'agent', evaluations }))
-      expect((failure as WfError).code).toBe(ERR_EXPERIENCE_BAD_ARGS)
+      expect((failure as WfError).code, `非数组入参：${String(evaluations)}`).toBe(ERR_EXPERIENCE_BAD_ARGS)
     }
     expect(h.host.feedbackCalls).toEqual([])
   })
