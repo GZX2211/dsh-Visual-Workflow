@@ -21,6 +21,7 @@
 import { randomUUID } from 'node:crypto'
 
 import { WF_GRAPH_PATCH, ERR_REVISION_CONFLICT } from '../../shared/protocol.js'
+import { PATCH_OPS_MAX } from '../../prompts/index.js'
 import { defineTool, type ToolExecLike } from '../infrastructure/define-tool.js'
 import { registerTool, requireToolsService } from '../infrastructure/register-tool.js'
 import { textRender } from '../infrastructure/text-render.js'
@@ -153,8 +154,8 @@ function throwGraphInvalid(issues: GraphIssue[]): never {
   throw new WfError(`WF_GRAPH_INVALID: the patch was blocked by the graph checker (${issues.length} issue(s)):\n${detail}`, 'WF_GRAPH_INVALID')
 }
 
-/** 补丁 op 数上限（元参数 patchOpsMax 由检查器护栏判定；此处只做整体 sanity）。 */
-const PATCH_OPS_HARD_LIMIT = 200
+/** 补丁 op 数上限（与 rules.patchContract 的规则文本同源；元参数 patchOpsMax 由检查器护栏判定）。 */
+const PATCH_OPS_HARD_LIMIT = PATCH_OPS_MAX
 
 /**
  * 单条 op 失败清单 → 聚合错误（整批拒绝）。

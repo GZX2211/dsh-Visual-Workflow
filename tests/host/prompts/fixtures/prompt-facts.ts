@@ -7,10 +7,6 @@
 export const orchFacts = {
   workflowName: '示例工作流',
   workflowGoal: '演示编排指令基线',
-  nodes: [
-    { id: 'node-a', label: '分析节点' },
-    { id: 'node-b', label: '总结节点' },
-  ],
   collabGroups: [{ groupId: 'group-1', label: 'Team 一', memberIds: ['node-a', 'node-b'] }],
   systemLanguage: '中文',
 }

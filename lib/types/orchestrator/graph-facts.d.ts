@@ -3,7 +3,7 @@ import type { GraphNode, RoleNode, WorkflowDocument } from '../shared/graph-mode
 import type { RunSnapshot } from '../shared/types.js';
 import { WfError } from './errors.js';
 /**
- * 生成某节点的数据库工具说明。
+ * 生成某节点的数据库工具说明（正文见 prompts/texts/rule-db-tool.ts）。
  * - 存在 db-in 连线时，返回包含所连数据节点 id 与 label 的提示——子代理必须把该 id
  *   作为 wf_db_query 的 dataId 传入（BUG 修复：此前提示未携带 id，子代理无法定位数据源，
  *   只能用猜测的 id → WF_DB_BAD_DATA）。
@@ -16,12 +16,14 @@ export declare function labelOf(node: GraphNode): string;
 /** 流程中的暂停节点 id 清单（编排指令与节点任务块动态态共用）。 */
 export declare function pauseNodeIdsOf(flow: WorkflowDocument): string[];
 /**
- * 编排指令 facts 的节点清单（仅可执行且参与流程的 agent 节点；父代理即编排者本人不列）。
+ * 参与流程的可调度 agent 节点清单（catalog 的 `schedulable` 与编排调度口径的等价参照）。
+ *
+ * 编排指令**不再内联节点清单**：拓扑只经 wf_org_catalog 的 instance 通道召回，父代理自行读取
+ * 每个节点的 schedulable 标记。本函数保留为「可调度单元」这一口径的唯一可测表达。
  * 「参与流程」判定：节点自身或其虚拟节点作为任一流程线（flow-out/flow-in）的源/目标；
  * 未参与流程的 agent 节点 = 用户批注的「不执行任务的无关节点」，不进入清单。
  * Team 卡片是包裹层（不是执行主体），proxy 镜像主节点 agent id 相同，
- * 阶段/文件/数据库均非可执行节点——一律不列入待编排节点（用户批注，图3）。
- * Team 成员节点不连流程线（组内成员仅 ctx/db 连接点），其启动清单由 collabGroupList 单独成段给出。
+ * 阶段/文件/数据库均非可执行节点——一律不列入。
  */
 export declare function orchestrationNodeList(flow: WorkflowDocument): Array<{
     id: string;

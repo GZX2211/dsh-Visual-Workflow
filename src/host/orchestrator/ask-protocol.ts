@@ -8,6 +8,7 @@
 // reply 反向投递回复到发起者，由发起者的后续回合处理。超时裁决与父代理介入已退役。
 
 import type { CoordinatorMessage } from './seams.js'
+import { ASK_MESSAGE, ASK_REPLY, renderTemplate } from '../prompts/index.js'
 
 /** wf_ask_agent 两态命令（ask 投递并登记待回复 / reply 答复并反向投递）。 */
 export type AskAgentCmd = 'ask' | 'reply'
@@ -64,15 +65,14 @@ export function coordinatorMessage(id: string, text: string, senderSessionId: st
   }
 }
 
-/** 投递给目标子代理的消息文本（含 askId 与回复指令，业务中文）。 */
+/** 投递给目标子代理的消息文本（正文见 prompts/texts/notice-ask-message.ts）。 */
 export function buildAskText(pending: Pick<PendingAsk, 'from' | 'fromNodeId' | 'to' | 'toNodeId' | 'askId' | 'message'>): string {
-  return [
-    `[协作通信] 同工作流节点子代理「${pending.fromNodeId}」（会话 ${pending.from}）向你发送协作消息（askId: ${pending.askId}）：`,
-    pending.message,
-    '',
-    `请仅当你确有明确答复时回复：调用 wf_ask_agent({ cmd: "reply", targetChildId: "${pending.fromNodeId}", askId: "${pending.askId}", message: "<你的回复文本>" })。`,
-    '对方不会阻塞等待你的回复：回复将作为新消息投递到对方会话。',
-  ].join('\n')
+  return renderTemplate(ASK_MESSAGE, {
+    fromNodeId: pending.fromNodeId,
+    from: pending.from,
+    askId: pending.askId,
+    message: pending.message,
+  })
 }
 
 /**
@@ -83,8 +83,10 @@ export function buildReplyText(
   pending: Pick<PendingAsk, 'from' | 'fromNodeId' | 'to' | 'toNodeId' | 'askId'>,
   reply: string,
 ): string {
-  return [
-    `[协作通信回复] 节点子代理「${pending.toNodeId}」（会话 ${pending.to}）回复了你发起且 askId 为 ${pending.askId} 的协作消息：`,
+  return renderTemplate(ASK_REPLY, {
+    toNodeId: pending.toNodeId,
+    to: pending.to,
+    askId: pending.askId,
     reply,
-  ].join('\n')
+  })
 }

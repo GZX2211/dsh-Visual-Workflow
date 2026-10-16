@@ -10,8 +10,7 @@
 
 import { nodeParticipatesInFlow } from '../../graph/index.js'
 import { labelOf } from '../../orchestrator/index.js'
-import { ORG_SOP_DESIGN_METHOD, ORG_SOP_L1_GRAPH_SEMANTICS } from '../../prompts/index.js'
-import { PATCH_CONTRACT_TEXT } from '../infrastructure/graph-op-contract.js'
+import { ORG_SOP_DESIGN_METHOD, ORG_SOP_L1_GRAPH_SEMANTICS, PATCH_CONTRACT_TEXT } from '../../prompts/index.js'
 import { CATALOG_LIMITS, ID_CONVENTION, INLINE_ROLE_SEPARATOR, INSTANCE_ID } from './types.js'
 import type {
   CatalogComboEntry,

@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest'
 import { executeGraphPatch, registerWfGraphPatch, type GraphPatchHost } from '../../../../src/host/tools/wf-graph-patch/tool.js'
 import { WfError, type RunEntry } from '../../../../src/host/orchestrator/index.js'
 import { stageLabel } from '../../../../src/host/graph/index.js'
-import { OP_FIELD_SHAPES } from '../../../../src/host/tools/infrastructure/graph-op-contract.js'
+import { OP_FIELD_SHAPES } from '../../../../src/host/prompts/index.js'
 import { DEFAULT_OUTPUT_CONTRACT_TEXT } from '../../../../src/host/shared/protocol.js'
 import type { GraphNode, Line, WorkflowDocument, WorkflowTemplate } from '../../../../src/host/shared/graph-model.js'
 

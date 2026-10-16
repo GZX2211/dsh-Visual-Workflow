@@ -240,8 +240,6 @@ describe('resumeRun mode2（服务断点续跑）', () => {
     expect(input?.status).toBe('ok')
     expect(input?.output).toBe('问题A')
     expect(input?.resumed).toBe(true)
-    // 断点继续指令
-    expect(lastDirective(h)).toContain('正在恢复先前运行')
   })
 })
 

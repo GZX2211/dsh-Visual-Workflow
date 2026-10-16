@@ -1,5 +1,5 @@
 import { type ResumeInput, type ResumeResult } from './resume.js';
-import { type CollabChannel } from '../prompts/index.js';
+import type { CollabChannel } from '../prompts/index.js';
 import type { StartRunOptions, StartRunResult } from './run-entry.js';
 import { RuntimeBase } from './runtime-base.js';
 export declare class RuntimeLaunch extends RuntimeBase {

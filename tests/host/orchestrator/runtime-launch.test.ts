@@ -8,7 +8,6 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { FlowStore } from '../../../src/host/storage/flow-store.js'
 import { OrchestratorRuntime } from '../../../src/host/orchestrator/index.js'
-import { HEAD_MARKER, MID_MARKER, ORCH_HARD_CONSTRAINTS, TAIL_MARKER, TAIL_RESTATE_MARKER } from '../../../src/host/prompts/index.js'
 import type { ServiceState } from '../../../src/host/shared/types.js'
 import type { WorkflowDocument } from '../../../src/host/shared/graph-model.js'
 import { makeFlow, stage, agent, FakeRoot, makeHarness, start, caller, cleanupTempDirs, type Harness } from './fixtures/harness.js'
@@ -178,43 +177,12 @@ describe('startRun 启动与运行锁', () => {
     expect(persisted?.status).toBe('running')
   })
 
-  it('编排指令模板满足 W-01/W-02：marker 顺序、硬约束双位机制、动态值仅在末段', async () => {
+  it('编排指令注入：工作流名进入父代理消息，且只注入一条消息', async () => {
     const h = await makeHarness()
     await start(h, makeFlow())
-    const text = h.agents.roots.get('session-1')!.messages[0].content[0].text
-
-    // W-01 前缀稳定三段布局：head < mid < tail
-    const headAt = text.indexOf(HEAD_MARKER)
-    const midAt = text.indexOf(MID_MARKER)
-    const tailAt = text.indexOf(TAIL_MARKER)
-    expect(headAt).toBeGreaterThanOrEqual(0)
-    expect(midAt).toBeGreaterThan(headAt)
-    expect(tailAt).toBeGreaterThan(midAt)
-
-    // W-02 关键约束双位机制：首段含硬约束、末段重申（TAIL_RESTATE_MARKER + 至少一条导出常量）
-    // 仅验证「双位机制」，不绑定具体文案条目（提示词文案可随版本润色）
-    const headSection = text.slice(0, midAt)
-    const tailSection = text.slice(tailAt)
-    expect(headSection).toContain(ORCH_HARD_CONSTRAINTS.dispatchOnly)
-    expect(Object.values(ORCH_HARD_CONSTRAINTS).some((v) => tailSection.includes(v))).toBe(true)
-    expect(tailSection).toContain(TAIL_RESTATE_MARKER)
-
-    // 动态值（暂停节点 id）仅注入末段且只出现一次
-    expect(text.indexOf('n-pause')).toBe(text.lastIndexOf('n-pause'))
-    expect(text.indexOf('n-pause')).toBeGreaterThan(tailAt)
-  })
-
-  it('组织预算注入（P2 §6.4）：冻结元参数 → 剩余量文本，且只在末段', async () => {
-    const h = await makeHarness()
-    const flow = makeFlow()
-    flow.meta = { nodeMax: 5, groupMax: 2, membersMax: 4, patchOpsMax: 10 }
-    await start(h, flow)
-    const text = h.agents.roots.get('session-1')!.messages[0].content[0].text
-    const tailAt = text.indexOf(TAIL_MARKER)
-    expect(tailAt).toBeGreaterThan(0)
-    expect(text.slice(0, tailAt)).not.toContain('本次组织预算：')
-    expect(text.slice(tailAt)).toContain('本次组织预算：')
-    expect(text.slice(tailAt)).toContain('剩余')
+    const messages = h.agents.roots.get('session-1')!.messages
+    expect(messages).toHaveLength(1)
+    expect(messages[0].content[0].text).toContain('测试流程')
   })
 
   it('运行锁：同会话重复运行 WF_LOCKED；跨会话 WF_LOCKED 且携带 lockedSessionId', async () => {

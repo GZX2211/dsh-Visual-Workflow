@@ -19,10 +19,6 @@ import {
   type ArrangeInjectedMessage,
 } from '../../../src/host/commands/arrange.js'
 import {
-  HEAD_MARKER,
-  MID_MARKER,
-  ORG_RULES_SOURCE_NOTE,
-  TAIL_MARKER,
   ORG_SOP_L1_GRAPH_SEMANTICS,
   ORG_SOP_DESIGN_METHOD,
 } from '../../../src/host/prompts/index.js'
@@ -132,38 +128,33 @@ describe('/arrange handler：只采集 + 注入，绝不改图', () => {
     expect(messages[0].content[0].type).toBe('text')
   })
 
-  it('注入文本＝规划变体（HEAD/MID/TAIL 标记 + 规则来源指引；规则正文由工具返回）', () => {
+  it('注入文本＝规划变体（用户意图数据进入；规则正文由工具返回而不随命令注入）', () => {
     const { ctx, registered } = makeCtx()
     registerArrangeCommand(ctx)
     const { agent, messages } = makeAgent()
     registered[0].handler({ agent, rawInput: '做一个内容生产流水线' })
     const text = messages[0].content[0].text
-    expect(text).toContain(HEAD_MARKER)
-    expect(text).toContain(MID_MARKER)
-    expect(text).toContain(TAIL_MARKER)
     // 规则不再随 /arrange 注入（改由 wf_org_catalog 返回，规划期与运行期共用同一份）
     expect(text).not.toContain(ORG_SOP_L1_GRAPH_SEMANTICS)
     expect(text).not.toContain(ORG_SOP_DESIGN_METHOD)
-    expect(text).toContain(ORG_RULES_SOURCE_NOTE)
     expect(text).toContain('做一个内容生产流水线')
   })
 
-  it('目标默认 create（新建模板）：提示词指引走 create 通路而非要求用户先给 targetId', () => {
+  it('目标默认 create（新建模板）：提示词给出 create 通路而非要求既有 targetId', () => {
     const { ctx, registered } = makeCtx()
     registerArrangeCommand(ctx)
     const { agent, messages } = makeAgent()
     registered[0].handler({ agent, rawInput: '规划一个新流程' })
     const text = messages[0].content[0].text
     expect(text).toContain('create')
-    expect(text).not.toContain('scope=\'instance\' 改实例，且必须带 targetId 与 expectRevision。')
-    expect(text).toContain(TAIL_MARKER)
+    expect(text).not.toContain('expectRevision')
   })
 
-  it('系统语言透传：给出时注入语言规则，缺省不注入', () => {
+  it('系统语言透传：给出时注入语言名，缺省不注入', () => {
     const withLang = buildArrangePrompt({ userIntent: 'x', systemLanguage: '中文' })
-    expect(withLang).toContain('必须使用中文')
+    expect(withLang).toContain('中文')
     const without = buildArrangePrompt({ userIntent: 'x' })
-    expect(without).not.toContain('必须使用')
+    expect(without).not.toContain('中文')
   })
 
   it('空意图：返回用法错误且不注入任何消息（不消耗模型回合）', () => {

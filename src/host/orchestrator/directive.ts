@@ -19,7 +19,7 @@ import {
 } from '../prompts/index.js'
 import { nodeHasFlowIn, nodeParticipatesInFlow } from '../graph/index.js'
 import type { WorkflowDocument } from '../shared/graph-model.js'
-import { collabGroupList, labelOf, orchestrationNodeList, pauseNodeIdsOf } from './graph-facts.js'
+import { collabGroupList, labelOf, pauseNodeIdsOf } from './graph-facts.js'
 
 /**
  * 父代理提示词变体判定（三情况，纯函数）：
@@ -73,8 +73,6 @@ export function directiveParams(
     parentTaskBlock?: string
     /** 系统语言名（从 DSH 用户设置读取；注入语言规则）。 */
     systemLanguage?: string
-    /** 「本次组织预算」末段文本（冻结快照 → 剩余量口径；P2 注入）。 */
-    orgBudgetText?: string
     /** 协作通道（官方 Agent Team 可用性；决定 Team 段文案与启动方式）。 */
     collabChannel?: CollabChannel
   },
@@ -83,7 +81,6 @@ export function directiveParams(
     facts: {
       workflowName: flow.name ?? flow.id,
       workflowGoal: flow.description ?? '',
-      nodes: orchestrationNodeList(flow),
       collabGroups: collabGroupList(flow),
       collabChannel: extra?.collabChannel ?? 'legacy',
       parentNode: extra?.parentNode ?? null,
@@ -96,7 +93,6 @@ export function directiveParams(
           ? 'mode2 (service): use wf_run_node_wait to start each node and block until it finishes; never use wf_run_node.'
           : 'mode1 (orchestration): use wf_run_node to start each node asynchronously; never use wf_run_node_wait.',
       ...(extra?.question ? { question: extra.question } : {}),
-      ...(extra?.orgBudgetText ? { orgBudgetText: extra.orgBudgetText } : {}),
       ...(extra?.parentTaskBlock ? { parentTaskBlock: extra.parentTaskBlock } : {}),
       ...(extra?.resume
         ? { isResume: true, resumeFromNodeId: extra.resume.resumeFromNodeId, resumedFromRunId: extra.resume.resumedFromRunId }
@@ -126,8 +122,6 @@ export function buildParentRunPrompt(input: {
   executor: { nodeId: string; nodeLabel: string; task: ExecutorContextFacts; runContextText: string } | null
   /** 系统语言名（从 DSH 用户设置读取；注入语言规则）。 */
   systemLanguage: string
-  /** 「本次组织预算」末段文本（冻结快照 → 剩余量口径；P2 起由 startRun/resumeRun 注入）。 */
-  orgBudgetText?: string
   /** 协作通道（官方 Agent Team 可用性；决定 Team 段文案与启动方式）。 */
   collabChannel?: CollabChannel
 }): string {
@@ -152,7 +146,6 @@ export function buildParentRunPrompt(input: {
       directiveParams(flow, mode, {
         ...(resume ? { resume } : {}),
         ...(input.question ? { question: input.question } : {}),
-        ...(input.orgBudgetText ? { orgBudgetText: input.orgBudgetText } : {}),
         collabChannel,
         parentNode: { nodeId: executor.nodeId, nodeLabel: executor.nodeLabel },
         parentTaskBlock: buildParentTaskSpec({ facts: executor.task, runContextText: executor.runContextText, systemLanguage }),
@@ -166,7 +159,6 @@ export function buildParentRunPrompt(input: {
     directiveParams(flow, mode, {
       ...(resume ? { resume } : {}),
       ...(input.question ? { question: input.question } : {}),
-      ...(input.orgBudgetText ? { orgBudgetText: input.orgBudgetText } : {}),
       collabChannel,
       systemLanguage,
     }),

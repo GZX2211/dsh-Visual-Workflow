@@ -18,7 +18,7 @@ import {
   stageLabel,
 } from '../../graph/index.js'
 import { WfError } from '../../orchestrator/index.js'
-import { OP_FIELD_SHAPES } from '../infrastructure/graph-op-contract.js'
+import { OP_FIELD_SHAPES } from '../../prompts/index.js'
 import { DEFAULT_OUTPUT_CONTRACT_TEXT } from '../../shared/protocol.js'
 import type { GraphNode, Handle, Line, WorkflowDocument } from '../../shared/graph-model.js'
 import type { GraphPatchOp, GraphPatchResult, PatchOpFailure } from './types.js'

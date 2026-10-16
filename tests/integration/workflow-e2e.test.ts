@@ -32,7 +32,6 @@ import { VisualWorkflowApi, type ApiHost } from '../../src/host/api/index.js'
 import { SessionMap, ServiceManager, renderServePatch } from '../../src/host/service/index.js'
 import { registerWfAskAgent } from '../../src/host/tools/wf-ask-agent/tool.js'
 import { WF_ASK_AGENT } from '../../src/host/shared/protocol.js'
-import { HEAD_MARKER, ORCH_HARD_CONSTRAINTS, TAIL_MARKER, TAIL_RESTATE_MARKER } from '../../src/host/prompts/index.js'
 
 const cleanups: Array<() => Promise<void>> = []
 
@@ -206,15 +205,11 @@ describe('e2e：编排运行全链路与双向同步', () => {
     expect(started.runId).toBeTruthy()
     const directive = h.root.messages[0]?.content
     const directiveText = (directive as Array<{ text?: string }>)?.map((m) => m.text ?? '').join('') ?? ''
-    expect(directiveText.startsWith(HEAD_MARKER)).toBe(true)
     // 安全门禁：编排指令不含宿主路径（拓扑只经 wf_org_catalog 的 instance 通道召回）
     expect(directiveText).not.toContain('orchestrations')
     expect(directiveText).not.toMatch(/[A-Za-z]:[\\/]/)
-    // W-02 注意力双位机制：末段重申存在（TAIL_RESTATE_MARKER + 至少一条导出硬约束常量；
-    // 只验证机制，不绑定具体文案条目——提示词文案可随版本润色）
-    const tailSection = directiveText.slice(directiveText.indexOf(TAIL_MARKER))
-    expect(tailSection).toContain(TAIL_RESTATE_MARKER)
-    expect(Object.values(ORCH_HARD_CONSTRAINTS).some((v) => tailSection.includes(v))).toBe(true)
+    // 注入内容携带工作流名（数据，非提示词文案）；消息来源为 user（官方 Message 契约）
+    expect(directiveText).toContain(flow.name)
     expect(h.root.messages[0]?.source).toEqual({ kind: 'user' })
 
     // 2. wf_run_node → 子代理启动（任务块含节点身份与上游 ctx）

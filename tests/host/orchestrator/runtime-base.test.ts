@@ -5,7 +5,8 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { createRunSnapshot, parentExecutorOf, setNodeStatus, sweepWatchdogOnce } from '../../../src/host/orchestrator/index.js'
-import { ORCH_CHANGE_MARKER, ORCH_HARD_CONSTRAINTS } from '../../../src/host/prompts/index.js'
+import { ORCH_CHANGE_MARKER } from '../../../src/host/prompts/index.js'
+import { WF_DB_QUERY } from '../../../src/host/shared/protocol.js'
 import { type GraphNode, type RoleNode, type WorkflowDocument } from '../../../src/host/shared/graph-model.js'
 import { stage, agent, fileNode, parentNode, makeFlow, FakeRoot, type Harness, makeHarness, caller, start, cleanupTempDirs } from './fixtures/harness.js'
 
@@ -528,11 +529,9 @@ describe('父代理执行者模式', () => {
     expect(parentNode?.status).toBe('running')
     expect(entry.executorParentId).toBe('n-parent')
     const directive = h.agents.roots.get('session-1')!.messages[0].content.map((c) => c.text).join('\n')
-    expect(directive).toContain(ORCH_HARD_CONSTRAINTS.executorRole)
-    expect(directive).toContain('【你的节点任务】')
+    expect(directive).toContain('n-parent') // 父代理执行节点身份数据
     expect(directive).toContain('需求文本') // 文件文本经 ctx 连线直通
-    expect(directive).toContain('wf_db_query') // db 提示（Connected database node(s)…）
-    expect(directive).toContain('n-parent') // 执行节点标识
+    expect(directive).toContain(WF_DB_QUERY) // db 提示（工具名取自协议常量）
   })
 
   it('纯调度者（无 flow-in）：指令不含执行者措辞与任务块，父代理节点保持 pending', async () => {
@@ -543,7 +542,7 @@ describe('父代理执行者模式', () => {
     const parentNode = h.runtime.runSnapshot(result.runId)?.nodes.find((n) => n.nodeId === 'n-parent')
     expect(parentNode?.status).toBe('pending')
     const directive = h.agents.roots.get('session-1')!.messages[0].content.map((c) => c.text).join('\n')
-    expect(directive).not.toContain('【你的节点任务】')
+    expect(directive).not.toContain('n-parent')
   })
 
   it('wfRunNode 首次调度：父代理节点标记 ok，输出回写最近 assistant/message 文本', async () => {

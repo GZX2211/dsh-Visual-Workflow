@@ -20,8 +20,7 @@ import {
   maskConnection,
 } from '../../../../src/host/tools/wf-org-catalog/build.js'
 import { CATALOG_LIMITS, ID_CONVENTION } from '../../../../src/host/tools/wf-org-catalog/types.js'
-import { PATCH_CONTRACT_TEXT } from '../../../../src/host/tools/infrastructure/graph-op-contract.js'
-import { ORG_SOP_DESIGN_METHOD, ORG_SOP_L1_GRAPH_SEMANTICS } from '../../../../src/host/prompts/index.js'
+import { ORG_SOP_DESIGN_METHOD, ORG_SOP_L1_GRAPH_SEMANTICS, PATCH_CONTRACT_TEXT } from '../../../../src/host/prompts/index.js'
 import { collabGroupList, orchestrationNodeList } from '../../../../src/host/orchestrator/index.js'
 import {
   instanceFlowFixture,

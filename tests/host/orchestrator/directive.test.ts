@@ -15,7 +15,8 @@ import {
   parentPromptVariantOf,
 } from '../../../src/host/orchestrator/index.js'
 import type { GraphNode, Line, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
-import { ORCH_HARD_CONSTRAINTS, type ExecutorContextFacts } from '../../../src/host/prompts/index.js'
+import type { ExecutorContextFacts } from '../../../src/host/prompts/index.js'
+import { WF_FINISH, WF_RUN_NODE } from '../../../src/host/shared/protocol.js'
 
 // —— 画布构建小工具（分类测试用；不校验，仅结构）——
 function roleNode(id: string, kind: 'parent' | 'agent', label: string): GraphNode {
@@ -151,33 +152,32 @@ describe('orchestrationNodeList / collabGroupList 只列参与流程的执行单
   })
 })
 
-describe('buildParentRunPrompt 三情况整装（身份措辞互斥）', () => {
-  it('情况1（无父代理）→ 纯编排指令：含「仅编排」、不含执行者模式（经导出常量引用）', () => {
+describe('buildParentRunPrompt 三情况整装（结构差异；不断言提示词文案）', () => {
+  it('情况1（无父代理）→ 纯编排：注入工作流名与节点清单数据，不含执行者身份', () => {
     const f = flow([roleNode('a1', 'agent', '子代理A')], [flowLine('s-a1', 'start', 'a1'), flowLine('a1-end', 'a1', 'end')])
     const directive = buildParentRunPrompt({ flow: f, mode: 'mode1', executor: null, systemLanguage: '中文' })
-    expect(directive).toContain(ORCH_HARD_CONSTRAINTS.dispatchOnly)
-    expect(directive).not.toContain(ORCH_HARD_CONSTRAINTS.executorRole)
+    expect(directive).toContain(f.name)
+    expect(directive).not.toContain('父执行')
   })
 
-  it('情况2（hybrid）→ 编排+执行者角色；不含「仅编排」（经导出常量引用）', () => {
+  it('情况2（hybrid）→ 编排+执行者：注入父代理节点身份与自执行任务块数据', () => {
     const f = flow(
       [roleNode('p1', 'parent', '父执行'), roleNode('a1', 'agent', '子代理A')],
       [flowLine('s-p1', 'start', 'p1'), flowLine('p1-a1', 'p1', 'a1'), flowLine('a1-end', 'a1', 'end')],
     )
     const directive = buildParentRunPrompt({ flow: f, mode: 'mode1', executor: executorOf('p1', '父执行'), systemLanguage: '中文' })
-    expect(directive).toContain(ORCH_HARD_CONSTRAINTS.executorRole)
-    expect(directive).not.toContain(ORCH_HARD_CONSTRAINTS.dispatchOnly)
+    expect(directive).toContain('父执行')
+    expect(directive).toContain('runId=run-1')
   })
 
-  it('情况3（executor）→ 纯执行提示：无编排/调度语义且含 wf_finish 收尾', () => {
+  it('情况3（executor）→ 纯执行：含收尾工具、不含编排启动工具', () => {
     const f = flow([roleNode('p1', 'parent', '父执行')], [flowLine('s-p1', 'start', 'p1'), flowLine('p1-end', 'p1', 'end')])
     const directive = buildParentRunPrompt({ flow: f, mode: 'mode1', executor: executorOf('p1', '父执行'), systemLanguage: '中文' })
-    expect(directive).toContain('wf_finish')
-    expect(directive).not.toContain(ORCH_HARD_CONSTRAINTS.dispatchOnly)
-    expect(directive).not.toContain('wf_run_node')
+    expect(directive).toContain(WF_FINISH)
+    expect(directive).not.toContain(WF_RUN_NODE)
   })
 
-  it('续跑边界：hybrid 但父代理执行单元已完成（executor 为 null）→ 按纯编排组装，不再出现自执行任务', () => {
+  it('续跑边界：hybrid 但父代理执行单元已完成（executor 为 null）→ 按纯编排组装', () => {
     const f = flow(
       [roleNode('p1', 'parent', '父执行'), roleNode('a1', 'agent', '子代理A')],
       [flowLine('s-p1', 'start', 'p1'), flowLine('p1-a1', 'p1', 'a1'), flowLine('a1-end', 'a1', 'end')],
@@ -189,9 +189,6 @@ describe('buildParentRunPrompt 三情况整装（身份措辞互斥）', () => {
       resume: { resumeFromNodeId: 'a1', resumedFromRunId: 'run-0' },
       systemLanguage: '中文',
     })
-    expect(directive).toContain(ORCH_HARD_CONSTRAINTS.dispatchOnly)
-    expect(directive).not.toContain(ORCH_HARD_CONSTRAINTS.executorRole)
-    // 恢复数据（动态值，非提示词文案）透传入末段
-    expect(directive).toContain('run-0')
+    expect(directive).not.toContain('父执行')
   })
 })

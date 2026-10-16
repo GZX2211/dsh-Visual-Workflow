@@ -14,14 +14,10 @@
 
 import { randomUUID } from 'node:crypto'
 import type { NodeRunner } from '../orchestrator/index.js'
+import { REACT_CAP_DENY_REASON, REACT_CAP_MESSAGE } from '../prompts/index.js'
 
-/** 软截停的强制收尾指令（面向模型，英文；W-03 面向模型的文本与工具描述一致）。 */
-export const REACT_CAP_MESSAGE =
-  'You have reached the ReAct iteration limit for this turn. ' +
-  'Stop calling tools now and emit your final conclusion based on the progress made so far.'
-
-/** tools.guard 拒绝原因（面向模型，英文）。 */
-export const REACT_CAP_DENY_REASON = 'ReAct iteration limit reached — conclude this turn with your final output now.'
+// 软截停的两条模型可见文本集中在 prompts/texts/rule-soft-stop.ts；此处 re-export 保持既有导出面。
+export { REACT_CAP_DENY_REASON, REACT_CAP_MESSAGE }
 
 /**
  * 注入消息的来源插件标识。

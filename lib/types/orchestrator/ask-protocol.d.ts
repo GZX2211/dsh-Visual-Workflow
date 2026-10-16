@@ -45,7 +45,7 @@ export interface PendingAsk {
 export declare const ASK_MESSAGE_LIMIT = 20000;
 /** 构造协作消息（steer/followup 共用；senderSessionId = 发起者会话 id）。 */
 export declare function coordinatorMessage(id: string, text: string, senderSessionId: string): CoordinatorMessage;
-/** 投递给目标子代理的消息文本（含 askId 与回复指令，业务中文）。 */
+/** 投递给目标子代理的消息文本（正文见 prompts/texts/notice-ask-message.ts）。 */
 export declare function buildAskText(pending: Pick<PendingAsk, 'from' | 'fromNodeId' | 'to' | 'toNodeId' | 'askId' | 'message'>): string;
 /**
  * 反向投递给发起者的回复文本（方向与 ask 相反：发送者为回复方，接收者为发起者）。

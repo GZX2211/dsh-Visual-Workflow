@@ -22,6 +22,7 @@ import type { FlowStore } from '../storage/flow-store.js'
 import type { GraphNode, RoleNode } from '../shared/graph-model.js'
 import type { NodeRunner, NodeStartInput, OrchestratorLogger } from '../orchestrator/index.js'
 import { consumeReactCappedOf, type ReactGuardBridge } from './guards.js'
+import { renderTemplate, TASK_FALLBACK } from '../prompts/index.js'
 import { CHILD_AGENT_HIDDEN_TOOLS, RESERVED_TRANSPORT_TOOL, TEAM_TOOL_NAMES, WF_FINISH, WF_RUN_NODE, WF_RUN_NODE_WAIT } from '../shared/protocol.js'
 import type { ModelSelectionLike, ModelSelectionSetup, SelectionChildContext } from './model-selection.js'
 import type { ChildPromptSetup, ChildPromptState } from './prompt-setup.js'
@@ -93,13 +94,9 @@ export function detectSubagentProvider(service: SubagentsServiceLike): string | 
   return pickProviderName(service.list?.() ?? [])
 }
 
-/** 任务块为空的兜底 prompt（正常路径由 T-021 组装任务块；防御性兜底）。 */
+/** 任务块为空的兜底首条消息（正常路径由 buildNodeBlocks 组装；正文见 prompts/texts/task-fallback.ts）。 */
 function fallbackPrompt(node: RoleNode): string {
-  return [
-    '你是 Visual Workflow 工作流中的节点子代理。',
-    `节点名称：${node.data.label ?? node.id}`,
-    '具体任务将随后续消息派发；请按收到的任务要求执行并汇报结论。',
-  ].join('\n')
+  return renderTemplate(TASK_FALLBACK, { nodeLabel: node.data.label ?? node.id })
 }
 
 /**

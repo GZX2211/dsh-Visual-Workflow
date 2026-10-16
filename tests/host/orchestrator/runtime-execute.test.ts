@@ -6,7 +6,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { GLOBAL_RUN_CALL_LIMIT, OUTPUT_SUMMARY_LIMIT, buildNodeBlocks, createRunSnapshot } from '../../../src/host/orchestrator/index.js'
 import { DEFAULT_SYSTEM_LANGUAGE } from '../../../src/host/system-language.js'
-import { HEAD_MARKER, MID_MARKER, TAIL_MARKER } from '../../../src/host/prompts/index.js'
 import { TEAM_SEND_MESSAGE, WF_ASK_AGENT } from '../../../src/host/shared/protocol.js'
 import type { RoleNode, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
 import { agent, fileNode, groupNode, makeFlow, stage, type Harness, makeHarness, caller, childCaller, start, cleanupTempDirs } from './fixtures/harness.js'
@@ -28,21 +27,14 @@ describe('wfRunNode 异步路径与护栏', () => {
     expect(h.runtime.childMetaFor('child-1')).toEqual({ sessionId: 'session-1', flowId: 'flow-1', nodeId: 'n-a1' })
   })
 
-  it('任务块注入：marker 三段布局 + 节点身份数据透传（不绑定提示词文案）', async () => {
+  it('任务块注入：节点身份数据透传（不断言提示词文案）', async () => {
     const h = await makeHarness()
     await start(h, makeFlow())
     await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
     const text = h.runner.calls[0].blocks[0].text
 
-    // W-01 三段布局：head < mid < tail
-    const headAt = text.indexOf(HEAD_MARKER)
-    const midAt = text.indexOf(MID_MARKER)
-    const tailAt = text.indexOf(TAIL_MARKER)
-    expect(headAt).toBeGreaterThanOrEqual(0)
-    expect(midAt).toBeGreaterThan(headAt)
-    expect(tailAt).toBeGreaterThan(midAt)
-    // 数据透传：节点身份（画布节点 label）出现在首段
-    expect(text.slice(0, midAt)).toContain('子任务A')
+    // 数据透传：画布节点 label 出现在任务块中
+    expect(text).toContain('子任务A')
   })
   it('文档 ctx-in：文本内容注入（超限截断）+ 受管文件路径索引', async () => {
     const h = await makeHarness()

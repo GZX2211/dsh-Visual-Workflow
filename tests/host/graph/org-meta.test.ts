@@ -26,7 +26,6 @@ import {
   orgBudgetOf,
   orgUsageOf,
 } from '../../../src/host/graph/index.js'
-import { buildOrgBudgetText } from '../../../src/host/prompts/index.js'
 import type { GraphNode } from '../../../src/host/shared/graph-model.js'
 import type { RunSnapshot } from '../../../src/host/shared/types.js'
 
@@ -284,41 +283,5 @@ describe('freezeOrgMeta：快照冻结（D-13 第三层）', () => {
     const first = structuredClone(snap.meta)
     freezeOrgMeta(snap, { groupMax: 2 })
     expect(snap.meta).toEqual(first)
-  })
-})
-
-describe('buildOrgBudgetText：末段动态文本（纯函数）', () => {
-  const budget = orgBudgetOf(
-    { nodeMax: 12, groupMax: 3, membersMax: 5, patchOpsMax: 6, forbiddenShapes: ['flowCycle', 'orphanNode'] },
-    { nodeCount: 4, groupCount: 1, maxGroupMembers: 2, patchOps: 0 },
-  )
-
-  it('输出含剩余量口径与禁用拓扑清单', () => {
-    const text = buildOrgBudgetText(budget)
-    expect(text).toContain('本次组织预算')
-    expect(text).toContain('4/12')
-    expect(text).toContain('剩余 8')
-    expect(text).toContain('flowCycle / orphanNode')
-  })
-
-  it('闸门退役：预算文本不再出现父代理闸门维度', () => {
-    expect(buildOrgBudgetText(budget)).not.toContain('父代理闸门')
-  })
-
-  it('上限未配置：渲染「不限」而不是 0', () => {
-    const text = buildOrgBudgetText(orgBudgetOf({}, { nodeCount: 2, groupCount: 0, maxGroupMembers: 0 }))
-    expect(text).toContain('不限')
-    expect(text).not.toContain('/0')
-    expect(text).toContain('禁用拓扑：无')
-  })
-
-  it('确定性：同输入两次输出字节相同（不读时钟/随机源）', () => {
-    expect(buildOrgBudgetText(budget)).toBe(buildOrgBudgetText(budget))
-    expect(buildOrgBudgetText(budget)).not.toContain('Date.now')
-  })
-
-  it('命名约定：配置时出现在预算文本中', () => {
-    const text = buildOrgBudgetText(orgBudgetOf({ namingConvention: '阶段' }, { nodeCount: 0, groupCount: 0, maxGroupMembers: 0 }))
-    expect(text).toContain('命名约定：阶段')
   })
 })

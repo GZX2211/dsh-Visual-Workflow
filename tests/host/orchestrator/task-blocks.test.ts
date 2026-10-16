@@ -10,7 +10,6 @@
 // 默认文本经共享常量 DEFAULT_OUTPUT_CONTRACT_TEXT 引用。
 import { describe, expect, it } from 'vitest'
 import { buildNodeBlocks, inputContractOf, outputContractOf } from '../../../src/host/orchestrator/index.js'
-import { HEAD_MARKER, MID_MARKER, TAIL_MARKER } from '../../../src/host/prompts/index.js'
 import { DEFAULT_OUTPUT_CONTRACT_TEXT } from '../../../src/host/shared/protocol.js'
 import type { RoleNode, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
 import type { RunSnapshot } from '../../../src/host/shared/types.js'
@@ -101,8 +100,8 @@ describe('节点契约解析（outputContractOf / inputContractOf）', () => {
   })
 })
 
-describe('buildNodeBlocks 契约段位', () => {
-  it('输入契约注入中段、输出契约注入末段（注意力位），不污染首段', () => {
+describe('buildNodeBlocks 契约注入（只断言数据，不断言文案）', () => {
+  it('输入契约与输出契约都注入任务块，且输入契约在输出契约之前', () => {
     const flow = makeFlow({
       nodes: [role('a1', 'agent', { inputSchema: '上游交付的调研纪要', outputSchema: '结论 / 置信度' }), role('a2')],
     })
@@ -113,18 +112,12 @@ describe('buildNodeBlocks 契约段位', () => {
       documentTextLimit: 20000,
       systemLanguage: '中文',
     })[0].text
-    const head = text.slice(0, text.indexOf(MID_MARKER))
-    const mid = text.slice(text.indexOf(MID_MARKER), text.indexOf(TAIL_MARKER))
-    const tail = text.slice(text.indexOf(TAIL_MARKER))
-    expect(text).toContain(HEAD_MARKER)
-    expect(head).not.toContain('上游交付的调研纪要')
-    expect(head).not.toContain('结论 / 置信度')
-    expect(mid).toContain('上游交付的调研纪要')
-    expect(mid).not.toContain('结论 / 置信度')
-    expect(tail).toContain('结论 / 置信度')
+    expect(text).toContain('上游交付的调研纪要')
+    expect(text).toContain('结论 / 置信度')
+    expect(text.indexOf('上游交付的调研纪要')).toBeLessThan(text.indexOf('结论 / 置信度'))
   })
 
-  it('未配置任何契约（界面清空）时不组装契约段', () => {
+  it('未配置任何契约（界面清空）时不出现契约数据', () => {
     const flow = makeFlow({ nodes: [role('a1'), role('a2')] })
     const text = buildNodeBlocks({
       flow,
@@ -133,8 +126,8 @@ describe('buildNodeBlocks 契约段位', () => {
       documentTextLimit: 20000,
       systemLanguage: '中文',
     })[0].text
-    expect(text).not.toContain('输入契约')
-    expect(text).not.toContain(DEFAULT_OUTPUT_CONTRACT_TEXT)
+    expect(text).not.toContain('上游交付的调研纪要')
+    expect(text).not.toContain('结论 / 置信度')
   })
 
   it('默认文本随节点数据落盘：未改动的节点按默认契约注入', () => {
@@ -146,10 +139,10 @@ describe('buildNodeBlocks 契约段位', () => {
       documentTextLimit: 20000,
       systemLanguage: '中文',
     })[0].text
-    expect(text.slice(text.indexOf(TAIL_MARKER))).toContain(DEFAULT_OUTPUT_CONTRACT_TEXT)
+    expect(text).toContain(DEFAULT_OUTPUT_CONTRACT_TEXT)
   })
 
-  it('终端节点（无下游）同样注入输出契约（不再有「终端节点不注入」分支）', () => {
+  it('终端节点（无下游）同样注入输出契约', () => {
     const flow = makeFlow({ nodes: [role('a1'), role('terminal', 'agent', { outputSchema: '终端契约字段' })] })
     const text = buildNodeBlocks({
       flow,
@@ -158,19 +151,7 @@ describe('buildNodeBlocks 契约段位', () => {
       documentTextLimit: 20000,
       systemLanguage: '中文',
     })[0].text
-    expect(text.slice(text.indexOf(TAIL_MARKER))).toContain('终端契约字段')
-  })
-
-  it('契约段不再断言「下游节点直接读取」（终端节点也会出现该段）', () => {
-    const flow = makeFlow({ nodes: [role('a1', 'agent', { outputSchema: '契约字段' }), role('a2')] })
-    const text = buildNodeBlocks({
-      flow,
-      node: flow.nodes[0] as RoleNode,
-      snapshot: emptySnapshot,
-      documentTextLimit: 20000,
-      systemLanguage: '中文',
-    })[0].text
-    expect(text).not.toContain('下游节点直接读取')
+    expect(text).toContain('终端契约字段')
   })
 })
 

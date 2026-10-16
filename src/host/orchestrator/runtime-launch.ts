@@ -6,26 +6,14 @@
 import { randomUUID } from 'node:crypto'
 import { buildResumedSnapshot, findResumableRun, type ResumeInput, type ResumeResult } from './resume.js'
 import { createRunSnapshot, setNodeStatus, statusText } from './snapshot.js'
-import { effectiveOrgMeta, freezeOrgMeta, metaOfDocument, normalizeOrgMeta, orgBudgetOf, orgUsageOf } from '../graph/index.js'
-import { buildOrgBudgetText, type CollabChannel } from '../prompts/index.js'
+import { effectiveOrgMeta, freezeOrgMeta, metaOfDocument } from '../graph/index.js'
+import type { CollabChannel } from '../prompts/index.js'
 import { buildParentRunPrompt } from './directive.js'
 import { missingStageLabels, validateFlowForRun } from './graph-facts.js'
 import { WfError, messageOf } from './errors.js'
 import { DEFAULT_SYSTEM_LANGUAGE } from '../system-language.js'
 import type { StartRunOptions, StartRunResult, RunEntry } from './run-entry.js'
-import type { RunSnapshot } from '../shared/types.js'
-import type { WorkflowDocument } from '../shared/graph-model.js'
 import { RuntimeBase } from './runtime-base.js'
-
-/**
- * 本次运行「组织预算」末段文本（自主编排方案 §6.4；P2 正式接入）。
- * 口径 = 快照冻结元参数（D-13 第三层：运行期不再重读模板/实例）+ 当前图规模 → **剩余量**。
- * 纯函数：同一快照与图两次调用字节相同；预算文本不是运行必需条件，调用侧不因它失败。
- */
-function orgBudgetTextOf(snapshot: RunSnapshot, flow: WorkflowDocument): string {
-  const meta = normalizeOrgMeta(snapshot.meta ?? {})
-  return buildOrgBudgetText(orgBudgetOf(meta, orgUsageOf(flow)))
-}
 
 export class RuntimeLaunch extends RuntimeBase {
   /**
@@ -170,7 +158,6 @@ export class RuntimeLaunch extends RuntimeBase {
       ...(question ? { question } : {}),
       executor,
       systemLanguage: this.deps.systemLanguage?.() ?? DEFAULT_SYSTEM_LANGUAGE,
-      orgBudgetText: orgBudgetTextOf(snapshot, flow),
       collabChannel: this.collabChannelOf(runSessionId),
     })
     try {
@@ -301,7 +288,6 @@ export class RuntimeLaunch extends RuntimeBase {
         resume: { resumeFromNodeId: snapshot.resumeFromNodeId, resumedFromRunId: prev.id },
         executor,
         systemLanguage: this.deps.systemLanguage?.() ?? DEFAULT_SYSTEM_LANGUAGE,
-        orgBudgetText: orgBudgetTextOf(snapshot, flow),
         collabChannel: this.collabChannelOf(sessionId),
       })
       try {

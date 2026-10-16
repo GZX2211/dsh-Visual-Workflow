@@ -1,8 +1,6 @@
 import type { NodeRunner } from '../orchestrator/index.js';
-/** 软截停的强制收尾指令（面向模型，英文；W-03 面向模型的文本与工具描述一致）。 */
-export declare const REACT_CAP_MESSAGE: string;
-/** tools.guard 拒绝原因（面向模型，英文）。 */
-export declare const REACT_CAP_DENY_REASON = "ReAct iteration limit reached \u2014 conclude this turn with your final output now.";
+import { REACT_CAP_DENY_REASON, REACT_CAP_MESSAGE } from '../prompts/index.js';
+export { REACT_CAP_DENY_REASON, REACT_CAP_MESSAGE };
 /** 守卫注入点的最小结构（childCtx 形状，运行时守卫收窄）。 */
 export interface GuardChildContext {
     /** cordis 事件注册（waterfall 语义由事件本身决定）。 */

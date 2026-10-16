@@ -37,8 +37,6 @@ export declare function directiveParams(flow: WorkflowDocument, mode: 'mode1' | 
     parentTaskBlock?: string;
     /** 系统语言名（从 DSH 用户设置读取；注入语言规则）。 */
     systemLanguage?: string;
-    /** 「本次组织预算」末段文本（冻结快照 → 剩余量口径；P2 注入）。 */
-    orgBudgetText?: string;
     /** 协作通道（官方 Agent Team 可用性；决定 Team 段文案与启动方式）。 */
     collabChannel?: CollabChannel;
 }): OrchestrationDirectiveParams;
@@ -71,8 +69,6 @@ export declare function buildParentRunPrompt(input: {
     } | null;
     /** 系统语言名（从 DSH 用户设置读取；注入语言规则）。 */
     systemLanguage: string;
-    /** 「本次组织预算」末段文本（冻结快照 → 剩余量口径；P2 起由 startRun/resumeRun 注入）。 */
-    orgBudgetText?: string;
     /** 协作通道（官方 Agent Team 可用性；决定 Team 段文案与启动方式）。 */
     collabChannel?: CollabChannel;
 }): string;
