@@ -40,7 +40,7 @@ export function registerWfExperienceFeedback(
   const definition = defineTool({
     name: WF_EXPERIENCE_FEEDBACK,
     description:
-      'Submit how the experiences you actually used in this unit of work affected your decisions. Call it in the final completion stage of a task, together with wf_experience_learn. '
+      'Submit how the experiences you actually used in this unit of work affected your decisions. Call it in the final completion stage of a task. '
       + 'Preconditions: every experience_id must be one this subject had injected into its context through wf_experience_recall; experiences never used cannot be rated and come back in skipped. '
       + 'Score each evaluation by choosing a semantic anchor level, never an arbitrary decimal. Fetch the scoring standard first: pass an empty evaluations array to get the four dimensions with the behaviour definition of every level, then rate against it. '
       + 'decision_effect is not how much you like the experience; unknown fields are rejected. '

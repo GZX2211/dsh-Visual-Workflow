@@ -143,10 +143,11 @@ describe('wf_experience_feedback：注册与 schema', () => {
     for (const code of [ERR_EXPERIENCE_BAD_ARGS, ERR_EXPERIENCE_WRONG_TYPE, ERR_EXPERIENCE_FEEDBACK_FAILED]) {
       expect(description).toContain(code)
     }
-    // 反馈与学习同属任务最终完成阶段；跨工具的阶段导航（召回时机等）不进本工具常驻面
-    expect(description).toContain('wf_experience_learn')
-    expect(description).toContain('wf_experience_recall')
+    // 只写本工具自己的调用时刻；跨工具阶段导航（与 learn 同批）不常驻
+    expect(description).not.toContain('wf_experience_learn')
     expect(description).toContain('final completion stage')
+    // 前置条件必须点明 experience_id 的来源（recall 注入过），这是准入信息而非阶段导航
+    expect(description).toContain('wf_experience_recall')
     expect(description).not.toContain('at the start of a task or while it is running')
     // 内部机制（统计重算、信任修正幅度）与「经验内容不被修改」等说明不进常驻面
     expect(description).not.toContain('±20%')
