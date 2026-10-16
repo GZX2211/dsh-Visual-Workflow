@@ -27,6 +27,7 @@ import type {
   WorkflowDocument,
   WorkflowMode,
 } from '../shared/graph-model.js'
+import { STAGE_LABELS } from '../shared/protocol.js'
 import { createHash } from 'node:crypto'
 import { isFlowLine } from './dag.js'
 
@@ -242,9 +243,7 @@ export function newStageNode(kind: 'start' | 'end' | 'pause', mode: WorkflowMode
 
 /** 阶段节点硬编码名称（§4.2.5.1 卡片设计表：启动/输入、结束/输出、暂停）。 */
 export function stageLabel(kind: 'start' | 'end' | 'pause', mode: WorkflowMode): string {
-  if (kind === 'start') return mode === 'mode1' ? '启动' : '输入'
-  if (kind === 'end') return mode === 'mode1' ? '结束' : '输出'
-  return '暂停'
+  return STAGE_LABELS[mode][kind]
 }
 
 /** 新建协作组节点（§4.2.5.2）。 */

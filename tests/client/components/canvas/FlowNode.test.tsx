@@ -20,7 +20,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import React from 'react'
 import { FlowNode } from '../../../../src/client/components/canvas/FlowNode.js'
-import { zh } from '../../../../src/client/i18n.js'
+import { en, zh } from '../../../../src/client/i18n.js'
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -86,5 +86,35 @@ describe('P4 画布角标（FlowNode）', () => {
   it('agentPatched 缺省时不显示该角标', async () => {
     await renderFlowNode(proxyNode({}))
     expect(container!.textContent).not.toContain(zh.agentPatchedBadge)
+  })
+})
+
+describe('stage names follow the active language', () => {
+  it.each([
+    ['mode1', 'start', '启动', 'Start'],
+    ['mode1', 'end', '结束', 'End'],
+    ['mode1', 'pause', '暂停', 'Pause'],
+    ['mode2', 'start', '输入', 'Input'],
+    ['mode2', 'end', '输出', 'Output'],
+  ] as const)('%s %s displays English for a canonical stored label', async (mode, kind, stored, label) => {
+    await renderFlowNode({ id: 'stage', kind, position: { x: 0, y: 0 }, data: { label: stored } }, {
+      mode, copy: { ...en, modeName: () => '' },
+    })
+    expect(container!.querySelector('.wf-node__label')!.textContent).toBe(label)
+    expect(container!.querySelector('.wf-node__kind > span')!.textContent).toBe(label)
+  })
+
+  it('updates stage names when the language changes without changing stored data', async () => {
+    const node = { id: 'stage', kind: 'start', position: { x: 0, y: 0 }, data: { label: '启动' } }
+    await renderFlowNode(node, { copy: { ...en, modeName: () => '' } })
+    expect(container!.querySelector('.wf-node__label')!.textContent).toBe('Start')
+    await act(async () => {
+      root!.render(React.createElement(FlowNode, {
+        node, copy, mode: 'mode1', selected: false, highlighted: false, dragging: false,
+        runStatus: null, onPointerDown: () => {}, onHandlePointerDown: () => {}, onToggleSwap: () => {},
+      } as never))
+    })
+    expect(container!.querySelector('.wf-node__label')!.textContent).toBe('启动')
+    expect(node.data.label).toBe('启动')
   })
 })
