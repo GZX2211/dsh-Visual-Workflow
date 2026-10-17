@@ -161,6 +161,8 @@ export const ERROR_STATUS_EXEMPT: Record<string, string> = {
   WF_SEND_BAD_ARGS: '只经 wf_send_message 工具面（模型可见错误码），不经 GUI HTTP 边界',
   WF_SEND_TARGET_UNKNOWN: '只经 wf_send_message 工具面（模型可见错误码），不经 GUI HTTP 边界',
   WF_SEND_DELIVERY_FAILED: '只经 wf_send_message 工具面（模型可见错误码），不经 GUI HTTP 边界',
+  // wf_graph_patch 工具面专用码：父代理不得编排自己（用户手工改图不受此限），无对应 HTTP 端点。
+  WF_PARENT_SELF_EDIT: '只经 wf_graph_patch 工具面（模型可见错误码），不经 GUI HTTP 边界',
 }
 
 /**

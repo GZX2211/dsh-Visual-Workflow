@@ -238,12 +238,11 @@ describe('角色节点 data 补全（normalizeRoleNodeData）', () => {
     expect(data.injectToolSections).toBe(false)
   })
 
-  it('create_node：父代理节点不落默认输出契约（父代理不参与节点交接）', () => {
-    const { doc } = applyGraphOps({
+  it('create_node：父代理节点只能由用户手工创建（wf_graph_patch 拒绝，错误码 WF_PARENT_SELF_EDIT）', () => {
+    expect(() => applyGraphOps({
       doc: flowOf([stage('s', 'start')]),
       ops: [{ op: 'create_node', node: { id: 'p1', kind: 'parent', position: { x: 0, y: 0 }, data: { label: '父代理' } } }],
-    })
-    expect(roleDataOf(doc, 'p1').outputSchema).toBe('')
+    })).toThrowError(expect.objectContaining({ code: 'WF_PARENT_SELF_EDIT' }))
   })
 
   it('create_node：显式传入空串 = 明确清空，不落默认契约', () => {

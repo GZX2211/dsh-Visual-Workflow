@@ -298,7 +298,7 @@ describe('wf_graph_patch · 图结构变更组', () => {
     const { applyGraphOps } = await import('../../../../src/host/tools/wf-graph-patch/apply.js')
     const applied = applyGraphOps({
       doc: makeFlow('wf-1', { nodes: [stageNode('s', 'start')], lines: [] }),
-      ops: [{ op: 'create_node', node: { id: 'a9', kind: 'parent' } }],
+      ops: [{ op: 'create_node', node: { id: 'a9', kind: 'agent' } }],
     })
     const node = (applied.doc.nodes as GraphNode[]).find((item) => item.id === 'a9') as {
       data?: Record<string, unknown>
