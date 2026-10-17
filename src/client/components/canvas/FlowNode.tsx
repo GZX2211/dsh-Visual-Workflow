@@ -105,14 +105,18 @@ function metaLinesOf(node: CanvasNode, copy: Dict & { modeName(id: string | null
 export const FlowNode = memo(function FlowNode({ node, copy, mode, selected, highlighted, dragging, runStatus, locked, lockHint, agentPatched, onPointerDown, onHandlePointerDown, onToggleSwap }: FlowNodeProps) {
   const kind = node.kind
   const isProxy = kind === 'proxy'
-  // 名称回退：label 为空（含空白）时显示节点种类名（避免虚拟节点显示为空白卡片）
-  const nodeLabel = String(node.data.label ?? '').trim() || String(copy.nodeKinds[isProxy ? 'agent' : kind] ?? '')
   // 阶段节点（启动/结束/暂停）：单/双流程连接点，交换无意义且会产生死数据（审查 BUG-1），
   // 与 Team 一致不渲染交换按钮。
   const isStage = kind === 'start' || kind === 'end' || kind === 'pause'
   // 交换状态随节点持久化（用户批注：作为节点属性保存，重载后保持）
   const swapped = (node.data as { swapPorts?: unknown }).swapPorts === true
   const displayKind = isProxy ? 'agent' : kind
+  // 阶段名称在渲染期按界面语言取词典；存储值保持中文规范值（validateFlow 锁定该值）。
+  const labelKind = (mode === 'mode2' && kind === 'start' ? 'input'
+    : mode === 'mode2' && kind === 'end' ? 'output' : displayKind) as keyof Dict['nodeKinds']
+  // 名称回退：label 为空（含空白）时显示节点种类名（避免虚拟节点显示为空白卡片）
+  const nodeLabel = isStage ? copy.nodeKinds[labelKind]
+    : String(node.data.label ?? '').trim() || String(copy.nodeKinds[displayKind as keyof Dict['nodeKinds']] ?? '')
   const handles = nodeHandles(displayKind, mode, swapped)
   const status = runStatus?.status ?? null
   const statusText = statusLabelOf(copy, status)
@@ -166,7 +170,7 @@ export const FlowNode = memo(function FlowNode({ node, copy, mode, selected, hig
           >{swapped ? '⇆' : '⇄'}</button>
         ) : null}
         <div className="wf-node__kind">
-          <span>{String(copy.nodeKinds[displayKind] ?? displayKind)}</span>
+          <span>{String(copy.nodeKinds[labelKind] ?? labelKind)}</span>
           {statusText ? <span className={`wf-status-dot is-${status}`} /> : null}
           {statusText ? <span className="wf-hint">{statusText}</span> : null}
           {/* 运行中锁定角标（已完成/执行中流程不可修改、不可删除；仍可拖动移动） */}

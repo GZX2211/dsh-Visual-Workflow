@@ -11,6 +11,8 @@
 //   4. 服务全链路：SessionMap 持久化隔离 / fork 组合参数 / serve patch 渲染。
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { en, zh } from '../../src/client/i18n.js'
+import { serializeFlow } from '../../src/client/lib/graph-serialize.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -194,6 +196,25 @@ async function runNodeAndFinish(h: Harness, nodeId: string): Promise<{ childId: 
 }
 
 describe('e2e：编排运行全链路与双向同步', () => {
+  it.each([['en', en], ['zh', zh]] as const)('starts a saved %s canvas workflow without stage-label errors', async (_language, copy) => {
+    const h = await makeHarness()
+    const flow = makeFlow()
+    const canvasNodes = flow.nodes.map((node) => node.kind === 'start' || node.kind === 'end'
+      ? { ...node, data: { ...node.data, label: copy.nodeKinds[node.kind] } }
+      : { ...node, data: { ...node.data } })
+    const saved = serializeFlow(flow, canvasNodes, flow.lines)
+    await saveFlow(h, saved)
+
+    const started = await h.api.handle('run', { sessionId: flow.sessionId, flowId: flow.id }) as { runId: string }
+    const result = await h.runtime.wfRunNode({ isChild: false, sessionId: flow.sessionId }, { nodeId: 'n-a1' })
+
+    expect(result.status).toBe('started')
+    expect(h.runner.calls[0]?.node.id).toBe('n-a1')
+    await h.runtime.handleSubagentEnd({ id: result.childId, stopReason: 'completed', lastAssistantMessage: [] })
+    await h.runtime.wfFinish({ isChild: false, sessionId: flow.sessionId }, { status: 'completed', summary: 'Done' })
+    expect((await h.store.getRun(started.runId))?.status).toBe('completed')
+  })
+
   it('API run → 编排指令注入（硬约束双位）→ 节点回写 → finish → 磁盘历史；运行中改图即时生效', async () => {
     const h = await makeHarness()
     await saveFlow(h, makeFlow())

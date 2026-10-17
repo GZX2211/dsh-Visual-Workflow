@@ -299,7 +299,9 @@ export function editorDataOf(state: StudioState): EditorData | null {
       }))
       return { kind: 'group', data, name: String(data.label ?? ''), nodeId: node.id, members }
     }
-    if (node.kind === 'start' || node.kind === 'end' || node.kind === 'pause') return { kind: 'stage', data, name: String(data.label ?? ''), nodeId: node.id }
+    if (node.kind === 'start' || node.kind === 'end' || node.kind === 'pause') {
+      return { kind: 'stage', data, name: String(data.label ?? ''), nodeId: node.id, stageKind: node.kind, mode: state.mode }
+    }
     if (node.kind === 'proxy') {
       const sourceId = String((node as { proxySourceId?: unknown }).proxySourceId ?? '')
       const main = state.canvas.nodes.find((item) => item.id === sourceId)

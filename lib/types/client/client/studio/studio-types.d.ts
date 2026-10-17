@@ -251,6 +251,9 @@ export interface EditorData {
     nodeId?: string;
     /** 虚拟节点主节点名称。 */
     mainLabel?: string;
+    /** 阶段节点种类与所属模式（属性面板按当前界面语言渲染阶段名）。 */
+    stageKind?: 'start' | 'end' | 'pause';
+    mode?: 'mode1' | 'mode2';
     /** Team 成员（画布节点解析）。 */
     members?: Array<{
         id: string;

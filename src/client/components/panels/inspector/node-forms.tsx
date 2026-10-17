@@ -6,14 +6,14 @@ import type { Dict } from '../../../i18n.js'
 import { Field } from '../form-field.js'
 import { NameField } from './form-primitives.js'
 
-/** 阶段属性只读（无描述字段，无保存按钮）。 */
-export function StageForm({ data, copy, nodeLabel }: { data: Record<string, unknown>; copy: Dict; nodeLabel: string }) {
+/** 阶段属性只读（无描述字段，无保存按钮）；名称由调用方按界面语言注入。 */
+export function StageForm({ copy, nodeLabel }: { copy: Dict; nodeLabel: string }) {
   return (
     <div>
-      <h3>{nodeLabel || String(data.label ?? '')}</h3>
+      <h3>{nodeLabel}</h3>
       <div className="wf-pathbox">
         <span className="wf-pathbox__label">{copy.label}</span>
-        <span className="wf-pathbox__value">{String(data.label ?? '')}</span>
+        <span className="wf-pathbox__value">{nodeLabel}</span>
       </div>
       <span className="wf-hint">{copy.stageReadonlyHint}</span>
     </div>

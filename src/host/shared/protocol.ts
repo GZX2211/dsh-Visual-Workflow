@@ -620,3 +620,8 @@ export const ERR_EXPERIENCE_RECALL_FAILED = 'WF_EXPERIENCE_RECALL_FAILED'
  */
 export const ERR_EXPERIENCE_FEEDBACK_FAILED = 'WF_EXPERIENCE_FEEDBACK_FAILED'
 
+/** Persisted stage labels are a storage contract, independent of the UI language. */
+export const STAGE_LABELS = {
+  mode1: { start: '启动', end: '结束', pause: '暂停' },
+  mode2: { start: '输入', end: '输出', pause: '暂停' },
+} as const

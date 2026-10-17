@@ -367,3 +367,16 @@ export declare const ERR_EXPERIENCE_RECALL_FAILED = "WF_EXPERIENCE_RECALL_FAILED
  * 消费方语义：本次评价未落库，调用方可稍后在任务收尾阶段重试；已有评价历史一律不被改写。
  */
 export declare const ERR_EXPERIENCE_FEEDBACK_FAILED = "WF_EXPERIENCE_FEEDBACK_FAILED";
+/** Persisted stage labels are a storage contract, independent of the UI language. */
+export declare const STAGE_LABELS: {
+    readonly mode1: {
+        readonly start: "启动";
+        readonly end: "结束";
+        readonly pause: "暂停";
+    };
+    readonly mode2: {
+        readonly start: "输入";
+        readonly end: "输出";
+        readonly pause: "暂停";
+    };
+};

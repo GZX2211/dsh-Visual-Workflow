@@ -22,6 +22,7 @@ import { GroupForm, ProxyForm, StageForm } from './node-forms.js'
 import { LinePanel, WorkflowForm } from './flow-forms.js'
 import { AssetVersions } from './asset-versions.js'
 import { ExperienceForm } from './experience-form.js'
+import { stageNodeLabelOf } from '../../../lib/graph-handles.js'
 
 export interface InspectorProps {
   copy: Dict
@@ -110,9 +111,14 @@ export function Inspector(props: InspectorProps) {
       case 'group':
         content = <GroupForm data={data} copy={t} members={editorData.members} onPatch={onPatch} onLoadMd={onLoadGroupMd} onRemoveMember={onRemoveMember} />
         break
-      case 'stage':
-        content = <StageForm data={data} copy={t} nodeLabel={String(data.label ?? '')} />
+      case 'stage': {
+        // 阶段名按当前界面语言渲染；存储值仍是中文规范值（由保存路径保证）。
+        const stageLabel = editorData.stageKind
+          ? stageNodeLabelOf(editorData.mode ?? 'mode1', editorData.stageKind, t.nodeKinds)
+          : String(data.label ?? '')
+        content = <StageForm copy={t} nodeLabel={stageLabel} />
         break
+      }
       case 'proxy':
         content = <ProxyForm data={data} copy={t} onPatch={onPatch} mainLabel={editorData.mainLabel ?? ''} />
         break

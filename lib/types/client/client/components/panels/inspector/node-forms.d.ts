@@ -1,7 +1,6 @@
 import type { Dict } from '../../../i18n.js';
-/** 阶段属性只读（无描述字段，无保存按钮）。 */
-export declare function StageForm({ data, copy, nodeLabel }: {
-    data: Record<string, unknown>;
+/** 阶段属性只读（无描述字段，无保存按钮）；名称由调用方按界面语言注入。 */
+export declare function StageForm({ copy, nodeLabel }: {
     copy: Dict;
     nodeLabel: string;
 }): import("react").JSX.Element;
