@@ -1,9 +1,11 @@
 // src/host/tools/wf-graph-patch/apply.ts
 //
-// wf_graph_patch 的**纯函数内核**（自主编排方案 §4.2 A/C 组）：
-//   - applyGraphOps：按序应用图结构操作，返回新文档（不改写入参，深拷贝语义）；
-//   - applyMarkOp：运行状态标记的**状态机纯函数**（run 持有者按此改写快照）；
-//   - ensureGroupConsistency：协作组与成员的 groupId 双向一致（复用画布侧同款语义）。
+// wf_graph_patch 的**纯函数内核**（自主编排方案 §4.2）：
+//   - applyGraphOpsInPlace：单份副本上的就地逐条应用（整批与容错两条路径共用的唯一实现，
+//     分支必须原子：先校验后改动）；
+//   - applyGraphOps：按序应用图结构操作，返回新文档（不改写入参，**一次**深拷贝语义）；
+//   - applyGraphOpsTolerant：逐条容错（失败 op 记入 errors，其余继续；整批只深拷贝一次）；
+//   - ensureGroupConsistency：Team 与成员的 groupId 双向一致（复用画布侧同款语义）。
 // 不触盘、不读时钟/随机源——落盘与校验在 tool.ts 执行层。
 
 import {
@@ -12,14 +14,14 @@ import {
   NODE_KINDS,
   makeLineId,
   makeNodeId,
-  newRoleNode,
   pairingTargetOf,
   stageLabel,
 } from '../../graph/index.js'
 import { WfError } from '../../orchestrator/index.js'
-import { OP_FIELD_SHAPES } from '../infrastructure/graph-op-contract.js'
+import { OP_FIELD_SHAPES } from '../../prompts/index.js'
+import { DEFAULT_OUTPUT_CONTRACT_TEXT } from '../../shared/protocol.js'
 import type { GraphNode, Handle, Line, WorkflowDocument } from '../../shared/graph-model.js'
-import type { GraphPatchOp, GraphPatchResult, MarkPatchOp, MarkPatchResult, PatchOpFailure } from './types.js'
+import type { GraphPatchOp, GraphPatchResult, PatchOpFailure } from './types.js'
 
 /**
  * 参数层错误（WF_BAD_ARGS）：字段没给对，**不是**图语义问题。
@@ -35,7 +37,7 @@ function resolveHandle(handle: string, kind: string, side: 'out' | 'in'): Handle
   const allowed = (side === 'out' ? def?.outputs : def?.inputs) ?? []
   if (!allowed.includes(handle as Handle)) {
     throw new WfError(
-      `connect: ${kind} 节点没有${side === 'out' ? '输出' : '输入'}点「${handle}」（可用：${allowed.join('/') || '无'}）`,
+      `connect: node kind "${kind}" has no ${side === 'out' ? 'output' : 'input'} handle "${handle}" (available: ${allowed.join('/') || 'none'})`,
       'WF_GRAPH_INVALID',
     )
   }
@@ -94,20 +96,20 @@ function wantsManagedFile(raw: Record<string, unknown>): boolean {
 }
 
 /**
- * 协作组一致性：成员节点的 groupId 与组的 memberIds 双向对齐。
+ * Team 一致性：成员节点的 groupId 与组的 memberIds 双向对齐。
  * 入组：写 node.data.groupId；出组：置 null。组不存在或成员不存在 → 稳定错误。
  */
 export function ensureGroupConsistency(nodes: GraphNode[], groupId: string, memberIds: string[]): GraphNode[] {
   const group = nodes.find((node) => node.id === groupId)
   if (!group || group.kind !== 'group') {
-    throw new WfError(`WF_GRAPH_INVALID: collaboration group not found: ${groupId}`, 'WF_GRAPH_INVALID')
+    throw new WfError(`WF_GRAPH_INVALID: Team not found: ${groupId}`, 'WF_GRAPH_INVALID')
   }
   const unique = [...new Set(memberIds.map(String).filter(Boolean))]
   for (const memberId of unique) {
     const member = nodes.find((node) => node.id === memberId)
-    if (!member) throw new WfError(`WF_GRAPH_INVALID: collaboration group member not found: ${memberId}`, 'WF_GRAPH_INVALID')
+    if (!member) throw new WfError(`WF_GRAPH_INVALID: Team member not found: ${memberId}`, 'WF_GRAPH_INVALID')
     if (member.kind !== 'agent' && member.kind !== 'parent') {
-      throw new WfError(`WF_GRAPH_INVALID: a collaboration group member must be a role node (${memberId} is ${member.kind})`, 'WF_GRAPH_INVALID')
+      throw new WfError(`WF_GRAPH_INVALID: a Team member must be a role node (${memberId} is ${member.kind})`, 'WF_GRAPH_INVALID')
     }
   }
   return nodes.map((node) => {
@@ -126,19 +128,14 @@ export function ensureGroupConsistency(nodes: GraphNode[], groupId: string, memb
 }
 
 /**
- * 虚拟节点 data 归一化（P3；自主编排方案 §5.2 扩展1）：只保留 `label` / `role`。
- * `role` 越界（既不是 executor 也不是 milestone）→ WF_GRAPH_INVALID；
- * 归一化后无有效字段则返回 undefined（调用方删除 data，保持文档形状最小）。
+ * 虚拟节点 data 归一化：只保留 `label`（画布显示名）。
+ * 未知字段一律静默丢弃（含退役字段），归一化后无有效字段则返回 undefined
+ * （调用方删除 data，保持文档形状最小）。
  */
 function normalizeProxyData(raw: Record<string, unknown>): Record<string, unknown> | undefined {
-  const role = raw?.role
-  if (role !== undefined && role !== null && role !== 'executor' && role !== 'milestone') {
-    throw new WfError(`WF_GRAPH_INVALID: proxy data.role must be executor or milestone (received ${String(role)})`, 'WF_GRAPH_INVALID')
-  }
   const out: Record<string, unknown> = {}
   const label = raw?.label
   if (label !== undefined && label !== null && String(label).trim()) out.label = String(label).trim()
-  if (role === 'executor' || role === 'milestone') out.role = role
   return Object.keys(out).length > 0 ? out : undefined
 }
 
@@ -193,6 +190,20 @@ export function applyRoleNodeCreateDefaults(raw: unknown): Record<string, unknow
 }
 
 /**
+ * 创建路径的输出契约默认值：agent 节点未提供 outputSchema 时写入默认契约文本，
+ * 与画布新建（graph/model.ts 的 newRoleNode）保持一致——界面显示、运行期注入与磁盘同值。
+ * 父代理不参与节点交接，故不落默认；显式传入（含空串）一律不覆盖，空串即「明确清空」。
+ */
+export function applyRoleNodeOutputContractDefault(
+  data: Record<string, unknown>,
+  kind: 'parent' | 'agent',
+): Record<string, unknown> {
+  if (kind !== 'agent') return data
+  if (data.outputSchema !== undefined && data.outputSchema !== null) return data
+  return { ...data, outputSchema: DEFAULT_OUTPUT_CONTRACT_TEXT }
+}
+
+/**
  * 角色节点 data 补全（图结构补丁的**唯一规范化入口**）。
  *
  * 为什么必须有（2026.09 实机取证）：ops 是自由对象，`create_node` 只把 raw 原样落盘，
@@ -226,25 +237,72 @@ export function normalizeRoleNodeData(raw: unknown): Record<string, unknown> {
   }
 }
 
-/**
- * 应用图结构操作（按序，纯函数）。
- * 失败一律抛 WfError（稳定 code），调用方据此返回带修复建议的补丁错误。
- */
-export function applyGraphOps(input: {
-  doc: WorkflowDocument
-  ops: GraphPatchOp[]
-}): GraphPatchResult {
-  const doc = cloneDoc(input.doc)
-  const createdNodeIds: string[] = []
-  const removedNodeIds: string[] = []
-  const updatedNodeIds: string[] = []
-  const connectedLineIds: string[] = []
-  const disconnectedLineIds: string[] = []
+/** 逐 op 结果收集器（整批路径与容错路径共用；只在 op 成功后才写入）。 */
+interface OpOutcome {
+  createdNodeIds: string[]
+  removedNodeIds: string[]
+  updatedNodeIds: string[]
+  connectedLineIds: string[]
+  disconnectedLineIds: string[]
   /** 被归一化为文本型的 file 节点（D-07；工具层据此出 warning）。 */
-  const fileNodeTextOnlyIds: string[] = []
-  const mode: 'mode1' | 'mode2' = doc.mode === 'mode2' ? 'mode2' : 'mode1'
+  fileNodeTextOnlyIds: string[]
+}
 
-  for (const op of input.ops ?? []) {
+function emptyOpOutcome(): OpOutcome {
+  return {
+    createdNodeIds: [],
+    removedNodeIds: [],
+    updatedNodeIds: [],
+    connectedLineIds: [],
+    disconnectedLineIds: [],
+    fileNodeTextOnlyIds: [],
+  }
+}
+
+/**
+ * 父代理节点只能由用户手工调整（用户裁决 2026-10）：wf_graph_patch 只服务「编排子代理」。
+ * 父代理经它增删改自身节点或连线，等于重写自己的运行时角色——父代理是否被流程线驱动，
+ * 会直接改变它自己的执行模式（纯编排 / 编排+自执行 / 纯执行）。
+ */
+function rejectParentSelfEdit(nodeId: string, opName: string): never {
+  throw new WfError(
+    `WF_PARENT_SELF_EDIT: ${opName}: the parent-agent node "${nodeId}" can only be adjusted by the user on the canvas; `
+      + 'the parent agent must not orchestrate itself — coordinate child nodes with wf_run_node / wf_send_message instead',
+    'WF_PARENT_SELF_EDIT',
+  )
+}
+
+/** 目标节点是父代理时拒绝（改图写路径共用；节点不存在时由调用方另行处理）。 */
+function assertNotParentNode(doc: WorkflowDocument, nodeId: string, opName: string): void {
+  const node = doc.nodes.find((item) => item.id === nodeId)
+  if (node?.kind === 'parent') rejectParentSelfEdit(nodeId, opName)
+}
+
+/** 连线任一端是父代理时拒绝（连/断父代理节点的流程线都会改变它的执行模式）。 */
+function assertNoParentEndpoint(doc: WorkflowDocument, source: string, target: string, opName: string): void {
+  for (const nodeId of [source, target]) {
+    if (doc.nodes.some((item) => item.id === nodeId && item.kind === 'parent')) rejectParentSelfEdit(nodeId, opName)
+  }
+}
+
+/**
+ * **就地**按序应用图结构操作（内部）：改动直接落在传入的 doc 上，成功项写入 outcome。
+ *
+ * 为什么要就地：整图深拷贝按 op 计费（每条 op 都要重算一次全图），N 条 op 即 N 次全图往返；
+ * 一次深拷贝 + 逐条就地让拷贝次数与 op 数无关。
+ *
+ * **原子性是本函数的硬前提**：调用方在同一份副本上连续推进，没有第二份副本可回退，
+ * 因此每个分支都必须先完成全部可能抛错的校验，再改动 doc 与 outcome——
+ * 「失败 op 不污染后续判定基础」由此保证，而不是由「内部副本 + 整份丢弃」保证。
+ * （容错层逐条调用，传单元素数组；严格应用器一次传入全部 op。）
+ */
+function applyGraphOpsInPlace(
+  doc: WorkflowDocument,
+  ops: readonly GraphPatchOp[],
+  mode: 'mode1' | 'mode2',
+  outcome: OpOutcome,
+): void {
+  for (const op of ops) {
     switch (op.op) {
       case 'create_node': {
         const opTop = op as unknown as Record<string, unknown>
@@ -255,18 +313,19 @@ export function applyGraphOps(input: {
           // 以前这里只报「非法节点种类「」」，模型无法定位到自己少了一层 node 包装。
           const flattened = 'kind' in opTop || 'data' in opTop
           badArgs(
-            `create_node: 缺少 node 对象${flattened ? '（检测到 kind/data 被直接写在了 op 顶层）' : ''}——正确形状：${OP_FIELD_SHAPES.create_node}`,
+            `create_node: missing the node object${flattened ? ' (kind/data was written directly on the op instead of inside node)' : ''}; correct shape: ${OP_FIELD_SHAPES.create_node}`,
           )
         }
         const raw = opTop.node as Record<string, unknown>
         const kind = String(raw.kind ?? '').trim()
         if (!kind) {
-          badArgs(`create_node: node.kind 缺失——正确形状：${OP_FIELD_SHAPES.create_node}`)
+          badArgs(`create_node: node.kind is required; correct shape: ${OP_FIELD_SHAPES.create_node}`)
         }
         if (!NODE_KINDS.includes(kind as GraphNode['kind'])) {
           throw new WfError(`WF_GRAPH_INVALID: create_node: invalid node kind "${kind}" (allowed: ${NODE_KINDS.join('/')})`, 'WF_GRAPH_INVALID')
         }
         const id = String(raw.id ?? '').trim() || makeNodeId()
+        if (kind === 'parent') rejectParentSelfEdit(id, 'create_node')
         if (doc.nodes.some((node) => node.id === id)) {
           throw new WfError(`WF_GRAPH_INVALID: create_node: node id already exists "${id}"`, 'WF_GRAPH_INVALID')
         }
@@ -283,7 +342,10 @@ export function applyGraphOps(input: {
           ;(node as { data: { label: string } }).data = { label: stageLabelOf(node.kind, mode) }
         } else if (node.kind === 'parent' || node.kind === 'agent') {
           // 角色节点 data 补全（缺 data 也不崩：按空对象补默认值）
-          ;(node as { data: Record<string, unknown> }).data = normalizeRoleNodeData(applyRoleNodeCreateDefaults(raw.data))
+          const withCreateDefaults = applyRoleNodeCreateDefaults(raw.data)
+          ;(node as { data: Record<string, unknown> }).data = normalizeRoleNodeData(
+            applyRoleNodeOutputContractDefault(withCreateDefaults, node.kind),
+          )
         }
         if (node.kind === 'proxy') {
           const sourceId = String((raw as { proxySourceId?: unknown }).proxySourceId ?? '')
@@ -291,7 +353,7 @@ export function applyGraphOps(input: {
           if (!source || (source.kind !== 'agent' && source.kind !== 'parent')) {
             throw new WfError(`WF_GRAPH_INVALID: create_node: a proxy node must reference an existing role node (${sourceId || 'proxySourceId not provided'})`, 'WF_GRAPH_INVALID')
           }
-          // P3：虚拟节点 data 只认 label / role（闸门识别的事实源）
+          // 虚拟节点 data 只认 label（未知字段静默丢弃）
           const proxyData = normalizeProxyData((raw.data ?? {}) as Record<string, unknown>)
           if (proxyData) (node as { data?: Record<string, unknown> }).data = proxyData
           else delete (node as { data?: unknown }).data
@@ -302,7 +364,7 @@ export function applyGraphOps(input: {
             label: String(data.label ?? node.id),
             collabPrompt: String(data.collabPrompt ?? ''),
             memberIds: [],
-            // 组卡片尺寸（视图数据；缺省与画布默认一致）
+            // Team 卡片尺寸（视图数据；缺省与画布默认一致）
             size: (data.size as { w: number; h: number } | undefined) ?? { w: 300, h: 220 },
           }
         }
@@ -310,17 +372,18 @@ export function applyGraphOps(input: {
           // 写图只产文本型文件节点（D-07）：受管文件必须已存在，会挡掉「未来要产出的交付文件」
           const normalized = normalizeFileNodeData((raw.data ?? {}) as Record<string, unknown>, id)
           ;(node as unknown as { data: Record<string, unknown> }).data = normalized.data
-          if (normalized.normalized) fileNodeTextOnlyIds.push(id)
+          if (normalized.normalized) outcome.fileNodeTextOnlyIds.push(id)
         }
         doc.nodes.push(node)
-        createdNodeIds.push(id)
+        outcome.createdNodeIds.push(id)
         break
       }
       case 'remove_node': {
         const nodeId = String(op.nodeId ?? '').trim()
-        if (!nodeId) badArgs(`remove_node: nodeId 必填——正确形状：${OP_FIELD_SHAPES.remove_node}`)
+        if (!nodeId) badArgs(`remove_node: nodeId is required; correct shape: ${OP_FIELD_SHAPES.remove_node}`)
         const node = doc.nodes.find((item) => item.id === nodeId)
         if (!node) throw new WfError(`WF_GRAPH_INVALID: remove_node: node not found "${nodeId}"`, 'WF_GRAPH_INVALID')
+        assertNotParentNode(doc, nodeId, 'remove_node')
         const cascade = op.cascade !== false
         const removed = new Set<string>([nodeId])
         if (cascade) {
@@ -331,7 +394,7 @@ export function applyGraphOps(input: {
         }
         doc.lines = doc.lines.filter((line) => !removed.has(line.source) && !removed.has(line.target))
         doc.nodes = doc.nodes.filter((item) => !removed.has(item.id))
-        // 组内成员被删：从各组成员清单移除（组卡片保持可用）
+        // 组内成员被删：从各组成员清单移除（Team 卡片保持可用）
         doc.nodes = doc.nodes.map((item) => {
           if (item.kind !== 'group') return item
           const members = (item.data.memberIds ?? []).filter((memberId) => !removed.has(memberId))
@@ -340,20 +403,21 @@ export function applyGraphOps(input: {
             : { ...item, data: { ...item.data, memberIds: members } } as GraphNode
         })
         if (node.kind === 'group') {
-          // 删除组卡片：成员出组（groupId 置 null）
+          // 删除 Team 卡片：成员出组（groupId 置 null）
           doc.nodes = doc.nodes.map((item) => {
             if (item.kind !== 'agent' && item.kind !== 'parent') return item
             return (item.data.groupId === nodeId) ? { ...item, data: { ...item.data, groupId: null } } as GraphNode : item
           })
         }
-        removedNodeIds.push(...removed)
+        outcome.removedNodeIds.push(...removed)
         break
       }
       case 'update_node_data': {
         const nodeId = String(op.nodeId ?? '').trim()
-        if (!nodeId) badArgs(`update_node_data: nodeId 必填——正确形状：${OP_FIELD_SHAPES.update_node_data}`)
+        if (!nodeId) badArgs(`update_node_data: nodeId is required; correct shape: ${OP_FIELD_SHAPES.update_node_data}`)
         const node = doc.nodes.find((item) => item.id === nodeId)
         if (!node) throw new WfError(`WF_GRAPH_INVALID: update_node_data: node not found "${nodeId}"`, 'WF_GRAPH_INVALID')
+        assertNotParentNode(doc, nodeId, 'update_node_data')
         if (node.kind === 'start' || node.kind === 'end' || node.kind === 'pause') {
           throw new WfError(`WF_GRAPH_INVALID: update_node_data: stage-node properties (${node.kind}) are locked; only the label can change and it is system-managed`, 'WF_GRAPH_INVALID')
         }
@@ -363,17 +427,20 @@ export function applyGraphOps(input: {
         // 角色节点：父代理不可配置字段直接剥离——保留节点现值（用户手动改过的值不被覆盖）
         const patch = isRoleNode ? stripParentUnconfigurableRoleFields(rawPatch) : rawPatch
         if (node.kind === 'proxy') {
-          // 虚拟节点：引用字段在顶层；data 只认 label / role（P3 闸门识别）
+          // 虚拟节点：引用字段在顶层；data 只认 label
+          let nextProxySourceId: string | undefined
           if ('proxySourceId' in patch) {
             const sourceId = String(patch.proxySourceId ?? '')
             const source = doc.nodes.find((item) => item.id === sourceId)
             if (!source || (source.kind !== 'agent' && source.kind !== 'parent')) {
               throw new WfError(`WF_GRAPH_INVALID: update_node_data: a proxy node must reference an existing role node (${sourceId})`, 'WF_GRAPH_INVALID')
             }
-            ;(node as { proxySourceId: string }).proxySourceId = sourceId
+            nextProxySourceId = sourceId
           }
           const merged = { ...((node as { data?: Record<string, unknown> }).data ?? {}), ...patch }
+          // 先规范化再落账：本函数必须原子，失败 op 不得留下半成品引用。
           const proxyData = normalizeProxyData(merged)
+          if (nextProxySourceId !== undefined) (node as { proxySourceId: string }).proxySourceId = nextProxySourceId
           if (proxyData) (node as { data?: Record<string, unknown> }).data = proxyData
           else delete (node as { data?: unknown }).data
         } else if (node.kind === 'file') {
@@ -382,7 +449,7 @@ export function applyGraphOps(input: {
           if (wantsManagedFile(patch)) {
             const normalized = normalizeFileNodeData({ ...(target.data ?? {}), ...patch }, nodeId)
             target.data = normalized.data
-            if (normalized.normalized) fileNodeTextOnlyIds.push(nodeId)
+            if (normalized.normalized) outcome.fileNodeTextOnlyIds.push(nodeId)
           } else {
             target.data = { ...(target.data ?? {}), ...patch }
           }
@@ -394,21 +461,21 @@ export function applyGraphOps(input: {
           // 角色节点：合并后再过一次规范化（补全被手改/导入数据抹掉的必填字段）
           target.data = isRoleNode ? normalizeRoleNodeData(next) : next
         }
-        updatedNodeIds.push(nodeId)
+        outcome.updatedNodeIds.push(nodeId)
         break
       }
       case 'connect': {
         const opc = op as unknown as Record<string, unknown>
         if (opc.from !== undefined || opc.to !== undefined) {
           // 实测最常见的写法错误：端点字段猜成 from/to（契约是 source/target）。
-          badArgs(`connect: 端点字段是 source/target（不是 from/to）——正确形状：${OP_FIELD_SHAPES.connect}`)
+          badArgs(`connect: the endpoint fields are source/target (not from/to); correct shape: ${OP_FIELD_SHAPES.connect}`)
         }
         const source = String(opc.source ?? '').trim()
         const target = String(opc.target ?? '').trim()
         if (!source || !target) {
           badArgs(
-            `connect: source/target 必填（收到 source=${JSON.stringify(opc.source ?? null)}, target=${JSON.stringify(opc.target ?? null)}）`
-            + `——正确形状：${OP_FIELD_SHAPES.connect}`,
+            `connect: source/target are required (received source=${JSON.stringify(opc.source ?? null)}, target=${JSON.stringify(opc.target ?? null)}); `
+            + `correct shape: ${OP_FIELD_SHAPES.connect}`,
           )
         }
         const sourceNode = doc.nodes.find((item) => item.id === source)
@@ -419,6 +486,7 @@ export function applyGraphOps(input: {
         if (!targetNode) {
           throw new WfError(`WF_GRAPH_INVALID: connect: target node not found "${target}" (node ids come from the orchestration directive or the wf_org_catalog workflow skeleton)`, 'WF_GRAPH_INVALID')
         }
+        assertNoParentEndpoint(doc, source, target, 'connect')
         // handle：缺省按流程通道补全。
         // 为什么不能沿用旧的 `?? ''` 兜底：'' 会写出 isFlowLine()=false 的**幽灵线**——
         // 该线在流程 DAG 中不存在，检查器随后报「启动节点没有流程出线 / 悬空节点」，
@@ -444,12 +512,12 @@ export function applyGraphOps(input: {
           }
           if (!CONDITION_TYPES.includes(conditionType as (typeof CONDITION_TYPES)[number])) {
             badArgs(
-              `connect: condition.type 必须是 ${CONDITION_TYPES.join('/')}（收到 ${JSON.stringify(conditionType)}）`
-              + `——漏写 type 会让条件线静默退化成普通流程线；正确形状：${OP_FIELD_SHAPES.connect}`,
+              `connect: condition.type must be ${CONDITION_TYPES.join('/')} (received ${JSON.stringify(conditionType)}); `
+              + `omitting type silently degrades a condition line into a plain flow line; correct shape: ${OP_FIELD_SHAPES.connect}`,
             )
           }
           if (conditionType === 'content' && !conditionLabel) {
-            badArgs(`connect: condition.type='content' 必须带 label（条件内容文本）——正确形状：${OP_FIELD_SHAPES.connect}`)
+            badArgs(`connect: condition.type='content' requires a label (the condition text); correct shape: ${OP_FIELD_SHAPES.connect}`)
           }
         }
         if (doc.lines.some((line) => line.source === source && line.target === target
@@ -467,32 +535,42 @@ export function applyGraphOps(input: {
             ? { condition: { type: conditionType as 'pass' | 'fail' | 'content', ...(conditionLabel ? { label: conditionLabel } : {}) } }
             : {}),
         })
-        connectedLineIds.push(lineId)
+        outcome.connectedLineIds.push(lineId)
         break
       }
       case 'disconnect': {
         const before = doc.lines.length
+        // 父代理节点的连线同样不可由父代理自己断开（会改变它自己的执行模式）
         if (op.lineId) {
-          doc.lines = doc.lines.filter((line) => line.id !== op.lineId)
+          const line = doc.lines.find((item) => item.id === op.lineId)
+          if (line) assertNoParentEndpoint(doc, line.source, line.target, 'disconnect')
+        } else if (op.key) {
+          assertNoParentEndpoint(doc, op.key.source, op.key.target, 'disconnect')
+        }
+        // 先算出目标连线集再落账：失败（没有匹配连线）时不得改动 doc。
+        let next: Line[]
+        if (op.lineId) {
+          next = doc.lines.filter((line) => line.id !== op.lineId)
         } else if (op.key) {
           const key = op.key
-          doc.lines = doc.lines.filter((line) => !(line.source === key.source && line.target === key.target
+          next = doc.lines.filter((line) => !(line.source === key.source && line.target === key.target
             && line.sourceHandle === key.sourceHandle && line.targetHandle === key.targetHandle))
         } else {
-          badArgs(`disconnect: 需要 lineId 或 key（四个端点字段）——正确形状：${OP_FIELD_SHAPES.disconnect}`)
+          badArgs(`disconnect: lineId or key (all four endpoint fields) is required; correct shape: ${OP_FIELD_SHAPES.disconnect}`)
         }
-        if (doc.lines.length === before) {
+        if (next.length === before) {
           throw new WfError('WF_GRAPH_INVALID: disconnect: no matching line found (lines come from the orchestration directive topology or the wf_org_catalog workflow skeleton)', 'WF_GRAPH_INVALID')
         }
+        doc.lines = next
         break
       }
       case 'create_group': {
         const groupId = String(op.groupId ?? '').trim()
-        if (!groupId) badArgs(`create_group: groupId 必填——正确形状：${OP_FIELD_SHAPES.create_group}`)
+        if (!groupId) badArgs(`create_group: groupId is required; correct shape: ${OP_FIELD_SHAPES.create_group}`)
         if (doc.nodes.some((item) => item.id === groupId)) {
           throw new WfError(`WF_GRAPH_INVALID: create_group: node id already exists "${groupId}"`, 'WF_GRAPH_INVALID')
         }
-        doc.nodes.push({
+        const withGroup = [...doc.nodes, {
           id: groupId,
           kind: 'group',
           position: { x: 0, y: 0 },
@@ -502,22 +580,23 @@ export function applyGraphOps(input: {
             memberIds: [],
             size: { w: 300, h: 220 },
           },
-        } as GraphNode)
-        createdNodeIds.push(groupId)
-        if (Array.isArray(op.memberIds) && op.memberIds.length > 0) {
-          doc.nodes = ensureGroupConsistency(doc.nodes, groupId, op.memberIds)
-        }
+        } as GraphNode]
+        // 成员校验可能抛错：先在临时数组上完成，成功后才写回 doc（原子性；见函数头）。
+        doc.nodes = Array.isArray(op.memberIds) && op.memberIds.length > 0
+          ? ensureGroupConsistency(withGroup, groupId, op.memberIds)
+          : withGroup
+        outcome.createdNodeIds.push(groupId)
         break
       }
       case 'set_group_members': {
         const groupId = String(op.groupId ?? '').trim()
-        if (!groupId) badArgs(`set_group_members: groupId 必填——正确形状：${OP_FIELD_SHAPES.set_group_members}`)
+        if (!groupId) badArgs(`set_group_members: groupId is required; correct shape: ${OP_FIELD_SHAPES.set_group_members}`)
         // 旧实现把缺失的 memberIds 兜底成 []，等于「悄悄清空全组成员」——破坏性默认值必须拒绝。
         if (!Array.isArray(op.memberIds)) {
-          badArgs(`set_group_members: memberIds 必须是数组（清空成员请显式传 []）——正确形状：${OP_FIELD_SHAPES.set_group_members}`)
+          badArgs(`set_group_members: memberIds must be an array (pass [] explicitly to clear members); correct shape: ${OP_FIELD_SHAPES.set_group_members}`)
         }
         doc.nodes = ensureGroupConsistency(doc.nodes, groupId, op.memberIds)
-        updatedNodeIds.push(groupId)
+        outcome.updatedNodeIds.push(groupId)
         break
       }
       default: {
@@ -525,26 +604,32 @@ export function applyGraphOps(input: {
       }
     }
   }
-
-  return {
-    doc: doc as unknown as GraphPatchResult['doc'],
-    createdNodeIds,
-    removedNodeIds,
-    updatedNodeIds,
-    connectedLineIds,
-    disconnectedLineIds,
-    fileNodeTextOnlyIds,
-  }
 }
 
 /**
- * 容错应用：逐条复用严格应用器，失败的 op 记入 errors 并跳过，其余操作继续。
+ * 应用图结构操作（按序，纯函数）：入参分毫不动，全部改动落在**一次**深拷贝出的副本上。
+ * 失败一律抛 WfError（稳定 code），调用方据此返回带修复建议的补丁错误。
+ */
+export function applyGraphOps(input: {
+  doc: WorkflowDocument
+  ops: GraphPatchOp[]
+}): GraphPatchResult {
+  const doc = cloneDoc(input.doc)
+  const outcome = emptyOpOutcome()
+  const mode: 'mode1' | 'mode2' = doc.mode === 'mode2' ? 'mode2' : 'mode1'
+  applyGraphOpsInPlace(doc, input.ops ?? [], mode, outcome)
+  return { doc, ...outcome }
+}
+
+/**
+ * 容错应用：逐条就地复用单 op 应用器，失败的 op 记入 errors 并跳过，其余操作继续。
  *
  * 为什么容错（而不是遇到第一条就停）：ops 之间存在有序依赖，父代理最常见的失败模式是
  * 一批里多条字段写错；一次只报一条会让它把同一批补丁反复重试，而失败清单一次列全后
  * 可以一轮改完。
- * 为什么逐条调用严格应用器：严格应用器在**内部副本**上推进，抛错时本层已成功的结果
- * 分毫未动——失败 op 既不污染后续 op 的判定基础，也不需要回滚逻辑。
+ * 为什么只拷贝一次：本层要按 op 隔离失败，而隔离不需要第二份副本——单 op 应用器**原子**
+ * （先校验后改动），失败时工作副本分毫未动，因此一次深拷贝即可，无需按 op 回滚或重拷贝；
+ * 判定基础与逐条严格应用逐字节等价。
  * 为什么只捕获 WfError：非 WfError 属于工具自身的缺陷，不能被伪装成「某条 op 写错了」。
  * 语义前提：调用方在 errors 非空时**整批不落盘**，因此返回的结果仅供错误报告与后续 op
  * 的判定基础使用。
@@ -554,25 +639,14 @@ export function applyGraphOpsTolerant(input: {
   ops: GraphPatchOp[]
 }): { result: GraphPatchResult; errors: PatchOpFailure[] } {
   const errors: PatchOpFailure[] = []
-  const createdNodeIds: string[] = []
-  const removedNodeIds: string[] = []
-  const updatedNodeIds: string[] = []
-  const connectedLineIds: string[] = []
-  const disconnectedLineIds: string[] = []
-  const fileNodeTextOnlyIds: string[] = []
-  let doc = input.doc
+  const outcome = emptyOpOutcome()
+  const doc = cloneDoc(input.doc)
+  const mode: 'mode1' | 'mode2' = doc.mode === 'mode2' ? 'mode2' : 'mode1'
   const ops = input.ops ?? []
   for (let index = 0; index < ops.length; index += 1) {
     const op = ops[index]
     try {
-      const applied = applyGraphOps({ doc, ops: [op] })
-      doc = applied.doc as unknown as WorkflowDocument
-      createdNodeIds.push(...applied.createdNodeIds)
-      removedNodeIds.push(...applied.removedNodeIds)
-      updatedNodeIds.push(...applied.updatedNodeIds)
-      connectedLineIds.push(...applied.connectedLineIds)
-      disconnectedLineIds.push(...applied.disconnectedLineIds)
-      fileNodeTextOnlyIds.push(...applied.fileNodeTextOnlyIds)
+      applyGraphOpsInPlace(doc, [op], mode, outcome)
     } catch (error) {
       if (!(error instanceof WfError)) throw error
       errors.push({
@@ -583,47 +657,5 @@ export function applyGraphOpsTolerant(input: {
       })
     }
   }
-  return {
-    result: {
-      doc: doc as unknown as GraphPatchResult['doc'],
-      createdNodeIds,
-      removedNodeIds,
-      updatedNodeIds,
-      connectedLineIds,
-      disconnectedLineIds,
-      fileNodeTextOnlyIds,
-    },
-    errors,
-  }
-}
-
-/**
- * 运行状态标记（C 组）纯函数：校验节点存在 + 闸门预算，给出标记结果。
- * 状态机分工（P3）：**「必须是当前闸门轮 / 当前闸门节点」由 runMarkGroup 判定**
- * （需要入口 entry 与解析后的画布），本函数只负责与单据无关的校验——
- * status 取值、节点是否在快照内、以及 status=ok 时的闸门预算（D-21：不含首次编排）。
- */
-export function applyMarkOp(input: {
-  op: MarkPatchOp
-  runId: string
-  nodeIds: string[]
-  /** 已用闸门次数（P3 预算判定用；本轮由宿主缝给出 0）。 */
-  milestoneUsed?: number
-  /** 元参数闸门上限（0 = 不限制）。 */
-  milestoneMax?: number
-}): MarkPatchResult {
-  const nodeId = String(input.op?.nodeId ?? '')
-  const status = input.op?.status
-  if (status !== 'ok' && status !== 'fail') {
-    throw new WfError('WF_GRAPH_INVALID: mark_node status must be ok or fail', 'WF_GRAPH_INVALID')
-  }
-  if (!input.nodeIds.includes(nodeId)) {
-    throw new WfError(`WF_MILESTONE_INVALID: mark_node: node "${nodeId}" is not in the current run snapshot`, 'WF_MILESTONE_INVALID')
-  }
-  const milestoneMax = Number(input.milestoneMax) || 0
-  const used = Math.max(0, Math.floor(Number(input.milestoneUsed) || 0))
-  if (milestoneMax > 0 && status === 'ok' && used >= milestoneMax) {
-    throw new WfError(`WF_MILESTONE_INVALID: the parent-agent gate budget is exhausted (${used}/${milestoneMax}; the first orchestration is not counted)`, 'WF_MILESTONE_INVALID')
-  }
-  return { nodeId, status, runId: input.runId }
+  return { result: { doc, ...outcome }, errors }
 }

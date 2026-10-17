@@ -1,10 +1,9 @@
 // src/host/orchestrator/runtime-observe.ts
 //
 // 编排运行时观察回写层（RuntimeObserve extends RuntimeComm）：subagent/end
-// 事件回写节点状态（ok/fail/react-capped）、唤醒 wait 阻塞与协作组聚合。
+// 事件回写节点状态（ok/fail/react-capped）、唤醒 wait 阻塞与成员待命（armed）判定。
 // 方法体逐字移动。
 
-import type { WorkflowDocument } from '../shared/graph-model.js'
 import { memberGroupId } from '../graph/index.js'
 import { lastAssistantText, setNodeStatus } from './snapshot.js'
 import { SUBAGENT_END_RETRY_DELAY_MS, SUBAGENT_END_RETRY_MAX } from './seams.js'
@@ -67,9 +66,9 @@ export class RuntimeObserve extends RuntimeComm {
       const outputText = lastAssistantText(info?.lastAssistantMessage, 0)
       // 软截停（护栏）：触达 ReAct 上限仍正常产出——标记 react-capped（非失败）
       const reactCapped = this.deps.runner.consumeReactCapped?.(childId) === true
-      // P0-1：协作组成员回合结束 ≠ 终态完成——它在协作组内仍可被 wf_ask_agent 唤醒，
-      // 落「armed/待命」中间态（显示为「等待」），避免被误判为终态 ok、组卡片提前 ok。
-      const inGroup = completed && !reactCapped && (await this.isGroupMemberOf(entry, meta.nodeId))
+      // P0-1：Team 成员回合结束 ≠ 终态完成——它在团队内仍可被 send_message 唤醒，
+      // 落「armed/待命」中间态（显示为「等待」），避免被误判为终态 ok。
+      const inGroup = completed && !reactCapped && (await this.teamMemberArmed(entry, meta.nodeId))
       const finalStatus: 'ok' | 'armed' | 'react-capped' | 'fail' = completed
         ? (reactCapped ? 'react-capped' : (inGroup ? 'armed' : 'ok'))
         : 'fail'
@@ -80,9 +79,6 @@ export class RuntimeObserve extends RuntimeComm {
         stopReason,
         recordTurn: true,
       })
-      // 协作组聚合：成员产出一轮后若组内全部成员均已产出且该组无挂起 ask → 组卡片记为 ok
-      // （「组内全部 ok -> 组卡片记为 ok」；只做回显，不干预父代理调度）
-      if (completed) await this.markGroupOkIfComplete(entry, meta.nodeId)
       await this.persistWarn(entry)
       // 唤醒阻塞等待（wait:true；与 subagent/end 共用同一完成通道）。armed 视同完成。
       const waitKey = `${s.id}:${meta.nodeId}`
@@ -116,51 +112,19 @@ export class RuntimeObserve extends RuntimeComm {
   }
 
   /**
-   * 协作组聚合：某成员产出一轮后，若其所属协作组全部成员均已「产出一轮」
-   * （armed/ok/react-capped），且该组当前无待回复 ask，把组卡片标记为 ok
-   * （只影响运行回显，不干预父代理调度）。组卡片单向推进：仅 pending → ok；
-   * 成员后续重试/失败不回退组卡片。流程读取失败时跳过聚合（下一次成员完成事件重试）。
+   * 成员回合结束的「待命（armed）」判定——成员运行的权威读源是**官方 roster**。
+   *
+   * 语义：成员一轮产出结束、但在团队内仍可被 send_message 唤醒，故不是终态。
+   *   - 官方 Team 可用：查官方成员状态，只有 `inactive`（当前无回合在执行）才算待命；
+   *     running/provisioning 说明仍在执行或创建，failed 说明成员已不可用（落 ok 会掩盖失败）。
+   *   - 官方不可用（成员已降级为普通可延续子代理）：退回图判定——是团队成员即待命。
+   * 查询/读图失败时保守返回 false（不阻断回写，落 ok，保留旧行为）。
+   *
+   * Team 卡片（包裹层）不参与运行事实：本层不再聚合、不再写组状态（用户裁决 2026-10）。
    */
-  private async markGroupOkIfComplete(entry: RunEntry, memberNodeId: string): Promise<void> {
-    const snapshot = entry.snapshot
-    if (snapshot.status !== 'running' && snapshot.status !== 'paused') return
-    let flow: WorkflowDocument
-    try {
-      flow = await this.currentResolvedFlow(entry)
-    } catch {
-      return
-    }
-    for (const group of flow.nodes) {
-      if (group.kind !== 'group' || !(group.data.memberIds ?? []).includes(memberNodeId)) continue
-      // 组完成 = 全部成员已产出一轮（armed/ok/react-capped）且该组无待回复 ask（P0-1 建议 2）
-      const allProduced = (group.data.memberIds ?? []).every((id) => {
-        const record = snapshot.nodes.find((n) => n.nodeId === id)
-        return record !== undefined && (record.status === 'armed' || record.status === 'ok' || record.status === 'react-capped')
-      })
-      if (!allProduced) continue
-      const memberSet = new Set(group.data.memberIds ?? [])
-      // 非阻塞协议下登记即「已发出但尚无回复」；有其一则不判组完成。
-      // 必须按 expiresAt 过滤：TTL 惰性清理只在通信调用进入时触发，若此处只看登记表，
-      // 过期未回复的 ask 会把组卡片永久卡在 running（直到下一次通信或 run 结束）。
-      const now = this.now()
-      const groupHasPendingAsk = Array.from(entry.asks.values()).some(
-        (ask) => ask.expiresAt > now && (ask.toNodeId === group.id || memberSet.has(ask.toNodeId)),
-      )
-      if (groupHasPendingAsk) continue
-      const current = snapshot.nodes.find((n) => n.nodeId === group.id)
-      // 组卡片由 wf_run_node(groupId) 置为 running，故 pending 与 running 都是可收敛状态；
-      // 组卡片单向推进（running/pending → ok），成员后续重试/失败不回退组卡片。
-      if (current && (current.status === 'pending' || current.status === 'running')) {
-        setNodeStatus(snapshot, group.id, 'ok', { output: '（协作组）全部成员已完成', now: this.now() })
-      }
-    }
-  }
-
-  /**
-   * 判断某 agent 节点是否属于某协作组（P0-1：组成员回合结束落 armed 而非 ok）。
-   * 流程读取失败时保守返回 false（不阻断，落 ok，保留旧行为）。
-   */
-  private async isGroupMemberOf(entry: RunEntry, nodeId: string): Promise<boolean> {
+  private async teamMemberArmed(entry: RunEntry, nodeId: string): Promise<boolean> {
+    const status = this.deps.runner.teamMemberStatusOf?.(entry.snapshot.sessionId, nodeId)
+    if (status !== undefined && status !== null) return status === 'inactive'
     try {
       const flow = await this.currentResolvedFlow(entry)
       return memberGroupId(flow, nodeId) !== null

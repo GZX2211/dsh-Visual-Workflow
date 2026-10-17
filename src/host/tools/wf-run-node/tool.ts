@@ -13,7 +13,8 @@
 
 import { WF_RUN_NODE } from '../../shared/protocol.js'
 import { callerOf, type WfToolsHost } from '../infrastructure/caller.js'
-import { defineTool, type ToolDefinitionLike } from '../infrastructure/define-tool.js'
+import { defineTool } from '../infrastructure/define-tool.js'
+import { registerTool, requireToolsService } from '../infrastructure/register-tool.js'
 import { textRender } from '../infrastructure/text-render.js'
 
 /**
@@ -24,21 +25,18 @@ export function registerWfRunNode(
   ctx: { get(name: string): unknown },
   host: WfToolsHost,
 ): () => void {
-  const tools = ctx.get('tools') as { register(def: ToolDefinitionLike): () => void } | null | undefined
-  if (!tools || typeof tools.register !== 'function') {
-    throw new Error('[visual-workflow] tools 服务不可用，无法注册 wf_run_node')
-  }
+  const tools = requireToolsService(ctx, WF_RUN_NODE)
 
   const definition = defineTool({
     name: WF_RUN_NODE,
     description:
       'Start one agent node of a mode1 orchestration run asynchronously and return the child id immediately; do not wait for the child. ' +
-      'A collaboration-group card starts the whole group as official Agent Team members and returns their list. ' +
+      'A node that belongs to a Team card starts as an official Team member (the official teammate path); other nodes start as ordinary child agents. ' +
       'A paused, stopped, or interrupted run is resumed before the node starts; a pause-node id pauses the run instead and returns paused.',
     parameters: {
-      nodeId: { type: 'string', required: true, description: 'Node id from the flow definition file (nodes[].id): a role node, or a collaboration-group card to start that whole group. A proxy node is a real flow step: pass the proxy id and never skip a proxy or pass its source node id instead.' },
-      thinking: { type: 'string', description: 'Optional reasoning-effort override for this node run; for a group it applies to every member.' },
-      iterationLimit: { type: 'number', description: 'Optional ReAct iteration-limit override (soft cap: the child concludes); for a group it applies to every member.' },
+      nodeId: { type: 'string', required: true, description: 'Node id from the flow definition file (nodes[].id): a role node, including a node that belongs to a Team card (a Team card itself is only a wrapper and is rejected). A proxy node is a real flow step: pass the proxy id and never skip a proxy or pass its source node id instead.' },
+      thinking: { type: 'string', description: 'Optional reasoning-effort override for this node run.' },
+      iterationLimit: { type: 'number', description: 'Optional ReAct iteration-limit override (soft cap: the child concludes).' },
       retryLimit: { type: 'number', description: 'Optional per-node retry-limit override (hard guard).' },
     },
     output: {
@@ -47,21 +45,8 @@ export function registerWfRunNode(
         additionalProperties: false,
         properties: {
           nodeId: { type: 'string', required: true, description: 'The resolved node id that was started.' },
-          status: { type: 'string', required: true, enum: ['started', 'paused'] as const, description: 'started: async start (a collaboration group also returns its member list); paused: pause gate.' },
-          childId: { type: 'string', description: 'The node child session id (started path). Absent when a collaboration group started several member sessions.' },
-          members: {
-            type: 'array',
-            description: 'Collaboration group only: one row per member teammate.',
-            items: {
-              type: 'object',
-              additionalProperties: false,
-              properties: {
-                nodeId: { type: 'string', required: true, description: 'Member role node id.' },
-                target: { type: 'string', required: true, description: 'Official teammate name; use it as the send_message target.' },
-                childId: { type: 'string', required: true, description: 'Member session id.' },
-              },
-            },
-          },
+          status: { type: 'string', required: true, enum: ['started', 'paused'] as const, description: 'started: async start; paused: pause gate.' },
+          childId: { type: 'string', description: 'The node child session id (started path).' },
         },
       },
       render: textRender,
@@ -69,12 +54,5 @@ export function registerWfRunNode(
     execute: (args, exec) => host.orchestrator.wfRunNode(callerOf(exec), args ?? {}, exec.signal, { expectedMode: 'mode1' }),
   })
 
-  const dispose = tools.register(definition)
-  return () => {
-    try {
-      dispose()
-    } catch {
-      // 注销尽力而为（工具可能已被外部注销）
-    }
-  }
+  return registerTool(tools, definition)
 }

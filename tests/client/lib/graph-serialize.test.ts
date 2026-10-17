@@ -6,6 +6,9 @@
 // tests/client/hooks/graph-serialize-convergence.test.tsx。
 
 import { describe, expect, it } from 'vitest'
+import { en, zh } from '../../../src/client/i18n.js'
+import { newRoleNode, validateFlow } from '../../../src/host/graph/index.js'
+import { stageTemplateKinds } from '../../../src/client/lib/graph-handles.js'
 import { serializeFlow, serializeLines, serializeNodes } from '../../../src/client/lib/graph-serialize.js'
 import type { CanvasEdge, CanvasNode } from '../../../src/client/lib/canvas-model.js'
 import type { WorkflowDocument } from '../../../src/host/shared/graph-model.js'
@@ -68,5 +71,25 @@ describe('serializeFlow', () => {
     expect(out).toMatchObject({ id: 'wf-1', sessionId: 's-1', mode: 'mode1', name: '实例', description: '说明', revision: 3 })
     expect(out.nodes).toEqual(serializeNodes(nodes))
     expect(out.lines).toEqual(serializeLines(edges))
+  })
+})
+
+describe('localized stage labels across the client/host boundary', () => {
+  it.each([
+    ['mode1', en], ['mode1', zh], ['mode2', en], ['mode2', zh],
+  ] as const)('%s stages serialize to a graph accepted by host validation', (mode, copy) => {
+    const nodes: CanvasNode[] = stageTemplateKinds(mode, copy.nodeKinds).map(({ kind, label }) => ({
+      id: kind, kind, position: { x: 0, y: 0 }, data: { label, swapPorts: false, futureField: 'keep' },
+    }))
+    const original = structuredClone(nodes)
+    const saved = serializeFlow({ ...flow, mode }, nodes, [])
+
+    expect(validateFlow({ ...saved, nodes: [...saved.nodes, newRoleNode('parent', 'Parent')] })).toEqual({ ok: true, issues: [] })
+    expect(saved.nodes.map((node) => node.data?.label)).toEqual(
+      mode === 'mode1' ? ['启动', '结束', '暂停'] : ['输入', '输出'],
+    )
+    expect(saved.nodes.every((node) => (node.data as Record<string, unknown>).futureField === 'keep')).toBe(true)
+    expect(nodes).toEqual(original)
+    expect(serializeFlow(saved, saved.nodes.map((node) => ({ ...node, data: { ...node.data } })), []).nodes).toEqual(saved.nodes)
   })
 })

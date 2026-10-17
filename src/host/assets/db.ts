@@ -1,14 +1,15 @@
 // src/host/assets/db.ts
 //
-// 资产库连接与事务：打开/关闭、PRAGMA、withTx 事务助手。
+// 资产库连接与事务：打开/关闭、PRAGMA、withTx 事务助手，以及连接级的语句缓存。
 //
 // 为什么读改写必须共用 withTx：资产写路径存在「先查历史/Active、再决定新增版本还是
 // 仅移动指针」的读改写序列，裸读裸写会在两个进程之间留下丢更新窗口；withTx 内的
 // 全部语句共享同一事务，失败即回滚，不留半成品。
 
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
+import { DatabaseSync, type StatementSync } from 'node:sqlite'
 import { ASSET_DB_FILE, initSchema } from './schema.js'
 
 /** 库文件路径：固定 `<root>/assets.db`（root = 插件 dataDir）。 */
@@ -64,6 +65,35 @@ function applyJournalMode(db: DatabaseSync): void {
 /** 行值：node:sqlite 返回 null 原型对象，凡向外传递前都必须转成普通对象。 */
 export type DbRow = Record<string, unknown>
 
+/**
+ * 连接 → SQL 原文 → 已编译语句。三个通用入口（queryRows / queryRow / runSql）共用同一份缓存，
+ * 因此列表读、逐项明细与热点写语句都只编译一次。
+ *
+ * 为什么按连接分桶：语句与连接同生命周期，跨连接复用无效（驱动会拒绝）；WeakMap 让连接
+ * 关闭后整桶随之可回收，无需人工失效。
+ * 为什么键是 SQL 原文：参数一律经绑定传值，同一原文的语句对任意入参都可用；语句由 SQLite
+ * 在执行前复位，可安全重复执行。
+ * 为什么有长度上限：`IN (?,?,…)` 这类文本随入参个数变化，缓存因此可能有多个条目；缓存是纯
+ * 加速设施，不允许变成无界内存增长点，超限即整体丢弃（下次执行重新编译，不影响正确性）。
+ */
+const statementCache = new WeakMap<DatabaseSync, Map<string, StatementSync>>()
+const STATEMENT_CACHE_LIMIT = 256
+
+/** 取（必要时编译并缓存）语句。 */
+function preparedStatement(db: DatabaseSync, sql: string): StatementSync {
+  let bySql = statementCache.get(db)
+  if (!bySql) {
+    bySql = new Map<string, StatementSync>()
+    statementCache.set(db, bySql)
+  }
+  const cached = bySql.get(sql)
+  if (cached) return cached
+  if (bySql.size >= STATEMENT_CACHE_LIMIT) bySql.clear()
+  const statement = db.prepare(sql)
+  bySql.set(sql, statement)
+  return statement
+}
+
 /** 把 null 原型行对象转为普通对象（调用方不得持有驱动内部结构）。 */
 export function plainRow(row: Record<string, unknown>): DbRow {
   return { ...row }
@@ -71,21 +101,20 @@ export function plainRow(row: Record<string, unknown>): DbRow {
 
 /** 查询多行（返回普通对象数组）。 */
 export function queryRows(db: DatabaseSync, sql: string, params: unknown[] = []): DbRow[] {
-  return db
-    .prepare(sql)
+  return preparedStatement(db, sql)
     .all(...(params as never[]))
     .map((row) => plainRow(row as Record<string, unknown>))
 }
 
 /** 查询单行（无匹配返回 null）。 */
 export function queryRow(db: DatabaseSync, sql: string, params: unknown[] = []): DbRow | null {
-  const row = db.prepare(sql).get(...(params as never[]))
+  const row = preparedStatement(db, sql).get(...(params as never[]))
   return row === undefined ? null : plainRow(row as Record<string, unknown>)
 }
 
 /** 执行写语句（INSERT/UPDATE/DELETE）。 */
 export function runSql(db: DatabaseSync, sql: string, params: unknown[] = []): void {
-  db.prepare(sql).run(...(params as never[]))
+  preparedStatement(db, sql).run(...(params as never[]))
 }
 
 /**
@@ -118,6 +147,32 @@ class SerialQueue {
     this.tail = result.catch(() => undefined)
     return result
   }
+}
+
+/**
+ * 事务内的 async 上下文标记（重入检测）。
+ *
+ * 为什么需要：同一连接上的事务队列不可重入——`withTx` 回调内再调 `AssetStore`
+ * 的另一个方法（内部又走 withTx/withRead）会排在队尾并等待外层让出临界区，而外层
+ * 正 await 它 → 双方永久挂起（既非报错也非超时，整条资产写路径静默卡死）。
+ *
+ * 为什么用 AsyncLocalStorage 而不是计数器：队列允许**并发的外部调用**，计数器在
+ * 「A 的事务在途、B 从外部并发进入」时会误判为重入（B 其实应正常排队）；ALS 只把
+ * 标记传播给事务回调自己的 async 续体，恰好等于「本次调用是否来自事务内部」。
+ *
+ * 为什么标记携带句柄身份：同一进程可能存在多个 AssetDb（只读句柄、测试夹具），
+ * 跨句柄嵌套各有独立队列，不会自等（若一并拒绝就是误报）；只有同一句柄才算重入。
+ *
+ * 为什么是模块级常量：事务标记必须与被标记的回调同生命周期，句柄只是标记的比较键。
+ */
+const transactionScope = new AsyncLocalStorage<AssetDb>()
+
+/** 重入错误（可行动：说明触发入口与正确做法）。 */
+function reentryError(entry: string): Error {
+  return new Error(
+    `资产库事务不可重入：${entry} 不能在 withTx/withRead 回调内调用（会自排队尾并永久挂起）。` +
+    `请改用回调已提供的 tx 上下文，或把嵌套调用拆到事务外。`,
+  )
 }
 
 /** AssetStore 持有的库句柄：连接、串行队列与事务工厂。 */
@@ -163,13 +218,20 @@ export class AssetDb {
     return this.db
   }
 
+  /** 事务内再次请求同一连接的事务即抛错（在入队之前判定，故不会留下排队条目）。 */
+  private assertNoTransactionReentry(entry: string): void {
+    if (transactionScope.getStore() === this) throw reentryError(entry)
+  }
+
   /**
    * 在**一笔事务**内执行 fn 并返回其结果。
    * 为什么用 BEGIN IMMEDIATE：写路径的第一步就是读，IMMEDIATE 立刻取写锁，
    * 避免「读时未锁、写时才发现冲突」的升级失败；进程内并发再由串行队列挡一层。
+   * 重入（回调内再调 withTx/withRead）立即抛错而不是排队：见 transactionScope。
    */
   async withTx<T>(fn: (ctx: AssetTxContext) => Promise<T> | T): Promise<T> {
-    return this.queue.run(async () => {
+    this.assertNoTransactionReentry('withTx')
+    return this.queue.run(() => transactionScope.run(this, async () => {
       const db = this.require()
       const ctx = createContext(db)
       db.exec('BEGIN IMMEDIATE')
@@ -185,7 +247,7 @@ export class AssetDb {
         }
         throw error
       }
-    })
+    }))
   }
 
   /**
@@ -201,7 +263,8 @@ export class AssetDb {
    * 同一连接上的语句不得交错。
    */
   async withRead<T>(fn: (ctx: AssetTxContext) => Promise<T> | T): Promise<T> {
-    return this.queue.run(async () => {
+    this.assertNoTransactionReentry('withRead')
+    return this.queue.run(() => transactionScope.run(this, async () => {
       const db = this.require()
       const ctx = createContext(db)
       db.exec('PRAGMA query_only = ON')
@@ -221,7 +284,7 @@ export class AssetDb {
         // 队列保证同一时刻只有一个事务在跑，因此复位不会影响其它读路径
         db.exec('PRAGMA query_only = OFF')
       }
-    })
+    }))
   }
 }
 

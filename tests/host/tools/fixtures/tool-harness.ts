@@ -13,9 +13,11 @@ import { FlowStore } from '../../../../src/host/storage/flow-store.js'
 import {
   OrchestratorRuntime,
   type AgentHost,
+  type CoordinatorMessage,
   type NodeRunner,
   type NodeStartInput,
   type OrchestratorConfig,
+  type OrchestratorLogger,
   type RootAgentLike,
   type TurnEndInfo,
 } from '../../../../src/host/orchestrator/index.js'
@@ -94,20 +96,31 @@ export function makeFlow(): WorkflowDocument {
 
 export class FakeRoot implements RootAgentLike {
   id: string
-  status = 'idle'
+  status: string
   session: { events: unknown[] } = { events: [] }
-  constructor(id: string) {
+  /** steer 投递记录（协作投递类用例断言「消息确实插队送达」）。 */
+  steers: CoordinatorMessage[] = []
+  constructor(id: string, status = 'idle') {
     this.id = id
+    this.status = status
+  }
+  steer(message: CoordinatorMessage): void {
+    this.steers.push(message)
   }
 }
 
 export class FakeAgents implements AgentHost {
   roots = new Map<string, FakeRoot>()
+  /** 子代理注册表（按 childId 查；在线投递与冷态回退的判据）。 */
+  children = new Map<string, FakeRoot>()
   available(): boolean {
     return true
   }
   getRootAgent(id: string): RootAgentLike | null {
     return this.roots.get(id) ?? null
+  }
+  getChildAgent(childId: string): RootAgentLike | null {
+    return this.children.get(childId) ?? null
   }
   followupRoot(): void {}
   latestTurnEnd(): TurnEndInfo | null {
@@ -177,12 +190,26 @@ export interface TestEnv {
   clock: { now: number }
 }
 
+/** 装配可注入项：时间与 id 由调用方决定（TTL/审计/固定 runId 断言）。 */
+export interface TestEnvOptions {
+  config?: Partial<OrchestratorConfig>
+  /** 时钟注入（TTL、空闲超时等分段计时用例）；缺省用固定起点时钟 env.clock。 */
+  now?: () => number
+  /** runId 生成（缺省按时钟派生）；需按固定 runId 检索 runs 表的用例可注入。 */
+  newRunId?: () => string
+  /** 消息 id 生成（缺省按时钟派生）；需按固定 id 断言消息的用例可注入。 */
+  uuid?: () => string
+  /** 宿主日志（收集 info 行以断言审计）；缺省静默。 */
+  logger?: OrchestratorLogger
+}
+
 /** 装配：临时 dataDir + 真实编排运行时 + fake 依赖（工具注册由各测试文件自行完成）。 */
-export async function makeEnv(options: { config?: Partial<OrchestratorConfig> } = {}): Promise<TestEnv> {
+export async function makeEnv(options: TestEnvOptions = {}): Promise<TestEnv> {
   const dir = await tempDir('vw-tools-')
   const store = new FlowStore(dir)
   await store.init()
   const clock = { now: 1_000_000 }
+  const now = options.now ?? (() => clock.now)
   const agents = new FakeAgents()
   agents.roots.set('session-1', new FakeRoot('session-1'))
   const runner = new FakeRunner()
@@ -195,14 +222,13 @@ export async function makeEnv(options: { config?: Partial<OrchestratorConfig> } 
       documentTextLimit: 200,
       runIdleTimeoutMs: 500,
       retryLimitDefault: 3,
-      reactIterationLimitDefault: 50,
-      wfAskAgentTtlMs: 500,
+      reactIterationLimitDefault: 0,
       ...options.config,
     },
-    logger: { warn: () => {}, info: () => {}, debug: () => {} },
-    now: () => clock.now,
-    newRunId: () => `run-${clock.now}`,
-    uuid: () => `uuid-${clock.now}`,
+    logger: options.logger ?? { warn: () => {}, info: () => {}, debug: () => {} },
+    now,
+    newRunId: options.newRunId ?? (() => `run-${now()}`),
+    uuid: options.uuid ?? (() => `uuid-${now()}`),
   })
   return { dir, store, runtime, agents, runner, tools: new FakeToolsRegistry(), questions: new FakeUserQuestions(), clock }
 }

@@ -8,7 +8,7 @@ export { FlowNotFoundError, FlowRevisionConflictError } from './document-policy.
 export declare class FlowStore {
     readonly root: string;
     /** 顶层数据目录（init 时创建；常量表供测试与外部工具断言布局）。 */
-    static readonly DIRS: readonly ["workflows", "services", "roles", "data", "groups", "runs", "orchestrations", "flow-templates"];
+    static readonly DIRS: readonly ["workflows", "services", "roles", "data", "groups", "runs", "flow-templates"];
     /** 嵌套子目录（相对 root；随顶层目录一并幂等创建）。 */
     static readonly NESTED_DIRS: readonly ["data/files"];
     constructor(root: string);
@@ -53,7 +53,7 @@ export declare class FlowStore {
     saveService(service: ServiceState, sessionId: string, options?: SaveOptions): Promise<ServiceState>;
     /**
      * 服务文档写回（调用方必须已持该服务文件锁，且已完成各自的校验）：
-     * revision 记账 + 客户端字段剥除 + 原子写，返回落盘副本。
+     * 发布策略（净化 + revision 记账 + 时间戳继承）见 document-policy，返回落盘副本。
      */
     private writeServiceDoc;
     /** 删除服务（级联删除其 sessions 映射文件）。 */
@@ -64,20 +64,20 @@ export declare class FlowStore {
     listTemplates(kind: 'file'): Promise<FileTemplate[]>;
     /** 列出数据库模板（data/ 下按字段判别过滤）。 */
     listTemplates(kind: 'database'): Promise<DatabaseTemplate[]>;
-    /** 列出协作组模板（groups/ 目录）。 */
+    /** 列出 Team 模板（groups/ 目录）。 */
     listTemplates(kind: 'group'): Promise<GroupTemplate[]>;
     /** 列出某类模板（kind 联合兜底；具体子类型请用窄签名）。 */
     listTemplates(kind: TemplateKind): Promise<Template[]>;
     /**
      * 按 id 取单个模板（无则 null；导入导出用）。
      * 单资源读：直接按 id 定位文件并保持 file/database 子类判别；损坏 JSON 抛
-     * CorruptJsonError（不伪装成「不存在」，避免导入路径静默覆盖损坏数据）。
+     * CorruptJsonError，JSON 合法但形状不是模板则抛 InvalidDocumentError（携带 filePath）——
+     * 两者都不伪装成「不存在」，避免导入路径静默覆盖损坏数据。
      */
     getTemplate(kind: TemplateKind, id: string): Promise<Template | null>;
     /**
      * 保存模板（原子写；模板 id 由调用方生成；返回带 createdAt/updatedAt 的持久化副本）。
-     * 时间戳策略与其余 save* 一致：createdAt = 调用方值 ?? 既有值 ?? now，
-     * 避免更新时把创建时间重置为当前时间。
+     * 时间戳与净化走共用发布策略（模板无 revision 记账，落盘字段不因此增减）。
      */
     saveTemplate(kind: TemplateKind, template: Template): Promise<Template>;
     /** 删除模板（仅删文件，不影响画布中已深拷贝的节点——§4.2.1 解耦语义）。 */
@@ -96,18 +96,47 @@ export declare class FlowStore {
      *   必须传，防跨会话运行历史泄露；resume 侧因调用前已按会话定位 flow 可不传）。
      */
     listRuns(flowId: string, sessionId?: string): Promise<RunSnapshot[]>;
+    /**
+     * 列出全部 run 快照（对账 / 接续 / 幂等判定等**扫描整个目录**的场景；顺序不保证）。
+     *
+     * 为什么不提供「先列 id 再逐个 getRun」的用法：getRun 是单资源读，形状不合法即抛错，
+     * 而扫描场景的输入是整个目录——目录里混入任何非本资源文档（历史格式残留、外部文件）
+     * 都会让整轮扫描失败。此处复用列表读语义逐文件跳过并告警：一个坏文件不影响其余记录，
+     * 「跳过」仍可在日志中追溯。
+     */
+    listAllRuns(): Promise<RunSnapshot[]>;
     /** 读取单个 run 快照。 */
     getRun(runId: string): Promise<RunSnapshot | null>;
-    /** 保存 run 快照（断点持久化走同一入口；原子写保证崩溃不撕裂）。 */
+    /**
+     * 保存 run 快照（断点持久化走同一入口；原子写保证崩溃不撕裂）。
+     *
+     * 为什么本资源不走文档发布策略（无净化 / 无 revision 记账 / 无时间戳继承）：
+     * RunSnapshot 是编排器拥有的**运行态事实整体**——它没有 revision 列，也不需要
+     * createdAt/updatedAt（时间语义在 startedAt/endedAt 上，由编排器按状态机推进），
+     * 且不接受客户端回写（`_draft`/`lastPatch` 这类客户标记不会出现在快照里）。快照必须
+     * 按调用方给出的完整对象原样落盘，任何字段级改写都会破坏断点续跑的一致性。
+     */
     saveRun(run: RunSnapshot): Promise<RunSnapshot>;
-    /** 扫描全部 run id（reconcileStaleRuns 用）。 */
-    listAllRunIds(): Promise<string[]>;
+    /**
+     * 读取工具组合文档（combos.json，单资源）。
+     * 文件不存在即空列表（既有降级语义）；形状不合法抛带路径的可诊断错误——读取方会直接
+     * 展开该数组，把非数组当数组用会写出「按下标/字符切碎」的垃圾数据，比报错难排查得多。
+     */
+    private readComboState;
     /** 列出全部工具组合（全局共享）。 */
     listToolCombos(): Promise<ToolCombo[]>;
     /** 保存工具组合（id 须为 combo- 前缀，§4.6 规则 2）。 */
     saveToolCombo(combo: ToolCombo): Promise<ToolCombo>;
     /** 删除工具组合。 */
     deleteToolCombo(id: string): Promise<boolean>;
+    /**
+     * 读取 userId 映射（返回副本，防调用方意外修改内部缓存）。
+     *
+     * 为什么这一处降级而不是抛错：映射是服务运行的旁路事实，文件损坏时抛错会让该服务的
+     * 会话解析永久失败（连下次写入自愈的机会都没有）；按「无映射」降级只影响已损坏的旧值，
+     * 下一次 mergeUserIdMap 写回即恢复。降级必须留告警，不得静默。
+     */
+    private readSessionIdMap;
     /** 读取某服务的 userId 映射（返回副本，防调用方意外修改内部缓存）。 */
     userIdMap(serviceId: string): Promise<Record<string, string>>;
     /**
@@ -120,10 +149,4 @@ export declare class FlowStore {
      * 不得再写映射；调用方在写入前须确认服务仍存在（storage 不保证跨文件事务）。
      */
     mergeUserIdMap(serviceId: string, entries: Record<string, string>): Promise<Record<string, string>>;
-    /** 保存运行时流程定义（startRun 时写入，父代理只读的事实源）。 */
-    saveOrchestration(runId: string, flow: WorkflowDocument): Promise<void>;
-    /** 读取运行时流程定义。 */
-    readOrchestration(runId: string): Promise<WorkflowDocument | null>;
-    /** 运行时流程定义文件的绝对路径（编排指令 facts.definitionPath 注入用）。 */
-    orchestrationFilePath(runId: string): string;
 }

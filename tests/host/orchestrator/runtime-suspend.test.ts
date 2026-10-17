@@ -23,7 +23,7 @@ import {
 
 afterEach(cleanupTempDirs)
 
-/** 本文件的最小流程：start → a1 → end（挂起/续跑不涉及暂停门与协作组）。 */
+/** 本文件的最小流程：start → a1 → end（挂起/续跑不涉及暂停门与 Team）。 */
 function makeFlow(): WorkflowDocument {
   return {
     id: 'flow-1',

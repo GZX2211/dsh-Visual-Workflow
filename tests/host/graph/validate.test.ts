@@ -1,7 +1,7 @@
 // tests/host/graph/validate.test.ts
 //
 // 图结构校验测试（原 tests/host/graph-model.test.ts 拆分）：单连线检测、全量校验
-// （自环/重复/主虚互斥/条件仅流程线/阶段唯一/父代理唯一/协作组边界/模式差异）与
+// （自环/重复/主虚互斥/条件仅流程线/阶段唯一/父代理唯一/Team 边界/模式差异）与
 // 运行前完整性检查。
 // 数据模型与拓扑助手（model.ts）见 ./model.test.ts。
 // 断言依据：架构文档 §4.2 校验规则 + 需求文档 §4.2/§4.3/§4.2.5。
@@ -19,7 +19,6 @@ import {
   newProxyNode,
   newRoleNode,
   newStageNode,
-  stageLabel,
   validateFlow,
 } from '../../../src/host/graph/index.js'
 import type { GraphNode, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
@@ -181,7 +180,7 @@ describe('validateFlow 全量校验', () => {
     expect(validateFlow(makeFlow([main, proxy, target], [l1, l2])).ok).toBe(true)
   })
 
-  it('协作组边界：成员节点 flow 连接点拒绝 → groupMemberFlowHandle', () => {
+  it('Team 边界：成员节点 flow 连接点拒绝 → groupMemberFlowHandle', () => {
     const g = newGroupNode('g')
     const member = newRoleNode('agent', 'm')
     member.data.groupId = g.id
@@ -191,7 +190,7 @@ describe('validateFlow 全量校验', () => {
     expect(codes(makeFlow([g, member, other], [line]))).toContain('groupMemberFlowHandle')
   })
 
-  it('协作组成员跨组 ctx 连线合法（§4.2.5.2 规则 4）', () => {
+  it('Team 成员跨组 ctx 连线合法（§4.2.5.2 规则 4）', () => {
     const g = newGroupNode('g')
     const member = newRoleNode('agent', 'm')
     member.data.groupId = g.id
@@ -201,12 +200,12 @@ describe('validateFlow 全量校验', () => {
     expect(validateFlow(makeFlow([g, member, outside], [line])).ok).toBe(true)
   })
 
-  it('协作组卡片 ctx/db 连线被矩阵层拒绝（组卡片仅 flow 连接点，§4.2.5.2）', () => {
+  it('Team 卡片 ctx/db 连线被矩阵层拒绝（Team 卡片仅 flow 连接点，§4.2.5.2）', () => {
     const g = newGroupNode('g')
     const a = newRoleNode('agent', 'a')
-    // 组卡片无 ctx-out：源侧矩阵拒绝
+    // Team 卡片无 ctx-out：源侧矩阵拒绝
     const l1 = newLine(g.id, a.id, 'ctx-out', 'ctx-in')
-    // 组卡片无 ctx-in：目标侧矩阵拒绝
+    // Team 卡片无 ctx-in：目标侧矩阵拒绝
     const l2 = newLine(a.id, g.id, 'ctx-out', 'ctx-in')
     const cs = codes(makeFlow([g, a], [l1, l2]))
     expect(cs).toContain('invalidHandle')
@@ -236,7 +235,7 @@ describe('validateFlow 全量校验', () => {
     expect(codes(makeFlow([s]))).toContain('stageLabelLocked')
   })
 
-  it('协作组成员不存在 → groupMemberMissing；成员种类非法 → groupMemberKind', () => {
+  it('Team 成员不存在 → groupMemberMissing；成员种类非法 → groupMemberKind', () => {
     const g = newGroupNode('g')
     g.data.memberIds = ['ghost']
     expect(codes(makeFlow([g]))).toContain('groupMemberMissing')

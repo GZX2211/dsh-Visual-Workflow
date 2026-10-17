@@ -1,6 +1,6 @@
 // src/client/styles/canvas.ts
 //
-// 画布域。画布容器与网格背景、图舞台（连线 / 箭头 / 接点 / 缩放控件）、节点卡片与协作组卡片、画布内文件列表与空态提示。
+// 画布域。画布容器与网格背景、图舞台（连线 / 箭头 / 接点 / 缩放控件）、节点卡片与 Team 卡片、画布内文件列表与空态提示。
 //
 // 本文件内规则顺序即覆盖顺序（同特异性下后写的覆盖先写的），禁止重排。
 
@@ -202,7 +202,7 @@ g.is-locked .wf-graph__edge-hit {
   outline: 0;
 }
 
-/* 接点左右位置：普通卡片（角色/文件/数据库/阶段/虚拟）按交换状态动态指定 side；协作组卡固定 target/source */
+/* 接点左右位置：普通卡片（角色/文件/数据库/阶段/虚拟）按交换状态动态指定 side；Team 卡固定 target/source */
 .wf-graph__handle.is-side-left {
   left: -6px;
 }
@@ -337,18 +337,6 @@ g.is-locked .wf-graph__edge-hit {
   cursor: help;
 }
 
-/* 里程碑闸门用实线强调边框（普通虚拟节点是虚线） */
-.wf-node.is-gate {
-  border-style: solid;
-  border-color: var(--wf-brand);
-  box-shadow: 0 0 0 1px var(--wf-brand) inset;
-}
-
-.wf-node__proxy-badge.is-gate {
-  color: var(--wf-brand);
-  border-color: var(--wf-brand);
-}
-
 /* P4：父代理补丁改动的节点角标 */
 .wf-node__agent-badge {
   flex: none;
@@ -366,7 +354,7 @@ g.is-locked .wf-graph__edge-hit {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wf-ink-2) 35%, transparent);
 }
 
-/* 协作组卡片运行中：官方团队正在执行（成员由官方机制调度），外圈品牌色提示 */
+/* Team 卡片运行中：官方团队正在执行（成员由官方机制调度），外圈品牌色提示 */
 .wf-node--group.is-running {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--wf-brand) 22%, transparent), 0 10px 26px color-mix(in srgb, var(--wf-ink) 10%, transparent);
 }
@@ -480,7 +468,7 @@ g.is-locked .wf-graph__edge-hit {
   color: var(--wf-warn);
 }
 
-/* ---- 协作组卡片 ---- */
+/* ---- Team 卡片 ---- */
 .wf-node--group {
   display: flex;
   flex-direction: column;
@@ -492,7 +480,7 @@ g.is-locked .wf-graph__edge-hit {
   height: 220px;
 }
 
-/* 拖拽悬停入组高亮（卡片插入协作组卡片区域即识别为入组） */
+/* 拖拽悬停入组高亮（卡片插入 Team 卡片区域即识别为入组） */
 .wf-group-node.is-drop-target .wf-node--group {
   border-color: var(--wf-pass);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--wf-pass) 26%, transparent), 0 0 22px color-mix(in srgb, var(--wf-pass) 32%, transparent);
@@ -537,7 +525,7 @@ g.is-locked .wf-graph__edge-hit {
   background: color-mix(in srgb, var(--wf-brand) 8%, transparent);
 }
 
-/* ---- 协作组成员列表（缩小版角色卡） ---- */
+/* ---- Team 成员列表（缩小版角色卡） ---- */
 .wf-group__members {
   flex: 1;
   min-height: 0;
@@ -580,6 +568,25 @@ g.is-locked .wf-graph__edge-hit {
   width: 9px;
   height: 9px;
   border-width: 1px;
+}
+
+/* Team 卡片流程接点（居中）：位置随语义类下沉，不得退回内联样式 */
+.wf-graph__handle--group-flow {
+  top: 50%;
+}
+
+/* 组内成员接点的固定纵向位置（成员行内锚点；用户批注：左侧 db/ctx 接点拉开间距，
+   避免两个接点贴在一起，右侧 ctx 接点居中）。 */
+.wf-graph__handle--member-db-in {
+  top: 30%;
+}
+
+.wf-graph__handle--member-ctx-in {
+  top: 64%;
+}
+
+.wf-graph__handle--member-ctx-out {
+  top: 47%;
 }
 
 .wf-graph__handle--mini:hover {

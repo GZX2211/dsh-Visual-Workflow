@@ -2,7 +2,7 @@
 //
 // 文档 → 画布投影（studio/studio-projection.ts）：工作流文档与服务文档共用同一投影
 // 实现，两者对同构输入必须给出同一结果——虚拟节点顶层 proxySourceId 保留（否则保存时
-// 后端校验报缺主引用）、位置缺省落默认格点、协作组重复节点合并。
+// 后端校验报缺主引用）、位置缺省落默认格点、Team 重复节点合并。
 
 import { describe, expect, it } from 'vitest'
 import { flowToCanvas, serviceToCanvas } from '../../../src/client/studio/studio-projection.js'
@@ -53,7 +53,7 @@ describe('文档 → 画布投影', () => {
     expect(flow.nodes.find((node) => node.id === 'n1')?.position).toEqual({ x: 10, y: 20 })
   })
 
-  it('重复协作组节点合并为一条且成员并集去重；连线按字段口径投影', () => {
+  it('重复 Team 节点合并为一条且成员并集去重；连线按字段口径投影', () => {
     const flow = flowToCanvas(asFlow())
     const groups = flow.nodes.filter((node) => node.kind === 'group')
     expect(groups).toHaveLength(1)

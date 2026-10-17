@@ -34,15 +34,27 @@ export interface EdgeGeometry {
   path: string
 }
 
-/** 成员所在组（画布节点含该成员）。 */
-export function groupOfMember(byId: Map<string, CanvasNode>, memberId: string): CanvasNode | null {
+/**
+ * 成员 id → 所属组 的预建索引。
+ * 为什么需要：所属组反查若按全节点扫描，连线几何会对每条边扫两次全节点（O(边×节点)），
+ * 且拖拽时每帧执行；索引化后由 GraphCanvas 按节点集预建一次，逐边只做 O(1) 命中。
+ * 同一成员出现在多个组时按节点顺序取先到的组，与原先的全量扫描口径一致。
+ */
+export type MemberGroupIndex = Map<string, CanvasNode>
+
+/** 由画布节点表预建成员 → 组索引（一次全量扫描，替代逐边反查）。 */
+export function memberGroupIndexOf(byId: Map<string, CanvasNode>): MemberGroupIndex {
+  const index: MemberGroupIndex = new Map()
   for (const node of byId.values()) {
-    if (node.kind === 'group' && ((node.data.memberIds as string[] | undefined) ?? []).includes(memberId)) return node
+    if (node.kind !== 'group') continue
+    for (const memberId of new Set((node.data.memberIds as string[] | undefined) ?? [])) {
+      if (!index.has(memberId)) index.set(memberId, node)
+    }
   }
-  return null
+  return index
 }
 
-/** 组内成员连线锚点（组卡片左/右边缘 + 成员行中心）。 */
+/** 组内成员连线锚点（Team 卡片左/右边缘 + 成员行中心）。 */
 export function memberAnchor(group: CanvasNode, memberId: string, side: 'left' | 'right'): { x: number; y: number } | null {
   const memberIds = (group.data.memberIds as string[] | undefined) ?? []
   const index = memberIds.indexOf(memberId)
@@ -60,18 +72,18 @@ export function swappedOf(node: CanvasNode | null | undefined): boolean {
   return (node?.data as { swapPorts?: unknown } | undefined)?.swapPorts === true
 }
 
-/** 连线贝塞尔几何（源端口 → 目标端口；组卡片流程接点居中，组内成员锚到成员行）。
+/** 连线贝塞尔几何（源端口 → 目标端口；Team 卡片流程接点居中，组内成员锚到成员行）。
  *  交换过连接点的节点：源出点改在左边缘（start.x=左侧），目标入点改在右边缘（end.x=右侧）。
  *  控制点方向跟随端口所在边缘（右缘向外 +x、左缘向外 -x），连线从正确一侧进出，不会
  *  穿入卡片体被遮挡（用户批注：连线方向应当根据连接点确定，而非默认朝右）。 */
-export function edgeGeometry(edge: CanvasEdge, byId: Map<string, CanvasNode>): EdgeGeometry | null {
+export function edgeGeometry(edge: CanvasEdge, byId: Map<string, CanvasNode>, memberGroups: MemberGroupIndex): EdgeGeometry | null {
   const source = byId.get(edge.source)
   const target = byId.get(edge.target)
   if (!source || !target) return null
   const sourceSize = nodeSizeOf(source)
   const targetSize = nodeSizeOf(target)
-  const sourceGroup = source.kind === 'group' ? null : groupOfMember(byId, source.id)
-  const targetGroup = target.kind === 'group' ? null : groupOfMember(byId, target.id)
+  const sourceGroup = source.kind === 'group' ? null : memberGroups.get(source.id) ?? null
+  const targetGroup = target.kind === 'group' ? null : memberGroups.get(target.id) ?? null
   const sourceSwapped = swappedOf(source)
   const targetSwapped = swappedOf(target)
   // 成员锚点可能为空（组的 memberIds 与节点反查口径分叉时）：为空则回退节点自身几何，不用非空断言
@@ -86,7 +98,7 @@ export function edgeGeometry(edge: CanvasEdge, byId: Map<string, CanvasNode>): E
     y: target.position.y + targetSize.h * (target.kind === 'group' ? 0.5 : handleY(edge.targetHandle ?? 'flow-in')),
   }
   // 端口朝向（端口所在边缘的外法向）：右缘 +1、左缘 -1。组内成员沿用固定侧
-  // （成员出点=组卡片右缘、入点=组卡片左缘，见 memberAnchor）。
+  // （成员出点=Team 卡片右缘、入点=Team 卡片左缘，见 memberAnchor）。
   // 用户批注：连线方向应当根据连接点（左缘/右缘）确定，而非默认朝右。
   const startDir = sourceAnchor ? 1 : (sourceSwapped ? -1 : 1)
   const endDir = targetAnchor ? -1 : (targetSwapped ? 1 : -1)

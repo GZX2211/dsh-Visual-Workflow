@@ -8,7 +8,7 @@
 
 ## 目录与分类
 
-- 按工具能力组织，文件夹按工具名命名：`wf-run-node/`、`wf-ask/`、`wf-db-query/`等。
+- 按工具能力组织，文件夹按工具名命名：`wf-run-node/`、`wf-ask-user/`、`wf-db-query/`等。
 - `infrastructure/` 放 Tool 基础设施，如 `define-tool.ts`、`text-render.ts`等。
 - `caller.ts` 承载跨 Tool 共享的调用方身份派生（`callerOf`）与工具层宿主能力最小缝（`WfToolsHost`）；多个 Tool 共用同一逻辑时提升到此层，不得由某个 Tool 目录反向导出。
 

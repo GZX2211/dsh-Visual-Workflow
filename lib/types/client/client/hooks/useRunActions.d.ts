@@ -2,7 +2,7 @@ import type { Dispatch } from 'react';
 import type { StudioAction, StudioState } from '../studio/studio-state.js';
 import type { RemoteFace } from './useRemote.js';
 import type { RunControlFace } from './useRunControl.js';
-import type { ServiceControlFace } from './useServiceControl.js';
+import { type ServiceControlFace } from './useServiceControl.js';
 import type { ToastFace } from './useToast.js';
 import type { DocumentActionsFace } from './useDocumentActions.js';
 import type { Dict } from '../i18n.js';

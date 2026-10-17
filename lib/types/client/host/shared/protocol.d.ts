@@ -142,9 +142,14 @@ export declare const WF_RUN_NODE_WAIT = "wf_run_node_wait";
 /** 幂等收尾工具名（父代理；释放运行锁）。 */
 export declare const WF_FINISH = "wf_finish";
 /** 向用户提问工具名（官方提问卡；任何 agent 可用，可选注入）。 */
-export declare const WF_ASK = "wf_ask";
-/** 协作成员间非阻塞通信工具名（ask/reply 两态；子代理可选注入）。 */
-export declare const WF_ASK_AGENT = "wf_ask_agent";
+export declare const WF_ASK_USER = "wf_ask_user";
+/**
+ * 向本 run 的另一成员投递一条持久消息的工具名（单向，随即返回，不等待回复）。
+ *
+ * 寻址面只有两种形态——`nodeId`（覆盖普通子代理与 Team 成员，由插件内部解析投递
+ * 通道）与父代理固定别名 `parent`。父代理与子代理均可调用。
+ */
+export declare const WF_SEND_MESSAGE = "wf_send_message";
 /** 单工具三模式数据访问工具名（search/query/schema，有 db-in 连线时注入）。 */
 export declare const WF_DB_QUERY = "wf_db_query";
 /** 父代理自主编排的只读勘察工具名（编排规则 / 角色模板 / 组合 / preset / 模型 / 工作流模板，按需召回详情）。 */
@@ -207,10 +212,16 @@ export declare const TEAM_TOOL_NAMES: readonly ["spawn_teammate", "send_message"
  *
  * 语义：只在「文件不存在」这一个条件下播种一次，写入后磁盘即唯一权威；此后查询、
  * 展示、生效三者读同一份磁盘清单，不存在「内置种子 ∪ 用户项」的第二份状态。
- * spawn_teammate 默认关闭的理由（运行事实）：自行拉人会绕过插件的成员编排，
- * 而插件创建成员走宿主对官方服务的直接调用，不经过工具注册与开关，不受本项影响。
+ *   - spawn_teammate 默认关闭的理由（运行事实）：自行拉人会绕过插件的成员编排，
+ *     而插件创建成员走宿主对官方服务的直接调用，不经过工具注册与开关，不受本项影响；
+ *   - send_message 默认关闭的理由（用户裁决 2026-10）：消息发送统一收口到
+ *     wf_send_message（官方 Team 版 send_message 只认 teammate 名，且父代理给普通
+ *     子代理投递会失败），避免同一语义存在两条互不可达的通道；官方 Team 的
+ *     list_agents / interrupt_agent / 任务板仍保留官方能力。
+ *     注意：本项只在首次安装播种——既有部署的磁盘清单不会被改写，需用户在全局开关
+ *     面板自行关闭官方 send_message。
  */
-export declare const DEFAULT_DISABLED_ON_FIRST_INSTALL: readonly ["spawn_teammate"];
+export declare const DEFAULT_DISABLED_ON_FIRST_INSTALL: readonly ["spawn_teammate", "send_message"];
 /**
  * 官方保留的 Code Mode presentation transport 名（run_code）：
  *  - 官方 core/tools 在非 native 模式为每个 scope 自动注入（子代理本就自带，无需勾选）；
@@ -228,8 +239,8 @@ export declare const RESERVED_TRANSPORT_TOOL = "run_code";
  */
 export declare const RUN_STATUSES: readonly ["running", "paused", "completed", "failed", "stopped", "interrupted"];
 /**
- * 节点状态枚举（NODE_STATUSES）：与 run-types.js 的 NodeRunStatus 逐字一致（七态，含协作组「待命」armed——
- * 非终态：回合结束但仍在协作组内可被唤醒，父代理 wf_finish 后终态化）。
+ * 节点状态枚举（NODE_STATUSES）：与 run-types.js 的 NodeRunStatus 逐字一致（七态，含 Team「待命」armed——
+ * 非终态：回合结束但仍在 Team 内可被唤醒，父代理 wf_finish 后终态化）。
  * react-capped 为 ReAct 软截停（非失败，正常产出）。
  * 与该类型的双向穷尽由测试的编译期断言锁定（禁止固定长度断言）。
  */
@@ -238,7 +249,7 @@ export declare const NODE_STATUSES: readonly ["pending", "running", "armed", "ok
 export declare const MODES: readonly ["mode1", "mode2"];
 /**
  * 可执行单元节点种类（元参数规模统计口径）：
- * 子代理（agent）、父代理（parent）与协作组卡片（group，组内成员并行执行为一单元）。
+ * 子代理（agent）、父代理（parent）与 Team 卡片（group，组内成员并行执行为一单元）。
  * 为什么放在协议常量层而不是纯形状层：该口径是 Host 检查器 / 写图工具 / 客户端预算
  * 展示共用的跨层契约常量，改一处必须三端一致；纯形状文件不得含运行时值。
  * 口径漂移会直接导致预算判定与展示不一致，故以 NodeKind 标注类型并由测试锁定取值。
@@ -295,6 +306,8 @@ export declare const ENDPOINT_NAMES: readonly ["listWorkflows", "getWorkflow", "
  * （`Intl` 解析出的任意 IANA 名），字面量联合会让 includes/unshift 需要窄化断言。
  */
 export declare const SCHEDULER_TIMEZONE_SUGGESTIONS: readonly string[];
+/** 输出契约的默认文本（新建 agent 节点时写入 `data.outputSchema`）。 */
+export declare const DEFAULT_OUTPUT_CONTRACT_TEXT = "\u7ED3\u8BBA / \u4EA7\u51FA\u6587\u4EF6\u8DEF\u5F84 / \u5173\u952E\u51B3\u7B56 / \u672A\u51B3\u95EE\u9898";
 /** 乐观锁冲突：资源在客户端加载后已被别的写入修改（HTTP 409）。 */
 export declare const ERR_REVISION_CONFLICT = "FLOW_REVISION_CONFLICT";
 /**
@@ -354,3 +367,16 @@ export declare const ERR_EXPERIENCE_RECALL_FAILED = "WF_EXPERIENCE_RECALL_FAILED
  * 消费方语义：本次评价未落库，调用方可稍后在任务收尾阶段重试；已有评价历史一律不被改写。
  */
 export declare const ERR_EXPERIENCE_FEEDBACK_FAILED = "WF_EXPERIENCE_FEEDBACK_FAILED";
+/** Persisted stage labels are a storage contract, independent of the UI language. */
+export declare const STAGE_LABELS: {
+    readonly mode1: {
+        readonly start: "启动";
+        readonly end: "结束";
+        readonly pause: "暂停";
+    };
+    readonly mode2: {
+        readonly start: "输入";
+        readonly end: "输出";
+        readonly pause: "暂停";
+    };
+};

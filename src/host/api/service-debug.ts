@@ -110,7 +110,7 @@ export async function openServiceDebug(
 export async function pumpServiceDebug(
   body: ReadableStream<Uint8Array>,
   sink: SseSink,
-  signal?: AbortSignal,
+  _signal?: AbortSignal,
 ): Promise<void> {
   try {
     const reader = body.getReader()

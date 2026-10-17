@@ -5,7 +5,8 @@
 // 核心职责（见 ./AGENTS.md）：把 Host 的持久化文档以「单文件即单资源 + 原子发布 +
 // 进程内/跨进程锁」保存与读取。目录布局与路径计算的稳定契约见 ./storage-paths.ts；
 // 原子写/读与锁原语见 ./atomic.ts；写入字段与版本策略的纯逻辑见 ./document-policy.ts；
-// 模板种类判别见 ./template-model.ts；服务↔工作流投影见 ./service-view.ts。
+// 读取时的最小形状守卫见 ./document-shape.ts；模板种类判别见 ./template-model.ts；
+// 服务↔工作流投影见 ./service-view.ts。
 //
 // 非职责：不做 Workflow/图语义决策（合法性、状态机、运行推进、结构编辑）；不持有
 // 运行态内存事实（运行锁/快照/等待器归 orchestrator）；不定义第二套 Workflow 结构
@@ -16,14 +17,23 @@
 // 全局共享不隔离。
 
 import { mkdir, readdir, rm } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { atomicWriteJson, readJson, withJsonLock, CorruptJsonError } from './atomic.js'
+import {
+  InvalidDocumentError,
+  isRunSnapshot,
+  isServiceState,
+  isSessionIdMap,
+  isTemplate,
+  isToolComboDocument,
+  isWorkflowDocument,
+  isWorkflowTemplate,
+} from './document-shape.js'
 import {
   DIRS as DATA_DIRS,
   NESTED_DIRS as NESTED_DATA_DIRS,
   combosPath,
   flowTemplatePath,
-  orchestrationPath,
   runsPath,
   servicePath,
   sessionsPath,
@@ -34,9 +44,8 @@ import {
 import { isDatabaseTemplate, type Template, type TemplateKind } from './template-model.js'
 import {
   FlowNotFoundError,
-  keepServerFieldsOf,
-  nextFlowRevision,
-  stripClientMeta,
+  publishDocument,
+  publishVersionedDocument,
   type SaveOptions,
 } from './document-policy.js'
 import { serviceToWorkflowView } from './service-view.js'
@@ -58,20 +67,69 @@ export type { SaveOptions } from './document-policy.js'
 export { FlowNotFoundError, FlowRevisionConflictError } from './document-policy.js'
 
 // ---------------------------------------------------------------------------
-// 列表读取容错（持久化层策略）
+// 按形状读取（持久化层策略）
 // ---------------------------------------------------------------------------
 
 /**
- * 列表场景逐文件读取：单个文件损坏（CorruptJsonError）时跳过该文件返回 null，
- * 不阻塞整个列表——一个损坏的 JSON 不应让同目录其他正常文件全部不可见。
+ * 列表场景逐文件读取：单个文件损坏（JSON 解析失败或形状不是该资源）时跳过该文件返回 null，
+ * 不阻塞整个列表——一个坏文件不应让同目录其他正常文件全部不可见。跳过必须留下告警，
+ * 否则「数据损坏」会退化成一个无人知道的空列表。
  * 其余读取失败（EACCES 等）仍上浮（保留可诊断性，防止把权限问题伪装成空列表）。
- * 注意：单资源读取不使用本函数——单资源读遇损坏必须抛错（见 ./AGENTS.md）。
+ * 注意：单资源读取不返回 null 兜底——坏文档必须抛错（见 ./AGENTS.md）。
  */
-async function readListEntry<T>(dir: string, name: string): Promise<T | null> {
+async function readListEntry<T>(
+  dir: string,
+  name: string,
+  guard: (value: unknown) => value is T,
+): Promise<T | null> {
+  const path = join(dir, name)
   try {
-    return await readJson<T | null>(join(dir, name), null)
+    const raw = await readJson<unknown>(path, null)
+    if (raw === null) return null
+    if (!guard(raw)) {
+      warnSkippedDocument(path, '形状不匹配（缺少文档身份字段）')
+      return null
+    }
+    return raw
   } catch (error) {
-    if (error instanceof CorruptJsonError) return null
+    if (error instanceof CorruptJsonError) {
+      warnSkippedDocument(path, error.message)
+      return null
+    }
+    throw error
+  }
+}
+
+/**
+ * 单资源读取：文件不存在返回 null；JSON 合法但形状不是该资源时抛带路径的错误。
+ * 为什么不与列表读共用「跳过」语义：单资源读的调用方要立刻用它的字段，返回 null 会被
+ * 当成「不存在」处理，损坏文件因此从视野里消失（见 ./AGENTS.md「读取语义」）。
+ */
+async function readDocument<T>(path: string, guard: (value: unknown) => value is T): Promise<T | null> {
+  const raw = await readJson<unknown>(path, null)
+  if (raw === null) return null
+  if (!guard(raw)) {
+    throw new InvalidDocumentError(resolve(path), '缺少文档身份字段（id 非空字符串）')
+  }
+  return raw
+}
+
+/** 坏文档告警（可追溯；列表读不因它整表不可用）。 */
+function warnSkippedDocument(path: string, detail: string): void {
+  console.warn(`[storage] 跳过损坏的文档 ${path}：${detail}`)
+}
+
+/**
+ * 目录级列表读取：目录不存在（ENOENT）→ 空列表（合法降级：该资源从未写过）；
+ * 其余失败（EACCES/ENOTDIR 等）原样上浮。
+ * 为什么只放过 ENOENT：把权限/结构故障一并吞成「空列表」，数据消失就无人可诊断
+ * ——列表读的可用性只应覆盖「本来就没有」这一种情况（见 ./AGENTS.md「读取语义」）。
+ */
+async function readDirNames(dir: string): Promise<string[]> {
+  try {
+    return await readdir(dir)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') return []
     throw error
   }
 }
@@ -120,16 +178,11 @@ export class FlowStore {
    */
   async listWorkflows(sessionId?: string): Promise<WorkflowDocument[]> {
     const dir = join(this.root, 'workflows')
-    let names: string[] = []
-    try {
-      names = await readdir(dir)
-    } catch {
-      return []
-    }
+    const names = await readDirNames(dir)
     const items: WorkflowDocument[] = []
     for (const name of names) {
       if (!name.endsWith('.json')) continue
-      const doc = await readListEntry<WorkflowDocument>(dir, name)
+      const doc = await readListEntry<WorkflowDocument>(dir, name, isWorkflowDocument)
       if (doc && (sessionId === undefined || doc.sessionId === sessionId)) items.push(doc)
     }
     return items.sort(byUpdatedAtDesc)
@@ -137,7 +190,7 @@ export class FlowStore {
 
   /** 读取单个工作流；不属于该会话返回 null（隔离语义）。 */
   async getWorkflow(sessionId: string, flowId: string): Promise<WorkflowDocument | null> {
-    const doc = await readJson<WorkflowDocument | null>(workflowPath(this.root, flowId), null)
+    const doc = await readDocument(workflowPath(this.root, flowId), isWorkflowDocument)
     if (!doc || doc.sessionId !== sessionId) return null
     return doc
   }
@@ -149,19 +202,14 @@ export class FlowStore {
     const path = workflowPath(this.root, flow.id)
     return withJsonLock(path, async () => {
       const current = await readJson<WorkflowDocument | null>(path, null)
-      // 会话归属校验（读/删两侧已有，写侧此前缺失）：磁盘上已属于别的会话时拒绝覆盖，
+      // 会话归属校验：磁盘上已属于别的会话时拒绝覆盖，
       // 否则一个错误/恶意的 sessionId 入参就能改写他人工作流内容并把归属翻走。
       // 不存在（current === null）视为新建，照旧放行。
       // 抛稳定码（而非普通 Error）：边界据此映射 404，不得落成 500。
       if (current && current.sessionId !== sessionId) throw new FlowNotFoundError(flow.id)
-      const revision = nextFlowRevision(flow, current, options)
-      const now = new Date().toISOString()
       const saved: WorkflowDocument = {
-        ...stripClientMeta(flow, keepServerFieldsOf(options)),
-        revision,
+        ...publishVersionedDocument(flow, current, options, new Date().toISOString()),
         sessionId,
-        createdAt: flow.createdAt ?? current?.createdAt ?? now,
-        updatedAt: now,
       }
       await atomicWriteJson(path, saved)
       return saved
@@ -188,16 +236,11 @@ export class FlowStore {
    */
   async listServices(sessionId?: string): Promise<ServiceState[]> {
     const dir = join(this.root, 'services')
-    let names: string[] = []
-    try {
-      names = await readdir(dir)
-    } catch {
-      return []
-    }
+    const names = await readDirNames(dir)
     const items: ServiceState[] = []
     for (const name of names) {
       if (!name.endsWith('.json') || name.endsWith('.sessions.json')) continue
-      const doc = await readListEntry<ServiceState>(dir, name)
+      const doc = await readListEntry<ServiceState>(dir, name, isServiceState)
       if (doc && (sessionId === undefined || doc.sessionId === sessionId)) items.push(doc)
     }
     return items.sort(byUpdatedAtDesc)
@@ -205,29 +248,24 @@ export class FlowStore {
 
   /** 读取单个服务；不属于该会话返回 null。 */
   async getService(sessionId: string, serviceId: string): Promise<ServiceState | null> {
-    const doc = await readJson<ServiceState | null>(servicePath(this.root, serviceId), null)
+    const doc = await readDocument(servicePath(this.root, serviceId), isServiceState)
     if (!doc || doc.sessionId !== sessionId) return null
     return doc
   }
 
   /** 按 id 读取服务（不校验归属会话；服务管理器/服务进程用）。 */
   async getServiceById(serviceId: string): Promise<ServiceState | null> {
-    return readJson<ServiceState | null>(servicePath(this.root, serviceId), null)
+    return readDocument(servicePath(this.root, serviceId), isServiceState)
   }
 
   /** 列出全部服务（不按会话过滤；自动恢复扫描用）。 */
   async listServicesAll(): Promise<ServiceState[]> {
     const dir = join(this.root, 'services')
-    let names: string[] = []
-    try {
-      names = await readdir(dir)
-    } catch {
-      return []
-    }
+    const names = await readDirNames(dir)
     const items: ServiceState[] = []
     for (const name of names) {
       if (!name.endsWith('.json') || name.endsWith('.sessions.json')) continue
-      const doc = await readListEntry<ServiceState>(dir, name)
+      const doc = await readListEntry<ServiceState>(dir, name, isServiceState)
       if (doc) items.push(doc)
     }
     return items.sort(byUpdatedAtDesc)
@@ -281,7 +319,7 @@ export class FlowStore {
 
   /**
    * 服务文档写回（调用方必须已持该服务文件锁，且已完成各自的校验）：
-   * revision 记账 + 客户端字段剥除 + 原子写，返回落盘副本。
+   * 发布策略（净化 + revision 记账 + 时间戳继承）见 document-policy，返回落盘副本。
    */
   private async writeServiceDoc(
     path: string,
@@ -290,14 +328,9 @@ export class FlowStore {
     sessionId: string,
     options: SaveOptions,
   ): Promise<ServiceState> {
-    const revision = nextFlowRevision(incoming, current, options)
-    const now = new Date().toISOString()
     const saved: ServiceState = {
-      ...stripClientMeta(incoming, keepServerFieldsOf(options)),
-      revision,
+      ...publishVersionedDocument(incoming, current, options, new Date().toISOString()),
       sessionId,
-      createdAt: incoming.createdAt ?? current?.createdAt ?? now,
-      updatedAt: now,
     }
     await atomicWriteJson(path, saved)
     return saved
@@ -323,23 +356,18 @@ export class FlowStore {
   async listTemplates(kind: 'file'): Promise<FileTemplate[]>
   /** 列出数据库模板（data/ 下按字段判别过滤）。 */
   async listTemplates(kind: 'database'): Promise<DatabaseTemplate[]>
-  /** 列出协作组模板（groups/ 目录）。 */
+  /** 列出 Team 模板（groups/ 目录）。 */
   async listTemplates(kind: 'group'): Promise<GroupTemplate[]>
   /** 列出某类模板（kind 联合兜底；具体子类型请用窄签名）。 */
   async listTemplates(kind: TemplateKind): Promise<Template[]>
-  /** 列出某类模板（roles/ 角色；groups/ 协作组；data/ 文件+数据库按字段判别过滤）。 */
+  /** 列出某类模板（roles/ 角色；groups/ Team；data/ 文件+数据库按字段判别过滤）。 */
   async listTemplates(kind: TemplateKind): Promise<Template[]> {
     const dir = join(this.root, templateDir(kind))
-    let names: string[] = []
-    try {
-      names = await readdir(dir)
-    } catch {
-      return []
-    }
+    const names = await readDirNames(dir)
     const items: Template[] = []
     for (const name of names) {
       if (!name.endsWith('.json')) continue
-      const t = await readListEntry<Template>(dir, name)
+      const t = await readListEntry<Template>(dir, name, isTemplate)
       if (!t) continue
       // 数据模板同目录混存：file 与 database 以 dbType 字段判别（§6 目录规划）
       if (kind === 'file' && isDatabaseTemplate(t)) continue
@@ -352,10 +380,11 @@ export class FlowStore {
   /**
    * 按 id 取单个模板（无则 null；导入导出用）。
    * 单资源读：直接按 id 定位文件并保持 file/database 子类判别；损坏 JSON 抛
-   * CorruptJsonError（不伪装成「不存在」，避免导入路径静默覆盖损坏数据）。
+   * CorruptJsonError，JSON 合法但形状不是模板则抛 InvalidDocumentError（携带 filePath）——
+   * 两者都不伪装成「不存在」，避免导入路径静默覆盖损坏数据。
    */
   async getTemplate(kind: TemplateKind, id: string): Promise<Template | null> {
-    const t = await readJson<Template | null>(templatePath(this.root, kind, id), null)
+    const t = await readDocument(templatePath(this.root, kind, id), isTemplate)
     if (!t) return null
     if (kind === 'file' && isDatabaseTemplate(t)) return null
     if (kind === 'database' && !isDatabaseTemplate(t)) return null
@@ -364,22 +393,16 @@ export class FlowStore {
 
   /**
    * 保存模板（原子写；模板 id 由调用方生成；返回带 createdAt/updatedAt 的持久化副本）。
-   * 时间戳策略与其余 save* 一致：createdAt = 调用方值 ?? 既有值 ?? now，
-   * 避免更新时把创建时间重置为当前时间。
+   * 时间戳与净化走共用发布策略（模板无 revision 记账，落盘字段不因此增减）。
    */
   async saveTemplate(kind: TemplateKind, template: Template): Promise<Template> {
     if (!template?.id) throw new Error('saveTemplate 需要 template id')
     const path = templatePath(this.root, kind, template.id)
     return withJsonLock(path, async () => {
       const current = await readJson<Template | null>(path, null)
-      const now = new Date().toISOString()
-      const saved = {
-        ...stripClientMeta(template),
-        createdAt: template.createdAt ?? current?.createdAt ?? now,
-        updatedAt: now,
-      }
+      const saved = publishDocument(template, current, new Date().toISOString())
       await atomicWriteJson(path, saved)
-      return saved as Template
+      return saved
     })
   }
 
@@ -399,16 +422,11 @@ export class FlowStore {
   /** 列出全部工作流模板（按 updatedAt 倒序；全局共享，所有会话可见）。 */
   async listFlowTemplates(): Promise<WorkflowTemplate[]> {
     const dir = join(this.root, 'flow-templates')
-    let names: string[] = []
-    try {
-      names = await readdir(dir)
-    } catch {
-      return []
-    }
+    const names = await readDirNames(dir)
     const items: WorkflowTemplate[] = []
     for (const name of names) {
       if (!name.endsWith('.json')) continue
-      const t = await readListEntry<WorkflowTemplate>(dir, name)
+      const t = await readListEntry<WorkflowTemplate>(dir, name, isWorkflowTemplate)
       if (t) items.push(t)
     }
     return items.sort(byUpdatedAtDesc)
@@ -416,7 +434,7 @@ export class FlowStore {
 
   /** 按 id 读取单个工作流模板（无则 null）。 */
   async getFlowTemplate(templateId: string): Promise<WorkflowTemplate | null> {
-    return readJson<WorkflowTemplate | null>(flowTemplatePath(this.root, templateId), null)
+    return readDocument(flowTemplatePath(this.root, templateId), isWorkflowTemplate)
   }
 
   /** 保存工作流模板（新建/更新统一；revision 递增 + 冲突保护 + 原子写；无 sessionId 隔离）。 */
@@ -425,14 +443,7 @@ export class FlowStore {
     const path = flowTemplatePath(this.root, template.id)
     return withJsonLock(path, async () => {
       const current = await readJson<WorkflowTemplate | null>(path, null)
-      const revision = nextFlowRevision(template, current, options)
-      const now = new Date().toISOString()
-      const saved: WorkflowTemplate = {
-        ...stripClientMeta(template, keepServerFieldsOf(options)),
-        revision,
-        createdAt: template.createdAt ?? current?.createdAt ?? now,
-        updatedAt: now,
-      }
+      const saved = publishVersionedDocument(template, current, options, new Date().toISOString())
       await atomicWriteJson(path, saved)
       return saved
     })
@@ -458,28 +469,51 @@ export class FlowStore {
    */
   async listRuns(flowId: string, sessionId?: string): Promise<RunSnapshot[]> {
     const dir = join(this.root, 'runs')
-    let names: string[] = []
-    try {
-      names = await readdir(dir)
-    } catch {
-      return []
-    }
+    const names = await readDirNames(dir)
     const items: RunSnapshot[] = []
     for (const name of names) {
       if (!name.endsWith('.json')) continue
-      const run = await readListEntry<RunSnapshot>(dir, name)
+      const run = await readListEntry<RunSnapshot>(dir, name, isRunSnapshot)
       if (run && run.flowId === flowId && (sessionId === undefined || run.sessionId === sessionId)) items.push(run)
     }
     // 与工作流/模板列表同口径：码位序（localeCompare 会让顺序随运行环境 ICU 漂移）
     return items.sort((a, b) => compareText(String(b.startedAt ?? ''), String(a.startedAt ?? '')))
   }
 
-  /** 读取单个 run 快照。 */
-  async getRun(runId: string): Promise<RunSnapshot | null> {
-    return readJson<RunSnapshot | null>(runsPath(this.root, runId), null)
+  /**
+   * 列出全部 run 快照（对账 / 接续 / 幂等判定等**扫描整个目录**的场景；顺序不保证）。
+   *
+   * 为什么不提供「先列 id 再逐个 getRun」的用法：getRun 是单资源读，形状不合法即抛错，
+   * 而扫描场景的输入是整个目录——目录里混入任何非本资源文档（历史格式残留、外部文件）
+   * 都会让整轮扫描失败。此处复用列表读语义逐文件跳过并告警：一个坏文件不影响其余记录，
+   * 「跳过」仍可在日志中追溯。
+   */
+  async listAllRuns(): Promise<RunSnapshot[]> {
+    const dir = join(this.root, 'runs')
+    const names = await readDirNames(dir)
+    const items: RunSnapshot[] = []
+    for (const name of names) {
+      if (!name.endsWith('.json')) continue
+      const run = await readListEntry<RunSnapshot>(dir, name, isRunSnapshot)
+      if (run) items.push(run)
+    }
+    return items
   }
 
-  /** 保存 run 快照（断点持久化走同一入口；原子写保证崩溃不撕裂）。 */
+  /** 读取单个 run 快照。 */
+  async getRun(runId: string): Promise<RunSnapshot | null> {
+    return readDocument(runsPath(this.root, runId), isRunSnapshot)
+  }
+
+  /**
+   * 保存 run 快照（断点持久化走同一入口；原子写保证崩溃不撕裂）。
+   *
+   * 为什么本资源不走文档发布策略（无净化 / 无 revision 记账 / 无时间戳继承）：
+   * RunSnapshot 是编排器拥有的**运行态事实整体**——它没有 revision 列，也不需要
+   * createdAt/updatedAt（时间语义在 startedAt/endedAt 上，由编排器按状态机推进），
+   * 且不接受客户端回写（`_draft`/`lastPatch` 这类客户标记不会出现在快照里）。快照必须
+   * 按调用方给出的完整对象原样落盘，任何字段级改写都会破坏断点续跑的一致性。
+   */
   async saveRun(run: RunSnapshot): Promise<RunSnapshot> {
     if (!run?.id) throw new Error('saveRun 需要 run id')
     const path = runsPath(this.root, run.id)
@@ -489,22 +523,27 @@ export class FlowStore {
     })
   }
 
-  /** 扫描全部 run id（reconcileStaleRuns 用）。 */
-  async listAllRunIds(): Promise<string[]> {
-    const dir = join(this.root, 'runs')
-    try {
-      return (await readdir(dir)).filter((n) => n.endsWith('.json')).map((n) => n.slice(0, -'.json'.length))
-    } catch {
-      return []
-    }
-  }
-
   // ---- 工具组合（combos.json 单文件） ---------------------------------------
+
+  /**
+   * 读取工具组合文档（combos.json，单资源）。
+   * 文件不存在即空列表（既有降级语义）；形状不合法抛带路径的可诊断错误——读取方会直接
+   * 展开该数组，把非数组当数组用会写出「按下标/字符切碎」的垃圾数据，比报错难排查得多。
+   */
+  private async readComboState(): Promise<{ combos: ToolCombo[] }> {
+    const path = combosPath(this.root)
+    const state = await readJson<unknown>(path, null)
+    if (state === null) return { combos: [] }
+    if (!isToolComboDocument(state)) {
+      throw new InvalidDocumentError(resolve(path), '缺少 combos 数组')
+    }
+    // 元素级形状（ToolCombo 的字段）不在守卫范围：缺省字段由消费方各自降级
+    return { combos: state.combos as ToolCombo[] }
+  }
 
   /** 列出全部工具组合（全局共享）。 */
   async listToolCombos(): Promise<ToolCombo[]> {
-    const state = await readJson<{ combos: ToolCombo[] }>(combosPath(this.root), { combos: [] })
-    return state.combos ?? []
+    return (await this.readComboState()).combos
   }
 
   /** 保存工具组合（id 须为 combo- 前缀，§4.6 规则 2）。 */
@@ -513,8 +552,8 @@ export class FlowStore {
     if (!Array.isArray(combo.tools)) throw new Error('工具组合 tools 必须为数组')
     const path = combosPath(this.root)
     return withJsonLock(path, async () => {
-      const state = await readJson<{ combos: ToolCombo[] }>(path, { combos: [] })
-      const combos = [combo, ...(state.combos ?? []).filter((c) => c.id !== combo.id)]
+      const state = await this.readComboState()
+      const combos = [combo, ...state.combos.filter((c) => c.id !== combo.id)]
       await atomicWriteJson(path, { combos })
       return combo
     })
@@ -524,20 +563,35 @@ export class FlowStore {
   async deleteToolCombo(id: string): Promise<boolean> {
     const path = combosPath(this.root)
     return withJsonLock(path, async () => {
-      const state = await readJson<{ combos: ToolCombo[] }>(path, { combos: [] })
-      const existed = (state.combos ?? []).some((c) => c.id === id)
-      if (!existed) return false
-      await atomicWriteJson(path, { combos: (state.combos ?? []).filter((c) => c.id !== id) })
+      const state = await this.readComboState()
+      if (!state.combos.some((c) => c.id === id)) return false
+      await atomicWriteJson(path, { combos: state.combos.filter((c) => c.id !== id) })
       return true
     })
   }
 
   // ---- userId → sessionId 映射（模式二多租户隔离，§4.1.3 规则 7） -------------
 
+  /**
+   * 读取 userId 映射（返回副本，防调用方意外修改内部缓存）。
+   *
+   * 为什么这一处降级而不是抛错：映射是服务运行的旁路事实，文件损坏时抛错会让该服务的
+   * 会话解析永久失败（连下次写入自愈的机会都没有）；按「无映射」降级只影响已损坏的旧值，
+   * 下一次 mergeUserIdMap 写回即恢复。降级必须留告警，不得静默。
+   */
+  private async readSessionIdMap(path: string): Promise<Record<string, string>> {
+    const raw = await readJson<unknown>(path, null)
+    if (raw === null) return {}
+    if (!isSessionIdMap(raw)) {
+      warnSkippedDocument(path, '不是 userId → sessionId 映射（按空映射降级）')
+      return {}
+    }
+    return { ...raw }
+  }
+
   /** 读取某服务的 userId 映射（返回副本，防调用方意外修改内部缓存）。 */
   async userIdMap(serviceId: string): Promise<Record<string, string>> {
-    const map = await readJson<Record<string, string>>(sessionsPath(this.root, serviceId), {})
-    return { ...(map ?? {}) }
+    return this.readSessionIdMap(sessionsPath(this.root, serviceId))
   }
 
   /**
@@ -550,30 +604,12 @@ export class FlowStore {
    * 不得再写映射；调用方在写入前须确认服务仍存在（storage 不保证跨文件事务）。
    */
   async mergeUserIdMap(serviceId: string, entries: Record<string, string>): Promise<Record<string, string>> {
-    return withJsonLock(sessionsPath(this.root, serviceId), async () => {
-      const current = await readJson<Record<string, string>>(sessionsPath(this.root, serviceId), {})
-      const merged: Record<string, string> = { ...(current ?? {}), ...entries }
-      await atomicWriteJson(sessionsPath(this.root, serviceId), merged)
+    const path = sessionsPath(this.root, serviceId)
+    return withJsonLock(path, async () => {
+      const merged: Record<string, string> = { ...(await this.readSessionIdMap(path)), ...entries }
+      await atomicWriteJson(path, merged)
       return merged
     })
   }
 
-  // ---- 编排事实源（orchestrations/<runId>.json，父代理只读） ------------------
-
-  /** 保存运行时流程定义（startRun 时写入，父代理只读的事实源）。 */
-  async saveOrchestration(runId: string, flow: WorkflowDocument): Promise<void> {
-    await withJsonLock(orchestrationPath(this.root, runId), async () => {
-      await atomicWriteJson(orchestrationPath(this.root, runId), flow)
-    })
-  }
-
-  /** 读取运行时流程定义。 */
-  async readOrchestration(runId: string): Promise<WorkflowDocument | null> {
-    return readJson<WorkflowDocument | null>(orchestrationPath(this.root, runId), null)
-  }
-
-  /** 运行时流程定义文件的绝对路径（编排指令 facts.definitionPath 注入用）。 */
-  orchestrationFilePath(runId: string): string {
-    return orchestrationPath(this.root, runId)
-  }
 }

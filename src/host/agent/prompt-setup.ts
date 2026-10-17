@@ -177,7 +177,8 @@ function shouldKeepSection(name: string, ref: PromptStateRef): boolean {
  * 把角色 Prompt 状态应用到一次系统提示词组装结果（纯函数、确定性）：
  *   - 两开关全开且未设置角色 Prompt 时原样返回（保持官方缓存/稳定性优化）；
  *   - 否则注入 `visual-workflow:prompt` 段（sectionRegistered 为 false 时在瀑布内补插），
- *     再按 shouldKeepSection 过滤出保留段；contexts 随 injectSystemPrompt 开关。
+ *     再按 shouldKeepSection 过滤出保留段；contexts 按 injectSystemPrompt 过滤，
+ *     但 required context（0.2.1+ 的 team:identity / 工作目录 / 沙箱策略等）始终保留。
  * 供 per-agent 贡献/父代理 bindParent 与全局首轮瀑布共用，逻辑一致。
  */
 function applyPromptStateToAssembly(
@@ -201,7 +202,17 @@ function applyPromptStateToAssembly(
     }
   }
   const sections = baseSections.filter((section) => shouldKeepSection(String(section.name), ref))
-  return { ...assembly, sections, contexts: ref.injectSystemPrompt ? (assembly.contexts ?? []) : [] }
+  const contexts = Array.isArray(assembly.contexts) ? assembly.contexts : []
+  // 0.2.1+ 的 PromptContext 新增 required：它标记运行必需事实（team:identity、工作目录、
+  // 沙箱/审批策略等），不属于可关闭的「官方人设散文」。关闭人设段时只清可选 context；
+  // 旧宿主无 required 字段 → 过滤为空，保持既有「全清」行为。
+  const keptContexts = ref.injectSystemPrompt
+    ? contexts
+    : contexts.filter((context) => {
+        if (context === null || typeof context !== 'object') return false
+        return (context as { required?: unknown }).required === true
+      })
+  return { ...assembly, sections, contexts: keptContexts }
 }
 
 /**
@@ -233,7 +244,7 @@ function registerPromptOnCtx(childCtx: PromptChildContextLike, ref: PromptStateR
   // 缓存/稳定性优化）；否则按 applyPromptStateToAssembly 保留角色段 + Code 协议段 + 按开关的
   // 工具段/官方段。角色 Prompt 设置时会替换官方身份/人设段（用户裁决）。
   // 工具调用能力仅由 tools[] Schema 决定，本瀑布从不改动 assembly.tools。
-  const disposeAssembly = childCtx.on('system-prompt/assemble', async (rawAssembly, _rawContext, next) => {
+  const disposeAssembly = childCtx.on('system-prompt/assemble', async (_rawAssembly, _rawContext, next) => {
     const assembly = (await next()) as PromptAssemblyLike | null
     return applyPromptStateToAssembly(assembly, ref, sectionRegistered)
   }) as () => void
@@ -324,7 +335,7 @@ export function createChildPromptSetup(): ChildPromptSetup {
    */
   const registerGlobalAssemblyHook = (ctx: PromptChildContextLike): (() => void) => {
     if (typeof ctx?.on !== 'function') return () => {}
-    return ctx.on('system-prompt/assemble', async (rawAssembly, _rawContext, next) => {
+    return ctx.on('system-prompt/assemble', async (_rawAssembly, _rawContext, next) => {
       const assembly = (await next()) as PromptAssemblyLike | null
       const pendingState = pending.getStore()
       if (!pendingState) return assembly // 非视觉工作流子代理首轮/后续回合：交给 per-agent 贡献/bindParent

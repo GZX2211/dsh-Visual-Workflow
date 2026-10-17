@@ -3,7 +3,7 @@
 // tests/client/lib/dom-hit-test.test.ts
 //
 // 画布 DOM 命中检测（入组落点、连线目标）纯函数单测：
-// 仅协作组表面可入组，连接点不具入组功能，被拖拽本体节点被排除。
+// 仅 Team 表面可入组，连接点不具入组功能，被拖拽本体节点被排除。
 
 import { describe, expect, it } from 'vitest'
 import { groupSurfaceFromElements, groupSurfaceUnderPoint, connectionTargetAt } from '../../../src/client/lib/dom-hit-test.js'
@@ -15,8 +15,8 @@ function groupEl(id: string): HTMLDivElement {
   return g
 }
 
-describe('groupSurfaceFromElements（入组落点：仅协作组表面，连接点不具入组功能）', () => {
-  it('组卡片表面命中 → 返回组 id', () => {
+describe('groupSurfaceFromElements（入组落点：仅 Team 表面，连接点不具入组功能）', () => {
+  it('Team 卡片表面命中 → 返回组 id', () => {
     expect(groupSurfaceFromElements([groupEl('g')])).toBe('g')
   })
 
@@ -36,7 +36,7 @@ describe('groupSurfaceFromElements（入组落点：仅协作组表面，连接�
     expect(groupSurfaceFromElements([node, g], 'a')).toBe('g')
   })
 
-  it('非协作组表面 → 返回 null', () => {
+  it('非 Team 表面 → 返回 null', () => {
     const node = document.createElement('div')
     node.className = 'wf-graph__node'
     node.setAttribute('data-wf-node-id', 'a')

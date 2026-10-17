@@ -47,8 +47,8 @@ export interface SetNodeStatusOptions {
 /**
  * 该节点状态是否携带**本回合产出**。
  * 产出回写（setNodeStatus）与下游 ctx 注入（graph-facts）共用同一判定：两处若各写一份
- * 谓词，一旦口径漂移就会静默形成信息断链（协作组成员产出传不到下游）。
- * react-capped 是软截停的正常产出（T-022）；armed 是协作组成员回合结束的待命态
+ * 谓词，一旦口径漂移就会静默形成信息断链（Team 成员产出传不到下游）。
+ * react-capped 是软截停的正常产出（T-022）；armed 是 Team 成员回合结束的待命态
  * （仍可被唤醒，但本回合结论已产出）；fail/skipped 没有可交接的产出。
  */
 export declare function hasProducedOutput(status: NodeRunStatus): boolean;
@@ -65,7 +65,7 @@ export declare function setNodeStatus(snapshot: RunSnapshot, nodeId: string, sta
 /**
  * 终态化节点清单（运行收尾/终止时调用）：从未启动的 pending → skipped，
  * 正在执行的 running → fail（非 ok 不继承，续跑时重试，见文件头语义说明）；
- * 待命 armed（仍在协作组内可唤醒）→ 运行收尾即视为可唤醒状态结束，normalize 为 ok
+ * 待命 armed（仍在 Team 内可唤醒）→ 运行收尾即视为可唤醒状态结束，normalize 为 ok
  * （已产出回合，非失败）。
  * @param stopReason 终止原因（stop/interrupt/fail/…），写入仍在 running 的节点的回合记录，
  *                   供父代理区分「用户停止」与「异常失败」，避免误重启（P2-5）。

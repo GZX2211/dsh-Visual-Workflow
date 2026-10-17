@@ -31,6 +31,7 @@ afterEach(() => {
   root = null
   container?.remove()
   container = null
+  vi.restoreAllMocks()
 })
 
 function makeTask(id: string, overrides: Partial<ScheduledTask> = {}): ScheduledTask {
@@ -157,7 +158,6 @@ describe('SchedulerManager', () => {
         .find((item) => item.textContent?.includes('新建任务'))
       button?.click()
     })
-    const nameInput = document.querySelector<HTMLInputElement>('input[placeholder="任务名称"]')
     await setInput('input[placeholder="任务名称"]', '夜间归档')
     // 选择模板（第一个 select）
     await act(async () => {
@@ -239,5 +239,36 @@ describe('SchedulerManager', () => {
     const labels = Array.from(document.querySelectorAll('.wf-sched-day')).map((item) => item.textContent)
     // 前 7 个为星期按钮（第 8 个是「每天」）
     expect(labels.slice(0, 7)).toEqual(zh.schedulerWeekdays)
+  })
+
+  it('时区探测不可用：显式提示用户手动选择（不再静默按 Shanghai 解释）', async () => {
+    vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockImplementation(() => {
+      throw new Error('timezone unavailable')
+    })
+    const { remote } = makeRemote()
+    const onToast = vi.fn()
+    await act(async () => {
+      root = createRoot(container!)
+      root.render(React.createElement(SchedulerManager, {
+        copy: zh, remote, sessionId: 's-1', onClose: vi.fn(), onToast,
+      }))
+    })
+    await waitFor(() => document.querySelector('.wf-combo__side-list') !== null)
+    expect(onToast).toHaveBeenCalledWith('error', zh.schedulerTimezoneUnavailable)
+  })
+
+  it('时区探测可用：不产生时区提示', async () => {
+    const { remote } = makeRemote()
+    const onToast = vi.fn()
+    await act(async () => {
+      root = createRoot(container!)
+      root.render(React.createElement(SchedulerManager, {
+        copy: zh, remote, sessionId: 's-1', onClose: vi.fn(), onToast,
+      }))
+    })
+    await waitFor(() => document.querySelector('.wf-combo__side-list') !== null)
+    const timezoneToasts = onToast.mock.calls.filter(([kind, text]) =>
+      kind === 'error' && String(text).includes(zh.schedulerTimezoneUnavailable))
+    expect(timezoneToasts).toEqual([])
   })
 })

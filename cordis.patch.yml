@@ -2,8 +2,8 @@
 #
 # T-002：insert 块声明插件行。id 是配置树中稳定的行身份（后层按 id 覆盖前层），
 # name 是 Cordis Loader 可解析的 Node 包名（对应本包 main 入口 lib/index.js）。
-# config 的 13 个键是 patch 层实际暴露的全部键，与 src/host/index.ts 导出的 Config schema 逐键对应
-# （默认值一致）；schema 另有 1 个退役只读键 wfAskAgentTimeoutMs，不出现在本文件。
+# config 的 12 个键是 patch 层实际暴露的全部键，与 src/host/index.ts 导出的 Config schema 逐键对应
+# （默认值一致）。
 # 键义逐条见下方中文注释；形态与架构文档 §2.2 逐字一致。
 - insert:
     - id: visual-workflow
@@ -20,15 +20,14 @@
         apiKey: null
         # 模式二单服务并发请求上限（超出返回 429，需求 §4.1.3 默认 50）。
         maxConcurrentPerService: 50
-        # wf_ask_agent 待回复登记的 TTL 毫秒数（到期后不再接受 reply，也不再阻塞组聚合；默认 120s）。
-        wfAskAgentTtlMs: 120000
         # 运行空闲超时毫秒数（无 in-flight 时的看护门限，默认 30 分钟）。
         runIdleTimeoutMs: 1800000
         # 运行状态回显（编排 → 画布双向同步）的轮询间隔毫秒数；前端经 runtimeConfig 端点
         # 消费本键，未下发 / 下发失败 / 取值非法时回退其自持缺省 600ms。
         runPollMs: 2000
-        # ReAct 迭代次数默认上限（软截停强制收尾，代理达到上限后不再发起工具调用）。
-        reactIterationLimitDefault: 50
+        # ReAct 迭代次数默认上限（软截停强制收尾）；0 = 不设限（插件不设私有护栏，
+        # 未设置时迭代交给官方运行时行为约束）。
+        reactIterationLimitDefault: 0
         # 单节点回流重试次数默认上限（超限按护栏终止该节点）。
         retryLimitDefault: 3
         # 节点完整输出持久化的字节上限（默认 100KB，需求 §4.7 可配置）。
@@ -39,3 +38,7 @@
         embeddingModelDir: null
         # 外部 OpenAI 兼容 /embeddings 端点；null 表示优先本地嵌入（不可用才降级 BM25）。
         embeddingEndpoint: null
+        # Team 成员上限（官方 agent-team.maxMembers 的镜像）：会话级累计名额，含创建失败的成员。
+        # 画布入组交互与启动成员前的预检都以此为准，必须与部署层 agent-team.maxMembers 同值
+        # （官方默认 16、官方 bundle 层压到 8）。
+        teamMemberLimit: 8

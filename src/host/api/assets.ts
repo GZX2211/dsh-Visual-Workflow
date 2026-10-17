@@ -6,6 +6,7 @@
 
 import { ERR_ASSET_BAD_ARGS, ERR_ASSET_NOT_FOUND } from '../shared/protocol.js'
 import { contentFingerprint } from '../assets/index.js'
+import { NODE_KINDS } from '../graph/index.js'
 import type { AssetKind, AssetVersionEntry, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../shared/asset-types.js'
 import type { RoleTemplate } from '../shared/template-types.js'
 import type { GraphNode, Line } from '../shared/graph-model.js'
@@ -70,10 +71,38 @@ function roleTemplateOf(payload: Record<string, unknown>, assetId: string): Role
   }
 }
 
-/** payload → 工作流节点数组（保存与影响面预览共用同一形状校验）。 */
+/**
+ * payload → 工作流节点数组（保存与影响面预览共用同一形状校验）。
+ *
+ * 为什么端点必须校验节点身份：`Array.isArray` 只挡住「不是数组」，元素为 null /
+ * 缺 id / kind 越界的节点会一路进入资产库（内容指纹、版本行、级联推演都按 id 与
+ * kind 取数），保存成功但资产不可用。此处只判「是否是一个节点」这一最小形状，
+ * 节点内部结构（data 字段、position、连接点）的判定仍归 graph 模块，端点不重定义。
+ */
 function requireNodes(payload: Record<string, unknown>): GraphNode[] {
-  if (!Array.isArray(payload.nodes)) throw assetBadArgs('workflow payload requires nodes array')
-  return payload.nodes as GraphNode[]
+  const nodes = payload.nodes
+  if (!Array.isArray(nodes)) throw assetBadArgs('workflow payload requires nodes array')
+  nodes.forEach((node, index) => {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) {
+      throw assetBadArgs(`workflow payload nodes[${index}] must be an object`)
+    }
+    const candidate = node as Record<string, unknown>
+    if (typeof candidate.id !== 'string' || !candidate.id.trim()) {
+      throw assetBadArgs(`workflow payload nodes[${index}] requires a non-empty string id`)
+    }
+    // kind 取值域的唯一本体是 graph 模块的 NODE_KINDS（新增节点种类只改那一处）
+    if (typeof candidate.kind !== 'string' || !(NODE_KINDS as readonly string[]).includes(candidate.kind)) {
+      throw assetBadArgs(`workflow payload nodes[${index}] has unsupported kind: ${String(candidate.kind)}`)
+    }
+  })
+  return nodes as GraphNode[]
+}
+
+/** 取可选 meta（形状必须是普通对象；取值域归一化归 graph 模块，端点不重定义）。 */
+function optionalMeta(value: unknown): OrgMeta | undefined {
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'object' || Array.isArray(value)) throw assetBadArgs('workflow payload meta must be an object')
+  return value as OrgMeta
 }
 
 /** 校验并归一化资产 id（必填）。 */
@@ -211,6 +240,7 @@ export class AssetEndpoints extends VisualWorkflowApiBase {
     const description = requireString(payload, 'description', 'workflow')
     const nodes = requireNodes(payload)
     if (!Array.isArray(payload.lines)) throw assetBadArgs('workflow payload requires lines array')
+    const meta = optionalMeta(payload.meta)
     const input: WorkflowSaveInput = {
       assetId,
       mode: payload.mode === 'mode2' ? 'mode2' : 'mode1',
@@ -218,7 +248,7 @@ export class AssetEndpoints extends VisualWorkflowApiBase {
       description,
       nodes,
       lines: payload.lines as Line[],
-      ...(payload.meta === undefined ? {} : { meta: payload.meta as OrgMeta }),
+      ...(meta === undefined ? {} : { meta }),
       source: 'human',
     }
     return assets.saveWorkflowVersion(input)

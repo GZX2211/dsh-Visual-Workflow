@@ -1,3 +1,5 @@
+// scripts/client-smoke.mjs
+//
 // Visual Workflow —— client bundle 冒烟（T-003，由旧项目 scripts/client-smoke.mjs 改造）。
 //
 // 断言（构建后冒烟，node 原生运行，不依赖其它框架）：

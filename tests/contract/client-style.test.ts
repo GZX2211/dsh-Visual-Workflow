@@ -18,7 +18,6 @@ import { importsOf, listSourceFiles, parseSource, readText, stripCssComments } f
 
 const STYLE_DIR = 'src/client/styles'
 const INDEX_FILE = `${STYLE_DIR}/index.ts`
-const TOKENS_FILE = `${STYLE_DIR}/tokens.ts`
 
 const STYLE_FILES = listSourceFiles(STYLE_DIR)
 const FRAGMENTS = STYLE_FILES.filter((file) => file !== INDEX_FILE)
@@ -40,16 +39,6 @@ const COLOR_BASELINE: ReadonlyArray<{ readonly file: string; readonly literal: s
 
 /** 静态内联样式存量豁免（冻结基线）：file → 允许的处数。 */
 const INLINE_STYLE_BASELINE: ReadonlyArray<{ readonly file: string; readonly count: number; readonly reason: string }> = [
-  {
-    file: 'components/canvas/CanvasEdges.tsx',
-    count: 1,
-    reason: '.wf-graph__edges 已声明 position/inset/overflow，内联值与之重复，可直接删除内联样式',
-  },
-  {
-    file: 'components/canvas/GroupCard.tsx',
-    count: 5,
-    reason: '组内成员接点的固定纵向位置（top:30%/47%/50%/64%）应改为语义类',
-  },
   {
     file: 'components/panels/inspector/role-form.tsx',
     count: 3,

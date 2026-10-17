@@ -8,6 +8,8 @@ import type { NodeKind } from '../../host/shared/graph-model.js'
 
 export type HandleSpec = { inputs: string[]; outputs: string[] }
 
+// 技术债（ctx-out 停用）：角色节点（parent/agent/proxy）仍保留 ctx-out 出点，连线也仍合法，
+// 但连上不再产生注入效果——上游产出改由流程线自动注入下游。见 host graph/model.ts 同标记。
 export const HANDLES: Record<string, HandleSpec> = {
   parent: { inputs: ['db-in', 'ctx-in', 'flow-in'], outputs: ['ctx-out', 'flow-out'] },
   agent: { inputs: ['db-in', 'ctx-in', 'flow-in'], outputs: ['ctx-out', 'flow-out'] },
@@ -38,6 +40,16 @@ function stageLabels(mode: string, copy: StageLabelCopy): { start: string; end: 
     end: isMode2 ? copy.output : copy.end,
     pause: copy.pause,
   }
+}
+
+/** 单个阶段节点在当前模式与界面语言下的显示名（存储值仍是中文规范值）。 */
+export function stageNodeLabelOf(
+  mode: string,
+  kind: 'start' | 'end' | 'pause',
+  copy: StageLabelCopy,
+): string {
+  if (kind === 'pause') return copy.pause
+  return stageLabels(mode, copy)[kind]
 }
 
 /** Stage nodes available in each mode (mode 2 has no pause node). */

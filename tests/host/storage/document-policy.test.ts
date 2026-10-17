@@ -11,10 +11,15 @@ import {
   flowRevision,
   keepServerFieldsOf,
   nextFlowRevision,
+  publishDocument,
+  publishVersionedDocument,
   stripClientMeta,
 } from '../../../src/host/storage/document-policy.js'
 
 const PATCH = { origin: 'agent' as const, at: '2026-09-01T00:00:00.000Z', nodeIds: ['a'] }
+
+const NOW = '2026-09-02T00:00:00.000Z'
+const EARLIER = '2026-09-01T00:00:00.000Z'
 
 describe('stripClientMeta 客户端快照剥除', () => {
   it('始终剥除前端临时标记（_draft / _clientMeta）', () => {
@@ -99,5 +104,59 @@ describe('nextFlowRevision 记账与乐观锁', () => {
       expect(conflict.actualRevision).toBe(5)
       expect(conflict.message).toContain('wf-1')
     }
+  })
+})
+
+// 发布策略是各 save* 的唯一落盘记账点：这三项决策（净化 / revision / 时间戳继承）
+// 必须在一处可断言，否则任何一处漏掉都会静默改变落盘形状。
+describe('publishVersionedDocument 版本化文档发布策略', () => {
+  it('剥除前端标记与服务端字段，并记录 revision', () => {
+    const incoming = { id: 'wf-1', name: 'n', lastPatch: PATCH, _draft: true, revision: 0 }
+    const published = publishVersionedDocument(incoming, null, {}, NOW)
+
+    expect(published).toEqual({ id: 'wf-1', name: 'n', revision: 1, createdAt: NOW, updatedAt: NOW })
+    // 浅拷贝：入参不得被改写
+    expect(incoming).toHaveProperty('_draft', true)
+  })
+
+  it('keepServerFields=true 时保留 lastPatch（代理补丁路径）', () => {
+    const incoming: { id: string; lastPatch?: typeof PATCH } = { id: 'wf-1', lastPatch: PATCH }
+    const published = publishVersionedDocument(incoming, null, { keepServerFields: true }, NOW)
+    expect(published).toMatchObject({ lastPatch: PATCH })
+  })
+
+  it('createdAt 继承既有值，updatedAt 恒为本刻（不采用调用方传入的 updatedAt）', () => {
+    const incoming = { id: 'wf-1', revision: 2, createdAt: EARLIER, updatedAt: EARLIER }
+    const published = publishVersionedDocument(incoming, { ...incoming }, {}, NOW)
+
+    expect(published).toMatchObject({ revision: 3, createdAt: EARLIER, updatedAt: NOW })
+  })
+
+  it('显式期望 revision 不匹配时抛冲突（不产出落盘副本）', () => {
+    const incoming = { id: 'wf-1', revision: 2 }
+    expect(() => publishVersionedDocument(incoming, { ...incoming }, { expectedRevision: 1 }, NOW)).toThrow(
+      FlowRevisionConflictError,
+    )
+  })
+})
+
+describe('publishDocument 非版本化文档发布策略', () => {
+  it('剥除前端标记与时间戳继承，且不新增 revision 字段', () => {
+    const incoming: { id: string; name: string; createdAt?: string; _draft?: boolean } = {
+      id: 'tpl-1',
+      name: '模板',
+      _draft: true,
+    }
+    const published = publishDocument(incoming, { id: 'tpl-1', name: '旧名', createdAt: EARLIER }, NOW)
+
+    expect(published).toEqual({ id: 'tpl-1', name: '模板', createdAt: EARLIER, updatedAt: NOW })
+    expect(published).not.toHaveProperty('revision')
+  })
+
+  it('既有创建时间缺失时取调用方值，调用方也未给则取 now', () => {
+    const withCreatedAt: { id: string; createdAt?: string } = { id: 'tpl-1', createdAt: EARLIER }
+    const withoutCreatedAt: { id: string; createdAt?: string } = { id: 'tpl-1' }
+    expect(publishDocument(withCreatedAt, null, NOW)).toMatchObject({ createdAt: EARLIER })
+    expect(publishDocument(withoutCreatedAt, null, NOW)).toMatchObject({ createdAt: NOW, updatedAt: NOW })
   })
 })

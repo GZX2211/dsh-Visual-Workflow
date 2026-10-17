@@ -21,6 +21,7 @@ import {
 } from '../../../../src/host/tools/infrastructure/tool-switches.js'
 import {
   DEFAULT_DISABLED_ON_FIRST_INSTALL,
+  TEAM_SEND_MESSAGE,
   TEAM_SPAWN_TEAMMATE,
   WF_GRAPH_PATCH,
   WF_ORG_CATALOG,
@@ -125,8 +126,8 @@ describe('ToolSwitchStore', () => {
     expect([...store.currentDisabled()]).toEqual([...DEFAULT_DISABLED_ON_FIRST_INSTALL])
     expect(await store.readDisabled()).toEqual([...DEFAULT_DISABLED_ON_FIRST_INSTALL])
     expect(await store.effectiveDisabled()).toEqual([...DEFAULT_DISABLED_ON_FIRST_INSTALL])
-    // 播种内容必须是官方 Lead 专属创建工具（默认关闭的唯一目的：阻止模型自行拉人）
-    expect([...DEFAULT_DISABLED_ON_FIRST_INSTALL]).toEqual([TEAM_SPAWN_TEAMMATE])
+    // 播种内容 = 官方成员创建工具 + 官方消息发送工具（消息统一收口到 wf_send_message）
+    expect([...DEFAULT_DISABLED_ON_FIRST_INSTALL]).toEqual([TEAM_SPAWN_TEAMMATE, TEAM_SEND_MESSAGE])
   })
 
   it('既有文件（含空清单）不被播种覆盖，且自主编排工具默认开启（历史种子 BUG 不回归）', async () => {

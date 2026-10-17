@@ -1,9 +1,6 @@
 // src/client/i18n.ts
 //
-// 中英双语文案（覆盖模式/服务/断点/协作组/虚拟节点等需求模型的全部界面文案）。
-
-// 上限数值只有一处本体（画布交互约束），文案插值引用它，避免「改了上限忘了改提示」。
-import { GROUP_MEMBER_LIMIT } from './lib/group-members.js'
+// 中英双语文案（覆盖模式/服务/断点/团队/虚拟节点等需求模型的全部界面文案）。
 
 export const zh = {
   // 标题顶栏
@@ -25,14 +22,13 @@ export const zh = {
   flowInstances: '实例',
   flowTemplates: '工作流模板',
   parentAgent: '父代理',
-  builtinParentPrompt: '你是工作流编排的父代理，仅负责调度子代理、判断流程走向，不执行节点任务。',
   roleTemplates: '角色模板',
   files: '文件',
   databases: '数据库',
   stages: '阶段',
-  groupTemplates: '协作组',
-  groupMemberLimitHint: `协作组成员数量上限为 ${GROUP_MEMBER_LIMIT}`,
-  toastGroupMemberAdded: '已加入协作组',
+  groupTemplates: '团队',
+  groupMemberLimitHint: '团队成员数量已达上限（上限由部署层 agent-team.maxMembers 决定）',
+  toastGroupMemberAdded: '已加入团队',
   stagePinHint: '固定模板',
   newTemplate: '新建模板',
   libEmptyTemplates: '暂无模板，点击右侧 + 新建',
@@ -171,6 +167,7 @@ export const zh = {
   serviceDebugEmpty: '服务运行中，发送问题后 SSE 流式回答将实时显示在此处',
   serviceDebugHint: '调试请求经独立调试会话发送，与真实用户会话隔离',
   serviceDebugErrorPrefix: '[错误] ',
+  serviceDebugOmitted: '…… 已省略早期输出 ',
   history: '运行历史',
   // 模板→实例 / 实例→模板
   saveAsTemplate: '另存为模板',
@@ -199,7 +196,7 @@ export const zh = {
     pause: '暂停',
     input: "输入",
     output: "输出",
-    group: '协作组',
+    group: '团队',
     proxy: '虚拟节点',
   },
   fileKindLabel: { text: '文本', file: '文件' },
@@ -237,16 +234,17 @@ export const zh = {
   reactLimit: 'ReAct 迭代上限',
   reactLimitHint: '0 = 不设限',
   parentAdvancedHint: '父代理高级选项仅含 ReAct 迭代上限与回流重试上限',
-  inputSchema: '输入结构',
-  outputSchema: '输出结构',
-  inputSchemaExample: "如：{query: string}",
-  outputSchemaExample: "如：{result: string, pass: boolean}",
+  inputSchema: '输入契约',
+  outputSchema: '输出契约',
+  inputSchemaExample: '如：上游结论；产出文件路径',
+  outputSchemaExample: '如：结论 / 产出文件路径 / 关键决策 / 未决问题',
+  contractRestoreDefault: '恢复默认',
   fileKind: '文件类型',
   fileContent: '文件内容',
   fileUnset: '未选择文件',
   /** 文件多选提示（已选文件列表显示在按钮下方）。 */
-  /** 协作组拖拽悬停提示（放开以入组）。 */
-  groupDropHint: '放开以入组',
+  /** 团队卡片拖拽悬停提示（放开以入组）。 */
+  groupDropHint: '放开以加入团队',
   /** 角色卡元信息「模型」前缀。 */
   nodeMetaModel: '模型',
   /** 画布节点元信息「组合」前缀（显示选择的模式或组合）。 */
@@ -282,21 +280,16 @@ export const zh = {
   dbAdvancedHint: '召回条数=每次返回命中数(默认5,上限50)\n分块窗口/重叠=索引分块大小(384/128)\n相似度阈值=仅保留更高分(默认0)\n索引容量=单库最多索引行数(默认10000)',
   stageReadonlyHint: '阶段节点属性固定（名称硬编码），不支持编辑；删除按钮仅移除画布节点',
   collabPrompt: '协作 Prompt',
-  collabPromptHint: '追加注入到组内成员的用户消息；无论此处文本是否为空都默认列出组内全部成员（告知协作对象与可发消息对象）',
-  groupMembers: '组合成员',
-  groupMemberHint: '把角色拖入组内（或删除成员以移出）',
-  groupDefaultName: '协作组',
+  collabPromptHint: '追加到组内成员任务消息的「组内说明」（可通信对象清单由插件统一注入，与是否官方团队成员无关）',
+  groupMembers: '团队成员',
+  groupMemberHint: '把角色拖入团队内（或删除成员以移出）',
+  groupDefaultName: '团队',
   /** 卡片右上角「交换左右连接点」按钮提示（用户批注：美化布线防交叉）。 */
   swapPorts: '交换左右连接点',
   proxyMainLabel: '主节点',
   proxyReadonlyHint: '虚拟节点不存储独立配置，与主节点共享执行实例；修改主节点实时同步',
   proxyLabel: '显示名',
-  proxyLabelHint: '画布显示名（如「里程碑①：方案评审」）；留空则显示角色名',
-  proxyRole: '虚拟节点角色',
-  proxyRoleExecutor: '普通执行入口',
-  proxyRoleMilestone: '里程碑闸门',
-  proxyRoleMilestoneHint: '闸门不自动完成：父代理必须显式标记该轮完成（不含首次编排，受元参数闸门上限约束）',
-  proxyGateBadge: '🚩 里程碑',
+  proxyLabelHint: '画布显示名（如「阶段复核」）；留空则显示节点种类名',
   agentPatchedBadge: 'AI 调整',
   // 连线
   line: '连线',
@@ -317,7 +310,7 @@ export const zh = {
   newWorkflow: '新建工作流',
   deleteFlow: '删除工作流',
   // 模板
-  templateDefaultName: { workflow: '未命名工作流', role: '新角色模板', file: '新文件模板', database: '新数据库模板', group: '新协作组模板' },
+  templateDefaultName: { workflow: '未命名工作流', role: '新角色模板', file: '新文件模板', database: '新数据库模板', group: '新团队模板' },
   // 草稿默认名（本地草稿未命名时使用；与模板默认名分开——实例/模板语义不同）
   untitledWorkflow: '未命名工作流',
   untitledService: '未命名服务',
@@ -352,6 +345,8 @@ export const zh = {
   toastRunning: '运行已开始',
   toastStopped: '运行已停止',
   toastSaved: '已保存',
+  // 服务状态形状漂移（稳定码 SERVICE_STATE_SHAPE）：界面语言由调用方持有，故由调用方映射
+  toastServiceStateShape: '宿主返回的服务状态不完整（缺少标识），工作区未更新；请重试该操作或重新打开服务列表',
   // 乐观锁冲突（后端稳定码 ERR_REVISION_CONFLICT）：刷新列表后提示用户重试保存
   revisionConflictRetry: '保存冲突：该资源已在别处被修改。已重新加载服务端最新版本列表（当前画布改动仍保留），请再次保存。',
   sessionCreateFailed: '新建会话失败：未返回会话 id',
@@ -373,7 +368,7 @@ export const zh = {
   selfLoop: '不允许自环',
   duplicateConnection: '重复连线',
   proxyParallel: '主节点与虚拟节点不得同时连入同一连接点',
-  groupMemberFlowLine: '协作组成员不能连流程线，仅可连上下文/数据库线',
+  groupMemberFlowLine: '团队成员不能连流程线，仅可连上下文/数据库线',
   // 运行状态
   status: {
     pending: '等待',
@@ -394,11 +389,15 @@ export const zh = {
   resumedFrom: '续跑自',
   resumeFromNode: '断点节点',
   resumeRun: '恢复运行',
-  // 启动时开启新会话（仅模板态显示；创建实例时的一次性临时选项，不持久化到模板/实例文档）
+  // 开启新会话（模板态：模板级持久化配置——勾选与工作区路径随模板保存/删除；
+  // 资产态：一次性临时选项，无路径归属）
   newSession: '开启新会话',
-  newSessionHint: '勾选后从模板「创建实例」时先新建独立主会话，实例绑定该新会话；之后运行只认实例绑定的会话（一次性动作，不随模板/实例保存）',
+  newSessionHint: '勾选后从当前模板「创建实例」时先新建独立主会话，实例绑定该新会话；勾选状态与工作区路径随当前模板保存（删除模板即随之删除），之后运行只认实例绑定的会话',
+  // 定时任务表单仍为手填工作区（不在本次「模板态改选择器」范围内）
   workspacePlaceholder: '如 D:\\work\\project（新会话工作区，须为存在的目录；留空则继承当前会话工作区）',
-  workspaceHint: '新会话工作区路径（绝对路径目录）；该路径即新会话 cwd，也是沙箱 workspace-write 根，创建实例时校验存在，留空默认继承当前会话工作区',
+  workspaceHint: '新会话工作区路径（绝对路径目录）；该路径即新会话 cwd，也是沙箱 workspace-write 根；未选择则继承当前会话工作区',
+  pickWorkspace: '选择工作区…',
+  workspacePickerUnavailable: '当前环境不支持官方目录选择器，无法选择工作区（未选择时将继承当前会话工作区）',
   // 工作台全局化：每会话单实例 + 覆盖确认 + 当前会话标签
   currentSessionBadge: '当前',
   overwriteInstanceTitle: '覆盖已有实例',
@@ -531,6 +530,9 @@ export const zh = {
   schedulerDeleted: '任务已删除',
   schedulerNeedName: '请填写任务名称',
   schedulerNeedTemplate: '请选择执行的工作流模板',
+  // 日期展示 locale：日期格式跟随界面语言（lib 只接收注入值，不持有词典）
+  schedulerLocale: 'zh-CN',
+  schedulerTimezoneUnavailable: '无法探测本机时区：请在「时区」中手动选择，否则按 Asia/Shanghai 计算触发时刻',
   remoteTimeout: "工作流服务响应超时（{endpoint}）",
   remoteConnection: "无法连接工作流服务：{detail}",
   remoteHttpStatus: "工作流服务错误（HTTP {status}）",
@@ -555,14 +557,13 @@ export const en: Dict = {
   flowInstances: 'Instances',
   flowTemplates: 'Workflow templates',
   parentAgent: 'Parent Agent',
-  builtinParentPrompt: 'You are the parent agent of a workflow: you only schedule sub-agents and decide the flow direction, and never execute node tasks yourself.',
   roleTemplates: 'Agent templates',
   files: 'Files',
   databases: 'Databases',
   stages: 'Stages',
-  groupTemplates: 'Groups',
-  groupMemberLimitHint: `A group supports up to ${GROUP_MEMBER_LIMIT} members`,
-  toastGroupMemberAdded: 'Added to group',
+  groupTemplates: 'Teams',
+  groupMemberLimitHint: 'Team member limit reached (the limit comes from agent-team.maxMembers in the deployment layer)',
+  toastGroupMemberAdded: 'Added to Team',
   stagePinHint: 'Fixed template',
   newTemplate: 'New template',
   libEmptyTemplates: 'No templates yet — click + to create',
@@ -696,6 +697,7 @@ export const en: Dict = {
   serviceDebugEmpty: 'Run the service, then send a question to preview the SSE streamed answer',
   serviceDebugHint: 'Debug requests use a separate debug session, isolated from real users',
   serviceDebugErrorPrefix: '[Error] ',
+  serviceDebugOmitted: '... earlier output omitted: ',
   history: 'Run History',
   // 模板→实例 / 实例→模板
   saveAsTemplate: 'Save as template',
@@ -721,7 +723,7 @@ export const en: Dict = {
     pause: 'Pause',
     input: "Input",
     output: "Output",
-    group: 'Group',
+    group: 'Team',
     proxy: 'Proxy',
   },
   fileKindLabel: { text: 'Text', file: 'File' },
@@ -758,14 +760,15 @@ export const en: Dict = {
   reactLimit: 'ReAct limit',
   reactLimitHint: '0 = unlimited',
   parentAdvancedHint: 'Parent advanced options: ReAct limit & retry limit only',
-  inputSchema: 'Input schema',
-  outputSchema: 'Output schema',
-  inputSchemaExample: "e.g. {query: string}",
-  outputSchemaExample: "e.g. {result: string, pass: boolean}",
+  inputSchema: 'Input contract',
+  outputSchema: 'Output contract',
+  inputSchemaExample: 'e.g. upstream conclusion; artifact paths',
+  outputSchemaExample: 'e.g. conclusion / artifact paths / key decisions / open questions',
+  contractRestoreDefault: 'Restore default',
   fileKind: 'File kind',
   fileContent: 'File content',
   fileUnset: 'No file selected',
-  groupDropHint: 'Drop to join the group',
+  groupDropHint: 'Drop to join the Team',
   nodeMetaModel: 'Model',
   nodeMetaPreset: 'Preset',
   description: 'Description',
@@ -799,20 +802,15 @@ export const en: Dict = {
   dbAdvancedHint: 'Top-K: hits per search (default 5, max 50)\nchunk size/overlap: index window (384/128)\nthreshold: keep only higher scores (default 0)\nindex rows cap: rows indexed per DB (default 10000)',
   stageReadonlyHint: 'Stage node attributes are fixed (hardcoded label); delete removes the canvas node only',
   collabPrompt: 'Collab prompt',
-  collabPromptHint: 'Appended to every member user message; always lists all group members (who you can message)',
-  groupMembers: 'Members',
-  groupMemberHint: 'Drag agents into the group (or remove members to exit)',
-  groupDefaultName: 'Group',
+  collabPromptHint: 'Appended to the member task message as a "team note" (the reachable-agent list is injected by the plugin regardless of official Team membership)',
+  groupMembers: 'Team members',
+  groupMemberHint: 'Drag agents into the Team (or remove members to exit)',
+  groupDefaultName: 'Team',
   swapPorts: 'Swap left/right ports',
   proxyMainLabel: 'Main node',
   proxyReadonlyHint: 'Proxy nodes share the main node instance; edits on the main node sync automatically',
   proxyLabel: 'Label',
-  proxyLabelHint: 'Canvas label (e.g. "Gate 1: design review"); empty falls back to the role name',
-  proxyRole: 'Proxy role',
-  proxyRoleExecutor: 'Execution entry',
-  proxyRoleMilestone: 'Milestone gate',
-  proxyRoleMilestoneHint: 'A gate never auto-completes: the parent agent must mark it done explicitly (the first orchestration is not counted; bounded by the meta gate limit)',
-  proxyGateBadge: '🚩 Gate',
+  proxyLabelHint: 'Canvas label (e.g. "stage review"); empty falls back to the node kind name',
   agentPatchedBadge: 'AI edit',
   line: 'Line',
   lineType: 'Line type',
@@ -830,7 +828,7 @@ export const en: Dict = {
   meta: 'Status',
   newWorkflow: 'New workflow',
   deleteFlow: 'Delete workflow',
-  templateDefaultName: { workflow: 'Untitled workflow', role: 'New agent template', file: 'New file template', database: 'New database template', group: 'New group template' },
+  templateDefaultName: { workflow: 'Untitled workflow', role: 'New agent template', file: 'New file template', database: 'New database template', group: 'New Team template' },
   // Draft default names (used when a local draft has no name; separate from template defaults)
   untitledWorkflow: 'Untitled workflow',
   untitledService: 'Untitled service',
@@ -861,6 +859,8 @@ export const en: Dict = {
   toastRunning: 'Run started',
   toastStopped: 'Run stopped',
   toastSaved: 'Saved',
+  // Service-state shape drift (stable code SERVICE_STATE_SHAPE): mapped where the UI language is owned
+  toastServiceStateShape: 'The host returned an incomplete service state (missing id); the workspace was not updated — retry the action or reopen the service list',
   // Optimistic-lock conflict (backend code ERR_REVISION_CONFLICT): reload lists, ask user to retry
   revisionConflictRetry: 'Save conflict: this resource was modified elsewhere. The latest server version list has been reloaded (your canvas changes are kept) — please save again.',
   sessionCreateFailed: 'Failed to create the session: no session id returned',
@@ -881,7 +881,7 @@ export const en: Dict = {
   selfLoop: 'Self loops are not allowed',
   duplicateConnection: 'Duplicate connection',
   proxyParallel: 'Main node and its proxies cannot share the same target handle',
-  groupMemberFlowLine: 'Group members can only connect context/database lines, not flow lines',
+  groupMemberFlowLine: 'Team members can only connect context/database lines, not flow lines',
   status: {
     pending: 'Pending',
     running: 'Running',
@@ -900,11 +900,15 @@ export const en: Dict = {
   resumedFrom: 'resumed from',
   resumeFromNode: 'checkpoint',
   resumeRun: 'Resume',
-  // Start in a new session (template-only; one-shot option at instance creation, never persisted)
+  // Start in a new session (template: persisted with the template — checkbox and workspace
+  // path are saved together and removed with the template; asset: one-shot, no path).
   newSession: 'Start in new session',
-  newSessionHint: 'When on, creating an instance from a template first creates a fresh main session and binds the instance to it; subsequent runs only use the session the instance is bound to (one-shot option, never persisted to the template/instance)',
+  newSessionHint: 'When on, creating an instance from the current template first creates a fresh main session and binds the instance to it; the checkbox and workspace path are saved with the template (removed with it). Subsequent runs only use the session the instance is bound to',
+  // The scheduler form still types the workspace path (not part of the template picker change)
   workspacePlaceholder: 'e.g. D:\\work\\project (new-session workspace; must exist; blank inherits the current session workspace)',
-  workspaceHint: 'Absolute workspace path for the new session (session cwd = sandbox workspace-write root); validated at instance creation; blank inherits the current session workspace',
+  workspaceHint: 'New-session workspace path (absolute directory); it becomes the new-session cwd and the sandbox workspace-write root; unset inherits the current session workspace',
+  pickWorkspace: 'Choose workspace…',
+  workspacePickerUnavailable: 'The official directory picker is unavailable in this environment (the current session workspace is inherited when unset)',
   currentSessionBadge: 'Current',
   overwriteInstanceTitle: 'Overwrite existing instance',
   overwriteInstanceMessage: 'This session already holds a workflow instance; the new workflow will overwrite the old one (the old instance content is replaced with the new template content, run history is kept). Continue?',
@@ -1035,6 +1039,8 @@ export const en: Dict = {
   schedulerDeleted: 'Task deleted',
   schedulerNeedName: 'Please enter a task name',
   schedulerNeedTemplate: 'Please choose a workflow template',
+  schedulerLocale: 'en-US',
+  schedulerTimezoneUnavailable: 'Local timezone could not be detected — choose one under "Timezone", otherwise trigger times are computed in Asia/Shanghai',
   remoteTimeout: "Workflow service timed out ({endpoint})",
   remoteConnection: "Could not connect to the workflow service: {detail}",
   remoteHttpStatus: "Workflow service error (HTTP {status})",

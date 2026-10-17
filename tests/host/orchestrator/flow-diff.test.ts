@@ -1,9 +1,9 @@
 // tests/host/orchestrator/flow-diff.test.ts
 //
 // 编排语义变更判定单测（flow-diff 纯函数）：
-//   - 几何改动（坐标/组卡片尺寸/连接点交换）不算变更；
+//   - 几何改动（坐标/Team 卡片尺寸/连接点交换）不算变更；
 //   - 节点增删改、连线增删与条件变化判定为变更；同语义连线仅 id 变化不算。
-// DoD：拖动坐标与组卡片缩放绝不触发「编排变更」注入。
+// DoD：拖动坐标与 Team 卡片缩放绝不触发「编排变更」注入。
 
 import { describe, expect, it } from 'vitest'
 import { lineKeyOf, nodeConfigKeyOf, summarizeFlowChange } from '../../../src/host/orchestrator/index.js'
@@ -78,7 +78,7 @@ describe('flow-diff 编排语义变更判定', () => {
     expect(summarizeFlowChange(flow, moved).changed).toBe(false)
   })
 
-  it('协作组卡片尺寸与左右连接点交换：不算编排变更（纯几何）', () => {
+  it('Team 卡片尺寸与左右连接点交换：不算编排变更（纯几何）', () => {
     const flow: WorkflowDocument = {
       ...baseFlow(),
       nodes: [...baseFlow().nodes, {

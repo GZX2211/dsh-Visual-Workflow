@@ -6,11 +6,13 @@
 //   1. API → run → 编排指令注入（硬约束双位）→ wf_run_node → subagent/end 回写
 //      → wf_finish → 磁盘历史；运行中改图保存后重读新快照（双向同步）。
 //   2. 暂停门 → paused 断点持久化 → resumeRun：已 ok 节点继承不重跑、续跑继承链。
-//   3. wf_ask_agent 越权拒绝（非成员 ask → WF_ASK_FORBIDDEN；陌生目标 → 未知）
+//   3. wf_send_message 越权拒绝（调用方非本运行节点子代理 → 身份不合法；陌生目标 → 未知）
 //      与正常 ask→deliver(steer)→reply 解锁闭环；工具注册签名合规（英文 description）。
 //   4. 服务全链路：SessionMap 持久化隔离 / fork 组合参数 / serve patch 渲染。
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { en, zh } from '../../src/client/i18n.js'
+import { serializeFlow } from '../../src/client/lib/graph-serialize.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -30,9 +32,8 @@ import type { StageNode, RoleNode, WorkflowDocument, Line } from '../../src/host
 import { stageLabel } from '../../src/host/graph/index.js'
 import { VisualWorkflowApi, type ApiHost } from '../../src/host/api/index.js'
 import { SessionMap, ServiceManager, renderServePatch } from '../../src/host/service/index.js'
-import { registerWfAskAgent } from '../../src/host/tools/wf-ask-agent/tool.js'
-import { WF_ASK_AGENT } from '../../src/host/shared/protocol.js'
-import { HEAD_MARKER, ORCH_HARD_CONSTRAINTS, TAIL_MARKER, TAIL_RESTATE_MARKER } from '../../src/host/prompts/index.js'
+import { registerWfSendMessage } from '../../src/host/tools/wf-send-message/tool.js'
+import { DEFAULT_OUTPUT_CONTRACT_TEXT, WF_SEND_MESSAGE } from '../../src/host/shared/protocol.js'
 
 const cleanups: Array<() => Promise<void>> = []
 
@@ -140,7 +141,7 @@ interface Harness {
   root: FakeRoot
 }
 
-async function makeHarness(): Promise<Harness> {
+async function makeHarness(systemLanguage: () => string = () => '中文'): Promise<Harness> {
   const dir = await mkdtemp(join(tmpdir(), 'vw-e2e-'))
   cleanups.push(() => rm(dir, { recursive: true, force: true }))
   const store = new FlowStore(dir)
@@ -156,6 +157,7 @@ async function makeHarness(): Promise<Harness> {
   const runDefaults = resolveConfig({ dataDir: dir })
   const runtime = new OrchestratorRuntime({
     store,
+    systemLanguage,
     runner,
     agents,
     config: {
@@ -164,7 +166,6 @@ async function makeHarness(): Promise<Harness> {
       runIdleTimeoutMs: 60_000,
       retryLimitDefault: runDefaults.retryLimitDefault,
       reactIterationLimitDefault: runDefaults.reactIterationLimitDefault,
-      wfAskAgentTtlMs: 60_000,
     },
     logger: { warn: () => {}, info: () => {}, debug: () => {} },
     newRunId: () => `run-${++seq}`,
@@ -196,22 +197,40 @@ async function runNodeAndFinish(h: Harness, nodeId: string): Promise<{ childId: 
 }
 
 describe('e2e：编排运行全链路与双向同步', () => {
+  it.each([['en', en], ['zh', zh]] as const)('保存后的 %s 画布工作流可启动，且不出现阶段标签校验错误', async (_language, copy) => {
+    const h = await makeHarness()
+    const flow = makeFlow()
+    const canvasNodes = flow.nodes.map((node) => node.kind === 'start' || node.kind === 'end'
+      ? { ...node, data: { ...node.data, label: copy.nodeKinds[node.kind] } }
+      : { ...node, data: { ...node.data } })
+    const saved = serializeFlow(flow, canvasNodes, flow.lines)
+    await saveFlow(h, saved)
+
+    const started = await h.api.handle('run', { sessionId: flow.sessionId, flowId: flow.id }) as { runId: string }
+    const result = await h.runtime.wfRunNode({ isChild: false, sessionId: flow.sessionId }, { nodeId: 'n-a1' })
+
+    expect(result.status).toBe('started')
+    expect(h.runner.calls[0]?.node.id).toBe('n-a1')
+    await h.runtime.handleSubagentEnd({ id: result.childId, stopReason: 'completed', lastAssistantMessage: [] })
+    await h.runtime.wfFinish({ isChild: false, sessionId: flow.sessionId }, { status: 'completed', summary: 'Done' })
+    expect((await h.store.getRun(started.runId))?.status).toBe('completed')
+  })
+
   it('API run → 编排指令注入（硬约束双位）→ 节点回写 → finish → 磁盘历史；运行中改图即时生效', async () => {
     const h = await makeHarness()
     await saveFlow(h, makeFlow())
     const flow = (await h.api.handle('getWorkflow', { sessionId: 'session-1', id: 'flow-1' })) as WorkflowDocument
 
     // 1. 启动（API 层）→ 编排指令注入根 Agent（消息 id/source 齐备）
-    const started = (await h.api.handle('run', { sessionId: 'session-1', flowId: flow.id })) as { runId: string; defPath: string }
+    const started = (await h.api.handle('run', { sessionId: 'session-1', flowId: flow.id })) as { runId: string; sessionId: string }
     expect(started.runId).toBeTruthy()
     const directive = h.root.messages[0]?.content
     const directiveText = (directive as Array<{ text?: string }>)?.map((m) => m.text ?? '').join('') ?? ''
-    expect(directiveText.startsWith(HEAD_MARKER)).toBe(true)
-    // W-02 注意力双位机制：末段重申存在（TAIL_RESTATE_MARKER + 至少一条导出硬约束常量；
-    // 只验证机制，不绑定具体文案条目——提示词文案可随版本润色）
-    const tailSection = directiveText.slice(directiveText.indexOf(TAIL_MARKER))
-    expect(tailSection).toContain(TAIL_RESTATE_MARKER)
-    expect(Object.values(ORCH_HARD_CONSTRAINTS).some((v) => tailSection.includes(v))).toBe(true)
+    // 安全门禁：编排指令不含宿主路径（拓扑只经 wf_org_catalog 的 instance 通道召回）
+    expect(directiveText).not.toContain('orchestrations')
+    expect(directiveText).not.toMatch(/[A-Za-z]:[\\/]/)
+    // 注入内容携带工作流名（数据，非提示词文案）；消息来源为 user（官方 Message 契约）
+    expect(directiveText).toContain(flow.name)
     expect(h.root.messages[0]?.source).toEqual({ kind: 'user' })
 
     // 2. wf_run_node → 子代理启动（任务块含节点身份与上游 ctx）
@@ -293,8 +312,8 @@ describe('e2e：暂停门与断点续跑', () => {
   })
 })
 
-describe('e2e：wf_ask_agent 越权拒绝与通信闭环', () => {
-  it('ask→steer 投递→reply 解锁；非运营子代理 ask 被拒；陌生目标未知', async () => {
+describe('e2e：wf_send_message 越权拒绝与通信闭环', () => {
+  it('子代理→子代理、子代理→父代理、父代理→子代理三向投递；非本运行子代理与陌生目标被拒', async () => {
     const h = await makeHarness()
     const flow: WorkflowDocument = {
       ...makeFlow(),
@@ -308,59 +327,70 @@ describe('e2e：wf_ask_agent 越权拒绝与通信闭环', () => {
     const r1 = (await h.runtime.wfRunNode({ isChild: false, sessionId: 'session-1' }, { nodeId: 'n-a1' })) as { childId: string }
     const r2 = (await h.runtime.wfRunNode({ isChild: false, sessionId: 'session-1' }, { nodeId: 'n-a2' })) as { childId: string }
 
-    // 正常 ask（非阻塞）：返回受理凭证，deliver 被调用（steer 投递）
-    const delivered: Array<{ to: string; text: string }> = []
+    const textOf = (input: { message?: { content?: Array<{ text?: string }> } }): string =>
+      (input.message?.content ?? []).map((c) => c.text ?? '').join('')
+    const toChild: Array<{ childId: string; text: string }> = []
+    const toParent: Array<{ text: string }> = []
     const delivery = {
-      deliver: vi.fn(async (input: { to: string; message: { content?: Array<{ text?: string }> } }) => {
-        delivered.push({
-          to: input.to,
-          text: (input.message.content ?? []).map((c) => c.text ?? '').join(''),
-        })
+      deliverToChild: vi.fn(async (input: { childId: string; message: { content?: Array<{ text?: string }> } }) => {
+        toChild.push({ childId: input.childId, text: textOf(input) })
+        return 'delivered' as const
       }),
+      deliverToParent: vi.fn(async (input: { message: { content?: Array<{ text?: string }> } }) => {
+        toParent.push({ text: textOf(input) })
+        return 'delivered' as const
+      }),
+      deliverToTeammate: vi.fn(async () => {}),
     }
-    const askResult = await h.runtime.wfAskAgent(
+
+    // 子代理 → 子代理（nodeId 寻址，resolved 解析为对方 childId）
+    const toPeer = await h.runtime.wfSendMessage(
       { isChild: true, sessionId: 'session-1' },
       r1.childId,
-      { cmd: 'ask', targetChildId: r2.childId, message: '请提供数据' },
+      { target: 'n-a2', message: '请提供数据' },
       delivery as never,
     )
-    expect(askResult).toMatchObject({ cmd: 'ask', from: r1.childId, to: r2.childId })
-    expect(delivered).toHaveLength(1)
-    expect(delivered[0]?.to).toBe(r2.childId)
-    const askId = askResult.askId ?? ''
-    expect(askId).toBeTruthy()
-    expect(delivered[0]?.text).toContain(askId)
+    expect(toPeer).toEqual({ target: 'n-a2', resolved: r2.childId, status: 'delivered' })
+    expect(toChild[0]?.childId).toBe(r2.childId)
+    expect(toChild[0]?.text).toContain('请提供数据')
 
-    // reply 反向投递：回复作为新消息送达发起者（非调用结果）
-    const replyResult = await h.runtime.wfAskAgent(
+    // 子代理 → 父代理（固定别名）
+    const toRoot = await h.runtime.wfSendMessage(
       { isChild: true, sessionId: 'session-1' },
-      r2.childId,
-      { cmd: 'reply', askId, targetChildId: r1.childId, message: '数据在此' },
+      r1.childId,
+      { target: 'parent', message: '需要你的决定' },
       delivery as never,
     )
-    expect(replyResult).toMatchObject({ cmd: 'reply', askId, from: r2.childId, to: r1.childId })
-    expect(delivered).toHaveLength(2)
-    expect(delivered[1]?.to).toBe(r1.childId)
-    expect(delivered[1]?.text).toContain('数据在此')
+    expect(toRoot).toEqual({ target: 'parent', resolved: 'parent', status: 'delivered' })
+    expect(toParent[0]?.text).toContain('需要你的决定')
 
-    // 越权拒绝：非本运行子代理 ask（childIndex 未登记）→ 禁止
-    await expect(h.runtime.wfAskAgent(
+    // 父代理 → 子代理
+    const fromRoot = await h.runtime.wfSendMessage(
+      { isChild: false, sessionId: 'session-1' },
+      'session-1',
+      { target: 'n-a1', message: '补充指令' },
+      delivery as never,
+    )
+    expect(fromRoot).toEqual({ target: 'n-a1', resolved: r1.childId, status: 'delivered' })
+
+    // 越权拒绝：非本运行子代理（childIndex 未登记）→ 身份不合法
+    await expect(h.runtime.wfSendMessage(
       { isChild: true, sessionId: 'session-1' },
       'stranger-child',
-      { cmd: 'ask', targetChildId: r2.childId, message: 'hi' },
+      { target: 'n-a2', message: 'hi' },
       delivery as never,
-    )).rejects.toMatchObject({ code: 'WF_ASK_FORBIDDEN' })
+    )).rejects.toMatchObject({ code: 'WF_SEND_BAD_ARGS' })
 
     // 陌生目标：目标非本运行节点子代理 → 目标未知
-    await expect(h.runtime.wfAskAgent(
+    await expect(h.runtime.wfSendMessage(
       { isChild: true, sessionId: 'session-1' },
       r1.childId,
-      { cmd: 'ask', targetChildId: 'ghost-child', message: 'hi' },
+      { target: 'ghost-child', message: 'hi' },
       delivery as never,
-    )).rejects.toMatchObject({ code: 'WF_ASK_TARGET_UNKNOWN' })
+    )).rejects.toMatchObject({ code: 'WF_SEND_TARGET_UNKNOWN' })
   })
 
-  it('工具注册真身：wf_ask_agent 定义签名合规（description 英文标准写法、name 常量）', () => {
+  it('工具注册真身：wf_send_message 定义签名合规（description 英文标准写法、name 常量）', () => {
     const registered: Array<{ name?: string; description?: string; parameters?: unknown }> = []
     const ctx = { get: (name: string) => (name === 'tools' ? {
       register(def: { name?: string; description?: string; parameters?: unknown }) {
@@ -368,10 +398,16 @@ describe('e2e：wf_ask_agent 越权拒绝与通信闭环', () => {
         return () => {}
       },
     } : null) }
-    const dispose = registerWfAskAgent(ctx as never, { orchestrator: null as never, followupChild: null as never } as never)
-    expect(registered[0]?.name).toBe(WF_ASK_AGENT)
+    const dispose = registerWfSendMessage(ctx as never, {
+      orchestrator: null as never,
+      getChildAgent: null as never,
+      followupRoot: null as never,
+      followupChild: null as never,
+      sendToTeammate: null as never,
+    } as never)
+    expect(registered[0]?.name).toBe(WF_SEND_MESSAGE)
     const desc = String(registered[0]?.description ?? '')
-    expect(desc).toMatch(/^Exchange messages/) // 英文标准写法：何时调用开头
+    expect(desc).toMatch(/^Send one durable message/) // 英文标准写法：何时调用开头
     expect(desc.length).toBeLessThan(700)
     dispose()
   })
@@ -445,5 +481,45 @@ describe('e2e：服务侧组合（fork 参数 / serve patch / 会话映射持久
     expect(patch).toContain('disabled: true')
     expect(patch).toContain('apiKey: null')
     expect(patch).toContain('visual-workflow-service')
+  })
+})
+
+describe('UI locale 贯穿真实运行装配', () => {
+  it.each([['en', 'English', '# Hard constraints'], ['zh', '中文', '# 硬性约束']])('%s 由父代理、子代理、断点与续跑共享', async (language, resolved, heading) => {
+    // 故意让 Host 设置与 UI 相反：本次运行以 Client 的自动 locale 为准。
+    const h = await makeHarness(() => language === 'en' ? '中文' : 'English')
+    const flow = makeFlow(true)
+    flow.name = 'Instagram Post Helper'
+    flow.description = 'Prepare an Instagram post'
+    for (const node of flow.nodes) {
+      if (node.kind !== 'agent') continue
+      node.data.label = node.id
+      node.data.outputSchema = DEFAULT_OUTPUT_CONTRACT_TEXT
+    }
+    await saveFlow(h, flow)
+    const start = await h.api.handle('run', { sessionId: flow.sessionId, flowId: flow.id, language }) as { runId: string }
+    const parent = h.root.messages[0]!.content.map(item => item.text).join('')
+    expect(parent).toContain(heading)
+    if (language === 'en') expect(parent).not.toMatch(/[\u3400-\u9fff]/)
+    expect(h.runtime.runSnapshot(start.runId)?.systemLanguage).toBe(resolved)
+    const child = await h.runtime.wfRunNode({ isChild: false, sessionId: flow.sessionId }, { nodeId: 'n-a1' })
+    const text = h.runner.calls[0]!.blocks.map(block => block.text).join('')
+    expect(text).toContain(heading)
+    if (language === 'en') {
+      expect(text).toContain('Conclusion / Output file paths / Key decisions / Open questions')
+      expect(text).not.toMatch(/[\u3400-\u9fff]/)
+    }
+    await h.runtime.handleSubagentEnd({ id: child.childId, stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: 'Research complete' }] })
+    await h.runtime.wfRunNode({ isChild: false, sessionId: flow.sessionId }, { nodeId: 'n-pause' })
+    expect((await h.store.getRun(start.runId))?.systemLanguage).toBe(resolved)
+    // 无 GUI 的续跑继承已持久化的运行语言，即使 Host 设置与它相反。
+    const resumed = await h.runtime.resumeRun({ sessionId: flow.sessionId, flowId: flow.id, fromRunId: start.runId })
+    expect(h.runtime.runSnapshot(resumed.runId)?.systemLanguage).toBe(resolved)
+    expect(h.root.messages.at(-1)!.content[0]!.text).toContain(heading)
+    await h.runtime.stopRun(resumed.runId)
+    // 显式切换 UI 语言只作用于本次新续跑的运行。
+    const switched = await h.api.handle('runResume', { sessionId: flow.sessionId, flowId: flow.id, runId: resumed.runId, language: language === 'en' ? 'zh' : 'en' }) as { runId: string }
+    expect(h.runtime.runSnapshot(switched.runId)?.systemLanguage).toBe(resolved === 'English' ? '中文' : 'English')
+    await h.runtime.stopRun(switched.runId)
   })
 })

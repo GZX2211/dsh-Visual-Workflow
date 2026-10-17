@@ -2,10 +2,10 @@
 //
 // FlowStore 数据层测试（T-012）：全 CRUD、会话隔离（workflow/service 按 sessionId）、
 // revision 冲突保护、原子性与锁一致性（并发保存无撕裂/无垃圾文件）、userId 映射持久化、
-// 编排事实源、模板时间戳记账与单资源读语义。断言依据：架构文档 §4.1 + 需求文档 §4.2.2/§4.7/§6
+// 模板时间戳记账与单资源读语义。断言依据：架构文档 §4.1 + 需求文档 §4.2.2/§4.7/§6
 // + src/host/storage/AGENTS.md。
 
-import { describe, expect, it, beforeEach, afterEach } from 'vitest'
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -239,6 +239,74 @@ describe('列表容错：损坏 JSON 不阻塞整个列表（Bug 21）', () => {
   })
 })
 
+// JSON 合法但形状不是该资源文档：列表读必须跳过并告警，单资源读必须抛带路径的错误。
+// 为什么这条与上面的「损坏 JSON」分开：两类原因不同（解析失败 vs 形状不匹配），
+// 修法也不同；合成一条会掩盖其中之一。
+describe('形状守卫：JSON 合法但不是该资源的文档', () => {
+  it('列表读跳过形状不匹配的文件并告警（可解析的 123/[]/{} 不再流进列表）', async () => {
+    await store.saveWorkflow(makeFlow('good', 's1'), 's1')
+    await store.saveService(makeService('svc1', 's1'), 's1')
+    await store.saveTemplate('role', makeRoleTemplate('r1'))
+    await store.saveFlowTemplate(makeFlow('tpl1', 's1'))
+    await store.saveRun({
+      id: 'run-1', flowId: 'f1', flowName: '流程', sessionId: 's1', mode: 'mode1', status: 'completed',
+      startedAt: '2026-08-24T00:00:00.000Z', endedAt: null, summary: '', nodes: [],
+    })
+    await writeFile(join(dir, 'workflows', 'shape.json'), '123', 'utf8')
+    await writeFile(join(dir, 'services', 'shape.json'), '[]', 'utf8')
+    await writeFile(join(dir, 'roles', 'shape.json'), '"文字"', 'utf8')
+    await writeFile(join(dir, 'flow-templates', 'shape.json'), '{}', 'utf8')
+    await writeFile(join(dir, 'runs', 'shape.json'), 'true', 'utf8')
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      expect((await store.listWorkflows('s1')).map((f) => f.id)).toEqual(['good'])
+      expect((await store.listServices('s1')).map((s) => s.id)).toEqual(['svc1'])
+      expect((await store.listServicesAll()).map((s) => s.id)).toEqual(['svc1'])
+      expect((await store.listTemplates('role')).map((t) => t.id)).toEqual(['r1'])
+      expect((await store.listFlowTemplates()).map((t) => t.id)).toEqual(['tpl1'])
+      expect((await store.listRuns('f1')).map((r) => r.id)).toEqual(['run-1'])
+      // 每个被跳过的文件都留下一条告警：静默跳过会把「数据损坏」退化成空列表
+      for (const relative of ['workflows', 'services', 'roles', 'flow-templates', 'runs']) {
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining(join(relative, 'shape.json')))
+      }
+      // services 目录被 listServices 与 listServicesAll 各扫一次，故告警比文件数多一条
+      expect(warn).toHaveBeenCalledTimes(6)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('单资源读遇到形状不匹配抛带路径的 InvalidDocumentError', async () => {
+    await writeFile(join(dir, 'workflows', 'shape.json'), '[]', 'utf8')
+    await expect(store.getWorkflow('s1', 'shape')).rejects.toMatchObject({
+      name: 'InvalidDocumentError',
+      filePath: join(dir, 'workflows', 'shape.json'),
+    })
+  })
+
+  it('service/template/flow-template/run 的单资源读同样抛形状错误且带各自路径', async () => {
+    await writeFile(join(dir, 'services', 'shape.json'), '{}', 'utf8')
+    await writeFile(join(dir, 'roles', 'shape.json'), '"文字"', 'utf8')
+    await writeFile(join(dir, 'flow-templates', 'shape.json'), '[]', 'utf8')
+    await writeFile(join(dir, 'runs', 'shape.json'), '123', 'utf8')
+
+    const reads: Array<() => Promise<unknown>> = [
+      () => store.getServiceById('shape'),
+      () => store.getService('s1', 'shape'),
+      () => store.getTemplate('role', 'shape'),
+      () => store.getFlowTemplate('shape'),
+      () => store.getRun('shape'),
+    ]
+    for (const read of reads) {
+      await expect(read()).rejects.toMatchObject({ name: 'InvalidDocumentError' })
+    }
+    await expect(store.getServiceById('shape')).rejects.toMatchObject({
+      filePath: join(dir, 'services', 'shape.json'),
+    })
+  })
+})
+
 describe('模板 CRUD（全局共享）与子类过滤', () => {
   it('角色/文件/数据库三类模板增删查', async () => {
     const role = makeRoleTemplate('r1')
@@ -263,8 +331,8 @@ describe('模板 CRUD（全局共享）与子类过滤', () => {
     expect((await store.listTemplates('role')).length).toBe(1)
   })
 
-  it('协作组模板增删查（groups/ 目录，全局共享）', async () => {
-    const group: GroupTemplate = { id: 'gt1', name: '审查组', collabPrompt: '你们是双 Agent 协作组' }
+  it('Team 模板增删查（groups/ 目录，全局共享）', async () => {
+    const group: GroupTemplate = { id: 'gt1', name: '审查组', collabPrompt: '你们是双 Agent Team' }
     await store.saveTemplate('group', group)
     expect((await store.listTemplates('group')).map((t) => t.id)).toEqual(['gt1'])
     expect(await store.getTemplate('group', 'gt1')).not.toBeNull()
@@ -306,6 +374,12 @@ describe('模板 CRUD（全局共享）与子类过滤', () => {
     expect(saved.createdAt).toBe(createdAt)
     expect(Date.parse(saved.updatedAt)).toBeGreaterThanOrEqual(Date.parse(createdAt))
   })
+
+  it('saveTemplate 经发布策略剥除前端临时标记（不落盘）', async () => {
+    await store.saveTemplate('role', { ...makeRoleTemplate('r-clean'), _draft: true } as RoleTemplate)
+    const disk = JSON.parse(await readFile(join(dir, 'roles', 'r-clean.json'), 'utf8')) as Record<string, unknown>
+    expect(disk).not.toHaveProperty('_draft')
+  })
 })
 
 describe('运行历史（runs/<runId>.json）', () => {
@@ -324,7 +398,7 @@ describe('运行历史（runs/<runId>.json）', () => {
     }
   }
 
-  it('保存→读取→按 flowId 过滤→exists→全量 id 扫描', async () => {
+  it('保存→读取→按 flowId 过滤→exists→全量扫描', async () => {
     await store.saveRun(makeRun('run-1', 'f1'))
     await store.saveRun(makeRun('run-2', 'f1'))
     await store.saveRun(makeRun('run-3', 'f2'))
@@ -332,7 +406,7 @@ describe('运行历史（runs/<runId>.json）', () => {
     expect((await store.listRuns('f2')).map((r) => r.id)).toEqual(['run-3'])
     expect(await store.getRun('run-1')).not.toBeNull()
     expect(await store.getRun('ghost')).toBeNull()
-    expect((await store.listAllRunIds()).sort()).toEqual(['run-1', 'run-2', 'run-3'].sort())
+    expect((await store.listAllRuns()).map((r) => r.id).sort()).toEqual(['run-1', 'run-2', 'run-3'].sort())
   })
 
   it('Bug 14：listRuns 可按 sessionId 过滤（跨会话历史不可见）', async () => {
@@ -350,7 +424,7 @@ describe('运行历史（runs/<runId>.json）', () => {
 
 describe('工具组合（combos.json）', () => {
   function combo(id: string): ToolCombo {
-    return { id: id as `combo-${string}`, name: '组合', tools: ['wf_ask'], mcpServers: [] }
+    return { id: id as `combo-${string}`, name: '组合', tools: ['wf_ask_user'], mcpServers: [] }
   }
 
   it('保存→列出→删除；id 必须 combo- 前缀', async () => {
@@ -360,6 +434,16 @@ describe('工具组合（combos.json）', () => {
     await expect(store.saveToolCombo({ id: 'bad', name: 'x', tools: [], mcpServers: [] } as unknown as ToolCombo)).rejects.toThrow()
     expect(await store.deleteToolCombo('combo-a')).toBe(true)
     expect(await store.deleteToolCombo('combo-a')).toBe(false)
+  })
+
+  it('combos 非数组：读写都抛带路径的形状错误（不把非数组展开成垃圾数据）', async () => {
+    await writeFile(join(dir, 'combos.json'), JSON.stringify({ combos: 'combo-a' }), 'utf8')
+    await expect(store.listToolCombos()).rejects.toMatchObject({
+      name: 'InvalidDocumentError',
+      filePath: join(dir, 'combos.json'),
+    })
+    await expect(store.saveToolCombo(combo('combo-a'))).rejects.toMatchObject({ name: 'InvalidDocumentError' })
+    await expect(store.deleteToolCombo('combo-a')).rejects.toMatchObject({ name: 'InvalidDocumentError' })
   })
 })
 
@@ -389,18 +473,18 @@ describe('userId → sessionId 映射（§4.1.3 规则 7）', () => {
     const disk = JSON.parse(await readFile(join(dir, 'services', 'svc-c.sessions.json'), 'utf8')) as Record<string, string>
     expect(Object.keys(disk).sort()).toEqual(['user-1', 'user-2', 'user-3'])
   })
-})
 
-describe('编排事实源（orchestrations/<runId>.json）', () => {
-  it('保存→读取→路径可解析（父代理只读事实源）', async () => {
-    const flow = makeFlow('f1', 's1')
-    await store.saveOrchestration('run-1', flow)
-    expect(await store.readOrchestration('run-1')).not.toBeNull()
-    // 编排指令注入的绝对路径与读取入口指向同一文件
-    expect(store.orchestrationFilePath('run-1')).toBe(join(dir, 'orchestrations', 'run-1.json'))
-    expect(JSON.parse(await readFile(store.orchestrationFilePath('run-1'), 'utf8'))).toMatchObject({ id: 'f1' })
-    // 未写入的 run 读取为 null（不抛错）
-    expect(await store.readOrchestration('run-missing')).toBeNull()
+  it('映射内容形状不合法：告警并按空映射降级（不阻断该服务的会话解析）', async () => {
+    await writeFile(join(dir, 'services', 'svc-bad.sessions.json'), JSON.stringify({ u1: 42 }), 'utf8')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      expect(await store.userIdMap('svc-bad')).toEqual({})
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(join('services', 'svc-bad.sessions.json')))
+    } finally {
+      warn.mockRestore()
+    }
+    // 降级不是终态：下一次合并写入即覆盖为合法映射（自愈）
+    expect(await store.mergeUserIdMap('svc-bad', { u2: 'sess-b' })).toEqual({ u2: 'sess-b' })
   })
 })
 
@@ -412,15 +496,23 @@ describe('原子性与锁一致性', () => {
     const results = await Promise.all(
       Array.from({ length: 10 }, (_, i) => store.saveWorkflow({ ...flow, name: `并发-${i}` }, 's1')),
     )
-    const revs = results.map((r) => r.revision)
-    expect(new Set(revs).size).toBe(10) // 10 次并发写各自拿到不同 revision（锁串行化）
-    // 最终文件为完整 JSON
+    // 契约口径：只锁「初始 1 + 10 次追加 = 11」，不锁「每次并发写各拿到不同 revision」——
+    // 合法实现若合并/重排写入（只要不丢更新）不应误红。
     const final = await store.getWorkflow('s1', 'f1')
     expect(final!.revision).toBe(11)
     expect(final!.name).toMatch(/^并发-/)
-    // 无 .tmp-* 垃圾残留（原子写清理）
+    // 每个并发调用返回的仍是该次保存的完整文档（无撕裂），revision 落在本次并发区间内
+    for (const saved of results) {
+      expect(saved.id).toBe('f1')
+      expect(saved.sessionId).toBe('s1')
+      expect(Number.isInteger(saved.revision)).toBe(true)
+      expect(saved.revision).toBeGreaterThanOrEqual(1)
+      expect(saved.revision).toBeLessThanOrEqual(11)
+    }
+    // 目录契约口径：无临时文件/锁文件残留 + 目标文件存在（不锁「目录里只允许出现该文件」）
     const files = await readdir(join(dir, 'workflows'))
-    expect(files).toEqual(['f1.json'])
+    expect(files.filter((f) => f.startsWith('.tmp') || f.endsWith('.lock')), '不应残留临时文件或锁文件').toEqual([])
+    expect(files, '目标工作流文件必须存在').toContain('f1.json')
   })
 
   it('并发带陈旧期望的保存按乐观锁拒绝（其余不受影响）', async () => {
@@ -591,5 +683,40 @@ describe('列表排序的确定性', () => {
     }
     const listed = await store.listTemplates('role')
     expect(listed.map((item) => String((item as { name?: string }).name))).toEqual(codepointSorted(names))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// IF-12 列表读取的错误语义：目录不存在（ENOENT）降级为空，其他失败一律上浮
+// （storage/AGENTS.md：列表读可用，但不得把权限等读取失败伪装成空列表）
+// ---------------------------------------------------------------------------
+
+describe('列表读取的错误语义', () => {
+  it('目录不存在 → 各列表入口都返回空（合法降级，不抛错）', async () => {
+    for (const name of ['workflows', 'services', 'roles', 'data', 'groups', 'flow-templates', 'runs']) {
+      await rm(join(dir, name), { recursive: true, force: true })
+    }
+    expect(await store.listWorkflows()).toEqual([])
+    expect(await store.listServices()).toEqual([])
+    expect(await store.listServicesAll()).toEqual([])
+    expect(await store.listTemplates('role')).toEqual([])
+    expect(await store.listTemplates('file')).toEqual([])
+    expect(await store.listTemplates('database')).toEqual([])
+    expect(await store.listTemplates('group')).toEqual([])
+    expect(await store.listFlowTemplates()).toEqual([])
+    expect(await store.listRuns('flow-1')).toEqual([])
+    expect(await store.listAllRuns()).toEqual([])
+  })
+
+  it('目录不可枚举（ENOTDIR，代指权限等非 ENOENT 失败）→ 上浮可诊断错误，不伪装成空列表', async () => {
+    // 用「目录项被同名文件占位」造出确定性的非 ENOENT 失败（Windows/POSIX 同为 ENOTDIR），
+    // 避免依赖平台相关的权限 ACL 才能复现权限失败。
+    await rm(join(dir, 'workflows'), { recursive: true, force: true })
+    await writeFile(join(dir, 'workflows'), 'not a directory')
+    await expect(store.listWorkflows()).rejects.toMatchObject({ code: 'ENOTDIR' })
+
+    await rm(join(dir, 'roles'), { recursive: true, force: true })
+    await writeFile(join(dir, 'roles'), 'not a directory')
+    await expect(store.listTemplates('role')).rejects.toMatchObject({ code: 'ENOTDIR' })
   })
 })

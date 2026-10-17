@@ -1,28 +1,20 @@
 // src/host/tools/wf-graph-patch/types.ts
 //
 // wf_graph_patch 的类型契约：
-//   - PatchOp 判别联合：图结构变更 / 运行状态标记（两组）；
-//   - 每组一个「已应用操作」类型，供执行层按组分别落地（两条代码路径零共享）；
-//   - op → 组名映射：服务端据此拒绝同一补丁混用不同组。
+//   - PatchOp：图结构变更操作的判别联合；
+//   - GraphPatchResult：执行层按条落地的结果清单；
+//   - op 名清单与未知 op 判定：服务端据此拒绝非法 op（未知 op 属入参形状错误）。
 // 纯类型 + 常量（无 IO），可在 host 单测与后续客户端角标渲染侧复用。
 
-import type { OrgMeta } from '../../shared/types.js'
+import type { WorkflowDocument } from '../../shared/graph-model.js'
 
 /** 补丁作用域：template = 工作流模板（规划期改模板）；instance = 工作流/服务实例（运行期改实例）。 */
 export type PatchScope = 'template' | 'instance'
 
 /**
- * 操作组名（两组）。
- * 元参数（组织预算）不在此列：它是约束改图方的硬护栏，被约束方不得自行调整，
- * 因此没有「改元参数」这一组操作，只能在画布/设置中由用户调整。
- */
-export type PatchGroup = 'graph' | 'mark'
-
-/**
  * 新建模板说明（wf_graph_patch 的 create 参数）。
  * 语义（用户裁决 2026.09）：规划期的主用例是「按意图产出新模板」，因此
  * `scope='template'` + `create` = 新建；不带 create 仍是「必须已存在」的更新语义。
- * 允许出现的组合只有：scope=template 且 op 组为 graph（其余组合一律拒绝）。
  */
 export interface NewTemplateSpec {
   /** 模板名称（人类可读，必填）。 */
@@ -33,7 +25,7 @@ export interface NewTemplateSpec {
   mode?: 'mode1' | 'mode2'
 }
 
-/** 图结构变更组。 */
+/** 图结构变更操作。 */
 export type GraphPatchOp =
   | { op: 'create_node'; node: Record<string, unknown> }
   | { op: 'remove_node'; nodeId: string; cascade?: boolean }
@@ -43,24 +35,15 @@ export type GraphPatchOp =
   | { op: 'create_group'; groupId: string; label: string; collabPrompt?: string; memberIds?: string[] }
   | { op: 'set_group_members'; groupId: string; memberIds: string[] }
 
-/**
- * 运行状态标记组（闸门节点完成/失败）。
- * 语义约束：只能标记**当前仍在运行**的 run 所对应的节点；节点不存在即拒绝。
- * 闸门身份与次数预算由执行层按运行事实判定。
- */
-export interface MarkPatchOp {
-  op: 'mark_node'
-  nodeId: string
-  status: 'ok' | 'fail'
-  summary?: string
-}
-
 /** 补丁操作（判别联合）。 */
-export type PatchOp = GraphPatchOp | MarkPatchOp
+export type PatchOp = GraphPatchOp
 
-/** 图结构变更结果。 */
+/**
+ * 图结构变更结果。
+ * doc 用图契约本体：后续校验、预算与落盘全部按 WorkflowDocument 语义进行。
+ */
 export interface GraphPatchResult {
-  doc: { id: string; sessionId: string; mode: string; name: string; description: string; nodes: unknown[]; lines: unknown[]; revision: number; meta?: OrgMeta }
+  doc: WorkflowDocument
   createdNodeIds: string[]
   removedNodeIds: string[]
   updatedNodeIds: string[]
@@ -74,13 +57,6 @@ export interface GraphPatchResult {
    * 强制受管会把这类规划直接挡在门外。归一化不静默：工具层据此产出 warning 告知调用方。
    */
   fileNodeTextOnlyIds: string[]
-}
-
-/** 运行状态标记结果。 */
-export interface MarkPatchResult {
-  nodeId: string
-  status: 'ok' | 'fail'
-  runId: string
 }
 
 /**
@@ -98,7 +74,7 @@ export interface PatchOpFailure {
   message: string
 }
 
-/** 图结构组的 op 名（op → 组映射、分组提示与契约完整性校验的唯一来源）。 */
+/** 图结构 op 名清单（契约完整性校验与未知 op 判定的唯一来源）。 */
 export const GRAPH_OP_NAMES = [
   'create_node',
   'remove_node',
@@ -109,25 +85,10 @@ export const GRAPH_OP_NAMES = [
   'set_group_members',
 ] as const
 
-/** 标记组的 op 名。 */
-export const MARK_OP_NAMES = ['mark_node'] as const
-
-/** op → 组名映射（服务端混组拒绝的唯一依据）。 */
-export function opGroupOf(op: unknown): PatchGroup | null {
+/** op 是否属于图结构 op（未知 op 由参数层按 WF_BAD_ARGS 拒绝）。 */
+export function opGroupOf(op: unknown): 'graph' | null {
   const name = String((op as { op?: unknown })?.op ?? '')
-  if ((GRAPH_OP_NAMES as readonly string[]).includes(name)) return 'graph'
-  if ((MARK_OP_NAMES as readonly string[]).includes(name)) return 'mark'
-  return null
-}
-
-/** 补丁中出现的全部组名（按出现顺序去重）。 */
-export function groupsOf(ops: unknown[]): PatchGroup[] {
-  const out: PatchGroup[] = []
-  for (const op of ops ?? []) {
-    const group = opGroupOf(op)
-    if (group && !out.includes(group)) out.push(group)
-  }
-  return out
+  return (GRAPH_OP_NAMES as readonly string[]).includes(name) ? 'graph' : null
 }
 
 /** 未知 op 名（用于错误信息）。 */
@@ -135,8 +96,5 @@ export function unknownOpsOf(ops: unknown[]): string[] {
   return (ops ?? []).filter((op) => opGroupOf(op) === null).map((op) => String((op as { op?: unknown })?.op ?? ''))
 }
 
-/** 混组错误的可读分组说明（写进错误文本，帮助模型自我修正）。 */
-export const GROUP_HINTS: Record<PatchGroup, string> = {
-  graph: `graph structure ops (${GRAPH_OP_NAMES.join('/')})`,
-  mark: `run-state marking op (${MARK_OP_NAMES.join('/')})`,
-}
+/** 全部允许的 op 名（写进错误文本，帮助模型自我修正）。 */
+export const ALLOWED_OP_NAMES_TEXT = GRAPH_OP_NAMES.join(' / ')

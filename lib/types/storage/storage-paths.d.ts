@@ -1,6 +1,6 @@
 import type { TemplateKind } from './template-model.js';
 /** 顶层数据目录（init 时创建；外部工具与测试以此为布局契约）。 */
-export declare const DIRS: readonly ["workflows", "services", "roles", "data", "groups", "runs", "orchestrations", "flow-templates"];
+export declare const DIRS: readonly ["workflows", "services", "roles", "data", "groups", "runs", "flow-templates"];
 /** 嵌套子目录（相对 root 的路径；随顶层目录一并幂等创建）。 */
 export declare const NESTED_DIRS: readonly ["data/files"];
 /** 受管文件目录（data/files，存放非文本文件模板的受管拷贝）。 */
@@ -8,6 +8,13 @@ export declare function managedFilesDir(root: string): string;
 /**
  * 文件名消毒：id 中非法字符替换为下划线（防路径穿越/坏文件名）。
  * `.` 与 `..` 单独出现时同样替换，避免生成指向目录自身的路径。
+ *
+ * 已知限制（有意保留，不要顺手「修复」；改动前须先取得契约裁决）：
+ *   1. 映射非单射：`a/b`、`a b`、`a_b` 同落 `a_b.json`。改成无冲突编码会改变既有 id 的
+ *      落盘路径，磁盘上已存在的文件随之读不回来——「既有数据可读性」优先于文件名唯一。
+ *   2. 不排除 Windows 保留设备名（CON / PRN / AUX / NUL / COM1-9 / LPT1-9，含带扩展名形态）。
+ *      任何排除方式（转义或拒绝）都是一次路径变更，会让磁盘上以这类名字存在的文件或
+ *      记录读不回来；是否接受该代价属产品/契约裁决，不得在实现里静默选择。
  */
 export declare function safeFilePart(value: unknown): string;
 /** 工作流实例文件路径。 */
@@ -24,7 +31,5 @@ export declare function templatePath(root: string, kind: TemplateKind, id: strin
 export declare function flowTemplatePath(root: string, templateId: string): string;
 /** run 快照文件路径。 */
 export declare function runsPath(root: string, runId: string): string;
-/** 运行时流程定义文件路径（orchestrations/）。 */
-export declare function orchestrationPath(root: string, runId: string): string;
 /** 工具组合文件路径（combos.json 单文件）。 */
 export declare function combosPath(root: string): string;

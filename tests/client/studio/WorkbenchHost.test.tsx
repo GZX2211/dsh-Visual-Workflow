@@ -10,14 +10,15 @@
 //   - 因此 Studio 不再直接作为 body 组件，而是挂在插件自持的**常驻容器**里：
 //     body 组件只负责在激活时把容器搬进自己的 DOM，卸载时交还（见 sidebar/workbench-tab.tsx）。
 //   - 本测试断言：① 标签页 body 挂载/卸载往返中 Studio 内容 DOM 节点恒等（容器与子树未重建）；
-//     ② 「开启新会话」复选框 + 工作区路径跨往返原样保留（并已落盘 localStorage）；
-//     ③ 宿主重建模拟：instanceOptions 初始状态从缓存恢复，不被默认值覆盖。
+//     ② 模板态「开启新会话」勾选后出现官方目录选择按钮（宿主无官方选择器时禁用并提示）；
+//     ③ Electron preload 通道存在时按钮可用（复用官方原生目录选择器）。
+//   （模板级配置持久化与选择路径链路在 workbench-global.test / useNewSessionOptions.test 覆盖。）
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act } from 'react'
 import { apply } from '../../../src/client/entry.js'
 import { zh } from '../../../src/client/i18n.js'
-import { INSTANCE_OPTIONS_KEY } from '../../../src/client/studio/instance-options.js'
+import { EP } from '../../../src/client/lib/remote.js'
 import { attachWorkbenchHost, setWorkbenchMountHost } from '../../../src/client/sidebar/workbench-tab.js'
 import { resetWorkbenchDictForTest } from '../../../src/client/sidebar/locale-bridge.js'
 import { setWorkbenchOpenHandler } from '../../../src/client/sidebar/footer-entry.js'
@@ -29,6 +30,7 @@ afterEach(async () => {
   await act(async () => {
     while (cleanups.length > 0) cleanups.pop()!()
   })
+  vi.unstubAllGlobals()
   resetWorkbenchDictForTest()
   setWorkbenchOpenHandler(null)
   setWorkbenchMountHost(null)
@@ -77,8 +79,24 @@ function makeCtx(options: { currentSession?: string } = {}) {
   return { ctx, disposers }
 }
 
+/**
+ * 模板保存 fetch 桩：勾选「开启新会话」会立即保存模板（真实环境走同一远端通道）。
+ * 其余端点保持「网络不可用」——本文件只关心工作台 DOM 装配，不依赖列表数据。
+ */
+function stubTemplateSave(): void {
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input) === `/visual-workflow/${EP.EP_PUT_FLOW_TEMPLATE}`) {
+      const body = JSON.parse(String(init?.body ?? '{}')) as { args?: { template?: Record<string, unknown> } }
+      const template = body.args?.template ?? {}
+      return { ok: true, status: 200, json: async () => ({ ok: true, value: { ...template, revision: 1 } }) }
+    }
+    throw new TypeError('network unavailable (test stub)')
+  }))
+}
+
 /** 装配插件并返回「标签页 body 挂载点（模拟官方 body 内的 .wf-tab-mount）」。 */
 async function mountPlugin(): Promise<{ host: HTMLDivElement; attach: () => () => void }> {
+  stubTemplateSave()
   const { ctx, disposers } = makeCtx()
   cleanups.push(() => { while (disposers.length > 0) disposers.pop()!() })
   await act(async () => { apply(ctx as never) })
@@ -133,51 +151,52 @@ describe('标签页 body 挂载/卸载往返：常驻容器不重建（状态全
     detach2()
   })
 
-  it('「开启新会话」复选框 + 工作区路径：body 卸载/重载往返后原样保留（含 localStorage 落盘）', async () => {
+  it('模板态勾选「开启新会话」→ 出现官方目录选择按钮；官方选择器缺失时禁用并提示', async () => {
     const { host, attach } = await mountPlugin()
     const detach = attach()
 
-    // 进入模板态（新建空白工作流模板草稿）→ 「开启新会话」复选框出现（仅模板态显示）
+    // 进入模板态（新建空白工作流模板草稿）→ 「开启新会话」复选框出现（仅实例来源态显示）
     await createDraft()
     const checkbox = document.querySelector<HTMLInputElement>('.wf-toolbar__switch input[type="checkbox"]')
     expect(checkbox).toBeTruthy()
 
-    // 勾选「开启新会话」→ 工作区输入框出现；输入路径（受控 input 用原生 value setter）
     await act(async () => { checkbox!.click() })
-    const workspace = document.querySelector<HTMLInputElement>('.wf-toolbar__workspace')
-    expect(workspace).toBeTruthy()
-    const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
-    await act(async () => {
-      valueSetter.call(workspace, 'C:/work/ws')
-      workspace!.dispatchEvent(new Event('input', { bubbles: true }))
-    })
-    // 已落盘 localStorage（instanceOptions 缓存）
-    const cached = JSON.parse(localStorage.getItem(INSTANCE_OPTIONS_KEY) ?? '{}') as { newSession?: boolean; workspacePath?: string }
-    expect(cached.newSession).toBe(true)
-    expect(cached.workspacePath).toBe('C:/work/ws')
+    const pick = document.querySelector<HTMLButtonElement>('.wf-toolbar__workspace-pick')
+    expect(pick).toBeTruthy()
+    expect(pick!.textContent).toBe(zh.pickWorkspace)
+    // 当前装配的 fake ctx 没有 uiWorkspace、jsdom 也没有 Electron preload → 不可用降级
+    expect(pick!.disabled).toBe(true)
+    expect(pick!.getAttribute('title')).toBe(zh.workspacePickerUnavailable)
 
-    // 切标签页（body 卸载）→ 切回（body 重新挂载）：选项与路径原样保留
+    // 切标签页（body 卸载）→ 切回（body 重新挂载）：勾选状态仍在（常驻容器未重建）
     detach()
     expect(document.getElementById('visual-workflow-workbench-host')?.parentElement?.id).toBe('visual-workflow-workbench-holder')
     const detach2 = attachWorkbenchHost(host)
     const checkbox2 = document.querySelector<HTMLInputElement>('.wf-toolbar__switch input[type="checkbox"]')
     expect(checkbox2).toBeTruthy()
     expect(checkbox2!.checked).toBe(true)
-    const workspace2 = document.querySelector<HTMLInputElement>('.wf-toolbar__workspace')
-    expect(workspace2?.value).toBe('C:/work/ws')
+    expect(document.querySelector('.wf-toolbar__workspace-pick')).toBeTruthy()
     detach2()
   })
 
-  it('宿主重建模拟（重挂载 + 缓存预置）：初始状态恢复缓存，不被初始默认值覆盖', async () => {
-    // 预置缓存（模拟此前用户已勾选/输入并落盘，随后宿主被重建）
-    localStorage.setItem(INSTANCE_OPTIONS_KEY, JSON.stringify({ newSession: true, workspacePath: '/tmp/ws' }))
-    const { attach } = await mountPlugin()
-    const detach = attach()
-    // 常驻容器随之重建：useStudioState 初始化工厂恢复缓存 → 落盘 effect 写回同一值；
-    // 若恢复失效（state 为默认），落盘 effect 会把预置缓存覆盖为默认值 → 断言失败。
-    expect(localStorage.getItem(INSTANCE_OPTIONS_KEY)).toContain('"newSession":true')
-    expect(localStorage.getItem(INSTANCE_OPTIONS_KEY)).toContain('/tmp/ws')
-    detach()
+  it('Electron preload 通道存在 → 选择按钮可用（复用官方原生目录选择器）', async () => {
+    // Electron 桌面注入的窄接口（与官方 directory-picker-native 客户端同一来源）
+    const holder = globalThis as Record<string, unknown>
+    holder.__DSH_DIRECTORY_PICKER__ = { pick: vi.fn(async () => null) }
+    try {
+      const { attach } = await mountPlugin()
+      const detach = attach()
+      await createDraft()
+      const checkbox = document.querySelector<HTMLInputElement>('.wf-toolbar__switch input[type="checkbox"]')
+      await act(async () => { checkbox!.click() })
+
+      const pick = document.querySelector<HTMLButtonElement>('.wf-toolbar__workspace-pick')
+      expect(pick).toBeTruthy()
+      expect(pick!.disabled).toBe(false)
+      detach()
+    } finally {
+      delete holder.__DSH_DIRECTORY_PICKER__
+    }
   })
 
   it('多标签页 body 并存：容器归最新者，先前 body 标记 empty（渲染占位）', async () => {

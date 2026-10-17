@@ -5,10 +5,13 @@
 // 以及「同一工作流资产保存多次」不构成多引用方的资产级计数口径。
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { DatabaseSync } from 'node:sqlite'
 import { ERR_ASSET_NOT_FOUND, ERR_ASSET_VERSION_NOT_FOUND } from '../../../src/host/shared/protocol.js'
 import type { RoleNode } from '../../../src/host/shared/graph-model.js'
 import { AssetStore, type AssetError } from '../../../src/host/assets/index.js'
-import { flowLine, makeStore, orgMeta, removeTempRoot, roleNode, roleTemplate, stageNode } from './fixtures/asset-fixture.js'
+import { openAssetDatabase, queryRow, queryRows, runSql, type AssetTxContext } from '../../../src/host/assets/db.js'
+import { getWorkflowAssetDetail, registerWorkflowVersion } from '../../../src/host/assets/workflow-assets.js'
+import { FIXED_NOW, flowLine, makeStore, orgMeta, removeTempRoot, roleNode, roleTemplate, stageNode } from './fixtures/asset-fixture.js'
 
 let store: AssetStore
 let root: string
@@ -1109,5 +1112,258 @@ describe('影响面预览', () => {
 
     const unchanged = await store.previewAssetCascade({ kind: 'role', assetId: roleAssetId, role: roleTemplate() })
     expect(unchanged).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 读路径的查询次数（N+1 与查重短路的可判别面）
+//
+// 为什么用「SQL 调用计数」而不是计时：耗时断言依赖机器与负载，无法判别回归；
+// 回表次数是确定的、可手算的。这里直接驱动端口函数（AssetTxContext 是端口契约），
+// 在以真实库文件打开的独立连接上统计调用，不触碰 Store 内部实现。
+// ---------------------------------------------------------------------------
+
+/** 统计 SQL 调用的 Tx 上下文：把「回了几次表」变成可断言的计数事实。 */
+function countingContext(db: DatabaseSync): { ctx: AssetTxContext; queries: string[] } {
+  const queries: string[] = []
+  return {
+    queries,
+    ctx: {
+      exec: (sql) => db.exec(sql),
+      all: (sql, params) => {
+        queries.push(sql)
+        return queryRows(db, sql, params)
+      },
+      get: (sql, params) => {
+        queries.push(sql)
+        return queryRow(db, sql, params)
+      },
+      run: (sql, params) => {
+        queries.push(sql)
+        runSql(db, sql, params)
+      },
+    },
+  }
+}
+
+/** 批量取角色版本行的 SQL 判据（D04-06 的批量入口）。 */
+const BATCH_ROLE_QUERY = 'FROM role_asset_history WHERE id IN'
+
+describe('读路径的查询次数（N+1 与查重短路）', () => {
+  /** 三个角色节点的图（角色节点越多，N+1 与批量读的差距越大）。 */
+  const threeRoleNodes = (): RoleNode[] => [
+    roleNode({ id: 'n1' }),
+    roleNode({ id: 'n2', data: { label: '审查员', systemPrompt: '你是审查员。' } }),
+    roleNode({ id: 'n3', data: { label: '编辑', systemPrompt: '你是编辑。' } }),
+  ]
+
+  /** 晋升一张含三个角色节点的工作流，返回资产 id（供后续以独立连接直接驱动端口）。 */
+  async function promoteThreeRoleFlow(): Promise<string> {
+    const flow = await store.promoteWorkflow({
+      templateId: 'tpl-flow-1',
+      fingerprint: 'fp-1',
+      mode: 'mode1',
+      name: '工作流A',
+      description: '说明A',
+      nodes: [stageNode('s1'), ...threeRoleNodes()],
+      lines: [flowLine('l1', 's1', 'n1', 'flow-out', 'flow-in')],
+      meta: orgMeta(),
+      source: 'human',
+    })
+    return flow.assetId
+  }
+
+  it('test_详情重建_三个角色节点_角色版本行一次批量取回', async () => {
+    const assetId = await promoteThreeRoleFlow()
+    store.close()
+    const raw = openAssetDatabase(root)
+    try {
+      const { ctx, queries } = countingContext(raw)
+      const detail = getWorkflowAssetDetail(ctx, assetId)
+
+      expect(detail?.nodes).toHaveLength(4)
+      expect(queries.filter((sql) => sql.includes(BATCH_ROLE_QUERY))).toHaveLength(1)
+      // 逐个回表的旧写法会命中「按 (asset_id, version_id) 取角色单行」的 SQL，批量路径不得出现
+      const singleRoleRead = 'FROM role_asset_history WHERE asset_id = ? AND version_id = ?'
+      expect(queries.filter((sql) => sql.includes(singleRoleRead))).toHaveLength(0)
+    } finally {
+      raw.close()
+    }
+  })
+
+  it('test_保存查重_仅名称变更_不重建基线整图（零次角色版本行批量读）', async () => {
+    const assetId = await promoteThreeRoleFlow()
+    store.close()
+    const raw = openAssetDatabase(root)
+    try {
+      const { ctx, queries } = countingContext(raw)
+      const result = registerWorkflowVersion(
+        { tx: ctx, now: () => FIXED_NOW + 10_000 },
+        {
+          assetId,
+          mode: 'mode1',
+          name: '工作流B',
+          description: '说明A',
+          nodes: [stageNode('s1'), ...threeRoleNodes()],
+          lines: [flowLine('l1', 's1', 'n1', 'flow-out', 'flow-in')],
+          meta: orgMeta(),
+          source: 'human',
+          sourceTemplateId: null,
+          fingerprint: null,
+          shortCircuitFingerprint: null,
+          nextRoleAssetId: () => 'role-unused',
+        },
+      )
+
+      // 名称变更即内容必然变更：登记新版本，且不需要为查重重建基线整图
+      expect(result).toMatchObject({ assetId, versionId: 2, unchanged: false })
+      expect(queries.filter((sql) => sql.includes(BATCH_ROLE_QUERY))).toHaveLength(0)
+    } finally {
+      raw.close()
+    }
+  })
+
+  it('test_保存查重_内容全等_仍做整图比较并判定未变化', async () => {
+    const assetId = await promoteThreeRoleFlow()
+    store.close()
+    const raw = openAssetDatabase(root)
+    try {
+      const { ctx, queries } = countingContext(raw)
+      const result = registerWorkflowVersion(
+        { tx: ctx, now: () => FIXED_NOW + 10_000 },
+        {
+          assetId,
+          mode: 'mode1',
+          name: '工作流A',
+          description: '说明A',
+          nodes: [stageNode('s1'), ...threeRoleNodes()],
+          lines: [flowLine('l1', 's1', 'n1', 'flow-out', 'flow-in')],
+          meta: orgMeta(),
+          source: 'human',
+          sourceTemplateId: null,
+          fingerprint: null,
+          shortCircuitFingerprint: null,
+          nextRoleAssetId: () => 'role-unused',
+        },
+      )
+
+      // 头部全等才走整图比较：此时角色版本行必须取回（否则「内容未变」无从判定）
+      expect(result).toMatchObject({ versionId: 1, unchanged: true })
+      expect(queries.filter((sql) => sql.includes(BATCH_ROLE_QUERY))).toHaveLength(1)
+    } finally {
+      raw.close()
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 父代理节点不登记角色资产（用户裁决）：父代理提示词只存在于实例节点正文与
+// 用户手工入库的那条资产；工作流保存按**完整节点**落库，不产生 parent 角色资产。
+// ---------------------------------------------------------------------------
+
+describe('父代理节点不登记角色资产', () => {
+  /** 含父代理 + 子代理节点的工作流（子代理节点用于对照「只有 agent 会登记」）。 */
+  function flowNodes(parentPrompt: string): RoleNode[] {
+    return [
+      roleNode({ id: 'pp', kind: 'parent', data: { label: '父代理', systemPrompt: parentPrompt } }),
+      roleNode({ id: 'n1' }),
+    ]
+  }
+
+  it('首次晋升：只有子代理被登记为角色资产，父代理节点内容随工作流资产完整保存', async () => {
+    const result = await store.promoteWorkflow({
+      templateId: 'tpl-flow-parent',
+      fingerprint: 'fp-parent-1',
+      mode: 'mode1',
+      name: '父代理流程',
+      description: '含父代理节点',
+      nodes: flowNodes('父代理职责正文'),
+      lines: [],
+      source: 'human',
+    })
+
+    // 资产库只有子代理角色资产：父代理不登记、不产生版本
+    const roles = await store.listRoleAssets()
+    expect(roles.map((role) => role.kind)).toEqual(['agent'])
+    expect(result.sharedRoleAssetIds).toEqual([])
+
+    const detail = await store.getWorkflowAsset(result.assetId)
+    expect(detail?.roleVersionIds.map((ref) => ref.nodeId)).toEqual(['n1'])
+    expect(detail?.nodes.find((node) => node.id === 'pp')).toMatchObject({
+      id: 'pp',
+      kind: 'parent',
+      data: { label: '父代理', systemPrompt: '父代理职责正文' },
+    })
+  })
+
+  it('再次保存改了父代理提示词：升版且内容生效，仍不新增角色资产', async () => {
+    const first = await store.promoteWorkflow({
+      templateId: 'tpl-flow-parent',
+      fingerprint: 'fp-parent-1',
+      mode: 'mode1',
+      name: '父代理流程',
+      description: '',
+      nodes: flowNodes('父代理职责正文 V1'),
+      lines: [],
+      source: 'human',
+    })
+    const second = await store.promoteWorkflow({
+      templateId: 'tpl-flow-parent',
+      fingerprint: 'fp-parent-2',
+      mode: 'mode1',
+      name: '父代理流程',
+      description: '',
+      nodes: flowNodes('父代理职责正文 V2'),
+      lines: [],
+      source: 'human',
+    })
+
+    expect(second).toMatchObject({ assetId: first.assetId, versionId: 2, unchanged: false })
+    expect((await store.listRoleAssets()).map((role) => role.kind)).toEqual(['agent'])
+    const detail = await store.getWorkflowAsset(first.assetId)
+    expect(detail?.versionId).toBe(2)
+    expect(detail?.nodes.find((node) => node.id === 'pp')).toMatchObject({
+      data: { systemPrompt: '父代理职责正文 V2' },
+    })
+  })
+
+  it('旧版本行里残留的父代理壳仍按壳读回（无迁移）', async () => {
+    const parentRole = await store.promoteRole({
+      templateId: 'tpl-parent',
+      fingerprint: 'fp-parent-role',
+      role: roleTemplate({ kind: 'parent', name: '父代理', systemPrompt: '旧形状父代理职责' }),
+      source: 'human',
+    })
+    const flow = await store.promoteWorkflow({
+      templateId: 'tpl-flow-parent',
+      fingerprint: 'fp-parent-legacy',
+      mode: 'mode1',
+      name: '旧父代理流程',
+      description: '',
+      nodes: [roleNode({ id: 'pp', kind: 'parent', data: { label: '父代理', systemPrompt: '旧形状父代理职责' } })],
+      lines: [],
+      source: 'human',
+    })
+    // 把新形状（完整节点）改写回旧形状（父代理壳 + 角色版本行引用），模拟改造前的资产行
+    store.close()
+    const raw = openAssetDatabase(root)
+    try {
+      const shells = [{ id: 'pp', kind: 'parent', position: { x: 10, y: 20 } }]
+      const refs = [{ nodeId: 'pp', roleVersionId: parentRole.rowId }]
+      runSql(
+        raw,
+        'UPDATE workflow_asset_history SET nodes_json = ?, role_version_ids = ? WHERE asset_id = ?',
+        [JSON.stringify(shells), JSON.stringify(refs), flow.assetId],
+      )
+      const { ctx } = countingContext(raw)
+      const detail = getWorkflowAssetDetail(ctx, flow.assetId)
+      expect(detail?.nodes.find((node) => node.id === 'pp')).toMatchObject({
+        id: 'pp',
+        kind: 'parent',
+        data: { label: '父代理', systemPrompt: '旧形状父代理职责' },
+      })
+    } finally {
+      raw.close()
+    }
   })
 })

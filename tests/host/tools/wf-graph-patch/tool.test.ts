@@ -2,12 +2,12 @@
 //
 // wf_graph_patch 工具单测：
 //   - 图结构组：创建/删除（级联）/改数据/连线/断线/组一致性 → 检查器校验 + 落盘 revision；
-//   - 参数层：混组拒绝（WF_PATCH_MIXED_GROUPS）、未知 op 名拒绝（WF_BAD_ARGS）、空补丁拒绝；
+//   - 参数层：未知 op 名拒绝（WF_BAD_ARGS）、空补丁拒绝；
 //   - scope 与目标类型不匹配（WF_SCOPE_INVALID，按真实类型判定）；目标不存在（WF_ORG_NOT_FOUND）；
 //   - revision 冲突不重试（WF_PATCH_CONFLICT）；
 //   - 检查器阻断（WF_GRAPH_INVALID，错误文本含修复suggestion）；
 //   - 元参数硬护栏恒生效 + 元参数组已下线（set_meta 被拒、来源参数不存在）；
-//   - mark_node：无运行拒绝、节点不存在拒绝、闸门预算用尽拒绝、成功改写快照；
+//   - 已退役的 mark_node 按未知 op 拒绝（单组工具）；
 //   - 虚拟节点引用校验；阶段节点属性锁定；坐标不入补丁（哨兵 {0,0}）；
 //   - 工具注册面：参数与 output schema 必须与实际行为一致。
 //
@@ -18,9 +18,9 @@ import { describe, expect, it } from 'vitest'
 import { executeGraphPatch, registerWfGraphPatch, type GraphPatchHost } from '../../../../src/host/tools/wf-graph-patch/tool.js'
 import { WfError, type RunEntry } from '../../../../src/host/orchestrator/index.js'
 import { stageLabel } from '../../../../src/host/graph/index.js'
-import { OP_FIELD_SHAPES } from '../../../../src/host/tools/infrastructure/graph-op-contract.js'
+import { OP_FIELD_SHAPES } from '../../../../src/host/prompts/index.js'
+import { DEFAULT_OUTPUT_CONTRACT_TEXT } from '../../../../src/host/shared/protocol.js'
 import type { GraphNode, Line, WorkflowDocument, WorkflowTemplate } from '../../../../src/host/shared/graph-model.js'
-import type { RunSnapshot } from '../../../../src/host/shared/types.js'
 
 // ---------------------------------------------------------------------------
 // fake 宿主（store + orchestrator）
@@ -79,34 +79,6 @@ function makeStore(state: FakeStoreState) {
   }
 }
 
-function makeRunEntry(flowId: string, nodeIds: string[]): RunEntry {
-  const snapshot: RunSnapshot = {
-    id: 'run-1',
-    flowId,
-    flowName: '流程',
-    sessionId: 'session-1',
-    mode: 'mode1',
-    status: 'running',
-    startedAt: '2026-01-01T00:00:00.000Z',
-    endedAt: null,
-    summary: '',
-    nodes: nodeIds.map((nodeId) => ({
-      nodeId, status: 'pending' as const, attempts: 0, startedAt: null, endedAt: null, output: '', outputSummary: '',
-    })),
-  }
-  return {
-    controller: new AbortController(),
-    snapshot,
-    baseFlow: { id: flowId, sessionId: 'session-1', mode: 'mode1', name: '流程', description: '', nodes: [], lines: [] },
-    inflight: new Set(),
-    attempts: new Map(),
-    callCount: 0,
-    lastActiveAt: 0,
-    waiters: new Map(),
-    asks: new Map(),
-  }
-}
-
 function makeHost(overrides: Partial<GraphPatchHost> = {}, state?: FakeStoreState) {
   const storeState: FakeStoreState = state ?? {
     workflows: new Map(),
@@ -134,36 +106,6 @@ function makeHost(overrides: Partial<GraphPatchHost> = {}, state?: FakeStoreStat
       currentResolvedFlow: async (entry: RunEntry) => entry.baseFlow,
       touchRunForSession: (sessionId: string) => { touched.push(sessionId); return true },
       refreshActiveDefinitions: async (flowId: string) => { refreshed.push(flowId) },
-      // 闸门事实/写入：fake 仅按运行时契约的最小语义镜像（真实写入语义由 orchestrator 单测覆盖）
-      milestoneFactsFor: (sessionId: string) => {
-        const entry = entries.get(sessionId)
-        if (!entry) return null
-        const meta = (entry.snapshot.meta ?? {}) as { milestoneMax?: unknown }
-        return {
-          runId: entry.snapshot.id,
-          executorParentId: String(entry.executorParentId ?? ''),
-          executorIsMilestone: entry.executorIsMilestone === true,
-          ...(entry.milestoneProxyId ? { milestoneProxyId: entry.milestoneProxyId } : {}),
-          nodeIds: entry.snapshot.nodes.map((node) => node.nodeId),
-          milestoneUsed: Math.max(0, Math.floor(Number(entry.snapshot.milestoneUsed) || 0)),
-          milestoneMax: Number(meta.milestoneMax) || 0,
-        }
-      },
-      markMilestoneNode: (sessionId: string, input: { nodeId: string; status: 'ok' | 'fail' }) => {
-        const entry = entries.get(sessionId)
-        if (!entry) throw new Error('mark_node: 当前会话没有正在运行的编排')
-        const node = entry.snapshot.nodes.find((item) => item.nodeId === input.nodeId)
-        if (node) {
-          node.status = input.status
-          node.endedAt = new Date().toISOString()
-          node.stopReason = 'milestone'
-          node.turns ??= []
-          node.turns.push({ startedAt: node.startedAt, endedAt: node.endedAt, stopReason: 'milestone', outputSummary: '' })
-        }
-        const milestoneUsed = Math.max(0, Math.floor(Number(entry.snapshot.milestoneUsed) || 0)) + (input.status === 'ok' ? 1 : 0)
-        entry.snapshot.milestoneUsed = milestoneUsed
-        return { nodeId: input.nodeId, status: input.status, runId: entry.snapshot.id, milestoneUsed }
-      },
     },
     ...overrides,
   }
@@ -249,7 +191,7 @@ const ctxInput = { sessionId: 'session-1' }
 // ---------------------------------------------------------------------------
 
 describe('wf_graph_patch · 图结构变更组', () => {
-  it('create_node + connect + disconnect：落盘 revision 递增、事实源刷新', async () => {
+  it('create_node + connect + disconnect：落盘 revision 递增、编排基线刷新', async () => {
     const { host, storeState, refreshed } = makeHost()
     storeState.workflows.set('wf-1', makeFlow())
     const result = await executeGraphPatch(host, 'session-1', {
@@ -344,7 +286,8 @@ describe('wf_graph_patch · 图结构变更组', () => {
       retryLimit: 3,
       reactLimit: null,
       inputSchema: '',
-      outputSchema: '',
+      // 输出契约默认文本随创建落盘（与画布新建一致；空串 = 明确清空）
+      outputSchema: DEFAULT_OUTPUT_CONTRACT_TEXT,
       injectSystemPrompt: false,
       injectToolSections: false,
       groupId: null,
@@ -355,7 +298,7 @@ describe('wf_graph_patch · 图结构变更组', () => {
     const { applyGraphOps } = await import('../../../../src/host/tools/wf-graph-patch/apply.js')
     const applied = applyGraphOps({
       doc: makeFlow('wf-1', { nodes: [stageNode('s', 'start')], lines: [] }),
-      ops: [{ op: 'create_node', node: { id: 'a9', kind: 'parent' } }],
+      ops: [{ op: 'create_node', node: { id: 'a9', kind: 'agent' } }],
     })
     const node = (applied.doc.nodes as GraphNode[]).find((item) => item.id === 'a9') as {
       data?: Record<string, unknown>
@@ -387,9 +330,9 @@ describe('wf_graph_patch · 图结构变更组', () => {
     expect(node.data?.presetId).toBe('combo-1')
   })
 
-  it('remove_node：级联删除虚拟节点与其连线，并从协作组成员清单移除', async () => {
+  it('remove_node：级联删除虚拟节点与其连线，并从 Team 成员清单移除', async () => {
     const { host, storeState } = makeHost()
-    // 基线：s → a1 → g1 → e；a2/a3 为组内成员（无流程线，但组成员由组卡片承载）
+    // 基线：s → a1 → g1 → e；a2/a3 为组内成员（无流程线，但组成员由 Team 卡片承载）
     storeState.workflows.set('wf-1', makeFlow('wf-1', {
       nodes: [stageNode('s', 'start'), roleNode('a1'), groupNode('g1', ['a2', 'a3']), roleNode('a2'), roleNode('a3'), proxyNode('p2', 'a2'), stageNode('e', 'end')],
       lines: [
@@ -439,7 +382,7 @@ describe('wf_graph_patch · 图结构变更组', () => {
   it('create_group + set_group_members：成员 groupId 与组 memberIds 双向一致', async () => {
     const { host, storeState } = makeHost()
     // 基线：s → g1（空组，流程门）→ e；a1 → a2 走上下文线（两者都不参与流程，但非孤儿）。
-    // 说明：组卡片只有流程连接点、组内成员只有 ctx/db 连接点（§4.2.5.2 规则 4），
+    // 说明：Team 卡片只有流程连接点、组内成员只有 ctx/db 连接点（§4.2.5.2 规则 4），
     // 故"把 a1/a2 入组"不会破坏结构校验。
     storeState.workflows.set('wf-1', makeFlow('wf-1', {
       nodes: [stageNode('s', 'start'), groupNode('g1', []), roleNode('a1'), roleNode('a2'), stageNode('e', 'end')],
@@ -513,19 +456,17 @@ describe('wf_graph_patch · 图结构变更组', () => {
 // ---------------------------------------------------------------------------
 
 describe('wf_graph_patch · 参数层校验', () => {
-  it('混组拒绝：WF_PATCH_MIXED_GROUPS 并写明分组原因', async () => {
+  it('mark_node 已退役：按未知 op 拒绝（WF_BAD_ARGS），且磁盘零变更', async () => {
     const { host, storeState } = makeHost()
     storeState.workflows.set('wf-1', makeFlow())
+    const before = JSON.stringify(storeState.workflows.get('wf-1'))
     const error = await expectWfError(() => executeGraphPatch(host, 'session-1', {
       scope: 'instance',
       targetId: 'wf-1',
-      ops: [
-        { op: 'create_node', node: { id: 'a2', kind: 'agent', data: {} } },
-        { op: 'mark_node', nodeId: 'a1', status: 'ok' },
-      ],
-    }), 'WF_PATCH_MIXED_GROUPS')
-    expect(error.message).toContain('graph')
-    expect(error.message).toContain('mark')
+      ops: [{ op: 'mark_node', nodeId: 'a1', status: 'ok' }],
+    }), 'WF_BAD_ARGS')
+    expect(error.message).toContain('mark_node')
+    expect(JSON.stringify(storeState.workflows.get('wf-1'))).toBe(before)
   })
 
   it('未知 op 名拒绝（WF_BAD_ARGS，错误文本点名未知操作与允许的 op 组）', async () => {
@@ -537,7 +478,7 @@ describe('wf_graph_patch · 参数层校验', () => {
       ops: [{ op: 'move', nodeId: 'a1' }],
     }), 'WF_BAD_ARGS')
     expect(error.message).toContain('move')
-    expect(error.message).toContain('graph / mark')
+    expect(error.message).toContain('create_node')
   })
 
   it('scope 与目标类型不匹配：WF_SCOPE_INVALID（实例当模板 / 模板当实例）', async () => {
@@ -1004,108 +945,6 @@ describe('wf_graph_patch · 只读预算', () => {
     expect(result.budget.nodeMax).toBe(0)
     expect(result.budget.nodeRemaining).toBeNull()
   })
-
-  it('标记组：budget 带标记后的闸门已用数与剩余量', async () => {
-    const { host, entries } = makeHost({ persistRun: async () => {} })
-    const entry = withGateFlow(makeRunEntry('wf-1', ['p1']))
-    entry.executorParentId = 'p1'
-    entry.executorIsMilestone = true
-    entry.milestoneProxyId = 'm1'
-    entry.snapshot.meta = { milestoneMax: 3 }
-    entries.set('session-1', entry)
-    const result = await executeGraphPatch(host, 'session-1', {
-      scope: 'instance',
-      targetId: 'wf-1',
-      ops: [{ op: 'mark_node', nodeId: 'm1', status: 'ok' }],
-    })
-    expect(result.budget).toMatchObject({ milestoneUsed: 1, milestoneMax: 3, milestoneRemaining: 2 })
-  })
-})
-
-// ---------------------------------------------------------------------------
-// 运行状态标记组
-// ---------------------------------------------------------------------------
-
-describe('wf_graph_patch · 运行状态标记组', () => {
-  it('mark 组超过 exactly 1 op op：WF_BAD_ARGS，且不触碰运行快照', async () => {
-    const { host, entries } = makeHost({ persistRun: async () => {} })
-    const entry = withGateFlow(makeRunEntry('wf-1', ['p1']))
-    entry.executorParentId = 'p1'
-    entry.executorIsMilestone = true
-    entry.milestoneProxyId = 'm1'
-    entries.set('session-1', entry)
-    const error = await expectWfError(() => executeGraphPatch(host, 'session-1', {
-      scope: 'instance',
-      targetId: 'wf-1',
-      ops: [
-        { op: 'mark_node', nodeId: 'm1', status: 'ok' },
-        { op: 'mark_node', nodeId: 'p1', status: 'ok' },
-      ],
-    }), 'WF_BAD_ARGS')
-    expect(error.message).toContain('exactly 1 op')
-    expect(entry.snapshot.nodes.every((node) => node.status === 'pending')).toBe(true)
-    expect(Number(entry.snapshot.milestoneUsed ?? 0)).toBe(0)
-  })
-
-  it('mark_node：无运行拒绝（WF_MILESTONE_INVALID）', async () => {
-    const { host, storeState } = makeHost()
-    storeState.workflows.set('wf-1', makeFlow())
-    await expectWfError(() => executeGraphPatch(host, 'session-1', {
-      scope: 'instance',
-      targetId: 'wf-1',
-      ops: [{ op: 'mark_node', nodeId: 'a1', status: 'ok' }],
-    }), 'WF_MILESTONE_INVALID')
-  })
-
-  it('mark_node：成功改写快照并落盘；节点不在快照 → 拒绝', async () => {
-    let persisted = 0
-    const { host, entries, touched } = makeHost({
-      persistRun: async () => { persisted += 1 },
-      milestoneUsedOf: () => 0,
-    })
-    const entry = makeRunEntry('wf-1', ['s', 'a1', 'e'])
-    entry.snapshot.meta = { milestoneMax: 2 }
-    // P3 闸门状态机：只有gate turn（executorIsMilestone + executorParentId）才可标记
-    entry.executorParentId = 'a1'
-    entry.executorIsMilestone = true
-    entry.milestoneProxyId = 'm1'
-    entries.set('session-1', entry)
-    const ok = await executeGraphPatch(host, 'session-1', {
-      scope: 'instance',
-      targetId: 'wf-1',
-      ops: [{ op: 'mark_node', nodeId: 'a1', status: 'ok', summary: '里程碑通过' }],
-    })
-    expect(ok.revision).toBe(0) // C 组不改文档：revision 来自运行快照（baseFlow.revision 缺省 0）
-    expect(ok.marked).toEqual({ nodeId: 'a1', status: 'ok', runId: 'run-1' })
-    expect(entry.snapshot.nodes.find((node) => node.nodeId === 'a1')?.status).toBe('ok')
-    expect(entry.snapshot.nodes.find((node) => node.nodeId === 'a1')?.stopReason).toBe('milestone')
-    expect(persisted).toBe(1)
-    // 双保险：mark_node 期间顺带刷新空闲基准（方案 §5.1）
-    expect(touched).toEqual(['session-1'])
-
-    await expectWfError(() => executeGraphPatch(host, 'session-1', {
-      scope: 'instance',
-      targetId: 'wf-1',
-      ops: [{ op: 'mark_node', nodeId: '不存在', status: 'ok' }],
-    }), 'WF_MILESTONE_INVALID')
-  })
-
-  it('mark_node：闸门预算用尽后拒绝（不含首次编排，D-21）', async () => {
-    const { host, entries } = makeHost({ milestoneUsedOf: () => 2, persistRun: async () => {} })
-    const entry = makeRunEntry('wf-1', ['a1'])
-    // 预算口径唯一来源是快照（P3）：已用 2 次 / 上限 2 次
-    entry.snapshot.meta = { milestoneMax: 2 }
-    entry.snapshot.milestoneUsed = 2
-    entry.executorParentId = 'a1'
-    entry.executorIsMilestone = true
-    entries.set('session-1', entry)
-    const error = await expectWfError(() => executeGraphPatch(host, 'session-1', {
-      scope: 'instance',
-      targetId: 'wf-1',
-      ops: [{ op: 'mark_node', nodeId: 'a1', status: 'ok' }],
-    }), 'WF_MILESTONE_INVALID')
-    expect(error.message).toContain('exhausted')
-  })
 })
 
 // ---------------------------------------------------------------------------
@@ -1194,15 +1033,6 @@ describe('wf_graph_patch · create 新建模板', () => {
     }), 'WF_SCOPE_INVALID')
   })
 
-  it('create 与 mark 组同用：WF_SCOPE_INVALID（一次补丁一个 op 组）', async () => {
-    const { host } = makeHost()
-    await expectWfError(() => executeGraphPatch(host, 'session-1', {
-      scope: 'template',
-      create: { name: 'x' },
-      ops: [{ op: 'mark_node', nodeId: 'a1', status: 'ok' }],
-    }), 'WF_SCOPE_INVALID')
-  })
-
   it('create 与 expectRevision 互斥：WF_BAD_ARGS', async () => {
     const { host } = makeHost()
     await expectWfError(() => executeGraphPatch(host, 'session-1', {
@@ -1257,125 +1087,6 @@ describe('wf_graph_patch · create 新建模板', () => {
     expect(result.ok).toBe(true)
     expect(result.warnings.some((w) => w.code === 'duplicateRoleLabel')).toBe(true)
     expect(storeState.templates.has('tpl-warn')).toBe(true)
-  })
-})
-
-// ---------------------------------------------------------------------------
-// P3 闸门状态机（mark_node 三关：gate turn / 当前闸门 / 预算）
-// ---------------------------------------------------------------------------
-
-/** 让 fake run 的 baseFlow 带上"父代理 + 闸门虚拟节点"，供目标归一化使用。 */
-function withGateFlow(entry: RunEntry, role: 'executor' | 'milestone' = 'milestone'): RunEntry {
-  entry.baseFlow = {
-    ...entry.baseFlow,
-    nodes: [
-      { id: 'p1', kind: 'parent', position: { x: 0, y: 0 }, data: { label: 'CEO' } },
-      { id: 'm1', kind: 'proxy', position: { x: 0, y: 0 }, proxySourceId: 'p1', data: { role } },
-    ] as RunEntry['baseFlow']['nodes'],
-    lines: [{ id: 'l1', source: 's', target: 'm1', sourceHandle: 'flow-out', targetHandle: 'flow-in' }],
-  }
-  return entry
-}
-
-describe('wf_graph_patch · 闸门状态机（mark_node）', () => {
-  it('非gate turn：executorIsMilestone 缺失 → WF_MILESTONE_INVALID（纯编排/普通执行轮没有可标记的闸门）', async () => {
-    const { host, entries } = makeHost({ persistRun: async () => {} })
-    const entry = makeRunEntry('wf-1', ['a1'])
-    entry.executorParentId = 'a1'
-    entries.set('session-1', entry)
-    const error = await expectWfError(() => executeGraphPatch(host, 'session-1', {
-      scope: 'instance', targetId: 'wf-1',
-      ops: [{ op: 'mark_node', nodeId: 'a1', status: 'ok' }],
-    }), 'WF_MILESTONE_INVALID')
-    expect(error.message).toContain('gate turn')
-  })
-
-  it('目标不是当前闸门：其它节点 id → WF_MILESTONE_INVALID（错误文本给出当前闸门）', async () => {
-    const { host, entries } = makeHost({ persistRun: async () => {} })
-    const entry = withGateFlow(makeRunEntry('wf-1', ['p1', 'a1']))
-    entry.executorParentId = 'p1'
-    entry.executorIsMilestone = true
-    entry.milestoneProxyId = 'm1'
-    entries.set('session-1', entry)
-    const error = await expectWfError(() => executeGraphPatch(host, 'session-1', {
-      scope: 'instance', targetId: 'wf-1',
-      ops: [{ op: 'mark_node', nodeId: 'a1', status: 'ok' }],
-    }), 'WF_MILESTONE_INVALID')
-    expect(error.message).toContain('m1')
-  })
-
-  it('用闸门虚拟节点 id 标记：归一化到父代理节点、写 ok + milestone、快照预算递增', async () => {
-    let persisted = 0
-    const { host, entries } = makeHost({ persistRun: async () => { persisted += 1 } })
-    const entry = withGateFlow(makeRunEntry('wf-1', ['p1', 'a1']))
-    entry.executorParentId = 'p1'
-    entry.executorIsMilestone = true
-    entry.milestoneProxyId = 'm1'
-    entry.snapshot.meta = { milestoneMax: 3 }
-    entries.set('session-1', entry)
-    const result = await executeGraphPatch(host, 'session-1', {
-      scope: 'instance', targetId: 'wf-1',
-      ops: [{ op: 'mark_node', nodeId: 'm1', status: 'ok', summary: '方案评审通过' }],
-    })
-    expect(result.marked).toEqual({ nodeId: 'p1', status: 'ok', runId: 'run-1' })
-    expect(result.milestoneUsed).toBe(1)
-    const node = entry.snapshot.nodes.find((item) => item.nodeId === 'p1')
-    expect(node?.status).toBe('ok')
-    expect(node?.stopReason).toBe('milestone')
-    expect(entry.snapshot.milestoneUsed).toBe(1)
-    expect(persisted).toBe(1)
-  })
-
-  it('多闸门连续标记：预算逐次累计；达到上限后拒绝（不含首次编排 D-21）', async () => {
-    const { host, entries } = makeHost({ persistRun: async () => {} })
-    const entry = withGateFlow(makeRunEntry('wf-1', ['p1']))
-    entry.executorParentId = 'p1'
-    entry.executorIsMilestone = true
-    entry.milestoneProxyId = 'm1'
-    entry.snapshot.meta = { milestoneMax: 1 }
-    entries.set('session-1', entry)
-    const first = await executeGraphPatch(host, 'session-1', {
-      scope: 'instance', targetId: 'wf-1', ops: [{ op: 'mark_node', nodeId: 'm1', status: 'ok' }],
-    })
-    expect(first.milestoneUsed).toBe(1)
-    const second = await expectWfError(() => executeGraphPatch(host, 'session-1', {
-      scope: 'instance', targetId: 'wf-1', ops: [{ op: 'mark_node', nodeId: 'p1', status: 'ok' }],
-    }), 'WF_MILESTONE_INVALID')
-    expect(second.message).toContain('exhausted')
-    // fail 不消耗预算：同一次已用计数下仍允许标记失败
-    const failed = await executeGraphPatch(host, 'session-1', {
-      scope: 'instance', targetId: 'wf-1', ops: [{ op: 'mark_node', nodeId: 'p1', status: 'fail' }],
-    })
-    expect(failed.marked?.status).toBe('fail')
-    expect(failed.milestoneUsed).toBe(1)
-  })
-
-  it('meta.milestoneMax=0（不限制）：闸门可连续标记，预算只记录不阻断', async () => {
-    const { host, entries } = makeHost({ persistRun: async () => {} })
-    const entry = withGateFlow(makeRunEntry('wf-1', ['p1']))
-    entry.executorParentId = 'p1'
-    entry.executorIsMilestone = true
-    entries.set('session-1', entry)
-    for (let i = 1; i <= 3; i += 1) {
-      const result = await executeGraphPatch(host, 'session-1', {
-        scope: 'instance', targetId: 'wf-1', ops: [{ op: 'mark_node', nodeId: 'p1', status: 'ok' }],
-      })
-      expect(result.milestoneUsed).toBe(i)
-    }
-  })
-
-  it('跨运行继承：续跑新 run 的闸门预算从旧快照带入（不重读元参数）', async () => {
-    const { host, entries } = makeHost({ persistRun: async () => {} })
-    const entry = withGateFlow(makeRunEntry('wf-1', ['p1']))
-    entry.executorParentId = 'p1'
-    entry.executorIsMilestone = true
-    entry.snapshot.milestoneUsed = 2
-    entry.snapshot.meta = { milestoneMax: 2 }
-    entries.set('session-1', entry)
-    const error = await expectWfError(() => executeGraphPatch(host, 'session-1', {
-      scope: 'instance', targetId: 'wf-1', ops: [{ op: 'mark_node', nodeId: 'p1', status: 'ok' }],
-    }), 'WF_MILESTONE_INVALID')
-    expect(error.message).toContain('exhausted')
   })
 })
 
@@ -1486,7 +1197,11 @@ describe('wf_graph_patch · 工具注册面回归', () => {
     const parameters = def.parameters?.properties ?? {}
     expect(parameters.origin).toBeUndefined()
     expect(String((parameters.ops as { description?: string })?.description ?? '')).not.toContain('set_meta')
-    expect(Object.keys((def.output?.schema as SchemaLike)?.properties ?? {})).not.toContain('meta')
+    const declared = Object.keys((def.output?.schema as SchemaLike)?.properties ?? {})
+    expect(declared).not.toContain('meta')
+    // 闸门退役：标记组的输出字段一并从注册面移除
+    expect(declared).not.toContain('marked')
+    expect(declared).not.toContain('milestoneUsed')
   })
 
   it('描述已瘦身：op 字段形状不再常驻，改为指向 catalog rules 的契约指引', () => {
@@ -1506,30 +1221,15 @@ describe('wf_graph_patch · 工具注册面回归', () => {
     // 契约条款的复述句由 rules.patchContract 单点承载，常驻描述不再重复
     expect(description).not.toMatch(/ops are grouped/i)
     expect(description).not.toMatch(/atomic/i)
-    // 但调用相位提示保留：mark_node 只在闸门回合有意义（写图契约不承载「何时调用本工具」）
-    expect(description).toContain('mark group')
-    expect(description).not.toContain('CURRENT milestone gate')
+    // 图构成规则（start / 执行单元 / end）与「op 按数组顺序生效」同样由契约承载
+    expect(description).not.toMatch(/start \+ executable units \+ end/)
+    expect(ops).not.toMatch(/array order/i)
+    // 闸门退役：常驻描述不再保留标记组的调用相位提示
+    expect(description).not.toContain('mark group')
+    expect(description).not.toContain('mark_node')
     // 起手可用的最小示例保留（漏写 node 包装 / 端点字段名是历史高频错因）
     expect(ops).toContain('"op": "connect"')
     expect(ops).toContain('"node"')
-  })
-
-  it('mark 组：marked 已声明且确实返回', async () => {
-    const { host, entries } = makeHost({ persistRun: async () => {}, milestoneUsedOf: () => 0 })
-    const entry = makeRunEntry('wf-1', ['s', 'a1', 'e'])
-    entry.snapshot.meta = { milestoneMax: 2 }
-    entry.executorParentId = 'a1'
-    entry.executorIsMilestone = true
-    entry.milestoneProxyId = 'm1'
-    entries.set('session-1', entry)
-    const schema = captureSchema(host)
-    const result = await executeGraphPatch(host, 'session-1', {
-      scope: 'instance',
-      targetId: 'wf-1',
-      ops: [{ op: 'mark_node', nodeId: 'a1', status: 'ok' }],
-    })
-    expect(undeclaredKeys(result, schema)).toEqual([])
-    expect(result.marked).toMatchObject({ nodeId: 'a1', status: 'ok' })
   })
 })
 
@@ -1569,7 +1269,7 @@ describe('wf_graph_patch · 参数层契约守卫', () => {
       targetId: 'wf-1',
       ops: [{ op: 'connect', source: 's' } as never],
     }), 'WF_BAD_ARGS')
-    expect(err.message).toContain('source/target 必填')
+    expect(err.message).toContain('source/target are required')
     expect(err.message).toContain("op:'connect'")
   })
 
@@ -1581,8 +1281,8 @@ describe('wf_graph_patch · 参数层契约守卫', () => {
       targetId: 'wf-1',
       ops: [{ op: 'create_node', kind: 'agent', id: 'a9' } as never],
     }), 'WF_BAD_ARGS')
-    expect(err.message).toContain('node 对象')
-    expect(err.message).toContain('顶层')
+    expect(err.message).toContain('missing the node object')
+    expect(err.message).toContain('written directly on the op')
   })
 
   it('connect 省略 handle：按流程通道补全 flow-out/flow-in（不再写出幽灵线）', async () => {

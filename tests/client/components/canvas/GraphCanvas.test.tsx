@@ -6,7 +6,7 @@
 // tests/client/components/canvas/GraphCanvas.test.tsx
 //
 // GraphCanvas 画布组件回归测试（Bug 14 修正定位）：
-//   - 协作组拉伸（beginGroupResize）的 window 监听改由 useEffect 管理后，
+//   - Team 拉伸（beginGroupResize）的 window 监听改由 useEffect 管理后，
 //     组件卸载时监听随清理函数移除——卸载后指针移动不再触发 onGroupResize；
 //   - pointercancel / blur 兜底清理（Bug 7 同款）：取消拖拽后监听移除，
 //     后续移动不再触发（旧实现直接在 callback 里注册、仅 onUp 移除，两者均泄漏）。
@@ -14,7 +14,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import React from 'react'
 import { GraphCanvas, type GraphCanvasProps } from '../../../../src/client/components/canvas/GraphCanvas.js'
 import { zh } from '../../../../src/client/i18n.js'
 import type { CanvasEdge, CanvasNode } from '../../../../src/client/studio/studio-state.js'
@@ -80,7 +79,7 @@ function renderCanvas(onGroupResize: (id: string, size: { w: number; h: number }
   })
 }
 
-describe('GraphCanvas 协作组拉伸监听清理（Bug 14 修正定位）', () => {
+describe('GraphCanvas Team 拉伸监听清理（Bug 14 修正定位）', () => {
   it('拖拽中卸载组件：window 监听随之移除，指针移动不再触发 onGroupResize', () => {
     const onGroupResize = vi.fn()
     renderCanvas(onGroupResize)

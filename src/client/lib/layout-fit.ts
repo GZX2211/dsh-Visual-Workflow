@@ -2,7 +2,7 @@
 //
 // 自动布局判定与重叠检测：
 //   - needsAutoLayout：节点缺坐标或坐标为哨兵 {0,0} → 需要自动布局一次；
-//   - layoutBoxesOf：**实际渲染盒子**清单——组卡片 + 独立节点（组内成员不独立渲染、
+//   - layoutBoxesOf：**实际渲染盒子**清单——Team 卡片 + 独立节点（组内成员不独立渲染、
 //     不参与重叠判定，见 layout.ts 头部说明；虚拟节点已独立占位，仍参与判定）；
 //   - findLayoutOverlaps：盒子两两相交检测（非阻断提示「建议整理布局」）；
 //   - boxesOverlap / applyLayout：几何工具与「把坐标写回节点」的纯函数。
@@ -11,6 +11,7 @@
 import { layoutGraph as rawLayoutGraph, toLayoutInputs } from './layout.js'
 import { isSentinelPosition } from './layout-types.js'
 import type { LayoutOptions, LayoutResult } from './layout-types.js'
+import type { Line } from '../../host/shared/graph-model.js'
 import { groupCardSizeOf } from './card-geometry.js'
 
 /** 画布节点最小形状（只读 id/kind/position/data；不绑定 studio 状态类型）。 */
@@ -19,6 +20,22 @@ export interface LayoutBoxNode {
   kind: string
   position: { x: number; y: number }
   data?: Record<string, unknown>
+}
+
+/** 布局入参的最小节点形状：布局只读 id/kind/data，尺寸另行解析（不绑定画布投影类型）。 */
+export interface LayoutNodeLike {
+  id: string
+  kind: string
+  data?: Record<string, unknown>
+}
+
+/** 布局入参的最小连线形状：id 仅用于诊断回传，连接点用于 flow 与数据关联分类。 */
+export interface LayoutLineLike {
+  id?: string
+  source: string
+  target: string
+  sourceHandle?: string
+  targetHandle?: string
 }
 
 /** 渲染盒子（用于重叠判定；不含组内成员与虚拟节点）。 */
@@ -38,7 +55,7 @@ export function needsAutoLayout(nodes: LayoutBoxNode[] | null | undefined): bool
   return (nodes ?? []).some((node) => isSentinelPosition(node?.position))
 }
 
-/** 协作组成员的 id 集合（以组的 memberIds 为准；用于排除重复渲染节点）。 */
+/** Team 成员的 id 集合（以组的 memberIds 为准；用于排除重复渲染节点）。 */
 export function groupMemberIdsOf(nodes: LayoutBoxNode[] | null | undefined): Set<string> {
   const members = new Set<string>()
   for (const node of nodes ?? []) {
@@ -51,8 +68,8 @@ export function groupMemberIdsOf(nodes: LayoutBoxNode[] | null | undefined): Set
 }
 
 /**
- * 实际渲染盒子清单：组卡片 + 独立节点（组内成员不独立渲染；虚拟节点独立占位，参与判定）。
- * 为什么排除组内成员：GraphCanvas 只渲染组卡片与独立节点（组内成员以迷你卡渲染在卡片内），
+ * 实际渲染盒子清单：Team 卡片 + 独立节点（组内成员不独立渲染；虚拟节点独立占位，参与判定）。
+ * 为什么排除组内成员：GraphCanvas 只渲染 Team 卡片与独立节点（组内成员以迷你卡渲染在卡片内），
  * 对它们做重叠判定会产生「永远重叠」的假告警。
  */
 export function layoutBoxesOf(
@@ -93,7 +110,7 @@ export function findLayoutOverlaps(boxes: LayoutBox[] | null | undefined): Array
 }
 
 /**
- * 布局中被折叠（不占位置槽）的节点 id 集合：仅协作组成员。
+ * 布局中被折叠（不占位置槽）的节点 id 集合：仅 Team 成员。
  * 与 layout.ts 的折叠规则同源（虚拟节点独立占位，不再折叠到主节点）；供重叠判定与 UI 使用。
  */
 export function collapsedIdsOf(inputs: Array<{ id: string; kind: string; sourceId?: string; memberIds?: string[] }>): Set<string> {
@@ -113,18 +130,18 @@ export function collapsedIdsOf(inputs: Array<{ id: string; kind: string; sourceI
  * 统一布局入口（「整理布局」按钮与自动布局共用同一实现）：
  * 「宿主节点 → 布局输入 → 分层布局 → 坐标写回」四步收敛在一处，
  * 避免两条路径各写一遍而坐实「两份布局算法漂移」。
- * @param sizeOf 卡片尺寸解析（通常为 card-geometry.groupCardSizeOf）
+ * @param sizeOf 卡片尺寸解析（通常为 card-geometry.groupCardSizeOf）；
+ *   形参是布局最小节点面（id/kind/data），调用方无需为类型擦除做断言。
  */
 export function tidyNodes<T extends LayoutBoxNode>(
   nodes: T[],
-  lines: Array<{ source: string; target: string; sourceHandle?: string; targetHandle?: string }>,
-  options: { sizeOf: (node: T) => { w: number; h: number }; layout?: LayoutOptions } = { sizeOf: (() => ({ w: 0, h: 0 })) as never },
+  lines: LayoutLineLike[],
+  options: { sizeOf: (node: LayoutNodeLike) => { w: number; h: number }; layout?: LayoutOptions } = { sizeOf: () => ({ w: 0, h: 0 }) },
 ): { nodes: T[]; result: LayoutResult } {
-  const inputs = toLayoutInputs(
-    nodes as unknown as Array<{ id: string; kind: string; data?: Record<string, unknown> }>,
-    options.sizeOf as never,
-  )
-  const result = rawLayoutGraph(inputs, lines as never, options.layout ?? {})
+  const inputs = toLayoutInputs(nodes, options.sizeOf)
+  // 布局形参是存储层 Line（id/连接点必填、可带条件），调用方按最小面给连线：
+  // 此处只收窄声明，不补造字段——布局只读 id/source/target 与两个连接点。
+  const result = rawLayoutGraph(inputs, lines as Line[], options.layout ?? {})
   return { nodes: applyLayout(nodes, result), result }
 }
 
@@ -157,10 +174,9 @@ export function applyLayout<T extends LayoutBoxNode>(nodes: T[], result: LayoutR
  */
 export function layoutNodes<T extends LayoutBoxNode>(
   nodes: T[],
-  lines: Array<{ source: string; target: string; sourceHandle?: string; targetHandle?: string }>,
+  lines: LayoutLineLike[],
 ): T[] {
-  type SizeInput = Parameters<typeof groupCardSizeOf>[0]
   return tidyNodes(nodes, lines, {
-    sizeOf: (node) => groupCardSizeOf(node as unknown as SizeInput),
+    sizeOf: (node) => groupCardSizeOf(node),
   }).nodes
 }

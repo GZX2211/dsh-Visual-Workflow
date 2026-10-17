@@ -500,7 +500,7 @@ describe('模版 → 资产入库：目标与锁定判据（纯函数）', () =>
       .toEqual({ kind: 'workflow', templateId: 'tpl-1' })
     expect(promoteTargetOf({ ...base, editor: { source: 'template', kind: 'role', id: 'r-1' } }))
       .toEqual({ kind: 'role', templateId: 'r-1' })
-    // 文件/数据库/协作组模板不提供入库；实例态与资产态同样没有入库目标
+    // 文件/数据库/Team 模板不提供入库；实例态与资产态同样没有入库目标
     expect(promoteTargetOf({ ...base, editor: { source: 'template', kind: 'file', id: 'f-1' } })).toBeNull()
     expect(promoteTargetOf({ ...base, editor: { source: 'workflow', id: 'wf-1' } })).toBeNull()
     expect(promoteTargetOf({ ...base, editor: { source: 'flowAsset', id: 'a-1' } })).toBeNull()

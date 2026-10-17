@@ -94,7 +94,6 @@ export function ruleMetaLimits(input: CheckGraphInput, dag: FlowDag, cycleNodes:
     .map((node) => node.id)
   const layers = computeFlowLayers(dag, cycleNodes)
   const usage = orgUsageOf(input.flow, {
-    milestoneUsed: input.milestoneUsed,
     parallelBranchMax: maxLayerWidth(layers, unitIds),
     ...(input.patchOps !== undefined ? { patchOps: input.patchOps } : {}),
   })

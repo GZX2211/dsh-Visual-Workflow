@@ -21,7 +21,7 @@ import type { OrgUsage } from './org-meta-usage.js'
 export const ORG_META_LIMIT_DEFAULTS = {
   /** 可执行节点数上限（自主编排方案 §6.4 示例：12）。 */
   nodeMax: 12,
-  /** 协作组数量上限（示例：3）。 */
+  /** Team 数量上限（示例：3）。 */
   groupMax: 3,
   /** 组内人数上限（示例：5）。 */
   membersMax: 5,
@@ -34,14 +34,12 @@ export const ORG_META_LIMIT_DEFAULTS = {
 export const ORG_META_NORMALIZE_CAPS = {
   /** 可执行节点数上限的安全网。 */
   nodeMax: 200,
-  /** 协作组数量上限的安全网。 */
+  /** Team 数量上限的安全网。 */
   groupMax: 50,
   /** 组内人数上限的安全网（画布 UI 既有上限为 30，此处放宽）。 */
   membersMax: 50,
   /** 并行分支上限的安全网。 */
   parallelBranchMax: 50,
-  /** 闸门次数上限的安全网。 */
-  milestoneMax: 50,
   /** 单轮改图 op 上限的安全网。 */
   patchOpsMax: 200,
   /** 每节点协作消息上限的安全网。 */
@@ -100,8 +98,6 @@ export function normalizeOrgMeta(input: unknown): OrgMeta {
 
   const parallelBranchMax = positiveInt(raw.parallelBranchMax, caps.parallelBranchMax)
   if (parallelBranchMax !== undefined) out.parallelBranchMax = parallelBranchMax
-  const milestoneMax = positiveInt(raw.milestoneMax, caps.milestoneMax)
-  if (milestoneMax !== undefined) out.milestoneMax = milestoneMax
   const patchOpsMax = positiveInt(raw.patchOpsMax, caps.patchOpsMax)
   if (patchOpsMax !== undefined) out.patchOpsMax = patchOpsMax
   const askPerNodeMax = positiveInt(raw.askPerNodeMax, caps.askPerNodeMax)
@@ -125,8 +121,8 @@ export function normalizeOrgMeta(input: unknown): OrgMeta {
 
   if (Array.isArray(raw.interveneTrigger)) {
     const triggers = raw.interveneTrigger
-      .map((item) => oneOf(item, ['user', 'threshold', 'milestone'] as const))
-      .filter((item): item is 'user' | 'threshold' | 'milestone' => item !== undefined)
+      .map((item) => oneOf(item, ['user', 'threshold'] as const))
+      .filter((item): item is 'user' | 'threshold' => item !== undefined)
     // 去重后写入（顺序保持首次出现，便于提示词稳定输出）
     if (triggers.length > 0) out.interveneTrigger = [...new Set(triggers)]
   }
@@ -185,7 +181,6 @@ export function metaOfDocument(doc: Pick<WorkflowDocument | WorkflowTemplate, 'm
 export function orgBudgetOf(meta: OrgMeta, usage: OrgUsage): OrgBudget {
   const nodeMax = Number(meta.nodeMax) || 0
   const groupMax = Number(meta.groupMax) || 0
-  const milestoneMax = Number(meta.milestoneMax) || 0
   const patchOpsMax = Number(meta.patchOpsMax) || 0
   return {
     nodeUsed: usage.nodeCount,
@@ -196,9 +191,6 @@ export function orgBudgetOf(meta: OrgMeta, usage: OrgUsage): OrgBudget {
     groupRemaining: groupMax > 0 ? groupMax - usage.groupCount : null,
     membersMax: Number(meta.membersMax) || 0,
     parallelBranchMax: Number(meta.parallelBranchMax) || 0,
-    milestoneUsed: usage.milestoneUsed,
-    milestoneMax,
-    milestoneRemaining: milestoneMax > 0 ? milestoneMax - usage.milestoneUsed : null,
     patchOpsMax,
     patchOpsRemaining: patchOpsMax > 0 ? patchOpsMax - Math.max(0, Number(usage.patchOps) || 0) : null,
     forbiddenShapes: [...(meta.forbiddenShapes ?? [])],

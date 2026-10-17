@@ -16,7 +16,8 @@ import { EXPERIENCE_TYPES, FIELD_BUDGETS } from '../../experience/index.js'
 import { ERR_EXPERIENCE_BAD_ARGS, WF_EXPERIENCE_LEARN } from '../../shared/protocol.js'
 import { WfError } from '../../orchestrator/index.js'
 import { experienceCallerOf } from '../infrastructure/caller.js'
-import { defineTool, type ToolDefinitionLike, type ToolExecLike } from '../infrastructure/define-tool.js'
+import { defineTool, type ToolExecLike } from '../infrastructure/define-tool.js'
+import { registerTool, requireToolsService } from '../infrastructure/register-tool.js'
 import { EXPERIENCE_TYPE_PARAM_DESCRIPTION, assertExperienceTypeOwnership, parseExperienceType, type WfExperienceHost } from '../infrastructure/experience-contract.js'
 import { textRender } from '../infrastructure/text-render.js'
 import { mapExperienceCandidates } from './apply.js'
@@ -44,10 +45,7 @@ export function registerWfExperienceLearn(
   ctx: { get(name: string): unknown },
   host: WfExperienceHost,
 ): () => void {
-  const tools = ctx.get('tools') as { register(def: ToolDefinitionLike): () => void } | null | undefined
-  if (!tools || typeof tools.register !== 'function') {
-    throw new Error('[visual-workflow] tools 服务不可用，无法注册 wf_experience_learn')
-  }
+  const tools = requireToolsService(ctx, WF_EXPERIENCE_LEARN)
 
   const definition = defineTool({
     name: WF_EXPERIENCE_LEARN,
@@ -74,8 +72,10 @@ export function registerWfExperienceLearn(
             trigger: { type: 'string', description: 'The recognizable future signal that should make this experience worth recalling.' + scalarLengthNote(FIELD_BUDGETS.trigger) },
             principle: { type: 'string', description: 'The reusable rule, causal relation or judgement principle.' + scalarLengthNote(FIELD_BUDGETS.principle) },
             recommended_action: { type: 'string', description: 'The future action the principle turns into.' + scalarLengthNote(FIELD_BUDGETS.recommendedAction) },
-            exclusions: { type: 'array', items: { type: 'string' }, description: 'Conditions under which this experience must not be transferred.' + listLengthNote(FIELD_BUDGETS.arrayLength, FIELD_BUDGETS.arrayElement) },
-            evidence: { type: 'array', items: { type: 'string' }, description: 'Key facts that support the experience (not a run log).' + listLengthNote(FIELD_BUDGETS.arrayLength, FIELD_BUDGETS.arrayElement) },
+            // 这两个字段的语义要求（适用边界 / 证据只记关键事实）写在生成 Prompt 里，
+            // 而生成 Prompt 是提交的前置条件（必读），故常驻参数说明只给写入预算、不复述语义。
+            exclusions: { type: 'array', items: { type: 'string' }, description: listLengthNote(FIELD_BUDGETS.arrayLength, FIELD_BUDGETS.arrayElement).trim() },
+            evidence: { type: 'array', items: { type: 'string' }, description: listLengthNote(FIELD_BUDGETS.arrayLength, FIELD_BUDGETS.arrayElement).trim() },
           },
         },
       },
@@ -136,12 +136,5 @@ export function registerWfExperienceLearn(
     },
   })
 
-  const dispose = tools.register(definition)
-  return () => {
-    try {
-      dispose()
-    } catch {
-      // 注销尽力而为（工具可能已被外部注销）
-    }
-  }
+  return registerTool(tools, definition)
 }

@@ -23,7 +23,6 @@ import type { ExperienceCaller } from "../../../src/host/experience/ports.js"
 import { errorOf } from "./fixtures/assertions.js"
 import {
   createExperienceWorld,
-  seedActiveRun,
   seedChildRun,
   seedEntry,
   seedInjected,

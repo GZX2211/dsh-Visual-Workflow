@@ -12,7 +12,7 @@ import { ToolSwitchStore } from '../../../src/host/tools/infrastructure/tool-swi
 import { listMcpServers } from '../../../src/host/mcp/registry.js'
 import { registerRoutes } from '../../../src/host/api/index.js'
 import { DEFAULT_DISABLED_ON_FIRST_INSTALL, RESERVED_TRANSPORT_TOOL } from '../../../src/host/shared/protocol.js'
-import { cleanupAll, makeHarness, snapshotDshHome } from './fixtures/api-harness.js'
+import { cleanupAll, makeHarness, snapshotDshHome, type Harness } from './fixtures/api-harness.js'
 
 const restoreDshHome = snapshotDshHome()
 
@@ -20,6 +20,54 @@ afterEach(async () => {
   await cleanupAll()
   restoreDshHome()
 })
+
+type RouteHandler = (req: unknown, res: unknown) => Promise<void>
+
+/** 装配被测 HTTP handler：注册前缀路由并取回 handler（边界状态映射用例共用）。 */
+function registerHttpRoute(h: Harness): RouteHandler {
+  const holder: { handler?: RouteHandler } = {}
+  h.ctx.services.set('webServer', {
+    register(route: { handler: RouteHandler }) {
+      holder.handler = route.handler
+      return () => {
+        delete holder.handler
+      }
+    },
+  })
+  registerRoutes({ get: (name) => h.ctx.get(name), logger: { warn: () => {} } }, h.host)
+  if (!holder.handler) throw new Error('registerRoutes 未注册 handler')
+  return holder.handler
+}
+
+/** 经注册的 HTTP 路由分发一次 POST，返回捕获到的状态与响应体。 */
+async function httpPost(handler: RouteHandler, endpoint: string, args: unknown): Promise<{ status: number; body: string }> {
+  const sent: Array<{ status: number; body: string }> = []
+  const res = {
+    writeHead(status: number) {
+      sent.push({ status, body: '' })
+      return this
+    },
+    end(body: string) {
+      sent[sent.length - 1].body = String(body ?? '')
+      return this
+    },
+  }
+  const body = JSON.stringify({ args })
+  await handler(
+    {
+      method: 'POST',
+      url: `/visual-workflow/${endpoint}`,
+      on(event: string, cb: (chunk?: unknown) => void) {
+        if (event === 'data') cb(body)
+        if (event === 'end') cb()
+      },
+      destroy() {},
+    },
+    res,
+  )
+  if (sent.length !== 1) throw new Error(`HTTP handler 未产生唯一响应（${sent.length}）`)
+  return sent[0]
+}
 
 /**
  * 预置「已安装过」环境：写入空清单文件，使 load 不触发首次安装播种。
@@ -104,7 +152,9 @@ describe('全局工具开关批量端点', () => {
     expect(state.disabledTools).toEqual([...DEFAULT_DISABLED_ON_FIRST_INSTALL])
     expect(await h.host.toolSwitches.readDisabled()).toEqual([...DEFAULT_DISABLED_ON_FIRST_INSTALL])
     // 用户可在组合管理页手动开启（默认值不是不可逆约束）
-    await h.api.handle('toolSwitchPut', { name: DEFAULT_DISABLED_ON_FIRST_INSTALL[0], disabled: false })
+    for (const name of DEFAULT_DISABLED_ON_FIRST_INSTALL) {
+      await h.api.handle('toolSwitchPut', { name, disabled: false })
+    }
     const reopened = (await h.api.handle('pluginCatalog', {})) as { disabledTools?: string[] }
     expect(reopened.disabledTools).toEqual([])
   })
@@ -167,26 +217,62 @@ describe('MCP 端点', () => {
   it('D01-01 路由层：注入式 id 经 HTTP 路径映射为 400（不得退化为 500）', async () => {
     const h = await makeHarness()
     process.env.DSH_HOME = join(h.dataDir, 'dsh-home-route')
-    let registered: { handler?: (req: unknown, res: unknown) => Promise<void> } | null = null
-    h.ctx.services.set('webServer', {
-      register(route: { handler: (req: unknown, res: unknown) => Promise<void> }) {
-        registered = route
-        return () => { registered = null }
-      },
-    })
-    registerRoutes({ get: (name) => h.ctx.get(name), logger: { warn: () => {} } }, h.host)
+    const handler = registerHttpRoute(h)
 
-    const responses: Array<{ status: number; body: string }> = []
-    const res = {
-      writeHead(status: number) { responses.push({ status, body: '' }); return this },
-      end(body: string) { responses[responses.length - 1].body = String(body ?? ''); return this },
-    }
-    const body = JSON.stringify({ args: { server: { id: 'mcp-x\n- insert:\n    - id: evil', serverName: 'demo', transport: 'stdio', commandLine: 'node a.js' } } })
-    await registered!.handler!({ method: 'POST', url: '/visual-workflow/mcpPut', on(event: string, cb: (chunk?: unknown) => void) { if (event === 'data') cb(body); if (event === 'end') cb() }, destroy() {} }, res)
+    const response = await httpPost(handler, 'mcpPut', {
+      server: { id: 'mcp-x\n- insert:\n    - id: evil', serverName: 'demo', transport: 'stdio', commandLine: 'node a.js' },
+    })
 
     // api/AGENTS.md：调用方错误不得被响应成 500；稳定码 → 状态映射是边界职责。
-    expect(responses[0].status, '调用方入参错误不得被响应成 500').toBe(400)
-    expect(JSON.parse(responses[0].body)).toMatchObject({ ok: false, error: { code: 'WF_BAD_ARGS' } })
+    expect(response.status, '调用方入参错误不得被响应成 500').toBe(400)
+    expect(JSON.parse(response.body)).toMatchObject({ ok: false, error: { code: 'WF_BAD_ARGS' } })
+  })
+
+  it('IF-1 路由层：streamable-http 缺 url → 400（WF_MCP_BAD_ARGS，文案点明缺失参数）', async () => {
+    const h = await makeHarness()
+    process.env.DSH_HOME = join(h.dataDir, 'dsh-home-mcp-badargs-http')
+    const handler = registerHttpRoute(h)
+
+    const response = await httpPost(handler, 'mcpPut', {
+      server: { id: 'mcp-http', serverName: 'http', transport: 'streamable-http' },
+    })
+
+    // 入参非法是调用方错误：不得落 500（500 只留给真正的内部故障）
+    expect(response.status, '缺 url 的入参错误不得被响应成 500').toBe(400)
+    const payload = JSON.parse(response.body) as { ok: boolean; error?: { code?: string; message?: string } }
+    expect(payload).toMatchObject({ ok: false, error: { code: 'WF_MCP_BAD_ARGS' } })
+    expect(String(payload.error?.message)).toMatch(/url/)
+  })
+
+  it('IF-1 路由层：stdio 缺 command/commandLine → 400（同一入参类稳定码）', async () => {
+    const h = await makeHarness()
+    process.env.DSH_HOME = join(h.dataDir, 'dsh-home-mcp-badargs-stdio')
+    const handler = registerHttpRoute(h)
+
+    const response = await httpPost(handler, 'mcpPut', {
+      server: { id: 'mcp-stdio', serverName: 'stdio', transport: 'stdio' },
+    })
+
+    expect(response.status, '缺启动命令的入参错误不得被响应成 500').toBe(400)
+    expect(JSON.parse(response.body)).toMatchObject({ ok: false, error: { code: 'WF_MCP_BAD_ARGS' } })
+  })
+
+  it('IF-1 路由层：toggle 不存在的服务器 → 404（WF_MCP_NOT_FOUND，与入参非法分流）', async () => {
+    const h = await makeHarness()
+    process.env.DSH_HOME = join(h.dataDir, 'dsh-home-mcp-notfound')
+    const handler = registerHttpRoute(h)
+    // 先落一个真实服务器：404 表达的是「该服务器不存在」，不是「托管区为空」
+    const saved = await httpPost(handler, 'mcpPut', {
+      server: { id: 'mcp-a', serverName: 'a', transport: 'stdio', commandLine: 'node a.js' },
+    })
+    expect(saved.status).toBe(200)
+
+    const response = await httpPost(handler, 'mcpToggle', { id: 'mcp-missing', disabled: true })
+
+    expect(response.status, '资源不存在映射为 404').toBe(404)
+    const payload = JSON.parse(response.body) as { ok: boolean; error?: { code?: string; message?: string } }
+    expect(payload).toMatchObject({ ok: false, error: { code: 'WF_MCP_NOT_FOUND' } })
+    expect(String(payload.error?.message)).toContain('mcp-missing')
   })
 
   it('D01-02：streamable-http + headers 写盘后读侧往返一致，且切换其他项后 headers 仍在', async () => {
@@ -247,7 +333,7 @@ describe('呈现语言（systemLanguage 能力缝）', () => {
 
     const catalog = (await h.api.handle('pluginCatalog', {})) as { items: Array<{ name: string; description: string }> }
     const item = catalog.items.find((entry) => entry.name === 'wf_graph_patch')
-    expect(item?.description).toBe('Rewrite the workflow graph (structure / milestone marking); parent only')
+    expect(item?.description).toBe('Rewrite the workflow graph (structure); parent only')
   })
 })
 

@@ -2,7 +2,7 @@ import type { WorkflowDocument } from '../shared/graph-model.js';
 import type { RunSnapshot, RunStatus } from '../shared/types.js';
 import { type ResumeInput, type ResumeResult } from './resume.js';
 import { type ExecutorContextFacts } from '../prompts/index.js';
-import type { MilestoneMarkResult, MilestoneRunFacts, OrchestratorDeps, RunEntry } from './run-entry.js';
+import type { OrchestratorDeps, RunEntry } from './run-entry.js';
 import { type ChildMeta, type FlowLockInfo, type OrchestratorLogger, type RootAgentLike, type TurnEndInfo } from './seams.js';
 export declare abstract class RuntimeBase {
     protected readonly deps: OrchestratorDeps;
@@ -16,7 +16,7 @@ export declare abstract class RuntimeBase {
     readonly runs: Map<string, RunEntry>;
     /** childId → 运行位置反查（subagent/end 观察回写用）。 */
     protected readonly childIndex: Map<string, ChildMeta>;
-    /** nodeId → childId 反向索引（wf_ask_agent 节点 id 寻址 O(1)，P2-4）。 */
+    /** nodeId → childId 反向索引（wf_send_message 节点 id 寻址 O(1)，P2-4）。 */
     protected readonly childByNode: Map<string, string>;
     /**
      * 断点静默接续去重表（sessionId → 进行中的运行上下文接续 Promise）。
@@ -46,16 +46,10 @@ export declare abstract class RuntimeBase {
     /** 记录告警（watchdog 扫描失败/持久化告警路径）。 */
     warn(message: string): void;
     /**
-     * 持久化运行快照（公开包装；自主编排的 mark_node 路径在改写节点状态后调用）。
-     * 为什么需要公开入口：`persistWarn` 是 protected（内部状态机专用），而工具层只应
-     * 「改状态 → 落盘」两步，不应为落盘再复制一遍错误容忍逻辑。
-     */
-    persistRunSnapshot(entry: RunEntry): Promise<void>;
-    /**
      * 父代理执行单元准备（startRun/resumeRun 共用；情况2 hybrid / 情况3 executor）：
      *   - 父代理节点被流程线连接 → 登记 executorParentId，快照中该节点标记 running
      *     （续跑已 ok 则跳过——继承不重跑）；
-     *   - 组装父代理执行单元上下文（复用 buildNodeContextFacts：上游 ctx 产出/文件
+     *   - 组装父代理执行单元上下文（复用 buildNodeContextFacts：上游产出（自动注入）/文件
      *     文本与路径索引/db 提示），返回结构化上下文供 hybrid 的【你的节点任务】与
      *     executor（情况3）提示词构建使用；
      *   - 情况1 纯调度者返回 null（指令不含执行单元内容）。
@@ -68,16 +62,8 @@ export declare abstract class RuntimeBase {
     } | null>;
     /**
      * 父代理执行者收尾：开始调度（首次 wf_run_node / wf_finish）时把父代理节点标记 ok。
-     * P3：**闸门轮（executorIsMilestone）不生效**——闸门的完成只能由
-     * `wf_graph_patch(mark_node)` 写入（D-07），否则自动标记会把闸门静默放过。
      */
     protected markParentExecutorDone(entry: RunEntry): void;
-    /**
-     * 本会话在编运行已完成的门闸数（D-21：不含首次编排）。
-     * 口径唯一来源是快照的 `milestoneUsed`（可审计 + 续跑继承），无活跃 run 时为 0。
-     * 供 wf_graph_patch 的闸门预算判定复用。
-     */
-    milestoneUsedForSession(sessionId: string): number;
     /** 空闲看护门限（watchdog.ts 引用）。 */
     get idleTimeoutMs(): number;
     /** 子代理是否仍在运行（watchdog.ts 引用；经 AgentHost）。 */
@@ -86,6 +72,15 @@ export declare abstract class RuntimeBase {
     parentTurnTerminal(entry: RunEntry): TurnEndInfo | null;
     /** 某会话正在运行的 run（status === 'running'）。 */
     activeRunForSession(sessionId: string): RunEntry | null;
+    /**
+     * 某会话正在运行实例的工作流文档（`wf_org_catalog` 的 instance 召回取数源；无活跃 run 返回 null）。
+     *
+     * 为什么只认 running：暂停中的运行不暴露骨架（暂停态父代理不继续编排，恢复后重新
+     * running 即再次可见）——「当前正在运行的实例」这条语义由本函数独占定义，取数方不判状态。
+     * 为什么取最新实例文档而不是运行起始快照：运行中画布可能被改，父代理要按最新拓扑调度
+     * （与 currentResolvedFlow 同口径；读失败回退起始快照）。
+     */
+    activeRunFlow(sessionId: string): Promise<WorkflowDocument | null>;
     /**
      * 活跃 run 摘要（running/paused 均保留运行锁；返回 flowId/status/runId/sessionId）。
      * 工作台全局化改版：sessionId 缺省时返回**全部会话**的活跃 run（工作台全局面板
@@ -121,7 +116,7 @@ export declare abstract class RuntimeBase {
      * 取「可直接执行节点」的激活运行；依次尝试：
      *   ① 本会话 running 的 run（常态路径）；
      *   ② 内存中本会话 paused 的 run → 用该 flowId **静默接续**（等价人工点「运行」，但不注入指令）；
-     *   ③ 该会话**最近可恢复**的磁盘记录（stopped/interrupted/paused）→ 静默接续；
+     *   ③ 该会话**全部可恢复**的磁盘记录（stopped/interrupted/paused）→ 逐条静默接续；
      *   ④ 都没有 → null（调用方按 WF_NO_ACTIVE_RUN 给出可行动提示）。
      *
      * 运行锁语义（用户裁决）：锁不再作为「执行节点的前置条件」，而是降权为
@@ -133,19 +128,22 @@ export declare abstract class RuntimeBase {
      * （WF_ROOT_BUSY），两者天然互斥——这正是「必须人工点运行」的根因。
      *
      * 停点判定为何「内存优先」：paused 是唯一保留在内存的断点（锁未释放），
-     * 恢复它会原样接管其断点产出；磁盘兜底按 startedAt 倒序取最近一条可恢复记录。
+     * 恢复它会原样接管其断点产出；磁盘兜底按 startedAt 倒序逐条尝试。
      */
     protected ensureActiveRun(sessionId: string): Promise<RunEntry | null>;
     /** 接续本体（已由 ensureActiveRun 完成会话级去重）：定位断点 → 静默接续 → 取回运行条目。 */
     private adoptRunContext;
+    /** 本会话某工作流当前 running 的条目（接续成功后取回；未取到返回 null）。 */
+    private runningEntryOf;
     /**
      * 断点静默接续（同 flowId 并发去重）：续跑失败时把恢复路径的错误向上抛（调用方据此
      * 给出精确错误码，例如 WF_FLOW_INCOMPLETE），不吞错。
      * 固定 silent：本方法只服务工具路径——调用时父代理正在自身回合内，故不注入编排指令、
      * 也不要求父代理空闲；显式启动语义（工作台/调度器/模式二）不经此路径。接续成功日志
      * 由 resumeRun 的静默分支记录，此处不重复。
+     * fromRunId 指定本次要接管的断点记录（接续多候选逐条尝试时用），缺省取该工作流最新可恢复记录。
      */
-    protected autoResumeRun(sessionId: string, flowId: string): Promise<ResumeResult | null>;
+    protected autoResumeRun(sessionId: string, flowId: string, fromRunId?: string): Promise<ResumeResult | null>;
     /** 某工作流当前被哪个会话锁定（running/paused 均保留锁）。 */
     flowLockInfo(flowId: string): FlowLockInfo | null;
     /**
@@ -175,24 +173,7 @@ export declare abstract class RuntimeBase {
      */
     runForChild(childId: string): RunEntry | null;
     /**
-     * 闸门标记所需的运行事实（只读，D-07/D-21）：闸门轮身份 + 快照节点清单 + 预算口径。
-     * 为什么收敛在此：快照归编排器所有，工具层不应直读 RunEntry/snapshot；预算上限的
-     * 判定仍由调用方（wf_graph_patch 的纯函数）按本事实裁决，本方法不做语义判断。
-     */
-    milestoneFactsFor(sessionId: string): MilestoneRunFacts | null;
-    /**
-     * 闸门节点状态标记（**运行快照写者的唯一入口**，P3 / D-07）：写节点状态、回合明细
-     * 与结束时间，并按 status='ok' 递增快照 milestoneUsed（D-21：不含首次编排）。
-     * 写前防御校验：运行存在且 running、nodeId 在当前快照内、status 合法；**不落盘**——
-     * 持久化时机由调用方决定，保持「逐项标记、末尾落盘一次」的既有语义。
-     * 时间源用注入时钟（this.now），与快照其他时间戳口径一致。
-     */
-    markMilestoneNode(sessionId: string, input: {
-        nodeId: string;
-        status: 'ok' | 'fail';
-    }): MilestoneMarkResult;
-    /**
-     * 触碰运行的空闲基准（工具层调用）：wf_ask 提问等长阻塞交互期间持续
+     * 触碰运行的空闲基准（工具层调用）：wf_ask_user 提问等长阻塞交互期间持续
      * 刷新 lastActiveAt，防止空闲看护（runIdleTimeoutMs）把等待用户的运行误判为空闲
      * 并自动停止。
      */
@@ -210,28 +191,27 @@ export declare abstract class RuntimeBase {
     /** 重读当前（运行的）工作流最新快照：每节点执行前读一次，运行中调整即时生效（双向同步①）。 */
     currentResolvedFlow(entry: RunEntry): Promise<WorkflowDocument>;
     /**
-     * 刷新实例保存后的运行事实源（双向同步①「画布→编排」的闭环补全）：
-     * 画布保存（putWorkflow/putService）会更新 workflows/services 目录，但运行
-     * 事实源 orchestrations/<runId>.json 是 startRun 时的一次性快照——若不同步
-     * 刷新，父代理（编排指令的 definitionPath 指向该文件）永远读到旧拓扑，
-     * 新增节点/连线在运行中不可见（本缺陷已验证）。此处对属于该实例且处于
-     * running/paused 的活跃 run，用最新保存内容重写其事实源文件。
+     * 刷新实例保存后的运行编排基线（双向同步①「画布→编排」的闭环补全）：
+     * 保存后若**编排语义确有变更**（flow-diff 判定，纯坐标拖动/Team 卡片缩放等几何改动不算），
+     * 且该 run 正在运行（running），立即向父代理注入【编排变更】通知（steer 插队优先，
+     * 父代理空闲时 followupRoot 唤醒），父代理据此重新召回实例骨架并调整后续编排。
      *
-     * 新机制（用户裁决）：保存后若**编排语义确有变更**（flow-diff 判定，纯坐标拖动/
-     * 组卡片缩放等几何改动不算），且该 run 正在运行（running），立即向父代理注入
-     * 【编排变更】通知（steer 插队优先，父代理空闲时 followupRoot 唤醒），父代理据此
-     * 重读事实源并调整后续编排——取代旧提示词「每次调度前重读源文件」的软约束。
-     * 暂停中的 run 只刷新事实源、不注入（不打断暂停态，恢复时按最新拓扑续跑）。
+     * 为什么基线是内存事实而不是落盘副本：那份 orchestrations/<runId>.json 副本的唯一用途
+     * 曾是「给父代理 read 一份只读快照」；改用 wf_org_catalog 的 instance 通道召回后它失去
+     * 消费者，故收敛为 RunEntry 上的内存基线（单一事实源，不再有「副本与画布漂移」这一整类问题）。
+     * 拓扑本身由 currentResolvedFlow 每次显式重读最新实例文档，不依赖任何快照副本。
+     *
+     * 暂停中的 run 只更新基线、不注入（不打断暂停态，恢复时按最新拓扑续跑）。
      * 幂等：无活跃 run 时为空操作；不打断正在执行的子代理。
      */
     refreshActiveDefinitions(flowId: string, sessionId: string, flow: WorkflowDocument): Promise<void>;
     /**
      * 向父代理注入【编排变更】通知（运行中画布保存且编排语义变更时调用）。
      * 通道选择（用户裁决）：父代理回合进行中（status='running'）且具备 steer → 插队
-     * 注入（下一步边界即见，与 wf_ask_agent 超时通知同通道）；否则用 followupRoot 唤醒
+     * 注入（下一步边界即见，与 wf_send_message 超时通知同通道）；否则用 followupRoot 唤醒
      * （父代理空闲时也能收到）。注入失败仅告警，绝不阻断画布保存主流程。
      */
-    protected notifyOrchestrationChange(entry: RunEntry, flow: WorkflowDocument): void;
+    protected notifyOrchestrationChange(entry: RunEntry): void;
     /**
      * 清理运行时资源（插件卸载/Service dispose，幂等）：
      * 中止全部运行（阻塞等待随之 reject）并清空内存表。
@@ -254,11 +234,6 @@ export declare abstract class RuntimeBase {
     protected releaseRunMemory(runId: string): void;
     /** 拒绝某运行的全部阻塞等待器（终止/卸载路径）。 */
     protected rejectWaiters(entry: RunEntry): void;
-    /**
-     * 释放某运行的全部待回复协作登记（终止/替换/卸载路径）。
-     * 非阻塞协议下登记不含等待受体，故无拒绝语义：仅清表 + 写审计（幂等）。
-     */
-    protected rejectAsks(entry: RunEntry): void;
     /** 持久化 run 快照（尽力而为：失败仅告警，不阻断状态机）。 */
     protected persistWarn(entry: RunEntry): Promise<void>;
 }

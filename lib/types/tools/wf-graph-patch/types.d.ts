@@ -1,17 +1,10 @@
-import type { OrgMeta } from '../../shared/types.js';
+import type { WorkflowDocument } from '../../shared/graph-model.js';
 /** 补丁作用域：template = 工作流模板（规划期改模板）；instance = 工作流/服务实例（运行期改实例）。 */
 export type PatchScope = 'template' | 'instance';
-/**
- * 操作组名（两组）。
- * 元参数（组织预算）不在此列：它是约束改图方的硬护栏，被约束方不得自行调整，
- * 因此没有「改元参数」这一组操作，只能在画布/设置中由用户调整。
- */
-export type PatchGroup = 'graph' | 'mark';
 /**
  * 新建模板说明（wf_graph_patch 的 create 参数）。
  * 语义（用户裁决 2026.09）：规划期的主用例是「按意图产出新模板」，因此
  * `scope='template'` + `create` = 新建；不带 create 仍是「必须已存在」的更新语义。
- * 允许出现的组合只有：scope=template 且 op 组为 graph（其余组合一律拒绝）。
  */
 export interface NewTemplateSpec {
     /** 模板名称（人类可读，必填）。 */
@@ -21,7 +14,7 @@ export interface NewTemplateSpec {
     /** 运行模式（缺省 mode1）。 */
     mode?: 'mode1' | 'mode2';
 }
-/** 图结构变更组。 */
+/** 图结构变更操作。 */
 export type GraphPatchOp = {
     op: 'create_node';
     node: Record<string, unknown>;
@@ -63,32 +56,14 @@ export type GraphPatchOp = {
     groupId: string;
     memberIds: string[];
 };
-/**
- * 运行状态标记组（闸门节点完成/失败）。
- * 语义约束：只能标记**当前仍在运行**的 run 所对应的节点；节点不存在即拒绝。
- * 闸门身份与次数预算由执行层按运行事实判定。
- */
-export interface MarkPatchOp {
-    op: 'mark_node';
-    nodeId: string;
-    status: 'ok' | 'fail';
-    summary?: string;
-}
 /** 补丁操作（判别联合）。 */
-export type PatchOp = GraphPatchOp | MarkPatchOp;
-/** 图结构变更结果。 */
+export type PatchOp = GraphPatchOp;
+/**
+ * 图结构变更结果。
+ * doc 用图契约本体：后续校验、预算与落盘全部按 WorkflowDocument 语义进行。
+ */
 export interface GraphPatchResult {
-    doc: {
-        id: string;
-        sessionId: string;
-        mode: string;
-        name: string;
-        description: string;
-        nodes: unknown[];
-        lines: unknown[];
-        revision: number;
-        meta?: OrgMeta;
-    };
+    doc: WorkflowDocument;
     createdNodeIds: string[];
     removedNodeIds: string[];
     updatedNodeIds: string[];
@@ -102,12 +77,6 @@ export interface GraphPatchResult {
      * 强制受管会把这类规划直接挡在门外。归一化不静默：工具层据此产出 warning 告知调用方。
      */
     fileNodeTextOnlyIds: string[];
-}
-/** 运行状态标记结果。 */
-export interface MarkPatchResult {
-    nodeId: string;
-    status: 'ok' | 'fail';
-    runId: string;
 }
 /**
  * 单条补丁操作失败项（容错收集模式下的一条记录）。
@@ -123,15 +92,11 @@ export interface PatchOpFailure {
     /** 可行动的错误说明（含正确形状或修复建议）。 */
     message: string;
 }
-/** 图结构组的 op 名（op → 组映射、分组提示与契约完整性校验的唯一来源）。 */
+/** 图结构 op 名清单（契约完整性校验与未知 op 判定的唯一来源）。 */
 export declare const GRAPH_OP_NAMES: readonly ["create_node", "remove_node", "update_node_data", "connect", "disconnect", "create_group", "set_group_members"];
-/** 标记组的 op 名。 */
-export declare const MARK_OP_NAMES: readonly ["mark_node"];
-/** op → 组名映射（服务端混组拒绝的唯一依据）。 */
-export declare function opGroupOf(op: unknown): PatchGroup | null;
-/** 补丁中出现的全部组名（按出现顺序去重）。 */
-export declare function groupsOf(ops: unknown[]): PatchGroup[];
+/** op 是否属于图结构 op（未知 op 由参数层按 WF_BAD_ARGS 拒绝）。 */
+export declare function opGroupOf(op: unknown): 'graph' | null;
 /** 未知 op 名（用于错误信息）。 */
 export declare function unknownOpsOf(ops: unknown[]): string[];
-/** 混组错误的可读分组说明（写进错误文本，帮助模型自我修正）。 */
-export declare const GROUP_HINTS: Record<PatchGroup, string>;
+/** 全部允许的 op 名（写进错误文本，帮助模型自我修正）。 */
+export declare const ALLOWED_OP_NAMES_TEXT: string;

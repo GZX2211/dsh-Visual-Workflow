@@ -39,7 +39,7 @@ export const DATA_KINDS: ReadonlySet<string> = new Set(['file', 'database'])
  */
 const orphanDataWarning = (id: string): string => `数据节点「${id}」未关联任何角色节点，已放到流程最右侧的独立列`
 const groupHeightWarning = (id: string, needed: number, memberCount: number): string =>
-  `协作组「${id}」卡片高度不足，建议加高到 ${needed}px 以容纳 ${memberCount} 名成员`
+  `团队「${id}」卡片高度不足，建议加高到 ${needed}px 以容纳 ${memberCount} 名成员`
 
 /** 仅流程线参与主干分层（ctx-out→ctx-in / db-out→db-in 不参与）。 */
 export function isFlowLine(line: Line): boolean {
@@ -85,7 +85,7 @@ export function toLayoutInputs(
 }
 
 /**
- * 折叠映射：协作组成员 → 组卡片。
+ * 折叠映射：Team 成员 → Team 卡片。
  * 只折叠组成员：虚拟节点（proxy）**不再**折叠到主节点——它是主节点的分身，独立占位与分层
  * （用户裁决：proxy 可以参与流程的不同阶段，与主节点不一定同列）。
  */
@@ -262,8 +262,8 @@ export function layoutGraph(nodes: LayoutNodeInput[], lines: Line[], options: La
   /**
    * 全局主轴 Y（主干线的水平位置）：originY + 基准主干卡片高/2。
    * 基准用「标准角色卡高」（card-geometry.GRAPH_NODE_HEIGHT）而非本图最高卡片：
-   * 主轴是画布级的固定基准线，不应因某张协作组卡更高而整体下移（否则各文档之间主干高低不一致）。
-   * 高于基准的卡片（如协作组卡）以自身中心叠在轴上，向上/向下略微越出轴两侧空间。
+   * 主轴是画布级的固定基准线，不应因某张 Team 卡更高而整体下移（否则各文档之间主干高低不一致）。
+   * 高于基准的卡片（如 Team 卡）以自身中心叠在轴上，向上/向下略微越出轴两侧空间。
    */
   const axisY = originY + GRAPH_NODE_HEIGHT / 2
 
@@ -389,7 +389,7 @@ export function layoutGraph(nodes: LayoutNodeInput[], lines: Line[], options: La
     }
   }
 
-  // 组内成员：顺序 = memberIds 顺序（去重），坐标写在组卡片矩形内；不参与全局分层与重叠判定
+  // 组内成员：顺序 = memberIds 顺序（去重），坐标写在 Team 卡片矩形内；不参与全局分层与重叠判定
   for (const unit of spineUnits) {
     if (unit.kind !== 'group') continue
     const position = positions.get(unit.id)

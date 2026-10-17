@@ -1,3 +1,5 @@
+// tests/contract/embedding-assets.test.ts
+//
 // T-004 模型资产业务测试：校验 assets/models/bge-small-zh-v1.5 的资产齐备性。
 //
 // 覆盖点（DoD 与任务验收）：

@@ -39,7 +39,6 @@ export class RuntimeLifecycle extends RuntimeObserve {
     snapshot.endedAt = this.isoNow()
     terminalizeNodes(snapshot, this.now(), options.status === 'stopped' ? 'stop' : 'interrupt')
     this.rejectWaiters(entry)
-    this.rejectAsks(entry)
     await this.persistWarn(entry)
     // 4. 释放内存条目（终态记录已持久化）。幂等由入口的 snapshot.status 保证：重复传入
     //    同一个 entry 直接返回 false；条目释放后 stopRun 从 this.runs 取不到 entry 即返回，

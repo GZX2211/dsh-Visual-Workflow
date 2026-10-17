@@ -5,7 +5,7 @@
 // tests/client/studio/studio-state.test.ts
 //
 // 状态机纯函数单测（照搬/适配旧项目行为 + 新数据模型）：
-// 画布投影、增删改、编辑器数据（角色/文件/数据库/阶段/协作组/虚拟节点）、
+// 画布投影、增删改、编辑器数据（角色/文件/数据库/阶段/Team/虚拟节点）、
 // 撤销重做、面板几何与打开文档的选中/编辑器重置。
 
 import { describe, expect, it } from 'vitest'
@@ -19,6 +19,7 @@ import {
   inspectorOpenOf,
   isInstanceSourceKind,
   type StudioState,
+  type StudioAction,
   type CanvasNode,
 } from '../../../src/client/studio/studio-state.js'
 import type { ExperienceEntry, RoleAssetDetail, WorkflowAssetDetail } from '../../../src/host/shared/asset-types.js'
@@ -293,36 +294,167 @@ describe('studioReducer', () => {
     expect(state.history.past.length + state.history.future.length).toBe(0)
   })
 
-  it('P0 对齐：四处文档/画布身份切换入口都清空历史栈', () => {
-    // openDocument 的三条入口
-    for (const action of [
-      { type: 'OPEN_FLOW', flow: flowDoc('X', [node({ id: 'x1', kind: 'agent' })]) },
-      { type: 'OPEN_SERVICE', service: { id: 'sv', sessionId: 's-1', mode: 'mode2', name: 'sv', description: '', nodes: [], lines: [], createdAt: '', updatedAt: '', status: 'stopped' } as never },
-      { type: 'OPEN_FLOW_TEMPLATE', template: { id: 'T', mode: 'mode1', name: 'T', description: '', nodes: [], lines: [] } as never },
-    ] as const) {
+  /**
+   * 文档/画布身份切换入口登记表：键必须覆盖 StudioAction 联合的**全部** type 字面量。
+   *
+   * 为什么用 Record 而不是手工数组：reducer 新增任一 action 时，此表缺键（或删 action 后多键）
+   * 都会让本文件的类型检查失败（tsconfig.test.client.json 覆盖 tests/client），因此「新增第五个
+   * 身份切换入口却忘了同步清单」不再能静默通过；值为 true 的入口必须在下方的场景表里受测，
+   * 由运行期断言逐一核对——登记表与场景表互为闭环。
+   */
+  const IDENTITY_SWITCH_ENTRIES: Readonly<Record<StudioAction['type'], boolean>> = {
+    SET_SESSION: false,
+    SET_MODE: false,
+    SET_LIB_TAB: false,
+    SET_LIBRARY_SOURCE: false,
+    SET_LIB_SEARCH: false,
+    ASSETS_LOADED: false,
+    ASSET_DOC_LOADED: false,
+    ROLE_ASSET_LOADED: false,
+    EXPERIENCES_LOADED: false,
+    EXPERIENCE_LOADED: false,
+    OPEN_EXPERIENCE: false,
+    EXPERIENCE_PATCH: false,
+    // 第四处入口：装载资产详情后把画布切到该资产文档（不走 openDocument）
+    OPEN_FLOW_ASSET: true,
+    OPEN_ROLE_ASSET: false,
+    ROLE_ASSET_PATCH: false,
+    ASSET_VERSIONS_LOADED: false,
+    ASSET_VERSIONS_CLOSED: false,
+    // 条件性切换：仅当被关闭的正是画布上打开的资产时清栈（场景表按该条件布置现场）
+    ASSET_CLOSED: true,
+    WORKFLOWS_LOADED: false,
+    WORKFLOW_ADDED: false,
+    WORKFLOW_UPDATED: false,
+    WORKFLOW_REMOVED: false,
+    FLOW_TEMPLATES_LOADED: false,
+    FLOW_TEMPLATES_SYNCED: false,
+    FLOW_TEMPLATE_ADDED: false,
+    FLOW_TEMPLATE_UPDATED: false,
+    FLOW_TEMPLATE_REMOVED: false,
+    SERVICES_LOADED: false,
+    SERVICE_UPDATED: false,
+    SERVICE_REMOVED: false,
+    ACTIVE_RUNS_LOADED: false,
+    INSTANCE_OPTIONS_SET: false,
+    TEMPLATES_LOADED: false,
+    TEMPLATE_ADDED: false,
+    TEMPLATE_UPDATED: false,
+    TEMPLATE_REMOVED: false,
+    COMBOS_LOADED: false,
+    PRESETS_LOADED: false,
+    MODELS_LOADED: false,
+    OPEN_FLOW: true,
+    OPEN_SERVICE: true,
+    OPEN_FLOW_TEMPLATE: true,
+    CLEAR_CANVAS: true,
+    GRAPH_REPLACED: false,
+    NODE_ADDED: false,
+    NODE_MOVED: false,
+    NODE_REMOVED: false,
+    EDGE_ADDED: false,
+    EDGE_REMOVED: false,
+    SELECT_NODE: false,
+    SELECT_EDGE: false,
+    SELECT_LIB: false,
+    SELECT_EDITOR: false,
+    CLEAR_SELECTION: false,
+    NODE_DATA_PATCH: false,
+    EDGE_PATCH: false,
+    DOC_PATCH: false,
+    SET_DIRTY: false,
+    MARK_SAVED: false,
+    RUN_STARTED: false,
+    RUN_SNAPSHOT: false,
+    RUN_CLEARED: false,
+    TOAST_PUSH: false,
+    TOAST_DROP: false,
+    HISTORY_PUSH: false,
+    UNDO: false,
+    REDO: false,
+    PANELS_SET: false,
+    CONFIRM_SET: false,
+    HISTORY_OPEN: false,
+    RUN_HISTORY_LOADED: false,
+    RUN_HISTORY_SELECT: false,
+    COMBO_OPEN: false,
+    SCHEDULER_OPEN: false,
+  }
+
+  /** 身份切换入口的受测场景：键集必须恰好等于登记表中为 true 的集合。 */
+  const IDENTITY_SWITCH_SCENARIOS: Readonly<Record<string, {
+    /** 前置：把状态摆到「该入口确实会切换身份」的现场（在压入历史栈之前执行）。 */
+    arrange?: (state: StudioState) => StudioState
+    /** 触发入口本身。 */
+    act: (state: StudioState) => StudioState
+    /** 清栈之外的身份结果补充断言。 */
+    after?: (state: StudioState) => void
+  }>> = {
+    OPEN_FLOW: {
+      act: (state) => studioReducer(state, { type: 'OPEN_FLOW', flow: flowDoc('X', [node({ id: 'x1', kind: 'agent' })]) }),
+      after: (state) => expect(state.currentId).toBe('X'),
+    },
+    OPEN_SERVICE: {
+      act: (state) => studioReducer(state, {
+        type: 'OPEN_SERVICE',
+        service: { id: 'sv', sessionId: 's-1', mode: 'mode2', name: 'sv', description: '', nodes: [], lines: [], createdAt: '', updatedAt: '', status: 'stopped' } as never,
+      }),
+      after: (state) => expect(state.currentId).toBe('sv'),
+    },
+    OPEN_FLOW_TEMPLATE: {
+      act: (state) => studioReducer(state, {
+        type: 'OPEN_FLOW_TEMPLATE',
+        template: { id: 'T', mode: 'mode1', name: 'T', description: '', nodes: [], lines: [] } as never,
+      }),
+      after: (state) => expect(state.currentId).toBe('T'),
+    },
+    OPEN_FLOW_ASSET: {
+      arrange: (state) => studioReducer(state, { type: 'ASSET_DOC_LOADED', detail: assetDetail }),
+      act: (state) => studioReducer(state, { type: 'OPEN_FLOW_ASSET', assetId: 'a-1' }),
+      after: (state) => {
+        // 资产画布必须是资产文档的图（未被前一份文档的图替换）
+        expect(state.canvas.nodes.map((item) => item.id)).toEqual(['s1'])
+        expect(state.currentId).toBe('a-1')
+      },
+    },
+    CLEAR_CANVAS: {
+      act: (state) => studioReducer(state, { type: 'CLEAR_CANVAS' }),
+      after: (state) => {
+        expect(state.currentId).toBeNull()
+        expect(state.canvas).toEqual({ nodes: [], edges: [] })
+      },
+    },
+    ASSET_CLOSED: {
+      arrange: (state) => studioReducer(
+        studioReducer(state, { type: 'ASSET_DOC_LOADED', detail: assetDetail }),
+        { type: 'OPEN_FLOW_ASSET', assetId: 'a-1' },
+      ),
+      act: (state) => studioReducer(state, { type: 'ASSET_CLOSED', assetId: 'a-1' }),
+      after: (state) => {
+        expect(state.currentId).toBeNull()
+        expect(state.canvas).toEqual({ nodes: [], edges: [] })
+      },
+    },
+  }
+
+  it('P0 对齐：身份切换入口清单与受测场景闭环（reducer 新增入口即转红）', () => {
+    const switching = (Object.keys(IDENTITY_SWITCH_ENTRIES) as Array<StudioAction['type']>)
+      .filter((type) => IDENTITY_SWITCH_ENTRIES[type])
+    // 登记表说「切换身份」的入口必须有场景：漏测即失败，且新增入口在类型层就已失败
+    expect(Object.keys(IDENTITY_SWITCH_SCENARIOS).sort()).toEqual([...switching].sort())
+
+    for (const [type, scenario] of Object.entries(IDENTITY_SWITCH_SCENARIOS)) {
       let state = baseState()
       state = studioReducer(state, { type: 'GRAPH_REPLACED', nodes: [node({ id: 'n1', kind: 'agent' })], edges: [], dirty: false })
+      if (scenario.arrange) state = scenario.arrange(state)
       state = studioReducer(state, { type: 'HISTORY_PUSH', snapshot: graphSnapshotOf(state) })
-      state = studioReducer(state, action as never)
-      expect(state.history.past, `${action.type} 未清空历史栈`).toEqual([])
-      expect(state.history.future, `${action.type} 未清空重做栈`).toEqual([])
+      // 前置非空守卫：否则「清空历史栈」断言会退化成恒真
+      expect(state.history.past.length, `${type} 前置历史栈为空`).toBeGreaterThan(0)
+      state = scenario.act(state)
+      expect(state.history.past, `${type} 未清空历史栈`).toEqual([])
+      expect(state.history.future, `${type} 未清空重做栈`).toEqual([])
+      scenario.after?.(state)
     }
-    // 第四处入口：OPEN_FLOW_ASSET（不走 openDocument）
-    let asset = baseState()
-    asset = studioReducer(asset, { type: 'GRAPH_REPLACED', nodes: [node({ id: 'n1', kind: 'agent' })], edges: [], dirty: false })
-    asset = studioReducer(asset, { type: 'HISTORY_PUSH', snapshot: graphSnapshotOf(asset) })
-    asset = studioReducer(asset, { type: 'ASSET_DOC_LOADED', detail: assetDetail })
-    asset = studioReducer(asset, { type: 'OPEN_FLOW_ASSET', assetId: 'a-1' })
-    expect(asset.history.past, 'OPEN_FLOW_ASSET 未清空历史栈').toEqual([])
-    expect(asset.history.future, 'OPEN_FLOW_ASSET 未清空重做栈').toEqual([])
-    // CLEAR_CANVAS
-    let cleared = baseState()
-    cleared = studioReducer(cleared, { type: 'GRAPH_REPLACED', nodes: [node({ id: 'n1', kind: 'agent' })], edges: [], dirty: false })
-    cleared = studioReducer(cleared, { type: 'HISTORY_PUSH', snapshot: graphSnapshotOf(cleared) })
-    cleared = studioReducer(cleared, { type: 'CLEAR_CANVAS' })
-    expect(cleared.history).toEqual({ past: [], future: [] })
-    // ASSET_CLOSED 的 closesCanvas 分支（已在上方用例覆盖，此处仅断言归属键不被清空影响）
-    expect(cleared.currentId).toBeNull()
   })
 
   it('SELECT_LIB：父代理模板选择（右侧面板无显示）', () => {
@@ -369,7 +501,7 @@ describe('editorDataOf', () => {
     expect(proxyData?.mainLabel).toBe('主')
   })
 
-  it('协作组 → kind group + members 解析', () => {
+  it('Team → kind group + members 解析', () => {
     const state = openWith(baseState(), [
       node({ id: 'g1', kind: 'group', data: { label: '组', memberIds: ['a1'] } }),
       node({ id: 'a1', kind: 'agent', data: { label: '成员' } }),
@@ -392,7 +524,7 @@ describe('editorDataOf', () => {
     expect(editorDataOf(selected)?.kind).toBe('edge')
   })
 
-  it('flowToCanvas：重复节点 id 去重（保留最后出现者，修复历史协作组重复追加缺陷）', () => {
+  it('flowToCanvas：重复节点 id 去重（保留最后出现者，修复历史 Team 重复追加缺陷）', () => {
     const projected = flowToCanvas({
       id: 'f', sessionId: 's', mode: 'mode1', name: 'f', description: '',
       nodes: [
@@ -407,7 +539,7 @@ describe('editorDataOf', () => {
     expect((projected.nodes.find((n) => n.id === 'g')?.data as { memberIds?: string[] }).memberIds).toEqual(['a'])
   })
 
-  it('协作组成员移除：仅移除目标成员（模拟 removeGroupMember 的两次 patch）', () => {
+  it('Team 成员移除：仅移除目标成员（模拟 removeGroupMember 的两次 patch）', () => {
     let state = baseState()
     state = studioReducer(state, {
       type: 'GRAPH_REPLACED',

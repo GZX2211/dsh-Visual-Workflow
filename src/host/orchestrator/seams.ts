@@ -8,7 +8,7 @@
 //     ChildMeta（childId → 运行位置反查）。
 // 错误类型见 errors.ts（WfError / messageOf）。
 
-import type { GraphNode, RoleNode } from '../shared/graph-model.js'
+import type { GraphNode } from '../shared/graph-model.js'
 import type { RunStatus } from '../shared/types.js'
 
 // ---------------------------------------------------------------------------
@@ -48,75 +48,26 @@ export interface NodeRunner {
   /** 尽力中断某子代理当前回合（保留会话；官方 interrupt 语义）。 */
   interruptChild(childId: string, sessionId: string): Promise<void>
   /**
-   * 官方 Agent Team 能力是否可用（协作块通道文案与执行路径选择用）。
+   * 官方 Agent Team 能力是否可用（Team 成员启动路径与消息投递通道的唯一判据）。
    *
-   * 可用 = 官方 Team 服务已挂载且能力齐全 + 该会话根 Agent 存活 + 存在可用的延续子代理
-   * provider。任一不满足时协作组必须回退到逐节点启动的既有路径。
+   * 可用 = 官方 Team 服务已挂载且能力齐全 + 官方 Team 工具与协作策略确实会下发给成员
+   * （父代理 scope 可见 spawn_teammate）+ 该会话根 Agent 存活 + 存在可用的延续子代理
+   * provider。任一不满足时团队成员节点必须回退到普通可延续子代理路径（消息投递走
+   * wf_send_message 的普通子代理通道）。
    */
   teamAvailable?(sessionId: string): boolean
   /**
-   * 把整个协作组启动为官方 Agent Team：为每个成员创建（或复用）teammate 并派发本轮任务。
+   * 官方 Team 成员的当前状态（成员运行态的**权威读源**；插件不自建成员状态机）。
    *
-   * 与 startNodeTask 的区别：成员的创建参数、成员身份与后续消息投递全部交给官方 Team 机制，
-   * 本插件只决定成员数量与成员级组成（角色提示词/模型/工具白名单）。
-   *
-   * 返回 null：官方 Team 服务不可用——调用方回退到对每个成员逐个 startNodeTask 的既有路径。
-   * 立即返回，不等待成员完成；成员完成经 subagent/end 观察回写节点状态。
+   * 返回 null：该节点不是官方成员，或官方 Team 不可用（调用方按降级语义处理）。
+   * 状态取值域与官方 roster 逐字一致：running / inactive / provisioning / failed。
    */
-  startGroupTask?(input: GroupStartInput): Promise<GroupStartResult | null>
+  teamMemberStatusOf?(sessionId: string, nodeId: string): 'running' | 'inactive' | 'provisioning' | 'failed' | null
   /**
    * 消费软截停标记（护栏）：该 child 最近一次任务是否触达 ReAct 迭代上限
    * （消费后清除）。触达上限仍正常产出——节点标记 react-capped（非失败）。
    */
   consumeReactCapped?(childId: string): boolean
-}
-
-/** 协作组成员启动计划（任务块与节点级参数由编排器组装后传入）。 */
-export interface GroupMemberPlan {
-  /** 成员角色节点（调用前已解析为真实节点，虚拟节点不适用）。 */
-  node: RoleNode
-  /** 成员任务块（含协作块；创建路径为首条 prompt，复用路径为派发的消息内容）。 */
-  blocks: Array<{ type: 'text'; text: string }>
-  /** 成员级思考强度覆盖（缺省继承节点配置）。 */
-  thinking?: string
-  /** 成员级 ReAct 迭代上限覆盖（缺省继承节点配置）。 */
-  iterationLimit?: number
-}
-
-/** 协作组启动入参。 */
-export interface GroupStartInput {
-  sessionId: string
-  flowId: string
-  /**
-   * 运行模式（缺省按模式一处理）。模式二的服务文档存储在 services/ 目录，
-   * 成员工具白名单解析须据此分派 db-in 连线检测的读取源。
-   */
-  mode?: 'mode1' | 'mode2'
-  /** 组节点 id（诊断与成员复用键用）。 */
-  groupId: string
-  /** 组级协作 Prompt（成员组成签名的一部分）。 */
-  collabPrompt: string
-  /** 组成员启动计划（按 memberIds 顺序）。 */
-  members: GroupMemberPlan[]
-  /** 运行级取消信号（运行停止/终止/插件卸载）。 */
-  signal: AbortSignal
-}
-
-/** 已启动或已复用的协作组成员。 */
-export interface GroupMemberStarted {
-  /** 成员角色节点 id（编排器据此把事件与状态回写到该节点）。 */
-  nodeId: string
-  /** 官方成员名（官方 send_message 的 target）。 */
-  target: string
-  /** 官方成员会话 id = 子代理 childId（编排器据此登记事件归属）。 */
-  childId: string
-  /** true = 复用既有成员（本次仅派发新任务）；false = 本次新建。 */
-  reused: boolean
-}
-
-/** 协作组启动结果。 */
-export interface GroupStartResult {
-  members: GroupMemberStarted[]
 }
 
 /** 节点任务启动入参（任务块与节点级参数，经子代理引擎透传官方配置）。 */
@@ -139,8 +90,16 @@ export interface NodeStartInput {
   thinking?: string
   /** 节点级 ReAct 迭代上限覆盖（缺省继承节点配置）。 */
   iterationLimit?: number
-  /** 协作组 Prompt（组卡片 data.collabPrompt；非组内成员为空字符串）。 */
+  /** Team Prompt（Team 卡片 data.collabPrompt；非组内成员为空字符串）。 */
   collabPrompt?: string
+  /**
+   * 该节点是 Team 成员（画布上 data.groupId 非空）。
+   *
+   * 为 true 且官方 Team 可用时，引擎把该节点启动为官方 teammate（官方 spawnTeammate /
+   * 复用 sendMessage），成员身份、消息、任务与状态全部由官方机制承担；官方不可用时
+   * **静默降级**为普通可延续子代理（与为 false 同路径）。为 false / 缺省时永远走普通子代理。
+   */
+  teamMember?: boolean
 }
 
 /** 注入父代理的 followup 消息（官方 Message 契约：必须带 id 与 source，否则父回合失败）。 */
@@ -152,9 +111,9 @@ export interface RootInjectedMessage {
 }
 
 /**
- * 协作通信消息（wf_ask_agent 投递/通知用）：source 使用官方「merge-extensible」
- * 扩展 kind（'coordinator' 不在官方 MessageSourceMap 内，官方消费端按未知 kind
- * fall-through，与旧项目 relay 语义一致）。
+ * 协作通信消息（wf_send_message 投递 / 编排变更通知用）：source 使用官方
+ * 「merge-extensible」扩展 kind（'coordinator' 不在官方 MessageSourceMap 内，官方
+ * 消费端按未知 kind fall-through，与旧项目 relay 语义一致）。
  */
 export interface CoordinatorMessage {
   id: string
@@ -208,8 +167,6 @@ export interface OrchestratorConfig {
   retryLimitDefault: number
   /** ReAct 迭代次数默认上限（节点未配置时兜底）。 */
   reactIterationLimitDefault: number
-  /** wf_ask_agent 待回复登记的 TTL 毫秒数。 */
-  wfAskAgentTtlMs: number
 }
 
 /** 日志缝（默认 console；单测注入收集器断言 warn 路径）。 */
@@ -309,7 +266,7 @@ export interface ChildMeta {
    *
    * 为什么必须显式退役而不是直接删表项：删掉后旧 child 的 subagent/end 会走
    * 「childIndex 未登记」的迟到重试路径（有界重试 + 告警），既浪费事件循环又产出
-   * 误导性告警；且 wf_ask_agent 的越权校验会把「已退役的子代理」误报成「不属于本运行」。
+   * 误导性告警；且 wf_send_message 的越权校验会把「已退役的子代理」误报成「不属于本运行」。
    * 保留表项 + 退役标记，可把这类事件判定为「已知无主、静默丢弃」。
    * 表项仍随 run 生命周期统一清理（上界 = 本轮运行内的重建次数）。
    */

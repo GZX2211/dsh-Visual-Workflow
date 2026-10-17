@@ -7,14 +7,14 @@ import type { FlowTemplatesFace } from './useFlowTemplates.js';
 import type { TemplatesFace } from './useTemplates.js';
 import type { SelectionFace } from './useSelection.js';
 import type { UnsavedGuardFace } from './useUnsavedGuard.js';
-import type { ServiceControlFace } from './useServiceControl.js';
+import { type ServiceControlFace } from './useServiceControl.js';
 import type { RemoteFace } from './useRemote.js';
 import type { ToastFace } from './useToast.js';
 import type { Dict } from '../i18n.js';
 /** 画布保存选项。 */
 export interface SaveCanvasOptions {
     /**
-     * 纯几何改动的自动保存（节点拖动 / 协作组卡片缩放的防抖保存）：
+     * 纯几何改动的自动保存（节点拖动 / Team 卡片缩放的防抖保存）：
      * 跳过「运行中保存」二次确认、跳过成功 toast（避免拖动即弹窗/刷屏）。
      * 它不是「编排变更」通道：若画布内容没变，宿主侧 diff 也不会向父代理注入。
      */
@@ -38,15 +38,26 @@ export interface DocumentActionsFace {
     saveCanvas(options?: SaveCanvasOptions): Promise<WorkflowDocument | WorkflowTemplate | ServiceState | null>;
     /**
      * 创建实例（模板态：模板内容存为新实例并切到实例态；实例态等价保存）。
-     * 工作台全局化改版：「开启新会话」为一次性临时选项——勾选时先新建主会话，
-     * 实例绑定该新会话；未勾选时在**当前主会话**创建，目标会话已有实例则弹
-     * 「覆盖旧工作流」二次确认（确认后复用旧实例 id 更新内容）。
+     * 「开启新会话」：模板态读**模板级持久化配置**（startNewSession / workspacePath，
+     * 随模板保存）——勾选时先新建主会话并绑定，未勾选时在**当前主会话**创建；资产态读
+     * 一次性临时选项（无路径）。目标会话已有同模式实例则弹「覆盖旧工作流」二次确认
+     * （确认后复用旧实例 id 更新内容）。
      * @param afterCreate 创建/覆盖成功后的回调（异步确认框路径同样触发）；
      *   「运行」入口用它接续启动（因为确认框是异步的，返回值不可依赖）。
      */
     createInstanceFromCanvas(afterCreate?: (created: WorkflowDocument | ServiceState) => void): Promise<WorkflowDocument | null>;
     /** 实例 → 模板（另存为全局共享工作流模板）。 */
     saveCurrentAsFlowTemplate(): Promise<void>;
+    /**
+     * 更新当前模板的「创建实例」新会话配置（勾选 / 工作区路径）。
+     * 模板级持久化配置：变更**立即保存当前模板**（复用模板保存通道，当前画布一并保存）；
+     * 保存失败回滚界面到保存前的模板并提示。草稿模板首次变更即入库。
+     * 空白 workspacePath 归一化为「移除该字段」；取消勾选保留已存路径。
+     */
+    setFlowTemplateOptions(patch: {
+        startNewSession?: boolean;
+        workspacePath?: string;
+    }): Promise<void>;
     openFlowById(id: string): void;
     openServiceById(id: string): void;
     openFlowTemplateById(id: string): void;
@@ -54,7 +65,7 @@ export interface DocumentActionsFace {
     selectWorkflow(id: string): void;
     /** 打开工作流模板（未保存守卫后切换）。 */
     selectFlowTemplate(id: string): void;
-    /** 新建（工作流 Tab / 角色 / 数据分区 / 协作组分区；+ 号新建模板）。 */
+    /** 新建（工作流 Tab / 角色 / 数据分区 / Team 分区；+ 号新建模板）。 */
     createNew(tab: LibTab, section?: 'file' | 'database' | 'flowTemplate' | 'group'): void;
 }
 /** 文档生命周期面（保存失败抛错/提示由保存路径处理）。 */

@@ -8,8 +8,20 @@ import type { DatabaseNode } from '../shared/graph-model.js'
 import { findResumableRun } from '../orchestrator/index.js'
 import { testDatabaseConnection } from '../tools/index.js'
 import { exportAgentTemplate, exportWorkflowBundle, importAgentTemplate, importWorkflowBundle } from '../transfer/bundle.js'
+import { systemLanguageFromLocale } from '../system-language.js'
 import { httpError } from './http.js'
 import { presentationOf, VisualWorkflowApiBase } from './boundary.js'
+
+/**
+ * 校验并归一化导入冲突策略：取值域闭集，缺省（未给 / null / 空串）交由 transfer 取默认策略。
+ * 为什么在端点内校验：`as 'rename' | 'overwrite'` 只是编译期断言，非法字符串会被
+ * 静默当成「非 overwrite」处理（导入行为与用户所选策略不一致且无任何提示）。
+ */
+function optionalConflictMode(value: unknown): 'rename' | 'overwrite' | undefined {
+  if (value === undefined || value === null || value === '') return undefined
+  if (value !== 'rename' && value !== 'overwrite') throw httpError(400, 'conflictMode must be rename or overwrite')
+  return value
+}
 
 export class RunEndpoints extends VisualWorkflowApiBase {
   // ---------- 运行（父代理编排） ----------
@@ -20,15 +32,17 @@ export class RunEndpoints extends VisualWorkflowApiBase {
    * （run.sessionId === instance.sessionId，不再支持运行期新建会话——「开启新会话」
    * 只是创建实例时的一次性动作，见 createSession 端点）。
    */
-  async run(args: { sessionId?: unknown; flowId?: unknown }): Promise<unknown> {
+  async run(args: { sessionId?: unknown; flowId?: unknown; language?: unknown }): Promise<unknown> {
     const sessionId = String(args?.sessionId ?? '')
     const flowId = String(args?.flowId ?? '')
     if (!sessionId || !flowId) throw httpError(400, 'requires sessionId and flowId')
+    const systemLanguage = systemLanguageFromLocale(args?.language)
+    const language = systemLanguage ? { systemLanguage } : {}
     const prev = await findResumableRun(this.host.store, { sessionId, flowId })
     if (prev) {
-      return this.host.orchestrator.resumeRun({ sessionId, flowId, fromRunId: prev.id })
+      return this.host.orchestrator.resumeRun({ sessionId, flowId, fromRunId: prev.id, ...language })
     }
-    return this.host.orchestrator.startRun({ sessionId, flowId })
+    return this.host.orchestrator.startRun({ sessionId, flowId, ...language })
   }
 
   /** 运行状态轮询：内存快照优先，终态（内存已释放）回退磁盘历史。会话归属校验。 */
@@ -86,11 +100,13 @@ export class RunEndpoints extends VisualWorkflowApiBase {
   }
 
   /** 断点续跑（历史面板「恢复」入口；runId 缺省取该工作流最近可恢复记录）。 */
-  async runResume(args: { sessionId?: unknown; flowId?: unknown; runId?: unknown }): Promise<unknown> {
+  async runResume(args: { sessionId?: unknown; flowId?: unknown; runId?: unknown; language?: unknown }): Promise<unknown> {
     const sessionId = String(args?.sessionId ?? '')
     const flowId = String(args?.flowId ?? '')
     if (!sessionId || !flowId) throw httpError(400, 'requires sessionId and flowId')
+    const systemLanguage = systemLanguageFromLocale(args?.language)
     const result = await this.host.orchestrator.resumeRun({
+      ...(systemLanguage ? { systemLanguage } : {}),
       sessionId,
       flowId,
       ...(args?.runId ? { fromRunId: String(args.runId) } : {}),
@@ -118,9 +134,8 @@ export class RunEndpoints extends VisualWorkflowApiBase {
   async importWorkflow(args: { json?: unknown; conflictMode?: unknown }): Promise<unknown> {
     // 图2 交互改造：导入一律落为「工作流模板」（全局共享），不再直接创建实例——
     // 用户需在画布中「创建实例」后才能运行（sessionId 参数不再需要）。
-    return importWorkflowBundle(this.host.store, args?.json, {
-      conflictMode: args?.conflictMode as 'rename' | 'overwrite' | undefined,
-    })
+    const conflictMode = optionalConflictMode(args?.conflictMode)
+    return importWorkflowBundle(this.host.store, args?.json, { conflictMode })
   }
 
   async exportAgentTemplate(args: { id?: unknown }): Promise<unknown> {
@@ -130,8 +145,7 @@ export class RunEndpoints extends VisualWorkflowApiBase {
   }
 
   async importAgentTemplate(args: { json?: unknown; conflictMode?: unknown }): Promise<unknown> {
-    return importAgentTemplate(this.host.store, args?.json, {
-      conflictMode: args?.conflictMode as 'rename' | 'overwrite' | undefined,
-    })
+    const conflictMode = optionalConflictMode(args?.conflictMode)
+    return importAgentTemplate(this.host.store, args?.json, { conflictMode })
   }
 }

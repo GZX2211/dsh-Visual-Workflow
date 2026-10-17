@@ -196,9 +196,14 @@ export const WF_RUN_NODE_WAIT = 'wf_run_node_wait'
 /** 幂等收尾工具名（父代理；释放运行锁）。 */
 export const WF_FINISH = 'wf_finish'
 /** 向用户提问工具名（官方提问卡；任何 agent 可用，可选注入）。 */
-export const WF_ASK = 'wf_ask'
-/** 协作成员间非阻塞通信工具名（ask/reply 两态；子代理可选注入）。 */
-export const WF_ASK_AGENT = 'wf_ask_agent'
+export const WF_ASK_USER = 'wf_ask_user'
+/**
+ * 向本 run 的另一成员投递一条持久消息的工具名（单向，随即返回，不等待回复）。
+ *
+ * 寻址面只有两种形态——`nodeId`（覆盖普通子代理与 Team 成员，由插件内部解析投递
+ * 通道）与父代理固定别名 `parent`。父代理与子代理均可调用。
+ */
+export const WF_SEND_MESSAGE = 'wf_send_message'
 /** 单工具三模式数据访问工具名（search/query/schema，有 db-in 连线时注入）。 */
 export const WF_DB_QUERY = 'wf_db_query'
 /** 父代理自主编排的只读勘察工具名（编排规则 / 角色模板 / 组合 / preset / 模型 / 工作流模板，按需召回详情）。 */
@@ -299,10 +304,16 @@ export const TEAM_TOOL_NAMES = [
  *
  * 语义：只在「文件不存在」这一个条件下播种一次，写入后磁盘即唯一权威；此后查询、
  * 展示、生效三者读同一份磁盘清单，不存在「内置种子 ∪ 用户项」的第二份状态。
- * spawn_teammate 默认关闭的理由（运行事实）：自行拉人会绕过插件的成员编排，
- * 而插件创建成员走宿主对官方服务的直接调用，不经过工具注册与开关，不受本项影响。
+ *   - spawn_teammate 默认关闭的理由（运行事实）：自行拉人会绕过插件的成员编排，
+ *     而插件创建成员走宿主对官方服务的直接调用，不经过工具注册与开关，不受本项影响；
+ *   - send_message 默认关闭的理由（用户裁决 2026-10）：消息发送统一收口到
+ *     wf_send_message（官方 Team 版 send_message 只认 teammate 名，且父代理给普通
+ *     子代理投递会失败），避免同一语义存在两条互不可达的通道；官方 Team 的
+ *     list_agents / interrupt_agent / 任务板仍保留官方能力。
+ *     注意：本项只在首次安装播种——既有部署的磁盘清单不会被改写，需用户在全局开关
+ *     面板自行关闭官方 send_message。
  */
-export const DEFAULT_DISABLED_ON_FIRST_INSTALL = [TEAM_SPAWN_TEAMMATE] as const
+export const DEFAULT_DISABLED_ON_FIRST_INSTALL = [TEAM_SPAWN_TEAMMATE, TEAM_SEND_MESSAGE] as const
 
 /**
  * 官方保留的 Code Mode presentation transport 名（run_code）：
@@ -334,15 +345,15 @@ export const RUN_STATUSES = [
 ] as const
 
 /**
- * 节点状态枚举（NODE_STATUSES）：与 run-types.js 的 NodeRunStatus 逐字一致（七态，含协作组「待命」armed——
- * 非终态：回合结束但仍在协作组内可被唤醒，父代理 wf_finish 后终态化）。
+ * 节点状态枚举（NODE_STATUSES）：与 run-types.js 的 NodeRunStatus 逐字一致（七态，含 Team「待命」armed——
+ * 非终态：回合结束但仍在 Team 内可被唤醒，父代理 wf_finish 后终态化）。
  * react-capped 为 ReAct 软截停（非失败，正常产出）。
  * 与该类型的双向穷尽由测试的编译期断言锁定（禁止固定长度断言）。
  */
 export const NODE_STATUSES = [
   'pending', // 待执行
   'running', // 执行中
-  'armed', // 待命（协作组成员非终态）
+  'armed', // 待命（Team 成员非终态）
   'ok', // 成功
   'fail', // 失败
   'skipped', // 已跳过
@@ -358,7 +369,7 @@ export const MODES = ['mode1', 'mode2'] as const
 
 /**
  * 可执行单元节点种类（元参数规模统计口径）：
- * 子代理（agent）、父代理（parent）与协作组卡片（group，组内成员并行执行为一单元）。
+ * 子代理（agent）、父代理（parent）与 Team 卡片（group，组内成员并行执行为一单元）。
  * 为什么放在协议常量层而不是纯形状层：该口径是 Host 检查器 / 写图工具 / 客户端预算
  * 展示共用的跨层契约常量，改一处必须三端一致；纯形状文件不得含运行时值。
  * 口径漂移会直接导致预算判定与展示不一致，故以 NodeKind 标注类型并由测试锁定取值。
@@ -516,6 +527,20 @@ export const SCHEDULER_TIMEZONE_SUGGESTIONS: readonly string[] = [
 ] as const
 
 // ---------------------------------------------------------------------------
+// 节点契约默认值（Host / Client 共用）
+// ---------------------------------------------------------------------------
+// 输入契约与输出契约的默认文本：新建 agent 节点时**直接写入节点数据**（不是读取期兜底），
+// 所以界面显示、运行期注入与磁盘存储是同一个值——「所见即生效」（用户裁决 2026-10）。
+// 为什么默认文本必须是共享常量：client 负责落盘与展示、host 负责注入，两端各写一份
+// 字面量必然漂移。
+//
+// 空值语义：契约字段为空串 = 该节点不配置契约（运行期不再注入任何契约相关内容），
+// 界面显示空输入框；旧数据里的空值按此解释，不回填默认文本。
+
+/** 输出契约的默认文本（新建 agent 节点时写入 `data.outputSchema`）。 */
+export const DEFAULT_OUTPUT_CONTRACT_TEXT = '结论 / 产出文件路径 / 关键决策 / 未决问题'
+
+// ---------------------------------------------------------------------------
 // 稳定错误码常量（Host 产出 / Client 按语义消费）
 // ---------------------------------------------------------------------------
 // 说明：领域模块抛稳定 code，边界层翻译为 HTTP 状态；Client 侧
@@ -595,3 +620,8 @@ export const ERR_EXPERIENCE_RECALL_FAILED = 'WF_EXPERIENCE_RECALL_FAILED'
  */
 export const ERR_EXPERIENCE_FEEDBACK_FAILED = 'WF_EXPERIENCE_FEEDBACK_FAILED'
 
+/** Persisted stage labels are a storage contract, independent of the UI language. */
+export const STAGE_LABELS = {
+  mode1: { start: '启动', end: '结束', pause: '暂停' },
+  mode2: { start: '输入', end: '输出', pause: '暂停' },
+} as const

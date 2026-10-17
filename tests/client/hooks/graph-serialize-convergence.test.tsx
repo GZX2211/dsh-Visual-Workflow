@@ -44,14 +44,14 @@ afterEach(() => {
 
 /**
  * 画布夹具：覆盖四种真实漂移面——虚拟节点（data 为空对象）、阶段节点（data 仅 label）、
- * 角色节点（data 携带多字段 + data.kind 历史残留）、协作组节点（memberIds/size），
+ * 角色节点（data 携带多字段 + data.kind 历史残留）、Team 节点（memberIds/size），
  * 以及带条件/不带条件两种连线。
  */
 const canvasNodes: CanvasNode[] = [
   { id: 'p1', kind: 'proxy', position: { x: 10, y: 20 }, data: {}, proxySourceId: 'n1' },
   { id: 's1', kind: 'start', position: { x: 0, y: 0 }, data: { label: '启动' } },
   { id: 'n1', kind: 'agent', position: { x: 40, y: 0 }, data: { label: '节点一', kind: 'agent', systemPrompt: '', retryLimit: 3 } },
-  { id: 'g1', kind: 'group', position: { x: 80, y: 0 }, data: { label: '协作组', collabPrompt: '', memberIds: ['n1'], size: { w: 300, h: 220 } } },
+  { id: 'g1', kind: 'group', position: { x: 80, y: 0 }, data: { label: 'Team', collabPrompt: '', memberIds: ['n1'], size: { w: 300, h: 220 } } },
 ]
 
 const canvasEdges: CanvasEdge[] = [
@@ -64,7 +64,7 @@ const goldenNodes = [
   { id: 'p1', kind: 'proxy', position: { x: 10, y: 20 }, data: {}, proxySourceId: 'n1' },
   { id: 's1', kind: 'start', position: { x: 0, y: 0 }, data: { label: '启动' } },
   { id: 'n1', kind: 'agent', position: { x: 40, y: 0 }, data: { label: '节点一', kind: 'agent', systemPrompt: '', retryLimit: 3 } },
-  { id: 'g1', kind: 'group', position: { x: 80, y: 0 }, data: { label: '协作组', collabPrompt: '', memberIds: ['n1'], size: { w: 300, h: 220 } } },
+  { id: 'g1', kind: 'group', position: { x: 80, y: 0 }, data: { label: 'Team', collabPrompt: '', memberIds: ['n1'], size: { w: 300, h: 220 } } },
 ]
 
 const goldenLines = [

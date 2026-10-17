@@ -10,7 +10,6 @@ import type {
   AssetVersionEntry,
   AssetVersionSource,
   ExperienceEntry,
-  ExperienceEvaluationEntry,
   ExperienceEvaluationInsertInput,
   ExperienceGenerationPromptEntry,
   ExperienceInsertCheckedInput,
@@ -31,12 +30,13 @@ import type { GraphNode, Line, WorkflowMode } from '../shared/graph-model.js'
 import type { OrgMeta } from '../shared/org-meta.js'
 import type { RoleTemplate } from '../shared/template-types.js'
 import { AssetDb } from './db.js'
-import { assetNotFound, AssetError } from './errors.js'
+import { assetNotFound } from './errors.js'
 import {
   insertEvaluationsCheckedRows,
   type ExperienceEvaluationsCheckedResult,
 } from './experience-evaluations.js'
 import { getActivePromptRow, listPromptRows } from './experience-prompts.js'
+import { seedParentDutiesAsset } from './parent-duties-seed.js'
 import { readStatsRows, rebuildStatsRows } from './experience-stats.js'
 import { readInjectedExperienceIds, recordUsageRows } from './experience-usage.js'
 import {
@@ -50,12 +50,7 @@ import {
   type ExperienceInsertCheckedResult,
 } from './experiences.js'
 import {
-  EXPERIENCE_EVALUATION_ID_PREFIX,
-  EXPERIENCE_ID_PREFIX,
-  EXPERIENCE_USAGE_ID_PREFIX,
-  newExperienceEvaluationId,
   newExperienceId,
-  newExperienceUsageId,
   newRoleAssetId,
   newWorkflowAssetId,
   type IdGeneratorDeps,
@@ -98,6 +93,7 @@ export type { ExperienceEmbeddingRow, ExperienceInsertCheckedResult } from './ex
 export type { ExperienceEvaluationsCheckedResult } from './experience-evaluations.js'
 export { EXPERIENCE_LIST_MAX_LIMIT } from './experiences.js'
 export { EXPERIENCE_PROMPT_SEED_VERSION, EXPERIENCE_PROMPT_SEEDS, type ExperiencePromptSeed } from './experience-seeds.js'
+export { PARENT_DUTIES_ASSET_ID, PARENT_DUTIES_ASSET_NAME, hasParentRoleAsset, seedParentDutiesAsset } from './parent-duties-seed.js'
 export {
   EXPERIENCE_EVALUATION_ID_PREFIX,
   EXPERIENCE_ID_PREFIX,
@@ -203,11 +199,13 @@ export class AssetStore {
   private readonly db: AssetDb
   private readonly now: () => number
   private readonly ids: IdGeneratorDeps
+  private readonly readOnly: boolean
   private initialized = false
 
   constructor(root: string, deps: AssetStoreDeps = {}) {
     this.now = deps.now ?? Date.now
-    this.db = new AssetDb(root, this.now, deps.readOnly === true)
+    this.readOnly = deps.readOnly === true
+    this.db = new AssetDb(root, this.now, this.readOnly)
     this.ids = deps.ids ?? {}
   }
 
@@ -222,6 +220,18 @@ export class AssetStore {
       throw error
     }
     this.initialized = true
+  }
+
+  /**
+   * 播种内置父代理职责资产（幂等；库中已有 parent 类型资产时不动）。
+   *
+   * 为什么由宿主在 init 后显式调用而不是在 init 内自动执行：它是**插件内置内容**的安装动作，
+   * 不是资产库的形状契约——裸库（测试夹具、备份浏览、导入工具）不该凭空多出一条角色资产，
+   * 否则任何「按列表长度/首元素」的读语义都会被内置内容干扰。
+   */
+  async seedParentDuties(): Promise<void> {
+    if (this.readOnly) throw new Error('只读资产库不支持写入：内置父代理职责资产只在可写句柄上播种')
+    await this.db.withTx((tx) => seedParentDutiesAsset({ tx, now: this.now }))
   }
 
   /** 关闭连接（幂等；关闭后再次调用读接口会重新要求 init）。 */

@@ -5,22 +5,23 @@
 // tests/client/studio/workbench-global.test.tsx
 //
 // 工作台全局化改版专项测试：
-//   1. 「开启新会话」复选框仅模板态显示（实例态/空态不显示）；
+//   1. 「开启新会话」复选框仅实例来源态显示（实例态/空态不显示）；模板态勾选后出现
+//      官方目录选择按钮，且勾选/路径变更立即保存进模板（模板级持久化配置）；
 //   2. 模板态创建实例：当前会话已有实例 → 弹覆盖确认；确认后复用旧实例 id 保存并打开；
-//   3. 勾选「开启新会话」创建实例：先经 createSession 建立主会话，实例保存到新会话；
-//   4. 实例列表 = 全部会话实例；当前主会话实例带「当前」标签，其他会话实例无。
+//   3. 打开模板恢复持久化的勾选与工作区 → 创建实例先经 createSession 建主会话并携带路径；
+//   4. 官方目录选择器选择路径 → 保存进模板、显示在按钮右侧、创建实例时携带；
+//   5. 实例列表 = 全部会话实例；当前主会话实例带「当前」标签，其他会话实例无。
 
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
+import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { act } from 'react'
-import { flushAsync, waitForCondition } from '../fixtures/async-flush.js'
-import { createRoot, type Root } from 'react-dom/client'
-import React from 'react'
-import { Studio } from '../../../src/client/studio/Studio.js'
+import { flushAsync } from '../fixtures/async-flush.js'
+import type { Root } from 'react-dom/client'
 import { zh } from '../../../src/client/i18n.js'
 import type { RemoteFace } from '../../../src/client/hooks/useRemote.js'
 import { EP } from '../../../src/client/lib/remote.js'
 import { mountStudio, remoteStub, type RemoteStub } from '../fixtures/studio-harness.js'
 import type { WorkflowDocument, WorkflowTemplate } from '../../../src/host/shared/graph-model.js'
+import type { WorkspacePicker } from '../../../src/client/sidebar/workspace-picker.js'
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -74,7 +75,7 @@ function makeInstance(id: string, sessionId: string, name: string): WorkflowDocu
   }
 }
 
-function makeTemplate(): WorkflowTemplate {
+function makeTemplate(patch: Partial<WorkflowTemplate> = {}): WorkflowTemplate {
   return {
     id: 'tpl-1',
     mode: 'mode1',
@@ -82,12 +83,21 @@ function makeTemplate(): WorkflowTemplate {
     description: '',
     nodes: [],
     lines: [],
+    ...patch,
   }
 }
 
-async function renderStudio(remote: RemoteFace): Promise<void> {
+/** 官方目录选择器替身（宿主接入层注入；模拟 Electron preload / uiWorkspace 任一通道可用）。 */
+function pickerReturning(path: string | null): WorkspacePicker {
+  return { available: () => true, pick: async () => path }
+}
+
+async function renderStudio(remote: RemoteFace, workspacePicker?: WorkspacePicker | null): Promise<void> {
   // flushBoot：冲掉 boot 异步链（列表加载 → 自动选中等多级 dispatch）。
-  await mountStudio(container!, (next) => { root = next }, remote, { flushBoot: true })
+  await mountStudio(container!, (next) => { root = next }, remote, {
+    flushBoot: true,
+    ...(workspacePicker !== undefined ? { workspacePicker } : {}),
+  })
 }
 
 /** 点击左侧「工作流」Tab 下「工作流模板」分组的模板卡（打开模板态；按分组定位，
@@ -112,20 +122,84 @@ async function clickToolbar(text: string): Promise<void> {
 }
 
 describe('工作台全局化：「开启新会话」仅模板态 + 创建/覆盖/新会话链路', () => {
-  it('模板态显示「开启新会话」复选框；创建实例后实例态不再显示', async () => {
-    const { remote } = wsRemoteStub({ flowTemplates: [makeTemplate()] })
-    await renderStudio(remote)
+  it('模板态显示「开启新会话」复选框；勾选后出现官方目录选择按钮；创建实例后实例态不再显示', async () => {
+    const { remote, calls } = wsRemoteStub({ flowTemplates: [makeTemplate()] })
+    await renderStudio(remote, pickerReturning(null))
     // 空态/实例态初始：不显示
     expect(document.querySelector('.wf-toolbar__switch')).toBeNull()
     await openTemplate()
-    // 模板态：显示
+    // 模板态：显示复选框（未勾选 → 不出现路径选择按钮）
     const checkbox = document.querySelector<HTMLInputElement>('.wf-toolbar__switch input[type=checkbox]')
     expect(checkbox).toBeTruthy()
-    // 勾选后出现工作区输入框
-    await act(async () => {
-      checkbox!.click()
+    expect(checkbox!.checked).toBe(false)
+    expect(document.querySelector('.wf-toolbar__workspace-pick')).toBeNull()
+    // 勾选后：出现官方目录选择按钮，且勾选状态立即保存进模板
+    await act(async () => { checkbox!.click() })
+    await flushAsync(2)
+    const pick = document.querySelector<HTMLButtonElement>('.wf-toolbar__workspace-pick')
+    expect(pick).toBeTruthy()
+    expect(pick!.textContent).toBe(zh.pickWorkspace)
+    expect(pick!.disabled).toBe(false)
+    const put = calls.find((call) => call.endpoint === EP.EP_PUT_FLOW_TEMPLATE)
+    expect(put).toBeTruthy()
+    expect((put?.args.template as WorkflowTemplate).startNewSession).toBe(true)
+    // 创建实例 → 实例态：复选框消失
+    await clickToolbar(zh.createInstance)
+    expect(document.querySelector('.wf-toolbar__switch')).toBeNull()
+  })
+
+  it('打开模板恢复持久化的勾选与路径：创建实例先建主会话并携带工作区', async () => {
+    const { remote, calls } = wsRemoteStub({
+      flowTemplates: [makeTemplate({ startNewSession: true, workspacePath: 'D:\\work\\project' })],
+      newSessionId: 'session-new-1',
     })
-    expect(document.querySelector('.wf-toolbar__workspace')).toBeTruthy()
+    await renderStudio(remote, pickerReturning(null))
+    await openTemplate()
+
+    // 模板级配置：打开即恢复勾选与路径（无需再选择）
+    const checkbox = document.querySelector<HTMLInputElement>('.wf-toolbar__switch input[type=checkbox]')
+    expect(checkbox!.checked).toBe(true)
+    expect(document.querySelector('.wf-toolbar__workspace-path')?.textContent).toBe('D:\\work\\project')
+
+    await clickToolbar(zh.createInstance)
+    const sessionCall = calls.find((call) => call.endpoint === EP.EP_CREATE_SESSION)
+    expect(sessionCall).toBeTruthy()
+    expect(sessionCall?.args.sessionId).toBe('s-1')
+    expect(sessionCall?.args.workspacePath).toBe('D:\\work\\project')
+    // label 已退役：请求体只携带会话与工作区（宿主会话标题不由客户端定义）
+    expect(sessionCall?.args).not.toHaveProperty('label')
+    const put = calls.find((call) => call.endpoint === EP.EP_PUT_WORKFLOW)
+    expect(put).toBeTruthy()
+    expect(put?.args.sessionId).toBe('session-new-1')
+    // 实例态：按钮变「保存实例」且复选框消失
+    expect(Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-toolbar button'))
+      .map((item) => item.textContent)).toContain(zh.saveInstance)
+    expect(document.querySelector('.wf-toolbar__switch')).toBeNull()
+  })
+
+  it('官方目录选择器选择路径：保存进模板并在按钮右侧显示；创建实例携带该路径', async () => {
+    const { remote, calls } = wsRemoteStub({ flowTemplates: [makeTemplate()], newSessionId: 'session-new-1' })
+    await renderStudio(remote, pickerReturning('D:\\work\\chosen'))
+    await openTemplate()
+
+    // 勾选（保存模板一次）→ 点击选择工作区（保存模板第二次，带路径）
+    const checkbox = document.querySelector<HTMLInputElement>('.wf-toolbar__switch input[type=checkbox]')
+    await act(async () => { checkbox!.click() })
+    await flushAsync(2)
+    const pick = document.querySelector<HTMLButtonElement>('.wf-toolbar__workspace-pick')
+    await act(async () => { pick!.click() })
+    await flushAsync(2)
+
+    const templatePuts = calls.filter((call) => call.endpoint === EP.EP_PUT_FLOW_TEMPLATE)
+    expect(templatePuts.length).toBeGreaterThanOrEqual(2)
+    expect((templatePuts.at(-1)?.args.template as WorkflowTemplate).workspacePath).toBe('D:\\work\\chosen')
+    // 路径显示在按钮右侧（用于确认）
+    expect(document.querySelector('.wf-toolbar__workspace-path')?.textContent).toBe('D:\\work\\chosen')
+
+    // 创建实例：新会话携带所选择的模板工作区
+    await clickToolbar(zh.createInstance)
+    const sessionCall = calls.find((call) => call.endpoint === EP.EP_CREATE_SESSION)
+    expect(sessionCall?.args.workspacePath).toBe('D:\\work\\chosen')
   })
 
   it('模板态创建实例（当前会话已有实例）→ 弹覆盖确认；确认后复用旧实例 id 保存', async () => {
@@ -158,39 +232,6 @@ describe('工作台全局化：「开启新会话」仅模板态 + 创建/覆盖
     })
     const putCount = calls.filter((call) => call.endpoint === EP.EP_PUT_WORKFLOW).length
     expect(putCount).toBe(1)
-  })
-
-  it('勾选「开启新会话」创建实例：先建主会话，实例保存到新会话（一次性动作）', async () => {
-    const { remote, calls } = wsRemoteStub({ flowTemplates: [makeTemplate()], newSessionId: 'session-new-1' })
-    await renderStudio(remote)
-    await openTemplate()
-    // 勾选开启新会话 + 填写工作区
-    await act(async () => {
-      const checkbox = document.querySelector<HTMLInputElement>('.wf-toolbar__switch input[type=checkbox]')
-      checkbox!.click()
-    })
-    await act(async () => {
-      // React 受控输入：需经原生 value setter + input 事件触发 onChange（jsdom）
-      const workspace = document.querySelector<HTMLInputElement>('.wf-toolbar__workspace')
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
-      setter?.call(workspace, 'D:\\work\\project')
-      workspace!.dispatchEvent(new Event('input', { bubbles: true }))
-    })
-    await clickToolbar(zh.createInstance)
-    // 先创建会话（携带来源会话与工作区），实例 PUT 归属新会话
-    const sessionCall = calls.find((call) => call.endpoint === EP.EP_CREATE_SESSION)
-    expect(sessionCall).toBeTruthy()
-    expect(sessionCall?.args.sessionId).toBe('s-1')
-    expect(sessionCall?.args.workspacePath).toBe('D:\\work\\project')
-    // label 已退役：请求体只携带会话与工作区（宿主会话标题不由客户端定义）
-    expect(sessionCall?.args).not.toHaveProperty('label')
-    const put = calls.find((call) => call.endpoint === EP.EP_PUT_WORKFLOW)
-    expect(put).toBeTruthy()
-    expect(put?.args.sessionId).toBe('session-new-1')
-    // 实例态：按钮变「保存实例」且复选框消失
-    expect(Array.from(document.querySelectorAll<HTMLButtonElement>('.wf-toolbar button'))
-      .map((item) => item.textContent)).toContain(zh.saveInstance)
-    expect(document.querySelector('.wf-toolbar__switch')).toBeNull()
   })
 
   it('实例列表 = 全部会话实例；当前主会话实例带「当前」标签，其他会话实例不带', async () => {

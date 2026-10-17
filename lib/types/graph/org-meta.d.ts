@@ -5,7 +5,7 @@ import type { OrgUsage } from './org-meta-usage.js';
 export declare const ORG_META_LIMIT_DEFAULTS: {
     /** 可执行节点数上限（自主编排方案 §6.4 示例：12）。 */
     readonly nodeMax: 12;
-    /** 协作组数量上限（示例：3）。 */
+    /** Team 数量上限（示例：3）。 */
     readonly groupMax: 3;
     /** 组内人数上限（示例：5）。 */
     readonly membersMax: 5;
@@ -17,14 +17,12 @@ export declare const ORG_META_LIMIT_DEFAULTS: {
 export declare const ORG_META_NORMALIZE_CAPS: {
     /** 可执行节点数上限的安全网。 */
     readonly nodeMax: 200;
-    /** 协作组数量上限的安全网。 */
+    /** Team 数量上限的安全网。 */
     readonly groupMax: 50;
     /** 组内人数上限的安全网（画布 UI 既有上限为 30，此处放宽）。 */
     readonly membersMax: 50;
     /** 并行分支上限的安全网。 */
     readonly parallelBranchMax: 50;
-    /** 闸门次数上限的安全网。 */
-    readonly milestoneMax: 50;
     /** 单轮改图 op 上限的安全网。 */
     readonly patchOpsMax: 200;
     /** 每节点协作消息上限的安全网。 */

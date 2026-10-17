@@ -1,7 +1,7 @@
 // tests/client/lib/layout-axis.test.ts
 //
 // 主轴共线 + 数据节点 (n-1) 列分布（用户裁决 2026-09，见 assets/imgs/布局算法调整.png 批注）：
-//   - 主干（start/end/pause/角色/协作组/proxy）保持一条水平直线，各列主干卡片共线于主轴 Y；
+//   - 主干（start/end/pause/角色/Team/proxy）保持一条水平直线，各列主干卡片共线于主轴 Y；
 //   - 同列多个主干节点以主轴为中心上下均分；
 //   - 数据节点（file/database）不占主干通道，放到与其关联角色所在列 n 的 **n-1** 列，
 //     并在该列内贴主轴上下堆叠（关联角色在主轴上方 → 数据节点贴上方，反之贴下方）；
@@ -341,11 +341,11 @@ describe('孤立节点：单独成列排在流程最右侧之外', () => {
 })
 
 // ---------------------------------------------------------------------------
-// ⑦ 协作组：卡片包住成员（回归既有不变量）
+// ⑦ Team：卡片包住成员（回归既有不变量）
 // ---------------------------------------------------------------------------
 
-describe('协作组：仍为超级节点，卡片包住成员', () => {
-  it('组卡片按主轴居中，成员坐标落在卡片矩形内且按 memberIds 顺序排列', () => {
+describe('Team：仍为超级节点，卡片包住成员', () => {
+  it('Team 卡片按主轴居中，成员坐标落在卡片矩形内且按 memberIds 顺序排列', () => {
     const nodes = [
       node('s', 'start'),
       node('g1', 'group', { memberIds: ['a1', 'a2'] }),
@@ -364,9 +364,9 @@ describe('协作组：仍为超级节点，卡片包住成员', () => {
       expect(member.y).toBeLessThanOrEqual(group.y + height)
     }
     expect((result.positions.get('a1') as { y: number }).y).toBeLessThan((result.positions.get('a2') as { y: number }).y)
-    // 组卡片中心落在主轴上
+    // Team 卡片中心落在主轴上
     expect(group.y + height / 2).toBe(result.axisY)
-    // 组卡片是超级节点：组员不参与重叠判定
+    // Team 卡片是超级节点：组员不参与重叠判定
     expect(renderBoxes(nodes, result.positions).map((box) => box.id).sort()).toEqual(['e', 'g1', 's'])
   })
 })

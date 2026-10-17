@@ -3,7 +3,7 @@
 // studio 选择器单测：
 //   ① P4 代理补丁来源标注：agentPatchedNodeIdsOf 读取当前文档 lastPatch.nodeIds
 //      （去重 + 过滤空值 + 非数组安全）；无 lastPatch（用户保存后）→ 空数组；模板态同样生效；
-//   ② 协作组成员显示名：memberLabelOf 的 fallback 规则（成员存在取 label、不存在回退 id、
+//   ② Team 成员显示名：memberLabelOf 的 fallback 规则（成员存在取 label、不存在回退 id、
 //      label 为空字符串时不幻觉出名字）；
 //   ③ editorDataOf 的资产语义投影：归档标记（决定归档按钮是否置灰）与画布角色节点的
 //      来源资产绑定（决定是否给出与左侧栏一致的回滚按钮）。
@@ -12,10 +12,13 @@
 // 按源文件归属拆分——studio-selectors 用例归入本文件。
 
 import { describe, expect, it } from 'vitest'
-import { agentPatchedNodeIdsOf, editorDataOf, memberLabelOf } from '../../../src/client/studio/studio-selectors.js'
+import {
+  activeRunBadgeOf, activeRunIndexOf, agentPatchedNodeIdsOf, editorDataOf, instanceRunBadgesOf, memberLabelOf,
+  newSessionOptionsOf,
+} from '../../../src/client/studio/studio-selectors.js'
 import { createInitialState } from '../../../src/client/studio/studio-initial.js'
 import type { CanvasNode, StudioState } from '../../../src/client/studio/studio-types.js'
-import type { WorkflowDocument } from '../../../src/host/shared/graph-model.js'
+import type { WorkflowDocument, WorkflowTemplate } from '../../../src/host/shared/graph-model.js'
 
 describe('P4 代理补丁标注（agentPatchedNodeIdsOf）', () => {
   it('读取当前文档 lastPatch.nodeIds（去重 + 过滤空值 + 非数组安全）', () => {
@@ -46,7 +49,7 @@ describe('P4 代理补丁标注（agentPatchedNodeIdsOf）', () => {
   })
 })
 
-describe('协作组成员显示名（memberLabelOf）', () => {
+describe('Team 成员显示名（memberLabelOf）', () => {
   function member(label?: unknown): CanvasNode {
     return { id: 'm-1', kind: 'agent', position: { x: 0, y: 0 }, data: label === undefined ? {} : { label } } as CanvasNode
   }
@@ -103,5 +106,105 @@ describe('编辑器数据投影（editorDataOf 的资产语义）', () => {
     const unbound: CanvasNode = { ...bound, data: { ...bound.data, sourceAssetId: undefined } }
     const plain: StudioState = { ...state, canvas: { nodes: [unbound], edges: [] } }
     expect(editorDataOf(plain)?.sourceAssetId).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// D06-08：实例列表运行徽标投影（activeRuns 索引 + 逐实例投影）
+// ---------------------------------------------------------------------------
+
+describe('实例运行徽标投影（activeRunIndexOf / instanceRunBadgesOf）', () => {
+  const base = createInitialState('s-1')
+
+  it('索引按「实例 id + 会话」定位：同名实例在不同会话下互不串状态', () => {
+    const state: StudioState = {
+      ...base,
+      activeRuns: [
+        { flowId: 'wf-1', sessionId: 's-1', status: 'running', runId: 'r-1' },
+        { flowId: 'wf-1', sessionId: 's-2', status: 'paused', runId: 'r-2' },
+      ],
+    }
+    const index = activeRunIndexOf(state)
+    expect(activeRunBadgeOf(index, 'wf-1', 's-1')).toEqual({ status: 'running', runId: 'r-1', sessionId: 's-1' })
+    expect(activeRunBadgeOf(index, 'wf-1', 's-2')).toEqual({ status: 'paused', runId: 'r-2', sessionId: 's-2' })
+    // 会话维度缺失即不命中（不得退化为「只按 id」匹配到别的会话）
+    expect(activeRunBadgeOf(index, 'wf-1', 's-3')).toBeNull()
+  })
+
+  it('投影：活跃摘要与「当前跟踪快照」分列，快照只认自己的实例', () => {
+    const index = activeRunIndexOf({
+      ...base,
+      activeRuns: [{ flowId: 'wf-2', sessionId: 's-1', status: 'paused', runId: 'r-2' }],
+    })
+    const flows = [{ id: 'wf-1', sessionId: 's-1' }, { id: 'wf-2', sessionId: 's-1' }]
+    const badges = instanceRunBadgesOf(flows, { runId: 'r-2', snapshot: { flowId: 'wf-2', status: 'running' } }, index)
+    expect(badges.get('wf-1')).toEqual({ active: null, currentSnapshot: null })
+    expect(badges.get('wf-2')).toEqual({
+      active: { status: 'paused', runId: 'r-2', sessionId: 's-1' },
+      currentSnapshot: 'running',
+    })
+    // 未跟踪 run（runId 为 null）时快照不参与判定（避免把上次运行的状态挂到新实例上）
+    const noRun = instanceRunBadgesOf(flows, { runId: null, snapshot: { flowId: 'wf-2', status: 'running' } }, index)
+    expect(noRun.get('wf-2')?.currentSnapshot).toBeNull()
+  })
+
+  it('脏条目与空列表：缺 flowId 的摘要丢弃，无活跃 run 时全部为 null', () => {
+    const index = activeRunIndexOf({
+      ...base,
+      activeRuns: [
+        { flowId: '', sessionId: 's-1', status: 'running', runId: 'r-0' },
+        { flowId: 'wf-1', sessionId: 's-1', status: '', runId: 'r-1' },
+      ],
+    })
+    expect(activeRunBadgeOf(index, '', 's-1')).toBeNull()
+    expect(activeRunBadgeOf(index, 'wf-1', 's-1')).toEqual({ status: '', runId: 'r-1', sessionId: 's-1' })
+    const empty = instanceRunBadgesOf([{ id: 'wf-9', sessionId: 's-9' }], { runId: null, snapshot: null }, activeRunIndexOf(base))
+    expect(empty.get('wf-9')).toEqual({ active: null, currentSnapshot: null })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 新会话选项派生（模板级持久化配置 / 资产态一次性临时选项）
+// ---------------------------------------------------------------------------
+
+describe('新会话选项派生（newSessionOptionsOf）', () => {
+  const base = createInitialState('s-1')
+
+  /** 模板态现场：当前画布 = 该模板。 */
+  function templateState(template: WorkflowTemplate): StudioState {
+    return { ...base, currentKind: 'flowTemplate', currentId: template.id, flowTemplates: [template] }
+  }
+
+  const template: WorkflowTemplate = { id: 'tpl-1', mode: 'mode1', name: 'T', description: '', nodes: [], lines: [] }
+
+  it('模板态：勾选与路径来自当前模板的持久化字段', () => {
+    const state = templateState({ ...template, startNewSession: true, workspacePath: 'D:\\work\\ws' })
+    expect(newSessionOptionsOf(state)).toEqual({ newSession: true, workspacePath: 'D:\\work\\ws' })
+  })
+
+  it('模板态：字段缺失/类型漂移 → 未勾选、无路径（不伪造配置）', () => {
+    expect(newSessionOptionsOf(templateState(template))).toEqual({ newSession: false, workspacePath: '' })
+    const drifted = { ...template, startNewSession: 'yes', workspacePath: 42 } as unknown as WorkflowTemplate
+    expect(newSessionOptionsOf(templateState(drifted))).toEqual({ newSession: false, workspacePath: '' })
+  })
+
+  it('模板态：当前模板已不在列表 → 回退未勾选、无路径', () => {
+    const state: StudioState = { ...base, currentKind: 'flowTemplate', currentId: 'tpl-gone', flowTemplates: [] }
+    expect(newSessionOptionsOf(state)).toEqual({ newSession: false, workspacePath: '' })
+  })
+
+  it('资产态：勾选取一次性临时选项，路径恒为空（资产无持久化归属）', () => {
+    const state: StudioState = {
+      ...base,
+      currentKind: 'flowAsset',
+      currentId: 'a-1',
+      instanceOptions: { newSession: true },
+    }
+    expect(newSessionOptionsOf(state)).toEqual({ newSession: true, workspacePath: '' })
+  })
+
+  it('实例态/空态：同样读取临时选项（UI 不显示该选项，派生规则不因此分叉）', () => {
+    const state: StudioState = { ...base, instanceOptions: { newSession: true } }
+    expect(newSessionOptionsOf(state)).toEqual({ newSession: true, workspacePath: '' })
   })
 })

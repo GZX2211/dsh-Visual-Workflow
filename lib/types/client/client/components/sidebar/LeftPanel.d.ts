@@ -18,7 +18,7 @@ export interface DragPayload {
         x: number;
         y: number;
     }): void;
-    /** 拖拽落点为协作组卡片时：生成节点并直接入组（角色模板）。 */
+    /** 拖拽落点为 Team 卡片时：生成节点并直接入组（角色模板）。 */
     onDropIntoGroup?(groupId: string, position?: {
         x: number;
         y: number;
@@ -64,7 +64,7 @@ export interface LeftPanelProps {
     roleTemplates: RoleTemplate[];
     fileTemplates: FileTemplate[];
     databaseTemplates: DatabaseTemplate[];
-    /** 协作组模板列表（全局共享；「其他」Tab 协作组分区，用户批注：+ 新增/点击编辑/删除）。 */
+    /** Team 模板列表（全局共享；「其他」Tab Team 分区，用户批注：+ 新增/点击编辑/删除）。 */
     groupTemplates: GroupTemplate[];
     stageKinds: Array<{
         kind: string;
@@ -90,7 +90,7 @@ export interface LeftPanelProps {
         x: number;
         y: number;
     }): void;
-    /** 角色模板拖入协作组：生成节点并直接入组。 */
+    /** 角色模板拖入 Team：生成节点并直接入组。 */
     onPlaceTemplateIntoGroup(kind: 'role', id: string, groupId: string, position: {
         x: number;
         y: number;
@@ -103,7 +103,7 @@ export interface LeftPanelProps {
         x: number;
         y: number;
     }): void;
-    /** 协作组模板拖入画布：按模板内容生成协作组节点。 */
+    /** Team 模板拖入画布：按模板内容生成 Team 节点。 */
     onPlaceGroupFromTemplate(id: string, position: {
         x: number;
         y: number;

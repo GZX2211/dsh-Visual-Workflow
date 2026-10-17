@@ -30,11 +30,11 @@ export class FakeOrchestrator {
   nextRunId = 'run-1'
   async startRun(input: { sessionId: string; flowId: string; mode: string; question?: string }) {
     this.startCalls.push({ ...input, question: input.question ?? '' })
-    return { runId: this.nextRunId, defPath: '/def.json' }
+    return { runId: this.nextRunId, sessionId: input.sessionId }
   }
   async resumeRun(input: { sessionId: string; flowId: string }) {
     this.resumeCalls.push(input)
-    return { runId: 'run-resumed', defPath: '/def.json' }
+    return { runId: 'run-resumed', resumedFromRunId: 'run-1' }
   }
   async stopRun(runId: string) {
     this.stopCalls.push(runId)

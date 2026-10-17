@@ -24,6 +24,6 @@ export declare function lineKeyOf(line: Line): string;
 /**
  * 比较前后两份画布，输出编排语义变更摘要。
  * 比较维度：节点增删 + 节点非几何配置变化 + 连线增删（按语义键）。
- * 不比较：节点坐标、组卡片尺寸、连接点交换、连线 id、文档名称/描述等元信息。
+ * 不比较：节点坐标、Team 卡片尺寸、连接点交换、连线 id、文档名称/描述等元信息。
  */
 export declare function summarizeFlowChange(prev: WorkflowDocument, next: WorkflowDocument): FlowChangeSummary;

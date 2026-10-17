@@ -10,7 +10,7 @@ import type { GraphNode, RoleNode } from '../shared/graph-model.js'
 import type { RoleTemplate } from '../shared/template-types.js'
 import type { RoleAssetKind, RoleAssetType } from '../shared/asset-types.js'
 import type { DbRow } from './db.js'
-import { toInteger, toJsonText, toNullableInteger, toNullableText, toOptionalText, toText } from './role-check.js'
+import { toInteger, toNullableInteger, toNullableText, toOptionalText, toText } from './role-check.js'
 
 /** 角色资产版本行的内容字段（不含统计缓存与审计列，便于整组比较）。 */
 export interface RoleContentFields {
@@ -170,7 +170,7 @@ export function sameRoleFields(left: RoleContentFields, right: RoleContentFields
  * 且有默认空串：节点可选字段缺省时必须写成空串而非 null，否则会撞 NOT NULL 约束；
  * 读回时统一还原成 null（见 toNullableText），可选语义由往返保证，不由存储细节泄漏。
  *
- * input_schema / output_schema 是**可空自由文本**列（交接契约说明，不做结构校验）：
+ * input_schema / output_schema 是**可空自由文本**列（节点输入/输出契约说明，不做结构校验）：
  * 缺省与空白一律落 NULL，与读侧 toNullableText 同口径（再走一遍 toOptionalText 是写入边界的兜底，
  * 防止绕过 roleFieldsFrom* 的调用方把空串直接写进列）。
  */

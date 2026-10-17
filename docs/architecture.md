@@ -179,7 +179,7 @@ Child Agent 可以发现：
 经验（Experience）是独立存在的长期资产，其主要依附载体是插件工作台的 GUI。
 
 * 经验体系**不得**与工作流的运行时或运行状态强绑定；
-* **不得**存在以运行事实（是否正在运行、是否改过图、是否启动过协作组、是否身处某个运行实例）为前提的护栏去阻止经验工具的调用；
+* **不得**存在以运行事实（是否正在运行、是否改过图、是否启动过 Team、是否身处某个运行实例）为前提的护栏去阻止经验工具的调用；
 * 运行事实只允许用于**溯源**（如来源 run id），且缺失时按「无来源」表达，而不是拒绝调用；
 * 类型的归属由调用方按「此刻正在执行的内容」自选（正在执行具体任务 → `agent`；父代理正在执行编排 → `orchestrator`），引擎不反推调用方身份；
 * 唯一保留的主体边界是「子代理恒为 `agent`」；
@@ -266,7 +266,7 @@ proxy
 * `database`：提供数据库检索能力。
 * `start/end/pause`：Workflow 生命周期控制节点。
 * `group`：Workflow 内的协作单元，也就是 Agent team。
-* `proxy`：引用已有执行节点的虚拟节点，可用于复用或里程碑闸门。
+* `proxy`：引用已有执行节点的虚拟节点，用于复用同一角色实例与它已有的上下文。
 
 ---
 
@@ -321,26 +321,29 @@ Team 内部如何协调由 dsh 的 Team Runtime 负责。
 
 ### 4.2.1 实现契约（官方 Agent Team 接入）
 
-协作组节点直接使用官方 Agent Team（`ctx.agentTeams`）作为执行与协作机制，插件只决定成员。
+Team 节点直接使用官方 Agent Team（`ctx.agentTeams`）作为执行与协作机制，插件只决定成员。
 
 职责划分：
 
 ```text
 插件（决定成员）                          官方 Team Runtime（决定执行过程）
-├── 成员数量（组卡片 memberIds）          ├── roster 与成员生命周期
+├── 成员身份映射（节点 id → 官方成员名）       ├── roster 与成员生命周期
 ├── 成员角色名 / System Prompt            ├── 持久邮箱（send_message）
 ├── 成员模型（provider/model/reasoning）   ├── 共享任务板（team_task_*）
 └── 成员工具组合（presetId 解析）          └── wait_agent / interrupt_agent / 浏览器 roster
 ```
 
-启动路径：
+启动路径（Team 卡片不是执行主体，成员节点才是）：
 
-1. 父代理对协作组卡片调用 `wf_run_node(<groupId>)`（仅模式一；模式二仍拒绝协作组节点）；
-2. 插件对 `memberIds` 中的每个角色节点调用官方 `spawnTeammate`（Lead = 会话根 Agent）；
+1. 父代理**逐个**对成员节点调用 `wf_run_node(<成员节点 id>)`（仅模式一）；
+   对 Team 卡片本身调用会被拒绝（`WF_NODE_KIND`，错误消息给出成员清单）；
+2. 插件对成员节点调用官方 `spawnTeammate`（Lead = 会话根 Agent），首条消息 =
+   官方身份前缀（逐字复刻官方 `spawn_teammate` 模板）+ 插件组装的成员任务块；
 3. 成员级组成在**子代理创建窗口内**装配（角色 Prompt 段 / 模型选择 / 工具白名单），
    因为官方创建请求不接受成员级模型与工具白名单；
-4. 成员会话是 Lead 的直接可延续子代理，其 `subagent/end` 经既有观察链路回写成员节点状态，
-   全部成员产出一轮后组卡片聚合为 `ok`。
+4. 成员自带官方九个 Team 工具与 `team:policy`（官方按成员作用域安装），协作与任务板
+   全部走官方机制；成员运行态以官方 roster（`listMembers`）为权威读源，成员产出仍经
+   `subagent/end` 事件记录（下游自动注入与断点续跑需要）；Team 卡片不写运行状态。
 
 官方硬约束（决定了插件的成员复用策略）：
 
@@ -348,11 +351,18 @@ Team 内部如何协调由 dsh 的 Team Runtime 负责。
 * 同名成员已存在 → 复用（`send_message` 派发本轮任务），不再创建；
 * 同名成员创建失败（`failed`）→ 既不能复用也不能重建，报可行动错误（新建会话或改节点 id）；
 * 成员组成在创建时确定，签名变化无法重建，只告警；
-* roster 是**会话级**的（`TeamId` = 根会话 id），所有协作组共用一张成员表，受官方 `maxMembers` 上限约束。
+* roster 是**会话级**的（`TeamId` = 根会话 id），所有 Team 共用一张成员表，受官方 `maxMembers`
+  上限（会话级累计，含创建失败的成员）约束；插件以 `teamMemberLimit` 与部署层同值预检；
+* 判定「官方 Team 可用」除服务与 provider 外，还要求官方**工具/策略包**确实下发给成员
+  （父代理 scope 可见 `spawn_teammate`）——只挂领域服务时成员拿不到官方九工具。
 
-降级路径：官方 Team 能力不可用（服务未挂载 / 根 Agent 不存在 / 无可用子代理 provider）时，
-协作组不整组启动，而是回到逐节点语义——编排指令指示父代理逐个 `wf_run_node` 启动成员节点，
-成员间用插件自建协作工具（`wf_ask_agent`）通信。
+降级路径：官方 Team 能力不可用（服务未挂载 / 官方工具包未挂载 / 根 Agent 不存在 /
+无可用子代理 provider）时，成员节点降级为普通可延续子代理（同一 `wf_run_node` 入口、
+同一登记与释放语义），成员间用插件自建协作工具（`wf_ask_agent`）通信；协作块
+（成员清单 + 通信指引）只在降级通道注入。
+
+模式二完全不支持 Team：Team 卡片与 Team 成员节点在 `wf_run_node_wait` 通道下均被拒绝
+（阻塞等待语义与团队异步协作不匹配）。
 
 ---
 
@@ -563,7 +573,7 @@ service-runner.ts        模式二服务进程入口（包级二级入口；只�
 config.ts                插件契约（name/inject/Config schema）与默认值解析
 events.d.ts              官方 cordis 事件的本地收窄声明（仅 host program）
 visual-workflow-host.ts  宿主 Service：装配各模块能力、事件观察与生命周期汇总
-system-language.ts       系统语言读取（settings.describe() 的 locale.preference → 语言名）
+system-language.ts       语言解析与 Host 回退（settings.describe()；GUI 运行语言由 Client locale 传入并冻结进运行快照）
 workspace-path.ts        新会话工作区路径校验（GUI 端点与定时任务端点共用）
 web-server.ts            官方 webServer 最小结构契约（两个 HTTP 边界共用）
 ecosystem-directory.ts   官方生态枚举投影（preset 模式 / 可选模型）
@@ -687,10 +697,20 @@ checkGraphInvariants
 
 边界：
 
-* **持有运行事实的唯一写者**：`RunSnapshot`、运行锁、子代理/等待器/协作通信的内存表只由 orchestrator 方法改写；工具层需要写运行状态时必须经语义化方法（如 `markMilestoneNode`），不得直接改写快照。
+* **持有运行事实的唯一写者**：`RunSnapshot`、运行锁、子代理/等待器/协作通信的内存表只由 orchestrator 方法改写；外部需要写运行状态时必须经语义化方法（如 `wf_run_node` 的节点状态推进），不得直接改写快照。
 * **不做 Agent 语义判断**：是否需要重规划、换人、汇报由 Agent 决定；orchestrator 只提供确定性事实（状态、锁、终态、错误码、事件回写）。
 * **不持有工作流文档写权**：文档读写归 storage 与写图工具；orchestrator 只读最新文档并刷新运行事实源文件。
 * **不反向依赖具体实现**：数据工具（索引预建）与 Agent（角色 Prompt 读取）能力经依赖缝注入，模块外统一从 `index.ts` 导入。
+
+节点间上下文交接（2026-10）：
+
+* **产出自动注入**：下游节点自动接收**直接流程前驱**的最终产出，不需要手动连线。
+  组装格式为「上游节点名称（id：节点ID）：产出内容」，多前驱按流程线声明顺序分别列出；
+  无产出的阶段节点（pause）被跳过并继续向前找；Team 与上下游解耦（既不注入也不回溯）。
+* **手动 ctx 交接退役**：角色节点（agent/parent/proxy）的 `ctx-out` 保留为连接点但不再生效
+  （技术债标记）；`ctx` 通道现仅剩「file 数据源 → 角色」的文本直通与受管路径索引注入。
+* **节点契约**：`inputSchema` / `outputSchema` 即「输入契约 / 输出契约」，柔性文本、不做结构校验；
+  agent 节点新建时默认落盘默认输出契约文本（界面显示即实际生效），清空即不配置；父代理不参与节点交接。
 
 文件职责（详见 `src/host/orchestrator/AGENTS.md`）：
 
@@ -699,9 +719,9 @@ index.ts             唯一公共入口（barrel）
 runtime.ts           OrchestratorRuntime 收口类（继承链最终类）
 runtime-base.ts      字段/查询/上下文自动接续/清理/父代理配置注入
 runtime-launch.ts    startRun / resumeRun
-runtime-execute.ts   wf_run_node / wf_finish（含协作组整组启动）
-runtime-comm.ts      wf_ask_agent 两态非阻塞协议（ask/reply）
-runtime-observe.ts   subagent/end 回写与协作组聚合
+runtime-execute.ts   wf_run_node / wf_finish（Team 卡片拒绝、成员节点分流）
+runtime-comm.ts      wf_ask_agent 两态非阻塞协议（ask/reply；Team 降级通道）
+runtime-observe.ts   subagent/end 回写（含成员待命态）
 runtime-lifecycle.ts 终止 / 停止 / 挂起
 seams.ts             依赖缝、常量、配置与身份类型
 errors.ts            WfError / messageOf
@@ -709,7 +729,7 @@ run-entry.ts         RunEntry 与运行接口契约
 ask-protocol.ts      三态协议类型与消息文本纯函数
 snapshot.ts          运行快照纯函数（截断口径唯一来源）
 graph-facts.ts       图推导与节点上下文事实（纯函数）
-task-blocks.ts       节点任务块与交接契约（纯函数）
+task-blocks.ts       节点任务块与节点契约（纯函数）
 directive.ts         父代理提示词变体与编排指令组装（纯函数）
 node-params.ts       节点级执行参数解析（纯函数）
 resume.ts            断点候选查找与继承快照构建
@@ -731,14 +751,14 @@ watchdog.ts          空闲看护、扫描与宿主重启对账
 * Reasoning
 * ReAct limits
 * Child Context
-* 协作组启动（一个协作组节点 ⇄ 一批官方 teammate）
+* Team 启动（一个 Team 节点 ⇄ 一批官方 teammate）
 
 Agent Runtime 建立在 Harness 官方 Agent / Subagent 能力之上。
 
-协作组路径的关键文件：
+Team 路径的关键文件：
 
 ```text
-group-runner.ts          协作组启动器（成员参数翻译 / 复用判定 / 官方创建与派发）
+member-launcher.ts      Team 成员启动器（成员参数翻译 / 复用判定 / 官方创建与派发）
 child-tool-filter.ts     子代理工具白名单创建窗口装配（官方创建请求不接受时的替代通道）
 model-selection.ts       模型选择装配（创建窗口夹持 + 按 childId 重发布重装）
 ```
@@ -768,7 +788,7 @@ Workflow execution
     ├── wf_run_node
     ├── wf_run_node_wait
     ├── wf_finish
-    └── wf_ask
+    └── wf_ask_user
 
 Data
     └── wf_db_query

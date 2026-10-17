@@ -33,16 +33,17 @@ import {
   MODES,
   NODE_STATUSES,
   RUN_STATUSES,
+  TEAM_SEND_MESSAGE,
   TEAM_SPAWN_TEAMMATE,
   TEAM_TOOL_NAMES,
-  WF_ASK,
-  WF_ASK_AGENT,
+  WF_ASK_USER,
   WF_DB_QUERY,
   WF_EXPERIENCE_FEEDBACK,
   WF_EXPERIENCE_LEARN,
   WF_EXPERIENCE_RECALL,
   WF_FINISH,
   WF_RUN_NODE,
+  WF_SEND_MESSAGE,
 } from '../../../src/host/shared/protocol.js'
 import type { NodeKind } from '../../../src/host/shared/graph-model.js'
 import type { NodeRunStatus, RunStatus } from '../../../src/host/shared/run-types.js'
@@ -134,11 +135,11 @@ describe('shared/protocol 端点清单', () => {
 })
 
 describe('shared/protocol 工具名常量与可见性', () => {
-  it('五个工具名常量值正确', () => {
+  it('工具名常量值正确', () => {
     expect(WF_RUN_NODE).toBe('wf_run_node')
     expect(WF_FINISH).toBe('wf_finish')
-    expect(WF_ASK).toBe('wf_ask')
-    expect(WF_ASK_AGENT).toBe('wf_ask_agent')
+    expect(WF_ASK_USER).toBe('wf_ask_user')
+    expect(WF_SEND_MESSAGE).toBe('wf_send_message')
     expect(WF_DB_QUERY).toBe('wf_db_query')
   })
 
@@ -171,8 +172,7 @@ describe('shared/protocol 工具名常量与可见性', () => {
       ...CHILD_AGENT_HIDDEN_TOOLS,
       WF_RUN_NODE,
       WF_FINISH,
-      WF_ASK,
-      WF_ASK_AGENT,
+      WF_ASK_USER,
       WF_DB_QUERY,
       WF_EXPERIENCE_LEARN,
       WF_EXPERIENCE_RECALL,
@@ -192,8 +192,8 @@ describe('shared/protocol 工具名常量与可见性', () => {
     }
   })
 
-  it('首次安装默认关闭清单只含官方成员创建工具（默认关闭的唯一目的：阻止模型自行拉人）', () => {
-    expect(DEFAULT_DISABLED_ON_FIRST_INSTALL).toEqual([TEAM_SPAWN_TEAMMATE])
+  it('首次安装默认关闭清单 = 官方成员创建工具 + 官方消息发送工具（消息统一收口到 wf_send_message）', () => {
+    expect(DEFAULT_DISABLED_ON_FIRST_INSTALL).toEqual([TEAM_SPAWN_TEAMMATE, TEAM_SEND_MESSAGE])
   })
 })
 
@@ -257,7 +257,7 @@ describe('shared/protocol 状态/模式/颜色/口径常量', () => {
     expect(_runStatusExhaustive).toBe(true)
   })
 
-  it('NODE_STATUSES 与 NodeRunStatus 双向穷尽（含协作组非终态 armed）', () => {
+  it('NODE_STATUSES 与 NodeRunStatus 双向穷尽（含 Team 非终态 armed）', () => {
     expect(NODE_STATUSES).toEqual([
       'pending', 'running', 'armed', 'ok', 'fail', 'skipped', 'react-capped',
     ])

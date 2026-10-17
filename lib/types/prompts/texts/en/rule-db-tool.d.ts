@@ -1,0 +1,1 @@
+export declare const RULE_DB_TOOL_EN = "Connected database nodes: {{sources}}. Access databases only through wf_db_query: mode \"search\" (vector retrieval), mode \"query\" (read-only SELECT with LIMIT), and mode \"schema\" (table structure); do not read database files directly.";

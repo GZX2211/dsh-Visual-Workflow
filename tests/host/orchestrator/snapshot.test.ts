@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { OUTPUT_SUMMARY_LIMIT, createRunSnapshot, lastAssistantText, setNodeStatus, statusText, terminalizeNodes, truncateText } from '../../../src/host/orchestrator/index.js'
-import { makeFlow, start } from './fixtures/harness.js'
+import { makeFlow } from './fixtures/harness.js'
 
 describe('snapshot 纯函数', () => {
   it('truncateText：超限截断并追加标记，未超限原样', () => {
@@ -63,7 +63,7 @@ describe('snapshot 纯函数', () => {
     expect(snapshot.nodes.every((n) => n.nodeId !== 'no-such')).toBe(true)
   })
 
-  it('setNodeStatus：armed（协作组成员待命）记录本回合产出与摘要，回合明细随之追记', () => {
+  it('setNodeStatus：armed（Team 成员待命）记录本回合产出与摘要，回合明细随之追记', () => {
     const snapshot = createRunSnapshot({ runId: 'run-1', flow: makeFlow(), sessionId: 'session-1', mode: 'mode1', now: 1000 })
     setNodeStatus(snapshot, 'n-a1', 'running', { now: 1000 })
     setNodeStatus(snapshot, 'n-a1', 'armed', {
@@ -74,7 +74,7 @@ describe('snapshot 纯函数', () => {
     })
     const entry = snapshot.nodes.find((n) => n.nodeId === 'n-a1')!
     // armed 仍是「可被唤醒、非终态」，但本回合确实产出了：产出事实必须落盘，
-    // 否则下游 ctx 注入只能读到空串（协作组信息断链）。
+    // 否则下游 ctx 注入只能读到空串（Team 信息断链）。
     expect(entry.status).toBe('armed')
     expect(entry.output).toBe('成员本回合结论')
     expect(entry.outputSummary).toBe('成员本回合结论')

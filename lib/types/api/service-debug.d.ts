@@ -34,4 +34,4 @@ export declare function openServiceDebug(target: ServiceDebugTarget, prompt: str
  * 把上游 SSE body 逐块转发到 sink（原有字节透传；打字机粒度由上游控制）。
  * AbortError 视为用户停止，静默收尾。
  */
-export declare function pumpServiceDebug(body: ReadableStream<Uint8Array>, sink: SseSink, signal?: AbortSignal): Promise<void>;
+export declare function pumpServiceDebug(body: ReadableStream<Uint8Array>, sink: SseSink, _signal?: AbortSignal): Promise<void>;

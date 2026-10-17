@@ -62,7 +62,7 @@ export interface EditorActionsOptions {
 
 /**
  * 模版态「入库」目标（纯函数）：工作流模版 → workflow、角色模版 → role；
- * 其余模版（文件/数据库/协作组）与实例态/资产态均无入库目标（返回 null）。
+ * 其余模版（文件/数据库/Team）与实例态/资产态均无入库目标（返回 null）。
  */
 export function promoteTargetOf(state: StudioState): { kind: AssetKind; templateId: string } | null {
   const editor = state.editor
@@ -242,7 +242,7 @@ export function useEditorActions(
       return
     }
     if (kind === 'groupTemplate') {
-      // 协作组模板点击：右侧属性栏显示模板内容（名称/协作 Prompt），可保存/删除（用户批注）
+      // Team 模板点击：右侧属性栏显示模板内容（名称/协作 Prompt），可保存/删除（用户批注）
       selection.selectEditor({ source: 'template', kind: 'group', id })
       return
     }
@@ -646,8 +646,13 @@ export function useEditorActions(
     }
   }, [assets, clearCanvasIfOwned, dispatch, experiences, notify, removeLine, removeSelected, state, t.assetRetireConfirm, t.assetRetireMessage, t.assetRetireSharedMessage, t.assetRetireTitle, t.confirmDelete, t.deleteFlow, t.experienceRetireConfirm, t.experienceRetireMessage, t.experienceRetireTitle, t.toastDeleted, templates, flowTemplates, toastError, workflows])
 
-  return {
+  // face 引用跨「同一 state 的重渲染」保持恒等（装配层用它作派生 props 的记忆化依赖）；
+  // 依赖即 face 暴露的全部方法，均为 useCallback，故同一 state 下引用稳定。
+  return useMemo(() => ({
     selectLibraryCard, patchEditor, saveEditor, deleteEditor,
     promoteEditor, promoteLocked, openAssetVersions, rollbackAssetVersion,
-  }
+  }), [
+    selectLibraryCard, patchEditor, saveEditor, deleteEditor,
+    promoteEditor, promoteLocked, openAssetVersions, rollbackAssetVersion,
+  ])
 }

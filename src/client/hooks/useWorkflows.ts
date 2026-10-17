@@ -9,7 +9,7 @@
 //     或新建主会话；「开启新会话」为一次性临时选项，实例文档不再继承该字段）；
 //   - saveWorkflow 以实例自身 sessionId 归属（运行/历史/状态都以实例绑定的会话为准）。
 
-import { useCallback, useRef } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import type { Dispatch } from 'react'
 import type { WorkflowDocument, WorkflowTemplate } from '../../host/shared/graph-model.js'
 import type { Drafted, StudioAction, CanvasNode, CanvasEdge } from '../studio/studio-state.js'
@@ -92,8 +92,9 @@ export function useWorkflows(
 
   /**
    * 模板 → 实例：深拷贝模板（节点/连线全量内联，与模板完全断引用）。
-   * 目标会话由调用方决定（当前主会话 / 新建主会话）；不继承 startNewSession/workspacePath
-   * （一次性临时选项，字段已退役）。fallbackName 由调用方从词典注入（模板无名称时使用）。
+   * 目标会话由调用方决定（当前主会话 / 新建主会话）；不继承模板的
+   * startNewSession/workspacePath（模板级持久化配置，创建实例时一次性消费，
+   * 不是实例内容）。fallbackName 由调用方从词典注入（模板无名称时使用）。
    */
   const instantiateFromTemplate = useCallback((template: WorkflowTemplate, targetSessionId: string, fallbackName: string): WorkflowDocument => {
     const now = new Date().toISOString()
@@ -176,12 +177,14 @@ export function useWorkflows(
     dispatch({ type: 'OPEN_FLOW', flow })
   }, [dispatch])
 
-  return {
+  // face 引用跨「同一 state 的重渲染」保持恒等：装配层把它当派生 props 的记忆化依赖
+  // （D06-08/D08-07 同口径），每次渲染新建会让下游 memo 边界整体失效。
+  return useMemo(() => ({
     loadWorkflows,
     createWorkflowDraft,
     instantiateFromTemplate,
     saveWorkflow,
     deleteWorkflow,
     openFlow,
-  }
+  }), [loadWorkflows, createWorkflowDraft, instantiateFromTemplate, saveWorkflow, deleteWorkflow, openFlow])
 }

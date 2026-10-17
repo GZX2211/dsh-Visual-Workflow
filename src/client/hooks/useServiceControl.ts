@@ -1,15 +1,22 @@
 // src/client/hooks/useServiceControl.ts
 //
 // 模式二服务控制：列表加载 / 启动 / 停止 / 状态刷新（后端 P10 已就绪）。
+//
+// 写路径（保存/启动/停止）对远端返回值做形状守卫：无字符串 id 一律视为失败——
+// 半截对象写进状态机后下游按 id/sessionId 取值会整片崩溃。失败抛出携带稳定 code 的
+// 错误、不 dispatch，提示文案由调用方按语义决定（本 hook 无词典注入）。
 
-import { useCallback } from 'react'
+import { useCallback, useMemo } from 'react'
 import type { Dispatch } from 'react'
 import type { ServiceState } from '../../host/shared/types.js'
 import type { WorkflowTemplate } from '../../host/shared/graph-model.js'
 import type { Drafted, StudioAction, CanvasNode, CanvasEdge } from '../studio/studio-state.js'
 import type { RemoteFace } from './useRemote.js'
-import { EP } from '../lib/remote.js'
+import { EP, type RemoteError } from '../lib/remote.js'
 import { serializeFlow } from '../lib/graph-serialize.js'
+
+/** 服务状态响应形状漂移（缺少字符串 id）的稳定错误码；调用方按语义决定提示文案。 */
+export const SERVICE_STATE_SHAPE_CODE = 'SERVICE_STATE_SHAPE'
 
 export interface ServiceControlFace {
   /** 加载服务实例列表（全部会话）；返回加载的条目。 */
@@ -29,6 +36,35 @@ export interface ServiceControlFace {
   startService(serviceId: string, sessionId: string): Promise<void>
   /** 停止服务：携带实例归属会话 id 供后端归属校验。 */
   stopService(serviceId: string, sessionId: string): Promise<void>
+}
+
+/** 服务状态响应归一化：无字符串 id（或空串）即视为形状漂移，返回 null（不写入半截数据）。 */
+function asServiceState(payload: unknown): ServiceState | null {
+  const record = payload as { id?: unknown } | null | undefined
+  return record && typeof record.id === 'string' && record.id !== '' ? (record as ServiceState) : null
+}
+
+/** 形状漂移失败：可行动错误（说明发生了什么 + 界面未被更新 + 如何恢复）。 */
+function serviceShapeFailure(endpoint: string): RemoteError {
+  const error = new Error(
+    'Invalid service state from host (missing string id); the workspace was not updated — retry the action or reopen the service list',
+  ) as RemoteError
+  error.code = SERVICE_STATE_SHAPE_CODE
+  error.endpoint = endpoint
+  return error
+}
+
+/**
+ * 形状失败错误 → 面向用户的可读文案（其余错误原样透传）。
+ * 为什么由调用方映射：hook 不持有词典（界面语言只有调用方知道），它只负责给出稳定错误码；
+ * 否则 toastError 会把 `error.message` 原样展示，中文界面会弹出整句英文。
+ * 换文案时保留 code，调用方仍可按码分支。
+ */
+export function serviceShapeTextOf(error: unknown, text: string): unknown {
+  if ((error as { code?: unknown } | null)?.code !== SERVICE_STATE_SHAPE_CODE) return error
+  const localized = new Error(text) as RemoteError
+  localized.code = SERVICE_STATE_SHAPE_CODE
+  return localized
 }
 
 /** 服务控制面（远端失败抛错，由调用方 toast）。 */
@@ -84,23 +120,33 @@ export function useServiceControl(dispatch: Dispatch<StudioAction>, remote: Remo
 
   const saveService = useCallback(async (service: ServiceState, nodes: CanvasNode[], edges: CanvasEdge[]): Promise<ServiceState | null> => {
     const serialized = serializeFlow(service, nodes, edges)
-    const saved = await remote.call(EP.EP_PUT_SERVICE, {
+    const payload = await remote.call(EP.EP_PUT_SERVICE, {
       sessionId: service.sessionId,
       service: serialized,
-    }) as ServiceState
+    })
+    const saved = asServiceState(payload)
+    if (!saved) throw serviceShapeFailure(EP.EP_PUT_SERVICE)
     dispatch({ type: 'SERVICE_UPDATED', service: saved })
     return saved
   }, [dispatch, remote])
 
   const startService = useCallback(async (serviceId: string, sessionId: string) => {
-    const service = await remote.call(EP.EP_SERVICE_START, { sessionId, serviceId }) as ServiceState
+    const payload = await remote.call(EP.EP_SERVICE_START, { sessionId, serviceId })
+    const service = asServiceState(payload)
+    if (!service) throw serviceShapeFailure(EP.EP_SERVICE_START)
     dispatch({ type: 'SERVICE_UPDATED', service })
   }, [dispatch, remote])
 
   const stopService = useCallback(async (serviceId: string, sessionId: string) => {
-    const service = await remote.call(EP.EP_SERVICE_STOP, { sessionId, serviceId }) as ServiceState
+    const payload = await remote.call(EP.EP_SERVICE_STOP, { sessionId, serviceId })
+    const service = asServiceState(payload)
+    if (!service) throw serviceShapeFailure(EP.EP_SERVICE_STOP)
     dispatch({ type: 'SERVICE_UPDATED', service })
   }, [dispatch, remote])
 
-  return { loadServices, createServiceDraft, instantiateFromTemplate, saveService, startService, stopService }
+  // face 引用跨「同一 state 的重渲染」保持恒等（D06-08：装配层据此记忆化派生 props）
+  return useMemo(
+    () => ({ loadServices, createServiceDraft, instantiateFromTemplate, saveService, startService, stopService }),
+    [loadServices, createServiceDraft, instantiateFromTemplate, saveService, startService, stopService],
+  )
 }

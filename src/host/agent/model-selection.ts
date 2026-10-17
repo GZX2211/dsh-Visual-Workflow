@@ -46,7 +46,7 @@ export interface SelectionChildContext {
  */
 export function installModelSelectionLike(childCtx: SelectionChildContext, selection: ModelSelectionRefLike): () => void {
   // system-prompt/assemble：组装期把 provider/model 注入提示词变量（官方 L40-53）
-  const disposeAssembly = childCtx.on('system-prompt/assemble', async (rawAssembly, _rawContext, next) => {
+  const disposeAssembly = childCtx.on('system-prompt/assemble', async (_rawAssembly, _rawContext, next) => {
     const assembly = await next()
     const selected = selection.current
     selection.assembled = selected
@@ -65,7 +65,7 @@ export function installModelSelectionLike(childCtx: SelectionChildContext, selec
 
   // agent/request：请求路由改写 provider/model，并写入 reasoningEffort
   // （官方 L54-70：无 effort 时清除继承值，恢复所选模型默认行为）
-  const disposeRequest = childCtx.on('agent/request', async (rawPayload, next) => {
+  const disposeRequest = childCtx.on('agent/request', async (_rawPayload, next) => {
     const resolved = (await next()) as Record<string, unknown> | null
     const selected = selection.assembled
     if (selected === undefined) return resolved
@@ -100,7 +100,7 @@ export interface ModelSelectionSetup {
    *
    * 为什么需要：selection 默认在创建完成后才写入，而创建即开始首轮推理——首条请求会落到
    * 创建时的路由（父代理的 provider/model）。对无法经官方创建参数携带路由的子代理
-   * （协作组成员由官方 Team 服务建立，不接受 agentOptions），必须在创建窗口内就让
+   * （Team 成员由官方 Team 服务建立，不接受 agentOptions），必须在创建窗口内就让
    * selection 就位，否则首个步骤用错模型。非该场景无需使用本方法。
    */
   withPending<T>(selection: ModelSelectionLike | undefined, operation: () => Promise<T>): Promise<T>

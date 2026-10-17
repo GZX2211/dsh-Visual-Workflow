@@ -8,8 +8,9 @@
 //   - 文件节点卡：文本类型显示内容（超两行省略）；文件类型显示所选文件名列表；
 //   - 虚拟节点「↻ 引用」徽标只渲染一处；
 //   - 输入/输出节点各只保留一个连接点（模式二：输入=flow-out、输出=flow-in）；
-//   - 连接点按入口/出口区分颜色；交换左右连接点（swapPorts）随节点持久化，协作组卡片不提供该按钮。
+//   - 连接点按入口/出口区分颜色；交换左右连接点（swapPorts）随节点持久化，Team 卡片不提供该按钮。
 
+import { memo } from 'react'
 import type { Dict } from '../../i18n.js'
 import type { CanvasNode } from '../../studio/studio-state.js'
 import { HANDLES } from '../../lib/graph-handles.js'
@@ -97,19 +98,25 @@ function metaLinesOf(node: CanvasNode, copy: Dict & { modeName(id: string | null
   return out.filter((line) => String(line ?? '').trim())
 }
 
-export function FlowNode({ node, copy, mode, selected, highlighted, dragging, runStatus, locked, lockHint, agentPatched, onPointerDown, onHandlePointerDown, onToggleSwap }: FlowNodeProps) {
+/**
+ * 节点卡片以 memo 包住：父组件拖拽/平移/缩放等本地渲染态变化时，未变的节点不重渲染
+ * （回调由 GraphCanvas 以 useCallback 固定引用，节点对象与运行状态对象保持原引用）。
+ */
+export const FlowNode = memo(function FlowNode({ node, copy, mode, selected, highlighted, dragging, runStatus, locked, lockHint, agentPatched, onPointerDown, onHandlePointerDown, onToggleSwap }: FlowNodeProps) {
   const kind = node.kind
   const isProxy = kind === 'proxy'
-  // 里程碑闸门：proxy.data.role='milestone' 时用里程碑样式 + 角标（label 已在名称行渲染）
-  const isGate = isProxy && (node.data as { role?: unknown }).role === 'milestone'
-  // 名称回退：label 为空（含空白）时显示节点种类名（避免虚拟节点显示为空白卡片）
-  const nodeLabel = String(node.data.label ?? '').trim() || String(copy.nodeKinds[isProxy ? 'agent' : kind] ?? '')
   // 阶段节点（启动/结束/暂停）：单/双流程连接点，交换无意义且会产生死数据（审查 BUG-1），
-  // 与协作组一致不渲染交换按钮。
+  // 与 Team 一致不渲染交换按钮。
   const isStage = kind === 'start' || kind === 'end' || kind === 'pause'
   // 交换状态随节点持久化（用户批注：作为节点属性保存，重载后保持）
   const swapped = (node.data as { swapPorts?: unknown }).swapPorts === true
   const displayKind = isProxy ? 'agent' : kind
+  // 阶段名称在渲染期按界面语言取词典；存储值保持中文规范值（validateFlow 锁定该值）。
+  const labelKind = (mode === 'mode2' && kind === 'start' ? 'input'
+    : mode === 'mode2' && kind === 'end' ? 'output' : displayKind) as keyof Dict['nodeKinds']
+  // 名称回退：label 为空（含空白）时显示节点种类名（避免虚拟节点显示为空白卡片）
+  const nodeLabel = isStage ? copy.nodeKinds[labelKind]
+    : String(node.data.label ?? '').trim() || String(copy.nodeKinds[displayKind as keyof Dict['nodeKinds']] ?? '')
   const handles = nodeHandles(displayKind, mode, swapped)
   const status = runStatus?.status ?? null
   const statusText = statusLabelOf(copy, status)
@@ -123,7 +130,6 @@ export function FlowNode({ node, copy, mode, selected, highlighted, dragging, ru
     selected ? 'is-selected' : '',
     highlighted ? 'is-highlighted' : '',
     isProxy ? 'is-proxy' : '',
-    isGate ? 'is-gate' : '',
     locked ? 'is-locked' : '',
   ].filter(Boolean).join(' ')
 
@@ -164,7 +170,7 @@ export function FlowNode({ node, copy, mode, selected, highlighted, dragging, ru
           >{swapped ? '⇆' : '⇄'}</button>
         ) : null}
         <div className="wf-node__kind">
-          <span>{String(copy.nodeKinds[displayKind] ?? displayKind)}</span>
+          <span>{String(copy.nodeKinds[labelKind] ?? labelKind)}</span>
           {statusText ? <span className={`wf-status-dot is-${status}`} /> : null}
           {statusText ? <span className="wf-hint">{statusText}</span> : null}
           {/* 运行中锁定角标（已完成/执行中流程不可修改、不可删除；仍可拖动移动） */}
@@ -173,11 +179,7 @@ export function FlowNode({ node, copy, mode, selected, highlighted, dragging, ru
           {agentPatched ? <span className="wf-node__agent-badge" title={String(copy.agentPatchedBadge)}>{String(copy.agentPatchedBadge)}</span> : null}
         </div>
         <div className="wf-node__label">
-          {isProxy
-            ? (isGate
-                ? <span className="wf-node__proxy-badge is-gate">{String(copy.proxyGateBadge)}</span>
-                : <span className="wf-node__proxy-badge">{String(copy.proxyBadge)}</span>)
-            : null}
+          {isProxy ? <span className="wf-node__proxy-badge">{String(copy.proxyBadge)}</span> : null}
           {nodeLabel}
         </div>
         {metaLines.length > 0 ? <div className="wf-node__prompt">{metaText}</div> : null}
@@ -186,4 +188,4 @@ export function FlowNode({ node, copy, mode, selected, highlighted, dragging, ru
       </div>
     </div>
   )
-}
+})

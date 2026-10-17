@@ -4,30 +4,30 @@
 //   - parentPromptVariantOf / parentExecutorOf：按画布形态判定三情况（orchestrator / hybrid / executor）；
 //   - directiveParams：facts 静态事实 + dynamic 末段动态态（前缀稳定）；
 //   - buildParentRunPrompt：startRun/resumeRun 共用的整份提示词组装。
-// 入参（flow/defPath/mode/executor/动态）不变则输出字节不变。
+// 入参（flow/mode/executor/动态）不变则输出字节不变。
+// 拓扑不进指令：只给召回入口（wf_org_catalog 的 instance 通道），宿主路径不出现在文本里。
 
 import {
   buildHybridPrompt,
   buildOrchestratorPrompt,
   buildParentExecutorPrompt,
   buildParentTaskSpec,
-  type CollabChannel,
   type ExecutorContextFacts,
   type OrchestrationDirectiveParams,
   type ParentPromptVariant,
 } from '../prompts/index.js'
 import { nodeHasFlowIn, nodeParticipatesInFlow } from '../graph/index.js'
 import type { WorkflowDocument } from '../shared/graph-model.js'
-import { collabGroupList, labelOf, orchestrationNodeList, pauseNodeIdsOf } from './graph-facts.js'
+import { collabGroupList, labelOf, pauseNodeIdsOf } from './graph-facts.js'
 
 /**
  * 父代理提示词变体判定（三情况，纯函数）：
  *   - orchestrator：纯编排——无父代理节点，或父代理（含其虚拟节点）未被流程线驱动
  *     （无 flow-in 入边）；
- *   - hybrid：编排 + 自执行——父代理被流程线驱动，且画布中**还存在其他参与流程的
- *     可执行单元**（agent 角色或其虚拟节点、协作组卡片任一参与流程线）；
- *   - executor：纯执行——父代理是唯一参与流程的可执行单元；画布上允许存在未参与
- *     流程的无关 agent/协作组节点（不执行任务，不进入编排清单）。
+ *   - hybrid：编排 + 自执行——父代理被流程线驱动，且画布中**还存在其他成员执行主体**
+ *     （参与流程的 agent 角色或其虚拟节点，或属于某个 Team 的成员节点）；
+ *   - executor：纯执行——父代理是唯一执行主体；画布上允许存在未参与流程、也不属于任何 Team
+ *     的无关 agent 节点（不执行任务，不进入编排清单）。
  */
 export function parentPromptVariantOf(flow: WorkflowDocument): ParentPromptVariant {
   const parent = flow.nodes.find((n) => n.kind === 'parent')
@@ -35,9 +35,11 @@ export function parentPromptVariantOf(flow: WorkflowDocument): ParentPromptVaria
   if (!parent || !nodeHasFlowIn(flow, parent.id)) return 'orchestrator'
   const othersActive = flow.nodes.some((n) => {
     if (n.id === parent.id) return false
-    if (n.kind === 'agent') return nodeParticipatesInFlow(flow, n.id)
-    if (n.kind === 'group') return nodeParticipatesInFlow(flow, n.id)
-    return false
+    // 执行单元只有 agent 节点（含 Team 成员）：Team 卡片是包裹层，不是执行主体（用户裁决 2026-10）；
+    // Team 成员节点虽不连流程线（组内成员仅 ctx/db 连接点），但它确实是父代理要调度的执行主体，
+    // 故参与流程的 agent 与「属于某个 Team 的 agent」都算其他执行单元。
+    if (n.kind !== 'agent') return false
+    return nodeParticipatesInFlow(flow, n.id) || (n.data.groupId ?? null) !== null
   })
   return othersActive ? 'hybrid' : 'executor'
 }
@@ -58,7 +60,6 @@ export function parentExecutorOf(flow: WorkflowDocument): { nodeId: string; node
 /** 编排指令参数组装（facts 静态事实 + dynamic 末段动态态，前缀稳定）。 */
 export function directiveParams(
   flow: WorkflowDocument,
-  defPath: string,
   mode: 'mode1' | 'mode2',
   extra?: {
     /** 断点继续事实（resumeRun 用）。 */
@@ -71,20 +72,13 @@ export function directiveParams(
     parentTaskBlock?: string
     /** 系统语言名（从 DSH 用户设置读取；注入语言规则）。 */
     systemLanguage?: string
-    /** 「本次组织预算」末段文本（冻结快照 → 剩余量口径；P2 注入）。 */
-    orgBudgetText?: string
-    /** 协作通道（官方 Agent Team 可用性；决定协作组段文案与启动方式）。 */
-    collabChannel?: CollabChannel
   },
 ): OrchestrationDirectiveParams {
   return {
     facts: {
       workflowName: flow.name ?? flow.id,
       workflowGoal: flow.description ?? '',
-      definitionPath: defPath,
-      nodes: orchestrationNodeList(flow),
       collabGroups: collabGroupList(flow),
-      collabChannel: extra?.collabChannel ?? 'legacy',
       parentNode: extra?.parentNode ?? null,
       systemLanguage: extra?.systemLanguage ?? '',
     },
@@ -95,7 +89,6 @@ export function directiveParams(
           ? 'mode2 (service): use wf_run_node_wait to start each node and block until it finishes; never use wf_run_node.'
           : 'mode1 (orchestration): use wf_run_node to start each node asynchronously; never use wf_run_node_wait.',
       ...(extra?.question ? { question: extra.question } : {}),
-      ...(extra?.orgBudgetText ? { orgBudgetText: extra.orgBudgetText } : {}),
       ...(extra?.parentTaskBlock ? { parentTaskBlock: extra.parentTaskBlock } : {}),
       ...(extra?.resume
         ? { isResume: true, resumeFromNodeId: extra.resume.resumeFromNodeId, resumedFromRunId: extra.resume.resumedFromRunId }
@@ -112,11 +105,10 @@ export function directiveParams(
  *   - 续跑继承边界：hybrid/executor 但父代理执行单元已 ok（断点继承完成、无任务块）
  *     时按 orchestrator 变体组装（剩余运行只有编排/收尾，不再含自执行任务内容），
  *     避免提示词出现「先执行自身节点任务」但无任务可执行的自相矛盾。
- * 纯函数：入参（flow/defPath/mode/executor/动态）不变则输出字节不变。
+ * 纯函数：入参（flow/mode/executor/动态）不变则输出字节不变。
  */
 export function buildParentRunPrompt(input: {
   flow: WorkflowDocument
-  defPath: string
   mode: 'mode1' | 'mode2'
   /** 模式二用户问题（不稳定内容，仅末段）。 */
   question?: string
@@ -126,15 +118,10 @@ export function buildParentRunPrompt(input: {
   executor: { nodeId: string; nodeLabel: string; task: ExecutorContextFacts; runContextText: string } | null
   /** 系统语言名（从 DSH 用户设置读取；注入语言规则）。 */
   systemLanguage: string
-  /** 「本次组织预算」末段文本（冻结快照 → 剩余量口径；P2 起由 startRun/resumeRun 注入）。 */
-  orgBudgetText?: string
-  /** 协作通道（官方 Agent Team 可用性；决定协作组段文案与启动方式）。 */
-  collabChannel?: CollabChannel
 }): string {
-  const { flow, defPath, mode, executor, systemLanguage } = input
+  const { flow, mode, executor, systemLanguage } = input
   const variant = parentPromptVariantOf(flow)
   const resume = input.resume
-  const collabChannel = input.collabChannel ?? 'legacy'
 
   // 情况3：纯执行（父代理为唯一参与流程的执行单元，且有执行单元内容）
   if (variant === 'executor' && executor) {
@@ -149,11 +136,9 @@ export function buildParentRunPrompt(input: {
   // 情况2：编排 + 自执行（有执行单元内容）
   if (variant === 'hybrid' && executor) {
     return buildHybridPrompt(
-      directiveParams(flow, defPath, mode, {
+      directiveParams(flow, mode, {
         ...(resume ? { resume } : {}),
         ...(input.question ? { question: input.question } : {}),
-        ...(input.orgBudgetText ? { orgBudgetText: input.orgBudgetText } : {}),
-        collabChannel,
         parentNode: { nodeId: executor.nodeId, nodeLabel: executor.nodeLabel },
         parentTaskBlock: buildParentTaskSpec({ facts: executor.task, runContextText: executor.runContextText, systemLanguage }),
         systemLanguage,
@@ -163,11 +148,9 @@ export function buildParentRunPrompt(input: {
 
   // 情况1：纯编排；或 hybrid/executor 在续跑中父代理执行单元已 ok（继承完成 → 纯编排语义）
   return buildOrchestratorPrompt(
-    directiveParams(flow, defPath, mode, {
+    directiveParams(flow, mode, {
       ...(resume ? { resume } : {}),
       ...(input.question ? { question: input.question } : {}),
-      ...(input.orgBudgetText ? { orgBudgetText: input.orgBudgetText } : {}),
-      collabChannel,
       systemLanguage,
     }),
   )

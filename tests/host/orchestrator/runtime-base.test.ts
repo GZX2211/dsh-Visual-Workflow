@@ -1,11 +1,12 @@
 // tests/host/orchestrator/runtime-base.test.ts
 //
-// 运行时基础层单测：断点自动接续、运行快照读取、双向同步（事实源刷新与编排变更注入）、执行者模式。
+// 运行时基础层单测：断点自动接续、运行快照读取、双向同步（编排基线更新与编排变更注入）、执行者模式。
 // 装配与测试替身见 fixtures/harness.ts（共享，不在本文件内重复）。
 
 import { afterEach, describe, expect, it } from 'vitest'
-import { createRunSnapshot, parentExecutorOf, reconcileStaleRuns, setNodeStatus, sweepWatchdogOnce } from '../../../src/host/orchestrator/index.js'
-import { ORCH_CHANGE_MARKER, ORCH_HARD_CONSTRAINTS } from '../../../src/host/prompts/index.js'
+import { createRunSnapshot, parentExecutorOf, setNodeStatus, sweepWatchdogOnce } from '../../../src/host/orchestrator/index.js'
+import { ORCH_CHANGE_MARKER } from '../../../src/host/prompts/index.js'
+import { WF_DB_QUERY } from '../../../src/host/shared/protocol.js'
 import { type GraphNode, type RoleNode, type WorkflowDocument } from '../../../src/host/shared/graph-model.js'
 import { stage, agent, fileNode, parentNode, makeFlow, FakeRoot, type Harness, makeHarness, caller, start, cleanupTempDirs } from './fixtures/harness.js'
 
@@ -97,6 +98,52 @@ describe('运行上下文自动接续（运行锁降权）', () => {
     const broken = { ...makeFlow(), nodes: makeFlow().nodes.filter((n) => n.kind !== 'end') }
     await h.store.saveWorkflow(broken, 'session-1', { force: true })
     await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })).rejects.toMatchObject({ code: 'WF_FLOW_INCOMPLETE' })
+  })
+
+  it('最新断点不可恢复时回退次新一条（逐条 try，不因一条失败放弃整轮接续）', async () => {
+    const h = await makeHarness()
+    const good = makeFlow()
+    await h.store.saveWorkflow(good, 'session-1', { force: true })
+    // 更新的断点属于另一条已被改坏的流程（缺结束节点）：接续必然失败
+    const broken = { ...makeFlow(), id: 'flow-broken', name: '坏流程', nodes: makeFlow().nodes.filter((n) => n.kind !== 'end') }
+    await h.store.saveWorkflow(broken, 'session-1', { force: true })
+
+    const older = createRunSnapshot({ runId: 'run-good', flow: good, sessionId: 'session-1', mode: 'mode1', now: 1000 })
+    older.status = 'stopped'
+    await h.store.saveRun(older)
+    const newer = createRunSnapshot({ runId: 'run-broken', flow: broken, sessionId: 'session-1', mode: 'mode1', now: 9000 })
+    newer.status = 'stopped'
+    await h.store.saveRun(newer)
+
+    const result = await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+
+    expect(result).toMatchObject({ nodeId: 'n-a1', status: 'started' })
+    // 次新一条被接管（继承链指向 run-good），坏断点未被误用、也保持原状
+    const lock = h.runtime.flowLockInfo('flow-1')
+    expect(lock).toMatchObject({ status: 'running' })
+    expect((await h.store.getRun(String(lock?.runId)))?.resumedFromRunId).toBe('run-good')
+    expect((await h.store.getRun('run-broken'))?.status).toBe('stopped')
+  })
+
+  it('全部断点都无法接续：错误列出被跳过的断点与原因（可行动，不静默丢断点）', async () => {
+    const h = await makeHarness()
+    const nodesOf = (id: string) => ({ ...makeFlow(), id, nodes: makeFlow().nodes.filter((n) => n.kind !== 'end') })
+    await h.store.saveWorkflow(nodesOf('flow-bad-a'), 'session-1', { force: true })
+    await h.store.saveWorkflow(nodesOf('flow-bad-b'), 'session-1', { force: true })
+    const first = createRunSnapshot({ runId: 'run-bad-a', flow: nodesOf('flow-bad-a'), sessionId: 'session-1', mode: 'mode1', now: 1000 })
+    first.status = 'stopped'
+    await h.store.saveRun(first)
+    const second = createRunSnapshot({ runId: 'run-bad-b', flow: nodesOf('flow-bad-b'), sessionId: 'session-1', mode: 'mode1', now: 9000 })
+    second.status = 'stopped'
+    await h.store.saveRun(second)
+
+    const failure = await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' }).then(() => null, (error: unknown) => error)
+
+    // 错误码取最新一条的恢复类错误（单候选时与旧行为一致），消息里逐条列出被跳过的断点
+    expect(failure).toMatchObject({ code: 'WF_FLOW_INCOMPLETE' })
+    const message = failure instanceof Error ? failure.message : String(failure)
+    expect(message).toContain('run-bad-b')
+    expect(message).toContain('run-bad-a')
   })
 
   it('wf_finish：无激活运行但有断点时自动续跑后收尾（磁盘旧记录保持原状）', async () => {
@@ -274,36 +321,36 @@ describe('currentResolvedFlow 双向同步（§4.7 规则 1 ①）', () => {
   })
 })
 
-describe('refreshActiveDefinitions：画布保存 → 运行事实源实时刷新（双向同步①）', () => {
-  it('运行中保存实例：刷新对应 run 的 orchestrations 事实源（父代理读到最新拓扑）', async () => {
+describe('refreshActiveDefinitions：画布保存 → 运行编排基线更新（双向同步①）', () => {
+  it('运行中保存实例：更新本 run 的编排基线（父代理经工具召回最新拓扑）', async () => {
     const h = await makeHarness()
     const flow = makeFlow()
     const { result } = await start(h, flow)
-    const defBefore = await h.store.readOrchestration(result.runId)
-    expect(defBefore?.nodes).toHaveLength(6) // start/a1/pause/a2/end/proxy
+    expect(h.runtime.entryFor(result.runId)?.lastSyncedFlow?.nodes).toHaveLength(6) // start/a1/pause/a2/end/proxy
 
     // 模拟画布保存：新增一个节点后的最新文档
     const updated = { ...flow, revision: 2, nodes: [...flow.nodes, agent('n-a3', '子任务C')] }
     await h.store.saveWorkflow(updated, 'session-1', { force: true })
     await h.runtime.refreshActiveDefinitions('flow-1', 'session-1', updated)
 
-    // 运行事实源文件已刷新：父代理 read 该文件可见新增节点（冲突根因修复）
-    const defAfter = await h.store.readOrchestration(result.runId)
-    expect(defAfter?.nodes.map((n) => n.id)).toContain('n-a3')
-    // 快照节点状态不受影响（只刷新流程定义，不重置节点记录）
+    // 基线已前进：下一次保存的「编排语义是否变更」以最新拓扑为基准
+    expect(h.runtime.entryFor(result.runId)?.lastSyncedFlow?.nodes.map((n) => n.id)).toContain('n-a3')
+    // 快照节点状态不受影响（只更新编排基线，不重置节点记录）
     expect(h.runtime.runSnapshot(result.runId)?.nodes).toHaveLength(6)
   })
 
-  it('已结束的 run 不刷新；无匹配 run 为空操作（幂等）', async () => {
+  it('已结束的 run：空操作（幂等，既不注入也不报错）', async () => {
     const h = await makeHarness()
     const flow = makeFlow()
     const { result } = await start(h, flow)
     await h.runtime.stopRun(result.runId)
+    const root = h.agents.roots.get('session-1') as FakeRoot
 
     const updated = { ...flow, revision: 3, nodes: [...flow.nodes, agent('n-a4', '新任务')] }
     await h.runtime.refreshActiveDefinitions('flow-1', 'session-1', updated)
-    // 已完成 run 的事实源不应被改写（历史追溯语料保持原样）
-    expect((await h.store.readOrchestration(result.runId))?.nodes).toHaveLength(6)
+
+    expect(root.steered).toHaveLength(0)
+    expect(root.messages).toHaveLength(1)
   })
 })
 
@@ -315,7 +362,7 @@ describe('运行中画布保存 → 编排变更注入（新机制）', () => {
     return root as FakeRoot
   }
 
-  it('编排语义变更 + 父代理忙碌：steer 插队注入【编排变更】与事实源路径', async () => {
+  it('编排语义变更 + 父代理忙碌：steer 插队注入【编排变更】', async () => {
     const h = await makeHarness()
     const flow = makeFlow()
     const { result } = await start(h, flow)
@@ -334,14 +381,17 @@ describe('运行中画布保存 → 编排变更注入（新机制）', () => {
     expect(root.steered).toHaveLength(1)
     const text = root.steered[0]?.content[0]?.text ?? ''
     expect(text).toContain(ORCH_CHANGE_MARKER)
-    expect(text).toContain(h.store.orchestrationFilePath(result.runId))
+    // 安全门禁：注入文本不含宿主路径与数据目录名（父代理无从进入用户私有存储）
+    expect(text).not.toContain(h.store.root)
+    expect(text).not.toContain('orchestrations')
+    expect(text).not.toContain('.json')
     // 未走 followup（父代理忙碌时不新起回合；messages 仅启动注入那一条）
     expect(root.messages).toHaveLength(1)
-    // 事实源已刷新为最新拓扑
-    expect((await h.store.readOrchestration(result.runId))?.nodes.map((n) => n.id)).toContain('n-a3')
+    // 基线已更新为最新拓扑
+    expect(h.runtime.entryFor(result.runId)?.lastSyncedFlow?.nodes.map((n) => n.id)).toContain('n-a3')
   })
 
-  it('纯几何改动（节点坐标）：不注入，但事实源仍刷新', async () => {
+  it('纯几何改动（节点坐标）：不注入，但基线照常前进', async () => {
     const h = await makeHarness()
     const flow = makeFlow()
     const { result } = await start(h, flow)
@@ -356,7 +406,8 @@ describe('运行中画布保存 → 编排变更注入（新机制）', () => {
 
     expect(root.steered).toHaveLength(0)
     expect(root.messages).toHaveLength(1)
-    expect((await h.store.readOrchestration(result.runId))?.nodes[0]?.position).toEqual({ x: 321, y: 654 })
+    // 基线仍前进（几何改动不算编排语义变更，但下次比较应对齐最新文档）
+    expect(h.runtime.entryFor(result.runId)?.lastSyncedFlow?.nodes[0]?.position).toEqual({ x: 321, y: 654 })
   })
 
   it('节点配置变化（systemPrompt）：注入', async () => {
@@ -391,7 +442,7 @@ describe('运行中画布保存 → 编排变更注入（新机制）', () => {
     expect(root.messages[1]?.content[0]?.text ?? '').toContain(ORCH_CHANGE_MARKER)
   })
 
-  it('paused run：只刷新事实源，不注入（不打断暂停态）', async () => {
+  it('paused run：只更新基线，不注入（不打断暂停态）', async () => {
     const h = await makeHarness()
     const flow = makeFlow()
     const { result } = await start(h, flow)
@@ -404,7 +455,8 @@ describe('运行中画布保存 → 编排变更注入（新机制）', () => {
 
     expect(root.steered).toHaveLength(0)
     expect(root.messages).toHaveLength(1)
-    expect((await h.store.readOrchestration(result.runId))?.nodes.map((n) => n.id)).toContain('n-a3')
+    // 暂停态不注入通知，但基线已对齐：恢复后按最新拓扑续跑
+    expect(entry.lastSyncedFlow?.nodes.map((n) => n.id)).toContain('n-a3')
   })
 
   it('连续两次相同保存：第二次无变更 → 不重复注入', async () => {
@@ -477,11 +529,9 @@ describe('父代理执行者模式', () => {
     expect(parentNode?.status).toBe('running')
     expect(entry.executorParentId).toBe('n-parent')
     const directive = h.agents.roots.get('session-1')!.messages[0].content.map((c) => c.text).join('\n')
-    expect(directive).toContain(ORCH_HARD_CONSTRAINTS.executorRole)
-    expect(directive).toContain('【你的节点任务】')
+    expect(directive).toContain('n-parent') // 父代理执行节点身份数据
     expect(directive).toContain('需求文本') // 文件文本经 ctx 连线直通
-    expect(directive).toContain('wf_db_query') // db 提示（Connected database node(s)…）
-    expect(directive).toContain('n-parent') // 执行节点标识
+    expect(directive).toContain(WF_DB_QUERY) // db 提示（工具名取自协议常量）
   })
 
   it('纯调度者（无 flow-in）：指令不含执行者措辞与任务块，父代理节点保持 pending', async () => {
@@ -492,7 +542,7 @@ describe('父代理执行者模式', () => {
     const parentNode = h.runtime.runSnapshot(result.runId)?.nodes.find((n) => n.nodeId === 'n-parent')
     expect(parentNode?.status).toBe('pending')
     const directive = h.agents.roots.get('session-1')!.messages[0].content.map((c) => c.text).join('\n')
-    expect(directive).not.toContain('【你的节点任务】')
+    expect(directive).not.toContain('n-parent')
   })
 
   it('wfRunNode 首次调度：父代理节点标记 ok，输出回写最近 assistant/message 文本', async () => {
@@ -530,7 +580,6 @@ describe('父代理执行者模式', () => {
     const h = await makeHarness()
     const { result } = await start(h, executorFlow())
     await h.runtime.stopRun(result.runId)
-    const parentNode = h.runtime.runSnapshot(result.runId)?.nodes.find((n) => n.nodeId === 'n-parent')
     // 内存条目 terminated 后已释放：查磁盘记录
     const disk = await h.store.getRun(result.runId)
     expect(disk?.nodes.find((n) => n.nodeId === 'n-parent')?.status).toBe('fail')
@@ -720,5 +769,51 @@ describe('父代理执行单元的重试预算文案', () => {
     await start(h, hybridBudgetFlow(0))
     const directive = h.agents.roots.get('session-1')!.messages[0].content.map((c) => c.text).join('\n')
     expect(directive).toContain('attempt 1/1（父代理执行单元）')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 闸门退役：运行时不再暴露闸门标记能力（遗留 data.role 一律按普通执行入口处理）
+// ---------------------------------------------------------------------------
+
+/** 遗留图：父代理虚拟节点仍带退役前的 data.role='milestone'。 */
+function legacyMilestoneFlow(): WorkflowDocument {
+  return {
+    id: 'flow-1',
+    sessionId: 'session-1',
+    mode: 'mode1',
+    name: '闸门流程',
+    description: '',
+    revision: 1,
+    nodes: [
+      stage('n-start', 'start'),
+      parentNode('n-p1', 'CEO'),
+      { id: 'n-m1', kind: 'proxy', position: { x: 0, y: 0 }, proxySourceId: 'n-p1', data: { role: 'milestone' } } as unknown as GraphNode,
+      agent('n-a1', '子任务A'),
+      stage('n-end', 'end'),
+    ],
+    lines: [
+      { id: 'l1', source: 'n-start', target: 'n-m1', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+      { id: 'l2', source: 'n-m1', target: 'n-a1', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+      { id: 'l3', source: 'n-a1', target: 'n-end', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+    ],
+  }
+}
+
+describe('闸门退役（运行时）', () => {
+  it('运行时不再暴露闸门标记能力（facts / writer / 计数）', async () => {
+    const h = await makeHarness()
+    expect('markMilestoneNode' in h.runtime).toBe(false)
+    expect('milestoneFactsFor' in h.runtime).toBe(false)
+    expect('milestoneUsedForSession' in h.runtime).toBe(false)
+  })
+
+  it('遗留 data.role=milestone：父代理虚拟节点按普通执行入口自动完成（旧数据容错）', async () => {
+    const h = await makeHarness()
+    const { entry } = await start(h, legacyMilestoneFlow())
+    expect(entry.executorParentId).toBe('n-p1')
+    expect('executorIsMilestone' in entry).toBe(false)
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    expect(entry.snapshot.nodes.find((node) => node.nodeId === 'n-p1')?.status).toBe('ok')
   })
 })

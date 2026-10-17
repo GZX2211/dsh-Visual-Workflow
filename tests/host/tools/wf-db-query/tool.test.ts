@@ -3,10 +3,10 @@
 // wf_db_query 工具（tool.ts）单测：注册面（参数/输出 schema/description W-03）与
 // 三模式执行、归属校验（运行态解耦/无实例/坏节点/无连线）、SQL 与索引错误路径。
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
+import { DatabaseSync, StatementSync, type SQLOutputValue } from 'node:sqlite'
 import type { EmbeddingEngine } from '../../../../src/host/embedding/engine.js'
 import type { DatabaseNode, WorkflowDocument } from '../../../../src/host/shared/graph-model.js'
 import { WF_DB_QUERY } from '../../../../src/host/shared/protocol.js'
@@ -14,8 +14,8 @@ import { SEARCH_TOP_K_MAX } from '../../../../src/host/embedding/indexer.js'
 import type { JsonSchemaNode } from '../../../../src/host/tools/infrastructure/define-tool.js'
 import { SCHEMA_TABLE_LIMIT } from '../../../../src/host/tools/wf-db-query/driver.js'
 import { indexPathOf } from '../../../../src/host/tools/wf-db-query/service.js'
-import { registerWfDbQuery, QUERY_CELL_MAX_LENGTH } from '../../../../src/host/tools/wf-db-query/tool.js'
-import type { WfDbQueryHost } from '../../../../src/host/tools/wf-db-query/types.js'
+import { registerWfDbQuery, QUERY_CELL_MAX_LENGTH, QUERY_ROWS_LIMIT } from '../../../../src/host/tools/wf-db-query/tool.js'
+import type { WfDbQueryHost, DatabaseDriver } from '../../../../src/host/tools/wf-db-query/types.js'
 import { makeDbFlow, makeSqliteDb } from '../fixtures/db-fixture.js'
 import {
   childAgent,
@@ -41,6 +41,44 @@ function makeTableDb(file: string, count: number): void {
   }
 }
 
+/** 建一个含 count 行的临时 SQLite 库（查询执行层行数上限用；行数可远超上限）。 */
+function makeRowDb(file: string, count: number): void {
+  const db = new DatabaseSync(file)
+  try {
+    db.exec('CREATE TABLE lots (id INTEGER PRIMARY KEY, payload TEXT)')
+    db.exec(
+      `WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < ${count})
+       INSERT INTO lots (id, payload) SELECT n, 'r' || n FROM seq`,
+    )
+  } finally {
+    db.close()
+  }
+}
+
+/**
+ * 给 `StatementSync.iterate` 加计数包装：返回真实迭代器，但统计 `next()` 被调用了几次
+ * ——即语句实际推进的行数，是「工具查询路径只读取到上限行」的可观察证据。
+ * 未把行数上限下推到执行层（或驱动退回 `.all()` 全量物化）时，计数为 0。
+ */
+function spyOnIterate(): { nextCalls: () => number; restore: () => void } {
+  const original = StatementSync.prototype.iterate as unknown as
+    (this: StatementSync) => NodeJS.Iterator<Record<string, SQLOutputValue>>
+  let nextCalls = 0
+  const spy = vi.spyOn(StatementSync.prototype, 'iterate').mockImplementation(function (this: StatementSync) {
+    const inner = original.call(this)
+    return {
+      next: () => {
+        nextCalls += 1
+        return inner.next()
+      },
+      [Symbol.iterator]() {
+        return this
+      },
+    } as unknown as ReturnType<typeof original>
+  })
+  return { nextCalls: () => nextCalls, restore: () => spy.mockRestore() }
+}
+
 /** 降级引擎替身（bm25：不做嵌入）。 */
 const engine: EmbeddingEngine = { source: 'bm25', dimension: 0, async ensureReady() {}, async embed() { throw new Error('bm25 only') }, dispose() {} }
 
@@ -52,11 +90,11 @@ interface DbHarness extends TestEnv {
   disposeTools: () => void
 }
 
-/** 装配：真实编排运行时 + 临时 SQLite 库 + 注册 wf_db_query。 */
-async function makeHarness(): Promise<DbHarness> {
+/** 装配：真实编排运行时 + 临时 SQLite 库 + 注册 wf_db_query（hostOverrides 注入宿主缝）。 */
+async function makeHarness(hostOverrides: Partial<WfDbQueryHost> = {}): Promise<DbHarness> {
   const env = await makeEnv()
   const dbFile = await makeSqliteDb(env.dir)
-  const host: WfDbQueryHost = { orchestrator: env.runtime, store: env.store, dataDir: env.dir, engine }
+  const host: WfDbQueryHost = { orchestrator: env.runtime, store: env.store, dataDir: env.dir, engine, ...hostOverrides }
   const disposeTools = registerTools(env, host, [registerWfDbQuery])
   return { ...env, host, engine, dataDir: env.dir, dbFile, disposeTools }
 }
@@ -189,6 +227,43 @@ describe('wf_db_query 工具执行', () => {
     expect((result as { rows: string[][] }).rows).toEqual([['苹果', '5.5'], ['香蕉', '3.2']])
   })
 
+  it('query 模式：大表超过上限 → 执行层只读「上限 + 1」行，rows 截到上限且 truncated 透传', async () => {
+    const h = await makeHarness()
+    const file = join(h.dataDir, 'many-rows.db')
+    makeRowDb(file, 20000)
+    await start(h, makeDbFlow(file))
+    await h.runtime.wfRunNode({ isChild: false, sessionId: 'session-1' }, { nodeId: 'a1' })
+    const def = h.tools.definitions.get(WF_DB_QUERY)!
+    const counter = spyOnIterate()
+    try {
+      const result = await def.execute(
+        { dataId: 'd1', mode: 'query', sql: 'SELECT id, payload FROM lots ORDER BY id LIMIT 999999999' },
+        execOf(childAgent),
+      )
+      expect(result).toMatchObject({ dataId: 'd1', mode: 'query', columns: ['id', 'payload'], truncated: true })
+      expect((result as { rows: string[][] }).rows).toHaveLength(QUERY_ROWS_LIMIT)
+      // 上限下推到执行层的判别性证据：底层语句只被推进 上限 + 1 次（含截断探测）
+      expect(counter.nextCalls()).toBe(QUERY_ROWS_LIMIT + 1)
+    } finally {
+      counter.restore()
+    }
+  })
+
+  it('query 模式：正好达到上限 → 不出现 truncated 字段（与 search/schema 同一精确口径）', async () => {
+    const h = await makeHarness()
+    const file = join(h.dataDir, 'exact-rows.db')
+    makeRowDb(file, QUERY_ROWS_LIMIT)
+    await start(h, makeDbFlow(file))
+    await h.runtime.wfRunNode({ isChild: false, sessionId: 'session-1' }, { nodeId: 'a1' })
+    const def = h.tools.definitions.get(WF_DB_QUERY)!
+    const result = await def.execute(
+      { dataId: 'd1', mode: 'query', sql: 'SELECT id FROM lots ORDER BY id LIMIT 999999999' },
+      execOf(childAgent),
+    )
+    expect((result as { rows: string[][] }).rows).toHaveLength(QUERY_ROWS_LIMIT)
+    expect((result as { truncated?: boolean }).truncated).toBeUndefined()
+  })
+
   it('search 模式：有内容但未预建索引 → 惰性自动构建并返回 hits（不报 INDEX_MISSING）', async () => {
     const h = await makeHarness()
     await start(h)
@@ -274,6 +349,62 @@ describe('wf_db_query 工具执行', () => {
     expect(error?.code).not.toBe('WF_DB_MODE')
     expect(error?.code, '驱动/错误码必须是连接类具名码').toMatch(/^(ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|WF_DB_DRIVER_MISSING|WF_DB_CONFIG)$/)
     expect(error?.code).not.toBe('WF_DB_DRIVER_MISSING')
+  })
+
+  it('服务器库（mysql）：注入驱动工厂后 schema/query/search 三模式可用（D09 缺口的正向锁定）', async () => {
+    // fake 驱动只回放固定数据：真实 MySQL/PG 服务在本环境不可提供，此前「服务器库检索可用」
+    // 只有反向断言（无服务时必失败），永远无法正向锁定。
+    const created: string[] = []
+    const fakeDriver: DatabaseDriver = {
+      async testConnection() {},
+      async query() {
+        return { columns: ['id', 'name'], rows: [['1', '向量 检索'], ['2', 'BM25 降级']] }
+      },
+      async schema() {
+        return [{ name: 'users' }]
+      },
+      async schemaPage() {
+        return { tables: [{ name: 'users' }], truncated: false }
+      },
+      close() {},
+    }
+    const h = await makeHarness({
+      createDriver: (node) => {
+        created.push(node.id)
+        return fakeDriver
+      },
+    })
+    const flow = makeDbFlow(h.dbFile)
+    const serverNode: DatabaseNode = {
+      id: 'd2',
+      kind: 'database',
+      position: { x: 0, y: 0 },
+      data: {
+        label: '服务器库', description: '', dbType: 'server', dbKind: 'mysql',
+        conn: { host: '127.0.0.1', port: 3306, user: 'u', password: 'p', db: 'd' },
+      },
+    }
+    flow.nodes.push(serverNode)
+    flow.lines.push({ id: 'l5', source: 'd2', target: 'a1', sourceHandle: 'db-out', targetHandle: 'db-in' })
+    await start(h, flow)
+    await h.runtime.wfRunNode({ isChild: false, sessionId: 'session-1' }, { nodeId: 'a1' })
+    const def = h.tools.definitions.get(WF_DB_QUERY)!
+
+    const schema = await def.execute({ dataId: 'd2', mode: 'schema' }, execOf(childAgent))
+    expect(schema).toMatchObject({ dataId: 'd2', mode: 'schema' })
+    expect((schema as { tables: Array<{ name: string }> }).tables).toEqual([{ name: 'users' }])
+
+    const queried = await def.execute({ dataId: 'd2', mode: 'query', sql: 'SELECT id, name FROM users LIMIT 2' }, execOf(childAgent))
+    expect(queried).toMatchObject({ dataId: 'd2', mode: 'query', columns: ['id', 'name'] })
+    expect((queried as { rows: string[][] }).rows).toEqual([['1', '向量 检索'], ['2', 'BM25 降级']])
+
+    // search：本地索引经同一驱动工厂构建（服务器库与本地库共用索引基础设施）
+    const searched = await def.execute({ dataId: 'd2', mode: 'search', query: '向量' }, execOf(childAgent))
+    expect(searched).toMatchObject({ dataId: 'd2', mode: 'search', source: 'bm25' })
+    expect((searched as { hits: unknown[] }).hits.length).toBeGreaterThan(0)
+
+    // 三处驱动创建（schema / query / 惰性索引构建）统一经宿主缝解析，无一处绕过
+    expect(created).toEqual(['d2', 'd2', 'd2'])
   })
 
   it('query 模式：超长单元格值被截断并标记 truncated（防向量/BLOB 列打爆上下文）', async () => {

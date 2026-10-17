@@ -26,7 +26,6 @@ import {
   orgBudgetOf,
   orgUsageOf,
 } from '../../../src/host/graph/index.js'
-import { buildOrgBudgetText } from '../../../src/host/prompts/index.js'
 import type { GraphNode } from '../../../src/host/shared/graph-model.js'
 import type { RunSnapshot } from '../../../src/host/shared/types.js'
 
@@ -69,11 +68,14 @@ describe('normalizeOrgMeta：规范化与防御', () => {
   })
 
   it('数值：取整、非正数视为未配置、超安全网夹取', () => {
-    const meta = normalizeOrgMeta({ nodeMax: 12.7, groupMax: 0, milestoneMax: -1, patchOpsMax: 99999 })
+    const meta = normalizeOrgMeta({ nodeMax: 12.7, groupMax: 0, patchOpsMax: 99999 })
     expect(meta.nodeMax).toBe(12)
     expect(meta.groupMax).toBeUndefined()
-    expect(meta.milestoneMax).toBeUndefined()
     expect(meta.patchOpsMax).toBe(ORG_META_NORMALIZE_CAPS.patchOpsMax)
+  })
+
+  it('闸门退役：milestoneMax 按未知字段丢弃（遗留元参数静默忽略）', () => {
+    expect(normalizeOrgMeta({ milestoneMax: 3 })).toEqual({})
   })
 
   it('区间自洽：min > max 时丢弃 min（保留上限）', () => {
@@ -103,7 +105,7 @@ describe('normalizeOrgMeta：规范化与防御', () => {
       interveneTrigger: ['user', 'nope', 'user', 'milestone'],
       forbiddenShapes: ['flowCycle', ' ', 'flowCycle', 'orphanNode'],
     })
-    expect(meta.interveneTrigger).toEqual(['user', 'milestone'])
+    expect(meta.interveneTrigger).toEqual(['user'])
     expect(meta.forbiddenShapes).toEqual(['flowCycle', 'orphanNode'])
   })
 
@@ -171,23 +173,25 @@ describe('已用量口径（与检查器/P1 工具共用）', () => {
 
   it('orgUsageOf：由图推导已用量，可选维度按传入决定是否判定', () => {
     const base = orgUsageOf({ nodes })
-    expect(base).toEqual({ nodeCount: 4, groupCount: 1, maxGroupMembers: 2, milestoneUsed: 0 })
-    const withOptions = orgUsageOf({ nodes }, { milestoneUsed: 2, parallelBranchMax: 3, patchOps: 4 })
-    expect(withOptions.milestoneUsed).toBe(2)
+    expect(base).toEqual({ nodeCount: 4, groupCount: 1, maxGroupMembers: 2 })
+    const withOptions = orgUsageOf({ nodes }, { parallelBranchMax: 3, patchOps: 4 })
+    expect(withOptions).not.toHaveProperty('milestoneUsed')
     expect(withOptions.parallelBranchMax).toBe(3)
     expect(withOptions.patchOps).toBe(4)
   })
 })
 
 describe('orgBudgetOf：剩余量口径', () => {
-  const usage = orgUsageOf({ nodes: [agent('a1'), agent('a2'), group('g1', ['a1', 'b', 'c'])] }, { milestoneUsed: 1, patchOps: 2 })
+  const usage = orgUsageOf({ nodes: [agent('a1'), agent('a2'), group('g1', ['a1', 'b', 'c'])] }, { patchOps: 2 })
 
   it('上限已配置 → 剩余 = 上限 - 已用', () => {
-    const budget = orgBudgetOf({ nodeMax: 5, groupMax: 2, milestoneMax: 3, patchOpsMax: 6 }, usage)
+    const budget = orgBudgetOf({ nodeMax: 5, groupMax: 2, patchOpsMax: 6 }, usage)
+    expect(budget).not.toHaveProperty('milestoneUsed')
+    expect(budget).not.toHaveProperty('milestoneMax')
+    expect(budget).not.toHaveProperty('milestoneRemaining')
     expect(budget.nodeUsed).toBe(3)
     expect(budget.nodeRemaining).toBe(2)
     expect(budget.groupRemaining).toBe(1)
-    expect(budget.milestoneRemaining).toBe(2)
     expect(budget.patchOpsRemaining).toBe(4)
   })
 
@@ -195,7 +199,6 @@ describe('orgBudgetOf：剩余量口径', () => {
     const budget = orgBudgetOf({}, usage)
     expect(budget.nodeMax).toBe(0)
     expect(budget.nodeRemaining).toBeNull()
-    expect(budget.milestoneRemaining).toBeNull()
     expect(budget.patchOpsRemaining).toBeNull()
     expect(budget.forbiddenShapes).toEqual([])
     expect(budget.namingConvention).toBeNull()
@@ -211,7 +214,7 @@ describe('orgBudgetOf：剩余量口径', () => {
 })
 
 describe('metaLimitIssues：硬护栏与下限提示', () => {
-  const usage = { nodeCount: 5, groupCount: 2, maxGroupMembers: 4, milestoneUsed: 0 }
+  const usage = { nodeCount: 5, groupCount: 2, maxGroupMembers: 4 }
   const codes = (issues: ReturnType<typeof metaLimitIssues>): string[] => issues.map((issue) => issue.code)
 
   it('全部上限未配置 → 无任何 issue', () => {
@@ -280,38 +283,5 @@ describe('freezeOrgMeta：快照冻结（D-13 第三层）', () => {
     const first = structuredClone(snap.meta)
     freezeOrgMeta(snap, { groupMax: 2 })
     expect(snap.meta).toEqual(first)
-  })
-})
-
-describe('buildOrgBudgetText：末段动态文本（纯函数）', () => {
-  const budget = orgBudgetOf(
-    { nodeMax: 12, groupMax: 3, membersMax: 5, milestoneMax: 2, patchOpsMax: 6, forbiddenShapes: ['flowCycle', 'orphanNode'] },
-    { nodeCount: 4, groupCount: 1, maxGroupMembers: 2, milestoneUsed: 1, patchOps: 0 },
-  )
-
-  it('输出含剩余量口径与禁用拓扑清单', () => {
-    const text = buildOrgBudgetText(budget)
-    expect(text).toContain('本次组织预算')
-    expect(text).toContain('4/12')
-    expect(text).toContain('剩余 8')
-    expect(text).toContain('1/2')
-    expect(text).toContain('flowCycle / orphanNode')
-  })
-
-  it('上限未配置：渲染「不限」而不是 0', () => {
-    const text = buildOrgBudgetText(orgBudgetOf({}, { nodeCount: 2, groupCount: 0, maxGroupMembers: 0, milestoneUsed: 0 }))
-    expect(text).toContain('不限')
-    expect(text).not.toContain('/0')
-    expect(text).toContain('禁用拓扑：无')
-  })
-
-  it('确定性：同输入两次输出字节相同（不读时钟/随机源）', () => {
-    expect(buildOrgBudgetText(budget)).toBe(buildOrgBudgetText(budget))
-    expect(buildOrgBudgetText(budget)).not.toContain('Date.now')
-  })
-
-  it('命名约定：配置时出现在预算文本中', () => {
-    const text = buildOrgBudgetText(orgBudgetOf({ namingConvention: '阶段' }, { nodeCount: 0, groupCount: 0, maxGroupMembers: 0, milestoneUsed: 0 }))
-    expect(text).toContain('命名约定：阶段')
   })
 })

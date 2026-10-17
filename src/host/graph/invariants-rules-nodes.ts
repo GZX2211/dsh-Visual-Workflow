@@ -1,7 +1,7 @@
 // src/host/graph/invariants-rules-nodes.ts
 //
-// 图质量规则（自主编排方案 §6.2 规则表）第二期：**节点维度**——协作组一致性、虚拟节点
-// 引用、数据节点完整性、上下文/数据库连线合法性、里程碑闸门（指向父代理的虚拟节点）。
+// 图质量规则（自主编排方案 §6.2 规则表）第二期：**节点维度**——Team 一致性、虚拟节点
+// 引用、数据节点完整性、上下文/数据库连线合法性、父代理虚拟节点的流程驱动。
 // 流程/阶段维度见 invariants-rules-flow.ts；元参数维度见 invariants-rules-meta.ts。
 //
 // 每个规则一个纯函数（入参 CheckGraphInput + 可选 FlowDag，返回 GraphIssue[]）。
@@ -9,15 +9,15 @@
 
 import type { FlowDag } from './dag.js'
 import type { CheckGraphInput, GraphIssue } from './invariants-types.js'
-import type { DatabaseNode, GraphNode, Line } from '../shared/graph-model.js'
-import { channelIn, channelOfIn, channelOfOut, channelOut, proxyRoleOf } from './model.js'
+import type { DatabaseNode, GraphNode } from '../shared/graph-model.js'
+import { channelOfIn, channelOfOut } from './model.js'
 
 /** 按 id 建索引（保持输入顺序）。 */
 function nodeMapOf(flow: CheckGraphInput['flow']): Map<string, GraphNode> {
   return new Map((flow?.nodes ?? []).map((node) => [node.id, node]))
 }
 
-/** a) 协作组一致性：无成员 / 悬空成员 / 无流程线。 */
+/** a) Team 一致性：无成员 / 悬空成员 / 无流程线。 */
 export function ruleGroupMembers(input: CheckGraphInput, dag: FlowDag): GraphIssue[] {
   const { flow } = input
   const byId = nodeMapOf(flow)
@@ -35,7 +35,7 @@ export function ruleGroupMembers(input: CheckGraphInput, dag: FlowDag): GraphIss
       issues.push({
         code: 'groupNoMembers',
         level: 'error',
-        message: `collaboration group "${label}" has no members`,
+        message: `Team "${label}" has no members`,
         nodeIds: [node.id],
         suggestion: 'drop role nodes into the group, or delete the empty group card',
       })
@@ -45,7 +45,7 @@ export function ruleGroupMembers(input: CheckGraphInput, dag: FlowDag): GraphIss
       issues.push({
         code: 'groupMemberMissing',
         level: 'error',
-        message: `collaboration group "${label}" references members that do not exist: ${missing.join(', ')}`,
+        message: `Team "${label}" references members that do not exist: ${missing.join(', ')}`,
         nodeIds: [node.id, ...missing],
         suggestion: 'remove the dangling member ids (their nodes were deleted) and pick the group members again',
       })
@@ -54,7 +54,7 @@ export function ruleGroupMembers(input: CheckGraphInput, dag: FlowDag): GraphIss
       issues.push({
         code: 'groupNoFlow',
         level: 'error',
-        message: `collaboration group "${label}" has no flow edge`,
+        message: `Team "${label}" has no flow edge`,
         nodeIds: [node.id],
         suggestion: 'connect a flow-in and a flow-out on the group card: the group card carries the flow gate, while members are wired by context edges only',
       })
@@ -127,7 +127,9 @@ export function ruleDataNodeComplete({ flow }: CheckGraphInput): GraphIssue[] {
   return issues
 }
 
-/** d) 上下文入线来源合法性（角色 / 虚拟节点 / 文件 / 模式二输入节点）。 */
+/** d) 上下文入线来源合法性（角色 / 虚拟节点 / 文件 / 模式二输入节点）。
+ *  技术债（ctx-out 停用）：角色节点的 ctx 出线已不再是注入来源，但连线仍是合法结构
+ *  （旧图零迁移），故本规则保持原口径不变。 */
 export function ruleCtxSource({ flow }: CheckGraphInput): GraphIssue[] {
   const byId = nodeMapOf(flow)
   const issues: GraphIssue[] = []
@@ -181,76 +183,6 @@ export function ruleDbTarget({ flow }: CheckGraphInput): GraphIssue[] {
 }
 
 /**
- * f) 数据流契约（warning，规划期提醒；用户裁决 C6）：把「上下游交接没有通道」变成规划期
- * 可见的提醒。两条互补规则，各自只在**确有可交接的产出 / 确有多个上游可连接**时才报，
- * 因此不会对普通的线性流水线（start → a1 → a2 → end）产生噪声：
- *
- *   - nodeNoConsumer：某可执行节点**声明了产出**（有 ctx-out 出线，或配置了 outputSchema），
- *     但它所有流程下游都没接入该节点的 ctx 出线——上游写了产出却没人读。
- *   - nodeNoUpstream：某可执行节点**有多个可执行前置节点**（存在其他可选的上游信息来源），
- *     却没有任何 ctx/file/db 入线——它多半该连一条而漏了（首节点只有一个前置 start，不报）。
- *
- * 为什么是 warning 而不是 error：单节点流水线、串联中确实不需要上游数据的节点都是合法的，
- * 硬判会误伤；本规则只负责「提醒」，是否补线由规划者/用户判断。
- */
-export function ruleNodeDataFlowContract({ flow }: CheckGraphInput): GraphIssue[] {
-  const byId = nodeMapOf(flow)
-  const lines = flow?.lines ?? []
-  const issues: GraphIssue[] = []
-
-  for (const node of flow?.nodes ?? []) {
-    if (node.kind !== 'agent' && node.kind !== 'parent') continue
-    const label = (node.data as { label?: unknown }).label ?? node.id
-    // 产出「声明」的唯一判据是 outputSchema：只有规划者明确声明了输出结构，
-    // 「下游没接这条 ctx」才是不一致（否则它可能本来就把结果写在文件里，报出来是噪声）。
-    const declaredOutput = String((node.data as { outputSchema?: unknown }).outputSchema ?? '').trim()
-    if (declaredOutput) {
-      const flowTargets = [...new Set(lines
-        .filter((line) => line.source === node.id && line.sourceHandle === channelOut('flow') && isUnitNode(byId.get(line.target)))
-        .map((line) => line.target))]
-      const consumed = new Set(lines
-        .filter((line) => line.source === node.id && line.sourceHandle === channelOut('ctx'))
-        .map((line) => line.target))
-      const unconsumed = flowTargets.filter((targetId) => {
-        if (consumed.has(targetId)) return false
-        // 下游经虚拟节点接 ctx 也算被消费（proxy 与主节点共享产出）
-        return !lines.some((line) => line.source === targetId && line.targetHandle === channelIn('ctx'))
-      })
-      if (flowTargets.length > 0 && unconsumed.length === flowTargets.length) {
-        issues.push({
-          code: 'nodeNoConsumer',
-          level: 'warning',
-          message: `executable node "${label}" declares an output contract, but none of its downstream nodes (${unconsumed.join(', ')}) consumes its ctx-out edge`,
-          nodeIds: [node.id, ...unconsumed],
-          suggestion: 'connect a ctx edge to the downstream nodes that need this output (sourceHandle=ctx-out -> targetHandle=ctx-in); if none of them needs it, clear this node\'s outputSchema so the contract matches the graph',
-        })
-      }
-    }
-    // 上游：只在「存在多个可执行前置」时判定——首节点只有一个前置（start），不该被误报。
-    if (!lines.some((line) => line.target === node.id && (line.targetHandle === channelIn('ctx') || line.targetHandle === channelIn('db')))) {
-      const predecessors = new Set(lines
-        .filter((line) => line.target === node.id && line.targetHandle === channelIn('flow') && isUnitNode(byId.get(line.source)))
-        .map((line) => line.source))
-      if (predecessors.size >= 2) {
-        issues.push({
-          code: 'nodeNoUpstream',
-          level: 'warning',
-          message: `executable node "${label}" has several executable predecessors but no input channel (no ctx / file / db in-edge)`,
-          nodeIds: [node.id],
-          suggestion: 'if it needs upstream output or managed files, connect a ctx edge (upstream sourceHandle=ctx-out -> this node targetHandle=ctx-in) or an edge from a file/database node; if it is genuinely self-contained, ignore this warning',
-        })
-      }
-    }
-  }
-  return issues
-}
-
-/** 是否可执行单元（agent/parent/group）。 */
-function isUnitNode(node: GraphNode | undefined): boolean {
-  return node?.kind === 'agent' || node?.kind === 'parent' || node?.kind === 'group'
-}
-
-/**
  * g) 角色节点配置完整性（warning，规划期提醒；用户裁决 C6 + P2 决策）：
  *   - presetId 为空 → 运行期 `resolveAgentTools` 判定该节点**零工具**（连 read/write 都调不到），
  *     是无效节点；这条只能在规划期提醒，运行期发现就太晚了。
@@ -287,55 +219,25 @@ export function ruleRoleNodeConfigured({ flow }: CheckGraphInput): GraphIssue[] 
 }
 
 /**
- * h) 里程碑闸门（指向父代理的虚拟节点）：
- *   - 任何指向父代理的虚拟节点缺流程入口 → 不会被流程驱动（warning）；
- *   - `data.role='milestone'` 却指向非父代理节点 → 闸门语义无效（warning）；
- *   - 标记为 milestone 的闸门数超过 `meta.milestoneMax` → 超上限（warning）。
- * P3 起闸门以 `data.role` 判别（缺省 executor，不占闸门预算）。
+ * h) 父代理虚拟节点的流程驱动：指向父代理的 proxy 必须有流程入口，否则流程永远不会
+ * 驱动它（该节点上的父代理执行单元也就永远不会执行）。
+ * 注意本规则只判定「有没有被驱动」，不承担父代理执行单元的完成语义。
  */
-export function ruleMilestoneProxy(input: CheckGraphInput, dag: FlowDag): GraphIssue[] {
-  const { flow, meta } = input
+export function ruleParentProxyFlowIn(input: CheckGraphInput, dag: FlowDag): GraphIssue[] {
+  const { flow } = input
   const byId = nodeMapOf(flow)
-  const proxies = (flow?.nodes ?? []).filter((node) => {
-    if (node.kind !== 'proxy') return false
-    const source = byId.get(String((node as { proxySourceId?: unknown }).proxySourceId ?? ''))
-    return source?.kind === 'parent'
-  })
   const issues: GraphIssue[] = []
-  for (const node of proxies) {
-    if ((dag.incoming.get(node.id) ?? []).length === 0) {
-      issues.push({
-        code: 'milestoneProxyInvalid',
-        level: 'warning',
-        message: `the parent-agent proxy node "${node.id}" has no flow entry, so the flow will never drive it`,
-        nodeIds: [node.id],
-        suggestion: 'connect the previous node\'s flow-out to this proxy node (a parent-agent gate only runs when driven by the flow)',
-      })
-    }
-  }
-  // P3：闸门角色一致性（`data.role` 是闸门识别的事实源）——
-  // 只有标记为 milestone 的虚拟节点才是闸门；缺省 executor 沿用既有自动完成行为，不进闸门预算。
   for (const node of flow?.nodes ?? []) {
-    if (node.kind !== 'proxy' || proxyRoleOf(node) !== 'milestone') continue
-    const sourceId = String((node as { proxySourceId?: unknown }).proxySourceId ?? '')
-    if (byId.get(sourceId)?.kind === 'parent') continue
+    if (node.kind !== 'proxy') continue
+    const source = byId.get(String((node as { proxySourceId?: unknown }).proxySourceId ?? ''))
+    if (source?.kind !== 'parent') continue
+    if ((dag.incoming.get(node.id) ?? []).length > 0) continue
     issues.push({
-      code: 'milestoneProxyInvalid',
+      code: 'parentProxyNoFlowIn',
       level: 'warning',
-      message: `proxy node "${node.id}" is marked as a milestone gate (data.role='milestone') but references "${sourceId || '(empty)'}", which is not a parent node`,
+      message: `the parent-agent proxy node "${node.id}" has no flow entry, so the flow will never drive it`,
       nodeIds: [node.id],
-      suggestion: 'a gate can only hang on a parent node: change proxySourceId to the parent node, or remove data.role',
-    })
-  }
-  const gates = proxies.filter((node) => proxyRoleOf(node) === 'milestone')
-  const milestoneMax = Number(meta?.milestoneMax) || 0
-  if (milestoneMax > 0 && gates.length > milestoneMax) {
-    issues.push({
-      code: 'milestoneProxyInvalid',
-      level: 'warning',
-      message: `${gates.length} parent-agent gate nodes exceed the meta-parameter limit ${milestoneMax}`,
-      nodeIds: gates.map((node) => node.id),
-      suggestion: `reduce the gate nodes to ${milestoneMax} or fewer, or raise the meta parameter milestoneMax`,
+      suggestion: 'connect the previous node\'s flow-out to this proxy node (a parent-agent unit only runs when driven by the flow)',
     })
   }
   return issues

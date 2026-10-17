@@ -21,7 +21,7 @@ import type {
   RoleAssetType,
 } from '../shared/asset-types.js'
 import type { RoleTemplate } from '../shared/template-types.js'
-import type { AssetTxContext } from './db.js'
+import { sqlPlaceholders, type AssetTxContext } from './db.js'
 import { assetNotFound, assetVersionNotFound, AssetError } from './errors.js'
 import { ERR_ASSET_DUPLICATE } from '../shared/protocol.js'
 import { versionRowId } from './ids.js'
@@ -111,6 +111,34 @@ export function readRoleVersionRow(ctx: AssetTxContext, assetId: string, version
   return row ? roleRowToAssetRow(row) : null
 }
 
+/**
+ * 按版本行 id 批量读取角色版本行（一次 `WHERE id IN (…)`）。
+ *
+ * 为什么必须有批量入口：工作流节点壳重建要按 `role_version_ids` 给每个角色节点回填内容，
+ * 逐个调用 readRoleVersionRow 就是 N+1 次回表（N = 角色节点数），而这一读在详情查询、
+ * 保存查重、回滚、恢复四条路径上都会发生。批量入口把「先收集行 id、再一次性取回」固化成
+ * 唯一写法；去重后的 id 个数与节点数同阶，远低于 SQLite 的绑定参数上限。
+ *
+ * @returns 行 id → 版本行（查不到的行不出现在结果里，由调用方按各自语义决定告警还是抛错）。
+ */
+export function readRoleVersionRowsByIds(
+  ctx: AssetTxContext,
+  rowIds: readonly string[],
+): Map<string, RoleAssetRow> {
+  const found = new Map<string, RoleAssetRow>()
+  const unique = [...new Set(rowIds)].filter((id) => id !== '')
+  if (unique.length === 0) return found
+  const rows = ctx.all(
+    `SELECT ${ROLE_HISTORY_COLUMNS} FROM role_asset_history WHERE id IN (${sqlPlaceholders(unique)})`,
+    unique,
+  )
+  for (const row of rows) {
+    const parsed = roleRowToAssetRow(row)
+    found.set(parsed.id, parsed)
+  }
+  return found
+}
+
 /** 是否处于未退役状态（Active 行存在）。 */
 export function isRoleAssetLive(ctx: AssetTxContext, assetId: string): boolean {
   const row = ctx.get('SELECT 1 AS present FROM role_asset_active WHERE asset_id = ?', [assetId])
@@ -171,6 +199,27 @@ export function findRoleVersionByContent(
   if (!row) return null
   const parsed = roleRowToAssetRow(row)
   return { assetId: parsed.assetId, versionId: parsed.versionId, row: parsed }
+}
+
+/**
+ * 唯一活跃父代理角色资产（Active 行指针）。
+ *
+ * 父代理提示词的资产管理只服务于迭代：一个工作流只有一个父代理，因此入库时总叠到同一条
+ * 资产上，而不是每改一次就新建一条。若历史数据里已有不止一条（改造前每次入库都新建），
+ * 按 Active 行的最近使用时间取第一条——此后入库只迭代它，不再继续扩散。
+ * 无活跃父代理资产返回 null（调用方按新建处理）。
+ */
+function activeParentRoleAsset(ctx: AssetTxContext): { assetId: string; versionId: number } | null {
+  const row = ctx.get(
+    `SELECT a.asset_id AS asset_id, a.version_id AS version_id
+       FROM role_asset_active a
+       JOIN role_asset_history h ON h.asset_id = a.asset_id AND h.version_id = a.version_id
+      WHERE h.kind = 'parent'
+      ORDER BY a.updated_at DESC, a.asset_id ASC
+      LIMIT 1`,
+  )
+  if (!row) return null
+  return { assetId: requireAssetId(row.asset_id), versionId: requireVersionId(row.version_id) }
 }
 
 /** 新建角色资产（版本 1）：写入历史行与 Active 行。 */
@@ -475,13 +524,13 @@ function compareText(left: string, right: string): number {
   return left < right ? -1 : 1
 }
 
-/** 角色摘要字数上限（与目录索引展示口径一致）。 */
+/** 角色摘要字数上限。 */
 const ROLE_SUMMARY_LIMIT = 60
 
 /**
  * 角色职责摘要（空白压缩 + 超限标注）。
- * 与 `wf_org_catalog` 的 clip 同口径：两处唯一的差异来源就是这里的截断标记，
- * 因此本模块产出摘要后目录侧原样透传，不再二次截断（否则标记会叠加）。
+ * 摘要是「够不够拿来参考」的判据，完整提示词始终可按 id 召回，故超限即截断。
+ * 截断只在**本模块**发生：目录侧原样透传该字段，再截一次会让截断标记叠加。
  */
 function roleSummaryOf(systemPrompt: unknown): string {
   const text = String(systemPrompt ?? '').replace(/\s+/g, ' ').trim()
@@ -604,13 +653,41 @@ export function retireRoleAssetRow(tx: AssetTxContext, assetId: string): void {
 
 /**
  * 角色晋升（算法 C）：
- *   1. 已有 Active 且绑定同一来源模版 → 走该资产的新版本路径（内容全等即 unchanged）；
- *   2. 否则内容去重：standalone 冲突直接拦截；inline/shared 冲突则合并（类型升 shared，不建新资产）；
- *   3. 均未命中 → 新建 standalone 资产（版本 1）。
+ *   1. 父代理提示词（kind='parent'）特例：资产管理只为「方便迭代」，且父代理提示词不参与
+ *      目录召回——一个工作流只有一个父代理，入库总是叠加到**唯一**那条父代理资产上；
+ *   2. 已有 Active 且绑定同一来源模版 → 走该资产的新版本路径（内容全等即 unchanged）；
+ *   3. 否则内容去重：standalone 冲突直接拦截；inline/shared 冲突则合并（类型升 shared，不建新资产）；
+ *   4. 均未命中 → 新建 standalone 资产（版本 1）。
  */
 export function promoteRoleVersion(ctx: RolePortContext, request: RolePromoteRequest): RoleWriteResult {
   const fields = roleContentFieldsOf(request.role)
   const templateId = request.sourceTemplateId
+  if (fields.kind === 'parent') {
+    const parentAsset = activeParentRoleAsset(ctx.tx)
+    if (parentAsset) {
+      const activeRow = readRoleVersionRow(ctx.tx, parentAsset.assetId, parentAsset.versionId)
+      if (activeRow && sameRoleFields(roleContentOf(activeRow), fields)) {
+        return {
+          assetId: parentAsset.assetId,
+          versionId: parentAsset.versionId,
+          rowId: versionRowId(parentAsset.assetId, parentAsset.versionId),
+          unchanged: true,
+          roleAssetType: activeRow.roleAssetType,
+          sharedRoleAssetIds: [],
+        }
+      }
+      const registration = addRoleVersion(ctx, {
+        assetId: parentAsset.assetId,
+        fields,
+        roleAssetType: activeRow ? activeRow.roleAssetType : 'standalone',
+        source: request.source,
+        // 与子代理入库同语义：来源绑定随本次入库刷新（「入库按钮锁定」据此判定）
+        inheritSource: { sourceTemplateId: templateId, sourceFingerprint: request.fingerprint },
+        ...(activeRow ? { previousRow: activeRow } : {}),
+      })
+      return { ...registration, sharedRoleAssetIds: [] }
+    }
+  }
   if (templateId) {
     const bound = ctx.tx.get(
       `SELECT a.asset_id AS asset_id, a.version_id AS version_id

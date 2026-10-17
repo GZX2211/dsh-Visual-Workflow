@@ -14,8 +14,7 @@ export const name = 'dsh-visual-workflow'
 export const inject: string[] = []
 
 // ── Config schema ────────────────────────────────────────────────────────
-// 与 cordis.patch.yml 的 13 个配置键逐键对应，默认值逐字一致；schema 另有 1 个退役只读键
-// wfAskAgentTimeoutMs（@deprecated，仅读取兼容），不出现在 patch 中（patch 并非 schema 全集）。默认值收敛在
+// 与 cordis.patch.yml 的配置键逐键对应，默认值逐字一致。默认值收敛在
 // schema：任何部署可能需要改变的值都应成为配置而非源码常量。
 
 /** Host 插件的全部可配置键（已含默认值，应用后为必填）。 */
@@ -28,18 +27,11 @@ export interface Config {
   apiKey: string | null
   /** 模式二单服务并发请求上限。 */
   maxConcurrentPerService: number
-  /** wf_ask_agent 待回复登记的 TTL 毫秒数（到期后不再接受 reply，也不再阻塞组聚合）。 */
-  wfAskAgentTtlMs: number
-  /**
-   * @deprecated 旧键名（历史命名把「待回复登记 TTL」写成了 Timeout）。
-   * 仅供读取兼容：resolveConfig 在 >0 时把它投影到 wfAskAgentTtlMs，禁止新增写入。
-   */
-  wfAskAgentTimeoutMs?: number
   /** 运行空闲超时毫秒数（无 in-flight 看护门限）。 */
   runIdleTimeoutMs: number
   /** 运行状态回显轮询间隔毫秒数（经 runtimeConfig 端点下发前端，由前端自持 600ms 缺省回退）。 */
   runPollMs: number
-  /** ReAct 迭代次数默认上限（软截停强制收尾）。 */
+  /** ReAct 迭代次数默认上限（软截停强制收尾）；0 = 不设限。 */
   reactIterationLimitDefault: number
   /** 单节点回流重试次数默认上限。 */
   retryLimitDefault: number
@@ -51,6 +43,17 @@ export interface Config {
   embeddingModelDir: string | null
   /** 外部 OpenAI 兼容 /embeddings 端点；null 优先本地嵌入。 */
   embeddingEndpoint: string | null
+  /**
+   * 官方 Team 会话级成员名额上限（部署层 `agent-team.maxMembers` 的镜像）。
+   *
+   * 官方语义是「本团队累计创建过的 teammate 数，含创建失败的」，且成员名永久不可复用；
+   * 插件在新建成员前用它预检，把运行期的官方类型化失败提前成可行动错误。改本键必须同步
+   * 部署层 `agent-team.maxMembers`，否则预检与实际名额不一致。
+   *
+   * 默认取官方 bundle 层的 8（官方包默认 16，本机部署层压到 8/30 不等）；部署层高于本值时
+   * 预检过于保守，应显式上调本键。
+   */
+  teamMemberLimit: number
 }
 
 /** 导出的 Config schema，供 Loader 校验与默认值填充。 */
@@ -59,17 +62,15 @@ export const Config: z<Config> = z.object({
   servicePortBase: z.natural().default(7860),
   apiKey: z.union([z.string(), z.const(null)]).default(null),
   maxConcurrentPerService: z.natural().default(50),
-  wfAskAgentTtlMs: z.natural().default(120000),
-  /** 旧键名（读取兼容；0 表示未设置。resolveConfig 投影到 wfAskAgentTtlMs，禁止新增写入）。 */
-  wfAskAgentTimeoutMs: z.natural().default(0),
   runIdleTimeoutMs: z.natural().default(1800000),
   runPollMs: z.natural().default(2000),
-  reactIterationLimitDefault: z.natural().default(50),
+  reactIterationLimitDefault: z.natural().default(0),
   retryLimitDefault: z.natural().default(3),
   outputFullLimit: z.natural().default(102400),
   documentTextLimit: z.natural().default(20000),
   embeddingModelDir: z.union([z.string(), z.const(null)]).default(null),
   embeddingEndpoint: z.union([z.string(), z.const(null)]).default(null),
+  teamMemberLimit: z.natural().default(8),
 })
 
 /**
@@ -79,16 +80,16 @@ export const Config: z<Config> = z.object({
  * 入口若直接拼一份完整对象，就会在源码里出现第二份默认值清单（改 schema 后两处不一致）。
  * 本函数把「部分入参 → 完整 Config」收敛到唯一一处，默认值来源仍只有上面的 schema。
  *
- * 注意：schema 对「可为 null」的键不填默认（default(null) 视为无默认），调用方需显式给出
- * apiKey / embeddingModelDir / embeddingEndpoint 的取值。
+ * 注意：schema 对「可为 null」的键不填默认（default(null) 视为无默认），而 Config 接口
+ * 把这类键声明为必填（`string | null`）。resolveConfig 是唯一的解析入口，故在此显式补齐
+ * null——否则调用方拿到的是「接口说必填、运行时缺键」的失真对象，只能各自 `?? null` 兜底。
  */
 export function resolveConfig(input: Partial<Config>): Config {
-  // 旧键读取兼容：早期把「待回复登记 TTL」命名为 wfAskAgentTimeoutMs；只在解析入口投影到
-  // 新键（新键优先），既有部署的旧配置继续生效，消费侧只见 wfAskAgentTtlMs。
-  const { wfAskAgentTimeoutMs: legacy, ...rest } = input
-  const merged: Partial<Config> =
-    rest.wfAskAgentTtlMs === undefined && typeof legacy === 'number' && legacy > 0
-      ? { ...rest, wfAskAgentTtlMs: legacy }
-      : rest
-  return (Config as unknown as (value: Partial<Config>) => Config)(merged)
+  const resolved = (Config as unknown as (value: Partial<Config>) => Config)(input)
+  return {
+    ...resolved,
+    apiKey: resolved.apiKey ?? null,
+    embeddingModelDir: resolved.embeddingModelDir ?? null,
+    embeddingEndpoint: resolved.embeddingEndpoint ?? null,
+  }
 }

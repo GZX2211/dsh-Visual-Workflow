@@ -1,3 +1,5 @@
+// scripts/build-client.ts
+//
 // Visual Workflow —— client bundle 构建配置（T-003）。
 //
 // 复用官方 packages/client/tsdown.client.ts 的 clientBundle 关键契约（见取证结论）：

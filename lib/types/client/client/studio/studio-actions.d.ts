@@ -134,11 +134,12 @@ export type StudioAction = {
         status: string;
         runId: string;
     }>;
-} | {
+}
+/** 资产态一次性「开启新会话」记忆（模板态勾选/路径走模板持久化字段，不经本动作）。 */
+ | {
     type: 'INSTANCE_OPTIONS_SET';
     options: Partial<{
         newSession: boolean;
-        workspacePath: string;
     }>;
 } | {
     type: 'TEMPLATES_LOADED';

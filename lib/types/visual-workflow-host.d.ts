@@ -2,7 +2,7 @@ import { Context, Service } from '@deepseek-ai/cordis';
 import type { Config } from './config.js';
 import { FlowStore } from './storage/flow-store.js';
 import { AssetStore } from './assets/index.js';
-import { OrchestratorRuntime, type RootAgentLike } from './orchestrator/index.js';
+import { OrchestratorRuntime, type RootAgentLike, type RootInjectedMessage } from './orchestrator/index.js';
 import { CordisAgentHost, NodeAgentRunner } from './agent/index.js';
 import { ToolSwitchStore } from './tools/index.js';
 import type { ExperienceDomainFace } from './api/index.js';
@@ -53,7 +53,7 @@ export declare class VisualWorkflowHost extends Service {
     private readonly childPrompt;
     /**
      * 子代理工具白名单装配（创建窗口内安装 allow）。
-     * 普通节点子代理由官方创建请求携带白名单；协作组成员无法携带，只能由本装配在窗口内安装。
+     * 普通节点子代理由官方创建请求携带白名单；Team 成员无法携带，只能由本装配在窗口内安装。
      */
     private readonly childToolFilter;
     /**
@@ -142,11 +142,24 @@ export declare class VisualWorkflowHost extends Service {
      * 统一清理。
      */
     private onAgentDisposed;
-    /** 按会话 id 取子代理 agent（wf_ask_agent 投递缝用；转发至 agents 适配）。 */
+    /** 按会话 id 取子代理 agent（wf_send_message 投递缝用；转发至 agents 适配）。 */
     getChildAgent(childId: string): RootAgentLike | null;
     /** 冷态投递：复用子代理派发协作消息（subagents 服务惰性解析；缺失报明确错误）。 */
     followupChild(parent: RootAgentLike, childId: string, content: unknown[], options: {
         source: unknown;
+        signal?: AbortSignal;
+    }): Promise<unknown>;
+    /** 父代理空闲时唤醒投递（wf_send_message 投递缝；转发至 agents 适配）。 */
+    followupRoot(agent: RootAgentLike, message: RootInjectedMessage): void;
+    /**
+     * 官方 Team 成员投递（wf_send_message 的成员通道）：按官方成员名寻址，直接调用官方
+     * Team 服务。
+     *
+     * 为什么不走官方 send_message 工具：工具通道可被全局工具开关关闭（插件默认关闭官方
+     * send_message），而成员间通信必须继续可用；宿主直接调用官方服务不经过工具注册与
+     * 开关，因此不受影响。
+     */
+    sendToTeammate(parent: RootAgentLike, memberName: string, content: unknown[], options: {
         signal?: AbortSignal;
     }): Promise<unknown>;
     /** 数据根目录（数据工具索引落盘位置）。 */
@@ -181,14 +194,24 @@ export declare class VisualWorkflowHost extends Service {
     /** 嵌入引擎（数据工具向量检索用）。 */
     get engine(): EmbeddingService;
     /**
-     * 运行期配置下发（API 边界缝）：只透传配置事实，前端据以调整轮询节奏。
+     * 运行期配置下发（API 边界缝）：只透传配置事实，前端据以调整轮询节奏与画布约束。
      * 前端在缺失/非法时的缺省回退由前端决定，Host 不在此伪造取值。
      */
     runtimeConfig(): {
         runPollMs: number;
+        teamMemberLimit: number;
     };
     /** 启动装配（Service.init 语义：初始化失败让 fiber 失败，不吞错）。 */
     [Service.init](): Promise<void>;
+    /**
+     * 播种内置父代理模板（幂等）：模板库中没有任何 kind==='parent' 模板时写入一条。
+     *
+     * 为什么由宿主播种而不是 Client：模板是持久化事实，Client 只在 boot 时补齐会让落盘
+     * 文案随「当次界面语言」漂移，且插件未开界面时角色 Tab 无父代理模板。
+     * 存在性判据只有 kind==='parent'（不比对语言与内容）：库中已有任意父代理模板
+     * （用户自建或历史版本播种过的）时本次不补齐、不覆盖用户改动。
+     */
+    private ensureBuiltinParentTemplate;
     /**
      * 自主编排工具的宿主能力适配（P1）：把宿主 service 的 store / 运行时 / 生态枚举
      * 收敛成两个工具所需的最小缝。为什么要一层适配而不是把 service 直接传出：

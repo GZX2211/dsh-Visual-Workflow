@@ -165,6 +165,10 @@ describe('wf_experience_learn：字段字数约束（只做提示词引导，不
       expect(fields[name]).toContain(`${FIELD_BUDGETS.arrayElement} characters`)
       expect(fields[name]).not.toContain('cap')
     }
+    // 这两个字段的语义要求（适用边界 / 证据只记关键事实）由必读的生成 Prompt 承载，
+    // 常驻参数说明不再复述
+    expect(fields.exclusions).not.toContain('must not be transferred')
+    expect(fields.evidence).not.toContain('not a run log')
   })
 
   it('工具描述：给出总预算；不向模型暴露总上限', async () => {

@@ -26,7 +26,7 @@ export type NodeKind =
   | 'start' // 启动阶段节点（模式一入口）
   | 'end' // 结束阶段节点（模式一出口）
   | 'pause' // 暂停阶段节点（流程门）
-  | 'group' // 协作组节点：组卡片 + 组内角色并行
+  | 'group' // Team 节点：Team 卡片 + 组内角色并行
   | 'proxy' // 虚拟节点：主节点别名引用，无独立配置
 
 /** 节点公共基座：所有节点的共有最小字段。 */
@@ -63,9 +63,14 @@ export interface RoleNode extends BaseNode {
     retryLimit: number
     /** ReAct 迭代次数上限（软截停语义；null 表示不设限）。 */
     reactLimit?: number | null
-    /** 输入结构描述（模型理解占位，不强校验）。 */
+    /**
+     * 输入契约（柔性文本，不强校验）：告诉子代理「应当收到什么输入」；空串即不配置（不注入）。
+     */
     inputSchema?: string
-    /** 输出结构描述（同上，占位不强校验）。 */
+    /**
+     * 输出契约（柔性文本）：子代理最终回复必须按其组织；空串即不配置（不注入该段）。
+     * 新建 agent 节点时默认落盘为 shared/protocol.ts 的 DEFAULT_OUTPUT_CONTRACT_TEXT。
+     */
     outputSchema?: string
     /** System Prompt 来源文件名（从 .md 加载时记录，左侧栏卡片展示用）。 */
     systemPromptSource?: string
@@ -99,7 +104,7 @@ export interface RoleNode extends BaseNode {
      * 未改动时复用原子代理、不重复读取。为空则直接使用 systemPrompt 文本。
      */
     promptFilePath?: string
-    /** 所属协作组 id（组内成员节点字段）。 */
+    /** 所属 Team id（组内成员节点字段）。 */
     groupId?: string | null
     /**
      * 来源角色资产 id（可选；仅「从资产拖入画布」时写入，从模版/实例拖入不写）。
@@ -184,8 +189,8 @@ export interface StageNode extends BaseNode {
 }
 
 /**
- * 协作组节点：组卡片 + 组内角色并行执行。
- * 组内成员节点经 memberIds 关联；组卡片仅提供流程入/出连接点。
+ * Team 节点：Team 卡片 + 组内角色并行执行。
+ * 组内成员节点经 memberIds 关联；Team 卡片仅提供流程入/出连接点。
  */
 export interface GroupNode extends BaseNode {
   kind: 'group'
@@ -213,17 +218,10 @@ export interface ProxyNode extends BaseNode {
   kind: 'proxy'
   /** 引用主节点的 id（虚拟节点不存储独立配置，仅此一个引用字段）。 */
   proxySourceId: string
-  /**
-   * 可选视图/识别数据（**全部可选，向后兼容**）。
-   * 为什么需要它：同一个父代理可以被多个虚拟节点引用，运行时必须能区分
-   * 「普通执行入口」与「里程碑闸门」——闸门那一轮**不自动完成**，只能由
-   * `wf_graph_patch(mark_node)` 显式标记。
-   */
+  /** 可选视图数据（仅画布展示，不参与运行判定）。 */
   data?: {
-    /** 画布显示名（如「里程碑①：方案评审」）。 */
+    /** 画布显示名（如「阶段复核」）。 */
     label?: string
-    /** 角色：缺省 = executor（沿用既有自动完成行为）；milestone = 闸门（不自动 ok）。 */
-    role?: 'executor' | 'milestone'
   }
 }
 
@@ -306,13 +304,17 @@ export interface WorkflowTemplate {
   /** 连线列表（全量内联）。 */
   lines: Line[]
   /**
-   * 【已退役，仅旧数据兼容】启动时是否开启新会话（不再写入/不再被运行逻辑消费）。
-   * 新语义（工作台全局化改版）：「开启新会话」是「从模板创建实例」时的一次性
-   * 临时选项——勾选后先新建主会话（官方 agents.create 无父根会话），实例绑定该
-   * 新会话 id；运行只认实例绑定的会话。该选项不持久化到模板/实例文档。
+   * 「从模板创建实例」时是否新开会话（**模板级持久化配置**，随模板保存、随模板删除）。
+   * true = 先新建独立主会话（官方 agents.create 无父根会话），实例绑定该新会话；
+   * 缺省/undefined = 在当前主会话创建。实例文档不保存本字段（只在创建实例时消费）。
    */
   startNewSession?: boolean
-  /** 【已退役，仅旧数据兼容】新会话工作区（同上：创建时一次性消费，不落盘）。 */
+  /**
+   * 新会话工作区路径（**模板级持久化配置**，随模板保存、随模板删除）。
+   * 仅在 startNewSession=true 时生效；由官方目录选择器选取，绝对路径目录。
+   * 该路径即新会话 cwd 与沙箱 workspace-write 根；存在性由创建实例的端点校验，
+   * 空白/缺失 = 继承当前会话工作区。实例文档不保存本字段。
+   */
   workspacePath?: string
   /** 修订版本号（可选，与实例保存对齐）。 */
   revision?: number
@@ -363,13 +365,17 @@ export interface WorkflowDocument {
   /** 连线列表（全量内联）。 */
   lines: Line[]
   /**
-   * 【已退役，仅旧数据兼容】启动时是否开启新会话（不再写入/不再被运行逻辑消费）。
-   * 新语义（工作台全局化改版）：「开启新会话」是「从模板创建实例」时的一次性
-   * 临时选项——勾选后先新建主会话（无父根会话），实例绑定该新会话 id；运行只认
-   * 实例绑定的会话（run.sessionId === instance.sessionId 恒成立）。该选项不持久化。
+   * 【实例文档不持久化，仅旧数据读兼容】启动时是否开启新会话。
+   * 新语义：「开启新会话」是**模板级持久化配置**（见 WorkflowTemplate.startNewSession）——
+   * 从模板创建实例时消费：勾选时先新建主会话（无父根会话），实例绑定该新会话；
+   * 运行只认实例绑定的会话（run.sessionId === instance.sessionId 恒成立）。
    */
   startNewSession?: boolean
-  /** 【已退役，仅旧数据兼容】新会话工作区（同上：创建时一次性消费，不落盘）。 */
+  /**
+   * 【实例文档不持久化，仅旧数据读兼容】新会话工作区。
+   * 新语义：模板级持久化配置（见 WorkflowTemplate.workspacePath），创建实例时经
+   * createSession 端点消费；实例文档不保存该字段。
+   */
   workspacePath?: string
   /** 修订版本号（可选，配合增量/缓存优化用，非必需）。 */
   revision?: number

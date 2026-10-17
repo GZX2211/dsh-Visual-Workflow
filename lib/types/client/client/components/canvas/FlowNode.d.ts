@@ -24,5 +24,9 @@ interface FlowNodeProps {
     /** 交换左右连接点（节点属性 swapPorts 取反）。 */
     onToggleSwap(id: string): void;
 }
-export declare function FlowNode({ node, copy, mode, selected, highlighted, dragging, runStatus, locked, lockHint, agentPatched, onPointerDown, onHandlePointerDown, onToggleSwap }: FlowNodeProps): import("react").JSX.Element;
+/**
+ * 节点卡片以 memo 包住：父组件拖拽/平移/缩放等本地渲染态变化时，未变的节点不重渲染
+ * （回调由 GraphCanvas 以 useCallback 固定引用，节点对象与运行状态对象保持原引用）。
+ */
+export declare const FlowNode: import("react").MemoExoticComponent<({ node, copy, mode, selected, highlighted, dragging, runStatus, locked, lockHint, agentPatched, onPointerDown, onHandlePointerDown, onToggleSwap }: FlowNodeProps) => import("react").JSX.Element>;
 export {};

@@ -55,7 +55,7 @@ export function useAutoLayout(
     attemptedRef.current = key
 
     // ① 缺坐标/哨兵坐标 → 自动重排一次并立即落盘
-    if (needsAutoLayout(nodes as never)) {
+    if (needsAutoLayout(nodes)) {
     // 单入口：layoutNodes（lib/layout-fit）内部即 tidyNodes 的
     // 「形状解析 → 分层布局 → 坐标写回」四步收敛，与「整理布局」按钮走同一实现，
     // 输出坐标与旧写法（toLayoutInputs → layoutGraph → applyLayout）逐项一致。
@@ -71,13 +71,10 @@ export function useAutoLayout(
     }
 
     // ② 已布局：只检测重叠并提示（非阻断，不自动重排）
-    // 排除「重复渲染」的节点（组内成员写入组卡片内、虚拟节点与主节点同坐标）：否则会永远告警
-    const inputs = toLayoutInputs(
-      nodes as unknown as Array<{ id: string; kind: string; data?: Record<string, unknown> }>,
-      (node) => groupCardSizeOf(node as never),
-    )
+    // 排除「重复渲染」的节点（组内成员写入 Team 卡片内、虚拟节点与主节点同坐标）：否则会永远告警
+    const inputs = toLayoutInputs(nodes, (node) => groupCardSizeOf(node))
     const excluded = collapsedIdsOf(inputs)
-    const boxes = layoutBoxesOf(nodes as never, (node) => groupCardSizeOf(node as never), excluded)
+    const boxes = layoutBoxesOf(nodes, (node) => groupCardSizeOf(node), excluded)
     const overlapTip = optionsRef.current.tips?.overlap
     if (findLayoutOverlaps(boxes).length === 0 || !overlapTip) return
     optionsRef.current.notify?.('info', overlapTip)

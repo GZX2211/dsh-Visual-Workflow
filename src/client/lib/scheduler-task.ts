@@ -2,18 +2,27 @@
 //
 // 定时任务纯逻辑（可单测）：草稿构建 / 视图转换 / 时间与时区换算 / 轻量即时校验 / 格式化。
 // 与 UI 生命周期无关，故归 lib（组件只消费，不承载业务换算）。
+// 时区探测不可用（返回 null）与展示 locale 都以显式返回值/注入参数表达：lib 不持有词典，
+// 也不用兜底文案掩盖「未知」，由调用方按语义提示。
 // 注意：仅做表单提示层校验（格式/必填），权威校验在 host schedulerTaskPut
 // （validateScheduledTask 400 中文错误，UI 经 toast 展示），避免双份校验逻辑漂移。
 
 import type { ScheduledTask, ScheduledTaskView } from '../../host/shared/types.js'
 
-/** 本地时区（浏览器/Node resolvedOptions；不可用时回退 Asia/Shanghai）。 */
-export function detectLocalTimezone(): string {
+/** 时区探测不可用时的兜底时区（宿主契约 ScheduledTask.timezone 必填；界面须同时显式提示）。 */
+export const FALLBACK_TIMEZONE = 'Asia/Shanghai'
+
+/**
+ * 本地时区（浏览器/Node resolvedOptions）。探测不可用返回 null —— 不静默按上海解释：
+ * 把未知时区当成已知事实会让全部触发时刻整体偏移，故由调用方提示用户手动选择
+ * （SchedulerManager 的 schedulerTimezoneUnavailable；草稿落库另用 FALLBACK_TIMEZONE）。
+ */
+export function detectLocalTimezone(): string | null {
   try {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
-    return tz || 'Asia/Shanghai'
+    return tz || null
   } catch {
-    return 'Asia/Shanghai'
+    return null
   }
 }
 
@@ -48,7 +57,9 @@ export function createTaskDraft(ownerSessionId: string, now = new Date()): Sched
     sessionMode: 'new-session',
     ownerSessionId,
     enabled: true,
-    timezone: detectLocalTimezone(),
+    // 探测不可用时落兜底时区：契约里 timezone 必填，空串会被 host 拒绝；
+    // 「不再静默」由界面负责——SchedulerManager 打开即提示用户手动选择
+    timezone: detectLocalTimezone() ?? FALLBACK_TIMEZONE,
     window: {
       startDate: today,
       endDate: shiftDateOnly(today, 30),
@@ -76,13 +87,17 @@ export function validateTaskDraft(task: ScheduledTask): string | null {
   return null
 }
 
-/** 显示格式化：ISO → 本地可读（含时区标识）。 */
-export function formatIso(value: string | null | undefined): string {
+/**
+ * 显示格式化：ISO → 本地可读。
+ * locale 由调用方从词典注入（lib 不持有词典）：年月日/时分顺序与 AM/PM 表达随界面
+ * 语言变化，硬编码 'zh-CN' 会让英文界面一直显示中文习惯的日期格式。
+ */
+export function formatIso(value: string | null | undefined, locale: string): string {
   if (!value) return '—'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return String(value)
   try {
-    return new Intl.DateTimeFormat('zh-CN', {
+    return new Intl.DateTimeFormat(locale, {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',

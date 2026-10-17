@@ -6,7 +6,7 @@
 //   /v1/models。
 // HTTP/SSE 适配层单测见 ./openai-http.test.ts。
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { OpenAiApi, OpenAiError, parseChatRequest } from '../../../src/host/service/index.js'
 import type { ServiceState } from '../../../src/host/shared/types.js'
@@ -296,6 +296,87 @@ describe('OpenAiApi.runChat', () => {
     const result = await h.api.runChat({ userId: 'user-1', question: 'q', stream: false })
     expect(result.status).toBe('completed')
     expect(h.orchestrator.stopCalls).toHaveLength(0)
+  })
+
+  it('客户端断开：signal abort 立即停止后台运行（不等下一轮 sweep/轮询）', async () => {
+    const h = makeHarness({ status: 'running' })
+    let releaseSweep!: () => void
+    const gate = new Promise<void>((resolve) => { releaseSweep = resolve })
+    let sweeps = 0
+    const api = new OpenAiApi({
+      store: h.store as never,
+      orchestrator: h.orchestrator as never,
+      serviceId: 'svc-1',
+      apiKey: null,
+      maxConcurrent: 50,
+      resolveSession: async () => 'session-1',
+      ensureRootAgent: async () => ({ agent: { followup() {}, session: { seq: 0, events: [] } } }),
+      // 首轮扫描挂起：abort 必须在这一轮扫描在途时就停掉运行，
+      // 而不是等「扫描返回 → 判终态 → sleep → 下一轮 isAborted」走完（旧实现多一个完整周期）。
+      sweep: () => { sweeps += 1; return gate },
+      pollMs: 1,
+    })
+    const controller = new AbortController()
+    const pending = api.runChat({ userId: 'user-1', question: 'q', stream: true }, undefined, { signal: controller.signal })
+    const settled = pending.then(() => null, (error: OpenAiError) => error)
+
+    await vi.waitFor(() => {
+      if (sweeps < 1) throw new Error('首轮 sweep 未开始')
+    }, { timeout: 2_000 })
+    controller.abort()
+    await vi.waitFor(() => {
+      if (!h.orchestrator.stopCalls.includes('run-1')) throw new Error('abort 未立即停止运行')
+    }, { timeout: 2_000 })
+
+    releaseSweep()
+    expect((await settled)?.code).toBe('client_closed')
+  })
+
+  it('正常终态：abort 监听器被摘除（不留监听器泄漏）', async () => {
+    const h = makeHarness()
+    const listeners = new Set<() => void>()
+    const signal = {
+      aborted: false,
+      addEventListener: (type: string, listener: () => void) => { if (type === 'abort') listeners.add(listener) },
+      removeEventListener: (type: string, listener: () => void) => { if (type === 'abort') listeners.delete(listener) },
+    } as unknown as AbortSignal
+
+    const result = await h.api.runChat({ userId: 'user-1', question: 'q', stream: false }, undefined, { signal })
+    expect(result.status).toBe('completed')
+    expect(listeners.size).toBe(0)
+  })
+})
+
+describe('OpenAiApi.sweep（跨请求 in-flight 去重）', () => {
+  it('重叠推进共享同一次扫描（与 SchedulerEngine.sweep 同构）；结束后可再次推进', async () => {
+    const h = makeHarness()
+    let calls = 0
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const api = new OpenAiApi({
+      store: h.store as never,
+      orchestrator: h.orchestrator as never,
+      serviceId: 'svc-1',
+      apiKey: null,
+      maxConcurrent: 50,
+      resolveSession: async () => 'session-1',
+      ensureRootAgent: async () => ({ agent: { followup() {}, session: { seq: 0, events: [] } } }),
+      sweep: () => { calls += 1; return gate },
+      pollMs: 1,
+    })
+
+    // 同一时刻两次推进（并发请求的轮询）：只应真正扫一次
+    const first = api.sweep()
+    const second = api.sweep()
+    await Promise.resolve()
+    expect(calls).toBe(1)
+    release()
+    await Promise.all([first, second])
+    expect(calls).toBe(1)
+
+    // 去重不粘住：扫描结束后下一次推进照常执行
+    await api.sweep()
+    expect(calls).toBe(2)
   })
 })
 

@@ -35,8 +35,8 @@ export function metaLimitIssues(meta: OrgMeta, usage: OrgUsage): GraphIssue[] {
     issues.push({
       code: META_LIMIT_EXCEEDED_CODE,
       level: 'error',
-      message: `协作组数 ${usage.groupCount} 超过元参数上限 ${groupMax}`,
-      suggestion: `减少协作组卡片数量至 ${groupMax} 个以内，或把成员改为独立节点串行执行`,
+      message: `Team 数 ${usage.groupCount} 超过元参数上限 ${groupMax}`,
+      suggestion: `减少 Team 卡片数量至 ${groupMax} 个以内，或把成员改为独立节点串行执行`,
     })
   }
   const membersMax = Number(meta.membersMax) || 0
@@ -45,7 +45,7 @@ export function metaLimitIssues(meta: OrgMeta, usage: OrgUsage): GraphIssue[] {
       code: META_LIMIT_EXCEEDED_CODE,
       level: 'error',
       message: `存在组内人数 ${usage.maxGroupMembers} 超过元参数上限 ${membersMax}`,
-      suggestion: `把超限协作组拆成多个组（每组 ≤ ${membersMax} 人），或减少组成员数`,
+      suggestion: `把超限 Team 拆成多个组（每组 ≤ ${membersMax} 人），或减少组成员数`,
     })
   }
   const parallelBranchMax = Number(meta.parallelBranchMax) || 0

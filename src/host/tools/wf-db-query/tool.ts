@@ -21,15 +21,19 @@ import { dbInEdges } from '../../graph/index.js'
 import { WfError, type CallerInfo, type OrchestratorRuntime, type RunEntry } from '../../orchestrator/index.js'
 import { SEARCH_TOP_K_MAX, VectorIndex } from '../../embedding/indexer.js'
 import { callerOf } from '../infrastructure/caller.js'
-import { defineTool, type ToolDefinitionLike, type ToolExecLike } from '../infrastructure/define-tool.js'
+import { defineTool, type ToolExecLike } from '../infrastructure/define-tool.js'
+import { registerTool, requireToolsService } from '../infrastructure/register-tool.js'
 import { textRender } from '../infrastructure/text-render.js'
 import { createDatabaseDriver } from './driver.js'
 import { sanitizeReadOnlySql } from './policy.js'
 import { buildIndexForDatabase, INDEX_MAX_ROWS, indexPathOf } from './service.js'
-import type { WfDbQueryHost } from './types.js'
+import type { DatabaseDriver, WfDbQueryHost } from './types.js'
 
-/** 查询结果行数上限（防结果集打爆上下文）。 */
-const QUERY_ROWS_LIMIT = 50
+/**
+ * 查询结果行数上限（防结果集打爆上下文）。
+ * 由执行层落实（驱动逐行读取并读满即停），不只做形式上的 LIMIT → slice。
+ */
+export const QUERY_ROWS_LIMIT = 50
 
 /** 查询结果单元格值最大长度（超长截断防止向量/BLOB 列打爆上下文；追加标记）。 */
 export const QUERY_CELL_MAX_LENGTH = 240
@@ -104,10 +108,9 @@ function callerNodeIdOf(flow: WorkflowDocument, caller: CallerInfo, childNodeId:
  * 返回 disposer：注销失败尽力而为。
  */
 export function registerWfDbQuery(ctx: { get(name: string): unknown }, host: WfDbQueryHost): () => void {
-  const tools = ctx.get('tools') as { register(def: ToolDefinitionLike): () => void } | null | undefined
-  if (!tools || typeof tools.register !== 'function') {
-    throw new Error('[visual-workflow] tools 服务不可用，无法注册 wf_db_query')
-  }
+  const tools = requireToolsService(ctx, WF_DB_QUERY)
+  // 驱动统一经宿主缝解析：未注入 createDriver 时缺省即真实驱动。
+  const driverOf = (node: DatabaseNode): DatabaseDriver => (host.createDriver ?? createDatabaseDriver)(node)
 
   const definition = defineTool({
     name: WF_DB_QUERY,
@@ -199,7 +202,7 @@ export function registerWfDbQuery(ctx: { get(name: string): unknown }, host: WfD
         // 落盘后复用）：运行期首次检索无需手动预建，嵌入不可用时自动落 BM25（结果标注）。
         let file = await index.load()
         if (!file || file.chunks.length === 0) {
-          file = (await buildIndexForDatabase(host.dataDir, dataNode, host.engine)).file
+          file = (await buildIndexForDatabase(host.dataDir, dataNode, host.engine, host.createDriver)).file
         }
         const result = await index.search(
           queryText,
@@ -216,10 +219,12 @@ export function registerWfDbQuery(ctx: { get(name: string): unknown }, host: WfD
         const sql = String(args?.sql ?? '')
         const checked = sanitizeReadOnlySql(sql)
         if (!checked.ok) throw new WfError(`WF_DB_SQL: SQL rejected: ${checked.error}`, 'WF_DB_SQL')
-        const driver = createDatabaseDriver(dataNode)
+        const driver = driverOf(dataNode)
         try {
-          const result = await driver.query(checked.sql)
-          const truncatedRows = result.rows.length > QUERY_ROWS_LIMIT
+          const result = await driver.query(checked.sql, { maxRows: QUERY_ROWS_LIMIT })
+          // 行数上限已下推到执行层（驱动逐行读取、读满即停）：不再依赖全量结果集。
+          // 未实现该上限的驱动（旧注入缝）仍以行数兜底——两种口径都如实透传 truncated。
+          const truncatedRows = result.truncated ?? result.rows.length > QUERY_ROWS_LIMIT
           const rows = result.rows.slice(0, QUERY_ROWS_LIMIT)
           // 单元格超长（如向量/BLOB 列）截断，防止巨量字符串打爆上下文
           let cellTruncated = false
@@ -238,7 +243,7 @@ export function registerWfDbQuery(ctx: { get(name: string): unknown }, host: WfD
       }
 
       // mode === 'schema'
-      const driver = createDatabaseDriver(dataNode)
+      const driver = driverOf(dataNode)
       try {
         // 驱动内部多取一行精确判定：正好满上限不算截断（与 search 的 truncated 判据同一口径）
         const { tables, truncated } = await driver.schemaPage()
@@ -249,12 +254,5 @@ export function registerWfDbQuery(ctx: { get(name: string): unknown }, host: WfD
     },
   })
 
-  const dispose = tools.register(definition)
-  return () => {
-    try {
-      dispose()
-    } catch {
-      // 注销尽力而为
-    }
-  }
+  return registerTool(tools, definition)
 }

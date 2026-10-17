@@ -23,7 +23,7 @@ export function DatabaseForm({ data, copy, onPatch, onTest }: {
    */
   const [passwordDraft, setPasswordDraft] = useState<string | null>(null)
   const setOpt = (patch: Record<string, number | undefined>): void => onPatch({ vectorOptions: { ...vectorOptions, ...patch } })
-  const clampInt = (value: string, min: number, fallback: number, max?: number): number => {
+  const clampInt = (value: string, min: number, _fallback: number, max?: number): number => {
     const n = Number(value)
     if (!Number.isFinite(n) || n < min) return min
     return max === undefined ? n : Math.min(max, n)

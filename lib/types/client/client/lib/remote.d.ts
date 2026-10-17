@@ -31,6 +31,17 @@ export interface RemoteCallOptions {
     /** 超时毫秒；0 = 不设超时（仅依赖 signal 取消）。缺省 DEFAULT_REMOTE_TIMEOUT_MS。 */
     timeoutMs?: number;
 }
+/**
+ * 同源 API 路径：以 document.baseURI 为基准解析相对路径。
+ *
+ * 为什么不能写死 `/visual-workflow/...`：官方 Web 在 index 注入 `<base href="./">`，
+ * 以支持 `--public-url` 的带路径前缀反向代理；固定根路径会绕过该前缀。base 不可用/
+ * 非法时回退根路径，保证普通根部署与测试环境行为不变。
+ * @param endpoint - 端点名（共享协议常量）。
+ * @param baseUri - 解析基准；缺省读取 document.baseURI（非浏览器环境回退根路径）。
+ * @returns 同源绝对路径（如 `/visual-workflow/run` 或 `/dsh/visual-workflow/run`）。
+ */
+export declare function visualWorkflowPath(endpoint: string, baseUri?: string): string;
 /** 调用 Host API（同源 fetch；超时与取消见 RemoteCallOptions）。 */
 export declare function remoteCall(endpoint: string, args?: Record<string, unknown>, options?: RemoteCallOptions): Promise<unknown>;
 /**

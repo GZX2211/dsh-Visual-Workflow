@@ -1,7 +1,7 @@
 // src/client/hooks/useStudioBoot.ts
 //
 // 工作台初始化加载（工作台全局化改版）：并行拉取**全部会话**的工作流/服务
-// 实例、模板，补齐内置父代理模板，拉取生态枚举（presets/models/combos）
+// 实例、模板，拉取生态枚举（presets/models/combos）
 // 与**全部会话**的活跃 run；随后按「当前主会话」自动选中实例（规则见
 // pickInitialInstanceForSession：当前会话实例运行中 > 暂停 > 最新；当前会话无
 // 实例则保持空白画布——不再回退到其他会话的实例）。
@@ -19,7 +19,6 @@ import type { FlowTemplatesFace } from './useFlowTemplates.js'
 import type { TemplatesFace } from './useTemplates.js'
 import type { ServiceControlFace } from './useServiceControl.js'
 import type { ToastFace } from './useToast.js'
-import type { Dict } from '../i18n.js'
 import { EP } from '../lib/remote.js'
 
 /** 自动选中实例判定（当前主会话实例列表 + 全量活跃 run；运行中>暂停>最新）。 */
@@ -34,7 +33,6 @@ export function useStudioBoot(
   dispatch: Dispatch<StudioAction>,
   _notify: ToastFace['toast'],
   toastError: ToastFace['toastError'],
-  t: Dict,
   remote: RemoteFace,
   workflows: WorkflowsFace,
   flowTemplates: FlowTemplatesFace,
@@ -75,27 +73,9 @@ export function useStudioBoot(
       if (templatesResult.status === 'rejected' && !cancelled) toastError(templatesResult.reason)
       try {
         // loadTemplates 直接返回三类结果（已含 role）：不得再单独发起一次 EP_LIST_TEMPLATES
-        // 查询——查询与创建之间无同步，会出现「创建成功但列表未刷新」的部分更新。
-        const loaded = await templates.loadTemplates()
-        // 内置父代理模板：模板库首次启动时补齐（角色 Tab 置顶固定显示）
-        const roleItems = loaded.role ?? []
-        if (!roleItems.some((item) => (item as { kind?: string }).kind === 'parent')) {
-          await templates.saveTemplate('role', {
-            id: 'role-parent-builtin',
-            kind: 'parent',
-            name: t.parentAgent,
-            systemPrompt: t.builtinParentPrompt,
-            provider: '',
-            model: '',
-            presetId: 'standard',
-            retryLimit: 3,
-            reactLimit: null,
-            inputSchema: '',
-            outputSchema: '',
-          } as never)
-          if (cancelled) return // 卸载后不再刷新（避免卸载后 dispatch）
-          await templates.loadTemplates() // 刷新列表（含新建内置模板）
-        }
+        // 查询。内置父代理模板由宿主初始化时播种——Client 不再写模板库（否则「落盘文案
+        // 取决于当次界面语言」）。
+        await templates.loadTemplates()
       } catch (error) {
         if (!cancelled) toastError(error)
       }

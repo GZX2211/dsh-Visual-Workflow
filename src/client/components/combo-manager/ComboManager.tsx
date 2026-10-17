@@ -18,6 +18,7 @@ import { TAG_ALL } from '../../lib/tool-tags.js'
 import { ComboCatalog } from './ComboCatalog.js'
 import { ComboSidePanel } from './ComboSidePanel.js'
 import { McpFormPanel } from './McpFormPanel.js'
+import { Modal } from '../modal/Modal.js'
 
 export interface ComboManagerProps {
   copy: Dict
@@ -230,64 +231,62 @@ export function ComboManager({ copy, remote, sessionId, onClose, onToast, onChan
   }, [copy.mcpImportEmptyInput, copy.mcpImported, copy.mcpImportServersEmpty, mcpImportText, onToast])
 
   return (
-    <div className="wf-combo-backdrop">
-      <div className="wf-combo" role="dialog" aria-modal="true">
-        <div className="wf-combo__head">
-          <h3>{copy.comboManager}</h3>
-          <span className="wf-status">{copy.comboHint}</span>
-          <button type="button" className="wf-btn wf-combo__close" onClick={onClose}>✕</button>
-        </div>
-        <div className="wf-combo__body">
-          <ComboCatalog
-            copy={copy}
-            catalog={combosFace.catalog}
-            tab={tab}
-            onTabChange={setTab}
-            search={search}
-            onSearchChange={setSearch}
-            activeTag={activeTag}
-            onTagChange={setActiveTag}
-            disabledTools={combosFace.disabledTools}
-            comboDraft={comboDraft}
-            busy={combosFace.busy}
-            onToggleTool={toggleTool}
-            onToggleMcp={toggleMcp}
-            onToggleToolDisabled={(name, disabled) => { void toggleToolDisabled(name, disabled) }}
-            onToggleMcpDisabled={(id, disabled) => { void runAction(() => combosFace.setMcpDisabled(id, disabled), disabled ? copy.mcpDisabled : copy.mcpEnabled) }}
-            onEditMcp={(server) => setMcpForm(mcpFormFromServer(server))}
-            onDeleteMcp={(id) => { void runAction(() => combosFace.deleteMcp(id), copy.mcpDeleted) }}
-            onBulkToolDisabled={(disabled, names) => { void bulkToolDisabled(disabled, names) }}
-          />
-          <ComboSidePanel
-            copy={copy}
-            combos={combosFace.combos}
-            activeComboId={activeComboId}
-            comboDraft={comboDraft}
-            busy={combosFace.busy}
-            confirmDelete={confirmDelete}
-            onSelect={selectCombo}
-            onNew={newCombo}
-            onDraftNameChange={(name) => setComboDraft((draft) => ({ ...draft, name }))}
-            onRemoveTool={toggleTool}
-            onRemoveMcp={toggleMcp}
-            onSave={() => { void saveCombo() }}
-            onDelete={() => { void deleteCombo() }}
-          />
-        </div>
-        <McpFormPanel
+    <Modal className="wf-combo" backdropClassName="wf-combo-backdrop" label={String(copy.comboManager)} onClose={onClose}>
+      <div className="wf-combo__head">
+        <h3>{copy.comboManager}</h3>
+        <span className="wf-status">{copy.comboHint}</span>
+        <button type="button" className="wf-btn wf-combo__close" onClick={onClose}>✕</button>
+      </div>
+      <div className="wf-combo__body">
+        <ComboCatalog
           copy={copy}
+          catalog={combosFace.catalog}
           tab={tab}
-          form={mcpForm}
+          onTabChange={setTab}
+          search={search}
+          onSearchChange={setSearch}
+          activeTag={activeTag}
+          onTagChange={setActiveTag}
+          disabledTools={combosFace.disabledTools}
+          comboDraft={comboDraft}
           busy={combosFace.busy}
-          importOpen={mcpImportOpen}
-          importText={mcpImportText}
-          onFormChange={setMcpForm}
-          onSave={() => { void saveMcp() }}
-          onImportOpenChange={setMcpImportOpen}
-          onImportTextChange={setMcpImportText}
-          onImportApply={importMcpJson}
+          onToggleTool={toggleTool}
+          onToggleMcp={toggleMcp}
+          onToggleToolDisabled={(name, disabled) => { void toggleToolDisabled(name, disabled) }}
+          onToggleMcpDisabled={(id, disabled) => { void runAction(() => combosFace.setMcpDisabled(id, disabled), disabled ? copy.mcpDisabled : copy.mcpEnabled) }}
+          onEditMcp={(server) => setMcpForm(mcpFormFromServer(server))}
+          onDeleteMcp={(id) => { void runAction(() => combosFace.deleteMcp(id), copy.mcpDeleted) }}
+          onBulkToolDisabled={(disabled, names) => { void bulkToolDisabled(disabled, names) }}
+        />
+        <ComboSidePanel
+          copy={copy}
+          combos={combosFace.combos}
+          activeComboId={activeComboId}
+          comboDraft={comboDraft}
+          busy={combosFace.busy}
+          confirmDelete={confirmDelete}
+          onSelect={selectCombo}
+          onNew={newCombo}
+          onDraftNameChange={(name) => setComboDraft((draft) => ({ ...draft, name }))}
+          onRemoveTool={toggleTool}
+          onRemoveMcp={toggleMcp}
+          onSave={() => { void saveCombo() }}
+          onDelete={() => { void deleteCombo() }}
         />
       </div>
-    </div>
+      <McpFormPanel
+        copy={copy}
+        tab={tab}
+        form={mcpForm}
+        busy={combosFace.busy}
+        importOpen={mcpImportOpen}
+        importText={mcpImportText}
+        onFormChange={setMcpForm}
+        onSave={() => { void saveMcp() }}
+        onImportOpenChange={setMcpImportOpen}
+        onImportTextChange={setMcpImportText}
+        onImportApply={importMcpJson}
+      />
+    </Modal>
   )
 }

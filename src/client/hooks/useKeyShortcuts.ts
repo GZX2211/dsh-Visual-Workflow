@@ -19,10 +19,15 @@ export function useKeyShortcuts(
   removeLine: CanvasActionsFace['removeLine'],
   removeSelected: CanvasActionsFace['removeSelected'],
 ): void {
+  // 依赖只列处理函数真正读取的事实（确认框有无、选中连线/节点 id）：
+  // 用整个 state 或 selection 对象会让无关状态变化也重挂 window 监听（D08-07）。
+  const hasConfirm = state.confirm !== null
+  const selectedEdgeId = state.selection.edgeId
+  const selectedNodeId = state.selection.nodeId
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
-        if (state.confirm) dispatch({ type: 'CONFIRM_SET', confirm: null })
+        if (hasConfirm) dispatch({ type: 'CONFIRM_SET', confirm: null })
         else selection.clearSelection()
         return
       }
@@ -34,10 +39,10 @@ export function useKeyShortcuts(
         if (event.shiftKey) history.redo()
         else history.undo()
       } else if (event.key === 'Delete') {
-        if (state.selection.edgeId) {
+        if (selectedEdgeId) {
           event.preventDefault()
-          removeLine(state.selection.edgeId)
-        } else if (state.selection.nodeId) {
+          removeLine(selectedEdgeId)
+        } else if (selectedNodeId) {
           event.preventDefault()
           removeSelected()
         }
@@ -45,5 +50,5 @@ export function useKeyShortcuts(
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [dispatch, history, removeLine, removeSelected, selection, state.confirm, state.selection])
+  }, [dispatch, hasConfirm, history, removeLine, removeSelected, selectedEdgeId, selectedNodeId, selection])
 }

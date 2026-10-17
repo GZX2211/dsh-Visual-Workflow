@@ -6,45 +6,30 @@
 import { randomUUID } from 'node:crypto'
 import { buildResumedSnapshot, findResumableRun, type ResumeInput, type ResumeResult } from './resume.js'
 import { createRunSnapshot, setNodeStatus, statusText } from './snapshot.js'
-import { effectiveOrgMeta, freezeOrgMeta, metaOfDocument, normalizeOrgMeta, orgBudgetOf, orgUsageOf } from '../graph/index.js'
-import { buildOrgBudgetText, type CollabChannel } from '../prompts/index.js'
+import { effectiveOrgMeta, freezeOrgMeta, metaOfDocument } from '../graph/index.js'
 import { buildParentRunPrompt } from './directive.js'
 import { missingStageLabels, validateFlowForRun } from './graph-facts.js'
 import { WfError, messageOf } from './errors.js'
 import { DEFAULT_SYSTEM_LANGUAGE } from '../system-language.js'
 import type { StartRunOptions, StartRunResult, RunEntry } from './run-entry.js'
-import type { RunSnapshot } from '../shared/types.js'
-import type { WorkflowDocument } from '../shared/graph-model.js'
 import { RuntimeBase } from './runtime-base.js'
-
-/**
- * 本次运行「组织预算」末段文本（自主编排方案 §6.4；P2 正式接入）。
- * 口径 = 快照冻结元参数（D-13 第三层：运行期不再重读模板/实例）+ 当前图规模 → **剩余量**。
- * 闸门已用次数据快照的 `milestoneUsed`（D-21：不含首次编排；P3 起由 mark_node 递增）。
- * 纯函数：同一快照与图两次调用字节相同；预算文本不是运行必需条件，调用侧不因它失败。
- */
-function orgBudgetTextOf(snapshot: RunSnapshot, flow: WorkflowDocument): string {
-  const meta = normalizeOrgMeta(snapshot.meta ?? {})
-  const milestoneUsed = Math.max(0, Math.floor(Number(snapshot.milestoneUsed) || 0))
-  return buildOrgBudgetText(orgBudgetOf(meta, orgUsageOf(flow, { milestoneUsed })))
-}
 
 export class RuntimeLaunch extends RuntimeBase {
   /**
-   * 协作通道判定（编排指令与成员任务块的唯一分支依据）：
-   * 官方 Agent Team 可用（服务已挂载 + 根 Agent 存活 + 有可用 provider）→ official；
-   * 否则 legacy（父代理逐个启动成员节点，成员间用插件自建协作工具）。
-   * 判据由子代理引擎提供，编排器不直接触达官方服务。
+   * 启动预留表（flowId → 启动在途）。
+   * 为什么需要：运行锁的「开头护栏」与「登记前重检」之间跨越多个 await（读文档/完整性
+   * 校验/注入父代理配置——后者要读 .md 文件），两个并发 startRun 都会全程做完这些工作，
+   * loser 直到登记前的同步重检才被拒。此处把互斥提前到第一个异步点之前（同步登记），
+   * loser 不再产生任何无效工作。预留只覆盖 startRun 自身生命周期；登记之后的运行期
+   * 仍由运行锁（runs 表）负责，两者语义不同、必须并存。
    */
-  protected collabChannelOf(sessionId: string): CollabChannel {
-    return this.deps.runner.teamAvailable?.(sessionId) === true ? 'official' : 'legacy'
-  }
+  private readonly launching = new Set<string>()
 
   // ---- 编排启动 --------------------------------------------------------------
 
   /**
    * 启动一次「父代理编排」运行（模式一入口）。
-   * 流程：校验 → 运行锁 → 建 run 状态 → 写流程事实源文件 → 构造编排指令 →
+   * 流程：校验 → 运行锁 + 并发启动预留 → 建 run 状态（含编排基线）→ 构造编排指令 →
    * followup 一次性注入+唤醒父代理 → 开始即落盘（崩溃后历史可追溯）。
    * 工作台全局化改版：运行唯一逻辑 = 运行当前实例——run 会话即实例绑定的会话
    * （run.sessionId === instance.sessionId）；「开启新会话」只是创建实例时的
@@ -53,12 +38,33 @@ export class RuntimeLaunch extends RuntimeBase {
   async startRun(input: { sessionId: string; flowId: string } & StartRunOptions): Promise<StartRunResult> {
     const sessionId = String(input.sessionId ?? '')
     const flowId = String(input.flowId ?? '')
-    const mode = input.mode ?? 'mode1'
     if (!sessionId || !flowId) throw new WfError('requires sessionId and flowId', 'WF_BAD_ARGS')
 
     // 运行锁护栏：跨会话冲突 / 同会话重复 / 暂停保留锁
     // （登记前还会在同一同步块内重检一次，见 runs.set 前注释——杜绝并发双运行）
     this.assertFlowLockFree(flowId, sessionId)
+    // 并发启动预留（同步，先于任何 await）：loser 在此被拒，不读文档/不注入父代理配置。
+    // 为什么放在运行锁护栏之后：已存在的运行（running/paused）应由运行锁给出更精确的
+    // 错误（WF_PAUSED / 跨会话 WF_LOCKED 且带 lockedSessionId），预留只负责「同刻两个启动」。
+    if (this.launching.has(flowId)) {
+      throw new WfError('该工作流正在启动中，请稍后重试', 'WF_LOCKED')
+    }
+    this.launching.add(flowId)
+    try {
+      return await this.startRunReserved(sessionId, flowId, input)
+    } finally {
+      // 失败路径必须释放：否则该 flowId 永久停在「启动中」，后续启动全被拒
+      this.launching.delete(flowId)
+    }
+  }
+
+  /** startRun 本体（launching 预留保护下运行；护栏与预留语义见 startRun）。 */
+  private async startRunReserved(
+    sessionId: string,
+    flowId: string,
+    input: { sessionId: string; flowId: string } & StartRunOptions,
+  ): Promise<StartRunResult> {
+    const mode = input.mode ?? 'mode1'
 
     const flow = mode === 'mode2'
       ? await this.deps.store.getServiceAsFlow(flowId)
@@ -90,6 +96,8 @@ export class RuntimeLaunch extends RuntimeBase {
 
     const runId = this.deps.newRunId?.() ?? `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     const snapshot = createRunSnapshot({ runId, flow, sessionId: runSessionId, mode, now: this.now() })
+    // 语言冻结进快照：本次运行后续的子代理任务、变更通知与续跑继承都读同一份事实。
+    snapshot.systemLanguage = input.systemLanguage ?? this.deps.systemLanguage?.() ?? DEFAULT_SYSTEM_LANGUAGE
     // 元参数三层之第三层（D-13）：把「有效值（模板 ← 实例覆盖）」冻结进快照。
     // 为什么在 startRun 冻结而非每次读取：运行期预算须可审计、可还原；此后改模板/实例
     // 的 meta 不影响本次运行（续跑继承旧冻结值，见 resume.ts 的 buildResumedSnapshot）。
@@ -111,27 +119,20 @@ export class RuntimeLaunch extends RuntimeBase {
       controller: new AbortController(),
       snapshot,
       baseFlow: flow,
+      lastSyncedFlow: flow,
       inflight: new Set(),
       attempts: new Map(),
       callCount: 0,
       lastActiveAt: this.now(),
       waiters: new Map(),
-      asks: new Map(),
     }
-    // 运行锁登记（check-then-act 竞态收口）：并发 startRun 可能已在本请求的
-    // await 期间登记了同一 flowId 的 run。此处重检 + runs.set 在同一同步块内
-    // 完成（Node 单线程内无交错），保证同工作流最多一个激活 run。
+    // 运行锁登记（check-then-act 竞态收口）：重检 + runs.set 在同一同步块内完成
+    // （Node 单线程内无交错），保证同工作流最多一个激活 run。
+    // 可达条件：同 flowId 的并发 startRun 已由 launching 预留表在第一个 await 之前拦掉，
+    // 因此本重检实际覆盖的是 startRun × resumeRun/autoResumeRun 交叉并发——resume 不经
+    // 预留表，只依赖自己的锁断言（独立审核 U2 指出该路径需在补用例时一并覆盖）。
     this.assertFlowLockFree(flowId, sessionId)
     this.runs.set(runId, entry)
-
-    // 流程事实源文件（父代理可 read，只读；defPath 注入编排指令）
-    const defPath = this.deps.store.orchestrationFilePath(runId)
-    try {
-      await this.deps.store.saveOrchestration(runId, flow)
-    } catch (error) {
-      this.runs.delete(runId)
-      throw new WfError(`流程定义文件写入失败：${messageOf(error)}`, 'WF_DEF_WRITE_FAILED')
-    }
 
     // 一次性注入 + 唤醒：官方 Message 契约要求 id 与 source 齐备（缺 source 父回合
     // 以 UNKNOWN 失败——旧项目根因复盘结论，必须保留）。
@@ -139,16 +140,14 @@ export class RuntimeLaunch extends RuntimeBase {
     //   - 情况1 纯编排：无执行单元，编排指令（orchestrator 变体）；
     //   - 情况2/3 父代理被流程线连接：prepareParentExecutor 先登记执行单元（快照
     //     标记 running、产出执行单元上下文），再按 hybrid/executor 变体组装。
+    // 拓扑不再进指令（不给宿主路径）：父代理按指令里的入口调 wf_org_catalog 召回实例骨架。
     const executor = await this.prepareParentExecutor(flow, entry)
     const directive = buildParentRunPrompt({
       flow,
-      defPath,
       mode,
       ...(question ? { question } : {}),
       executor,
-      systemLanguage: this.deps.systemLanguage?.() ?? DEFAULT_SYSTEM_LANGUAGE,
-      orgBudgetText: orgBudgetTextOf(snapshot, flow),
-      collabChannel: this.collabChannelOf(runSessionId),
+      systemLanguage: snapshot.systemLanguage,
     })
     try {
       this.deps.agents.followupRoot(root, {
@@ -164,7 +163,7 @@ export class RuntimeLaunch extends RuntimeBase {
 
     // 运行记录：开始即落盘（中断/崩溃后历史面板仍有记录）
     await this.persistWarn(entry)
-    return { runId, defPath, sessionId: runSessionId }
+    return { runId, sessionId: runSessionId }
   }
 
   // ---- 断点续跑（resumeRun） --------------------------------------------------
@@ -181,7 +180,7 @@ export class RuntimeLaunch extends RuntimeBase {
    *     故要求父代理空闲（root.status !== 'running'，否则 WF_ROOT_BUSY）；
    *   - 静默接续（工具路径，见 ensureActiveRun）：父代理正在自身回合内调用 wf_* 工具，
    *     只接管运行事实与锁，不注入编排指令、不要求父代理空闲。
-   * 两条语义共用同一套校验、快照继承与事实源写入——区别仅在「是否注入指令」。
+   * 两条语义共用同一套校验、快照继承与编排基线初始化——区别仅在「是否注入指令」。
    */
   async resumeRun(input: ResumeInput): Promise<ResumeResult> {
     const sessionId = String(input.sessionId ?? '')
@@ -238,30 +237,23 @@ export class RuntimeLaunch extends RuntimeBase {
 
     const runId = this.deps.newRunId?.() ?? `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     const snapshot = buildResumedSnapshot({ prev, runId, flow, sessionId, mode: prev.mode, now: this.now() })
+    // 续跑语言继承旧快照；显式 UI 切换只影响本次续跑（写回新快照，不改旧记录）。
+    snapshot.systemLanguage = input.systemLanguage ?? prev.systemLanguage ?? this.deps.systemLanguage?.() ?? DEFAULT_SYSTEM_LANGUAGE
     const entry: RunEntry = {
       controller: new AbortController(),
       snapshot,
       baseFlow: flow,
+      lastSyncedFlow: flow,
       inflight: new Set(),
       attempts: new Map(),
       callCount: 0,
       lastActiveAt: this.now(),
       waiters: new Map(),
-      asks: new Map(),
     }
     // 运行锁登记（check-then-act 竞态收口）：并发 resumeRun/startRun 可能已在本
     // 请求的 await 期间登记同一 flowId 的 run；重检 + 写入同一同步块内完成。
     this.assertResumeLockFree(flowId, sessionId)
     this.runs.set(runId, entry)
-
-    // 流程事实源文件（同 startRun；defPath 注入编排指令）
-    const defPath = this.deps.store.orchestrationFilePath(runId)
-    try {
-      await this.deps.store.saveOrchestration(runId, flow)
-    } catch (error) {
-      this.runs.delete(runId)
-      throw new WfError(`流程定义文件写入失败：${messageOf(error)}`, 'WF_DEF_WRITE_FAILED')
-    }
 
     // 断点继续指令（仅显式启动注入）：isResume 动态态注入末段（已 ok 不重跑；从
     // resumeFromNodeId 继续）。起点必须取自 buildResumedSnapshot 计算出的新快照
@@ -272,7 +264,7 @@ export class RuntimeLaunch extends RuntimeBase {
     // 三情况组装与 startRun 一致；prepareParentExecutor 内部对已 ok/react-capped 的
     // 继承态直接返回 null（不重跑）→ buildParentRunPrompt 按「父单元已完成」以
     // orchestrator 变体组装（剩余运行只有编排/收尾，无自执行任务内容）。
-    // 执行单元登记（父代理节点 running / 闸门识别）是运行事实初始化，静默接续同样必须执行。
+    // 执行单元登记（父代理节点 running）是运行事实初始化，静默接续同样必须执行。
     const executor = await this.prepareParentExecutor(flow, entry)
     if (silent) {
       // 静默接续：只接管运行事实与锁；不向会话注入编排指令，父代理在自身回合内继续调度
@@ -282,13 +274,10 @@ export class RuntimeLaunch extends RuntimeBase {
     } else {
       const directive = buildParentRunPrompt({
         flow,
-        defPath,
         mode: prev.mode,
         resume: { resumeFromNodeId: snapshot.resumeFromNodeId, resumedFromRunId: prev.id },
         executor,
-        systemLanguage: this.deps.systemLanguage?.() ?? DEFAULT_SYSTEM_LANGUAGE,
-        orgBudgetText: orgBudgetTextOf(snapshot, flow),
-        collabChannel: this.collabChannelOf(sessionId),
+        systemLanguage: snapshot.systemLanguage,
       })
       try {
         this.deps.agents.followupRoot(root, {
@@ -318,11 +307,10 @@ export class RuntimeLaunch extends RuntimeBase {
           // 忽略清理期错误
         }
         this.rejectWaiters(oldEntry)
-        this.rejectAsks(oldEntry)
         this.releaseRunMemory(oldId)
       }
     }
-    return { runId, defPath, resumedFromRunId: prev.id }
+    return { runId, resumedFromRunId: prev.id }
   }
 
 }

@@ -3,15 +3,15 @@
 // wf_org_catalog 的**纯函数装配层**：把工具层已取到的数据组装成索引/详情返回体。
 // 不触盘、不读时钟、不读全局——同一入参必同输出（需要外部事实时一律经回调注入）。
 //
-// 关键契约（用户裁决）：骨架必须自足——不可二次召回的内容（阶段节点、协作组配置、
+// 关键契约（用户裁决）：骨架必须自足——不可二次召回的内容（阶段节点、Team 配置、
 // 连线、数据节点正文与连接信息）一次性给全，保证「索引 + 多次详情召回」能拼出与
-// 工作流资产等价的完整信息；**唯一按需召回的长字段是角色 systemPrompt**，由骨架里的
-// 复合 id 指向。
+// 工作流资产等价的完整信息；**唯一按需召回的长字段是子代理角色的 systemPrompt**，
+// 由骨架里的复合 id 指向。父代理提示词不参与召回（见 DETAIL_HINT）。
 
+import { nodeParticipatesInFlow } from '../../graph/index.js'
 import { labelOf } from '../../orchestrator/index.js'
-import { ORG_SOP_DESIGN_METHOD, ORG_SOP_L1_GRAPH_SEMANTICS } from '../../prompts/index.js'
-import { GATE_MARKING_SEMANTICS, PATCH_CONTRACT_TEXT } from '../infrastructure/graph-op-contract.js'
-import { CATALOG_LIMITS, ID_CONVENTION, INLINE_ROLE_SEPARATOR } from './types.js'
+import { ORG_SOP_DESIGN_METHOD, ORG_SOP_L1_GRAPH_SEMANTICS, PATCH_CONTRACT_TEXT } from '../../prompts/index.js'
+import { CATALOG_LIMITS, ID_CONVENTION, INLINE_ROLE_SEPARATOR, INSTANCE_ID } from './types.js'
 import type {
   CatalogComboEntry,
   CatalogDatabaseNodeEntry,
@@ -19,6 +19,8 @@ import type {
   CatalogGroupNodeEntry,
   CatalogIndex,
   CatalogInlineRoleDetail,
+  CatalogInstanceDetail,
+  CatalogInstanceUnavailable,
   CatalogLineEntry,
   CatalogModelEntry,
   CatalogModelSource,
@@ -40,29 +42,42 @@ import type {
   WorkflowAssetRoleRef,
   WorkflowAssetSummary,
 } from '../../shared/asset-types.js'
-import type { GraphNode, Line, RoleNode } from '../../shared/graph-model.js'
+import type { GraphNode, Line, RoleNode, WorkflowDocument } from '../../shared/graph-model.js'
 
 /** 索引里的召回指引：目录是候选清单而非全部内容，详情按 ids 召回。 */
 export const DETAIL_HINT =
   'Index entries are **candidates** only (name / description / version); full content must be recalled by calling this tool again with ids: '
-  + '["flow-xxx"] = the workflow asset\'s complete skeleton; ["role-xxx"] = the role asset\'s full systemPrompt; '
+  + '["flow-xxx"] = the workflow asset\'s complete skeleton; ["role-xxx"] = the sub-agent role asset\'s full systemPrompt; '
   + '["flow-xxx#node-yyy"] = the full systemPrompt of that inline role\'s fixed version. '
   + 'The skeleton already contains stage nodes, group configuration, lines and data-node bodies (those have no second recall path); '
-  + 'the only long field recalled on demand is the role systemPrompt. A bad id among ids fails alone and does not block the rest.'
+  + 'the only long field recalled on demand is the role systemPrompt. '
+  + 'The parent agent\'s prompt is never recallable through this catalog, by any id shape. '
+  + 'A bad id among ids fails alone and does not block the rest.'
 
 /** 骨架返回体里的提示：角色提示词走复合 id 按需召回；角色版本无法解析时的取舍。 */
 export const WORKFLOW_DETAIL_NOTE =
-  'Role nodes in nodes (kind=agent|parent) omit systemPrompt: recall each one by its composite id from inlineRoles. '
+  'Role nodes in nodes (kind=agent) omit systemPrompt: recall each one by its composite id from inlineRoles. '
+  + 'The parent node (kind=parent) is the orchestrator itself: its prompt is never recallable and is absent from inlineRoles. '
   + 'roleAssetId / roleVersionId are the role asset and version this node is pinned to; when that role version row can no longer be resolved, both fields are omitted (the rest of the skeleton is unaffected).'
+
+/** 实例骨架返回体提示：第 3 层入口 + 孤立节点禁令（口径与资产骨架一致）。 */
+export const INSTANCE_DETAIL_NOTE =
+  'This is the skeleton of the instance running in this session: topology only, no asset content. '
+  + 'Role nodes in nodes (kind=agent) omit systemPrompt: recall each one by its instance#<node id> from inlineRoles. '
+  + 'The parent node (kind=parent) is the orchestrator itself: its prompt is never recallable and is absent from inlineRoles. '
+  + 'schedulable=false marks nodes left on the canvas without a flow line: never dispatch them.'
+
+/**
+ * 无活跃实例时的禁令文案（用户裁决逐字定稿）。
+ *
+ * 为什么返回正文而不是报错/空数组：这里的事实是「规划阶段没有实例可参考」，
+ * 文案本身就是护栏——它同时阻断模型另行翻找实例文件（因此不得出现任何路径线索）。
+ */
+export const INSTANCE_UNAVAILABLE_NOTE =
+  '当前会话没有正在运行的实例：规划阶段不得参考任何实例，请仅基于资产与工作区事实进行规划'
 
 /** 数据库连接里不进模型上下文的密钥字段。 */
 const SECRET_CONNECTION_KEYS = ['password'] as const
-
-/** 文本截断（空白压缩 + 超限标注，供角色摘要等短字段使用）。 */
-export function clip(value: unknown, limit: number): string {
-  const text = String(value ?? '').replace(/\s+/g, ' ').trim()
-  return text.length > limit ? `${text.slice(0, limit)}… (truncated)` : text
-}
 
 /** 数组预算：超限截断并返回是否截断。 */
 function clipList<T>(items: T[], limit: number): { items: T[]; truncated: boolean } {
@@ -99,7 +114,12 @@ export function buildIndex(input: {
   models: CatalogModelSource[]
 }): CatalogIndex {
   const workflowEntries = input.workflows.map(workflowAssetEntryOf).filter((entry) => entry.id)
-  const roleEntries = input.roles.map(roleAssetEntryOf).filter((entry) => entry.id)
+  // 父代理提示词不参与召回（用户裁决）：父代理即调用者本人，召回它既无参考价值，
+  // 也会把「自己该是什么职责」变成可被目录内容改写的软事实。资产管理页仍可迭代它。
+  const roleEntries = input.roles
+    .filter((role) => role.kind !== 'parent')
+    .map(roleAssetEntryOf)
+    .filter((entry) => entry.id)
   const comboEntries = input.combos.map(comboEntryOf).filter((entry) => entry.id)
   const presetEntries = input.presets.map(presetEntryOf).filter((entry) => entry.id)
   const modelEntries = input.models.map(modelEntryOf).filter((entry) => entry.provider || entry.model)
@@ -120,7 +140,6 @@ export function buildIndex(input: {
       graphSemantics: ORG_SOP_L1_GRAPH_SEMANTICS,
       designMethod: ORG_SOP_DESIGN_METHOD,
       patchContract: PATCH_CONTRACT_TEXT,
-      gateMarking: GATE_MARKING_SEMANTICS,
     },
     truncated:
       workflows.truncated
@@ -220,19 +239,45 @@ function roleRefMapOf(refs: WorkflowAssetRoleRef[] | undefined): Map<string, str
   return map
 }
 
+/**
+ * 骨架节点 / 连线条目（资产与实例**共用**的唯一装配口径）。
+ *
+ * 为什么必须共用：同一份骨架会经两条通道给出（资产 `flow-*` 与运行实例 `instance`），
+ * 各写一套必然让字段取舍与 schedulable 口径漂移——而父代理把两者当作同一种东西来读。
+ */
+function skeletonOf(input: {
+  nodes: GraphNode[]
+  lines: Line[]
+  roleNodeEntryOf: (node: RoleNode) => CatalogRoleNodeEntry
+}): { nodes: CatalogNodeEntry[]; lines: CatalogLineEntry[] } {
+  // schedulable 与运行期编排清单同源（nodeParticipatesInFlow）：只看流程线，ctx/db 线不计，
+  // proxy 的流程线归属其主节点。
+  const flow: Partial<WorkflowDocument> = { nodes: input.nodes, lines: input.lines }
+  const schedulableOf = (nodeId: string): boolean => nodeParticipatesInFlow(flow, nodeId)
+  return {
+    nodes: input.nodes.map((node) => nodeEntryOf(node, input.roleNodeEntryOf, schedulableOf)),
+    lines: input.lines.map(lineEntryOf),
+  }
+}
+
 /** 组装工作流资产骨架（`flow-*` 的返回体）。 */
 export function buildWorkflowDetail(
   asset: WorkflowAssetDetail,
   roleRefOf?: (roleRowId: string) => ResolvedRoleRef | null,
 ): CatalogWorkflowDetail {
   const nodes = (asset.nodes ?? []) as GraphNode[]
+  const lines = (asset.lines ?? []) as Line[]
   const id = textOf(asset.assetId)
   const refs = roleRefMapOf(asset.roleVersionIds)
-  const roleNodeEntryOf = (node: RoleNode): CatalogRoleNodeEntry => {
-    const rowId = refs.get(node.id)
-    const resolved = rowId && roleRefOf ? roleRefOf(rowId) : null
-    return roleNodeEntry(node, resolved?.assetId ?? undefined, resolved?.versionId)
-  }
+  const skeleton = skeletonOf({
+    nodes,
+    lines,
+    roleNodeEntryOf: (node) => {
+      const rowId = refs.get(node.id)
+      const resolved = rowId && roleRefOf ? roleRefOf(rowId) : null
+      return roleNodeEntry(node, resolved?.assetId ?? undefined, resolved?.versionId)
+    },
+  })
   return {
     type: 'workflow',
     id,
@@ -242,12 +287,48 @@ export function buildWorkflowDetail(
     description: textOf(asset.description),
     mode: asset.mode === 'mode2' ? 'mode2' : 'mode1',
     ...(asset.meta && Object.keys(asset.meta).length > 0 ? { meta: asset.meta } : {}),
-    nodes: nodes.map((node) => nodeEntryOf(node, roleNodeEntryOf)),
-    lines: (asset.lines ?? []).map(lineEntryOf),
+    nodes: skeleton.nodes,
+    lines: skeleton.lines,
+    // 只有 agent 的内联角色可召回；父代理提示词永不进目录（见 DETAIL_HINT）。
     inlineRoles: nodes
-      .filter((node) => node.kind === 'agent' || node.kind === 'parent')
+      .filter((node) => node.kind === 'agent')
       .map((node) => `${id}${INLINE_ROLE_SEPARATOR}${node.id}`),
     note: WORKFLOW_DETAIL_NOTE,
+  }
+}
+
+/**
+ * 组装当前运行实例骨架（`instance` 召回的第 2 层）。
+ *
+ * 与资产骨架的差别只在元数据：实例没有版本，也没有角色资产引用映射（其角色 Prompt 是
+ * 内联快照），故 roleNodeEntryOf 不带引用——第 3 层 `instance#<nodeId>` 直接取节点正文。
+ *
+ * @param flow 当前会话活跃 run 的工作流文档；`null` = 无活跃实例（返回禁令体）。
+ */
+export function buildInstanceDetail(flow: WorkflowDocument | null): CatalogInstanceDetail | CatalogInstanceUnavailable {
+  if (!flow) {
+    return { type: 'instance', id: INSTANCE_ID, available: false, message: INSTANCE_UNAVAILABLE_NOTE }
+  }
+  const nodes = (flow.nodes ?? []) as GraphNode[]
+  const skeleton = skeletonOf({
+    nodes,
+    lines: (flow.lines ?? []) as Line[],
+    roleNodeEntryOf: (node) => roleNodeEntry(node),
+  })
+  return {
+    type: 'instance',
+    id: INSTANCE_ID,
+    name: trimmedOrNull(flow.name) ?? flow.id,
+    description: textOf(flow.description),
+    mode: flow.mode === 'mode2' ? 'mode2' : 'mode1',
+    ...(flow.meta && Object.keys(flow.meta).length > 0 ? { meta: flow.meta } : {}),
+    nodes: skeleton.nodes,
+    lines: skeleton.lines,
+    // 只有 agent 的内联角色可召回；父代理提示词永不进目录（见 INSTANCE_DETAIL_NOTE）。
+    inlineRoles: nodes
+      .filter((node) => node.kind === 'agent')
+      .map((node) => `${INSTANCE_ID}${INLINE_ROLE_SEPARATOR}${node.id}`),
+    note: INSTANCE_DETAIL_NOTE,
   }
 }
 
@@ -322,7 +403,7 @@ export function maskConnection(conn: unknown): Record<string, unknown> | undefin
   return out
 }
 
-/** 角色节点条目（不可召回字段给全；systemPrompt 走复合 id 按需召回）。 */
+/** 角色节点条目（不可召回字段给全；子代理的 systemPrompt 走复合 id 按需召回，父代理无召回通道）。 */
 function roleNodeEntry(node: RoleNode, roleAssetId?: string, roleVersionId?: number): CatalogRoleNodeEntry {
   const data = node.data
   const reasoning = trimmedOrNull(data.reasoning)
@@ -348,6 +429,7 @@ function roleNodeEntry(node: RoleNode, roleAssetId?: string, roleVersionId?: num
 function nodeEntryOf(
   node: GraphNode,
   roleNodeEntryOf: (node: RoleNode) => CatalogRoleNodeEntry,
+  schedulableOf: (nodeId: string) => boolean,
 ): CatalogNodeEntry {
   switch (node.kind) {
     case 'start':
@@ -356,7 +438,10 @@ function nodeEntryOf(
       const entry: CatalogStageNodeEntry = { id: node.id, kind: node.kind, label: labelOf(node) }
       return entry
     }
+    // 只有 agent 是「可调度单元」：parent 是编排者本人，其执行身份由运行期指令给出，
+    // 不标注 schedulable（否则会诱导父代理把「调度自己」理解成一次节点派发）。
     case 'agent':
+      return { ...roleNodeEntryOf(node), schedulable: schedulableOf(node.id) }
     case 'parent':
       return roleNodeEntryOf(node)
     case 'proxy': {
@@ -365,7 +450,6 @@ function nodeEntryOf(
         kind: 'proxy',
         label: textOf(node.data?.label) || node.proxySourceId,
         proxySourceId: node.proxySourceId,
-        role: node.data?.role === 'milestone' ? 'milestone' : 'executor',
       }
       return entry
     }
@@ -376,6 +460,9 @@ function nodeEntryOf(
         label: labelOf(node),
         collabPrompt: textOf(node.data.collabPrompt),
         memberIds: Array.isArray(node.data.memberIds) ? node.data.memberIds.map(textOf) : [],
+        // Team 卡片是包裹层，不是调度目标（用户裁决 2026-10）：恒为 false，避免诱导父代理对
+        // 组 id 调用 wf_run_node（会被运行时拒绝）。成员节点各自带自己的 schedulable。
+        schedulable: false,
       }
       return entry
     }

@@ -1,3 +1,5 @@
+// tests/contract/cordis-patch.test.ts
+//
 // T-002 测试：cordis.patch.yml 的 insert 行与 src/host/index.ts 最小宿主入口骨架。
 //
 // 层级归属：断言对象是包的挂载契约（patch 文件）与宿主入口契约文本（跨模块装配声明），
@@ -37,22 +39,22 @@ const entryText =
   readFileSync(resolve(root, 'src/host/config.ts'), 'utf8') +
   readFileSync(resolve(root, 'src/host/visual-workflow-host.ts'), 'utf8')
 
-// 架构文档 §2.2 的 13 个 config 键 → 文本级期望值。
+// 架构文档 §2.2 的 config 键 → 文本级期望值。
 //   key: 期望出现的「键: 值」片段（弱匹配，容忍 !!js 标签；null 值匹配字面 null）。
 const CONFIG_KEYS: Array<[string, string]> = [
   ['dataDir', "dshHomePath('visual-workflow')"],
   ['servicePortBase', '7860'],
   ['apiKey', 'null'],
   ['maxConcurrentPerService', '50'],
-  ['wfAskAgentTtlMs', '120000'],
   ['runIdleTimeoutMs', '1800000'],
   ['runPollMs', '2000'],
-  ['reactIterationLimitDefault', '50'],
+  ['reactIterationLimitDefault', '0'],
   ['retryLimitDefault', '3'],
   ['outputFullLimit', '102400'],
   ['documentTextLimit', '20000'],
   ['embeddingModelDir', 'null'],
   ['embeddingEndpoint', 'null'],
+  ['teamMemberLimit', '8'],
 ]
 
 /** 解析 cordis.patch.yml 中 config 块的顶层键（按缩进识别，不引 yaml 运行期依赖）。 */
@@ -129,11 +131,8 @@ describe('T-002 cordis.patch.yml（insert 行语义）', () => {
     // patch 的每个键都必须在 schema 中真实存在（patch 键在新 schema 上静默失效即失败）。
     const unknownInPatch = patchKeys.filter((key) => !schemaKeys.includes(key))
     expect(unknownInPatch, 'patch 中出现 schema 不认识的 config 键').toEqual([])
-    // schema 允许比 patch 多出「退役只读键」：它必须存在，且**不得**出现在 patch 中
-    // （出现即意味着又把已退役键写进部署配置）。当前唯一退役键见 src/host/config.ts 的 @deprecated。
-    expect(schemaKeys).toContain('wfAskAgentTimeoutMs')
-    expect(patchKeys).not.toContain('wfAskAgentTimeoutMs')
-    expect(schemaKeys.length - patchKeys.length).toBe(1)
+    // 双向一致：schema 不得再保留任何 patch 未暴露的键（退役只读键已随 wf_ask_agent 一并删除）。
+    expect([...schemaKeys].sort(), 'schema 键集合与 patch 键集合必须逐键一致').toEqual([...patchKeys].sort())
   })
 })
 
@@ -143,7 +142,7 @@ describe('T-002 Host 入口契约（index/config/visual-workflow-host 拆分后�
     expect(entryText).toMatch(/export const inject: string\[\] = \[\]/)
   })
 
-  it('导出 apply(ctx, config) 与 Config schema（z.object + 13 键默认值）', () => {
+  it('导出 apply(ctx, config) 与 Config schema（z.object + 12 键默认值）', () => {
     expect(entryText).toMatch(/export function apply\(ctx: Context, config: Config\)/)
     expect(entryText).toMatch(/export const Config: z<Config> = z\.object\(\{/)
     for (const [key] of CONFIG_KEYS) {
@@ -153,10 +152,9 @@ describe('T-002 Host 入口契约（index/config/visual-workflow-host 拆分后�
     const numericDefaults: Array<[string, number]> = [
       ['servicePortBase', 7860],
       ['maxConcurrentPerService', 50],
-      ['wfAskAgentTtlMs', 120000],
       ['runIdleTimeoutMs', 1800000],
       ['runPollMs', 2000],
-      ['reactIterationLimitDefault', 50],
+      ['reactIterationLimitDefault', 0],
       ['retryLimitDefault', 3],
       ['outputFullLimit', 102400],
       ['documentTextLimit', 20000],

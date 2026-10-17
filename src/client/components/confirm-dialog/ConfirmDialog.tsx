@@ -5,6 +5,7 @@
 
 import type { ConfirmState } from '../../studio/studio-state.js'
 import type { Dict } from '../../i18n.js'
+import { Modal } from '../modal/Modal.js'
 
 interface ConfirmDialogProps {
   confirm: ConfirmState | null
@@ -41,12 +42,10 @@ export function ConfirmDialog({ confirm, copy, onClose, onSaveAndProceed, onDisc
         ]
 
   return (
-    <div className="wf-confirm-backdrop">
-      <div className="wf-confirm" role="dialog" aria-modal="true">
-        <h3>{title}</h3>
-        <p>{message}</p>
-        <div className="wf-confirm__actions">{actions}</div>
-      </div>
-    </div>
+    <Modal className="wf-confirm" backdropClassName="wf-confirm-backdrop" label={String(title)} onClose={onClose}>
+      <h3>{title}</h3>
+      <p>{message}</p>
+      <div className="wf-confirm__actions">{actions}</div>
+    </Modal>
   )
 }

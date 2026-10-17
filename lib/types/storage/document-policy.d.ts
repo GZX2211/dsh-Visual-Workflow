@@ -37,6 +37,38 @@ export declare function keepServerFieldsOf(options: SaveOptions | undefined): bo
 export declare function flowRevision(value: {
     revision?: number;
 } | null): number;
+/** 落盘文档的公共结构：身份字段 + 时间戳（run 快照的时间语义在 startedAt/endedAt 上）。 */
+export interface StoredDocument {
+    id: string;
+    createdAt?: string;
+    updatedAt?: string;
+}
+/** 版本化文档结构：workflow / service / flow-template 三类资源共有的记账字段。 */
+export interface VersionedDocument extends StoredDocument {
+    revision?: number;
+}
+/**
+ * 非版本化文档的发布策略：前端标记剥除 + 时间戳继承（模板没有 revision 字段，
+ * 不因本策略新增字段——落盘形状保持不变）。
+ *
+ * createdAt 取「调用方值 ?? 既有值 ?? now」：更新时不得把创建时间重置为当前时间。
+ * updatedAt 恒为本刻：调用方传入的值不得覆盖。
+ */
+export declare function publishDocument<T extends StoredDocument>(incoming: T, current: T | null, now: string): T;
+/**
+ * 版本化文档的发布策略：前端标记剥除 + revision 记账 + 时间戳继承。
+ *
+ * 为什么必须收敛到这一处：净化与 revision/时间戳记账一旦分散到多个写入入口，任何一处漏掉
+ * 净化或写错时间戳继承都会静默改变落盘形状与乐观锁语义；本函数是 `saveWorkflow` /
+ * `writeServiceDoc` / `saveFlowTemplate` 三处的唯一决策点。
+ * 本函数只决策、不做 IO——读改写与落盘仍由调用方在同一临界区内完成（见 ./AGENTS.md）。
+ *
+ * @param incoming 调用方提交的文档（可能携带仅前端的临时标记）。
+ * @param current 该文件的既有内容（不存在传 null，revision 从 1 起）。
+ * @param options 乐观锁期望（显式传入才生效）与服务端字段保留开关。
+ * @param now 本次发布的更新时间（由调用方取，便于测试确定化）。
+ */
+export declare function publishVersionedDocument<T extends VersionedDocument>(incoming: T, current: T | null, options: SaveOptions, now: string): T;
 /**
  * 计算保存后的 revision：无显式冲突期望时自动 +1；有期望时必须匹配（除非 force）。
  * 为什么只认显式 expectedRevision（不沿用旧项目 incoming.revision 回退）：文档内

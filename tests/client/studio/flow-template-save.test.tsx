@@ -13,7 +13,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { zh } from '../../../src/client/i18n.js'
 import { EP } from '../../../src/client/lib/remote.js'
 import { flushAsync } from '../fixtures/async-flush.js'

@@ -6,14 +6,19 @@ import type { ToastFace } from './useToast.js';
 import type { SaveCanvasOptions } from './useDocumentActions.js';
 import type { RunLockSet } from '../lib/run-locks.js';
 import type { Dict } from '../i18n.js';
-/** 几何拖动（节点拖动 / 组卡片缩放）自动保存的防抖窗口（毫秒）。 */
+/** 几何拖动（节点拖动 / Team 卡片缩放）自动保存的防抖窗口（毫秒）。 */
 export declare const GEOMETRY_AUTOSAVE_DEBOUNCE_MS = 400;
-/** 画布编辑面的外部依赖注入（锁定判定 + 自动保存）。 */
+/** 画布编辑面的外部依赖注入（锁定判定 + 自动保存 + 宿主下发的成员上限）。 */
 export interface CanvasActionsOptions {
     /** 运行中实例画布锁定判定集（模式一 running；未启用时全部解锁）。 */
     locks: RunLockSet;
     /** 画布保存入口（纯几何改动的防抖自动保存用；auto:true = 静默落库）。 */
     saveCanvas(options?: SaveCanvasOptions): Promise<unknown>;
+    /**
+     * 宿主下发的 Team 成员上限（部署层 agent-team.maxMembers 的镜像）。
+     * 缺省回退 TEAM_MEMBER_LIMIT_FALLBACK：入组交互据此拒绝超限，避免画布放得下而运行期排不进。
+     */
+    teamMemberLimit?: number;
 }
 export interface CanvasActionsFace {
     rememberGraph(): void;
@@ -55,7 +60,7 @@ export interface CanvasActionsFace {
         x: number;
         y: number;
     }): void;
-    /** 协作组模板拖入画布：按模板名称/协作 Prompt 生成协作组节点。 */
+    /** Team 模板拖入画布：按模板名称/协作 Prompt 生成 Team 节点。 */
     placeGroupFromTemplate(templateId: string, position: {
         x: number;
         y: number;

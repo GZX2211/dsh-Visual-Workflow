@@ -2,7 +2,6 @@ import type { FlowStore } from '../storage/flow-store.js';
 import type { RoleNode, WorkflowDocument } from '../shared/graph-model.js';
 import type { RunSnapshot, RunStatus } from '../shared/types.js';
 import type { AgentHost, NodeRunner, OrchestratorConfig, OrchestratorLogger, ParentModelSelectionLike, ParentPromptSetupLike } from './seams.js';
-import type { PendingAsk } from './ask-protocol.js';
 /** 单次运行的内存条目（旧项目 entry 同构：快照 + 护栏计数 + in-flight 表）。 */
 export interface RunEntry {
     /** 运行级取消控制器（停止/终止/插件卸载时 abort；阻塞中的 wait/提问随之取消）。 */
@@ -21,21 +20,20 @@ export interface RunEntry {
     lastActiveAt: number;
     /** 阻塞等待表：`${runId}:${nodeId}` → waiter（wait:true 路径）。 */
     waiters: Map<string, Waiter>;
-    /** 待回复登记表：askId → PendingAsk（wf_ask_agent 路径；非阻塞，供 reply 归属校验与组聚合判定）。 */
-    asks: Map<string, PendingAsk>;
     /**
      * 执行者模式：父代理节点 id（父代理被流程线连接，作为执行单元先执行自身任务）。
      * 启动时登记；父代理开始调度（首次 wf_run_node/wf_finish）时把该节点标记 ok。
      */
     executorParentId?: string;
     /**
-     * 执行者模式：本轮父代理执行单元是否为**里程碑闸门**（proxy.data.role='milestone'）。
-     * true 时 `markParentExecutorDone` 不生效——闸门只能由 wf_graph_patch(mark_node) 显式
-     * 标记完成（D-07）。内存态：startRun/resumeRun 时按当前画布重新推导。
+     * 上次同步给编排的拓扑基线（画布保存后的「编排语义是否变更」判定用）。
+     *
+     * 为什么是内存事实：它只在本次运行期内有意义（重启后 run 转 interrupted，不再有保存
+     * 触发的变更判定），且拓扑取数已改为 currentResolvedFlow 显式重读最新实例文档——
+     * 曾经的 orchestrations/<runId>.json 落盘副本因此失去唯一消费者（该副本当初只为给
+     * 父代理 read 一份只读快照）。startRun/resumeRun 以起始 flow 初始化。
      */
-    executorIsMilestone?: boolean;
-    /** 当前闸门虚拟节点 id（executorIsMilestone 时给出；mark_node 接受它或父代理节点 id）。 */
-    milestoneProxyId?: string;
+    lastSyncedFlow?: WorkflowDocument;
 }
 /** wait:true 的阻塞等待器（subagent/end 唤醒 resolve；终止/取消 reject）。 */
 export interface Waiter {
@@ -59,15 +57,6 @@ export interface RunNodeResult {
     status: 'started' | 'paused' | 'ok' | 'fail';
     childId?: string;
     output?: string;
-    /**
-     * 协作组启动路径的成员清单（仅当被启动节点是协作组卡片时给出）。
-     * childId 缺省：一个协作组对应多个成员会话，无单一 child。
-     */
-    members?: Array<{
-        nodeId: string;
-        target: string;
-        childId: string;
-    }>;
 }
 /** 官方 subagent/end 观察 payload（全字段可选，运行时守卫）。 */
 export interface SubagentEndInfo {
@@ -117,27 +106,9 @@ export interface OrchestratorDeps {
     /** 消息 id 生成注入（缺省 randomUUID）。 */
     uuid?: () => string;
 }
-/**
- * 闸门标记所需的运行事实（只读；wf_graph_patch 的 mark_node 路径消费）。
- * 快照归编排器所有，工具层据此裁决预算与目标合法性，不再直读 RunEntry/snapshot。
- */
-export interface MilestoneRunFacts {
-    runId: string;
-    executorParentId: string;
-    executorIsMilestone: boolean;
-    milestoneProxyId?: string;
-    nodeIds: string[];
-    milestoneUsed: number;
-    milestoneMax: number;
-}
-/** 闸门节点标记结果（markMilestoneNode 返回；milestoneUsed 为递增后的已用次数）。 */
-export interface MilestoneMarkResult {
-    nodeId: string;
-    status: 'ok' | 'fail';
-    runId: string;
-    milestoneUsed: number;
-}
 export interface StartRunOptions {
+    /** 已解析的 UI 语言；无 GUI 的调用方缺省时使用 Host 设置。 */
+    systemLanguage?: string;
     /** 运行模式（缺省 mode1；模式二由服务管理器传入 mode2）。 */
     mode?: 'mode1' | 'mode2';
     /** 模式二：本次外部请求的用户问题（注入输入节点产出 + 编排指令动态段）。 */
@@ -145,8 +116,6 @@ export interface StartRunOptions {
 }
 export interface StartRunResult {
     runId: string;
-    /** 流程事实源文件绝对路径（编排指令 facts.definitionPath）。 */
-    defPath: string;
     /** 实际执行会话 id（工作台全局化改版：恒等于入参 sessionId——运行只认实例绑定的会话）。 */
     sessionId: string;
 }

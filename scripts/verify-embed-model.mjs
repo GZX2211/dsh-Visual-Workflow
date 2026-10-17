@@ -1,5 +1,8 @@
-// 临时验证脚本：本地加载 bge-small-zh-v1.5 语义嵌入模型，确认语义向量路径可用。
-// 用法：node scripts/verify-embed-model.mjs
+// scripts/verify-embed-model.mjs
+//
+// 嵌入模型资产健康检查（可重复运行、只读）：本地加载 bge-small-zh-v1.5，确认语义向量路径可用。
+// 生效边界：只读磁盘上的随包资产，不下载、不重建；资产缺失/损坏时以非零退出码报告，供人工排查。
+// 用法：pnpm verify:embedding（等价 node scripts/verify-embed-model.mjs）
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { pipeline } from '@huggingface/transformers'

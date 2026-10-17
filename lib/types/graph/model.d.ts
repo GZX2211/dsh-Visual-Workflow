@@ -14,11 +14,16 @@ export interface NodeHandleDef {
  *   - 启动/输入（start）：无左入，右出 流程出 + 上下文出（上下文出仅模式二输入节点，§4.2.5.1）
  *   - 结束/输出（end）：左入 流程入（+ 上下文入仅模式二输出节点），无右出（§4.2.5.1）
  *   - 暂停（pause）：左入 流程入，右出 流程出（流程门语义，仅模式一，§4.2.5.1）
- *   - 协作组（group）：左入 流程入，右出 流程出；组卡片不提供 ctx/db 连接点（§4.2.5.2）
+ *   - Team（group）：左入 流程入，右出 流程出；Team 卡片不提供 ctx/db 连接点（§4.2.5.2）
  *   - 虚拟节点（proxy）：与主节点（角色）一致——运行时解析为主节点共享执行实例（§4.2.3.2 规则 7）
  *
  * 模式差异（mode1/mode2）不在此矩阵体现，由 validate.ts 按 flow.mode 做额外约束
  * （如 mode1 的 start 禁用 ctx-out、mode2 的 end 启用 ctx-in）。
+ *
+ * 技术债（ctx-out 停用）：角色节点（parent/agent/proxy）的 ctx-out 已不再是注入来源——
+ * 上游产出改由流程线自动注入下游（见 autoContextSourceIds）。该连接点**暂予保留**，
+ * 连线仍然合法（结构校验不变、旧图零迁移），但连上不再产生任何注入效果；
+ * 未来若需要「手动指定注入内容」可在此扩展。检索标记：`技术债（ctx-out 停用）`。
  */
 export declare const NODE_HANDLES: Record<NodeKind, NodeHandleDef>;
 /**
@@ -80,6 +85,9 @@ export declare function makeLineId(): string;
 /**
  * 新建角色节点（父/子代理，数据形状见 shared RoleNode）。
  * 深拷贝解耦语义：工厂只产出空白默认值，由调用方把模板数据复制进来（§4.2.1）。
+ *
+ * 输出契约默认文本直接落盘（不靠读取期兜底）：界面显示、运行期注入与磁盘存的是同一个值。
+ * 父代理不参与节点交接（产出由编排器按需转述），故它不落默认契约。
  */
 export declare function newRoleNode(kind: 'parent' | 'agent', label: string, position?: {
     x: number;
@@ -108,7 +116,7 @@ export declare function newStageNode(kind: 'start' | 'end' | 'pause', mode: Work
 }): StageNode;
 /** 阶段节点硬编码名称（§4.2.5.1 卡片设计表：启动/输入、结束/输出、暂停）。 */
 export declare function stageLabel(kind: 'start' | 'end' | 'pause', mode: WorkflowMode): string;
-/** 新建协作组节点（§4.2.5.2）。 */
+/** 新建 Team 节点（§4.2.5.2）。 */
 export declare function newGroupNode(label: string, position?: {
     x: number;
     y: number;
@@ -142,12 +150,29 @@ export declare function nodeParticipatesInFlow(flow: Partial<WorkflowDocument>, 
  * 这类幽灵线算成驱动，与流程子图口径分裂——本函数与 isFlowLine 同源。
  */
 export declare function nodeHasFlowIn(flow: Partial<WorkflowDocument>, nodeId: string): boolean;
-/** 某节点的 ctx-in 入边列表（上游上下文来源，§4.2.3.2 规则 5 显式连线）。 */
+/**
+ * 某节点的 ctx-in 入边列表。
+ * 现状（技术债（ctx-out 停用））：角色节点的 ctx 出线已不再是注入来源，该查询只剩
+ * file 数据源节点这一真实消费方——调用方必须按来源 kind 过滤，不得再把角色来源当上下文。
+ */
 export declare function ctxInEdges(flow: Partial<WorkflowDocument>, nodeId: string): Line[];
 /** 某节点的 db-in 入边列表（数据库服务标识来源；有边才注入 wf_db_query，§4.4.3 规则 5）。 */
 export declare function dbInEdges(flow: Partial<WorkflowDocument>, nodeId: string): Line[];
-/** 某节点经 ctx 连线收到的上游来源节点 id 列表（去重，供任务块组装注入上游产出）。 */
-export declare function upstreamCtxNodeIds(flow: Partial<WorkflowDocument>, nodeId: string): string[];
+/**
+ * 自动上下文注入的来源节点 id 清单（保序、去重；元素语义是「快照记账节点 id」）。
+ *
+ * 语义（用户裁决 2026-10）：节点交接不再依赖手动 ctx 连线，下游节点自动接收
+ * **直接流程前驱**的最终产出。三条边界：
+ *   - 无产出的阶段节点（pause）不携带交接内容，跳过它继续向前找；
+ *   - Team 与上下游解耦（输入与产出由父代理协调），遇到它既不取来源也不回溯，
+ *     否则会把组的上游产出越权塞给组的下游；
+ *   - 虚拟节点的流程线归属其主节点（与 nodeParticipatesInFlow 同源），proxy 前驱
+ *     解析为它引用的主节点——快照按主节点记账。
+ *
+ * 返回的是「可能提供产出」的来源，是否真的注入由调用方按快照产出判定
+ * （未产出或有状态无内容都不构成上下文）。纯函数，同输入同输出。
+ */
+export declare function autoContextSourceIds(flow: Partial<WorkflowDocument>, nodeId: string): string[];
 /** 某节点 flow-out 直接下游节点 id 列表（含条件连线，供父代理按拓扑推进）。 */
 export declare function downstreamFlowNodeIds(flow: Partial<WorkflowDocument>, nodeId: string): string[];
 /** 按 id 取节点；不存在返回 undefined。 */
@@ -156,30 +181,7 @@ export declare function nodeById(flow: Partial<WorkflowDocument>, nodeId: string
 export declare function lineById(flow: Partial<WorkflowDocument>, lineId: string): Line | undefined;
 /** 某主节点的全部虚拟节点（§4.2.3.2 规则 4：复制按钮生成）。 */
 export declare function proxiesOf(flow: Partial<WorkflowDocument>, nodeId: string): GraphNode[];
-/**
- * 虚拟节点角色（P3；自主编排方案 §5.2 扩展1）：缺省 `executor`（沿用既有自动完成行为），
- * 显式 `role: 'milestone'` 表示里程碑闸门——该轮父代理执行单元**不自动 ok**，
- * 只能由 `wf_graph_patch(mark_node)` 显式标记（D-07）。
- */
-export declare function proxyRoleOf(node: GraphNode | null | undefined): 'executor' | 'milestone';
-/** 某主节点的**闸门**虚拟节点（role='milestone'）。 */
-export declare function milestoneProxiesOf(flow: Partial<WorkflowDocument>, nodeId: string): GraphNode[];
-/**
- * 当前生效的闸门：被流程线驱动（有 flow-in）的 milestone 虚拟节点。
- * 纯函数；多个闸门时按画布节点顺序取第一个——调用方只用它判定「本轮是不是闸门」，
- * 不承担「第几个闸门」的运行时编排（那是父代理自己的调度决策）。
- */
-export declare function activeMilestoneGateOf(flow: Partial<WorkflowDocument>, nodeId: string): {
-    proxyId: string;
-    label?: string;
-} | null;
-/**
- * 把「主节点 id 或其任意虚拟节点 id」归一化为主节点 id（找不到返回 null）。
- * 为什么需要：闸门标记天然有两种自然写法（画布上的闸门虚拟节点 id / 父代理节点 id），
- * 二者在快照里是同一条记录（虚拟节点与主节点共享执行实例），必须在入口收敛为一种。
- */
-export declare function mainNodeIdOf(flow: Partial<WorkflowDocument>, nodeId: string): string | null;
-/** 某角色节点所属协作组 id（不在组内返回 null）。 */
+/** 某角色节点所属 Team id（不在组内返回 null）。 */
 export declare function memberGroupId(flow: Partial<WorkflowDocument>, nodeId: string): string | null;
-/** 判断角色节点是否为协作组成员（§4.2.5.2 规则 4：组内成员仅 ctx/db 连接点）。 */
+/** 判断角色节点是否为 Team 成员（§4.2.5.2 规则 4：组内成员仅 ctx/db 连接点）。 */
 export declare function isGroupMember(flow: Partial<WorkflowDocument>, nodeId: string): boolean;

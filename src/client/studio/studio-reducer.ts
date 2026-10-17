@@ -94,8 +94,9 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         run: { runId: null, sessionId: null, snapshot: null },
         selection: { nodeId: null, edgeId: null, lib: { kind: 'flowAsset', id: detail.assetId } },
         editor: { source: 'flowAsset', id: detail.assetId },
-        // 「开启新会话」临时选项与打开模板同口径：每次打开资产回到「不新开会话」默认
-        instanceOptions: { newSession: false, workspacePath: '' },
+        // 「开启新会话」：资产态一次性临时选项，每次打开资产回到「不新开会话」默认
+        // （模板态的勾选与路径来自模板持久化字段，与本临时值无关）
+        instanceOptions: { newSession: false },
         // 第四处画布身份切换入口：历史栈同样必须清空（否则可撤销回上一个文档的图，
         // 并被几何防抖自动保存写进本资产文档）
         history: { past: [], future: [] },
@@ -207,16 +208,14 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
     }
     case 'OPEN_FLOW_TEMPLATE': {
       // 模板打开 = 画布显示模板流程图（编辑态）；「创建实例」后转为实例态。
-      // 「开启新会话」临时选项：打开模板时重置（每次从模板创建实例默认不新开会话；
-      // 该选项仅临时 UI 状态，不持久化到模板文档）。
+      // 「开启新会话」的勾选与工作区是模板级持久化配置（模板对象上的
+      // startNewSession / workspacePath 字段），UI 经选择器 newSessionOptionsOf 派生，
+      // 不在此重置临时选项。
       const exists = state.flowTemplates.some((template) => template.id === action.template.id)
       const flowTemplates = exists
         ? state.flowTemplates.map((template) => (template.id === action.template.id ? action.template : template))
         : [action.template, ...state.flowTemplates]
-      return {
-        ...openDocument({ ...state, flowTemplates }, flowToCanvas(action.template), 'flowTemplate', action.template.id),
-        instanceOptions: { newSession: false, workspacePath: '' },
-      }
+      return openDocument({ ...state, flowTemplates }, flowToCanvas(action.template), 'flowTemplate', action.template.id)
     }
     case 'CLEAR_CANVAS':
       return {
@@ -293,8 +292,9 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         dirty: true,
       }
     case 'DOC_PATCH':
-      // 名/描述经 DOC_PATCH 落文档；undefined 不覆盖（「开启新会话/工作区」已
-      // 改为临时创建选项 INSTANCE_OPTIONS_SET，不再落文档——字段已退役）。
+      // 名/描述经 DOC_PATCH 落文档；undefined 不覆盖。
+      // 新会话配置不走本动作：模板态勾选/路径由 setFlowTemplateOptions 立即保存模板，
+      // 资产态勾选走 INSTANCE_OPTIONS_SET（一次性临时选项）。
       return state.currentKind === 'workflow'
         ? {
             ...state,

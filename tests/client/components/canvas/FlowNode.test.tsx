@@ -4,11 +4,10 @@
 
 // tests/client/components/canvas/FlowNode.test.tsx
 //
-// FlowNode 角标渲染（P4 体验与沉淀 · 闸门可视化与补丁来源标注）：
-//   ① 闸门虚拟节点（data.role='milestone'）→ 里程碑角标 + is-gate 样式 + 显示名；
-//   ② 普通虚拟节点仍是「↻ 引用」，不带 is-gate；
-//   ③ 显示名为空时回退节点种类名（不渲染空白卡片）；
-//   ④ agentPatched=true → 「AI 调整」角标；缺省不显示。
+// FlowNode 角标渲染（P4 体验与沉淀）：
+//   ① 虚拟节点沿用「↻ 引用」角标（闸门退役后无里程碑角标 / 无 is-gate）；
+//   ② 显示名为空时回退节点种类名（不渲染空白卡片）；
+//   ③ agentPatched=true → 「AI 调整」角标；缺省不显示。
 //
 // 注（治理）：本文件原为 tests/client/p4-experience.test.tsx 的一部分，结构治理后
 // 按源文件归属拆分——FlowNode 用例归入本文件，其余用例分别归入
@@ -20,7 +19,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import React from 'react'
 import { FlowNode } from '../../../../src/client/components/canvas/FlowNode.js'
-import { zh } from '../../../../src/client/i18n.js'
+import { en, zh } from '../../../../src/client/i18n.js'
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -59,22 +58,17 @@ function renderFlowNode(node: unknown, extra: Record<string, unknown> = {}): Pro
 }
 
 describe('P4 画布角标（FlowNode）', () => {
-  it('闸门虚拟节点：里程碑角标 + is-gate 样式 + 显示名', async () => {
-    await renderFlowNode(proxyNode({ role: 'milestone', label: '里程碑①' }))
+  it('闸门退役：遗留 data.role=milestone 按普通虚拟节点渲染（无 is-gate / 无里程碑角标）', async () => {
+    await renderFlowNode(proxyNode({ role: 'milestone', label: '遗留节点' }))
     const html = container!.innerHTML
-    expect(html).toContain('is-gate')
-    expect(container!.textContent).toContain(zh.proxyGateBadge)
-    expect(container!.textContent).toContain('里程碑①')
-  })
-
-  it('普通虚拟节点：仍是「↻ 引用」，不带 is-gate', async () => {
-    await renderFlowNode(proxyNode({}))
-    expect(container!.innerHTML).not.toContain('is-gate')
+    expect(html).not.toContain('is-gate')
+    expect(container!.textContent).not.toContain('🚩')
+    expect(container!.textContent).toContain('遗留节点')
     expect(container!.textContent).toContain('↻ 引用')
   })
 
   it('显示名为空时回退节点种类名（不渲染空白卡片）', async () => {
-    await renderFlowNode(proxyNode({ role: 'milestone', label: '   ' }))
+    await renderFlowNode(proxyNode({ label: '   ' }))
     expect(container!.textContent).toContain(String(zh.nodeKinds.agent))
   })
 
@@ -86,5 +80,35 @@ describe('P4 画布角标（FlowNode）', () => {
   it('agentPatched 缺省时不显示该角标', async () => {
     await renderFlowNode(proxyNode({}))
     expect(container!.textContent).not.toContain(zh.agentPatchedBadge)
+  })
+})
+
+describe('stage names follow the active language', () => {
+  it.each([
+    ['mode1', 'start', '启动', 'Start'],
+    ['mode1', 'end', '结束', 'End'],
+    ['mode1', 'pause', '暂停', 'Pause'],
+    ['mode2', 'start', '输入', 'Input'],
+    ['mode2', 'end', '输出', 'Output'],
+  ] as const)('%s %s displays English for a canonical stored label', async (mode, kind, stored, label) => {
+    await renderFlowNode({ id: 'stage', kind, position: { x: 0, y: 0 }, data: { label: stored } }, {
+      mode, copy: { ...en, modeName: () => '' },
+    })
+    expect(container!.querySelector('.wf-node__label')!.textContent).toBe(label)
+    expect(container!.querySelector('.wf-node__kind > span')!.textContent).toBe(label)
+  })
+
+  it('updates stage names when the language changes without changing stored data', async () => {
+    const node = { id: 'stage', kind: 'start', position: { x: 0, y: 0 }, data: { label: '启动' } }
+    await renderFlowNode(node, { copy: { ...en, modeName: () => '' } })
+    expect(container!.querySelector('.wf-node__label')!.textContent).toBe('Start')
+    await act(async () => {
+      root!.render(React.createElement(FlowNode, {
+        node, copy, mode: 'mode1', selected: false, highlighted: false, dragging: false,
+        runStatus: null, onPointerDown: () => {}, onHandlePointerDown: () => {}, onToggleSwap: () => {},
+      } as never))
+    })
+    expect(container!.querySelector('.wf-node__label')!.textContent).toBe('启动')
+    expect(node.data.label).toBe('启动')
   })
 })

@@ -5,6 +5,12 @@
 // 本文件内规则顺序即覆盖顺序（同特异性下后写的覆盖先写的），禁止重排。
 
 export const overlaysStyles = `
+/* ---- 弹层原语（Modal）：仅键盘聚焦时显示焦点环，不改变既有视觉 ---- */
+.wf-modal:focus-visible {
+  outline: 2px solid var(--wf-brand);
+  outline-offset: 2px;
+}
+
 /* ---- 二次确认弹层 ---- */
 .wf-confirm-backdrop {
   position: absolute;

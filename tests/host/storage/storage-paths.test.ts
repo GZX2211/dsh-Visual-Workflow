@@ -11,7 +11,6 @@ import {
   NESTED_DIRS,
   combosPath,
   flowTemplatePath,
-  orchestrationPath,
   runsPath,
   safeFilePart,
   servicePath,
@@ -53,6 +52,22 @@ describe('safeFilePart 文件名消毒', () => {
     expect(safeFilePart(undefined)).toBe('undefined')
     expect(safeFilePart('a/b')).not.toContain('/')
   })
+
+  // 下面两条锁定的是**有意保留**的已知限制（不是待修的疏漏）：任何「修复」都会改变既有 id
+  // 的落盘路径，使磁盘上已存在的文件读不回来。要改必须先有契约裁决，并同步改这两条断言。
+  it('已知限制：映射非单射——不同 id 落同一文件名', () => {
+    expect(safeFilePart('a/b')).toBe('a_b')
+    expect(safeFilePart('a b')).toBe('a_b')
+    expect(safeFilePart('a_b')).toBe('a_b')
+  })
+
+  it('已知限制：Windows 保留设备名不经转义或拒绝', () => {
+    for (const name of ['CON', 'con', 'PRN', 'AUX', 'NUL', 'COM1', 'LPT9', 'CON.json']) {
+      expect(safeFilePart(name), `保留名 ${name} 的落盘名保持原样`).toBe(name)
+    }
+    expect(workflowPath(ROOT, 'CON')).toBe(join(ROOT, 'workflows', 'CON.json'))
+    expect(runsPath(ROOT, 'NUL')).toBe(join(ROOT, 'runs', 'NUL.json'))
+  })
 })
 
 describe('目录布局常量', () => {
@@ -86,10 +101,9 @@ describe('资源路径计算', () => {
     expect(templatePath(ROOT, 'database', 'd1')).toBe(join(ROOT, 'data', 'd1.json'))
   })
 
-  it('工作流模板/run/编排事实源/组合文件路径', () => {
+  it('工作流模板/run/组合文件路径', () => {
     expect(flowTemplatePath(ROOT, 'tpl1')).toBe(join(ROOT, 'flow-templates', 'tpl1.json'))
     expect(runsPath(ROOT, 'run1')).toBe(join(ROOT, 'runs', 'run1.json'))
-    expect(orchestrationPath(ROOT, 'run1')).toBe(join(ROOT, 'orchestrations', 'run1.json'))
     expect(combosPath(ROOT)).toBe(join(ROOT, 'combos.json'))
   })
 

@@ -12,6 +12,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import React from 'react'
 import { useServiceDebugStream, type ServiceDebugFace, type ServiceDebugOptions } from '../../../src/client/hooks/useServiceDebugStream.js'
+import { MAX_SERVICE_DEBUG_CHARS } from '../../../src/client/lib/service-debug-output.js'
 import type { RemoteFace } from '../../../src/client/hooks/useRemote.js'
 
 let container: HTMLDivElement | null = null
@@ -23,6 +24,7 @@ const OPTIONS: ServiceDebugOptions = {
   sessionId: 's-9',
   enabled: true,
   errorPrefix: '[错误] ',
+  omittedLabel: '已省略 ',
 }
 
 function Harness({ remote, options }: { remote: RemoteFace; options: ServiceDebugOptions }) {
@@ -142,5 +144,20 @@ describe('useServiceDebugStream', () => {
     await act(async () => { root?.unmount(); root = null })
 
     expect((captured as AbortSignal | null)!.aborted).toBe(true)
+  })
+
+  it('超限输出：截断为有界文本并显示省略提示（不再无界累加）', async () => {
+    const long = 'x'.repeat(MAX_SERVICE_DEBUG_CHARS + 5_000)
+    const stream = vi.fn(async (_endpoint, _args, onLine: (line: string) => void) => {
+      onLine(`data: ${JSON.stringify({ choices: [{ delta: { content: `${long}\n尾段` } }] })}`)
+      onLine('data: [DONE]')
+    })
+    await render(remoteWith(stream))
+
+    await act(async () => { face!.send('长输出') })
+
+    expect(face!.output.startsWith(OPTIONS.omittedLabel)).toBe(true)
+    expect(face!.output).toContain('尾段')
+    expect(face!.output.length).toBeLessThan(long.length)
   })
 })

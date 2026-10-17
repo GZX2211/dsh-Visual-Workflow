@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ERR_ASSET_DUPLICATE, ERR_ASSET_NOT_FOUND, ERR_ASSET_VERSION_NOT_FOUND } from '../../../src/host/shared/protocol.js'
 import { ASSET_DB_FILE, AssetStore, type AssetError } from '../../../src/host/assets/index.js'
 import { flowLine, makeStore, removeTempRoot, roleNode, roleTemplate } from './fixtures/asset-fixture.js'
+import type { RoleTemplate } from '../../../src/host/shared/template-types.js'
 
 let store: AssetStore
 let root: string
@@ -179,6 +180,87 @@ describe('角色内容去重（算法 B）', () => {
 
     expect(second.assetId).not.toBe(first.assetId)
     expect(second.unchanged).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 父代理提示词入库（用户裁决）：资产管理只为方便迭代；父代理提示词不参与目录召回，
+// 故入库总是叠加到**唯一**那条父代理资产上（不新建第二条），来源绑定随本次入库刷新。
+// ---------------------------------------------------------------------------
+
+describe('父代理提示词入库（叠加版本）', () => {
+  const parentTemplate = (id: string, systemPrompt: string): RoleTemplate =>
+    roleTemplate({ id, kind: 'parent', name: '父代理', systemPrompt })
+
+  it('test_父代理入库_已有父代理资产_同资产叠加版本且来源绑定刷新', async () => {
+    const first = await store.promoteRole({
+      templateId: 'tpl-parent-a',
+      fingerprint: 'fp-a',
+      role: parentTemplate('tpl-parent-a', '父代理职责 A'),
+      source: 'human',
+    })
+    const second = await store.promoteRole({
+      templateId: 'tpl-parent-b',
+      fingerprint: 'fp-b',
+      role: parentTemplate('tpl-parent-b', '父代理职责 B'),
+      source: 'human',
+    })
+
+    // 唯一父代理资产：不因换了来源模版就新建第二条
+    expect(second).toMatchObject({ assetId: first.assetId, versionId: 2, unchanged: false })
+    const active = await store.listRoleAssets()
+    expect(active).toHaveLength(1)
+    expect(active[0]).toMatchObject({ assetId: first.assetId, kind: 'parent', versionId: 2 })
+
+    // 内容与来源绑定都随本次入库刷新（入库按钮锁定判据 = 绑定 + 指纹）
+    const detail = await store.getRoleAsset(first.assetId)
+    expect(detail).toMatchObject({ versionId: 2, systemPrompt: '父代理职责 B', sourceTemplateId: 'tpl-parent-b' })
+    expect((await store.listRoleVersions(first.assetId)).map((entry) => entry.versionId)).toEqual([2, 1])
+
+    // 旧版本仍可回滚（资产页面可回滚是本次改造的前提）
+    const rolledBack = await store.rollbackRoleAsset(first.assetId, 1)
+    expect(rolledBack).toMatchObject({ versionId: 1, systemPrompt: '父代理职责 A' })
+  })
+
+  it('test_父代理入库_与Active内容全等_unchanged不叠加版本', async () => {
+    const first = await store.promoteRole({
+      templateId: 'tpl-parent-a',
+      fingerprint: 'fp-a',
+      role: parentTemplate('tpl-parent-a', '父代理职责 A'),
+      source: 'human',
+    })
+    const again = await store.promoteRole({
+      templateId: 'tpl-parent-a',
+      fingerprint: 'fp-a2',
+      role: parentTemplate('tpl-parent-a', '父代理职责 A'),
+      source: 'human',
+    })
+
+    expect(again).toMatchObject({ assetId: first.assetId, versionId: 1, unchanged: true })
+    expect(await store.listRoleVersions(first.assetId)).toHaveLength(1)
+  })
+
+  it('test_父代理入库_无父代理资产_新建standalone而非合并到子代理资产', async () => {
+    const agent = await store.promoteRole({
+      templateId: 'tpl-role-1',
+      fingerprint: 'fp-1',
+      role: roleTemplate(),
+      source: 'human',
+    })
+    const parent = await store.promoteRole({
+      templateId: 'tpl-parent-a',
+      fingerprint: 'fp-a',
+      role: parentTemplate('tpl-parent-a', '父代理职责 A'),
+      source: 'human',
+    })
+
+    expect(parent).toMatchObject({ versionId: 1, unchanged: false, roleAssetType: 'standalone' })
+    expect(parent.assetId).not.toBe(agent.assetId)
+    const assets = await store.listRoleAssets()
+    expect(assets.map((item) => [item.assetId, item.kind])).toEqual([
+      [parent.assetId, 'parent'],
+      [agent.assetId, 'agent'],
+    ])
   })
 })
 

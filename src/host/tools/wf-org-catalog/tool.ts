@@ -6,29 +6,40 @@
 //   - 不传（或空数组 / 空串）→ **资产索引**：组合（含工具清单）、官方 preset、模型与
 //     思考强度、编排规则、工作流资产与角色资产索引，以及 ID 约定与召回指引；
 //   - 传 ids → **批量详情**：`flow-*` 工作流骨架 / `role-*` 角色完整 systemPrompt /
-//     `<flow-id>#<node-id>` 工作流资产内联角色完整 systemPrompt；坏 id 只单条报错，不阻塞其余。
+//     `<flow-id>#<node-id>` 工作流资产内联角色完整 systemPrompt；
+//     `instance` 当前运行实例骨架 / `instance#<node-id>` 该实例内联角色完整 systemPrompt；
+//     坏 id 只单条报错，不阻塞其余。
+//
+// 两条召回通道分层不同：资产三层（索引 → 骨架 → 角色 Prompt），运行实例两层
+// （`instance` → `instance#<node-id>`，不进索引、不与资产混召）。
+// 父代理提示词**不在召回范围**（用户裁决）：索引不列 parent 角色资产，`role-*` 与
+// 全部内联入口（`<flow-id>#<node-id>` / `instance#<node-id>`）遇到父代理节点一律单条报错。
 //
 // 职责边界：本文件只做「注册 + 取数编排 + 错误归一」；返回体装配在 build.ts（纯函数），
-// id 判定在 ids.ts（纯函数）。零写操作、幂等；不读运行实例（实例编排事实由运行期编排
-// 指令提供，本工具只暴露资产）。
+// id 判定在 ids.ts（纯函数）。零写操作、幂等。实例取数只经宿主缝 getActiveRunFlow
+// （编排器的语义化查询）——本文件不触达运行表，故能读到的实例恒为「当前会话正在运行的
+// 那一个」：历史 run 与其他会话的实例没有取数路径，规划期因此不可能借本工具参考实例。
 //
 // 提示词规范：description 官方标准英文（何时调用/前置条件/失败语义/副作用）。
 
 import { WF_ORG_CATALOG } from '../../shared/protocol.js'
-import { defineTool, type ToolDefinitionLike, type ToolExecLike } from '../infrastructure/define-tool.js'
+import { defineTool, type ToolExecLike } from '../infrastructure/define-tool.js'
+import { registerTool, requireToolsService } from '../infrastructure/register-tool.js'
 import { textRender } from '../infrastructure/text-render.js'
 import { callerOf } from '../infrastructure/caller.js'
 import { WfError } from '../../orchestrator/index.js'
 import {
   buildIndex,
   buildInlineRoleDetail,
+  buildInstanceDetail,
   buildRoleDetail,
   buildWorkflowDetail,
   type ResolvedRoleRef,
 } from './build.js'
 import { detailIdsLimitProblem, normalizeAssetIds, parseAssetId } from './ids.js'
+import { INSTANCE_ID } from './types.js'
 import type {
-  CatalogAssetDetail,
+  CatalogDetailEntry,
   CatalogDetails,
   CatalogDetailError,
   CatalogIndex,
@@ -41,7 +52,7 @@ import type {
   WorkflowAssetDetail,
   WorkflowAssetSummary,
 } from '../../shared/asset-types.js'
-import type { RoleNode } from '../../shared/graph-model.js'
+import type { GraphNode, RoleNode, WorkflowDocument } from '../../shared/graph-model.js'
 
 /**
  * 工具层所需宿主能力（宿主 service 的最小结构适配；单测 fake）。
@@ -71,12 +82,26 @@ export interface OrgCatalogHost {
   listPresets?: () => Promise<CatalogPresetSource[]>
   /** 模型目录（可选缝；缺失按空清单处理）：节点 provider/model/reasoning 的取值来源。 */
   listModels?: () => Promise<CatalogModelSource[]>
+  /**
+   * 当前会话**正在运行**的实例文档（`instance` 召回的取数源；无活跃 run 返回 null）。
+   *
+   * 为什么必填：实例召回是本工具的一等能力，装配方必须显式给出；缺失是编程错误，
+   * 不做「静默降级成没有实例」——那会把装配问题伪装成正常状态（工具层另有断言）。
+   * 语义：只暴露 running 的实例，且取最新实例文档。历史 run、暂停中的运行与其他会话的
+   * 实例在此缝之外就不可达（不是靠校验拦住，而是判据层没有形状）。
+   */
+  getActiveRunFlow(sessionId: string): Promise<WorkflowDocument | null>
 }
 
-/** 组装并执行一次勘察（导出供单测直接断言，无需起工具注册表）。 */
+/**
+ * 组装并执行一次勘察（导出供单测直接断言，无需起工具注册表）。
+ *
+ * @param sessionId 调用者会话；只有实例相关 id（`instance` / `instance#<nodeId>`）需要它。
+ */
 export async function executeOrgCatalog(
   host: OrgCatalogHost,
   args: Record<string, unknown>,
+  sessionId = '',
 ): Promise<CatalogIndex | CatalogDetails> {
   const ids = normalizeAssetIds(args?.ids)
   if (ids === null) {
@@ -87,7 +112,7 @@ export async function executeOrgCatalog(
   }
   const limitProblem = detailIdsLimitProblem(ids.length)
   if (limitProblem) throw new WfError(limitProblem, 'WF_BAD_ARGS')
-  return ids.length === 0 ? await buildIndexFrom(host) : await buildDetailsFrom(host, ids)
+  return ids.length === 0 ? await buildIndexFrom(host) : await buildDetailsFrom(host, ids, sessionId)
 }
 
 /**
@@ -127,14 +152,31 @@ async function lookupOf<T>(id: string, read: () => Promise<T>): Promise<Lookup<T
  * 批量详情召回：逐条独立处理——形状非法 / 资产不存在 / 单条读失败 / 已退役都只记为该 id
  * 的 error，绝不阻塞同批其余 id（用户裁决）。
  */
-async function buildDetailsFrom(host: OrgCatalogHost, ids: string[]): Promise<CatalogDetails> {
+async function buildDetailsFrom(host: OrgCatalogHost, ids: string[], sessionId: string): Promise<CatalogDetails> {
   const refs = ids.map((id) => ({ id, ref: parseAssetId(id) }))
-  const assets: CatalogAssetDetail[] = []
+  const assets: CatalogDetailEntry[] = []
   const errors: CatalogDetailError[] = []
   /** 已确认不存在（null）与读出结果的缓存：同批重复引用只查一次。 */
   const workflowCache = new Map<string, WorkflowAssetDetail | null>()
   const roleCache = new Map<string, RoleAssetDetail | null>()
   const roleVersionCache = new Map<string, ResolvedRoleRef | null>()
+
+  /**
+   * 实例取数：单例运行事实（当前会话至多一条），同批多次引用只取一次。
+   * 缺会话身份时抛 WF_BAD_CALLER——那是调用方错误、整批无效，不得降级成「没有实例」。
+   */
+  let instanceFlow: WorkflowDocument | null = null
+  let instanceLoaded = false
+  const loadInstanceFlow = async (): Promise<WorkflowDocument | null> => {
+    if (!sessionId) {
+      throw new WfError('WF_BAD_CALLER: cannot identify the caller session; the running instance cannot be resolved', 'WF_BAD_CALLER')
+    }
+    if (!instanceLoaded) {
+      instanceFlow = await host.getActiveRunFlow(sessionId)
+      instanceLoaded = true
+    }
+    return instanceFlow
+  }
 
   const loadWorkflow = async (assetId: string): Promise<WorkflowAssetDetail | null> => {
     if (!workflowCache.has(assetId)) workflowCache.set(assetId, await host.assets.getWorkflowAsset(assetId))
@@ -157,13 +199,15 @@ async function buildDetailsFrom(host: OrgCatalogHost, ids: string[]): Promise<Ca
 
   // 单次预扫分类：形状非法的 id 不进入任何取数，避免为坏 id 触发无谓读盘。
   // 内联角色的容器也计入工作流资产读盘（同一容器去重后只读一次）。
+  // 实例两态（instance / instanceRole）不参与资产取数——它们的取数通道是 getActiveRunFlow，
+  // 故必须显式判 kind，不能让 else 兜底把它们当成资产容器。
   const workflowIds: string[] = []
   const roleIds: string[] = []
   for (const { ref } of refs) {
     if (!ref.ok) continue
     if (ref.kind === 'workflow') workflowIds.push(ref.id)
     else if (ref.kind === 'role') roleIds.push(ref.id)
-    else if (!workflowIds.includes(ref.containerId)) workflowIds.push(ref.containerId)
+    else if (ref.kind === 'inlineRole' && !workflowIds.includes(ref.containerId)) workflowIds.push(ref.containerId)
   }
 
   const workflowLookups = await Promise.all(workflowIds.map((id) => lookupOf(id, () => loadWorkflow(id))))
@@ -176,6 +220,31 @@ async function buildDetailsFrom(host: OrgCatalogHost, ids: string[]): Promise<Ca
   for (const { id, ref } of refs) {
     if (!ref.ok) {
       errors.push({ id, code: 'WF_BAD_ARGS', message: ref.reason })
+      continue
+    }
+    // 实例两态：骨架（含「无活跃实例」的禁令体）与该实例的内联角色。
+    // 在资产 failure 表之前分派——实例不参与资产取数，故不查 workflow/role 缓存。
+    if (ref.kind === 'instance') {
+      assets.push(buildInstanceDetail(await loadInstanceFlow()))
+      continue
+    }
+    if (ref.kind === 'instanceRole') {
+      const flow = await loadInstanceFlow()
+      if (!flow) {
+        errors.push({ id, code: 'WF_ORG_NOT_FOUND', message: 'no instance is running in this session, so its inline roles cannot be recalled' })
+        continue
+      }
+      const node = (flow.nodes ?? []).find((item) => item.id === ref.nodeId)
+      if (!node) {
+        errors.push({ id, code: 'WF_ORG_NOT_FOUND', message: `node not found in the running instance: ${ref.nodeId}` })
+        continue
+      }
+      const notRecallable = roleNodeNotRecallableError(id, node)
+      if (notRecallable) {
+        errors.push(notRecallable)
+        continue
+      }
+      assets.push(buildInlineRoleDetail({ containerId: INSTANCE_ID, node: node as RoleNode }))
       continue
     }
     const failure = failureOf.get(id)
@@ -206,6 +275,12 @@ async function buildDetailsFrom(host: OrgCatalogHost, ids: string[]): Promise<Ca
         errors.push({ id, code: 'WF_ORG_NOT_FOUND', message: `role asset does not exist or has been retired: ${ref.id}` })
         continue
       }
+      // 父代理提示词不进目录（连索引都不列，故详情也必须拒）：资产管理页仍可迭代它，
+      // 但任何召回通道都不得把「父代理该是什么职责」变成可被目录内容改写的事实。
+      if (detail.kind === 'parent') {
+        errors.push({ id, code: 'WF_BAD_ARGS', message: `role asset ${ref.id} is the parent agent's prompt and is never recallable through this catalog` })
+        continue
+      }
       assets.push(buildRoleDetail(detail))
       continue
     }
@@ -219,12 +294,9 @@ async function buildDetailsFrom(host: OrgCatalogHost, ids: string[]): Promise<Ca
       errors.push({ id, code: 'WF_ORG_NOT_FOUND', message: `node not found in workflow asset ${ref.containerId}: ${ref.nodeId}` })
       continue
     }
-    if (node.kind !== 'agent' && node.kind !== 'parent') {
-      errors.push({
-        id,
-        code: 'WF_BAD_ARGS',
-        message: `node ${ref.nodeId} is ${node.kind} and has no systemPrompt (only agent/parent role nodes can be recalled)`,
-      })
+    const notRecallable = roleNodeNotRecallableError(id, node)
+    if (notRecallable) {
+      errors.push(notRecallable)
       continue
     }
     const rowId = (container.roleVersionIds ?? [])
@@ -251,6 +323,21 @@ function messageOf(error: unknown): string {
 }
 
 /**
+ * 节点是否可召回其 systemPrompt：只有 agent 节点属于目录范围。
+ * 父代理提示词永不召回（用户裁决）——父代理即调用者本人，且它的职责不应由目录内容定义。
+ * @returns 不可召回时的单条错误；可召回时 null。
+ */
+function roleNodeNotRecallableError(id: string, node: GraphNode): CatalogDetailError | null {
+  if (node.kind === 'parent') {
+    return { id, code: 'WF_BAD_ARGS', message: `node ${node.id} is the parent agent: its prompt is never recallable through this catalog` }
+  }
+  if (node.kind !== 'agent') {
+    return { id, code: 'WF_BAD_ARGS', message: `node ${node.id} is ${node.kind} and has no systemPrompt (only agent role nodes can be recalled)` }
+  }
+  return null
+}
+
+/**
  * 注册 wf_org_catalog（全局层；ctx.tools.register）。
  * 返回 disposer：注销失败尽力而为。
  */
@@ -258,24 +345,23 @@ export function registerWfOrgCatalog(
   ctx: { get(name: string): unknown },
   host: OrgCatalogHost,
 ): () => void {
-  const tools = ctx.get('tools') as { register(def: ToolDefinitionLike): () => void } | null | undefined
-  if (!tools || typeof tools.register !== 'function') {
-    throw new Error('[visual-workflow] tools 服务不可用，无法注册 wf_org_catalog')
-  }
+  const tools = requireToolsService(ctx, WF_ORG_CATALOG)
   const def = defineTool({
     name: WF_ORG_CATALOG,
     description:
       'Read-only survey of the organization assets available for planning. Omit ids for the compact index (combos, presets, models, orchestration rules, asset index); pass ids to recall details in one batch. '
       + 'Assets are reusable configurations; recall one to reuse. Index entries are candidates only — full content by id. Templates are NOT listed here. '
-      + 'rules.patchContract and rules.gateMarking carry the write-patch contract — read them before calling wf_graph_patch. '
-      + 'Supported ids: flow-* (workflow skeleton), role-* (role asset), <flow-id>#<node-id> (inline role). '
+      + 'The parent agent\'s own prompt is never recallable through this catalog, by any id shape. '
+      + 'rules.patchContract carries the write-patch contract — read it before calling wf_graph_patch. '
+      + 'Supported ids: flow-* (workflow skeleton), role-* (sub-agent role asset), <flow-id>#<node-id> (inline sub-agent role), '
+      + 'instance (skeleton of the instance currently running in this session — topology only, no asset content) and instance#<node-id> (that instance\'s inline sub-agent role). '
       + 'A node subagent\'s tools come ONLY from its presetId; picking one here is mandatory (empty = zero tools). '
-      + 'Skeletons omit role systemPrompts; recall them by <flow-id>#<node-id>. Idempotent, side-effect free.',
+      + 'Skeletons omit role systemPrompts; recall them by their composite id. Idempotent, side-effect free.',
     parameters: {
       ids: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Asset ids to recall in detail; omit (or pass []) for the compact index. Supported: flow-* (workflow asset), role-* (role asset), <flow-id>#<node-id> (inline role pinned in that workflow asset). Bad, missing or retired ids come back as per-item errors and never block the others. At most 20 ids per call - submit further batches when needed.',
+        description: 'Ids to recall in detail; omit (or pass []) for the compact index. Supported: flow-* (workflow asset), role-* (sub-agent role asset), <flow-id>#<node-id> (inline sub-agent role pinned in that workflow asset), instance (skeleton of the instance running in this session), instance#<node-id> (inline sub-agent role of that running instance). Parent-agent prompts are not recallable. Bad, missing or retired ids come back as per-item errors and never block the others. At most 20 ids per call - submit further batches when needed.',
       },
     },
     output: {
@@ -291,9 +377,10 @@ export function registerWfOrgCatalog(
     async execute(args, exec: ToolExecLike) {
       const caller = callerOf(exec)
       if (caller.isChild) throw new WfError('WF_NOT_ROOT: a child agent cannot call wf_org_catalog; only the session main agent may survey organization assets', 'WF_NOT_ROOT')
-      if (!caller.sessionId) throw new WfError('WF_BAD_CALLER: cannot identify the caller session', 'WF_BAD_CALLER')
-      return executeOrgCatalog(host, (args ?? {}) as Record<string, unknown>)
+      const sessionId = String(caller.sessionId ?? '')
+      if (!sessionId) throw new WfError('WF_BAD_CALLER: cannot identify the caller session', 'WF_BAD_CALLER')
+      return executeOrgCatalog(host, (args ?? {}) as Record<string, unknown>, sessionId)
     },
   })
-  return tools.register(def)
+  return registerTool(tools, def)
 }

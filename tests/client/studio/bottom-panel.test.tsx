@@ -10,12 +10,9 @@
 //  3) 右侧属性栏默认隐藏，仅当选中「具备属性」对象时弹出；点画布空白收起；
 //  4) 父代理模板也具备属性（点击弹出属性栏）；阶段节点不弹（用选择器纯逻辑覆盖）。
 
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
+import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import React from 'react'
-import { Studio } from '../../../src/client/studio/Studio.js'
-import { zh } from '../../../src/client/i18n.js'
+import type { Root } from 'react-dom/client'
 import type { RemoteFace } from '../../../src/client/hooks/useRemote.js'
 import { mountStudio, remoteStub } from '../fixtures/studio-harness.js'
 import {

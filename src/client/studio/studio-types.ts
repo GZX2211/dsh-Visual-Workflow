@@ -12,14 +12,14 @@ import type { ServiceState, RoleTemplate, FileTemplate, DatabaseTemplate, GroupT
 import type { AssetKind, AssetVersionEntry, ExperienceEntry, RoleAssetDetail, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../../host/shared/asset-types.js'
 import type { CanvasEdge, CanvasNode } from '../lib/canvas-model.js'
 
-/** 左侧栏 Tab：工作流 / 角色 / 数据（文件+数据库）/ 其他（阶段+协作组）。
+/** 左侧栏 Tab：工作流 / 角色 / 数据（文件+数据库）/ 其他（阶段+Team）。
  *  资产态下「数据」以「经验」呈现（同一 Tab key，语义与内容随库来源切换）。 */
 export type LibTab = 'workflow' | 'role' | 'data' | 'other'
 /** 左侧库来源：模版（可随意修改的草稿）/ 资产（带版本控制的晋升形态）。 */
 export type LibrarySource = 'template' | 'asset'
 /** 左侧库选中种类（模板 kind + 固定卡片 + 工作流模板 + 资产 + 经验）。 */
 export type LibSelKind = 'workflow' | 'service' | 'workflowTemplate' | 'role' | 'file' | 'database' | 'parentTemplate' | 'stage' | 'groupTemplate' | 'flowAsset' | 'roleAsset' | 'experience'
-/** 模板种类（与后端 listTemplates 契约一致；group 为协作组模板）。 */
+/** 模板种类（与后端 listTemplates 契约一致；group 为 Team 模板）。 */
 export type TemplateKind = 'role' | 'file' | 'database' | 'group'
 
 /**
@@ -145,12 +145,14 @@ export interface StudioState {
   /** 全部会话的活跃 run 摘要（工作台全局化：实例列表状态徽标；running/paused 保留锁）。 */
   activeRuns: Array<{ flowId: string; sessionId: string; status: string; runId: string }>
   /**
-   * 「从模板创建实例」的一次性临时选项（模板态画布上方「开启新会话」复选框 +
-   * 工作区输入框；不持久化到模板/实例文档，创建实例时消费：
+   * 「从模板创建实例」新会话选项的**临时界面记忆**（仅服务资产态/旧界面记忆；
+   * 模板态的唯一事实源是模板文档的 startNewSession/workspacePath 持久化字段，
+   * 见 studio-selectors.newSessionOptionsOf）。创建实例时消费：
    *   - newSession=true → 先新建主会话（createSession 端点），实例绑定该新会话；
    *   - newSession=false → 当前主会话，目标会话已有实例时弹覆盖确认。
+   * 资产没有模板文档可持久化归属，故路径不在此记录（路径恒空、继承当前会话工作区）。
    */
-  instanceOptions: { newSession: boolean; workspacePath: string }
+  instanceOptions: { newSession: boolean }
   /** 工作流模板列表（全局共享；部分仅含当前 mode 的模板，模板拖入画布后经「创建实例」转实例）。 */
   flowTemplates: WorkflowTemplate[]
   templates: Record<TemplateKind, Array<RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate>>
@@ -209,6 +211,9 @@ export interface EditorData {
   nodeId?: string
   /** 虚拟节点主节点名称。 */
   mainLabel?: string
-  /** 协作组成员（画布节点解析）。 */
+  /** 阶段节点种类与所属模式（属性面板按当前界面语言渲染阶段名）。 */
+  stageKind?: 'start' | 'end' | 'pause'
+  mode?: 'mode1' | 'mode2'
+  /** Team 成员（画布节点解析）。 */
   members?: Array<{ id: string; label: string }>
 }

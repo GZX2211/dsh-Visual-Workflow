@@ -9,7 +9,7 @@ export declare class CordisAgentHost implements AgentHost {
     private agentsService;
     available(): boolean;
     getRootAgent(sessionId: string): RootAgentLike | null;
-    /** 按会话 id 取子代理 agent（wf_ask_agent 投递缝用；未激活返回 null）。 */
+    /** 按会话 id 取子代理 agent（wf_send_message 投递缝用；未激活返回 null）。 */
     getChildAgent(childId: string): RootAgentLike | null;
     followupRoot(agent: RootAgentLike, message: RootInjectedMessage): void;
     /**

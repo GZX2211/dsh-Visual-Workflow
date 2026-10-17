@@ -48,10 +48,13 @@ export declare class AssetDb {
     close(): void;
     /** 取连接；未 init 时给出可行动错误而非静默空结果。 */
     private require;
+    /** 事务内再次请求同一连接的事务即抛错（在入队之前判定，故不会留下排队条目）。 */
+    private assertNoTransactionReentry;
     /**
      * 在**一笔事务**内执行 fn 并返回其结果。
      * 为什么用 BEGIN IMMEDIATE：写路径的第一步就是读，IMMEDIATE 立刻取写锁，
      * 避免「读时未锁、写时才发现冲突」的升级失败；进程内并发再由串行队列挡一层。
+     * 重入（回调内再调 withTx/withRead）立即抛错而不是排队：见 transactionScope。
      */
     withTx<T>(fn: (ctx: AssetTxContext) => Promise<T> | T): Promise<T>;
     /**

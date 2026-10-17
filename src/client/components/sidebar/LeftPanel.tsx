@@ -1,7 +1,7 @@
 // src/client/components/sidebar/LeftPanel.tsx
 //
 // 左侧模板库：
-// 四 Tag：工作流 / 角色（父代理模板置顶）/ 数据（文件 + 数据库分区）/ 其他（阶段 + 协作组）。
+// 四 Tag：工作流 / 角色（父代理模板置顶）/ 数据（文件 + 数据库分区）/ 其他（阶段 + Team）。
 // 本次改动：四 Tag 由文字改为「图标」展示（图片批注：Tag 区以图标显示，不显示文字，
 // 共 4 个 tag；切换到不同 Tag 时下方列表内容随动，适配角色/数据/其他节点）。
 // 内容构建已提取到 library-model.ts（与底栏 BottomPanel 共用同一 builder，逻辑一致）。
@@ -36,7 +36,7 @@ export interface DragPayload {
    * 归档资产重新进入编排，必须先经属性栏「回滚」显式启用）。
    */
   onDrop?(position?: { x: number; y: number }): void
-  /** 拖拽落点为协作组卡片时：生成节点并直接入组（角色模板）。 */
+  /** 拖拽落点为 Team 卡片时：生成节点并直接入组（角色模板）。 */
   onDropIntoGroup?(groupId: string, position?: { x: number; y: number }): void
 }
 
@@ -73,7 +73,7 @@ export interface LeftPanelProps {
   roleTemplates: RoleTemplate[]
   fileTemplates: FileTemplate[]
   databaseTemplates: DatabaseTemplate[]
-  /** 协作组模板列表（全局共享；「其他」Tab 协作组分区，用户批注：+ 新增/点击编辑/删除）。 */
+  /** Team 模板列表（全局共享；「其他」Tab Team 分区，用户批注：+ 新增/点击编辑/删除）。 */
   groupTemplates: GroupTemplate[]
   stageKinds: Array<{ kind: string; label: string }>
   libSelection: LibSelectionInfo | null
@@ -90,11 +90,11 @@ export interface LeftPanelProps {
   onOpenExperience(id: string): void
   onSelectLib(kind: LibSelectionInfo['kind'], id: string): void
   onPlaceTemplate(kind: 'role' | 'file' | 'database', id: string, position: { x: number; y: number }): void
-  /** 角色模板拖入协作组：生成节点并直接入组。 */
+  /** 角色模板拖入 Team：生成节点并直接入组。 */
   onPlaceTemplateIntoGroup(kind: 'role', id: string, groupId: string, position: { x: number; y: number }): void
   onPlaceStage(kind: string, position: { x: number; y: number }): void
   onPlaceGroup(position: { x: number; y: number }): void
-  /** 协作组模板拖入画布：按模板内容生成协作组节点。 */
+  /** Team 模板拖入画布：按模板内容生成 Team 节点。 */
   onPlaceGroupFromTemplate(id: string, position: { x: number; y: number }): void
   onPlaceParent(id: string, position: { x: number; y: number }): void
   onCreateNew(tab: LibTab, section?: 'file' | 'database' | 'flowTemplate' | 'group'): void

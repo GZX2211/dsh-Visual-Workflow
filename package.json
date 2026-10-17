@@ -30,6 +30,9 @@
     "assets/models/bge-small-zh-v1.5",
     "README.md"
   ],
+  "engines": {
+    "dsh": ">=0.2.1-rc.2 <0.3.0"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -55,7 +58,6 @@
   },
   "devDependencies": {
     "@deepseek-ai/schemastery": "^3.18.1",
-    "@playwright/mcp": "^0.0.79",
     "@types/node": "26.2.0",
     "@types/pg": "^8.23.1",
     "@types/react": "^19.2.8",
@@ -75,6 +77,10 @@
     "gates": "vitest run --pool=threads tests/contract",
     "client-smoke": "node scripts/client-smoke.mjs",
     "check": "pnpm typecheck && pnpm test && pnpm build && pnpm client-smoke",
-    "verify": "pnpm typecheck && pnpm build && pnpm test && pnpm client-smoke"
+    "dev:client": "node scripts/watch-client.mjs",
+    "dev:host": "node scripts/watch-host.mjs",
+    "assets:embedding": "node scripts/embedding-model.mjs",
+    "verify:embedding": "node scripts/verify-embed-model.mjs",
+    "docs:strip": "node scripts/strip-doc-refs.mjs"
   }
 }

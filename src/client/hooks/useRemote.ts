@@ -5,6 +5,7 @@
 import { useMemo } from "react"
 import type { Dict } from "../i18n.js"
 import {
+  EP,
   remoteCall,
   streamCall,
   type RemoteCallOptions,
@@ -50,11 +51,13 @@ function localizeTransportError(error: unknown, copy: Dict): unknown {
 }
 
 /** Stable remote-call face; dictionary changes replace only the error-copy mapping. */
-export function useRemote(copy: Dict): RemoteFace {
+export function useRemote(copy: Dict, language?: string): RemoteFace {
   return useMemo(() => ({
     call: async (endpoint: string, args?: Record<string, unknown>, options?: RemoteCallOptions): Promise<unknown> => {
       try {
-        return await remoteCall(endpoint, args, options)
+        const runArgs = language && (endpoint === EP.EP_RUN || endpoint === EP.EP_RUN_RESUME)
+          ? { ...args, language } : args
+        return await remoteCall(endpoint, runArgs, options)
       } catch (error) {
         throw localizeTransportError(error, copy)
       }
@@ -66,5 +69,5 @@ export function useRemote(copy: Dict): RemoteFace {
         throw localizeTransportError(error, copy)
       }
     },
-  }), [copy])
+  }), [copy, language])
 }

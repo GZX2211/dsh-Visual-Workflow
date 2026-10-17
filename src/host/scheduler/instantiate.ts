@@ -6,8 +6,8 @@
 //   - 目标会话已有实例（当前会话模式覆盖）→ overwriteInstanceFromTemplate：
 //     复用既有实例 id/sessionId/createdAt（revision 由保存层递增），
 //     名称与内容同步为模板最新定义——「覆盖旧工作流」。
-// 节点/连线深拷贝断引用（§4.2.1 语义）；「开启新会话」为一次性临时选项，
-// 实例文档不再继承 startNewSession/workspacePath（字段已退役）。
+// 节点/连线深拷贝断引用（§4.2.1 语义）；模板的「开启新会话/工作区」是**模板级持久化
+// 配置**（创建实例时的会话策略），不随实例文档落盘——实例内容只含图与元参数。
 
 import { randomUUID } from 'node:crypto'
 import type { WorkflowDocument, WorkflowTemplate } from '../shared/graph-model.js'

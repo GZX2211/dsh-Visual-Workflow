@@ -1,87 +1,162 @@
 // tests/host/orchestrator/runtime-launch.test.ts
 //
-// 启动层单测（startRun/resumeRun）：并发运行锁、启动校验、事实源写入、指令注入、运行会话归属。
+// 启动层单测（startRun/resumeRun）：并发运行锁、启动校验、编排基线初始化、指令注入、运行会话归属。
 // 装配与测试替身见 fixtures/harness.ts（共享，不在本文件内重复）。
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { FlowStore } from '../../../src/host/storage/flow-store.js'
 import { OrchestratorRuntime } from '../../../src/host/orchestrator/index.js'
-import { HEAD_MARKER, MID_MARKER, ORCH_HARD_CONSTRAINTS, TAIL_MARKER, TAIL_RESTATE_MARKER } from '../../../src/host/prompts/index.js'
 import type { ServiceState } from '../../../src/host/shared/types.js'
 import type { WorkflowDocument } from '../../../src/host/shared/graph-model.js'
-import { makeFlow, stage, agent, FakeRoot, makeHarness, start, caller, cleanupTempDirs } from './fixtures/harness.js'
+import { makeFlow, stage, agent, FakeRoot, makeHarness, start, caller, cleanupTempDirs, type Harness } from './fixtures/harness.js'
 
 // 临时目录：makeHarness 登记，文件结束统一清理
 afterEach(cleanupTempDirs)
 
 describe('startRun 并发运行锁（TOCTOU 竞态回归）', () => {
-  it('并发 startRun 同一 flowId：只允许一个成功，另一个 WF_LOCKED', async () => {
-    const h = await makeHarness()
-    await h.store.saveWorkflow(makeFlow(), 'session-1', { force: true })
-
-    // 受控闸门：让两个并发 startRun 都在运行锁首查之后、登记之前交错
-    // （两请求都读到「无锁」，制造 check-then-act 竞态窗口）。
-    let release!: () => void
-    const gate = new Promise<void>((resolve) => { release = resolve })
-    let inGate = 0
-    // Object.create 保留 FlowStore 原型链方法（spread 会丢失），仅覆盖 getWorkflow
+  /**
+   * 装配一个「读文档可控阻塞」的运行时（保留 FlowStore 原型链，仅覆盖 getWorkflow）。
+   * hook 收到本次读文档的序号，便于用例只闸住其中某一次（交叉并发用例的 setup 阶段
+   * 也要读文档，不能一并闸住）；newRunId 可注入以便区分本次运行与既有 run。
+   */
+  function slowRuntimeOf(
+    h: Harness,
+    hook: (call: number) => Promise<void>,
+    options: { newRunId?: () => string } = {},
+  ): { runtime: OrchestratorRuntime; gateHits: () => number } {
+    let hits = 0
     const slowStore = Object.create(h.store) as FlowStore
     slowStore.getWorkflow = async (sessionId: string, flowId: string) => {
-      inGate += 1
-      if (inGate === 1 || inGate === 2) await gate
+      hits += 1
+      await hook(hits)
       return h.store.getWorkflow(sessionId, flowId)
     }
-    const slowRuntime = new OrchestratorRuntime({
+    const runtime = new OrchestratorRuntime({
       store: slowStore,
       runner: h.runner,
       agents: h.agents,
       config: {
         outputFullLimit: 400, documentTextLimit: 200, runIdleTimeoutMs: 500,
-        retryLimitDefault: 3, reactIterationLimitDefault: 50, wfAskAgentTtlMs: 500,
+        retryLimitDefault: 3, reactIterationLimitDefault: 0,
       },
       logger: { warn: (message) => h.warnings.push(message), info: () => {}, debug: () => {} },
       now: () => h.clock.now,
-      newRunId: () => 'run-race',
+      newRunId: options.newRunId ?? (() => 'run-race'),
       uuid: () => 'uuid-race',
     })
+    return { runtime, gateHits: () => hits }
+  }
 
-    const p1 = slowRuntime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })
-    const p2 = slowRuntime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })
-    // 等两个请求都进入闸门（都已完成锁首查且看到 null）。
-    // 必须带上限：若加锁顺序变化导致条件永不成立，应报「未进入竞态窗口」而非挂到 vitest 超时。
-    await expect(
-      vi.waitFor(() => {
-        if (inGate < 2) throw new Error(`只有 ${inGate} 个 startRun 进入闸门`)
-      }, { timeout: 2_000 }),
-    ).resolves.toBeUndefined()
+  it('并发 startRun 同一 flowId：只允许一个成功，另一个在第一个异步点之前 WF_LOCKED（不读文档）', async () => {
+    const h = await makeHarness()
+    await h.store.saveWorkflow(makeFlow(), 'session-1', { force: true })
+
+    // 受控闸门：winner 卡在「读文档」这一步，用来观察 loser 是否连文档都没读。
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const { runtime, gateHits } = slowRuntimeOf(h, () => gate)
+
+    const first = runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })
+    const second = runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })
+    // 同步观察（两个 startRun 的同步前缀都已跑完）：loser 若未被预留拦下，会各自再读一遍文档。
+    const docReads = gateHits()
+
     release()
-
-    const results = await Promise.allSettled([p1, p2])
-    const fulfilled = results.filter((r) => r.status === 'fulfilled')
-    const rejected = results.filter((r) => r.status === 'rejected')
+    const results = await Promise.allSettled([first, second])
+    const fulfilled = results.filter((result) => result.status === 'fulfilled')
+    const rejected = results.filter((result) => result.status === 'rejected')
+    // loser 由「同步预留」在第一个 await 之前拦下：文档读取次数恒为 1（无效工作归零）
+    expect(docReads).toBe(1)
     expect(fulfilled).toHaveLength(1)
     expect(rejected).toHaveLength(1)
-    const reason = (rejected[0] as PromiseRejectedResult).reason as { code?: string }
-    expect(reason.code).toBe('WF_LOCKED')
-    // 内存中只登记了一个激活 run
-    expect(slowRuntime.activeRunForSession('session-1')).not.toBeNull()
-    // 磁盘 orchestration 只写了一份（后写者未走到事实源写入）
-    const dir = join(h.store.root, 'orchestrations')
-    const files = await import('node:fs/promises').then((fs) => fs.readdir(dir))
-    expect(files.length).toBe(1)
+    expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ code: 'WF_LOCKED' })
+    // 内存中只登记一个激活 run；磁盘也只有一条（loser 无任何副作用）
+    expect(runtime.activeRunForSession('session-1')).not.toBeNull()
+    expect((await h.store.listRuns('flow-1', 'session-1')).map((run) => run.id)).toEqual(['run-race'])
+  })
+
+  it('启动失败后预留释放：同一 flowId 可以再次 startRun（不留下永久「启动中」）', async () => {
+    const h = await makeHarness()
+    await h.store.saveWorkflow(makeFlow(), 'session-1', { force: true })
+    let failOnce = true
+    const { runtime } = slowRuntimeOf(h, async () => {
+      if (failOnce) {
+        failOnce = false
+        throw new Error('磁盘瞬时不可用')
+      }
+    })
+
+    await expect(runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })).rejects.toThrow('磁盘瞬时不可用')
+    // 预留必须已释放：否则第二次启动会被自己的残留预留拒成 WF_LOCKED
+    await expect(runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })).resolves.toMatchObject({ runId: 'run-race' })
+  })
+
+  it('交叉并发（startRun × resumeRun）：resume 在 startRun 的 await 期间登记 → 登记前重检 WF_LOCKED，不产生第二个 run', async () => {
+    const h = await makeHarness()
+    await h.store.saveWorkflow(makeFlow(), 'session-1', { force: true })
+
+    // 可布防闸门：默认旁路；arm 之后只闸住下一次读文档（setup 阶段也要读文档，不能一并闸住）
+    let armed = false
+    let enteredGate: () => void = () => {}
+    let releaseGate: () => void = () => {}
+    let entered = Promise.resolve()
+    const runSeq = { n: 0 }
+    const { runtime } = slowRuntimeOf(
+      h,
+      async () => {
+        if (!armed) return
+        armed = false
+        enteredGate()
+        await new Promise<void>((resolve) => { releaseGate = resolve })
+      },
+      { newRunId: () => { runSeq.n += 1; return `run-${runSeq.n}` } },
+    )
+
+    // 前置：跑一次再停止 → 磁盘留一条可恢复断点，内存锁已释放（开头护栏不会拦）
+    const first = await runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })
+    await runtime.stopRun(first.runId)
+    expect(runtime.flowLockInfo('flow-1')).toBeNull()
+    const root = h.agents.roots.get('session-1')!
+    const injectedBefore = root.messages.length
+
+    // winner：已过开头护栏、已拿启动预留，卡在「读文档」这个异步点
+    entered = new Promise<void>((resolve) => { enteredGate = resolve })
+    armed = true
+    const starting = runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })
+    await entered
+
+    // 交叉并发：resumeRun 不经启动预留表（它只有自己的锁断言），此刻登记新 run 接管运行锁
+    const resumed = await runtime.resumeRun({ sessionId: 'session-1', flowId: 'flow-1' })
+    expect(runtime.flowLockInfo('flow-1')).toMatchObject({ runId: resumed.runId, status: 'running' })
+    expect(root.messages.length).toBe(injectedBefore + 1)
+
+    releaseGate()
+    // 登记前重检在此收口：startRun 不得覆盖 resume 已建立的运行事实
+    await expect(starting).rejects.toMatchObject({ code: 'WF_LOCKED' })
+
+    // 内存只有 resume 那一条；startRun 未登记条目、也未注入编排指令
+    expect([...runtime.runs.keys()]).toEqual([resumed.runId])
+    expect(root.messages.length).toBe(injectedBefore + 1)
+    // 磁盘同样只多出 resume 那条（startRun 无任何落盘副作用）
+    const diskIds = (await h.store.listAllRuns())
+      .filter((record) => record.sessionId === 'session-1')
+      .map((record) => record.id)
+      .sort()
+    expect(diskIds).toEqual([first.runId, resumed.runId].sort())
   })
 })
 
 describe('startRun 启动与运行锁', () => {
-  it('成功：锁建立、快照 running、事实源写入、指令注入、开始即落盘', async () => {
+  it('成功：锁建立、快照 running、编排基线初始化、指令注入、开始即落盘', async () => {
     const h = await makeHarness()
     const { result, entry } = await start(h, makeFlow())
 
     expect(result.runId).toBe('run-1')
-    expect(result.defPath).toContain('orchestrations')
     expect(entry.snapshot.status).toBe('running')
+    // 画布保存后的「编排语义变更」判定以本基线为基准（内存事实，不落盘副本）
+    expect(entry.lastSyncedFlow?.id).toBe('flow-1')
     expect(entry.snapshot.flowName).toBe('测试流程')
 
     // 运行锁：flowLockInfo 返回本运行
@@ -97,52 +172,17 @@ describe('startRun 启动与运行锁', () => {
     expect(msg.source).toEqual({ kind: 'user' })
     expect(typeof msg.content[0].text).toBe('string')
 
-    // 事实源文件已写（父代理只读）
-    const def = await h.store.readOrchestration('run-1')
-    expect(def?.id).toBe('flow-1')
-
     // 开始即落盘（§4.7：崩溃后历史可追溯）
     const persisted = await h.store.getRun('run-1')
     expect(persisted?.status).toBe('running')
   })
 
-  it('编排指令模板满足 W-01/W-02：marker 顺序、硬约束双位机制、动态值仅在末段', async () => {
+  it('编排指令注入：工作流名进入父代理消息，且只注入一条消息', async () => {
     const h = await makeHarness()
     await start(h, makeFlow())
-    const text = h.agents.roots.get('session-1')!.messages[0].content[0].text
-
-    // W-01 前缀稳定三段布局：head < mid < tail
-    const headAt = text.indexOf(HEAD_MARKER)
-    const midAt = text.indexOf(MID_MARKER)
-    const tailAt = text.indexOf(TAIL_MARKER)
-    expect(headAt).toBeGreaterThanOrEqual(0)
-    expect(midAt).toBeGreaterThan(headAt)
-    expect(tailAt).toBeGreaterThan(midAt)
-
-    // W-02 关键约束双位机制：首段含硬约束、末段重申（TAIL_RESTATE_MARKER + 至少一条导出常量）
-    // 仅验证「双位机制」，不绑定具体文案条目（提示词文案可随版本润色）
-    const headSection = text.slice(0, midAt)
-    const tailSection = text.slice(tailAt)
-    expect(headSection).toContain(ORCH_HARD_CONSTRAINTS.dispatchOnly)
-    expect(Object.values(ORCH_HARD_CONSTRAINTS).some((v) => tailSection.includes(v))).toBe(true)
-    expect(tailSection).toContain(TAIL_RESTATE_MARKER)
-
-    // 动态值（暂停节点 id）仅注入末段且只出现一次
-    expect(text.indexOf('n-pause')).toBe(text.lastIndexOf('n-pause'))
-    expect(text.indexOf('n-pause')).toBeGreaterThan(tailAt)
-  })
-
-  it('组织预算注入（P2 §6.4）：冻结元参数 → 剩余量文本，且只在末段', async () => {
-    const h = await makeHarness()
-    const flow = makeFlow()
-    flow.meta = { nodeMax: 5, groupMax: 2, membersMax: 4, milestoneMax: 3, patchOpsMax: 10 }
-    await start(h, flow)
-    const text = h.agents.roots.get('session-1')!.messages[0].content[0].text
-    const tailAt = text.indexOf(TAIL_MARKER)
-    expect(tailAt).toBeGreaterThan(0)
-    expect(text.slice(0, tailAt)).not.toContain('本次组织预算：')
-    expect(text.slice(tailAt)).toContain('本次组织预算：')
-    expect(text.slice(tailAt)).toContain('剩余')
+    const messages = h.agents.roots.get('session-1')!.messages
+    expect(messages).toHaveLength(1)
+    expect(messages[0].content[0].text).toContain('测试流程')
   })
 
   it('运行锁：同会话重复运行 WF_LOCKED；跨会话 WF_LOCKED 且携带 lockedSessionId', async () => {
@@ -205,17 +245,6 @@ describe('startRun 启动与运行锁', () => {
 
     h.agents.roots.get('session-1')!.status = 'running'
     await expect(h.runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })).rejects.toMatchObject({ code: 'WF_ROOT_BUSY' })
-  })
-
-  it('事实源写入失败：清理 run 并报 WF_DEF_WRITE_FAILED', async () => {
-    const h = await makeHarness()
-    await h.store.saveWorkflow(makeFlow(), 'session-1', { force: true })
-    h.store.saveOrchestration = async () => {
-      throw new Error('磁盘错误')
-    }
-    await expect(h.runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })).rejects.toMatchObject({ code: 'WF_DEF_WRITE_FAILED' })
-    expect(h.runtime.activeRunForSession('session-1')).toBeNull()
-    expect(h.runtime.flowLockInfo('flow-1')).toBeNull()
   })
 
   it('指令注入失败：清理 run 并报 WF_INJECT_FAILED', async () => {
@@ -349,12 +378,12 @@ describe('模式二链路：服务文档 meta → 工作流视图', () => {
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
       status: 'stopped',
-      meta: { nodeMax: 7, milestoneMax: 2 },
+      meta: { nodeMax: 7, groupMax: 2 },
     } as unknown as ServiceState
     await h.store.saveService(service, 'session-1', { force: true })
     const flow = await h.store.getServiceAsFlow('svc-1')
     expect(flow?.mode).toBe('mode2')
-    expect(flow?.meta).toEqual({ nodeMax: 7, milestoneMax: 2 })
+    expect(flow?.meta).toEqual({ nodeMax: 7, groupMax: 2 })
   })
 })
 
@@ -380,13 +409,14 @@ function resumeReleaseFlow(): WorkflowDocument {
   }
 }
 
-/** 协作投递缝 fake：只记录投递调用（用于断言「未投递」）。 */
-function recordingDelivery(): { calls: unknown[]; deliver(input: unknown): Promise<void> } {
+/** 消息投递缝 fake：只记录投递调用（用于断言「未投递」）。 */
+function recordingDelivery(): { calls: unknown[]; deliverToChild(input: unknown): Promise<string> } {
   const calls: unknown[] = []
   return {
     calls,
-    async deliver(input: unknown): Promise<void> {
+    async deliverToChild(input: unknown): Promise<string> {
       calls.push(input)
+      return 'delivered'
     },
   }
 }
@@ -412,7 +442,7 @@ describe('resumeRun 释放旧 paused 条目', () => {
     expect((await h.store.getRun(start.runId))?.status).toBe('paused')
   })
 
-  it('续跑退役旧 run 的子代理归属：旧 child 不再能发起协作（判别性断言）', async () => {
+  it('续跑退役旧 run 的子代理归属：旧 child 不再能发送消息（判别性断言）', async () => {
     const h = await makeHarness()
     await h.store.saveWorkflow(resumeReleaseFlow(), 'session-1', { force: true })
     const started = await h.runtime.startRun({ sessionId: 'session-1', flowId: 'flow-1' })
@@ -424,18 +454,18 @@ describe('resumeRun 释放旧 paused 条目', () => {
     const resumed = await h.runtime.resumeRun({ sessionId: 'session-1', flowId: 'flow-1', fromRunId: started.runId })
     expect(resumed.runId).not.toBe(started.runId)
 
-    // 行为判据：旧 child 的归属已随旧 run 条目释放 → 投给旧同伴的协作请求被拒。
+    // 行为判据：旧 child 的归属已随旧 run 条目释放 → 以旧 child 身份发消息被拒。
     // 若归属残留，同一 sessionId/flowId 会通过越权校验并把消息投给已废弃的子代理会话
     // （目标按节点 id 经 childByNode 仍能解析到旧 child-2）。
     const delivery = recordingDelivery()
     await expect(
-      h.runtime.wfAskAgent(
+      h.runtime.wfSendMessage(
         { isChild: true, sessionId: 'session-1' },
         'child-1',
-        { cmd: 'ask', targetChildId: 'n-a2', message: '还在吗' },
+        { target: 'n-a2', message: '还在吗' },
         delivery as never,
       ),
-    ).rejects.toMatchObject({ code: 'WF_ASK_FORBIDDEN' })
+    ).rejects.toMatchObject({ code: 'WF_SEND_BAD_ARGS' })
     expect(delivery.calls).toEqual([])
 
     // 状态判据：归属索引里不再残留旧 child（与运行条目同生共死）

@@ -1,32 +1,31 @@
 // tests/host/prompts/orchestration-change.test.ts
 //
 // 「编排变更」注入通知文案单测（prompts/orchestration-change）：
-// 标记/事实源路径/语言规则/纯函数字节稳定。
+// 一句话形态、召回入口、系统通知语义，以及**不泄漏宿主路径**的安全门禁。
 // 编排语义变更判定（flow-diff）见 tests/host/orchestrator/flow-diff.test.ts。
 
 import { describe, expect, it } from 'vitest'
-import { ORCH_CHANGE_MARKER, buildOrchestrationChangeText } from '../../../src/host/prompts/index.js'
+import { ORCH_CHANGE_MARKER, ORCH_CHANGE_TEXT } from '../../../src/host/prompts/index.js'
 
 describe('orchestration-change 注入文案', () => {
-  it('含【编排变更】标记、事实源路径与「不是新指令」澄清', () => {
-    const text = buildOrchestrationChangeText({
-      workflowName: '测试流程',
-      definitionPath: 'D:/ws/orchestrations/run-1.json',
-      systemLanguage: '中文',
-    })
-    expect(text).toContain(ORCH_CHANGE_MARKER)
-    expect(text).toContain('D:/ws/orchestrations/run-1.json')
-    expect(text).toContain('不是用户的新指令')
-    expect(text).toContain('已完成的节点不要重跑')
-    expect(text).toContain('所有对话回复、注释、思考过程必须使用中文')
+  it('含【编排变更】标记与实例召回入口（父代理据此重新取骨架）', () => {
+    expect(ORCH_CHANGE_TEXT).toContain(ORCH_CHANGE_MARKER)
+    expect(ORCH_CHANGE_TEXT).toContain('wf_org_catalog')
+    expect(ORCH_CHANGE_TEXT).toContain('instance')
   })
 
-  it('系统语言缺省：不注入语言规则；纯函数字节稳定', () => {
-    const params = { workflowName: '测试流程', definitionPath: 'p.json' }
-    const first = buildOrchestrationChangeText(params)
-    const second = buildOrchestrationChangeText(params)
-    expect(first).toBe(second)
-    expect(first).not.toContain('所有对话回复')
+  it('安全门禁：不出现任何文件系统线索（盘符 / 目录名 / 文件扩展名）', () => {
+    expect(ORCH_CHANGE_TEXT).not.toMatch(/[A-Za-z]:[\\/]/)
+    expect(ORCH_CHANGE_TEXT).not.toContain('orchestrations')
+    expect(ORCH_CHANGE_TEXT).not.toContain('dataDir')
+    expect(ORCH_CHANGE_TEXT).not.toContain('.json')
+  })
+
+  it('保留「系统通知」语义：不与用户的新指令混淆', () => {
+    expect(ORCH_CHANGE_TEXT).toContain('系统通知')
+  })
+
+  it('单句形态：不含换行（不再复述操作细则）', () => {
+    expect(ORCH_CHANGE_TEXT).not.toContain('\n')
   })
 })
-

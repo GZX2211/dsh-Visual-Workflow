@@ -17,7 +17,6 @@ export declare const zh: {
     flowInstances: string;
     flowTemplates: string;
     parentAgent: string;
-    builtinParentPrompt: string;
     roleTemplates: string;
     files: string;
     databases: string;
@@ -156,6 +155,7 @@ export declare const zh: {
     serviceDebugEmpty: string;
     serviceDebugHint: string;
     serviceDebugErrorPrefix: string;
+    serviceDebugOmitted: string;
     history: string;
     saveAsTemplate: string;
     toastSavedAsTemplate: string;
@@ -227,11 +227,12 @@ export declare const zh: {
     outputSchema: string;
     inputSchemaExample: string;
     outputSchemaExample: string;
+    contractRestoreDefault: string;
     fileKind: string;
     fileContent: string;
     fileUnset: string;
     /** 文件多选提示（已选文件列表显示在按钮下方）。 */
-    /** 协作组拖拽悬停提示（放开以入组）。 */
+    /** 团队卡片拖拽悬停提示（放开以入组）。 */
     groupDropHint: string;
     /** 角色卡元信息「模型」前缀。 */
     nodeMetaModel: string;
@@ -278,11 +279,6 @@ export declare const zh: {
     proxyReadonlyHint: string;
     proxyLabel: string;
     proxyLabelHint: string;
-    proxyRole: string;
-    proxyRoleExecutor: string;
-    proxyRoleMilestone: string;
-    proxyRoleMilestoneHint: string;
-    proxyGateBadge: string;
     agentPatchedBadge: string;
     line: string;
     lineType: string;
@@ -337,6 +333,7 @@ export declare const zh: {
     toastRunning: string;
     toastStopped: string;
     toastSaved: string;
+    toastServiceStateShape: string;
     revisionConflictRetry: string;
     sessionCreateFailed: string;
     toastDeleted: string;
@@ -380,6 +377,8 @@ export declare const zh: {
     newSessionHint: string;
     workspacePlaceholder: string;
     workspaceHint: string;
+    pickWorkspace: string;
+    workspacePickerUnavailable: string;
     currentSessionBadge: string;
     overwriteInstanceTitle: string;
     overwriteInstanceMessage: string;
@@ -518,6 +517,8 @@ export declare const zh: {
     schedulerDeleted: string;
     schedulerNeedName: string;
     schedulerNeedTemplate: string;
+    schedulerLocale: string;
+    schedulerTimezoneUnavailable: string;
     remoteTimeout: string;
     remoteConnection: string;
     remoteHttpStatus: string;

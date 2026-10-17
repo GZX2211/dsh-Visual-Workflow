@@ -58,12 +58,17 @@ export class TemplateEndpoints extends VisualWorkflowApiBase {
     if (!raw || !String(raw.id ?? '').trim()) throw httpError(400, 'requires a flow template id')
     const expected = Number(raw.revision)
     if (!Number.isFinite(expected)) throw httpError(400, 'requires a numeric revision')
-    // 退役字段剥除（同 putWorkflow）：「开启新会话」/工作区已改为创建实例时的一次性
-    // 临时选项，模板不存储该配置（旧模板残留字段保存即清除；也不再校验旧路径）。
-    // 浅拷贝后剥除退役字段（前端标记剥除由 storage 保存路径统一负责）。
+    // 模板级新会话配置（startNewSession / workspacePath）：随模板持久化，删除模板即随之删除。
+    // 只做形状归一化（勾选仅 true 有意义；路径 trim 后非空才保留），不校验目录存在性——
+    // 路径来自官方目录选择器，存在性由创建实例的 createSession 端点校验（旧模板/导入数据
+    // 可能已失效，保存阶段拒绝会连带画布编辑一起失败，语义过重）。
+    // 浅拷贝后归一化（前端临时标记剥除由 storage 保存路径统一负责）。
     const normalized = { ...raw }
-    delete normalized.startNewSession
-    delete normalized.workspacePath
+    if (raw.startNewSession === true) normalized.startNewSession = true
+    else delete normalized.startNewSession
+    const workspacePath = String(raw.workspacePath ?? '').trim()
+    if (workspacePath) normalized.workspacePath = workspacePath
+    else delete normalized.workspacePath
     try {
       return await this.host.store.saveFlowTemplate(normalized as never, { expectedRevision: expected })
     } catch (error) {

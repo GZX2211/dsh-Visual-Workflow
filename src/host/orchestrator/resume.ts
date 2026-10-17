@@ -29,6 +29,8 @@ export const RESUMABLE_STATUSES = ['paused', 'interrupted', 'stopped'] as const
 
 /** 断点续跑入参（工具路径静默接续与端点/调度器显式续跑共用）。 */
 export interface ResumeInput {
+  /** 续跑时显式指定的 UI 语言；缺省继承断点快照的语言。 */
+  systemLanguage?: string
   sessionId: string
   flowId: string
   /** 指定恢复的旧 run id；缺省取该工作流最近的可恢复记录。 */
@@ -46,8 +48,6 @@ export interface ResumeInput {
 /** 断点续跑结果。 */
 export interface ResumeResult {
   runId: string
-  /** 流程事实源文件绝对路径（编排指令 facts.definitionPath）。 */
-  defPath: string
   /** 实际恢复的旧 run id。 */
   resumedFromRunId: string
 }

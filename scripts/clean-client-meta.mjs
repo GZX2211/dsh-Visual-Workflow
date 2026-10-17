@@ -1,4 +1,8 @@
-// 脚本：scripts/clean-client-meta.mjs（一次性数据修复，不入测试套件）
+// scripts/clean-client-meta.mjs
+//
+// 一次性数据修复脚本，不入测试套件。
+// 生效边界（历史 Bug 存量清理，修复完成后即失效）：必须显式给出 dataDir，只剥除
+// _draft/_clientMeta 标记并原子回写；不提供 package.json 别名，不参与 build/check/gates。
 // 用途：清理 dataDir 下历史残留的前端快照标记（_draft/_clientMeta）。
 // 背景：旧实现把 _draft 随模板/服务/工作流写盘，刷新后已入库对象被误判为
 // 本地草稿（本地删除不走后端、保存行为错乱）。本脚本剥除标记并原子回写。

@@ -21,6 +21,7 @@ import { useGraphHistory } from '../hooks/useGraphHistory.js'
 import { useUnsavedGuard } from '../hooks/useUnsavedGuard.js'
 import { useRunControl } from '../hooks/useRunControl.js'
 import { useRunPolling } from '../hooks/useRunPolling.js'
+import { useTeamMemberLimit } from '../hooks/useTeamMemberLimit.js'
 import { useActiveRunsPolling } from '../hooks/useActiveRunsPolling.js'
 import { useFlowTemplatesPolling } from '../hooks/useFlowTemplatesPolling.js'
 import { useServiceStatusPolling } from '../hooks/useServiceStatusPolling.js'
@@ -41,6 +42,7 @@ import { useKeyShortcuts } from '../hooks/useKeyShortcuts.js'
 import {
   currentFlowOf, currentServiceOf, currentFlowTemplateOf, currentFlowAssetOf, editorDataOf, instanceRunningOf, isRunningOf,
   leftPanelOpenOf, bottomPanelOpenOf, inspectorOpenOf, panelsFullyCollapsedOf, nextPanelMode,
+  agentPatchedNodeIdsOf, activeRunIndexOf, activeRunBadgeOf, instanceRunBadgesOf,
   PANEL_MODE_NONE, type LibrarySource,
 } from './studio-state.js'
 import { StudioLayout } from './StudioLayout.js'
@@ -48,9 +50,13 @@ import type { CanvasApi } from '../components/canvas/GraphCanvas.js'
 import { runStatusMap, runningNodeIds } from '../lib/run-status-map.js'
 import { stageTemplateKinds } from '../lib/graph-handles.js'
 import { computeRunLocks } from '../lib/run-locks.js'
-import { keepInstanceOptions } from './instance-options.js'
+import { useInstanceOptionsCache } from './useInstanceOptionsCache.js'
+import { useNewSessionOptions } from '../hooks/useNewSessionOptions.js'
+import type { WorkspacePicker } from '../sidebar/workspace-picker.js'
 
 export interface StudioProps {
+  /** 当前生效的 DSH 语言（含浏览器/原生自动选择），运行端点随请求携带。 */
+  language?: string
   /** 文案词典。 */
   t: Dict
   /** 绑定的会话 id。 */
@@ -63,10 +69,15 @@ export interface StudioProps {
    * 之前是「切到插件自己的分栏视图模式」，该模式已随浮窗/分栏整体删除。
    */
   onRunImmersive?: () => void
+  /**
+   * 官方目录选择器（宿主接入层组装；缺省 = 当前环境没有可用选择器）。
+   * 业务组件不直接触达官方服务，宿主能力经此注入面进入工作台。
+   */
+  workspacePicker?: WorkspacePicker | null
 }
 
-export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: StudioProps) {
-  const defaultRemote = useRemote(t)
+export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive, language, workspacePicker }: StudioProps) {
+  const defaultRemote = useRemote(t, language)
   const remote = remoteProp ?? defaultRemote
   const { state, dispatch } = useStudioState(sessionId)
   const { toast, toastError } = useToast(dispatch)
@@ -90,6 +101,14 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
   useFlowTemplatesPolling(dispatch, remote)
   // 模式二服务状态轮询：宿主侧进程崩溃/被回收时把运行事实拉回界面（此前只在动作后刷新）
   useServiceStatusPolling(state, dispatch, remote)
+  // Team 成员上限（宿主下发，与部署层 agent-team.maxMembers 同值）：画布入组交互据此拒绝超限
+  const teamMemberLimit = useTeamMemberLimit(remote)
+
+  // 活跃 run 摘要索引（实例列表运行徽标 + 运行对账共用）：一次建 Map，避免「每个实例一次全量
+  // 线性查找」（n 个实例 × m 条活跃 run）。按 activeRuns 引用记忆化：state 因其他原因变化时
+  // 沿用同一索引（引用恒等是下游徽标投影与库 props 记忆化保持稳定的前提）；对账 effect 消费的
+  // 仍是本次渲染的索引，不会读到过期值。
+  const activeRunIndex = useMemo(() => activeRunIndexOf(state), [state.activeRuns])
 
   const canvasApiRef = useRef<CanvasApi | null>(null)
   const canvasShellRef = useRef<HTMLDivElement | null>(null)
@@ -116,6 +135,19 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
   // id 列表（GraphCanvas 渲染 is-highlighted；防回环：只写视图，不进保存/撤销历史）。
   const highlightedNodeIds = useMemo(() => runningNodeIds(state.run.snapshot), [state.run.snapshot])
   const runStatusByNode = useMemo(() => runStatusMap(state.run.snapshot), [state.run.snapshot])
+  // 实例列表运行徽标（左栏/底栏共用一份）：投影结果随「实例列表 / 活跃 run 索引 / 当前 run」
+  // 变化才重建——同一 state 下重渲染时保持引用恒等（此前在渲染函数内逐实例现算，引用恒变）。
+  const libraryFlows = state.mode === 'mode2' ? state.services : state.workflows
+  const instanceRunBadges = useMemo(
+    () => instanceRunBadgesOf(libraryFlows, state.run, activeRunIndex),
+    [activeRunIndex, libraryFlows, state.run],
+  )
+  // P4 父代理补丁角标：同一 state 下重渲染必须给出同一数组引用（此前 JSX 内直接调用选择器，
+  // 每次渲染都是新数组，GraphCanvas 的 Set 投影与下游 props 比较因此全部失效）。
+  const agentPatchedNodeIds = useMemo(() => agentPatchedNodeIdsOf(state), [state])
+  // 模板分组列表（左栏 props 与 StudioLayout 同源，收敛到一处避免重复断言）
+  const roleTemplates = useMemo(() => (state.templates.role as import('../../host/shared/types.js').RoleTemplate[]).filter((item) => item.kind !== 'parent'), [state.templates.role])
+  const groupTemplates = state.templates.group as import('../../host/shared/types.js').GroupTemplate[]
   // 运行中画布锁定（用户裁决 c）：模式一实例 running 时，已跑完的流程不可变更
   // （节点/连线不可删改，仅可拖动）；未跑完的（执行中节点右出及其后全部）可自由编辑。
   const instanceRunning = instanceRunningOf(state)
@@ -138,26 +170,19 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
   useEffect(() => {
     if (state.mode !== 'mode1') return
     if (!currentFlow) return
-    const active = state.activeRuns.find(
-      (a) => a.flowId === currentFlow.id && a.sessionId === currentFlow.sessionId && a.status === 'running',
-    )
-    if (!active) return
+    const active = activeRunBadgeOf(activeRunIndex, currentFlow.id, currentFlow.sessionId)
+    if (active?.status !== 'running') return
     if (state.run.runId === active.runId) return
     dispatch({ type: 'RUN_STARTED', runId: active.runId, runSessionId: active.sessionId })
-  }, [currentFlow, dispatch, state.activeRuns, state.mode, state.run.runId])
+  }, [activeRunIndex, currentFlow, dispatch, state.mode, state.run.runId])
 
   useEffect(() => {
     dispatch({ type: 'SET_SESSION', sessionId })
   }, [dispatch, sessionId])
 
-  // 「开启新会话」/工作区路径缓存（用户裁决）：instanceOptions 任何变化即落盘
-  // localStorage；初始恢复在 useStudioState 初始化工厂完成。instanceOptions 的
-  // 唯一重置在 OPEN_FLOW_TEMPLATE（打开模板时回到「不新开会话」默认），实例创建
-  // 只消费、不回写。配合工作台保持挂载（关闭不卸载），重复进入不丢失，刷新亦恢复。
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    keepInstanceOptions(window.localStorage, state.instanceOptions)
-  }, [state.instanceOptions])
+  // 「开启新会话」界面记忆缓存：仅资产态一次性勾选落 localStorage（防抖）。
+  // 模板态的勾选/路径是模板级持久化配置（变更即保存模板），不写全局记忆。
+  useInstanceOptionsCache(state.currentKind === 'flowAsset' ? state.instanceOptions : null)
 
   // ---------- 轻提示 ----------
   const notify = useCallback((kind: 'info' | 'success' | 'error', text: string) => {
@@ -188,12 +213,23 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
 
   // ---------- 交互编排面（拆分至 hooks/ 的 controller hooks） ----------
   const doc = useDocumentActions(state, dispatch, guard, notify, toastError, workflows, flowTemplates, templates, selection, serviceControl, remote, t)
+  // 「开启新会话」+ 工作区路径：模板态读模板持久化字段并「变更即保存模板」，资产态为
+  // 一次性临时选项；路径选择复用宿主注入的官方目录选择器（业务组件不触达官方服务）。
+  const newSession = useNewSessionOptions({
+    state,
+    dispatch,
+    setFlowTemplateOptions: doc.setFlowTemplateOptions,
+    notify,
+    toastError,
+    picker: workspacePicker ?? null,
+    t,
+  })
   // 资产面（模版晋升而来的可复用资料）：列表/详情/入库/版本/回滚/退役 + 资产态画布打开。
   // 先于 editor 装配：属性栏的入库/回滚/资产态保存由 useEditorActions 经此面编排。
   const assets = useAssets(remote, dispatch, notify, toastError, t, state)
   // 经验面（资产态「经验」Tab）：列表 / 保存 / 归档 / 恢复；同样先于 editor 装配。
   const experiences = useExperiences(remote, dispatch, notify, toastError, t, state)
-  const canvas = useCanvasActions(state, dispatch, notify, history, t, { locks: runLocks, saveCanvas: doc.saveCanvas })
+  const canvas = useCanvasActions(state, dispatch, notify, history, t, { locks: runLocks, saveCanvas: doc.saveCanvas, teamMemberLimit })
   const editor = useEditorActions(state, dispatch, notify, toastError, t, workflows, flowTemplates, templates, assets, experiences, selection, remote, doc.saveCanvas, canvas.removeSelected, canvas.removeLine, doc.selectWorkflow, doc.selectFlowTemplate, { locks: runLocks })
   const run = useRunActions(state, dispatch, notify, toastError, t, remote, runControl, serviceControl, doc.saveCanvas, doc.createInstanceFromCanvas)
   const transfer = useStudioTransfer(state, dispatch, notify, toastError, t, remote, templates, flowTemplates, workflows, editor.patchEditor, editorData, personaInputRef, groupMdInputRef)
@@ -233,7 +269,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
 
   // ---------- 初始化加载 ----------
   useStudioBoot(
-    state, dispatch, notify, toastError, t, remote, workflows, flowTemplates, templates, serviceControl,
+    state, dispatch, notify, toastError, remote, workflows, flowTemplates, templates, serviceControl,
     pickInitialInstanceForSession,
   )
 
@@ -243,10 +279,12 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
     guard.guard(() => {
       modeSwitch.setMode(mode)
       dispatch({ type: 'CLEAR_CANVAS' })
+      // 这两个加载是模式切换的副作用、无人 await：漏掉 catch 会让远端失败变成静默的
+      // unhandled rejection（用户看不到任何反馈），故必须显式上报
       if (mode === 'mode1') {
-        void workflows.loadWorkflows()
+        void workflows.loadWorkflows().catch((error) => { toastError(error) })
       } else {
-        void serviceControl.loadServices()
+        void serviceControl.loadServices().catch((error) => { toastError(error) })
       }
     })
   }, [dispatch, guard, modeSwitch, serviceControl, state.mode, workflows])
@@ -273,7 +311,6 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
   // ---------- 派生 ----------
   const stageKinds = useMemo(() => stageTemplateKinds(state.mode, t.nodeKinds), [state.mode, t.nodeKinds])
   const parentTemplate = useMemo(() => (state.templates.role as import('../../host/shared/types.js').RoleTemplate[]).find((item) => item.kind === 'parent') ?? null, [state.templates.role])
-  const roleTemplates = useMemo(() => (state.templates.role as import('../../host/shared/types.js').RoleTemplate[]).filter((item) => item.kind !== 'parent'), [state.templates.role])
   // 画布连线即投影本体（CanvasEdge），渲染期按需计算颜色/条件标签，无需视图补充字段
   const edgeList = state.canvas.edges
   const toolbarRunning = state.mode === 'mode2' ? currentService?.status === 'running' : running
@@ -281,6 +318,69 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
   const leftOpen = leftPanelOpenOf(state)
   const bottomOpen = bottomPanelOpenOf(state)
   const inspectorOpen = inspectorOpenOf(state)
+
+  // 左栏（LeftPanel）与底栏（BottomPanel）共用同一份库内容 props（内容/选中/拖拽逻辑一致，
+  // 仅显示布局不同）。仅 open/width 或 open/height 两处按各自布局传入。
+  // memo：同一 state 下重渲染必须保持引用恒等（此对象此前每次渲染都重建，两个面板收到的
+  // props 恒为「新对象」，任何下游 props 比较/记忆化都失效）。
+  const libraryProps = useMemo(() => ({
+    libTab: state.libTab,
+    onSetTab: (tab: import('../studio/studio-state.js').LibTab) => dispatch({ type: 'SET_LIB_TAB', tab }),
+    // 库来源（模版 / 资产）+ 搜索关键词（两态共用）；来源切换会同时切画布文档类型
+    librarySource: state.librarySource,
+    onSetLibrarySource: setLibrarySource,
+    libSearch: state.libSearch,
+    onSetLibSearch: (query: string) => dispatch({ type: 'SET_LIB_SEARCH', query }),
+    mode: state.mode,
+    // 工作台全局化：实例列表 = 全部会话实例（带各自 sessionId 供「当前」标签/状态徽标归属）。
+    // 运行徽标来源已下沉为 instanceRunBadges 投影（此处只做字段映射，不做逐实例线性查找）。
+    currentSessionId: state.sessionId,
+    workflows: libraryFlows.map((item) => {
+      const badge = instanceRunBadges.get(item.id)
+      return {
+        id: item.id,
+        name: item.name,
+        description: item.description,
+        nodes: item.nodes,
+        sessionId: item.sessionId,
+        runStatus: badge?.currentSnapshot ?? badge?.active?.status ?? null,
+      }
+    }),
+    flowTemplates: (state.flowTemplates ?? []).filter((item) => item.mode === state.mode),
+    // 资产列表（Active 索引）：资产态左栏数据源（模版态不消费）
+    assets: state.assets,
+    // 经验列表：资产态「数据」Tag 以「经验」呈现时的数据源（活跃 + 已归档）
+    experiences: state.experiences,
+    parentTemplate,
+    roleTemplates,
+    fileTemplates: state.templates.file as import('../../host/shared/types.js').FileTemplate[],
+    databaseTemplates: state.templates.database as import('../../host/shared/types.js').DatabaseTemplate[],
+    groupTemplates,
+    stageKinds,
+    libSelection: state.selection.lib,
+    modeName,
+    onSelectWorkflow: doc.selectWorkflow,
+    onSelectFlowTemplate: doc.selectFlowTemplate,
+    // 资产卡片：工作流资产 → 打开为画布文档；角色资产 → 属性栏编辑 / 拖入画布
+    onSelectFlowAsset: selectFlowAsset,
+    onOpenRoleAsset: (id: string) => { void assets.openRoleAsset(id) },
+    onPlaceRoleAsset: placeRoleAsset,
+    // 经验卡片：经验没有画布形态，只能打开到属性栏编辑（无拖入入口）
+    onOpenExperience: (id: string) => editor.selectLibraryCard('experience', id),
+    onSelectLib: editor.selectLibraryCard,
+    onPlaceTemplate: canvas.placeTemplateNode,
+    onPlaceTemplateIntoGroup: canvas.placeTemplateIntoGroup,
+    onPlaceStage: canvas.placeStageNode,
+    onPlaceGroup: canvas.placeGroupNode,
+    onPlaceGroupFromTemplate: canvas.placeGroupFromTemplate,
+    onPlaceParent: canvas.placeParentNode,
+    onCreateNew: doc.createNew,
+    onBeginDrag: beginLibraryDrag,
+  }), [
+    assets, beginLibraryDrag, canvas, dispatch, doc, editor, groupTemplates, instanceRunBadges,
+    libraryFlows, modeName, parentTemplate, placeRoleAsset, roleTemplates,
+    selectFlowAsset, setLibrarySource, stageKinds, state,
+  ])
 
   // ---------- 渲染（委托 StudioLayout 纯展示层） ----------
   return (
@@ -297,10 +397,12 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
       stageKinds={stageKinds}
       parentTemplate={parentTemplate}
       roleTemplates={roleTemplates}
-      groupTemplates={state.templates.group as import('../../host/shared/types.js').GroupTemplate[]}
+      groupTemplates={groupTemplates}
       toolbarRunning={toolbarRunning}
       runStatusByNode={runStatusByNode}
       highlightedNodeIds={highlightedNodeIds}
+      agentPatchedNodeIds={agentPatchedNodeIds}
+      libraryProps={libraryProps}
       lockedNodeIds={runLocks.lockedNodeIds}
       lockedEdgeIds={runLocks.lockedEdgeIds}
       instanceRunning={instanceRunning}
@@ -335,9 +437,12 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
       handleRun={handleRun}
       panelsCollapsed={panelsCollapsed}
       onTogglePanels={togglePanels}
-      onSetLibrarySource={setLibrarySource}
-      onSelectFlowAsset={selectFlowAsset}
-      onPlaceRoleAsset={placeRoleAsset}
+      instanceOptions={newSession.options}
+      onInstanceOptionsChange={newSession.onOptionsChange}
+      showWorkspacePicker={newSession.showWorkspacePicker}
+      workspacePickerAvailable={newSession.pickerAvailable}
+      workspacePicking={newSession.picking}
+      onPickWorkspace={newSession.onPickWorkspace}
     />
   )
 }

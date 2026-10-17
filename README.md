@@ -182,7 +182,7 @@
 | **LLM 模型** | 独立选择 provider + model |
 | **思考强度** | 与官方下拉一致 |
 | **工具组合** | 内置预设（标准/极简/ptc/创造）+ 自定义组合（组合管理中创建） |
-| **ReAct 迭代上限** | 软截停：达上限后强制收尾（不发起新工具调用，输出已有结论），默认 50 |
+| **ReAct 迭代上限** | 软截停：达上限后强制收尾（不发起新工具调用，输出已有结论），默认不设限 |
 | **回流重试上限** | 节点级尝试计数护栏，默认 3 |
 | **输入/输出数据结构** | 文本/JSON 描述（辅助模型理解） |
 | **系统提示词开关** | 控制官方系统提示词注入（默认开启）；**关闭工具散文段不影响工具调用能力** |
@@ -438,7 +438,7 @@ scheduler/                  # 定时任务定义与触发记录
         maxConcurrentPerService: 50
         wfAskAgentTtlMs: 120000
         runIdleTimeoutMs: 1800000
-        reactIterationLimitDefault: 50
+        reactIterationLimitDefault: 0
         retryLimitDefault: 3
         outputFullLimit: 102400
         documentTextLimit: 20000
@@ -467,7 +467,6 @@ pnpm test           # 单元测试
 pnpm gates          # Contract / 门禁测试
 pnpm client-smoke   # Client 冒烟测试
 pnpm check          # 类型检查 + 测试 + 构建 + smoke
-pnpm verify         # 完整验证门禁
 ```
 
 > 修改 Client 需重新构建并硬刷新浏览器；修改 Host 需重启 `dsh web`。

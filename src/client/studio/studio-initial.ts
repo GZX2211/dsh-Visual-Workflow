@@ -32,7 +32,7 @@ export function createInitialState(sessionId: string): StudioState {
     workflows: [],
     services: [],
     activeRuns: [],
-    instanceOptions: { newSession: false, workspacePath: '' },
+    instanceOptions: { newSession: false },
     flowTemplates: [],
     templates: { role: [], file: [], database: [], group: [] },
     combos: [],

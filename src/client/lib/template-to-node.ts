@@ -6,7 +6,7 @@
 import type { RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate } from '../../host/shared/types.js'
 
 /** 模板字段 → 节点 data（深拷贝快照；模板 name → 节点 label，共享类型逐字段对齐）。
- *  kind 限定 role/file/database；传入 GroupTemplate 时按 None 处理（协作组模板走
+ *  kind 限定 role/file/database；传入 GroupTemplate 时按 None 处理（Team 模板走
  *  placeGroupFromTemplate，不进本函数）。 */
 export function templateToNodeData(
   kind: 'role' | 'file' | 'database',

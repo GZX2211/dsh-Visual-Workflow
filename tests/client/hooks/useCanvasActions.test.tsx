@@ -18,7 +18,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import React from 'react'
 import { useCanvasActions, GEOMETRY_AUTOSAVE_DEBOUNCE_MS, type CanvasActionsFace } from '../../../src/client/hooks/useCanvasActions.js'
 import { computeRunLocks } from '../../../src/client/lib/run-locks.js'
-import { createInitialState, type StudioAction, type StudioState } from '../../../src/client/studio/studio-state.js'
+import { createInitialState, type StudioState } from '../../../src/client/studio/studio-state.js'
 import type { GraphHistoryFace } from '../../../src/client/hooks/useGraphHistory.js'
 import type { RoleAssetDetail } from '../../../src/host/shared/asset-types.js'
 import { en, zh } from '../../../src/client/i18n.js'
@@ -78,6 +78,8 @@ interface CanvasHarness {
   dispatched: Array<{ type: string; [key: string]: unknown }>
   toasts: Array<{ kind: string; text: string }>
   saveCanvas: ReturnType<typeof vi.fn>
+  /** 用新的 state 重渲染（同一组件实例，用于观察回调/面身份是否稳定）。 */
+  rerender(next: StudioState): Promise<void>
 }
 
 async function renderCanvas(state: StudioState, copy = zh): Promise<CanvasHarness> {
@@ -89,16 +91,24 @@ async function renderCanvas(state: StudioState, copy = zh): Promise<CanvasHarnes
   const locks = computeRunLocks({ enabled: false, nodes: [], edges: [], statusByNode: {} })
   const history = { remember: vi.fn(), undo: vi.fn(), redo: vi.fn(), canUndo: false, canRedo: false } as unknown as GraphHistoryFace
   let face: CanvasActionsFace | null = null
-  function Harness(): null {
+  function Harness({ state }: { state: StudioState }): null {
     const f = useCanvasActions(state, dispatch, notify as never, history, copy, { locks, saveCanvas })
     useEffect(() => { face = f }, [f])
     return null
   }
   await act(async () => {
     root = createRoot(container!)
-    root.render(React.createElement(Harness))
+    root.render(React.createElement(Harness, { state }))
   })
-  return { face: face!, dispatched, toasts, saveCanvas }
+  return {
+    face: face!,
+    dispatched,
+    toasts,
+    saveCanvas,
+    rerender: async (next: StudioState): Promise<void> => {
+      await act(async () => { root!.render(React.createElement(Harness, { state: next })) })
+    },
+  }
 }
 
 describe('角色资产拖入画布（placeRoleAssetNode）', () => {
@@ -173,5 +183,49 @@ describe('几何自动保存（资产态不自动落库）', () => {
     await act(async () => { h.face.moveNode('n-1', { x: 5, y: 5 }) })
     await act(async () => { vi.advanceTimersByTime(GEOMETRY_AUTOSAVE_DEBOUNCE_MS + 10) })
     expect(h.saveCanvas).toHaveBeenCalledWith({ auto: true })
+  })
+})
+
+describe('face 身份稳定（D08-07）', () => {
+  it('无关状态切片变化：face 与几何回调身份不变（下游 effect 不重挂）', async () => {
+    const state: StudioState = {
+      ...createInitialState('s-1'),
+      currentKind: 'workflow',
+      currentId: 'wf-1',
+      workflows: [{ id: 'wf-1', sessionId: 's-1', mode: 'mode1', name: '流程', description: '', revision: 1, nodes: [], lines: [] }],
+    }
+    const h = await renderCanvas(state)
+    const firstFace = h.face
+    const firstMove = h.face.moveNode
+    const firstResize = h.face.onGroupResize
+
+    // 只改与画布编辑无关的切片（toasts）：不得重建操作面
+    await h.rerender({ ...state, toasts: [{ id: 't-1', kind: 'info', text: 'x' }] })
+
+    expect(h.face).toBe(firstFace)
+    expect(h.face.moveNode).toBe(firstMove)
+    expect(h.face.onGroupResize).toBe(firstResize)
+  })
+
+  it('画布内容变化后仍能读到最新状态（ref 语义未把回调钉死在旧快照）', async () => {
+    vi.useFakeTimers()
+    const state: StudioState = {
+      ...createInitialState('s-1'),
+      currentKind: 'workflow',
+      currentId: 'wf-1',
+      workflows: [{ id: 'wf-1', sessionId: 's-1', mode: 'mode1', name: '流程', description: '', revision: 1, nodes: [], lines: [] }],
+    }
+    const h = await renderCanvas(state)
+    const moveNode = h.face.moveNode
+    // 文档变为草稿态（同一回调身份下）：自动保存必须按最新状态判定为「不可保存」
+    const draft: StudioState = {
+      ...state,
+      workflows: [{ ...state.workflows[0]!, _draft: true } as unknown as StudioState['workflows'][number]],
+    }
+    await h.rerender(draft)
+
+    await act(async () => { moveNode('n-1', { x: 1, y: 1 }) })
+    await act(async () => { vi.advanceTimersByTime(GEOMETRY_AUTOSAVE_DEBOUNCE_MS + 10) })
+    expect(h.saveCanvas).not.toHaveBeenCalled()
   })
 })

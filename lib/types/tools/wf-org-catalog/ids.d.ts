@@ -14,16 +14,29 @@ export type AssetRef = {
     containerId: string;
     nodeId: string;
 } | {
+    ok: true;
+    kind: 'instance';
+    id: string;
+} | {
+    ok: true;
+    kind: 'instanceRole';
+    id: string;
+    nodeId: string;
+} | {
     ok: false;
     reason: string;
 };
-/** 支持的 id 形状说明（错误提示复用，避免措辞漂移）。 */
+/**
+ * 支持的 id 形状说明（错误提示复用，避免措辞漂移）。
+ * 实例两项只在此处与工具描述出现，不进资产索引：索引是规划期入口，
+ * 而实例入口只在运行期有意义（由运行期指令告知父代理）。
+ */
 export declare function idShapesHint(): string;
 /**
  * 解析单个 id（纯函数）。
- * 内联角色只从**工作流资产**召回：复合键左侧必须是 `flow-*`——运行期实例的骨架与
- * 内联角色不由本工具暴露（父代理只允许改当前正在运行的实例，其编排事实由运行期
- * 编排指令提供）。
+ * 内联角色有两个来源：**工作流资产**（复合键左侧 `flow-*`）与**当前运行实例**
+ * （左侧保留字 `instance`）。运行实例只有这一个入口——本工具不提供按 id 枚举任意实例的
+ * 形状，历史 run、其他会话的实例在判据层就不存在，故规划期无法借本工具参考不稳定实例。
  */
 export declare function parseAssetId(raw: unknown): AssetRef;
 /**

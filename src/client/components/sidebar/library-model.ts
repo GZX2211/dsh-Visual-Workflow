@@ -1,7 +1,7 @@
 // src/client/components/sidebar/library-model.ts
 //
 // 库内容模型构建器（纯函数，无副作用）：把「左侧库」的完整逻辑（来源（模版/资产）、
-// 四 Tag 分区、实例/模板/资产/角色/文件/数据库/阶段/协作组卡片、搜索过滤、
+// 四 Tag 分区、实例/模板/资产/角色/文件/数据库/阶段/Team 卡片、搜索过滤、
 // 拖拽 payload、选中高亮判定）提取为一份可复用的数据模型。左侧栏（LeftPanel，
 // 竖向列表）与底栏（BottomPanel，横向卡片流）共用同一 builder，保证两份显示的
 // 「内容与选中/拖拽逻辑」完全一致。
@@ -9,7 +9,7 @@
 // 单一职责：本文件只负责「从原始列表 + 回调构造卡片模型」，不渲染任何 JSX。
 //
 // 来源语义（用户裁决）：
-//   - 模版态：实例列表 + 工作流模板 / 父代理 + 角色模板 / 文件 + 数据库 / 阶段 + 协作组；
+//   - 模版态：实例列表 + 工作流模板 / 父代理 + 角色模板 / 文件 + 数据库 / 阶段 + Team；
 //   - 资产态：工作流资产 / 角色资产，各自再分「活跃资产」与「历史资产（已归档）」两栏；
 //     数据 Tag 在此态以「经验」呈现（用户批注：只在资产标签下改名并改变列表结构，
 //     模版界面仍是原本的文件 + 数据库），内容为经验库的「活跃经验 / 历史经验（已归档）」
@@ -175,7 +175,7 @@ export function buildLibraryModel(input: LibraryModelInput): LibraryModel {
     roleTemplates, fileTemplates, databaseTemplates, groupTemplates, stageKinds, libSelection,
     onSelectWorkflow, onSelectFlowTemplate, onSelectFlowAsset, onOpenRoleAsset, onPlaceRoleAsset, onOpenExperience,
     onSelectLib, onPlaceTemplate, onPlaceTemplateIntoGroup, onPlaceStage, onPlaceGroupFromTemplate,
-    onPlaceParent, onCreateNew,
+    onPlaceParent,
   } = input
 
   const librarySource: LibrarySource = input.librarySource === 'asset' ? 'asset' : 'template'

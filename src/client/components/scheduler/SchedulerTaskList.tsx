@@ -30,7 +30,7 @@ export function SchedulerTaskList(props: SchedulerTaskListProps) {
   const itemMeta = (view: ScheduledTaskView): string => {
     const tpl = templates.find((item) => item.id === view.task.workflowTemplateId)
     const parts = [tpl?.name ?? view.task.workflowTemplateId]
-    if (view.runtime.nextTriggerAt) parts.push(`${copy.schedulerNextRun} ${formatIso(view.runtime.nextTriggerAt)}`)
+    if (view.runtime.nextTriggerAt) parts.push(`${copy.schedulerNextRun} ${formatIso(view.runtime.nextTriggerAt, copy.schedulerLocale)}`)
     return parts.join(' · ')
   }
 

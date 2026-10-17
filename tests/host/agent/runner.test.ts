@@ -4,7 +4,7 @@
 // ensureNodeChild（创建/签名重建）/startNodeTask（相邻 Agent 通道派发）/interruptChild/
 // 软截停消费/可见性双保险。
 //
-// DoD（任务清单 T-022）：签名重建、白名单∩父代理工具集、wf_ask/wf_ask_agent 仅
+// DoD（任务清单 T-022）：签名重建、白名单∩父代理工具集、wf_ask_user/wf_send_message 仅
 // 勾选注入、wf_run_node/wf_finish 子代理不可见、ReAct 软截停输出结论（guards 单测）。
 // 断言依据：架构文档 §4.2 L218-219、需求文档 §4.4.2 规则 7 / §4.4.3 规则 5。
 
@@ -23,15 +23,18 @@ import {
   pickProviderName,
   resolveAgentTools,
   type AgentsServiceLike,
+  type SubagentActivationSpecLike,
+  type SubagentContinuableSpecLike,
   type SubagentsServiceLike,
   type ToolsView,
 } from '../../../src/host/agent/runner.js'
 import type { ReactGuardBridge } from '../../../src/host/agent/guards.js'
+import { subagentsServiceLike } from '../../../src/host/agent/agents-host.js'
 import { createChildToolFilterSetup, type ChildToolFilterSetup } from '../../../src/host/agent/child-tool-filter.js'
 import { createModelSelectionSetup, type ModelSelectionSetup } from '../../../src/host/agent/model-selection.js'
 import { createChildPromptSetup, type ChildPromptSetup } from '../../../src/host/agent/prompt-setup.js'
 import type { AgentTeamsServiceLike, TeamMemberViewLike } from '../../../src/host/team/index.js'
-import type { GroupStartInput, NodeStartInput } from '../../../src/host/orchestrator/index.js'
+import type { NodeStartInput } from '../../../src/host/orchestrator/index.js'
 import type { RoleNode, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
 import { CHILD_AGENT_HIDDEN_TOOLS } from '../../../src/host/shared/protocol.js'
 
@@ -70,7 +73,7 @@ function blocks(text = '任务块'): Array<{ type: 'text'; text: string }> {
 /** 子代理服务 fake：记录创建/派发/中断（旧宿主面；无 getProvider，走 list 回退）。 */
 class FakeSubagents implements SubagentsServiceLike {
   providers: string[] = ['spawn', 'fork', 'acp']
-  started: Array<Parameters<SubagentsServiceLike['startContinuable']>[0]> = []
+  started: SubagentContinuableSpecLike[] = []
   /** 复用派发记录（0.1.5-rc.1：sendMessage 为唯一推荐通道）。 */
   dispatches: Array<{ sender: unknown; targetId: string; content: unknown[]; signal?: AbortSignal }> = []
   interrupts: Array<{ childId: string; authority: { kind: 'user'; parentSessionId: string } }> = []
@@ -81,7 +84,7 @@ class FakeSubagents implements SubagentsServiceLike {
   list(): string[] {
     return [...this.providers]
   }
-  async startContinuable(spec: Parameters<SubagentsServiceLike['startContinuable']>[0]): Promise<{ childId: string }> {
+  async startContinuable(spec: SubagentContinuableSpecLike): Promise<{ childId: string }> {
     this.started.push(spec)
     if (this.failStart !== null) {
       const error = this.failStart
@@ -122,7 +125,7 @@ class FakeToolsView implements ToolsView {
   // scope），但不在父代理 scope 视图（简单模式未启用），运行时被兜底剔除；
   // wf_run_node_wait / wf_org_catalog / wf_graph_patch：CHILD_AGENT_HIDDEN_TOOLS 成员，
   // 即使被组合勾选也永不进 allow（父代理专属）
-  visible: string[] = ['read', 'write', 'edit', 'wf_ask', 'wf_ask_agent', 'wf_db_query', 'wf_run_node', 'wf_run_node_wait', 'wf_finish', 'wf_org_catalog', 'wf_graph_patch', 'run_code', 'str_replace_editor', 'mcp__srv1__a', 'mcp__srv1__b']
+  visible: string[] = ['read', 'write', 'edit', 'wf_ask_user', 'wf_send_message', 'wf_db_query', 'wf_run_node', 'wf_run_node_wait', 'wf_finish', 'wf_org_catalog', 'wf_graph_patch', 'run_code', 'str_replace_editor', 'mcp__srv1__a', 'mcp__srv1__b']
   presets = new Map<string, string[] | null>()
   /** 父代理 scope 视图（默认=可见集去掉 run_code 与幽灵工具；测试可覆盖）。 */
   agentTools: string[] | null = null
@@ -133,14 +136,17 @@ class FakeToolsView implements ToolsView {
     return this.presets.get(presetId) ?? null
   }
   async agentToolNames(): Promise<string[]> {
+    return this.agentToolNamesSync()
+  }
+  agentToolNamesSync(): string[] {
     return this.agentTools ?? this.visible.filter((name) => name !== 'run_code' && name !== 'str_replace_editor')
   }
 }
 
-interface RunnerHarness {
+interface RunnerHarness<S extends SubagentsServiceLike = FakeSubagents> {
   runner: NodeAgentRunner
   store: FlowStore
-  subagents: FakeSubagents
+  subagents: S
   agents: FakeAgentsService
   toolsView: FakeToolsView
     react: { setLimit: ReturnType<typeof vi.fn>; drop: ReturnType<typeof vi.fn>; consumeCapped: ReturnType<typeof vi.fn> }
@@ -148,12 +154,12 @@ interface RunnerHarness {
     promptSetup: { contribution: ReturnType<typeof vi.fn>; attach: ReturnType<typeof vi.fn> }
 }
 
-async function makeHarness(): Promise<RunnerHarness> {
+async function makeHarness<S extends SubagentsServiceLike = FakeSubagents>(subagents?: S): Promise<RunnerHarness<S>> {
   const dir = await mkdtemp(join(tmpdir(), 'vw-runner-'))
   cleanups.push(() => rm(dir, { recursive: true, force: true }))
   const store = new FlowStore(dir)
   await store.init()
-  const subagents = new FakeSubagents()
+  const service = subagents ?? (new FakeSubagents() as unknown as S)
   const agents = new FakeAgentsService()
   agents.parents.set('session-1', { id: 'session-1' })
   const toolsView = new FakeToolsView()
@@ -163,23 +169,24 @@ async function makeHarness(): Promise<RunnerHarness> {
   const runner = new NodeAgentRunner({
     store,
     agents: () => agents,
-    subagents: () => subagents,
+    subagents: () => service,
     toolsView,
-    ...fakeGroupDeps(),
+    ...fakeMemberDeps(),
     react: react as unknown as ReactGuardBridge,
     modelSelection: modelSelection as unknown as ModelSelectionSetup,
     promptSetup: promptSetup as unknown as ChildPromptSetup,
   })
-  return { runner, store, subagents, agents, toolsView, react, modelSelection, promptSetup }
+  return { runner, store, subagents: service, agents, toolsView, react, modelSelection, promptSetup }
 }
 
 /**
- * 协作组路径依赖桩：本文件只验证节点路径，故官方 Team 视为未挂载（teams 返回 null），
- * 工具白名单装配为无操作。协作组自身的行为由其专属测试文件覆盖。
+ * Team 成员路径依赖桩：本文件只验证普通节点路径，故官方 Team 视为未挂载（teams 返回 null），
+ * 工具白名单装配为无操作。成员路径自身的行为由其专属测试文件覆盖。
  */
-function fakeGroupDeps(): { teams: () => null; toolFilter: ChildToolFilterSetup } {
+function fakeMemberDeps(): { teams: () => null; teamMemberLimit: number; toolFilter: ChildToolFilterSetup } {
   return {
     teams: () => null,
+    teamMemberLimit: 8,
     toolFilter: {
       contribution: () => () => {},
       withPending: async <T>(_allow: readonly string[] | undefined, operation: () => Promise<T>): Promise<T> => operation(),
@@ -260,7 +267,7 @@ describe('resolveAgentTools 白名单解析（§4.2 L219）', () => {
 
   it('combo：勾选 ∩ 可见（父代理工具集）+ 所选 MCP 前缀工具；CHILD_AGENT_HIDDEN_TOOLS/run_code/str_replace_editor 被白名单天然排除', async () => {
     const h = await makeHarness()
-    await saveCombo(h, 'combo-c1', ['read', 'not-visible', 'wf_ask', 'wf_run_node', 'wf_run_node_wait', 'wf_finish', 'wf_org_catalog', 'wf_graph_patch', 'run_code', 'str_replace_editor'], ['srv1'])
+    await saveCombo(h, 'combo-c1', ['read', 'not-visible', 'wf_ask_user', 'wf_run_node', 'wf_run_node_wait', 'wf_finish', 'wf_org_catalog', 'wf_graph_patch', 'run_code', 'str_replace_editor'], ['srv1'])
     const tools = await resolveAgentTools({
       store: h.store, toolsView: h.toolsView, sessionId: 'session-1', flowId: 'flow-1',
       node: agentNode('n-a1'),
@@ -274,7 +281,7 @@ describe('resolveAgentTools 白名单解析（§4.2 L219）', () => {
     // str_replace_editor：官方简单模式专用工具，当前父代理视图（简单模式未启用）不含它
     // → 运行时兜底剔除，避免官方 tools.restrict 抛 "names unknown global tool"
     expect(tools).not.toContain('str_replace_editor')
-    expect(tools.sort()).toEqual(['mcp__srv1__a', 'mcp__srv1__b', 'read', 'wf_ask'])
+    expect(tools.sort()).toEqual(['mcp__srv1__a', 'mcp__srv1__b', 'read', 'wf_ask_user'])
   })
 
   it('str_replace_editor：父代理视图含它（简单模式启用）→ 保留进 allow', async () => {
@@ -289,15 +296,15 @@ describe('resolveAgentTools 白名单解析（§4.2 L219）', () => {
     expect(tools).toContain('read')
   })
 
-  it('wf_ask/wf_ask_agent 仅勾选注入（无强制追加，PRD §4.4.2 规则 7）', async () => {
+  it('wf_ask_user/wf_send_message 仅勾选注入（无强制追加，PRD §4.4.2 规则 7）', async () => {
     const h = await makeHarness()
     await saveCombo(h, 'combo-c1', ['read'])
     const tools = await resolveAgentTools({
       store: h.store, toolsView: h.toolsView, sessionId: 'session-1', flowId: 'flow-1',
       node: agentNode('n-a1'),
     })
-    expect(tools).not.toContain('wf_ask')
-    expect(tools).not.toContain('wf_ask_agent')
+    expect(tools).not.toContain('wf_ask_user')
+    expect(tools).not.toContain('wf_send_message')
     expect(tools).toContain('read')
   })
 
@@ -409,14 +416,14 @@ describe('resolveAgentTools 白名单解析（§4.2 L219）', () => {
 
   it('全局关闭工具：组合勾选亦被剔除（父代理不可用 → 子代理不得携带，双保险第二层）', async () => {
     const h = await makeHarness()
-    await saveCombo(h, 'combo-c1', ['read', 'write', 'wf_ask'], ['srv1'])
+    await saveCombo(h, 'combo-c1', ['read', 'write', 'wf_ask_user'], ['srv1'])
     const tools = await resolveAgentTools({
       store: h.store, toolsView: h.toolsView, sessionId: 'session-1', flowId: 'flow-1',
       node: agentNode('n-a1'),
       disabledTools: new Set(['write', 'mcp__srv1__a']),
     })
     expect(tools).toContain('read')
-    expect(tools).toContain('wf_ask')
+    expect(tools).toContain('wf_ask_user')
     expect(tools).toContain('mcp__srv1__b')
     expect(tools).not.toContain('write')
     expect(tools).not.toContain('mcp__srv1__a')
@@ -450,7 +457,7 @@ describe('resolveAgentTools 白名单解析（§4.2 L219）', () => {
 describe('NodeAgentRunner 创建/复用/派发', () => {
   it('首次创建：startContinuable 调用（provider 首选/任务块首条注入/不再传 persona/白名单/agentOptions）+ 护栏登记', async () => {
     const h = await makeHarness()
-    await h.store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read', 'wf_ask'], mcpServers: [] })
+    await h.store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read', 'wf_ask_user'], mcpServers: [] })
     const result = await h.runner.startNodeTask(taskInput({ thinking: 'high' }))
 
     expect(result).toEqual({ childId: 'child-1', created: true })
@@ -460,7 +467,7 @@ describe('NodeAgentRunner 创建/复用/派发', () => {
     expect(spec.label).toBe('节点n-a1')
     expect(spec.request.prompt).toEqual([{ type: 'text', text: '任务块' }]) // 首条消息=完整任务块
     expect(spec.request.persona).toBeUndefined() // 角色 Prompt 改为 system prompt 段，不再传官方 persona
-    expect(spec.request.toolFilter).toEqual({ allow: ['read', 'wf_ask'] }) // 勾选∩可见（wf_ask 勾选注入）
+    expect(spec.request.toolFilter).toEqual({ allow: ['read', 'wf_ask_user'] }) // 勾选∩可见（wf_ask_user 勾选注入）
     expect(spec.request.agentOptions).toEqual({ provider: 'deepseek', model: 'deepseek-chat' })
     expect(h.react.setLimit).toHaveBeenCalledWith('child-1', 7)
   })
@@ -515,7 +522,7 @@ describe('NodeAgentRunner 创建/复用/派发', () => {
       agents: () => null,
       subagents: () => new FakeSubagents(),
       toolsView: h2.toolsView,
-      ...fakeGroupDeps(),
+      ...fakeMemberDeps(),
       react: h2.react as unknown as ReactGuardBridge,
       modelSelection: h2.modelSelection as unknown as ModelSelectionSetup,
       promptSetup: h2.promptSetup as unknown as ChildPromptSetup,
@@ -678,7 +685,7 @@ describe('childVisibilityContribution（CHILD_AGENT_HIDDEN_TOOLS 双保险隐藏
 /** rc.1 面子代理服务 fake（无 list/followup/registerContinuableSetup）。 */
 class Rc1FakeSubagents implements SubagentsServiceLike {
   providers: Record<string, unknown> = { spawn: {}, fork: {}, acp: {} }
-  started: Array<Parameters<SubagentsServiceLike['startContinuable']>[0]> = []
+  started: SubagentContinuableSpecLike[] = []
   sent: Array<{ sender: unknown; targetId: string; content: unknown[]; signal?: AbortSignal }> = []
   queued: Array<{ parent: unknown; childId: string; content: unknown[]; source: unknown; signal?: AbortSignal }> = []
   interrupts: Array<{ childId: string; authority: { kind: 'user'; parentSessionId: string } }> = []
@@ -689,7 +696,7 @@ class Rc1FakeSubagents implements SubagentsServiceLike {
   getProvider(name: string): unknown {
     return this.providers[name]
   }
-  async startContinuable(spec: Parameters<SubagentsServiceLike['startContinuable']>[0]): Promise<{ childId: string }> {
+  async startContinuable(spec: SubagentContinuableSpecLike): Promise<{ childId: string }> {
     this.started.push(spec)
     this.seq += 1
     const childId = `rc1-${this.seq}`
@@ -712,7 +719,7 @@ class Rc1FakeSubagents implements SubagentsServiceLike {
 /** rc.1 面「仅 queuePrompt、无 sendMessage」的子代理 fake（投递回退分支用）。 */
 class Rc1QueueOnlySubagents implements SubagentsServiceLike {
   providers: Record<string, unknown> = { spawn: {} }
-  started: Array<Parameters<SubagentsServiceLike['startContinuable']>[0]> = []
+  started: SubagentContinuableSpecLike[] = []
   queued: Array<{ parent: unknown; childId: string; content: unknown[]; source: unknown; signal?: AbortSignal }> = []
   interrupts: Array<{ childId: string; authority: { kind: 'user'; parentSessionId: string } }> = []
   onStart?: (childId: string) => void
@@ -721,7 +728,7 @@ class Rc1QueueOnlySubagents implements SubagentsServiceLike {
   getProvider(name: string): unknown {
     return this.providers[name]
   }
-  async startContinuable(spec: Parameters<SubagentsServiceLike['startContinuable']>[0]): Promise<{ childId: string }> {
+  async startContinuable(spec: SubagentContinuableSpecLike): Promise<{ childId: string }> {
     this.started.push(spec)
     this.seq += 1
     const childId = `rc1-${this.seq}`
@@ -731,6 +738,37 @@ class Rc1QueueOnlySubagents implements SubagentsServiceLike {
   async queuePrompt(parent: unknown, childId: string, content: Array<{ type: 'text'; text: string }>, source?: unknown, signal?: AbortSignal): Promise<unknown> {
     this.queued.push({ parent, childId, content, source, signal })
     return `mid-${childId}`
+  }
+  interrupt(childId: string, authority: { kind: 'user'; parentSessionId: string }): void {
+    this.interrupts.push({ childId, authority })
+  }
+}
+
+/**
+ * 0.2.1+ 面子代理服务 fake：公开面只有 startActivation（startContinuable 已移除）。
+ * 用于锁定新宿主的统一激活入口与请求形状。
+ */
+class ActivationFakeSubagents implements SubagentsServiceLike {
+  providers: Record<string, unknown> = { spawn: {}, fork: {} }
+  activations: SubagentActivationSpecLike[] = []
+  sent: Array<{ sender: unknown; targetId: string; content: unknown[]; signal?: AbortSignal }> = []
+  interrupts: Array<{ childId: string; authority: { kind: 'user'; parentSessionId: string } }> = []
+  onStart?: (childId: string) => void
+  private seq = 0
+
+  getProvider(name: string): unknown {
+    return this.providers[name]
+  }
+  async startActivation(spec: SubagentActivationSpecLike): Promise<{ childId: string; messageId: string }> {
+    this.activations.push(spec)
+    this.seq += 1
+    const childId = `activation-${this.seq}`
+    this.onStart?.(childId)
+    return { childId, messageId: `message-${childId}` }
+  }
+  async sendMessage(sender: unknown, targetId: string, content: Array<{ type: 'text'; text: string }>, options: { signal?: AbortSignal }): Promise<unknown> {
+    this.sent.push({ sender, targetId, content, signal: options.signal })
+    return `message-${targetId}`
   }
   interrupt(childId: string, authority: { kind: 'user'; parentSessionId: string }): void {
     this.interrupts.push({ childId, authority })
@@ -765,7 +803,7 @@ describe('DSH 0.1.2 子代理 seam（getProvider 探测 / childSetup 安装 / se
       agents: () => h.agents,
       subagents: () => rc1,
       toolsView: h.toolsView,
-      ...fakeGroupDeps(),
+      ...fakeMemberDeps(),
       react: h.react as unknown as ReactGuardBridge,
       modelSelection: h.modelSelection as unknown as ModelSelectionSetup,
       promptSetup: h.promptSetup as unknown as ChildPromptSetup,
@@ -787,7 +825,7 @@ describe('DSH 0.1.2 子代理 seam（getProvider 探测 / childSetup 安装 / se
       agents: () => h.agents,
       subagents: () => rc1,
       toolsView: h.toolsView,
-      ...fakeGroupDeps(),
+      ...fakeMemberDeps(),
       react: h.react as unknown as ReactGuardBridge,
       modelSelection: h.modelSelection as unknown as ModelSelectionSetup,
       promptSetup: h.promptSetup as unknown as ChildPromptSetup,
@@ -816,7 +854,7 @@ describe('DSH 0.1.2 子代理 seam（getProvider 探测 / childSetup 安装 / se
       agents: () => h.agents,
       subagents: () => queueOnly,
       toolsView: h.toolsView,
-      ...fakeGroupDeps(),
+      ...fakeMemberDeps(),
       react: h.react as unknown as ReactGuardBridge,
       modelSelection: h.modelSelection as unknown as ModelSelectionSetup,
       promptSetup: h.promptSetup as unknown as ChildPromptSetup,
@@ -929,81 +967,182 @@ describe('CordisToolsView / preset standing scope（acquireScope 租约）', () 
 })
 
 // ---------------------------------------------------------------------------
-// 协作组路径：成员护栏登记的持有与释放
+// Team 成员路径：成员 childId 的登记与释放 / 官方不可用时的降级
 // ---------------------------------------------------------------------------
-// 为什么锁定此处：组成员由官方 Team 直接创建（spawnTeammate），不经 ensureNodeChild，
-// 因此其 childId 不会进入本类的登记集合——dispose 时 drop 不到，护栏的 limits/cappedFlags
-// 条目在宿主生命周期内只增不减。成员状态必须有释放条件与上界（agent 模块规则）。
+// 为什么锁定此处：成员由官方 Team 创建（spawnTeammate），不经 ensureNodeChild，
+// 因此其 childId 必须由本类显式登记——否则 dispose 时 drop 不到，护栏的 limits/cappedFlags
+// 条目在宿主生命周期内只增不减（每子代理状态必须有释放条件与上界）。
+// 官方 Team 不可用时成员必须降级为普通可延续子代理（同一登记语义、同一释放路径）。
 
-describe('协作组路径：成员 childId 随宿主 dispose 释放', () => {
-  /** 协作组 harness：官方 Team 可用性可控，成员逐个创建并返回新的 childId。 */
-  async function makeGroupHarness(options: { teams?: boolean } = {}): Promise<{ runner: NodeAgentRunner; drop: ReturnType<typeof vi.fn> }> {
-    const dir = await mkdtemp(join(tmpdir(), 'vw-runner-group-'))
+describe('Team 成员路径：childId 登记、释放与降级', () => {
+  /** 成员 harness：官方 Team 可用性与官方工具面可控。 */
+  async function makeMemberHarness(options: { teams?: boolean; toolFace?: boolean } = {}): Promise<{
+    runner: NodeAgentRunner
+    subagents: FakeSubagents
+    drop: ReturnType<typeof vi.fn>
+    members: TeamMemberViewLike[]
+  }> {
+    const dir = await mkdtemp(join(tmpdir(), 'vw-runner-member-'))
     cleanups.push(() => rm(dir, { recursive: true, force: true }))
     const store = new FlowStore(dir)
     await store.init()
-    // 成员节点的 presetId 指向真实组合：工具白名单解析需要组合存在（与节点路径同源）
+    // 成员节点的 presetId 指向真实组合：工具白名单解析需要组合存在（与普通节点路径同源）
     await store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read'], mcpServers: [] })
     const subagents = new FakeSubagents()
     const agents = new FakeAgentsService()
     agents.parents.set('session-1', { id: 'session-1' })
     const react = { setLimit: vi.fn(), drop: vi.fn(), consumeCapped: vi.fn(() => false) }
+    const members: TeamMemberViewLike[] = []
     let seq = 0
     const teams: AgentTeamsServiceLike = {
-      listMembers: () => [],
+      listMembers: () => members,
       sendMessage: async () => ({ messageId: 'msg-1', status: 'accepted' }),
       spawnTeammate: async (_caller, request) => {
         seq += 1
         const member: TeamMemberViewLike = { id: `member-child-${seq}`, name: request.name, role: 'teammate', status: 'inactive' }
+        members.push(member)
         return { member }
       },
     }
+    const toolsView = new FakeToolsView()
+    // 官方 Team 工具面：判据要求父代理 scope 可见 spawn_teammate（官方工具与策略在成员 scope 注册）
+    toolsView.agentTools = options.toolFace === false
+      ? ['read', 'write', 'edit']
+      : ['read', 'write', 'edit', 'spawn_teammate', 'send_message']
     const runner = new NodeAgentRunner({
       store,
       agents: () => agents,
       subagents: () => subagents,
       teams: () => ((options.teams ?? true) ? teams : null),
-      toolsView: new FakeToolsView(),
+      teamMemberLimit: 8,
+      toolsView,
       toolFilter: createChildToolFilterSetup(),
       react: react as unknown as ReactGuardBridge,
       modelSelection: createModelSelectionSetup(),
       promptSetup: createChildPromptSetup(),
     })
-    return { runner, drop: react.drop }
+    return { runner, subagents, drop: react.drop, members }
   }
 
-  function groupStartInput(): GroupStartInput {
+  function memberTaskInput(nodeId: string, extra: Partial<NodeStartInput> = {}): NodeStartInput {
     return {
       sessionId: 'session-1',
       flowId: 'flow-1',
       mode: 'mode1',
-      groupId: 'n-g',
-      collabPrompt: '组内协作',
-      members: [
-        { node: agentNode('n-m1'), blocks: blocks('任务1') },
-        { node: agentNode('n-m2'), blocks: blocks('任务2') },
-      ],
+      node: agentNode(nodeId),
+      blocks: blocks('任务1'),
+      teamMember: true,
       signal: new AbortController().signal,
+      ...extra,
     }
   }
 
-  it('整组启动创建的成员 childId 一并登记，dispose 时全部释放', async () => {
-    const h = await makeGroupHarness()
-    const result = await h.runner.startGroupTask(groupStartInput())
-    expect(result?.members.map((member) => member.childId)).toEqual(['member-child-1', 'member-child-2'])
+  it('成员路径：官方 teammate 创建成功，childId 登记且 dispose 释放', async () => {
+    const h = await makeMemberHarness()
+    const started = await h.runner.startNodeTask(memberTaskInput('n-m1'))
+
+    expect(started).toEqual({ childId: 'member-child-1', created: true })
+    // 两条路径互斥：官方成员路径不得同时触发普通子代理创建
+    expect(h.subagents.started).toHaveLength(0)
 
     h.runner.dispose()
-
     expect(h.drop).toHaveBeenCalledWith('member-child-1')
-    expect(h.drop).toHaveBeenCalledWith('member-child-2')
   })
 
-  it('官方 Team 不可用（返回 null）：不产生成员登记，dispose 无残留释放动作', async () => {
-    const h = await makeGroupHarness({ teams: false })
-    expect(await h.runner.startGroupTask(groupStartInput())).toBeNull()
+  it('成员复用：已存在同名成员时改派消息，created=false 且不重复创建', async () => {
+    const h = await makeMemberHarness()
+    await h.runner.startNodeTask(memberTaskInput('n-m1'))
+    const again = await h.runner.startNodeTask(memberTaskInput('n-m1'))
 
-    h.runner.dispose()
+    expect(again).toEqual({ childId: 'member-child-1', created: false })
+    expect(h.members).toHaveLength(1)
+  })
 
-    expect(h.drop).not.toHaveBeenCalled()
+  it('降级：官方 Team 服务不可用时走普通可延续子代理路径', async () => {
+    const h = await makeMemberHarness({ teams: false })
+    const started = await h.runner.startNodeTask(memberTaskInput('n-m1'))
+
+    expect(started.created).toBe(true)
+    expect(h.subagents.started).toHaveLength(1)
+  })
+
+  it('降级：官方 Team 工具面未下发（只挂领域服务）时同样走普通子代理路径', async () => {
+    const h = await makeMemberHarness({ toolFace: false })
+    const started = await h.runner.startNodeTask(memberTaskInput('n-m1'))
+
+    expect(started.created).toBe(true)
+    expect(h.subagents.started).toHaveLength(1)
+  })
+
+  it('teamMember 缺省：普通节点永不进入官方成员路径', async () => {
+    const h = await makeMemberHarness()
+    const started = await h.runner.startNodeTask(memberTaskInput('n-m1', { teamMember: undefined }))
+
+    expect(started.created).toBe(true)
+    expect(h.subagents.started).toHaveLength(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// DSH 0.2.1 子代理 seam（startActivation 统一激活入口）
+// ---------------------------------------------------------------------------
+// 取证（0.2.1-rc.2 dsh-subagent types）：startActivation(spec) 必填 delivery；
+// request 为 Omit<SubagentStartRequest,...>，已移除 toolFilter/persona，新增 cwd/agentPreset。
+// 插件只消费 prompt/parent/agentOptions；工具白名单由 host 在 agent/created 窗口内自装 restrict。
+
+describe('DSH 0.2.1 子代理 seam（startActivation）', () => {
+  it('仅 startActivation 可用时走统一激活入口：delivery=parent，request 不传 toolFilter', async () => {
+    const h = await makeHarness(new ActivationFakeSubagents())
+    await h.store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read', 'wf_ask_user'], mcpServers: [] })
+    h.subagents.onStart = (childId) => {
+      h.agents.children.set(childId, { id: childId, ctx: { tag: `ctx-${childId}` } })
+    }
+
+    const started = await h.runner.startNodeTask(taskInput())
+
+    expect(started).toEqual({ childId: 'activation-1', created: true })
+    expect(h.subagents.activations).toHaveLength(1)
+    const spec = h.subagents.activations[0]
+    expect(spec.provider).toBe('spawn')
+    expect(spec.label).toBe('节点n-a1')
+    expect(spec.delivery).toBe('parent')
+    expect(spec.request.prompt).toEqual(blocks())
+    expect(spec.request.parent).toEqual({ id: 'session-1' })
+    expect(spec.request.agentOptions).toEqual({ provider: 'deepseek', model: 'deepseek-chat' })
+    expect('toolFilter' in spec.request).toBe(false)
+    expect(spec.signal).toBeInstanceOf(AbortSignal)
+  })
+
+  it('复用：0.2.1 面仍走 sendMessage 相邻派发（不重复创建）', async () => {
+    const h = await makeHarness(new ActivationFakeSubagents())
+    await h.store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read', 'wf_ask_user'], mcpServers: [] })
+    h.subagents.onStart = (childId) => {
+      h.agents.children.set(childId, { id: childId, ctx: { tag: `ctx-${childId}` } })
+    }
+    await h.runner.startNodeTask(taskInput())
+    const again = await h.runner.startNodeTask(taskInput())
+
+    expect(again).toEqual({ childId: 'activation-1', created: false })
+    expect(h.subagents.activations).toHaveLength(1)
+    expect(h.subagents.sent).toHaveLength(1)
+    expect(h.subagents.sent[0]?.targetId).toBe('activation-1')
+  })
+
+  it('subagentsServiceLike：0.2.1 面（仅 startActivation）仍被判定为可用', () => {
+    const service = new ActivationFakeSubagents()
+    const ctx = { get: (name: string) => (name === 'subagents' ? service : undefined) } as unknown as Parameters<typeof subagentsServiceLike>[0]
+    expect(subagentsServiceLike(ctx)).toBe(service)
+  })
+
+  it('创建入口缺失 → 明确报错（不静默降级）', async () => {
+    const incomplete: SubagentsServiceLike = {
+      getProvider: () => ({}),
+      sendMessage: async () => undefined,
+      interrupt: () => {},
+    }
+    const h = await makeHarness(incomplete)
+    await h.store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read'], mcpServers: [] })
+
+    await expect(h.runner.startNodeTask(taskInput())).rejects.toThrow('startActivation/startContinuable')
   })
 })

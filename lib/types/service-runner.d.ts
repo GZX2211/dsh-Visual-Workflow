@@ -2,9 +2,12 @@ import type { Context } from '@deepseek-ai/cordis';
 import z from '@deepseek-ai/schemastery';
 /** 稳定插件名（serve.patch.yml 的 insert 行 name 解析目标）。 */
 export declare const name = "visual-workflow-service";
-/** 核心服务：cmdlineArgs 由 launcher 在树挂载前提供（app 自持参数族）。 */
+/**
+ * 核心服务：保留 cmdlineArgs 依赖只为启动时序——apply 需要 launcher 已挂载完 app 服务
+ * （appExit 由 launcher 提供，缺失即报错退出），本插件自身不再读取任何命令行参数。
+ */
 export declare const inject: string[];
-/** 插件配置（serve.patch.yml 渲染写入；cmdlineArgs 为权威覆盖源）。 */
+/** 插件配置（serve.patch.yml 渲染写入；身份与端口的唯一来源）。 */
 export interface Config {
     /** 服务 id（编排 flowId 与映射文件作用域）。 */
     serviceId: string;
@@ -18,11 +21,6 @@ export interface Config {
     maxConcurrent: number;
 }
 export declare const Config: z<Config>;
-/** 解析内层参数族：--visual-workflow-serve <serviceId> --port <n>。 */
-export declare function parseServiceArgs(args: readonly unknown[]): {
-    serviceId: string;
-    port: number;
-} | null;
 /**
  * 插件入口：启动异步装配（不阻塞树挂载）。
  * appExit 由 launcher 提供（缺失报错——服务进程必须能请求退出）。

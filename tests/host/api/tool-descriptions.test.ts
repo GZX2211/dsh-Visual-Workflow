@@ -20,7 +20,7 @@ describe('组合管理卡片描述（toolCardDescription）', () => {
   })
 
   it('自主编排两工具命中中文短描述（不再回退超长英文撑破卡片）', () => {
-    expect(toolCardDescription('wf_graph_patch', longEnglish, true)).toBe('改写工作流图（图结构 / 里程碑标记，一次补丁仅一组）；仅父代理可用')
+    expect(toolCardDescription('wf_graph_patch', longEnglish, true)).toBe('改写工作流图（图结构）；仅父代理可用')
     expect(toolCardDescription('wf_org_catalog', longEnglish, true)).toContain('只读勘察组织资产')
     expect(toolCardDescription('wf_org_catalog', longEnglish, true).length).toBeLessThanOrEqual(CARD_DESC_MAX)
   })

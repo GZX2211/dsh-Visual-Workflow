@@ -14,6 +14,7 @@ export type { ExperienceEmbeddingRow, ExperienceInsertCheckedResult } from './ex
 export type { ExperienceEvaluationsCheckedResult } from './experience-evaluations.js';
 export { EXPERIENCE_LIST_MAX_LIMIT } from './experiences.js';
 export { EXPERIENCE_PROMPT_SEED_VERSION, EXPERIENCE_PROMPT_SEEDS, type ExperiencePromptSeed } from './experience-seeds.js';
+export { PARENT_DUTIES_ASSET_ID, PARENT_DUTIES_ASSET_NAME, hasParentRoleAsset, seedParentDutiesAsset } from './parent-duties-seed.js';
 export { EXPERIENCE_EVALUATION_ID_PREFIX, EXPERIENCE_ID_PREFIX, EXPERIENCE_USAGE_ID_PREFIX, ROLE_ASSET_ID_PREFIX, WORKFLOW_ASSET_ID_PREFIX, newExperienceEvaluationId, newExperienceId, newExperienceUsageId, newRoleAssetId, newWorkflowAssetId, versionRowId, type IdGeneratorDeps, type RandomSource, } from './ids.js';
 export { ASSET_DB_FILE } from './schema.js';
 /** AssetStore 依赖：时钟与 id 生成（测试可确定化；缺省用系统实现）。 */
@@ -103,10 +104,19 @@ export declare class AssetStore {
     private readonly db;
     private readonly now;
     private readonly ids;
+    private readonly readOnly;
     private initialized;
     constructor(root: string, deps?: AssetStoreDeps);
     /** 打开库并幂等建表（重复调用无副作用）。 */
     init(): Promise<void>;
+    /**
+     * 播种内置父代理职责资产（幂等；库中已有 parent 类型资产时不动）。
+     *
+     * 为什么由宿主在 init 后显式调用而不是在 init 内自动执行：它是**插件内置内容**的安装动作，
+     * 不是资产库的形状契约——裸库（测试夹具、备份浏览、导入工具）不该凭空多出一条角色资产，
+     * 否则任何「按列表长度/首元素」的读语义都会被内置内容干扰。
+     */
+    seedParentDuties(): Promise<void>;
     /** 关闭连接（幂等；关闭后再次调用读接口会重新要求 init）。 */
     close(): void;
     /** 角色资产列表（活跃；Active 版本投影；currentTemplateFingerprint 由 API 边界填充）。 */

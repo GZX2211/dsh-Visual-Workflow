@@ -440,7 +440,7 @@ Default values can be overridden in `cordis.patch.yml`:
         maxConcurrentPerService: 50
         wfAskAgentTtlMs: 120000
         runIdleTimeoutMs: 1800000
-        reactIterationLimitDefault: 50
+        reactIterationLimitDefault: 0
         retryLimitDefault: 3
         outputFullLimit: 102400
         documentTextLimit: 20000
@@ -469,7 +469,6 @@ pnpm test           # Unit tests
 pnpm gates          # Contract / gate tests
 pnpm client-smoke   # Client smoke tests
 pnpm check          # Type check + test + build + smoke
-pnpm verify         # Full verification gate
 ```
 
 > Modifying Client requires rebuilding and hard-refreshing the browser; modifying Host requires restarting `dsh web`.

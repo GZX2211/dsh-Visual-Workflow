@@ -13,7 +13,7 @@
 // ERR_EXPERIENCE_NOT_FOUND（经验不存在）提示并刷新经验列表；其余交给通用错误提示。
 // 异步防竞态：列表加载持请求序号，只有最新一次可写状态；卸载后一律不写。
 
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { Dispatch } from 'react'
 import type { ExperienceEntry, ExperiencePatch } from '../../host/shared/asset-types.js'
 import type { StudioAction, StudioState } from '../studio/studio-state.js'
@@ -155,5 +155,10 @@ export function useExperiences(
     }
   }, [dispatch, handleFailure, notify, refresh, remote, t.toastExperienceRestored, t.toastExperienceRetired, toastError])
 
-  return { experiences: state.experiences, experienceDoc: state.experienceDoc, refresh, open, save, setActive }
+  // face 引用跨「同一 state 的重渲染」保持恒等（D06-08：装配层据此记忆化派生 props）
+  return useMemo(() => ({
+    experiences: state.experiences,
+    experienceDoc: state.experienceDoc,
+    refresh, open, save, setActive,
+  }), [state.experiences, state.experienceDoc, refresh, open, save, setActive])
 }

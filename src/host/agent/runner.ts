@@ -4,14 +4,15 @@
 // startNodeTask / interruptChild / 软截停消费。
 //
 // 官方 seam 取证：
-// - startContinuable({ provider, label, request:{prompt,parent,persona?,toolFilter?,agentOptions?}, signal }) → {childId,messageId}；request.prompt 为首条 user 消息，创建即推理；首次必须注入完整任务块，否则子代理空转。
+// - 0.2.1+：startActivation({ provider, label, request:{prompt,parent,agentOptions?}, signal, delivery }) → {childId,messageId,result,dispose}；request.prompt 为首条 user 消息，创建即推理；request 已移除 persona/toolFilter。
+// - ≤0.2.0（兜底）：startContinuable({ provider, label, request:{prompt,parent,toolFilter?,agentOptions?}, signal }) → {childId,messageId}。
 // - interrupt(childId,{kind:'user',parentSessionId}) 尽力中断。
 // - 每子代理作用域贡献：官方无 registerContinuableSetup，改为 agent/created 事件（0.1.7 前名为 agent/session-start）在创建窗口按 agent.ctx 安装四类贡献（可见性/软截停/模型选择/角色提示词），与 installModelSelection(agentCtx,…) 范式一致。
 //
 // 白名单规则：
 // - combo：combo.tools ∩ 可见工具集（父代理）+ 所选 MCP 前缀工具；
 // - 官方 preset：agentPresets.acquireScope 取 standing scope 租约 → 工具名 ∩ 可见（服务缺失回退全部可见）；旧 minimal/ptc 硬编码正则被真实 preset 解析取代；
-// - 无强制追加：wf_ask/wf_ask_agent 仅组合勾选时进 allow（旧自动追加删除，PRD §4.4.2 规则 7）；
+// - 无强制追加：wf_ask_user/wf_send_message 仅组合勾选时进 allow（旧自动追加删除，PRD §4.4.2 规则 7）；
 // - wf_db_query 仅存在 db-in 连线时追加（§4.4.3 规则 5）；
 // - CHILD_AGENT_HIDDEN_TOOLS（wf_run_node/wf_run_node_wait/wf_finish + 自主编排两工具）永不进 allow，且 tools.restrict 显式 deny（双保险）。
 
@@ -20,14 +21,16 @@ import { readFile } from 'node:fs/promises'
 import { dbInEdges } from '../graph/index.js'
 import type { FlowStore } from '../storage/flow-store.js'
 import type { GraphNode, RoleNode } from '../shared/graph-model.js'
-import type { NodeRunner, NodeStartInput, OrchestratorLogger, GroupStartInput, GroupStartResult } from '../orchestrator/index.js'
+import type { NodeRunner, NodeStartInput, OrchestratorLogger } from '../orchestrator/index.js'
 import { consumeReactCappedOf, type ReactGuardBridge } from './guards.js'
+import { renderTemplate, TASK_FALLBACK } from '../prompts/index.js'
 import { CHILD_AGENT_HIDDEN_TOOLS, RESERVED_TRANSPORT_TOOL, TEAM_TOOL_NAMES, WF_FINISH, WF_RUN_NODE, WF_RUN_NODE_WAIT } from '../shared/protocol.js'
 import type { ModelSelectionLike, ModelSelectionSetup, SelectionChildContext } from './model-selection.js'
 import type { ChildPromptSetup, ChildPromptState } from './prompt-setup.js'
 import type { ChildToolFilterSetup } from './child-tool-filter.js'
 import type { AgentTeamsServiceLike } from '../team/index.js'
-import { TeamGroupRunner } from './group-runner.js'
+import type { TeamMemberStartResult } from './member-launcher.js'
+import { TeamMemberLauncher } from './member-launcher.js'
 
 // ---------------------------------------------------------------------------
 // 纯函数（签名/复用键/provider 选择）
@@ -92,13 +95,9 @@ export function detectSubagentProvider(service: SubagentsServiceLike): string | 
   return pickProviderName(service.list?.() ?? [])
 }
 
-/** 任务块为空的兜底 prompt（正常路径由 T-021 组装任务块；防御性兜底）。 */
+/** 任务块为空的兜底首条消息（正常路径由 buildNodeBlocks 组装；正文见 prompts/texts/task-fallback.ts）。 */
 function fallbackPrompt(node: RoleNode): string {
-  return [
-    '你是 Visual Workflow 工作流中的节点子代理。',
-    `节点名称：${node.data.label ?? node.id}`,
-    '具体任务将随后续消息派发；请按收到的任务要求执行并汇报结论。',
-  ].join('\n')
+  return renderTemplate(TASK_FALLBACK, { nodeLabel: node.data.label ?? node.id })
 }
 
 /**
@@ -131,24 +130,47 @@ export interface AgentsServiceLike {
   roots?(): unknown[]
 }
 
-/** 子代理服务最小结构（0.1.5-rc.1 SubagentRuntime 使用面；零官方类型依赖，运行时守卫）。 */
+/** 0.2.1+ 子代理激活请求：request 已移除 persona/toolFilter，新增 cwd/agentPreset（本插件不消费）。 */
+export interface SubagentActivationSpecLike {
+  provider: string
+  label: string
+  request: {
+    prompt: Array<{ type: 'text'; text: string }>
+    parent: unknown
+    agentOptions?: { provider?: string; model?: string }
+  }
+  signal: AbortSignal
+  /**
+   * parent = 完成后向父代理发结算通知（与 0.2.0 startContinuable 的 notifySettlement
+   * 语义等价）；caller = 只把结果交给调用方。插件的编排回写依赖 subagent/end，
+   * 选 parent 保持旧行为。
+   */
+  delivery: 'parent' | 'caller'
+}
+
+/** ≤0.2.0 可延续子代理创建请求（旧宿主兜底面；0.2.1 已移除 startContinuable）。 */
+export interface SubagentContinuableSpecLike {
+  provider: string
+  label: string
+  request: {
+    prompt: Array<{ type: 'text'; text: string }>
+    parent: unknown
+    persona?: string
+    toolFilter?: { allow: string[] }
+    agentOptions?: { provider?: string; model?: string }
+  }
+  signal: AbortSignal
+}
+
+/** 子代理服务最小结构（SubagentRuntime 使用面；零官方类型依赖，运行时守卫）。 */
 export interface SubagentsServiceLike {
   /** 延续子代理 provider 名列表（旧面；新宿主改用 getProvider 按名探测）。 */
   list?(): string[]
-  /** 延续子代理创建：首条 prompt 即任务块（request 兼容 persona/toolFilter/agentOptions；signal 为必填）。 */
-  startContinuable(spec: {
-    provider: string
-    label: string
-    request: {
-      prompt: Array<{ type: 'text'; text: string }>
-      parent: unknown
-      persona?: string
-      toolFilter?: { allow: string[] }
-      agentOptions?: { provider?: string; model?: string }
-    }
-    signal: AbortSignal
-  }): Promise<{ childId: string; messageId?: unknown }>
-  /** 相邻 Agent 投递（live 父 Agent → direct child 派发下一回合）；**0.1.5 唯一推荐通道**。 */
+  /** 0.2.1+ 统一激活入口：创建可延续子代理并提交首条 prompt（新宿主首选）。 */
+  startActivation?(spec: SubagentActivationSpecLike): Promise<{ childId: string; messageId?: unknown }>
+  /** ≤0.2.0 可延续子代理创建（旧宿主兜底；0.2.1 的公开面已无此方法）。 */
+  startContinuable?(spec: SubagentContinuableSpecLike): Promise<{ childId: string; messageId?: unknown }>
+  /** 相邻 Agent 投递（live 父 Agent → direct child 派发下一回合）；0.1.5 起唯一推荐通道。 */
   sendMessage?(sender: unknown, targetId: string, content: Array<{ type: 'text'; text: string }>, options: { signal?: AbortSignal }): Promise<unknown>
   /**
    * host 协议投递（distinct child turn，durable host source）；**旧宿主兼容兜底**。
@@ -242,6 +264,14 @@ export interface ToolsView {
    * 无 agent/服务缺失回退全局层。
    */
   agentToolNames(sessionId?: string): Promise<string[]>
+  /**
+   * 某会话父代理 scope 的**同步**工具名视图（官方 Team 工具面判据专用）。
+   *
+   * 与 agentToolNames 同源（同一 scope key 语义），只做同步可达的部分：全局层 ∪ 该 agent
+   * 自身 scope。为什么需要同步版本：成员启动路径判据（teamAvailable）是同步契约；而官方
+   * Team 工具注册在**成员自身 scope**，不经过 preset standing scope，故判据不需要异步取用。
+   */
+  agentToolNamesSync(sessionId?: string): string[]
 }
 
 /**
@@ -357,6 +387,10 @@ export class CordisToolsView implements ToolsView {
   }
 
   async agentToolNames(sessionId?: string): Promise<string[]> {
+    return this.agentToolNamesSync(sessionId)
+  }
+
+  agentToolNamesSync(sessionId?: string): string[] {
     const tools = this.toolsService()
     if (!tools) return []
     // 优先取当前会话父代理（root agent）scope 视图：全局层 ∪ 父代理链注册工具。
@@ -433,7 +467,7 @@ const TEAM_BLOCKED_ALLOW_TOOLS: readonly string[] = TEAM_TOOL_NAMES
  *   - 官方 preset → standing scope 工具名 ∩ 可见（服务缺失回退全部可见）；
  *   - db-in 连线存在 → 追加 wf_db_query（§4.4.3 规则 5）；
  *   - CHILD_AGENT_HIDDEN_TOOLS 无条件剔除（即便被组合勾选也不进入子代理）。
- * 注意：无强制追加——wf_ask/wf_ask_agent 仅在组合勾选时进入（PRD §4.4.2 规则 7）。
+ * 注意：无强制追加——wf_ask_user/wf_send_message 仅在组合勾选时进入（PRD §4.4.2 规则 7）。
  */
 export async function resolveAgentTools(input: ResolveToolsInput): Promise<string[]> {
   const presetId = String(input.node.data?.presetId ?? '').trim()
@@ -510,13 +544,19 @@ export interface NodeAgentRunnerDeps {
   /** subagents 服务惰性解析（调用时求值）。 */
   subagents: () => SubagentsServiceLike | null
   /**
-   * 官方 Agent Team 服务惰性解析（协作组路径用）。
-   * 返回 null 表示官方团队未挂载：协作组回退到逐节点启动的既有路径。
+   * 官方 Agent Team 服务惰性解析（Team 成员路径用）。
+   * 返回 null 表示官方团队未挂载：成员节点降级为普通可延续子代理（协作通信走 wf_send_message）。
    */
   teams: () => AgentTeamsServiceLike | null
+  /**
+   * 官方 Team 会话级成员名额上限（部署层 agent-team.maxMembers 的镜像）。
+   * 官方语义是「本团队累计创建过的 teammate 数（含失败的）」；新建成员前用它预检，
+   * 把运行期的官方类型化失败提前成可行动错误。
+   */
+  teamMemberLimit: number
   /** 工具视图（白名单解析）。 */
   toolsView: ToolsView
-  /** 子代理工具白名单装配（协作组成员的创建窗口内安装；节点路径由官方创建请求携带）。 */
+  /** 子代理工具白名单装配（Team 成员的创建窗口内安装；节点路径由官方创建请求携带）。 */
   toolFilter: ChildToolFilterSetup
   /** 软截停护栏桥（guards.ts）。 */
   react: ReactGuardBridge
@@ -543,16 +583,16 @@ export interface NodeAgentRunnerDeps {
 export class NodeAgentRunner implements NodeRunner {
   /** 子代理表：复用键 → { childId, signature }。 */
   private readonly nodeChildren = new Map<string, { childId: string; signature: string }>()
-  /** 本类持有护栏登记的全部 childId（节点路径 + 协作组路径）；dispose 据此释放。 */
+  /** 本类持有护栏登记的全部 childId（普通节点路径 + Team 成员路径）；dispose 据此释放。 */
   private readonly childIds = new Set<string>()
   /** 软截停消费适配（NodeRunner 契约）。 */
   readonly consumeReactCapped: NonNullable<NodeRunner['consumeReactCapped']>
-  /** 协作组启动器（官方 Team 路径；与节点路径共用同一套依赖与装配对象）。 */
-  private readonly groups: TeamGroupRunner
+  /** Team 成员启动器（官方 Team 路径；与普通节点路径共用同一套装配对象）。 */
+  private readonly members: TeamMemberLauncher
 
   constructor(private readonly deps: NodeAgentRunnerDeps) {
     this.consumeReactCapped = consumeReactCappedOf(deps.react)
-    this.groups = new TeamGroupRunner({
+    this.members = new TeamMemberLauncher({
       store: deps.store,
       agents: deps.agents,
       subagents: deps.subagents,
@@ -563,9 +603,18 @@ export class NodeAgentRunner implements NodeRunner {
       modelSelection: deps.modelSelection,
       toolFilter: deps.toolFilter,
       promptSetup: deps.promptSetup,
+      memberLimit: deps.teamMemberLimit,
       ...(deps.logger ? { logger: deps.logger } : {}),
-      // 纯函数注入：与节点路径同源，杜绝成员与节点两套白名单/提示词口径
-      resolveTools: resolveAgentTools,
+      // 纯函数注入：与普通节点路径同源，杜绝成员与节点两套白名单/提示词口径
+      resolveTools: (input) => resolveAgentTools({
+        store: deps.store,
+        toolsView: deps.toolsView,
+        sessionId: input.sessionId,
+        flowId: input.flowId,
+        node: input.node,
+        ...(input.disabledTools ? { disabledTools: input.disabledTools } : {}),
+        ...(input.mode ? { mode: input.mode } : {}),
+      }),
       resolveRolePrompt,
       detectProvider: detectSubagentProvider,
       signatureOf: (node, resolvedTools, rolePrompt, injectSystemPrompt, injectToolSections, collabPrompt) =>
@@ -573,26 +622,16 @@ export class NodeAgentRunner implements NodeRunner {
     })
   }
 
-  // ---- NodeRunner 协作组契约 -------------------------------------------------
+  // ---- NodeRunner 官方 Team 契约 ---------------------------------------------
 
-  /** 官方 Agent Team 路径是否可用（协作块文案与执行路径选择的判据）。 */
+  /** 官方 Team 路径是否可用（成员启动路径选择与协作块文案的判据）。 */
   teamAvailable(sessionId: string): boolean {
-    return this.groups.available(sessionId)
+    return this.members.available(sessionId)
   }
 
-  /** 把整个协作组启动为官方 Agent Team（不可用时返回 null，由编排器回退）。 */
-  async startGroupTask(input: GroupStartInput): Promise<GroupStartResult | null> {
-    const result = await this.groups.start(input)
-    // 组成员由官方 Team 直接创建（不经 ensureNodeChild），其 childId 必须在此补登记：
-    // 否则 dispose 遍历 childIds 时永远 drop 不到它们，护栏登记（limits/cappedFlags）
-    // 在宿主生命周期内只增不减——每子代理状态必须有释放条件与上界。
-    // 复用成员一并登记（Set 幂等），使组路径与节点路径的释放语义完全一致。
-    if (result) {
-      for (const member of result.members) {
-        if (member.childId) this.childIds.add(member.childId)
-      }
-    }
-    return result
+  /** 官方 Team 成员的当前状态（成员运行态权威读源；非成员或官方不可用返回 null）。 */
+  teamMemberStatusOf(sessionId: string, nodeId: string): 'running' | 'inactive' | 'provisioning' | 'failed' | null {
+    return this.members.memberStatusOf(sessionId, nodeId)
   }
 
   // ---- NodeRunner 契约 -------------------------------------------------------
@@ -605,6 +644,16 @@ export class NodeAgentRunner implements NodeRunner {
    *   - 完成事件由编排器监听 subagent/end 更新快照，本方法不等待执行结果。
    */
   async startNodeTask(input: NodeStartInput): Promise<{ childId: string; created: boolean; replacedChildId?: string }> {
+    // Team 成员节点：官方 Team 可用时启动为官方 teammate（成员身份/消息/任务板/状态全交官方）；
+    // 官方不可用时静默降级到下面的普通可延续子代理路径（协作通信走 wf_send_message）。
+    if (input.teamMember === true && this.members.available(input.sessionId)) {
+      const member: TeamMemberStartResult | null = await this.members.start(input)
+      if (member) {
+        // childId 登记与普通路径同源：dispose 据此回收护栏登记，每子代理状态必须有上界
+        this.childIds.add(member.childId)
+        return { childId: member.childId, created: member.created }
+      }
+    }
     const { childId, created, replacedChildId } = await this.ensureNodeChild(input)
     // 每轮派发前刷新护栏上限与模型选择（节点级参数可按次覆盖；官方 selection 可变态）。
     // 【时序】setLimit 必须位于任何 await 之前：子代理本轮第一步推理的 pre-step 事件
@@ -735,23 +784,45 @@ export class NodeAgentRunner implements NodeRunner {
     // 【关键时序】每子代理作用域装配（角色提示词/工具可见性/模型选择/软截停）由 host 层
     // `agent/created` 处理器在子代理创建窗口内安装（该事件在 agents.create 发布、
     // 首轮 followup 组装之前串行 await 触发；此时 withPending 的 AsyncLocalStorage 状态仍在作用域内，
-    // 各 contribution 能读到本次创建的 promptState/manifest）。因此 startContinuable 只需要
-    // 创建子代理并提交首条任务，不再在返回后重复安装——避免二次「工具已更新」。
+    // 各 contribution 能读到本次创建的 promptState/manifest）。因此创建调用只需要
+    // 建立子代理并提交首条任务，不再在返回后重复安装——避免二次「工具已更新」。
+    const label = node.data.label || `visual-workflow:${input.flowId}:${node.id}`
+    const prompt = input.blocks.length > 0 ? input.blocks : [{ type: 'text' as const, text: fallbackPrompt(node) }]
     const started = await this.deps.promptSetup.withPending(promptState, async () => {
-      const result = await subagents.startContinuable({
-        provider,
-        label: node.data.label || `visual-workflow:${input.flowId}:${node.id}`,
-        request: {
-          // 首条消息 = 完整任务块（任务 + 上下文），杜绝创建即空转；角色 Prompt 由
-          // prompt-setup 注册为系统提示词独立段，不再经官方 request.persona 占用官方人设
-          prompt: input.blocks.length > 0 ? input.blocks : [{ type: 'text', text: fallbackPrompt(node) }],
-          parent,
-          ...(toolFilter ? { toolFilter } : {}),
-          ...(Object.keys(agentOptions).length > 0 ? { agentOptions } : {}),
-        },
-        signal: input.signal,
-      })
-      return result
+      // 0.2.1+：统一激活入口。request 已不接受 toolFilter/persona；工具白名单由 host
+      // 在 agent/created 窗口内自行 restrict（child-tool-filter），故此处不再传递。
+      if (typeof subagents.startActivation === 'function') {
+        return subagents.startActivation({
+          provider,
+          label,
+          request: {
+            // 首条消息 = 完整任务块（任务 + 上下文），杜绝创建即空转；角色 Prompt 由
+            // prompt-setup 注册为系统提示词独立段，不占用官方人设。
+            prompt,
+            parent,
+            ...(Object.keys(agentOptions).length > 0 ? { agentOptions } : {}),
+          },
+          signal: input.signal,
+          // 与 0.2.0 startContinuable 的结算通知语义保持一致（父代理仍收到完成通知）。
+          delivery: 'parent',
+        })
+      }
+      // ≤0.2.0 旧宿主兜底：0.2.1 的公开 SubagentRuntime 已移除该方法。旧面仍支持
+      // request.toolFilter（官方在创建窗口内 restrict，与本插件自装 restrict 双保险）。
+      if (typeof subagents.startContinuable === 'function') {
+        return subagents.startContinuable({
+          provider,
+          label,
+          request: {
+            prompt,
+            parent,
+            ...(toolFilter ? { toolFilter } : {}),
+            ...(Object.keys(agentOptions).length > 0 ? { agentOptions } : {}),
+          },
+          signal: input.signal,
+        })
+      }
+      throw new Error('subagents 服务不支持创建可延续子代理（缺少 startActivation/startContinuable）')
     })
     const previous = this.nodeChildren.get(key)
     const replacedChildId = previous && previous.childId !== started.childId ? previous.childId : undefined
@@ -762,7 +833,7 @@ export class NodeAgentRunner implements NodeRunner {
     }
     this.nodeChildren.set(key, { childId: started.childId, signature })
     this.childIds.add(started.childId)
-    // 创建即开始推理（官方 startContinuable 语义）：软截停上限必须在 startContinuable
+    // 创建即开始推理（官方 startActivation 语义）：软截停上限必须在创建调用
     // 返回后的同步块内立即登记（startNodeTask 会再次刷新，幂等）。保证事件循环中任何
     // pre-step 事件（宏任务）晚于登记发生；极端情况下官方在 resolve 前同步触发 pre-step
     // 仍无法覆盖，但该窗口已缩到官方内部实现边界（startNodeTask 复用路径已另行前置）。

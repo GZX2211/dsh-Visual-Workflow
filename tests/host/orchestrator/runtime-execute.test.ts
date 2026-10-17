@@ -4,10 +4,9 @@
 // 装配与测试替身见 fixtures/harness.ts（共享，不在本文件内重复）。
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { GLOBAL_RUN_CALL_LIMIT, OUTPUT_SUMMARY_LIMIT, buildNodeBlocks } from '../../../src/host/orchestrator/index.js'
+import { GLOBAL_RUN_CALL_LIMIT, OUTPUT_SUMMARY_LIMIT, buildNodeBlocks, createRunSnapshot } from '../../../src/host/orchestrator/index.js'
 import { DEFAULT_SYSTEM_LANGUAGE } from '../../../src/host/system-language.js'
-import { HEAD_MARKER, MID_MARKER, TAIL_MARKER } from '../../../src/host/prompts/index.js'
-import { TEAM_SEND_MESSAGE, WF_ASK_AGENT } from '../../../src/host/shared/protocol.js'
+import { WF_SEND_MESSAGE } from '../../../src/host/shared/protocol.js'
 import type { RoleNode, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
 import { agent, fileNode, groupNode, makeFlow, stage, type Harness, makeHarness, caller, childCaller, start, cleanupTempDirs } from './fixtures/harness.js'
 
@@ -28,21 +27,14 @@ describe('wfRunNode 异步路径与护栏', () => {
     expect(h.runtime.childMetaFor('child-1')).toEqual({ sessionId: 'session-1', flowId: 'flow-1', nodeId: 'n-a1' })
   })
 
-  it('任务块注入：marker 三段布局 + 节点身份数据透传（不绑定提示词文案）', async () => {
+  it('任务块注入：节点身份数据透传（不断言提示词文案）', async () => {
     const h = await makeHarness()
     await start(h, makeFlow())
     await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
     const text = h.runner.calls[0].blocks[0].text
 
-    // W-01 三段布局：head < mid < tail
-    const headAt = text.indexOf(HEAD_MARKER)
-    const midAt = text.indexOf(MID_MARKER)
-    const tailAt = text.indexOf(TAIL_MARKER)
-    expect(headAt).toBeGreaterThanOrEqual(0)
-    expect(midAt).toBeGreaterThan(headAt)
-    expect(tailAt).toBeGreaterThan(midAt)
-    // 数据透传：节点身份（画布节点 label）出现在首段
-    expect(text.slice(0, midAt)).toContain('子任务A')
+    // 数据透传：画布节点 label 出现在任务块中
+    expect(text).toContain('子任务A')
   })
   it('文档 ctx-in：文本内容注入（超限截断）+ 受管文件路径索引', async () => {
     const h = await makeHarness()
@@ -81,12 +73,9 @@ describe('wfRunNode 异步路径与护栏', () => {
     expect(text.match(/data\/files\/a\.pdf/g)).toHaveLength(1)
   })
 
-  it('ctx-in 角色节点：上游 ok/react-capped 产出注入下游（截断），来源标签正确', async () => {
+  it('流程前驱产出自动注入：a1 → pause → a2 跳过暂停节点取上游产出（截断），来源标签正确', async () => {
     const h = await makeHarness()
-    const flow = makeFlow()
-    // a1 ctx-out → a2 ctx-in：显式连线传递上游最终产出（需求 §4.1.2 规则 5）
-    flow.lines.push({ id: 'l-ctx-agent', source: 'n-a1', target: 'n-a2', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' })
-    await start(h, flow)
+    await start(h, makeFlow())
     // 先完成 a1（产出为超长文本，验证截断）
     await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
     await h.runtime.handleSubagentEnd({
@@ -102,11 +91,9 @@ describe('wfRunNode 异步路径与护栏', () => {
     expect(text).toContain('子任务A') // 来源标签（labelOf）
   })
 
-  it('ctx-in 角色节点：上游 fail/pending 无产出不注入；无连线完全不传', async () => {
+  it('流程前驱无产出不注入；没有流程前驱产出语义的节点不注入', async () => {
     const h = await makeHarness()
-    const flow = makeFlow()
-    flow.lines.push({ id: 'l-ctx-agent', source: 'n-a1', target: 'n-a2', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' })
-    await start(h, flow)
+    await start(h, makeFlow())
     // a1 未完成（pending）→ a2 启动时不注入任何上游内容
     await h.runtime.wfRunNode(caller, { nodeId: 'n-a2' })
     const first = h.runner.calls[0].blocks[0].text
@@ -117,25 +104,43 @@ describe('wfRunNode 异步路径与护栏', () => {
     await h.runtime.wfRunNode(caller, { nodeId: 'n-a2' })
     const second = h.runner.calls[2].blocks[0].text
     expect(second).not.toContain('子任务A')
-    // 无 ctx 连线的节点（n-pause 后的常规 a1 启动）不注入上游内容
+    // n-a1 的流程前驱只有启动节点（模式一无产出）→ 不注入任何上游内容
     await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
     const third = h.runner.calls[3].blocks[0].text
     expect(third).not.toContain('子任务B')
   })
 
-  it('ctx-in 虚拟节点：解析主节点产出注入（共享执行实例语义）', async () => {
+  it('流程前驱为虚拟节点：解析主节点产出注入（共享执行实例语义）', async () => {
     const h = await makeHarness()
-    const flow = makeFlow()
-    // a2 的虚拟节点 n-proxy-a2 作为上游：产出 = a2 的产出（快照按主节点记账）
-    flow.lines.push({ id: 'l-ctx-proxy', source: 'n-proxy-a2', target: 'n-a1', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' })
+    // 单独构造：proxy(n-main) → n-target，避免与标准流程成环
+    const flow: WorkflowDocument = {
+      id: 'flow-1',
+      sessionId: 'session-1',
+      mode: 'mode1',
+      name: '虚拟节点前驱流程',
+      description: '测试目标',
+      revision: 1,
+      nodes: [
+        stage('n-start', 'start', 'mode1'),
+        agent('n-main', '主节点'),
+        { id: 'n-proxy-main', kind: 'proxy', position: { x: 0, y: 0 }, proxySourceId: 'n-main' },
+        agent('n-target', '下游节点'),
+        stage('n-end', 'end', 'mode1'),
+      ],
+      lines: [
+        { id: 'l1', source: 'n-start', target: 'n-main', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+        { id: 'l2', source: 'n-proxy-main', target: 'n-target', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+        { id: 'l3', source: 'n-target', target: 'n-end', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
+      ],
+    }
     await start(h, flow)
-    await h.runtime.wfRunNode(caller, { nodeId: 'n-proxy-a2' }) // 解析为 n-a2
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-proxy-main' }) // 解析为 n-main
     await h.runtime.handleSubagentEnd({
       id: 'child-1',
       stopReason: 'completed',
       lastAssistantMessage: [{ type: 'text', text: '虚拟节点上游产出' }],
     })
-    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-target' })
     expect(h.runner.calls[1].blocks[0].text).toContain('虚拟节点上游产出')
   })
 
@@ -159,6 +164,14 @@ describe('wfRunNode 异步路径与护栏', () => {
     const text = input.blocks[0].text
     expect(text).not.toContain('重试上限')
     expect(text).not.toContain('ReAct 迭代上限')
+  })
+
+  it('迭代上限缺省不设限：节点未配置且配置默认为 0 时，不向引擎透传 iterationLimit', async () => {
+    const h = await makeHarness()
+    await start(h, makeFlow())
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    // 不设限 = 引擎层收到 undefined（护栏完全旁路），迭代交由官方运行时行为约束。
+    expect(h.runner.calls[0].iterationLimit).toBeUndefined()
   })
 
   it('护栏：nodeId 缺失 WF_BAD_ARGS；节点不存在 WF_NODE_MISSING；非 agent 节点 WF_NODE_KIND', async () => {
@@ -205,6 +218,70 @@ describe('wfRunNode 异步路径与护栏', () => {
     const { entry } = await start(h, makeFlow())
     entry.controller.abort()
     await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })).rejects.toMatchObject({ code: 'WF_CANCELLED' })
+  })
+})
+
+describe('retryLimit 只约束失败重试（重跑已完成节点不计入）', () => {
+  /** 该节点在快照里的记录（断言 running/ok/fail 与失败重试计数）。 */
+  const snapshotNode = (entry: { snapshot: { nodes: Array<{ nodeId: string; status: string; attempts: number }> } }, nodeId: string) =>
+    entry.snapshot.nodes.find((node) => node.nodeId === nodeId)!
+
+  it('已完成节点被重新调度 5 次：不受 retryLimit 约束且失败重试计数不递增', async () => {
+    const h = await makeHarness()
+    const { entry } = await start(h, makeFlow())
+    // 第一次执行并成功结算 → 节点 ok（retryLimit=3：重试上限 4 次）
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    await h.runtime.handleSubagentEnd({
+      id: 'child-1',
+      stopReason: 'completed',
+      lastAssistantMessage: [{ type: 'text', text: '第一轮产出' }],
+    })
+    expect(snapshotNode(entry, 'n-a1').status).toBe('ok')
+    const attemptsAfterFirst = snapshotNode(entry, 'n-a1').attempts
+    expect(attemptsAfterFirst).toBe(1)
+
+    for (let round = 2; round <= 6; round += 1) {
+      const result = await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+      expect(result.status).toBe('started')
+      // 重新调度新任务不是失败重试：计数保持
+      expect(snapshotNode(entry, 'n-a1').attempts).toBe(attemptsAfterFirst)
+      await h.runtime.handleSubagentEnd({
+        id: `child-${round}`,
+        stopReason: 'completed',
+        lastAssistantMessage: [{ type: 'text', text: `第 ${round} 轮产出` }],
+      })
+      expect(snapshotNode(entry, 'n-a1').status).toBe('ok')
+    }
+    // run 级失败重试基数同样未被重跑推高
+    expect(entry.attempts.get('n-a1')).toBe(attemptsAfterFirst)
+  })
+
+  it('重新调度仍受全局调用上限约束', async () => {
+    const h = await makeHarness()
+    const { entry } = await start(h, makeFlow())
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    await h.runtime.handleSubagentEnd({ id: 'child-1', stopReason: 'completed', lastAssistantMessage: [] })
+    expect(snapshotNode(entry, 'n-a1').status).toBe('ok')
+
+    entry.callCount = GLOBAL_RUN_CALL_LIMIT
+    await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })).rejects.toMatchObject({ code: 'WF_GLOBAL_LIMIT' })
+  })
+
+  it('失败节点仍受 retryLimit 约束（成功前最多 4 次尝试）', async () => {
+    const h = await makeHarness()
+    const { entry } = await start(h, makeFlow())
+    // 第 1 次尝试失败
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    await h.runtime.handleSubagentEnd({ id: 'child-1', stopReason: 'error', lastAssistantMessage: [] })
+    expect(snapshotNode(entry, 'n-a1').status).toBe('fail')
+    // 第 2/3/4 次失败重试仍允许（attempts 递增）
+    for (let round = 2; round <= 4; round += 1) {
+      await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+      expect(snapshotNode(entry, 'n-a1').attempts).toBe(round)
+      await h.runtime.handleSubagentEnd({ id: `child-${round}`, stopReason: 'error', lastAssistantMessage: [] })
+    }
+    // 第 5 次被上限拒绝
+    await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })).rejects.toMatchObject({ code: 'WF_RETRY_LIMIT' })
   })
 })
 
@@ -395,15 +472,15 @@ describe('wait 阻塞（§4.4.2 规则 1，模式二调度）', () => {
   })
 })
 
-describe('wfRunNode 协作组路径（官方 Agent Team）', () => {
-  /** 协作组流程：start → g1（成员 dev/rev）→ end。空成员组不生成成员节点。 */
-  function groupFlow(memberIds: string[] = ['n-dev', 'n-rev']): WorkflowDocument {
+describe('wfRunNode Team 卡片与成员路径', () => {
+  /** Team 流程：start → g1（成员 dev/rev）→ end。Team 卡片是包裹层，成员节点才是执行主体。 */
+  function teamFlow(memberIds: string[] = ['n-dev', 'n-rev']): WorkflowDocument {
     const labels: Record<string, string> = { 'n-dev': '后端开发工程师', 'n-rev': '后端代码审查专家' }
     return {
       id: 'flow-g',
       sessionId: 'session-1',
       mode: 'mode1',
-      name: '协作流程',
+      name: 'Team 流程',
       description: '协作目标',
       revision: 1,
       nodes: [
@@ -419,158 +496,127 @@ describe('wfRunNode 协作组路径（官方 Agent Team）', () => {
     }
   }
 
-  it('整组启动：调用 startGroupTask、返回成员清单、组卡片置 running、成员事件归属登记', async () => {
+  it('Team 卡片不是执行主体：wf_run_node(组 id) 明确拒绝并给出成员清单', async () => {
     const h = await makeHarness()
     h.runner.teamEnabled = true
-    const { entry } = await start(h, groupFlow())
+    const { entry } = await start(h, teamFlow())
 
-    const result = await h.runtime.wfRunNode(caller, { nodeId: 'n-g1' })
-
-    expect(result.status).toBe('started')
-    expect(result.nodeId).toBe('n-g1')
-    expect(result.childId).toBeUndefined() // 一个组对应多个成员会话，无单一 child
-    expect(result.members).toEqual([
-      { nodeId: 'n-dev', target: 'm-n-dev', childId: 'g-child-1' },
-      { nodeId: 'n-rev', target: 'm-n-rev', childId: 'g-child-2' },
-    ])
-    expect(h.runner.groupCalls).toHaveLength(1)
-    expect(h.runner.groupCalls[0].groupId).toBe('n-g1')
-    expect(h.runner.groupCalls[0].members.map((plan) => plan.node.id)).toEqual(['n-dev', 'n-rev'])
-    // 组卡片状态与成员事件归属（成员 subagent/end 按 childIndex 回写各自节点）
-    expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-g1')!.status).toBe('running')
-    expect(entry.inflight.has('g-child-1')).toBe(true)
-    expect(h.runtime.childMetaFor('g-child-1')).toEqual({ sessionId: 'session-1', flowId: 'flow-g', nodeId: 'n-dev' })
+    await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-g1' })).rejects.toMatchObject({ code: 'WF_NODE_KIND' })
+    await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-g1' })).rejects.toThrow(/n-dev, n-rev/)
+    // Team 卡片不参与运行事实：既不被置为 running，也不发起任何子代理
+    expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-g1')!.status).toBe('pending')
+    expect(h.runner.calls).toHaveLength(0)
   })
 
-  it('成员任务块走官方协作通道：含官方投递工具与成员名（不是自建协作工具）', async () => {
+  it('成员节点启动：单节点路径 + teamMember 标记（官方可用 → 官方 teammate）', async () => {
     const h = await makeHarness()
     h.runner.teamEnabled = true
-    await start(h, groupFlow())
-    await h.runtime.wfRunNode(caller, { nodeId: 'n-g1' })
+    const { entry } = await start(h, teamFlow())
 
-    const text = h.runner.groupCalls[0].members[0].blocks[0].text
-    expect(text).toContain(TEAM_SEND_MESSAGE)
-    expect(text).toContain('m-n-dev')
-    expect(text).not.toContain(WF_ASK_AGENT)
+    const result = await h.runtime.wfRunNode(caller, { nodeId: 'n-dev' })
+
+    expect(result).toMatchObject({ nodeId: 'n-dev', status: 'started', childId: 'child-1' })
+    expect(h.runner.calls[0].teamMember).toBe(true)
+    expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-dev')!.status).toBe('running')
+    expect(h.runtime.childMetaFor('child-1')).toEqual({ sessionId: 'session-1', flowId: 'flow-g', nodeId: 'n-dev' })
   })
 
-  it('成员任务块不附带任何额外文本：与同一节点走 buildNodeBlocks 的结构等价', async () => {
+  it('非成员节点：不携带 teamMember 标记（普通子代理路径）', async () => {
+    const h = await makeHarness()
+    await start(h, makeFlow())
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    expect(h.runner.calls[0]?.teamMember).toBeUndefined()
+  })
+
+  it('成员任务块注入可通信对象清单（父代理 + 组内其他成员；不再按官方可用性分叉）', async () => {
     const h = await makeHarness()
     h.runner.teamEnabled = true
-    await start(h, groupFlow())
-    const entry = h.runtime.activeRunForSession('session-1')!
-    await h.runtime.wfRunNode(caller, { nodeId: 'n-g1' })
+    await start(h, teamFlow())
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-dev' })
+
+    const text = h.runner.calls[0]!.blocks[0]!.text
+    expect(text).toContain(WF_SEND_MESSAGE)
+    expect(text).toContain('n-rev')
+    expect(text).toContain('parent')
+    expect(text).not.toContain('wf_ask_agent')
+  })
+
+  it('官方 Team 不可用（降级）：任务块结构不变（通道分叉已删除）', async () => {
+    const h = await makeHarness()
+    await start(h, teamFlow())
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-dev' })
+
+    const text = h.runner.calls[0]!.blocks[0]!.text
+    expect(text).toContain(WF_SEND_MESSAGE)
+    expect(text).toContain('n-rev')
+    // 编排器仍按图标记成员身份，是否降级由引擎按官方可用性裁决
+    expect(h.runner.calls[0]!.teamMember).toBe(true)
+  })
+
+  it('成员任务块与 buildNodeBlocks 结构等价（无额外追加段）', async () => {
+    const h = await makeHarness()
+    h.runner.teamEnabled = true
+    const { entry } = await start(h, teamFlow())
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-dev' })
 
     // 实现读的是落盘后的最新画布：以同一份事实为基准重算，保证「结构等价」是真的同输入比较
     const saved = (await h.store.getWorkflow('session-1', 'flow-g'))!
-    for (const member of h.runner.groupCalls[0].members) {
-      const node = saved.nodes.find((n): n is RoleNode => n.id === member.node.id)!
-      const expected = buildNodeBlocks({
-        flow: saved,
-        node,
-        snapshot: entry.snapshot,
-        // 与 harness 装配的 config.documentTextLimit 同值（makeHarness 默认 200）
-        documentTextLimit: 200,
-        systemLanguage: DEFAULT_SYSTEM_LANGUAGE,
-        collabChannel: 'official',
-      })
-      // 整组仅一个文本块，且与构建器输出逐字节相同 = 没有任何额外追加的段
-      expect(member.blocks).toEqual(expected)
-      expect(member.blocks).toHaveLength(1)
-    }
+    const node = saved.nodes.find((n): n is RoleNode => n.id === 'n-dev')!
+    const expected = buildNodeBlocks({
+      flow: saved,
+      node,
+      snapshot: entry.snapshot,
+      // 与 harness 装配的 config.documentTextLimit 同值（makeHarness 默认 200）
+      documentTextLimit: 200,
+      systemLanguage: DEFAULT_SYSTEM_LANGUAGE,
+    })
+    expect(h.runner.calls[0]!.blocks).toEqual(expected)
+    expect(h.runner.calls[0]!.blocks).toHaveLength(1)
   })
 
-  it('组启动通道抛错：组卡片置 fail，不留下 running 组卡片', async () => {
+  it('成员完成回写：官方 roster 显示 inactive（回合结束待命）→ 落 armed', async () => {
     const h = await makeHarness()
     h.runner.teamEnabled = true
-    h.runner.groupStartFail = new Error('启动通道不可用')
-    const { entry } = await start(h, groupFlow())
+    h.runner.teamMemberStatus.set('n-dev', 'inactive')
+    const { entry } = await start(h, teamFlow())
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-dev' })
 
-    await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-g1' })).rejects.toThrow('启动通道不可用')
+    await h.runtime.handleSubagentEnd({ id: 'child-1', stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: '开发完成' }] })
 
-    expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-g1')!.status).toBe('fail')
-  })
-
-  it('组启动返回 null（官方 Team 瞬间不可用）：组卡片置 fail 并给出可行动错误', async () => {
-    const h = await makeHarness()
-    h.runner.teamEnabled = true
-    h.runner.groupStartUnavailable = true
-    const { entry } = await start(h, groupFlow())
-
-    await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-g1' })).rejects.toMatchObject({ code: 'WF_TEAM_UNAVAILABLE' })
-
-    expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-g1')!.status).toBe('fail')
-  })
-
-  it('成员校验失败（成员不是角色节点）：组卡片保持 pending，未被误置为 running', async () => {
-    const h = await makeHarness()
-    h.runner.teamEnabled = true
-    await start(h, groupFlow())
-    // 双向同步：运行中改图后再次调度读最新快照（模拟绕过保存期校验的改动）
-    const mutated = groupFlow()
-    ;(mutated.nodes.find((n) => n.id === 'n-g1')!.data as { memberIds: string[] }).memberIds = ['n-start']
-    await h.store.saveWorkflow(mutated, 'session-1', { force: true })
-
-    await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-g1' })).rejects.toMatchObject({ code: 'WF_NODE_KIND' })
-
-    const entry = h.runtime.activeRunForSession('session-1')!
+    expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-dev')!.status).toBe('armed')
+    // Team 卡片不参与运行事实：不存在聚合写入，始终保持 pending
     expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-g1')!.status).toBe('pending')
   })
 
-  it('成员完成回写成员节点（组内成员落 armed 待命），全部产出后组卡片聚合为 ok', async () => {
+  it('成员完成回写：官方成员仍在运行（running）时不落待命', async () => {
     const h = await makeHarness()
     h.runner.teamEnabled = true
-    const { entry } = await start(h, groupFlow())
-    await h.runtime.wfRunNode(caller, { nodeId: 'n-g1' })
+    h.runner.teamMemberStatus.set('n-dev', 'running')
+    const { entry } = await start(h, teamFlow())
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-dev' })
 
-    await h.runtime.handleSubagentEnd({ id: 'g-child-1', stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: '开发完成' }] })
+    await h.runtime.handleSubagentEnd({ id: 'child-1', stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: '开发完成' }] })
+
+    expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-dev')!.status).toBe('ok')
+  })
+
+  it('降级（官方不可用）：成员仍按图判定落 armed，保持既有链路', async () => {
+    const h = await makeHarness()
+    const { entry } = await start(h, teamFlow())
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-dev' })
+
+    await h.runtime.handleSubagentEnd({ id: 'child-1', stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: '开发完成' }] })
+
     expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-dev')!.status).toBe('armed')
-    expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-g1')!.status).toBe('running')
-
-    await h.runtime.handleSubagentEnd({ id: 'g-child-2', stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: '审查完成' }] })
-    expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-rev')!.status).toBe('armed')
-    expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-g1')!.status).toBe('ok')
   })
 
-  it('官方 Team 不可用：不擅自启动成员，报可行动错误（指示逐个启动成员节点）', async () => {
-    const h = await makeHarness()
-    const { entry } = await start(h, groupFlow())
-
-    await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-g1' })).rejects.toMatchObject({ code: 'WF_TEAM_UNAVAILABLE' })
-    expect(h.runner.groupCalls).toHaveLength(0)
-    expect(h.runner.calls).toHaveLength(0)
-    // 组卡片不得停在进行中：错误路径不启动成员
-    expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-g1')?.status ?? 'pending').toBe('pending')
-    await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-g1' })).rejects.toThrow(/n-dev, n-rev/)
-  })
-
-  it('协作组无成员：明确拒绝（WF_GROUP_EMPTY）', async () => {
+  it('子代理调用成员节点：WF_NOT_ROOT（调度仍仅限会话根 Agent）', async () => {
     const h = await makeHarness()
     h.runner.teamEnabled = true
-    await start(h, groupFlow([]))
-    await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-g1' })).rejects.toMatchObject({ code: 'WF_GROUP_EMPTY' })
-  })
-
-  it('成员不是角色(agent)节点：明确拒绝（WF_NODE_KIND）——图校验之外的运行时兜底', async () => {
-    const h = await makeHarness()
-    h.runner.teamEnabled = true
-    const flow = groupFlow()
-    await start(h, flow)
-    // 双向同步：运行中改图后再次调度读最新快照（此处把成员改成阶段节点 id，模拟绕过保存期校验的改动）
-    const mutated = groupFlow()
-    ;(mutated.nodes.find((n) => n.id === 'n-g1')!.data as { memberIds: string[] }).memberIds = ['n-start', 'n-end']
-    await h.store.saveWorkflow(mutated, 'session-1', { force: true })
-    await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-g1' })).rejects.toMatchObject({ code: 'WF_NODE_KIND' })
-  })
-
-  it('子代理调用协作组：WF_NOT_ROOT（协作组调度仍仅限会话根 Agent）', async () => {
-    const h = await makeHarness()
-    h.runner.teamEnabled = true
-    await start(h, groupFlow())
-    await expect(h.runtime.wfRunNode(childCaller, { nodeId: 'n-g1' })).rejects.toMatchObject({ code: 'WF_NOT_ROOT' })
+    await start(h, teamFlow())
+    await expect(h.runtime.wfRunNode(childCaller, { nodeId: 'n-dev' })).rejects.toMatchObject({ code: 'WF_NOT_ROOT' })
   })
 })
-
 describe('wfFinish 收尾', () => {
   it('completed：终态、summary、pending→skipped、持久化、锁释放', async () => {
     const h = await makeHarness()
@@ -599,6 +645,32 @@ describe('wfFinish 收尾', () => {
     await h.runtime.wfFinish(caller, { status: 'completed' })
     const second = await h.runtime.wfFinish(caller, { status: 'completed' })
     expect(second).toMatchObject({ ok: true, status: 'completed', idempotent: true })
+  })
+
+  it('幂等判定取本会话最新一条：不把无关的旧终态运行当成本次收尾结果', async () => {
+    const h = await makeHarness()
+    const older = createRunSnapshot({ runId: 'run-a-old', flow: makeFlow(), sessionId: 'session-1', mode: 'mode1', now: 1000 })
+    older.status = 'completed'
+    await h.store.saveRun(older)
+    const newer = createRunSnapshot({
+      runId: 'run-b-new',
+      flow: { ...makeFlow(), id: 'flow-2', name: '另一条流程' },
+      sessionId: 'session-1',
+      mode: 'mode1',
+      now: 9000,
+    })
+    newer.status = 'failed'
+    await h.store.saveRun(newer)
+    // 其它会话的更新记录必须被会话隔离挡掉（否则会串会话返回别人的运行）
+    const otherSession = createRunSnapshot({ runId: 'run-c-other', flow: makeFlow(), sessionId: 'session-9', mode: 'mode1', now: 99999 })
+    otherSession.status = 'completed'
+    await h.store.saveRun(otherSession)
+
+    const result = await h.runtime.wfFinish(caller, { status: 'completed' })
+
+    // 磁盘路径按 startedAt 倒序取最新一条本会话记录（run-a-old 的文件名更靠前，
+    // 旧实现按目录顺序取第一条会误报它为本次收尾结果）
+    expect(result).toEqual({ ok: true, runId: 'run-b-new', status: 'failed', idempotent: true })
   })
 
   it('归属：子代理 WF_NOT_ROOT；无运行 WF_NO_ACTIVE_RUN', async () => {

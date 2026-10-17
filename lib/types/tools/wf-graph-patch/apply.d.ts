@@ -1,9 +1,9 @@
 import type { GraphNode, WorkflowDocument } from '../../shared/graph-model.js';
-import type { GraphPatchOp, GraphPatchResult, MarkPatchOp, MarkPatchResult, PatchOpFailure } from './types.js';
+import type { GraphPatchOp, GraphPatchResult, PatchOpFailure } from './types.js';
 /** 深拷贝文档骨架（保持元数据字段；节点/连线走 JSON 深拷贝避免共享引用）。 */
 export declare function cloneDoc(doc: WorkflowDocument): WorkflowDocument;
 /**
- * 协作组一致性：成员节点的 groupId 与组的 memberIds 双向对齐。
+ * Team 一致性：成员节点的 groupId 与组的 memberIds 双向对齐。
  * 入组：写 node.data.groupId；出组：置 null。组不存在或成员不存在 → 稳定错误。
  */
 export declare function ensureGroupConsistency(nodes: GraphNode[], groupId: string, memberIds: string[]): GraphNode[];
@@ -33,6 +33,12 @@ export declare const PARENT_UNCONFIGURABLE_ROLE_FIELDS: readonly ["retryLimit", 
  */
 export declare function applyRoleNodeCreateDefaults(raw: unknown): Record<string, unknown>;
 /**
+ * 创建路径的输出契约默认值：agent 节点未提供 outputSchema 时写入默认契约文本，
+ * 与画布新建（graph/model.ts 的 newRoleNode）保持一致——界面显示、运行期注入与磁盘同值。
+ * 父代理不参与节点交接，故不落默认；显式传入（含空串）一律不覆盖，空串即「明确清空」。
+ */
+export declare function applyRoleNodeOutputContractDefault(data: Record<string, unknown>, kind: 'parent' | 'agent'): Record<string, unknown>;
+/**
  * 角色节点 data 补全（图结构补丁的**唯一规范化入口**）。
  *
  * 为什么必须有（2026.09 实机取证）：ops 是自由对象，`create_node` 只把 raw 原样落盘，
@@ -47,7 +53,7 @@ export declare function applyRoleNodeCreateDefaults(raw: unknown): Record<string
  */
 export declare function normalizeRoleNodeData(raw: unknown): Record<string, unknown>;
 /**
- * 应用图结构操作（按序，纯函数）。
+ * 应用图结构操作（按序，纯函数）：入参分毫不动，全部改动落在**一次**深拷贝出的副本上。
  * 失败一律抛 WfError（稳定 code），调用方据此返回带修复建议的补丁错误。
  */
 export declare function applyGraphOps(input: {
@@ -55,13 +61,14 @@ export declare function applyGraphOps(input: {
     ops: GraphPatchOp[];
 }): GraphPatchResult;
 /**
- * 容错应用：逐条复用严格应用器，失败的 op 记入 errors 并跳过，其余操作继续。
+ * 容错应用：逐条就地复用单 op 应用器，失败的 op 记入 errors 并跳过，其余操作继续。
  *
  * 为什么容错（而不是遇到第一条就停）：ops 之间存在有序依赖，父代理最常见的失败模式是
  * 一批里多条字段写错；一次只报一条会让它把同一批补丁反复重试，而失败清单一次列全后
  * 可以一轮改完。
- * 为什么逐条调用严格应用器：严格应用器在**内部副本**上推进，抛错时本层已成功的结果
- * 分毫未动——失败 op 既不污染后续 op 的判定基础，也不需要回滚逻辑。
+ * 为什么只拷贝一次：本层要按 op 隔离失败，而隔离不需要第二份副本——单 op 应用器**原子**
+ * （先校验后改动），失败时工作副本分毫未动，因此一次深拷贝即可，无需按 op 回滚或重拷贝；
+ * 判定基础与逐条严格应用逐字节等价。
  * 为什么只捕获 WfError：非 WfError 属于工具自身的缺陷，不能被伪装成「某条 op 写错了」。
  * 语义前提：调用方在 errors 非空时**整批不落盘**，因此返回的结果仅供错误报告与后续 op
  * 的判定基础使用。
@@ -73,18 +80,3 @@ export declare function applyGraphOpsTolerant(input: {
     result: GraphPatchResult;
     errors: PatchOpFailure[];
 };
-/**
- * 运行状态标记（C 组）纯函数：校验节点存在 + 闸门预算，给出标记结果。
- * 状态机分工（P3）：**「必须是当前闸门轮 / 当前闸门节点」由 runMarkGroup 判定**
- * （需要入口 entry 与解析后的画布），本函数只负责与单据无关的校验——
- * status 取值、节点是否在快照内、以及 status=ok 时的闸门预算（D-21：不含首次编排）。
- */
-export declare function applyMarkOp(input: {
-    op: MarkPatchOp;
-    runId: string;
-    nodeIds: string[];
-    /** 已用闸门次数（P3 预算判定用；本轮由宿主缝给出 0）。 */
-    milestoneUsed?: number;
-    /** 元参数闸门上限（0 = 不限制）。 */
-    milestoneMax?: number;
-}): MarkPatchResult;

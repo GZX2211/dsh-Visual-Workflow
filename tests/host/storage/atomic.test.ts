@@ -1,3 +1,5 @@
+// tests/host/storage/atomic.test.ts
+//
 // T-011 原子存储原语测试。
 //
 // 覆盖任务 DoD 要求的全部场景，且**全部在临时目录内运行、结束清理**（硬性要求）：
@@ -445,6 +447,34 @@ describe('T-011 进程内文件锁 withFileLock', () => {
     openGate()
     await Promise.all([t1, t2])
     expect(executed).toEqual([1, 2])
+  })
+
+  it('只经 withFileLock（不建磁盘锁）的并发 atomicWriteJson：无丢更新、每次发布完整内容、无 .tmp 残留', async () => {
+    const dir = makeTmpDir()
+    const file = join(dir, 'in-process.json')
+    const n = 12
+    // 刻意不走 withJsonLock、不产生 .lock：本用例单独锁定进程内锁自身。
+    // 临界区必须包含读改写——纯并发发布（各自 rename）在 POSIX 上即使锁失效也读不到撕裂，
+    // 无法区分锁是否生效；「n 次自增相互覆盖 → rounds < n」才是进程内锁的判错锚点。
+    await Promise.all(
+      Array.from({ length: n }, (_, i) =>
+        withFileLock(file, async () => {
+          const state = await readJson<Record<string, unknown> | null>(file, null)
+          const rounds = typeof state?.rounds === 'number' ? state.rounds : 0
+          const published = { ...payload(i), rounds: rounds + 1 }
+          await atomicWriteJson(file, published)
+          // 持锁期间不得被其他写者插入：回读必为本次发布的完整内容（无撕裂、无中途覆盖）
+          expect(await readJson(file, null)).toEqual(published)
+        }),
+      ),
+    )
+    const final = await readJson<Record<string, unknown> | null>(file, null)
+    expect(final?.rounds, '并发读改写丢更新：进程内锁未串行化临界区').toBe(n)
+    expect(typeof final?.seq).toBe('number')
+    expect(final?.text).toBe(`content-${String(final?.seq)}`)
+    await expectNoTmpResidue(dir)
+    // 全程未使用磁盘锁：目录里不应出现锁文件残留
+    expect((await listEntryNames(dir)).filter((name) => name.endsWith('.lock'))).toEqual([])
   })
 })
 

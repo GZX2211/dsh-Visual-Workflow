@@ -243,7 +243,6 @@ export class SchedulerEngine {
 
     // ---- 活动 run 状态解析（内存锁 > 磁盘记录） ----
     const lock = rt.currentFlowId ? this.deps.orchestrator.flowLockInfo(rt.currentFlowId) : null
-    const ownLock = lock && lock.runId === rt.currentRunId ? lock : null
     const foreignLock = lock && lock.runId !== rt.currentRunId ? lock : null
     let runState: string | null = null
     if (rt.currentRunId) {
@@ -362,7 +361,7 @@ export class SchedulerEngine {
   }
 
   /** 窗口 end 挂起：run → paused（锁保留、不中断在执行的子代理），等待下一窗口续跑。 */
-  private async suspendByWindow(task: ScheduledTask, rt: PersistedRuntime, now: number): Promise<void> {
+  private async suspendByWindow(task: ScheduledTask, rt: PersistedRuntime, _now: number): Promise<void> {
     if (!rt.currentRunId) return
     try {
       const ok = await this.deps.orchestrator.suspendRun(rt.currentRunId)

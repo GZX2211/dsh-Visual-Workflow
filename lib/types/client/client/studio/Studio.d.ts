@@ -1,6 +1,9 @@
 import type { Dict } from '../i18n.js';
 import { type RemoteFace } from '../hooks/useRemote.js';
+import type { WorkspacePicker } from '../sidebar/workspace-picker.js';
 export interface StudioProps {
+    /** 当前生效的 DSH 语言（含浏览器/原生自动选择），运行端点随请求携带。 */
+    language?: string;
     /** 文案词典。 */
     t: Dict;
     /** 绑定的会话 id。 */
@@ -13,5 +16,10 @@ export interface StudioProps {
      * 之前是「切到插件自己的分栏视图模式」，该模式已随浮窗/分栏整体删除。
      */
     onRunImmersive?: () => void;
+    /**
+     * 官方目录选择器（宿主接入层组装；缺省 = 当前环境没有可用选择器）。
+     * 业务组件不直接触达官方服务，宿主能力经此注入面进入工作台。
+     */
+    workspacePicker?: WorkspacePicker | null;
 }
-export declare function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: StudioProps): import("react").JSX.Element;
+export declare function Studio({ t, sessionId, remote: remoteProp, onRunImmersive, language, workspacePicker }: StudioProps): import("react").JSX.Element;

@@ -6,7 +6,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
+import { DatabaseSync, StatementSync, type SQLOutputValue } from 'node:sqlite'
 import type { DatabaseNode } from '../../../../src/host/shared/graph-model.js'
 import {
   SCHEMA_TABLE_LIMIT,
@@ -50,6 +50,44 @@ function makeTableDb(file: string, count: number): void {
   } finally {
     db.close()
   }
+}
+
+/** 建一个含 count 行的临时 SQLite 库（查询执行层行数上限用；行数远超上限）。 */
+function makeRowDb(file: string, count: number): void {
+  const db = new DatabaseSync(file)
+  try {
+    db.exec('CREATE TABLE lots (id INTEGER PRIMARY KEY, payload TEXT)')
+    db.exec(
+      `WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < ${count})
+       INSERT INTO lots (id, payload) SELECT n, 'r' || n FROM seq`,
+    )
+  } finally {
+    db.close()
+  }
+}
+
+/**
+ * 给 `StatementSync.iterate` 加计数包装：返回真实迭代器，但统计 `next()` 被调用了几次
+ * ——即语句实际推进的行数，是本条「只读取到上限行」的可观察证据。
+ * 旧实现走 `.all()` 全量物化，根本不经过 iterate（计数恒为 0）。
+ */
+function spyOnIterate(): { nextCalls: () => number; restore: () => void } {
+  const original = StatementSync.prototype.iterate as unknown as
+    (this: StatementSync) => NodeJS.Iterator<Record<string, SQLOutputValue>>
+  let nextCalls = 0
+  const spy = vi.spyOn(StatementSync.prototype, 'iterate').mockImplementation(function (this: StatementSync) {
+    const inner = original.call(this)
+    return {
+      next: () => {
+        nextCalls += 1
+        return inner.next()
+      },
+      [Symbol.iterator]() {
+        return this
+      },
+    } as unknown as ReturnType<typeof original>
+  })
+  return { nextCalls: () => nextCalls, restore: () => spy.mockRestore() }
 }
 
 describe('SqliteDriver', () => {
@@ -135,6 +173,62 @@ describe('SqliteDriver', () => {
       const page = await driver.schemaPage()
       expect(page.tables).toHaveLength(SCHEMA_TABLE_LIMIT)
       expect(page.truncated).toBe(true)
+    } finally {
+      driver.close()
+    }
+  })
+})
+
+describe('SqliteDriver 查询执行层行数上限（IF-6）', () => {
+  it('大表（20000 行）：读满上限即停，只推进「上限 + 1」行，truncated 如实上报', async () => {
+    const dir = await tempDir('vw-drv-')
+    const file = join(dir, 'many-rows.db')
+    makeRowDb(file, 20000)
+    const driver = new SqliteDriver(file)
+    const counter = spyOnIterate()
+    try {
+      // LIMIT 999999999 只满足策略层的**形式判定**，不构成行数上限
+      const result = await driver.query('SELECT id, payload FROM lots ORDER BY id LIMIT 999999999', { maxRows: 50 })
+      expect(result.columns).toEqual(['id', 'payload'])
+      expect(result.rows).toHaveLength(50)
+      expect(result.rows[0]).toEqual(['1', 'r1'])
+      expect(result.truncated).toBe(true)
+      // 判别性证据：底层语句只被推进 51 次（50 行 + 1 次截断探测）。
+      // 全量物化的旧实现既不经过 iterate（计数 0），也会把 20000 行全部读进内存。
+      expect(counter.nextCalls()).toBe(51)
+    } finally {
+      counter.restore()
+      driver.close()
+    }
+  })
+
+  it('正好满上限：不多读判定行 → truncated=false（不把「正好满」误报为截断）', async () => {
+    const dir = await tempDir('vw-drv-')
+    const file = join(dir, 'exact-rows.db')
+    makeRowDb(file, 50)
+    const driver = new SqliteDriver(file)
+    const counter = spyOnIterate()
+    try {
+      const result = await driver.query('SELECT id FROM lots ORDER BY id LIMIT 999999999', { maxRows: 50 })
+      expect(result.rows).toHaveLength(50)
+      expect(result.truncated).toBe(false)
+      // 50 行 + 迭代器耗尽探测（返回 done 的这次不算读到行）
+      expect(counter.nextCalls()).toBe(51)
+    } finally {
+      counter.restore()
+      driver.close()
+    }
+  })
+
+  it('未传 maxRows：维持全量读取口径（truncated 不设置）', async () => {
+    const dir = await tempDir('vw-drv-')
+    const file = join(dir, 'plain-rows.db')
+    makeRowDb(file, 60)
+    const driver = new SqliteDriver(file)
+    try {
+      const result = await driver.query('SELECT id FROM lots ORDER BY id LIMIT 999999999')
+      expect(result.rows).toHaveLength(60)
+      expect(result.truncated).toBeUndefined()
     } finally {
       driver.close()
     }

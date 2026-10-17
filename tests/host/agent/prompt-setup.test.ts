@@ -10,7 +10,8 @@
 // - deployment:persona-suffix 属**环境事实段**，与两个开关都无关（恒保留）：
 //   用一个人格开关清空「代理在哪里」属误伤；
 // - 「人设段」开关（injectSystemPrompt）OFF：清空除角色段 / tool:* 散文段 / Code 协议段
-//   / 环境事实段之外的全部官方散文段与 contexts；
+//   / 环境事实段之外的全部官方散文段与可选 contexts；0.2.1+ 标记 required 的 context
+//   （team:identity、工作目录、沙箱策略等运行必需事实）仍保留；
 // - 工具散文段开关（injectToolSections）OFF：仅移除 tool:* 段；
 // - Code Mode 协议段 tools:sdk / tools:ptc-only（旧名 tools:code-only）与 tools[] 恒保留。
 //
@@ -93,9 +94,10 @@ async function runAssemble(
   ctx: ReturnType<typeof makeCtx>,
   sections: Array<{ name: string; text: string }>,
   tools: Array<{ name: string }> = [{ name: 'read' }],
+  contexts: unknown[] = [{ name: 'rt', text: 'x' }],
 ): Promise<{ out: AssembledLike; toolsIn: Array<{ name: string }> }> {
   const listener = ctx.__handlers.get('system-prompt/assemble')![0]
-  const assembly = { sections, contexts: [{ name: 'rt', text: 'x' }], tools }
+  const assembly = { sections, contexts, tools }
   const out = (await listener(assembly, undefined, () => Promise.resolve(assembly))) as AssembledLike
   return { out, toolsIn: tools }
 }
@@ -202,6 +204,42 @@ describe('T-021 提示词注入装配 bindParent（父代理根 Agent）', () =>
     expect(out.contexts).toHaveLength(0)
     // tools[] 零改动
     expect(out.tools).toBe(toolsIn)
+  })
+
+  it('人设段 OFF：required context（team:identity / 工作目录）保留，可选 context 清空', async () => {
+    const setup = createChildPromptSetup()
+    const ctx = makeCtx()
+    setup.bindParent(ctx, { systemPrompt: '父代理角色', injectSystemPrompt: false, injectToolSections: true }, 's')
+    const { out } = await runAssemble(
+      ctx,
+      officialSections(),
+      [{ name: 'read' }],
+      [
+        { name: 'rt', text: 'optional runtime context' },
+        { name: 'team:identity', text: 'You are teammate "x".', required: true },
+        { name: 'working-directory', text: 'cwd', required: true },
+      ],
+    )
+
+    const contextNames = (out.contexts ?? []).map((context) => (context as { name?: string }).name)
+    expect(contextNames).toEqual(['team:identity', 'working-directory'])
+  })
+
+  it('人设段 ON：required 与可选 context 原样保留', async () => {
+    const setup = createChildPromptSetup()
+    const ctx = makeCtx()
+    setup.bindParent(ctx, { systemPrompt: '父代理角色', injectSystemPrompt: true, injectToolSections: true }, 's')
+    const { out } = await runAssemble(
+      ctx,
+      officialSections(),
+      [{ name: 'read' }],
+      [
+        { name: 'rt', text: 'optional runtime context' },
+        { name: 'team:identity', text: 'You are teammate "x".', required: true },
+      ],
+    )
+
+    expect(out.contexts).toHaveLength(2)
   })
 
   it('角色 Prompt 设置 + 人设段 OFF：identity / persona 前缀无，环境事实段（persona 后缀）仍在', async () => {

@@ -9,6 +9,7 @@ export declare class RunEndpoints extends VisualWorkflowApiBase {
     run(args: {
         sessionId?: unknown;
         flowId?: unknown;
+        language?: unknown;
     }): Promise<unknown>;
     /** 运行状态轮询：内存快照优先，终态（内存已释放）回退磁盘历史。会话归属校验。 */
     runStatus(args: {
@@ -36,6 +37,7 @@ export declare class RunEndpoints extends VisualWorkflowApiBase {
         sessionId?: unknown;
         flowId?: unknown;
         runId?: unknown;
+        language?: unknown;
     }): Promise<unknown>;
     /** 连接测试（本地/服务器驱动均可；返回可展示消息）。 */
     dbTest(args: {

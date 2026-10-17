@@ -16,7 +16,8 @@ import { ERR_EXPERIENCE_BAD_ARGS, ERR_EXPERIENCE_RECALL_FAILED, WF_EXPERIENCE_RE
 import { EXPERIENCE_TYPES, MAX_RECALL_IDS, recallIdsLimitProblem } from '../../experience/constants.js'
 import { WfError, messageOf } from '../../orchestrator/index.js'
 import { experienceCallerOf } from '../infrastructure/caller.js'
-import { defineTool, type ToolDefinitionLike, type ToolExecLike } from '../infrastructure/define-tool.js'
+import { defineTool, type ToolExecLike } from '../infrastructure/define-tool.js'
+import { registerTool, requireToolsService } from '../infrastructure/register-tool.js'
 import { EXPERIENCE_TYPE_PARAM_DESCRIPTION, assertExperienceTypeOwnership, parseExperienceType, type WfExperienceHost } from '../infrastructure/experience-contract.js'
 import { candidateResultOf, detailsResultOf, renderRecallResult } from './build.js'
 import type { RecallResult } from './types.js'
@@ -61,18 +62,16 @@ export function registerWfExperienceRecall(
   ctx: { get(name: string): unknown },
   host: WfExperienceHost,
 ): () => void {
-  const tools = ctx.get('tools') as { register(def: ToolDefinitionLike): () => void } | null | undefined
-  if (!tools || typeof tools.register !== 'function') {
-    throw new Error('[visual-workflow] tools 服务不可用，无法注册 wf_experience_recall')
-  }
+  const tools = requireToolsService(ctx, WF_EXPERIENCE_RECALL)
 
   const definition = defineTool({
     name: WF_EXPERIENCE_RECALL,
     description:
       'Recall the experiences your current subject has already learned, to inform the decision you are about to make. Recall happens at the start of a task or while it is running. It is a two-stage call: query returns ranked candidate summaries [{id, score, summary, source}], then ids returns the full experience entries. '
-      + 'A candidate score adjusts relevance by a bounded trust correction; trust can never outweigh relevance, so prefer clearly more relevant candidates over high-trust but weakly related ones. '
+      + 'Prefer the clearly more relevant candidate over a weakly related one. '
       + 'After you use recalled experiences, rate them with wf_experience_feedback in the final completion stage of that same task. '
-      + 'Reading candidates changes nothing and can be repeated safely; reading full entries by ids is what makes them count as used, which later allows rating them with wf_experience_feedback. Only experiences of the subject type you pass are returned, so a child agent may only pass type "agent" (otherwise WF_EXPERIENCE_WRONG_TYPE). '
+      + 'Reading candidates changes nothing and can be repeated safely; reading full entries by ids is what makes them count as used, which later allows rating them with wf_experience_feedback. '
+      + 'Only experiences of the subject type you pass are returned, so a child agent may only pass type "agent" (otherwise WF_EXPERIENCE_WRONG_TYPE). '
       + `Failure semantics: a missing or invalid type, mixed-stage arguments, malformed ids and topK, or more than ${MAX_RECALL_IDS} ids in the second stage fail with WF_EXPERIENCE_BAD_ARGS; an unknown id fails with WF_EXPERIENCE_NOT_FOUND; a retrieval failure fails with WF_EXPERIENCE_RECALL_FAILED.`,
     parameters: {
       type: {
@@ -164,12 +163,5 @@ export function registerWfExperienceRecall(
     },
   })
 
-  const dispose = tools.register(definition)
-  return () => {
-    try {
-      dispose()
-    } catch {
-      // 注销尽力而为（工具可能已被外部注销）
-    }
-  }
+  return registerTool(tools, definition)
 }

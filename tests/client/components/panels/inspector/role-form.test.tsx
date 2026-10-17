@@ -15,6 +15,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import React from 'react'
 import { RoleForm } from '../../../../../src/client/components/panels/inspector/role-form.js'
 import { en, zh } from '../../../../../src/client/i18n.js'
+import { DEFAULT_OUTPUT_CONTRACT_TEXT } from '../../../../../src/host/shared/protocol.js'
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -95,5 +96,14 @@ describe('角色表单模式下拉', () => {
   it('选中组合：显示工具 + MCP 数量摘要', async () => {
     await renderRoleForm({ data: { presetId: 'combo-a' } })
     expect(container!.textContent).toContain('3')
+  })
+
+  it('输出契约：提供「恢复默认」操作，点击写回默认契约文本（清空后的一键恢复）', async () => {
+    const patches: Array<Record<string, unknown>> = []
+    await renderRoleForm({ data: { presetId: 'standard', outputSchema: '' }, onPatch: (patch) => patches.push(patch) })
+    const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === zh.contractRestoreDefault)
+    expect(button).toBeTruthy()
+    await act(async () => button!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    expect(patches).toEqual([{ outputSchema: DEFAULT_OUTPUT_CONTRACT_TEXT }])
   })
 })

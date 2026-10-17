@@ -3,7 +3,7 @@
 // 索引 / 详情装配纯函数单测：
 //   - 索引：组合携带完整工具清单、模型携带思考强度档位、资产条目只给「够不够参考」的判据、
 //     规则与 ID 约定同源、三段 ID 约定齐全且不含模版措辞；
-//   - 骨架：阶段节点 / 角色 / 协作组 / 虚拟节点 / 数据节点正文 / 连接信息脱敏 / 连线 /
+//   - 骨架：阶段节点 / 角色 / Team / 虚拟节点 / 数据节点正文 / 连接信息脱敏 / 连线 /
 //     可召回内联角色清单 / 角色节点的fixed version（roleAssetId + roleVersionId）；
 //   - 骨架的字段取舍：角色 systemPrompt 必须缺席（走按需召回），其余不可召回内容必须给全；
 //   - 角色 / 内联角色详情：最长字段完整不截断，可选字段缺省时省略。
@@ -12,16 +12,18 @@ import { describe, expect, it } from 'vitest'
 import {
   buildIndex,
   buildInlineRoleDetail,
+  buildInstanceDetail,
   buildRoleDetail,
   buildWorkflowDetail,
-  clip,
   DETAIL_HINT,
+  INSTANCE_UNAVAILABLE_NOTE,
   maskConnection,
 } from '../../../../src/host/tools/wf-org-catalog/build.js'
 import { CATALOG_LIMITS, ID_CONVENTION } from '../../../../src/host/tools/wf-org-catalog/types.js'
-import { GATE_MARKING_SEMANTICS, PATCH_CONTRACT_TEXT } from '../../../../src/host/tools/infrastructure/graph-op-contract.js'
-import { ORG_SOP_DESIGN_METHOD, ORG_SOP_L1_GRAPH_SEMANTICS } from '../../../../src/host/prompts/index.js'
+import { ORG_SOP_DESIGN_METHOD, ORG_SOP_L1_GRAPH_SEMANTICS, PATCH_CONTRACT_TEXT } from '../../../../src/host/prompts/index.js'
+import { collabGroupList, orchestrationNodeList } from '../../../../src/host/orchestrator/index.js'
 import {
+  instanceFlowFixture,
   makeCatalogHost,
   inlineRoleNodeFixture,
   roleAssetDetailFixture,
@@ -29,12 +31,20 @@ import {
   workflowAssetDetailFixture,
   workflowAssetSummaryFixture,
 } from './fixtures.js'
-import type { CatalogIndex, CatalogRoleNodeEntry, CatalogWorkflowDetail } from '../../../../src/host/tools/wf-org-catalog/types.js'
+import type { CatalogIndex, CatalogInstanceDetail, CatalogInstanceUnavailable, CatalogRoleNodeEntry, CatalogWorkflowDetail } from '../../../../src/host/tools/wf-org-catalog/types.js'
 import type { WorkflowAssetSummary } from '../../../../src/host/shared/asset-types.js'
+import type { GraphNode, WorkflowDocument } from '../../../../src/host/shared/graph-model.js'
 
 /** 取骨架里的角色节点条目（测试专用窄化）。 */
 function roleNodeOf(detail: CatalogWorkflowDetail, id: string): CatalogRoleNodeEntry {
   return detail.nodes.find((node) => node.id === id && (node.kind === 'agent' || node.kind === 'parent')) as CatalogRoleNodeEntry
+}
+
+/** 取实例骨架（窄化掉「无活跃实例」的禁令体；拿到禁令体即用例前提不成立，直接失败）。 */
+function instanceSkeletonOf(flow: WorkflowDocument): CatalogInstanceDetail {
+  const detail = buildInstanceDetail(flow)
+  if ('available' in detail) throw new Error('expected an instance skeleton, got the unavailable notice')
+  return detail
 }
 
 /** 空索引入参（各用例只覆盖自己关心的那一段）。 */
@@ -88,7 +98,8 @@ describe('buildIndex（资产索引装配）', () => {
     expect(index.rules.graphSemantics).toBe(ORG_SOP_L1_GRAPH_SEMANTICS)
     expect(index.rules.designMethod).toBe(ORG_SOP_DESIGN_METHOD)
     expect(index.rules.patchContract).toBe(PATCH_CONTRACT_TEXT)
-    expect(index.rules.gateMarking).toBe(GATE_MARKING_SEMANTICS)
+    // 闸门退役：契约段不再有闸门标记语义槽位
+    expect(index.rules).not.toHaveProperty('gateMarking')
     expect(index.idConvention).toEqual(ID_CONVENTION)
     expect(DETAIL_HINT).toBe(index.detailHint)
   })
@@ -135,7 +146,9 @@ describe('buildIndex（资产索引装配）', () => {
   })
 
   it('角色摘要由资产库截断后原样透传（目录侧不二次截断，避免截断标记叠加）', () => {
-    const summary = `${'长'.repeat(CATALOG_LIMITS.roleSummary)}…（已截断）`
+    // 摘要字数口径归资产库（它在列表查询里 JOIN 当前 Active 版本行时截断）；
+    // 目录侧只透传，故此处用资产库口径的成品串（60 字 + 标记）断言逐字相等。
+    const summary = `${'长'.repeat(60)}…（已截断）`
     const index = buildIndex({
       ...emptyIndexInput,
       roles: [roleAssetSummaryFixture({ summary })],
@@ -233,7 +246,7 @@ describe('buildWorkflowDetail（骨架自足性）', () => {
   it('角色节点给全不可召回字段，并标注固定引用的角色资产与版本，但**不含 systemPrompt**', () => {
     const role = roleNodeOf(detail, 'a1')
     expect(Object.keys(role).sort()).toEqual(
-      ['groupId', 'id', 'inputSchema', 'kind', 'label', 'model', 'outputSchema', 'presetId', 'provider', 'reasoning', 'roleAssetId', 'roleVersionId', 'systemPromptSource'].sort(),
+      ['groupId', 'id', 'inputSchema', 'kind', 'label', 'model', 'outputSchema', 'presetId', 'provider', 'reasoning', 'roleAssetId', 'roleVersionId', 'schedulable', 'systemPromptSource'].sort(),
     )
     expect(role.presetId).toBe('combo-1')
     expect(role.reasoning).toBe('high')
@@ -241,6 +254,7 @@ describe('buildWorkflowDetail（骨架自足性）', () => {
     expect(role.systemPromptSource).toBe('角色说明.md')
     expect(role.roleAssetId).toBe('role-1')
     expect(role.roleVersionId).toBe(3)
+    expect(role.schedulable).toBe(true)
     expect('systemPrompt' in role).toBe(false)
   })
 
@@ -261,14 +275,14 @@ describe('buildWorkflowDetail（骨架自足性）', () => {
     expect(role.label).toBe('分析员')
   })
 
-  it('协作组节点给全 collabPrompt 与成员清单', () => {
+  it('Team 节点给全 collabPrompt 与成员清单', () => {
     const group = detail.nodes.find((node) => node.id === 'g1')
-    expect(group).toEqual({ id: 'g1', kind: 'group', label: '评审组', collabPrompt: '组员互相评审', memberIds: ['a1'] })
+    expect(group).toEqual({ id: 'g1', kind: 'group', label: '评审组', collabPrompt: '组员互相评审', memberIds: ['a1'], schedulable: false })
   })
 
-  it('虚拟节点给出引用主节点与闸门角色', () => {
+  it('虚拟节点给出引用主节点与显示名（不再有角色字段）', () => {
     const proxy = detail.nodes.find((node) => node.id === 'p1')
-    expect(proxy).toEqual({ id: 'p1', kind: 'proxy', label: '里程碑复核', proxySourceId: 'a1', role: 'milestone' })
+    expect(proxy).toEqual({ id: 'p1', kind: 'proxy', label: '复核点', proxySourceId: 'a1' })
   })
 
   it('文件节点正文一次性给全（没有二次召回通道）', () => {
@@ -354,7 +368,7 @@ describe('buildRoleDetail / buildInlineRoleDetail（最长字段完整召回）'
   })
 })
 
-describe('maskConnection / clip（辅助纯函数）', () => {
+describe('maskConnection（辅助纯函数）', () => {
   it('只有密钥字段被替换，其余字段原样保留', () => {
     expect(maskConnection({ host: 'h', password: 'p', token: 't' })).toEqual({ host: 'h', password: '**', token: 't' })
   })
@@ -364,9 +378,122 @@ describe('maskConnection / clip（辅助纯函数）', () => {
     expect(maskConnection('x')).toBeUndefined()
     expect(maskConnection([1, 2])).toBeUndefined()
   })
+})
 
-  it('clip：空白压缩 + 超限标注', () => {
-    expect(clip('  a\n\nb  ', 10)).toBe('a b')
-    expect(clip('x'.repeat(20), 5)).toBe('xxxxx… (truncated)')
+describe('buildInstanceDetail（instance 召回的第 2 层：当前运行实例骨架）', () => {
+  it('骨架 id 为保留字 instance，只给拓扑（角色节点不含 systemPrompt）', () => {
+    const detail = instanceSkeletonOf(instanceFlowFixture())
+    expect(detail.type).toBe('instance')
+    expect(detail.id).toBe('instance')
+    expect(detail.name).toBe('在跑实例')
+    expect(detail.mode).toBe('mode1')
+    const role = detail.nodes.find((node) => node.id === 'a1')
+    expect(role).not.toHaveProperty('systemPrompt')
+    expect(role).toMatchObject({ kind: 'agent', presetId: 'combo-1', outputSchema: '交付说明' })
+  })
+
+  it('内联角色入口为 instance#<nodeId>（第 3 层按需召回全部角色节点）', () => {
+    const detail = instanceSkeletonOf(instanceFlowFixture())
+    expect(detail.inlineRoles).toEqual(['instance#a1', 'instance#a2'])
+  })
+
+  it('连线与条件语义照常给全（骨架自足）', () => {
+    const detail = instanceSkeletonOf(instanceFlowFixture())
+    expect(detail.lines.map((line) => line.id)).toEqual(['l1', 'l2', 'l3'])
+    expect(detail.lines[0]).toMatchObject({ sourceHandle: 'flow-out', targetHandle: 'flow-in' })
+  })
+
+  it('无活跃实例 → 返回禁令体（既不是骨架，也不是错误）', () => {
+    const result = buildInstanceDetail(null)
+    expect(result.type).toBe('instance')
+    expect((result as CatalogInstanceUnavailable).available).toBe(false)
+    expect((result as CatalogInstanceUnavailable).message).toBe(INSTANCE_UNAVAILABLE_NOTE)
+  })
+
+  it('禁令不泄漏宿主路径（不得给出任何可供自行翻找的线索）', () => {
+    const result = buildInstanceDetail(null) as CatalogInstanceUnavailable
+    expect(result.message).not.toMatch(/[A-Za-z]:[\\/]/)
+    expect(result.message).not.toContain('orchestrations')
+    expect(result.message).not.toContain('dataDir')
+  })
+})
+
+describe('schedulable（孤立节点标注：与既有编排清单同口径）', () => {
+  it('参与流程的 agent 标 true、孤立 agent 标 false；Team 卡片恒 false（包裹层不是调度目标）', () => {
+    const detail = instanceSkeletonOf(instanceFlowFixture())
+    const byId = new Map(detail.nodes.map((node) => [node.id, node]))
+    expect(byId.get('a1')).toMatchObject({ schedulable: true })
+    expect(byId.get('a2')).toMatchObject({ schedulable: false })
+    // Team 卡片无论是否参与流程都不可调度：对它调用 wf_run_node 会被运行时拒绝
+    expect(byId.get('g1')).toMatchObject({ schedulable: false })
+    expect(byId.get('g2')).toMatchObject({ schedulable: false })
+  })
+
+  it('阶段节点不带 schedulable（它们不是调度单元）', () => {
+    const detail = instanceSkeletonOf(instanceFlowFixture())
+    for (const id of ['s', 'e']) {
+      expect(detail.nodes.find((node) => node.id === id)).not.toHaveProperty('schedulable')
+    }
+  })
+
+  it('agent 口径等价于 orchestrationNodeList；Team 卡片恒不可调度', () => {
+    const flow = instanceFlowFixture()
+    const detail = instanceSkeletonOf(flow)
+    const schedulableAgents = detail.nodes
+      .filter((node) => node.kind === 'agent' && node.schedulable === true)
+      .map((node) => node.id)
+      .sort()
+    expect(schedulableAgents).toEqual(orchestrationNodeList(flow).map((node) => node.id).sort())
+    // Team 卡片不是调度单元：collabGroupList 给出的 Team 卡片全部 schedulable=false
+    const groupIds = collabGroupList(flow).map((group) => group.groupId)
+    for (const groupId of groupIds) {
+      expect(detail.nodes.find((node) => node.id === groupId)).toMatchObject({ schedulable: false })
+    }
+  })
+})
+
+describe('父代理提示词不参与召回（用户裁决）', () => {
+  /** 父代理节点样本：拓扑可见，但它的 systemPrompt 没有召回通道。 */
+  function parentNode(): GraphNode {
+    return {
+      id: 'pp',
+      kind: 'parent',
+      position: { x: 0, y: 0 },
+      data: {
+        label: '父代理',
+        systemPrompt: '父代理职责（不该被目录召回）',
+        provider: 'deepseek',
+        model: 'deepseek-chat',
+        presetId: 'standard',
+        retryLimit: 3,
+      },
+    }
+  }
+
+  it('索引不列父代理角色资产（资产管理页仍可迭代，召回目录不含它）', () => {
+    const index = buildIndex({
+      ...emptyIndexInput,
+      roles: [
+        roleAssetSummaryFixture({ assetId: 'role-parent', kind: 'parent', name: '父代理职责' }),
+        roleAssetSummaryFixture(),
+      ],
+    })
+    expect(index.assets.roles.map((role) => role.id)).toEqual(['role-1'])
+  })
+
+  it('工作流资产骨架：父代理节点保留拓扑，但不进 inlineRoles，note 声明不可召回', () => {
+    const base = workflowAssetDetailFixture()
+    const detail = buildWorkflowDetail({ ...base, nodes: [...base.nodes, parentNode()] })
+    expect(detail.nodes.find((node) => node.id === 'pp')).toMatchObject({ kind: 'parent', label: '父代理' })
+    expect(detail.inlineRoles).toEqual(['flow-1#a1'])
+    expect(detail.note).toContain('never recallable')
+  })
+
+  it('实例骨架同理：父代理节点保留拓扑，但 inlineRoles 只有 agent', () => {
+    const flow = instanceFlowFixture()
+    const detail = instanceSkeletonOf({ ...flow, nodes: [...flow.nodes, parentNode()] })
+    expect(detail.nodes.find((node) => node.id === 'pp')).toMatchObject({ kind: 'parent' })
+    expect(detail.inlineRoles).toEqual(['instance#a1', 'instance#a2'])
+    expect(detail.note).toContain('never recallable')
   })
 })

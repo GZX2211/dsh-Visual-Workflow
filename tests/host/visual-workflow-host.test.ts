@@ -1,4 +1,4 @@
-// tests/host/r4-host-lifecycle.test.ts
+// tests/host/visual-workflow-host.test.ts
 //
 // 宿主事件观察的卸载守卫（D01-06）：`dispose()` 之后到达的 `agent/created` /
 // `agent/disposed` 不得再产生任何副作用。
@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { VisualWorkflowHost, VisualWorkflowHostServiceName, type Config } from '../../src/host/index.js'
 import { VISUAL_WORKFLOW_PROMPT_SECTION } from '../../src/host/agent/prompt-setup.js'
+import { PARENT_ROLE_DUTIES } from '../../src/host/prompts/index.js'
 
 /** 构造含临时 dataDir 的完整配置（其余键取 schema 默认）。 */
 function makeConfig(dir: string): Config {
@@ -22,15 +23,15 @@ function makeConfig(dir: string): Config {
     servicePortBase: 7860,
     apiKey: null,
     maxConcurrentPerService: 50,
-    wfAskAgentTtlMs: 120000,
     runIdleTimeoutMs: 1800000,
     runPollMs: 2000,
-    reactIterationLimitDefault: 50,
+    reactIterationLimitDefault: 0,
     retryLimitDefault: 3,
     outputFullLimit: 102400,
     documentTextLimit: 20000,
     embeddingModelDir: null,
     embeddingEndpoint: null,
+    teamMemberLimit: 8,
   }
 }
 
@@ -78,7 +79,9 @@ function probeChildCtx(): ChildCtxProbe {
 const cleanups: Array<() => Promise<void>> = []
 
 afterEach(async () => {
-  await Promise.all(cleanups.splice(0).map((fn) => fn()))
+  // 逆序串行清理：后创建的宿主先释放，再删它使用的 dataDir。并发执行会让 rm 与
+  // 宿主释放（SQLite 仍持有文件）竞态，Windows 上表现为 EPERM（文件被占用）。
+  for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
 })
 
 /** 取宿主私有事件处理器的调用面（与 host-assembly 集成测试同款最小结构收窄）。 */
@@ -88,8 +91,8 @@ type HostEventSurface = {
   onAgentDisposed(payload: unknown): void
 }
 
-async function bootHost(): Promise<{ root: Context; host: VisualWorkflowHost }> {
-  const dir = await mkdtemp(join(tmpdir(), 'vw-r4-host-'))
+async function bootHost(dataDir?: string): Promise<{ root: Context; host: VisualWorkflowHost; dir: string }> {
+  const dir = dataDir ?? (await mkdtemp(join(tmpdir(), 'vw-r4-host-')))
   cleanups.push(() => rm(dir, { recursive: true, force: true }))
   const root = new Context()
   await root.plugin(VisualWorkflowHost, makeConfig(dir))
@@ -97,7 +100,7 @@ async function bootHost(): Promise<{ root: Context; host: VisualWorkflowHost }> 
   cleanups.push(async () => {
     await root.fiber.dispose()
   })
-  return { root, host }
+  return { root, host, dir }
 }
 
 describe('宿主卸载后的事件观察（D01-06）', () => {
@@ -129,5 +132,38 @@ describe('宿主卸载后的事件观察（D01-06）', () => {
     expect(() => surface.onAgentDisposed({ agent: { id: 'child-after-dispose' } })).not.toThrow()
     // 重复卸载仍幂等（与既有断言同口径）
     expect(() => host.dispose()).not.toThrow()
+  })
+})
+
+describe('内置父代理模板播种', () => {
+  it('初始化后模板库有且仅有一条父代理模板，正文来自五维职责唯一源', async () => {
+    const { host } = await bootHost()
+
+    const parents = (await host.store.listTemplates('role')).filter((role) => role.kind === 'parent')
+    expect(parents).toHaveLength(1)
+    expect(parents[0]).toMatchObject({
+      id: 'role-parent-builtin',
+      kind: 'parent',
+      name: '父代理',
+      presetId: 'standard',
+      retryLimit: 3,
+    })
+    // 数据接线（不锁定正文内容）：播种正文即五维职责常量
+    expect(parents[0].systemPrompt).toBe(PARENT_ROLE_DUTIES)
+  })
+
+  it('已有父代理模板时重启动不覆盖、不重复播种', async () => {
+    const { root, host, dir } = await bootHost()
+    const before = (await host.store.listTemplates('role')).find((role) => role.kind === 'parent')
+    expect(before).toBeDefined()
+    // 用户改写内置模板（模板侧无版本记账，改即生效）
+    await host.store.saveTemplate('role', { ...before!, systemPrompt: '用户改写的父代理职责' })
+    await root.fiber.dispose()
+
+    const second = await bootHost(dir)
+    const parents = (await second.host.store.listTemplates('role')).filter((role) => role.kind === 'parent')
+    expect(parents).toHaveLength(1)
+    expect(parents[0].id).toBe('role-parent-builtin')
+    expect(parents[0].systemPrompt).toBe('用户改写的父代理职责')
   })
 })

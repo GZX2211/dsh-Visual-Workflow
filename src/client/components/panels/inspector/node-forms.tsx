@@ -1,26 +1,26 @@
 // src/client/components/panels/inspector/node-forms.tsx
 //
-// 阶段 / 协作组 / 虚拟节点表单。
+// 阶段 / Team / 虚拟节点表单。
 
 import type { Dict } from '../../../i18n.js'
 import { Field } from '../form-field.js'
 import { NameField } from './form-primitives.js'
 
-/** 阶段属性只读（无描述字段，无保存按钮）。 */
-export function StageForm({ data, copy, nodeLabel }: { data: Record<string, unknown>; copy: Dict; nodeLabel: string }) {
+/** 阶段属性只读（无描述字段，无保存按钮）；名称由调用方按界面语言注入。 */
+export function StageForm({ copy, nodeLabel }: { copy: Dict; nodeLabel: string }) {
   return (
     <div>
-      <h3>{nodeLabel || String(data.label ?? '')}</h3>
+      <h3>{nodeLabel}</h3>
       <div className="wf-pathbox">
         <span className="wf-pathbox__label">{copy.label}</span>
-        <span className="wf-pathbox__value">{String(data.label ?? '')}</span>
+        <span className="wf-pathbox__value">{nodeLabel}</span>
       </div>
       <span className="wf-hint">{copy.stageReadonlyHint}</span>
     </div>
   )
 }
 
-/** 协作组（名称/协作 Prompt/成员列表删除）。模板态无成员（成员在画布内拖入登记），隐藏成员区。 */
+/** Team（名称/协作 Prompt/成员列表删除）。模板态无成员（成员在画布内拖入登记），隐藏成员区。 */
 export function GroupForm({ data, copy, members, onPatch, onLoadMd, onRemoveMember }: {
   data: Record<string, unknown>
   copy: Dict
@@ -67,10 +67,7 @@ export function GroupForm({ data, copy, members, onPatch, onLoadMd, onRemoveMemb
 }
 
 /**
- * 虚拟节点表单：引用主节点只读，另可编辑
- *   - 显示名（画布上替代角色名，如「里程碑①：方案评审」）；
- *   - 角色：普通执行入口（缺省，沿用自动完成）或里程碑闸门（不自动完成，
- *     只能由父代理 `wf_graph_patch(mark_node)` 显式标记）。
+ * 虚拟节点表单：引用主节点只读，另可编辑显示名（画布上替代节点种类名）。
  */
 export function ProxyForm({ data, copy, onPatch, mainLabel }: {
   data: Record<string, unknown>
@@ -78,7 +75,6 @@ export function ProxyForm({ data, copy, onPatch, mainLabel }: {
   onPatch(patch: Record<string, unknown>): void
   mainLabel: string
 }) {
-  const isMilestone = data.role === 'milestone'
   return (
     <div>
       <h3>{copy.nodeKinds.proxy}</h3>
@@ -93,20 +89,6 @@ export function ProxyForm({ data, copy, onPatch, mainLabel }: {
           placeholder={String(copy.proxyLabelHint)}
           onChange={(event) => onPatch({ label: event.target.value })}
         />
-      </Field>
-      <Field label={String(copy.proxyRole)}>
-        <div className="wf-form-stack">
-          <label className="wf-form-check">
-            <input
-              type="checkbox"
-              className="wf-form-check__box"
-              checked={isMilestone}
-              onChange={(event) => onPatch({ role: event.target.checked ? 'milestone' : null })}
-            />
-            <span>{isMilestone ? copy.proxyRoleMilestone : copy.proxyRoleExecutor}</span>
-          </label>
-          <span className="wf-hint">{copy.proxyRoleMilestoneHint}</span>
-        </div>
       </Field>
       <span className="wf-hint">{copy.proxyReadonlyHint}</span>
     </div>
