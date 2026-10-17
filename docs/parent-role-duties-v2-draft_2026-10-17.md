@@ -293,4 +293,99 @@
 2. **D4**：父代理模板入库「命中已有父代理资产则叠加版本，否则新建」——确认？（这是唯一性的必要条件；
    若不接受，则需接受资产库出现多条 parent 资产，仅靠 D2 的召回限制兜底）
 
+> 2026-10-17 已拍板：**D3 与 D4 均按推荐执行**（父代理节点不登记角色资产；入库命中唯一资产则叠加版本）。
+
+---
+
+## 七、执行交接（上下文压缩后按此继续）
+
+### 7.1 当前状态
+
+- 分支 `feature/branch-1`；工作区干净；
+- 提交：`f09b563`（第 1 批：五维正文 + 父代理职责资产播种）、
+  `e9d586b`（第 3 批 + D5：PATCH 禁止编排父代理 + 编排提示词改暂停门）；
+- `pnpm check` 全绿：**246 文件 / 3051 用例** + build + client-smoke。
+
+### 7.2 已完成
+
+| 项 | 内容 |
+|---|---|
+| 五维正文 | `src/host/prompts/texts/parent-role-duties.ts`（`PARENT_ROLE_DUTIES`，经 `prompts/index.ts` 导出；中文单份、无模板变量、非组装） |
+| 资产播种 | `src/host/assets/parent-duties-seed.ts`（`PARENT_DUTIES_ASSET_ID = 'role-parent-duties'`、`seedParentDutiesAsset`）；`AssetStore.seedParentDuties()` 由宿主在 `store.init()` 后显式调用（**不要**放回 `AssetStore.init`，会让 19 个既有断言失效） |
+| 播种测试 | `tests/host/assets/parent-duties-seed.test.ts`（4 用例）；`tests/integration/asset-lifecycle.test.ts` 两处断言排除内置资产 |
+| D5（PATCH 禁父代理） | `src/host/tools/wf-graph-patch/apply.ts`：`rejectParentSelfEdit` / `assertNotParentNode` / `assertNoParentEndpoint` 三守卫，接入 create_node / remove_node / update_node_data / connect / disconnect；新稳定码 `WF_PARENT_SELF_EDIT` 已在 `api/routes.ts` 的 `ERROR_STATUS_EXEMPT` 登记 |
+| D6（提示词措辞） | `texts/parent-orchestrator.ts`、`texts/parent-hybrid.ts` 第 4 条：「即终止运行」→「放置暂停门」；「只能重试一次」→「失败重试受节点重试上限约束」 |
+
+### 7.3 剩余工作（按 D1 → D2 → D3 → D4 → E5 顺序）
+
+**D1｜内置父代理模板改由宿主播种（正文统一）**
+- 删除 client 播种：`src/client/hooks/useStudioBoot.ts` 中 `if (!roleItems.some((item) => item.kind === 'parent')) { ... saveTemplate('role', ...) }` 整块（约 80-102 行，含注释）。
+- 新增宿主播种：`src/host/visual-workflow-host.ts` 的 init 里 `await this.store.init()` 之后：
+  用 `await this.store.listTemplates('role')` 判有无 `kind === 'parent'`，没有则
+  `await this.store.saveTemplate('role', { id: 'role-parent-builtin', kind: 'parent', name: '父代理', systemPrompt: PARENT_ROLE_DUTIES, provider: '', model: '', presetId: 'standard', retryLimit: 3, reactLimit: null, inputSchema: '', outputSchema: '' })`。
+  正文 import 自 `./prompts/index.js`；name 与词典 `parentAgent` 一致（中文「父代理」，英文词典为 'Parent Agent'，单份中文播种即可）。
+- 注意：不要覆盖已有父代理模板（用户自建或已存在则跳过）。
+- 测试：`tests/host/visual-workflow-host.test.ts`（初始化后模板列表可断言新事实）；client 侧无播种后需确认 `builtinParentPrompt` 词典项是否还有消费方，没有则删除（中英两处）。
+
+**D2｜catalog 禁止召回父代理提示词（三种来源）**
+- 索引：`src/host/tools/wf-org-catalog/tool.ts` 的 `buildIndexFrom`（约 121-136 行）——`listRoleAssets()` 结果过滤 `kind !== 'parent'`。
+- 资产详情：同文件 `loadRole`（约 180-196 行）——`detail.kind === 'parent'` 时该 id 记错误（`WF_BAD_ARGS`，说明「父代理提示词不参与召回」）。
+- 内联角色：`inlineRole`（工作流资产内联，约 208 起）与 `instanceRole`（约 229-249 行）——节点 `kind === 'parent'` 同样拒绝（现有分支允许 agent/parent，把 parent 从允许集移除）。
+- 可选：`build.ts` 的 `idShapesHint`（约 52/62 行）补一句「父代理提示词不可召回」。
+- 测试：`tests/host/tools/wf-org-catalog/**`、`tests/integration/asset-lifecycle.test.ts`。
+
+**D3｜父代理节点不登记角色资产（改全节点壳）**
+- `src/host/assets/workflow-assets.ts` 的 `insertWorkflowVersion`（约 488-500 行）：把
+  `if (!isRoleNode(node))` 改为 `if (!isRoleNode(node) || node.kind === 'parent')`，父代理节点走 `shells.push(node)`。
+- `rebuildNodes` 已支持 full shell，无需改；旧版本行（父代理曾按 roleVersionIds 存）仍按原路径重建，无需迁移。
+- 注释说明理由：父代理提示词只存在于实例节点与用户入库的那条资产，工作流保存不再产生 parent 角色资产。
+- 测试：`tests/host/assets/workflow-assets.test.ts` 中涉及 parent 节点的用例（grep `kind: 'parent'`），断言「不再新增 parent 资产、工作流资产仍完整保存节点内容」。
+
+**D4｜父代理入库命中唯一资产则叠加版本**
+- 实现位置：`src/host/assets/role-assets.ts:639` `promoteRoleVersion`（`promoteRole` 的核心）。
+- 特例：`request.role.kind === 'parent'` 时
+  1. 查已有 parent 资产：`role_asset_active JOIN role_asset_history ... WHERE h.kind='parent' ORDER BY a.updated_at DESC LIMIT 1`；
+  2. 命中 → 用 `addRoleVersion`（该 assetId，新 fields，`inheritSource` 取该资产 Active 行的 sourceTemplateId/sourceFingerprint）追加版本并移动 Active；内容与 Active 全等时沿用现有 `unchanged` 语义；
+  3. 未命中 → 走现有 `createRoleAsset`。
+- 子代理逻辑不动。测试：`tests/host/assets/role-assets.test.ts` 新增「父代理模板入库 → 资产 id 不变、版本号 +1、可回滚」用例。
+
+**E5｜重跑与失败重试计数分离**
+- 位置：`src/host/orchestrator/runtime-execute.ts:131-135`
+  `const attempt = (run.attempts.get(resolvedNodeId) ?? 0) + 1` / `if (attempt > effectiveRetryLimit + 1) throw WF_RETRY_LIMIT`。
+- 改法：进入 `wfRunNode` 时读取该节点上次快照状态（`run.snapshot.nodes` 里 `nodeId === resolvedNodeId` 的 status）：
+  - 上次为 `ok`（已完成节点被重新调度处理新任务）→ **不递增** `run.attempts`、不做 `WF_RETRY_LIMIT` 判定（仍受 `GLOBAL_RUN_CALL_LIMIT`）；
+  - 其他（pending/failed/running）→ 现状：递增并受 `retryLimit` 约束。
+- `setNodeStatus(..., 'running', { attempts })` 继续写失败重试次数（重跑时保持旧值）。
+- 测试：`tests/host/orchestrator/runtime-execute.test.ts`（新增：已完成节点重跑 N 次不被 `WF_RETRY_LIMIT` 拒；失败节点仍受上限）。
+
+**第 5 批（用户明确暂缓）**：子代理侧条款（无法决策上报父代理、问题在节点运行期内解决、结算汇报含未解决问题）。
+
+### 7.4 关键裁决与红线（不得偏离）
+
+- 阻塞一律**暂停**（插 pause 节点 → 推进即 paused），不终止；部分阻塞先做完无影响任务。
+- `retryLimit` 只限制失败重试，不限制重新调度已完成节点。
+- 渐进式改图是**软限制**（提示词层，不做护栏），优先改近邻节点。
+- 任务：图上已有准确任务则核对、不重复发布；没有才由父代理经 `wf_send_message` 发布。
+- 父代理提示词**不得被 catalog 召回**（三种来源全禁）。
+- 父代理节点**不登记角色资产**；父代理模板入库**命中唯一资产则叠加版本**。
+- PATCH 工具（`wf_graph_patch`）**不得编排父代理**（五类 op 全禁，`WF_PARENT_SELF_EDIT`）；用户手工改图不受限。
+- 错误措辞红线：不得引导子代理使用 `wf_run_node`（子代理没有该工具）。
+- Team 判据一句话进 systemPrompt；图硬规则/写图契约留在按需召回。
+
+### 7.5 关键事实（勿重复实测）
+
+- **暂停门**：`wf_run_node(pause 节点 id)` → run 置 `paused`、写 `resumeFromNodeId`、持久化，返回 `{status:'paused'}`（`runtime-execute.ts:87-99`）；pause 节点必须同时有 flow-in/flow-out。
+- **instance 骨架**已含数据节点正文与全部连线（`wf-org-catalog/build.ts:52,291-316`）→ 父代理可判定「图上是否已有任务」。
+- **资产列表排序**：`ORDER BY a.updated_at DESC, a.asset_id ASC` → 新入库自然置顶。
+- 模板/资产/实例三层现状见 §六.1（无需重构）。
+- 内置父代理资产 id：`role-parent-duties`（`src/host/assets/parent-duties-seed.ts`）。
+- 词典值：`parentAgent` 中文「父代理」、英文 'Parent Agent'（`src/client/i18n.ts:24/556`）。
+- 新增/删除源码文件后必须 `pnpm build`，否则 `build-artifacts` 门禁报产物不同步；`lib/` 子目录幽灵需手工删。
+
+### 7.6 命令
+
+`pnpm typecheck` / `pnpm test` / `pnpm build` / `pnpm check`（= 四者之和 + client-smoke）。
+改测试后先跑目标文件：`pnpm vitest run <path>`。
+
+
 
