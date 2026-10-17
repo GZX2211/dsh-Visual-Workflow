@@ -1,7 +1,8 @@
 // src/client/lib/remote.ts
 //
-// 工作台远端调用：POST /visual-workflow/<endpoint>，body { args }，返回 value。
-// 端点名直接引用共享协议常量表（host 同源），与后端零漂移。
+// 工作台远端调用：POST <base>/visual-workflow/<endpoint>，body { args }，返回 value。
+// 端点名直接引用共享协议常量表（host 同源），与后端零漂移；URL 以 document.baseURI
+// 为基准解析，兼容官方 --public-url 的带路径前缀反向代理（见 visualWorkflowPath）。
 //
 // 失败语义（显式区分，见 client AGENTS「数据流与数据访问边界」）：
 //   - 业务失败：后端 { ok:false, error:{ message, code } } → 抛出携带稳定 code 的 Error；
@@ -162,6 +163,35 @@ async function errorFromResponse(response: Response): Promise<RemoteError> {
   return responseError(payload, response.status)
 }
 
+/**
+ * 同源 API 路径：以 document.baseURI 为基准解析相对路径。
+ *
+ * 为什么不能写死 `/visual-workflow/...`：官方 Web 在 index 注入 `<base href="./">`，
+ * 以支持 `--public-url` 的带路径前缀反向代理；固定根路径会绕过该前缀。base 不可用/
+ * 非法时回退根路径，保证普通根部署与测试环境行为不变。
+ * @param endpoint - 端点名（共享协议常量）。
+ * @param baseUri - 解析基准；缺省读取 document.baseURI（非浏览器环境回退根路径）。
+ * @returns 同源绝对路径（如 `/visual-workflow/run` 或 `/dsh/visual-workflow/run`）。
+ */
+export function visualWorkflowPath(endpoint: string, baseUri?: string): string {
+  const fallback = `/visual-workflow/${endpoint}`
+  let base = baseUri
+  if (base === undefined && typeof document !== 'undefined') base = document.baseURI
+  if (!base) return fallback
+  try {
+    const parsed = new URL(base)
+    // 仅同源 HTTP(S) 页面走 base 解析；file:// 等载体保持旧根路径行为。
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return fallback
+    // <base href="./"> 的 baseURI 通常已带尾斜杠；显式补斜杠，避免 `/dsh` 被当成文件。
+    if (!parsed.pathname.endsWith('/')) parsed.pathname += '/'
+    parsed.search = ''
+    parsed.hash = ''
+    return new URL(`visual-workflow/${endpoint}`, parsed).pathname
+  } catch {
+    return fallback
+  }
+}
+
 /** 调用 Host API（同源 fetch；超时与取消见 RemoteCallOptions）。 */
 export async function remoteCall(
   endpoint: string,
@@ -172,7 +202,7 @@ export async function remoteCall(
   try {
     let response: Response
     try {
-      response = await fetch(`/visual-workflow/${endpoint}`, {
+      response = await fetch(visualWorkflowPath(endpoint), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ args }),
@@ -206,7 +236,7 @@ export async function streamCall(
 ): Promise<void> {
   let response: Response
   try {
-    response = await fetch(`/visual-workflow/${endpoint}`, {
+    response = await fetch(visualWorkflowPath(endpoint), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ args }),

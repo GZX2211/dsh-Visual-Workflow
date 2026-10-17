@@ -13,7 +13,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FlowStore } from '../../../src/host/storage/flow-store.js'
-import { TeamMemberLauncher, teammateIdentityPrefix, type TeamMemberLauncherDeps } from '../../../src/host/agent/member-launcher.js'
+import { TeamMemberLauncher, type TeamMemberLauncherDeps } from '../../../src/host/agent/member-launcher.js'
 import { createChildToolFilterSetup } from '../../../src/host/agent/child-tool-filter.js'
 import { createChildPromptSetup } from '../../../src/host/agent/prompt-setup.js'
 import { createModelSelectionSetup } from '../../../src/host/agent/model-selection.js'
@@ -222,19 +222,6 @@ describe('TeamMemberLauncher.available', () => {
   })
 })
 
-describe('官方身份前缀（逐字复刻官方 spawn_teammate 模板）', () => {
-  it('包含成员名 / Lead 名 / list_agents 与 send_message 入口，且带 system-reminder 包裹与尾空行', () => {
-    const prefix = teammateIdentityPrefix('m-n-be-dev')
-    expect(prefix.startsWith('<system-reminder>\n')).toBe(true)
-    expect(prefix.endsWith('</system-reminder>\n\n')).toBe(true)
-    expect(prefix).toContain('You are teammate "m-n-be-dev".')
-    expect(prefix).toContain('Your Team Lead is named "lead".')
-    expect(prefix).toContain('Use list_agents({}) to find your teammates and their names.')
-    expect(prefix).toContain('To message your Team Lead, use send_message({ target: "lead", message: "..." }).')
-    expect(prefix).toContain('To message another teammate, use send_message({ target: "<teammate name>", message: "..." }).')
-  })
-})
-
 describe('TeamMemberLauncher.start（创建路径）', () => {
   it('官方服务不可用 → 返回 null（不抛错，由调用方降级）', async () => {
     const h = await makeHarness({ service: false })
@@ -255,14 +242,11 @@ describe('TeamMemberLauncher.start（创建路径）', () => {
     expect(request?.provider).toBe('spawn')
   })
 
-  it('首条 prompt = 官方身份前缀 + 插件任务块（成员据此知道自己的名字与队友）', async () => {
+  it('首条 prompt 只含插件任务块：身份由官方 team:identity 系统上下文注入', async () => {
     const h = await makeHarness()
     await h.launcher.start(memberInput())
 
-    expect(h.spawns[0]?.request.prompt).toEqual([
-      { type: 'text', text: teammateIdentityPrefix('m-n-be-dev') },
-      { type: 'text', text: '任务1' },
-    ])
+    expect(h.spawns[0]?.request.prompt).toEqual([{ type: 'text', text: '任务1' }])
   })
 
   it('成员级组成在创建窗口内生效：角色提示词段 / 工具白名单 / 模型选择三处均按该成员配置', async () => {

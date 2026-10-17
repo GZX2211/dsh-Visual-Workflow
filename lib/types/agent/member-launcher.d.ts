@@ -7,14 +7,6 @@ import type { ChildToolFilterSetup } from './child-tool-filter.js';
 import type { ModelSelectionSetup } from './model-selection.js';
 import type { AgentsServiceLike, SubagentsServiceLike, ToolsView } from './runner.js';
 import type { ReactGuardBridge } from './guards.js';
-/**
- * 官方成员身份前缀（逐字复刻 `dsh-experimental-tool-agent-team` 的 spawn_teammate 模板）。
- *
- * 为什么必须逐字复刻：官方工具创建成员时会把这段前缀插在任务之前，成员据此知道自己的名字、
- * Lead 名与协作入口；插件直接调服务层不会自动获得，缺了它成员既不知道队友也不知道怎么发消息。
- * 官方该模板变更时，此处必须同步（判据测试锁定文本形状）。
- */
-export declare function teammateIdentityPrefix(name: string): string;
 /** 成员启动结果（编排器据此登记事件归属与节点状态）。 */
 export interface TeamMemberStartResult {
     /** 官方成员会话 id = 子代理 childId。 */

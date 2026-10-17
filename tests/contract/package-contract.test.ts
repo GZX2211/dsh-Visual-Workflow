@@ -1,8 +1,8 @@
 // tests/contract/package-contract.test.ts
 //
 // T-001 包契约测试：校验 package.json 的 name/type/module 形态、exports 键齐全、
-// dsh 元数据（bundle.patch / client）、依赖约束（W-05：零 @deepseek-ai/* 运行时依赖）、
-// patch 文件形态，以及 files/exports 引用的静态文件在磁盘上真实存在。
+// dsh 元数据（bundle.patch / client）、engines.dsh 兼容范围、依赖约束（W-05：零
+// @deepseek-ai/* 运行时依赖）、patch 文件形态，以及 files/exports 引用的静态文件在磁盘上真实存在。
 //
 // 层级归属：断言对象是整个发布包（跨 host/client 两半），不对应任何 src 模块，
 // 故属 tests/contract（包与构建契约门禁），不属 tests/host 的模块镜像测试。
@@ -108,6 +108,12 @@ describe('T-001 包契约（dsh 元数据）', () => {
     // 0.1.1-rc.2 时代把 client runtime 包列入 inject；0.1.2 拆解后它是运行时幽灵依赖，
     // 保留会让装配行 pending / 不入 boot graph——client 现只经 ctx.get 守卫取会话/语言服务。
     expect(pkg.dsh?.client?.inject).not.toContain('@deepseek-ai/dsh-client-runtime')
+  })
+
+  it('engines.dsh 声明 0.2.1-rc.2 起的兼容范围（官方优先按 engines.dsh 判定）', () => {
+    // 0.2.1 移除了 startContinuable、Agent Team 身份提示迁移为 team:identity context；
+    // 插件按 0.2.1 面适配，因此下限从 0.2.1-rc.2 起，覆盖 0.2.x 后续补丁/预发布。
+    expect(pkg.engines?.dsh).toBe('>=0.2.1-rc.2 <0.3.0')
   })
 })
 

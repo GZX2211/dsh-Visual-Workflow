@@ -30,6 +30,9 @@
     "assets/models/bge-small-zh-v1.5",
     "README.md"
   ],
+  "engines": {
+    "dsh": ">=0.2.1-rc.2 <0.3.0"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"

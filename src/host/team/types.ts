@@ -49,10 +49,14 @@ export interface TeamSendRequestLike {
   signal: AbortSignal
 }
 
-/** 投递结果：accepted = 立即送达，queued = 已持久排队（已安全存储，不可重发）。 */
+/**
+ * 投递结果：0.2.1 起为 `{ messageId }`（目标 inbox 已接受；随后执行与本次调用无关）。
+ *
+ * 【0.2.1 迁移】旧的 `status: 'accepted' | 'queued'` 随独立 outbox/重试机制一并移除；
+ * 插件不消费投递状态（派发是否送达由编排层按成员运行态推导），故只保留 messageId。
+ */
 export interface TeamSendResultLike {
   messageId?: string
-  status?: 'accepted' | 'queued'
 }
 
 /** 官方 Team 服务最小结构（`ctx.agentTeams`）。 */

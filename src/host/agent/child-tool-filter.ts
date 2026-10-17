@@ -3,8 +3,9 @@
 // 子代理工具白名单装配（allow 侧）与创建窗口夹持。
 //
 // 与 runner 的既有路径的关系：
-//   - 普通节点子代理经官方 `startContinuable({ request: { toolFilter } })` 传入白名单，
-//     由官方在创建窗口内 `tools.restrict({ allow })`；
+//   - 普通节点子代理由宿主在 `agent/created` 创建窗口内自行安装 restrict（0.2.1+ 的
+//     startActivation 请求已不接受 toolFilter；≤0.2.0 旧宿主仍经 startContinuable 传
+//     toolFilter，与本装配双保险）；
 //   - Team 成员由官方 Team 服务建立，该服务的创建请求**不接受** toolFilter，
 //     因此白名单必须由宿主在 `agent/created` 创建窗口内自行安装（官方语义等价：
 //     restrict 是作用域级声明式掩码，安装即对该子代理生效）。

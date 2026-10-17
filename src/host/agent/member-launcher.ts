@@ -13,8 +13,8 @@
 //
 // 官方事实（取证自 dsh-experimental-tool-agent-team 与 dsh-experimental-agent-team）：
 //   - spawn_teammate 只接受 name / description / prompt / context，模型与工具不经该请求；
-//   - 官方工具会给成员首条消息插入固定身份前缀（成员名 + Lead 名 + 协作入口），插件直接调用
-//     服务层时必须自行补上（见 TEAMMATE_IDENTITY_PREFIX，逐字复刻官方模板）；
+//   - 0.2.1 起成员身份由官方 `team:identity` 系统上下文注入（required），官方工具不再把
+//     身份前缀写进首条用户消息；插件直接调用服务层时同样不应再插前缀（否则重复身份）；
 //   - 成员名在同一团队内永久不可复用、成员不可删除：已存在者只能复用（sendMessage 重新派发）；
 //   - maxMembers 统计「累计创建过的 teammate 数（含失败的）」，耗尽时插件先给出可行动错误；
 //   - 成员是 Lead 的直接可延续子代理，其每轮驻留都发 subagent/end，故产出仍经既有事件链路观察。
@@ -32,25 +32,6 @@ import type { ChildToolFilterSetup } from './child-tool-filter.js'
 import type { ModelSelectionLike, ModelSelectionSetup } from './model-selection.js'
 import type { AgentsServiceLike, SubagentsServiceLike, ToolsView } from './runner.js'
 import type { ReactGuardBridge } from './guards.js'
-
-/**
- * 官方成员身份前缀（逐字复刻 `dsh-experimental-tool-agent-team` 的 spawn_teammate 模板）。
- *
- * 为什么必须逐字复刻：官方工具创建成员时会把这段前缀插在任务之前，成员据此知道自己的名字、
- * Lead 名与协作入口；插件直接调服务层不会自动获得，缺了它成员既不知道队友也不知道怎么发消息。
- * 官方该模板变更时，此处必须同步（判据测试锁定文本形状）。
- */
-export function teammateIdentityPrefix(name: string): string {
-  return `<system-reminder>
-You are teammate "${name}".
-Your Team Lead is named "lead".
-Use list_agents({}) to find your teammates and their names.
-To message your Team Lead, use send_message({ target: "lead", message: "..." }).
-To message another teammate, use send_message({ target: "<teammate name>", message: "..." }).
-</system-reminder>
-
-`
-}
 
 /** 成员启动结果（编排器据此登记事件归属与节点状态）。 */
 export interface TeamMemberStartResult {
@@ -218,8 +199,8 @@ export class TeamMemberLauncher {
           teams.spawnTeammate(root, {
             name,
             description: teammateDescriptionOf(node.data?.label, node.id),
-            // 首块 = 官方身份前缀（逐字复刻官方工具），次块 = 插件组装的成员任务块
-            prompt: [{ type: 'text', text: teammateIdentityPrefix(name) }, ...input.blocks],
+            // 成员身份由官方 team:identity 系统上下文注入（0.2.1+）；首条消息只放插件任务块。
+            prompt: [...input.blocks],
             // 成员是全新角色：不继承 Lead 对话（fork 会把编排指令与上下文灌进成员）
             context: 'fresh',
             provider,

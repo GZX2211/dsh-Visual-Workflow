@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  remoteCall, streamCall, EP, isRevisionConflict, DEFAULT_REMOTE_TIMEOUT_MS, POLL_REMOTE_TIMEOUT_MS,
+  remoteCall, streamCall, visualWorkflowPath, EP, isRevisionConflict, DEFAULT_REMOTE_TIMEOUT_MS, POLL_REMOTE_TIMEOUT_MS,
   REMOTE_TIMEOUT_CODE, REMOTE_CONNECTION_CODE, REMOTE_HTTP_STATUS_CODE, REMOTE_EMPTY_STREAM_CODE,
   type RemoteError,
 } from '../../../src/client/lib/remote.js'
@@ -29,6 +29,25 @@ function declaredEndpointNames(): string[] {
 afterEach(() => {
   vi.unstubAllGlobals()
   vi.useRealTimers()
+})
+
+describe('visualWorkflowPath（--public-url 子路径）', () => {
+  it('根部署：保持 /visual-workflow/<endpoint>', () => {
+    expect(visualWorkflowPath('run', 'http://127.0.0.1:50207/')).toBe('/visual-workflow/run')
+  })
+
+  it('带路径前缀反向代理：拼到 base 前缀下', () => {
+    expect(visualWorkflowPath('run', 'https://host/dsh/')).toBe('/dsh/visual-workflow/run')
+    // base 无尾斜杠时补斜杠，避免把 /dsh 当成文件路径
+    expect(visualWorkflowPath('run', 'https://host/dsh')).toBe('/dsh/visual-workflow/run')
+  })
+
+  it('base 非法/缺失：回退根路径', () => {
+    expect(visualWorkflowPath('run', 'not a url')).toBe('/visual-workflow/run')
+    expect(visualWorkflowPath('run', '')).toBe('/visual-workflow/run')
+    // file:// 等非 HTTP(S) 载体保持旧根路径行为
+    expect(visualWorkflowPath('run', 'file:///C:/app/index.html')).toBe('/visual-workflow/run')
+  })
 })
 
 describe('remoteCall', () => {

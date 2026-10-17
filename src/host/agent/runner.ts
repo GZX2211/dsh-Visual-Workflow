@@ -4,7 +4,8 @@
 // startNodeTask / interruptChild / 软截停消费。
 //
 // 官方 seam 取证：
-// - startContinuable({ provider, label, request:{prompt,parent,persona?,toolFilter?,agentOptions?}, signal }) → {childId,messageId}；request.prompt 为首条 user 消息，创建即推理；首次必须注入完整任务块，否则子代理空转。
+// - 0.2.1+：startActivation({ provider, label, request:{prompt,parent,agentOptions?}, signal, delivery }) → {childId,messageId,result,dispose}；request.prompt 为首条 user 消息，创建即推理；request 已移除 persona/toolFilter。
+// - ≤0.2.0（兜底）：startContinuable({ provider, label, request:{prompt,parent,toolFilter?,agentOptions?}, signal }) → {childId,messageId}。
 // - interrupt(childId,{kind:'user',parentSessionId}) 尽力中断。
 // - 每子代理作用域贡献：官方无 registerContinuableSetup，改为 agent/created 事件（0.1.7 前名为 agent/session-start）在创建窗口按 agent.ctx 安装四类贡献（可见性/软截停/模型选择/角色提示词），与 installModelSelection(agentCtx,…) 范式一致。
 //
@@ -129,24 +130,47 @@ export interface AgentsServiceLike {
   roots?(): unknown[]
 }
 
-/** 子代理服务最小结构（0.1.5-rc.1 SubagentRuntime 使用面；零官方类型依赖，运行时守卫）。 */
+/** 0.2.1+ 子代理激活请求：request 已移除 persona/toolFilter，新增 cwd/agentPreset（本插件不消费）。 */
+export interface SubagentActivationSpecLike {
+  provider: string
+  label: string
+  request: {
+    prompt: Array<{ type: 'text'; text: string }>
+    parent: unknown
+    agentOptions?: { provider?: string; model?: string }
+  }
+  signal: AbortSignal
+  /**
+   * parent = 完成后向父代理发结算通知（与 0.2.0 startContinuable 的 notifySettlement
+   * 语义等价）；caller = 只把结果交给调用方。插件的编排回写依赖 subagent/end，
+   * 选 parent 保持旧行为。
+   */
+  delivery: 'parent' | 'caller'
+}
+
+/** ≤0.2.0 可延续子代理创建请求（旧宿主兜底面；0.2.1 已移除 startContinuable）。 */
+export interface SubagentContinuableSpecLike {
+  provider: string
+  label: string
+  request: {
+    prompt: Array<{ type: 'text'; text: string }>
+    parent: unknown
+    persona?: string
+    toolFilter?: { allow: string[] }
+    agentOptions?: { provider?: string; model?: string }
+  }
+  signal: AbortSignal
+}
+
+/** 子代理服务最小结构（SubagentRuntime 使用面；零官方类型依赖，运行时守卫）。 */
 export interface SubagentsServiceLike {
   /** 延续子代理 provider 名列表（旧面；新宿主改用 getProvider 按名探测）。 */
   list?(): string[]
-  /** 延续子代理创建：首条 prompt 即任务块（request 兼容 persona/toolFilter/agentOptions；signal 为必填）。 */
-  startContinuable(spec: {
-    provider: string
-    label: string
-    request: {
-      prompt: Array<{ type: 'text'; text: string }>
-      parent: unknown
-      persona?: string
-      toolFilter?: { allow: string[] }
-      agentOptions?: { provider?: string; model?: string }
-    }
-    signal: AbortSignal
-  }): Promise<{ childId: string; messageId?: unknown }>
-  /** 相邻 Agent 投递（live 父 Agent → direct child 派发下一回合）；**0.1.5 唯一推荐通道**。 */
+  /** 0.2.1+ 统一激活入口：创建可延续子代理并提交首条 prompt（新宿主首选）。 */
+  startActivation?(spec: SubagentActivationSpecLike): Promise<{ childId: string; messageId?: unknown }>
+  /** ≤0.2.0 可延续子代理创建（旧宿主兜底；0.2.1 的公开面已无此方法）。 */
+  startContinuable?(spec: SubagentContinuableSpecLike): Promise<{ childId: string; messageId?: unknown }>
+  /** 相邻 Agent 投递（live 父 Agent → direct child 派发下一回合）；0.1.5 起唯一推荐通道。 */
   sendMessage?(sender: unknown, targetId: string, content: Array<{ type: 'text'; text: string }>, options: { signal?: AbortSignal }): Promise<unknown>
   /**
    * host 协议投递（distinct child turn，durable host source）；**旧宿主兼容兜底**。
@@ -760,23 +784,45 @@ export class NodeAgentRunner implements NodeRunner {
     // 【关键时序】每子代理作用域装配（角色提示词/工具可见性/模型选择/软截停）由 host 层
     // `agent/created` 处理器在子代理创建窗口内安装（该事件在 agents.create 发布、
     // 首轮 followup 组装之前串行 await 触发；此时 withPending 的 AsyncLocalStorage 状态仍在作用域内，
-    // 各 contribution 能读到本次创建的 promptState/manifest）。因此 startContinuable 只需要
-    // 创建子代理并提交首条任务，不再在返回后重复安装——避免二次「工具已更新」。
+    // 各 contribution 能读到本次创建的 promptState/manifest）。因此创建调用只需要
+    // 建立子代理并提交首条任务，不再在返回后重复安装——避免二次「工具已更新」。
+    const label = node.data.label || `visual-workflow:${input.flowId}:${node.id}`
+    const prompt = input.blocks.length > 0 ? input.blocks : [{ type: 'text' as const, text: fallbackPrompt(node) }]
     const started = await this.deps.promptSetup.withPending(promptState, async () => {
-      const result = await subagents.startContinuable({
-        provider,
-        label: node.data.label || `visual-workflow:${input.flowId}:${node.id}`,
-        request: {
-          // 首条消息 = 完整任务块（任务 + 上下文），杜绝创建即空转；角色 Prompt 由
-          // prompt-setup 注册为系统提示词独立段，不再经官方 request.persona 占用官方人设
-          prompt: input.blocks.length > 0 ? input.blocks : [{ type: 'text', text: fallbackPrompt(node) }],
-          parent,
-          ...(toolFilter ? { toolFilter } : {}),
-          ...(Object.keys(agentOptions).length > 0 ? { agentOptions } : {}),
-        },
-        signal: input.signal,
-      })
-      return result
+      // 0.2.1+：统一激活入口。request 已不接受 toolFilter/persona；工具白名单由 host
+      // 在 agent/created 窗口内自行 restrict（child-tool-filter），故此处不再传递。
+      if (typeof subagents.startActivation === 'function') {
+        return subagents.startActivation({
+          provider,
+          label,
+          request: {
+            // 首条消息 = 完整任务块（任务 + 上下文），杜绝创建即空转；角色 Prompt 由
+            // prompt-setup 注册为系统提示词独立段，不占用官方人设。
+            prompt,
+            parent,
+            ...(Object.keys(agentOptions).length > 0 ? { agentOptions } : {}),
+          },
+          signal: input.signal,
+          // 与 0.2.0 startContinuable 的结算通知语义保持一致（父代理仍收到完成通知）。
+          delivery: 'parent',
+        })
+      }
+      // ≤0.2.0 旧宿主兜底：0.2.1 的公开 SubagentRuntime 已移除该方法。旧面仍支持
+      // request.toolFilter（官方在创建窗口内 restrict，与本插件自装 restrict 双保险）。
+      if (typeof subagents.startContinuable === 'function') {
+        return subagents.startContinuable({
+          provider,
+          label,
+          request: {
+            prompt,
+            parent,
+            ...(toolFilter ? { toolFilter } : {}),
+            ...(Object.keys(agentOptions).length > 0 ? { agentOptions } : {}),
+          },
+          signal: input.signal,
+        })
+      }
+      throw new Error('subagents 服务不支持创建可延续子代理（缺少 startActivation/startContinuable）')
     })
     const previous = this.nodeChildren.get(key)
     const replacedChildId = previous && previous.childId !== started.childId ? previous.childId : undefined
@@ -787,7 +833,7 @@ export class NodeAgentRunner implements NodeRunner {
     }
     this.nodeChildren.set(key, { childId: started.childId, signature })
     this.childIds.add(started.childId)
-    // 创建即开始推理（官方 startContinuable 语义）：软截停上限必须在 startContinuable
+    // 创建即开始推理（官方 startActivation 语义）：软截停上限必须在创建调用
     // 返回后的同步块内立即登记（startNodeTask 会再次刷新，幂等）。保证事件循环中任何
     // pre-step 事件（宏任务）晚于登记发生；极端情况下官方在 resolve 前同步触发 pre-step
     // 仍无法覆盖，但该窗口已缩到官方内部实现边界（startNodeTask 复用路径已另行前置）。

@@ -36,35 +36,65 @@ export interface AgentsServiceLike {
     get(id: string): unknown;
     roots?(): unknown[];
 }
-/** 子代理服务最小结构（0.1.5-rc.1 SubagentRuntime 使用面；零官方类型依赖，运行时守卫）。 */
+/** 0.2.1+ 子代理激活请求：request 已移除 persona/toolFilter，新增 cwd/agentPreset（本插件不消费）。 */
+export interface SubagentActivationSpecLike {
+    provider: string;
+    label: string;
+    request: {
+        prompt: Array<{
+            type: 'text';
+            text: string;
+        }>;
+        parent: unknown;
+        agentOptions?: {
+            provider?: string;
+            model?: string;
+        };
+    };
+    signal: AbortSignal;
+    /**
+     * parent = 完成后向父代理发结算通知（与 0.2.0 startContinuable 的 notifySettlement
+     * 语义等价）；caller = 只把结果交给调用方。插件的编排回写依赖 subagent/end，
+     * 选 parent 保持旧行为。
+     */
+    delivery: 'parent' | 'caller';
+}
+/** ≤0.2.0 可延续子代理创建请求（旧宿主兜底面；0.2.1 已移除 startContinuable）。 */
+export interface SubagentContinuableSpecLike {
+    provider: string;
+    label: string;
+    request: {
+        prompt: Array<{
+            type: 'text';
+            text: string;
+        }>;
+        parent: unknown;
+        persona?: string;
+        toolFilter?: {
+            allow: string[];
+        };
+        agentOptions?: {
+            provider?: string;
+            model?: string;
+        };
+    };
+    signal: AbortSignal;
+}
+/** 子代理服务最小结构（SubagentRuntime 使用面；零官方类型依赖，运行时守卫）。 */
 export interface SubagentsServiceLike {
     /** 延续子代理 provider 名列表（旧面；新宿主改用 getProvider 按名探测）。 */
     list?(): string[];
-    /** 延续子代理创建：首条 prompt 即任务块（request 兼容 persona/toolFilter/agentOptions；signal 为必填）。 */
-    startContinuable(spec: {
-        provider: string;
-        label: string;
-        request: {
-            prompt: Array<{
-                type: 'text';
-                text: string;
-            }>;
-            parent: unknown;
-            persona?: string;
-            toolFilter?: {
-                allow: string[];
-            };
-            agentOptions?: {
-                provider?: string;
-                model?: string;
-            };
-        };
-        signal: AbortSignal;
-    }): Promise<{
+    /** 0.2.1+ 统一激活入口：创建可延续子代理并提交首条 prompt（新宿主首选）。 */
+    startActivation?(spec: SubagentActivationSpecLike): Promise<{
         childId: string;
         messageId?: unknown;
     }>;
-    /** 相邻 Agent 投递（live 父 Agent → direct child 派发下一回合）；**0.1.5 唯一推荐通道**。 */
+    /** ≤0.2.0 可延续子代理创建（旧宿主兜底；0.2.1 的公开面已无此方法）。 */
+    startContinuable?(spec: SubagentContinuableSpecLike): Promise<{
+        childId: string;
+        messageId?: unknown;
+    }>;
+    /** 相邻 Agent 投递（live 父 Agent → direct child 派发下一回合）；0.1.5 起唯一推荐通道。 */
     sendMessage?(sender: unknown, targetId: string, content: Array<{
         type: 'text';
         text: string;

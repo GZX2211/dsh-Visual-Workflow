@@ -239,7 +239,10 @@ export function subagentsServiceLike(ctx: Context): SubagentsServiceLike | null 
   const service: unknown = ctx.get('subagents')
   if (
     service !== null && typeof service === 'object'
-    && typeof (service as { startContinuable?: unknown }).startContinuable === 'function'
+    // 创建入口：0.2.1+ 为 startActivation；≤0.2.0 为 startContinuable。任一存在即可
+    // 创建可延续子代理（0.2.1 的公开面已移除 startContinuable，不能只认旧方法）。
+    && (typeof (service as { startActivation?: unknown }).startActivation === 'function'
+        || typeof (service as { startContinuable?: unknown }).startContinuable === 'function')
     // 相邻投递二选一：sendMessage（当前官方公开 runtime 唯一通道；sender 即 live 父代理，
     // 来源由服务派生）/ queuePrompt（旧宿主兼容兜底：当前官方公开 runtime 已无该通道，
     // 仅内部 continuation manager 持有）。
