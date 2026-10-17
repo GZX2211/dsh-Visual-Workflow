@@ -109,9 +109,11 @@ describe('T-003 构建链路（client bundle + host/client 并存）', () => {
     expect(existsSync(resolve(root, 'lib/index.js')), message).toBe(true)
   })
 
-  it('lib/client.js.map（sourcemap）存在', () => {
-    const message = 'sourcemap 缺失：lib/client.js.map（请先运行 pnpm build）'
-    expect(existsSync(resolve(root, 'lib/client.js.map')), message).toBe(true)
+  it('lib/client.js 声明 sourcemap 引用（映射文件按 .gitignore 不入库）', () => {
+    // 为什么不断言 lib/client.js.map 存在：*.map 被 .gitignore 显式排除（运行时无需），
+    // 全新检出在 pnpm build 之前必然没有该文件；门禁只读、不得依赖未入库产物。
+    // 这里改为断言受版本控制的 bundle 仍带 sourcemap 引用，构建配置关闭映射时会失败。
+    expect(readArtifact('lib/client.js')).toContain('//# sourceMappingURL=client.js.map')
   })
 
   it('lib/types/client/index.d.ts 存在（exports["./client"].types 契约真实可命中）', () => {
