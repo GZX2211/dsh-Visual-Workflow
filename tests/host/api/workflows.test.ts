@@ -99,7 +99,7 @@ describe('工作流端点', () => {
     expect(filtered.map((f) => f.id)).toEqual(['flow-1'])
   })
 
-  it('putWorkflow：实例文档不再写入 startNewSession/workspacePath（退役字段剥除）', async () => {
+  it('putWorkflow：实例文档不保存模板级新会话配置（startNewSession/workspacePath 保存时剥除）', async () => {
     const h = await makeHarness()
     await h.api.handle('putWorkflow', {
       sessionId: 'session-1',

@@ -13,6 +13,20 @@ export declare function currentFlowAssetOf(state: StudioState): WorkflowAssetDet
  * 二者画布内容语义一致（编辑中的草稿 → 保存为实例），运行入口也走同一分支。
  */
 export declare function isInstanceSourceKind(kind: StudioState['currentKind']): boolean;
+/** 「创建实例」的新会话选项。 */
+export interface NewSessionOptions {
+    /** 创建实例时是否新开会话。 */
+    newSession: boolean;
+    /** 新会话工作区路径（空白 = 继承当前会话工作区）。 */
+    workspacePath: string;
+}
+/**
+ * 派生「创建实例」的新会话选项（唯一取值口径）：
+ *   - 模板态：读**模板级持久化配置**（startNewSession / workspacePath，随模板保存与删除）；
+ *   - 资产态及其它：读一次性临时选项（资产无持久化归属，路径恒空）。
+ * 字段类型漂移一律按「未勾选 / 无路径」降级，不伪造配置。
+ */
+export declare function newSessionOptionsOf(state: StudioState): NewSessionOptions;
 /** 当前服务文档。 */
 export declare function currentServiceOf(state: StudioState): ServiceState | null;
 /**

@@ -19,6 +19,7 @@ import { Studio } from '../../../src/client/studio/Studio.js'
 import { zh } from '../../../src/client/i18n.js'
 import { EP } from '../../../src/client/lib/remote.js'
 import type { RemoteFace } from '../../../src/client/hooks/useRemote.js'
+import type { WorkspacePicker } from '../../../src/client/sidebar/workspace-picker.js'
 import { flushAsync, waitForCondition } from './async-flush.js'
 
 /** 远端调用记录。 */
@@ -105,6 +106,8 @@ export interface StudioMountOptions {
   readonly sessionId?: string
   /** 挂载后冲刷 boot 异步链（列表加载 → 自动选中等多级 dispatch）。 */
   readonly flushBoot?: boolean
+  /** 官方目录选择器替身（宿主接入层注入；缺省 = 当前环境没有可用的官方选择器）。 */
+  readonly workspacePicker?: WorkspacePicker | null
 }
 
 /** 在容器内挂载 Studio（container/root 由用例持有，便于 afterEach 卸载）。 */
@@ -117,7 +120,12 @@ export async function mountStudio(
   await act(async () => {
     const root = createRoot(container)
     setRoot(root)
-    root.render(React.createElement(Studio, { t: zh, sessionId: options.sessionId ?? 's-1', remote }))
+    root.render(React.createElement(Studio, {
+      t: zh,
+      sessionId: options.sessionId ?? 's-1',
+      remote,
+      ...(options.workspacePicker !== undefined ? { workspacePicker: options.workspacePicker } : {}),
+    }))
   })
   if (options.flushBoot) {
     await waitForCondition(() => { expect(remote.call).toHaveBeenCalled() })

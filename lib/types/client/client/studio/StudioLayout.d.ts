@@ -89,6 +89,24 @@ export interface StudioLayoutProps {
     panelsCollapsed: boolean;
     /** 顶部一键折叠/展开左右侧栏回调。 */
     onTogglePanels: () => void;
+    /** 「开启新会话」选项（模板态来自模板持久化字段；资产态为临时选项，路径恒空）。 */
+    instanceOptions: {
+        newSession: boolean;
+        workspacePath: string;
+    };
+    /** 选项变更回调（模板态由装配层立即保存模板；资产态写临时状态）。 */
+    onInstanceOptionsChange(patch: {
+        newSession?: boolean;
+        workspacePath?: string;
+    }): void;
+    /** 是否显示「选择工作区…」按钮（仅模板态；资产态无持久化归属）。 */
+    showWorkspacePicker: boolean;
+    /** 官方目录选择器是否可用（不可用时按钮禁用并提示）。 */
+    workspacePickerAvailable: boolean;
+    /** 目录选择器是否正在打开（防重复打开）。 */
+    workspacePicking: boolean;
+    /** 打开官方目录选择器并保存所选路径。 */
+    onPickWorkspace(): void;
 }
 /** 工作台渲染层（JSX 组合 + 自动布局接线与弹层装配；数据/回调全部来自 props）。 */
 export declare function StudioLayout(props: StudioLayoutProps): import("react").JSX.Element;

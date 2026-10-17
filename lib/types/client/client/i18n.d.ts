@@ -377,6 +377,8 @@ export declare const zh: {
     newSessionHint: string;
     workspacePlaceholder: string;
     workspaceHint: string;
+    pickWorkspace: string;
+    workspacePickerUnavailable: string;
     currentSessionBadge: string;
     overwriteInstanceTitle: string;
     overwriteInstanceMessage: string;

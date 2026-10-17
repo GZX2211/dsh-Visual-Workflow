@@ -4,13 +4,14 @@
 
 // tests/client/studio/StudioLayout.test.tsx
 //
-// 「渲染层收到的派生 props」身份与 instanceOptions 落盘时序用例：
+// 「渲染层收到的派生 props」身份与界面记忆落盘时序用例：
 //   - D06-08：装配层（Studio）必须把逐实例派生数据与代理补丁角标按 state 记忆化——**同一 state
 //     下重渲染**时 props 引用恒等。此前 agentPatchedNodeIds 在 JSX 内直接调选择器、实例列表在
 //     渲染函数里现算，每次渲染都产生新引用（下游 props 比较/记忆化全部失效）。
 //     观测点：把 StudioLayout 换成「记录 props + 委托真实实现」的包装组件，断言的是真实传入的
 //     props 对象，不是「源码里出现了 useMemo」。
-//   - D06-09：工作区路径逐字符输入只在防抖窗口结束后落盘一次（此前每次 dispatch 同步写盘）。
+//   - 新会话选项落盘口径（模板级持久化后）：模板态勾选/路径变更**立即保存模板**，
+//     不再写 localStorage 界面记忆；localStorage 只保留资产态一次性勾选的防抖记忆。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act } from 'react'
@@ -18,10 +19,12 @@ import { createRoot, type Root } from 'react-dom/client'
 import React from 'react'
 import { Studio } from '../../../src/client/studio/Studio.js'
 import type { StudioLayoutProps } from '../../../src/client/studio/StudioLayout.js'
-import { INSTANCE_OPTIONS_KEY } from '../../../src/client/studio/instance-options.js'
+import { INSTANCE_OPTIONS_KEY, type InstanceOptions } from '../../../src/client/studio/instance-options.js'
 import { useInstanceOptionsCache } from '../../../src/client/studio/useInstanceOptionsCache.js'
 import { zh } from '../../../src/client/i18n.js'
 import type { StorageLike } from '../../../src/client/lib/storage.js'
+import { EP } from '../../../src/client/lib/remote.js'
+import type { WorkflowTemplate } from '../../../src/host/shared/graph-model.js'
 import { flushAsync } from '../fixtures/async-flush.js'
 import { mountStudio, remoteStub } from '../fixtures/studio-harness.js'
 
@@ -63,15 +66,6 @@ function renders(): StudioLayoutProps[] {
   return layoutRenders as StudioLayoutProps[]
 }
 
-/** 工作区路径受控输入（受控 input 必须走原生 value setter 才能触发 React onChange）。 */
-async function typeWorkspace(input: HTMLInputElement, value: string): Promise<void> {
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
-  await act(async () => {
-    setter.call(input, value)
-    input.dispatchEvent(new Event('input', { bubbles: true }))
-  })
-}
-
 describe('渲染层派生 props 身份稳定（D06-08）', () => {
   it('同一 state 下重渲染：补丁角标与左栏库 props 引用恒等（不得每次渲染重建）', async () => {
     const remote = remoteStub({
@@ -100,46 +94,32 @@ describe('渲染层派生 props 身份稳定（D06-08）', () => {
 })
 
 // ---------------------------------------------------------------------------
-// D06-09：工作区路径逐字符输入 → 防抖后只落盘一次
+// 新会话选项落盘：模板态立即保存模板；资产态一次性勾选防抖记忆
 // ---------------------------------------------------------------------------
 
-describe('instanceOptions 落盘（D06-09）', () => {
-  it('连续输入只写一次存储，且防抖窗口内不写', async () => {
-    vi.useFakeTimers()
-    try {
-      const remote = remoteStub()
-      await mountStudio(container!, (next) => { root = next }, remote)
-      // 进入模板态（「开启新会话」复选框与工作区输入框仅模板态显示）
-      await act(async () => {
-        document.querySelector<HTMLButtonElement>('.wf-docgroup__add')?.click()
-      })
-      // 勾选「开启新会话」→ 工作区输入框出现
-      await act(async () => {
-        document.querySelector<HTMLInputElement>('.wf-toolbar__switch input[type="checkbox"]')?.click()
-      })
-      const workspace = document.querySelector<HTMLInputElement>('.wf-toolbar__workspace')
-      expect(workspace).toBeTruthy()
+describe('新会话选项落盘口径', () => {
+  it('模板态勾选 → 立即保存模板（携带 startNewSession），不写 localStorage 界面记忆', async () => {
+    const remote = remoteStub()
+    await mountStudio(container!, (next) => { root = next }, remote, { flushBoot: true })
+    const setItem = vi.spyOn(Storage.prototype, 'setItem')
 
-      const setItem = vi.spyOn(Storage.prototype, 'setItem')
-      // 连续 5 次输入（每次都在上一窗口内）：不落盘
-      for (const value of ['C', 'C:', 'C:/', 'C:/w', 'C:/work']) await typeWorkspace(workspace!, value)
-      expect(setItem.mock.calls.filter((call) => call[0] === INSTANCE_OPTIONS_KEY)).toHaveLength(0)
-      // 静默窗口不足：仍不落盘
-      await act(async () => { await vi.advanceTimersByTimeAsync(299) })
-      expect(setItem.mock.calls.filter((call) => call[0] === INSTANCE_OPTIONS_KEY)).toHaveLength(0)
+    // 新建工作流模板草稿 → 模板态（「开启新会话」复选框仅实例来源态显示）
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>('.wf-docgroup__add')?.click()
+    })
+    const checkbox = document.querySelector<HTMLInputElement>('.wf-toolbar__switch input[type="checkbox"]')
+    expect(checkbox).toBeTruthy()
+    await act(async () => { checkbox!.click() })
+    await flushAsync(2)
 
-      // 窗口结束：只写一次，且写入的是最后一次输入的值
-      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
-      const writes = setItem.mock.calls.filter((call) => call[0] === INSTANCE_OPTIONS_KEY)
-      expect(writes).toHaveLength(1)
-      // 「开启新会话」已勾选（工作区输入框仅在 newSession=true 时渲染），故落盘值为 true
-      expect(JSON.parse(String(writes[0]![1]))).toEqual({ newSession: true, workspacePath: 'C:/work' })
-    } finally {
-      vi.useRealTimers()
-    }
+    const put = remote.calls.find((call) => call.endpoint === EP.EP_PUT_FLOW_TEMPLATE)
+    expect(put).toBeTruthy()
+    expect((put?.args.template as WorkflowTemplate).startNewSession).toBe(true)
+    // 模板级持久化后不再依赖全局界面记忆
+    expect(setItem.mock.calls.filter((call) => call[0] === INSTANCE_OPTIONS_KEY)).toHaveLength(0)
   })
 
-  it('落盘值未变时不写存储（初始值来自缓存恢复 → 同值重渲染不产生写入）', async () => {
+  it('资产态选项：防抖窗口结束后落盘一次，同值不写', async () => {
     vi.useFakeTimers()
     try {
       const store: Record<string, string> = {}
@@ -148,11 +128,11 @@ describe('instanceOptions 落盘（D06-09）', () => {
         setItem: (key: string, value: string) => { store[key] = value },
       }
       const setItem = vi.spyOn(storage, 'setItem')
-      function Harness({ options }: { options: { newSession: boolean; workspacePath: string } }) {
+      function Harness({ options }: { options: InstanceOptions | null }) {
         useInstanceOptionsCache(options, storage)
         return null
       }
-      const options = { newSession: true, workspacePath: 'C:/work' }
+      const options: InstanceOptions = { newSession: true }
       await act(async () => {
         root = createRoot(container!)
         root.render(React.createElement(Harness, { options }))
@@ -162,10 +142,30 @@ describe('instanceOptions 落盘（D06-09）', () => {
       expect(setItem).not.toHaveBeenCalled()
 
       // 值真正变化 → 防抖窗口结束后落盘一次
-      await act(async () => { root!.render(React.createElement(Harness, { options: { newSession: true, workspacePath: 'C:/other' } })) })
+      await act(async () => { root!.render(React.createElement(Harness, { options: { newSession: false } })) })
       await act(async () => { await vi.advanceTimersByTimeAsync(300) })
       expect(setItem).toHaveBeenCalledTimes(1)
-      expect(store[INSTANCE_OPTIONS_KEY]).toBe(JSON.stringify({ newSession: true, workspacePath: 'C:/other' }))
+      expect(store[INSTANCE_OPTIONS_KEY]).toBe(JSON.stringify({ newSession: false }))
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('options 为 null（模板态/实例态）→ 不写任何界面记忆', async () => {
+    vi.useFakeTimers()
+    try {
+      const setItem = vi.fn()
+      const storage: StorageLike = { getItem: () => null, setItem }
+      function Harness(): null {
+        useInstanceOptionsCache(null, storage)
+        return null
+      }
+      await act(async () => {
+        root = createRoot(container!)
+        root.render(React.createElement(Harness))
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+      expect(setItem).not.toHaveBeenCalled()
     } finally {
       vi.useRealTimers()
     }

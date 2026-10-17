@@ -167,14 +167,15 @@ export interface StudioState {
         runId: string;
     }>;
     /**
-     * 「从模板创建实例」的一次性临时选项（模板态画布上方「开启新会话」复选框 +
-     * 工作区输入框；不持久化到模板/实例文档，创建实例时消费：
+     * 「从模板创建实例」新会话选项的**临时界面记忆**（仅服务资产态/旧界面记忆；
+     * 模板态的唯一事实源是模板文档的 startNewSession/workspacePath 持久化字段，
+     * 见 studio-selectors.newSessionOptionsOf）。创建实例时消费：
      *   - newSession=true → 先新建主会话（createSession 端点），实例绑定该新会话；
      *   - newSession=false → 当前主会话，目标会话已有实例时弹覆盖确认。
+     * 资产没有模板文档可持久化归属，故路径不在此记录（路径恒空、继承当前会话工作区）。
      */
     instanceOptions: {
         newSession: boolean;
-        workspacePath: string;
     };
     /** 工作流模板列表（全局共享；部分仅含当前 mode 的模板，模板拖入画布后经「创建实例」转实例）。 */
     flowTemplates: WorkflowTemplate[];

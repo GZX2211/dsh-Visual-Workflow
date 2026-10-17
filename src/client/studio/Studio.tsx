@@ -51,6 +51,8 @@ import { runStatusMap, runningNodeIds } from '../lib/run-status-map.js'
 import { stageTemplateKinds } from '../lib/graph-handles.js'
 import { computeRunLocks } from '../lib/run-locks.js'
 import { useInstanceOptionsCache } from './useInstanceOptionsCache.js'
+import { useNewSessionOptions } from '../hooks/useNewSessionOptions.js'
+import type { WorkspacePicker } from '../sidebar/workspace-picker.js'
 
 export interface StudioProps {
   /** 文案词典。 */
@@ -65,9 +67,14 @@ export interface StudioProps {
    * 之前是「切到插件自己的分栏视图模式」，该模式已随浮窗/分栏整体删除。
    */
   onRunImmersive?: () => void
+  /**
+   * 官方目录选择器（宿主接入层组装；缺省 = 当前环境没有可用选择器）。
+   * 业务组件不直接触达官方服务，宿主能力经此注入面进入工作台。
+   */
+  workspacePicker?: WorkspacePicker | null
 }
 
-export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: StudioProps) {
+export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive, workspacePicker }: StudioProps) {
   const defaultRemote = useRemote(t)
   const remote = remoteProp ?? defaultRemote
   const { state, dispatch } = useStudioState(sessionId)
@@ -171,12 +178,9 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
     dispatch({ type: 'SET_SESSION', sessionId })
   }, [dispatch, sessionId])
 
-  // 「开启新会话」/工作区路径缓存（用户裁决）：instanceOptions 变化后**防抖**落盘
-  // localStorage（工作区路径是逐字符 dispatch 的受控输入，同步逐字符写盘会拖慢打字）；
-  // 初始恢复在 useStudioState 初始化工厂完成。instanceOptions 的唯一重置在
-  // OPEN_FLOW_TEMPLATE（打开模板时回到「不新开会话」默认），实例创建只消费、不回写。
-  // 配合工作台保持挂载（关闭不卸载），重复进入不丢失，刷新亦恢复。
-  useInstanceOptionsCache(state.instanceOptions)
+  // 「开启新会话」界面记忆缓存：仅资产态一次性勾选落 localStorage（防抖）。
+  // 模板态的勾选/路径是模板级持久化配置（变更即保存模板），不写全局记忆。
+  useInstanceOptionsCache(state.currentKind === 'flowAsset' ? state.instanceOptions : null)
 
   // ---------- 轻提示 ----------
   const notify = useCallback((kind: 'info' | 'success' | 'error', text: string) => {
@@ -207,6 +211,17 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
 
   // ---------- 交互编排面（拆分至 hooks/ 的 controller hooks） ----------
   const doc = useDocumentActions(state, dispatch, guard, notify, toastError, workflows, flowTemplates, templates, selection, serviceControl, remote, t)
+  // 「开启新会话」+ 工作区路径：模板态读模板持久化字段并「变更即保存模板」，资产态为
+  // 一次性临时选项；路径选择复用宿主注入的官方目录选择器（业务组件不触达官方服务）。
+  const newSession = useNewSessionOptions({
+    state,
+    dispatch,
+    setFlowTemplateOptions: doc.setFlowTemplateOptions,
+    notify,
+    toastError,
+    picker: workspacePicker ?? null,
+    t,
+  })
   // 资产面（模版晋升而来的可复用资料）：列表/详情/入库/版本/回滚/退役 + 资产态画布打开。
   // 先于 editor 装配：属性栏的入库/回滚/资产态保存由 useEditorActions 经此面编排。
   const assets = useAssets(remote, dispatch, notify, toastError, t, state)
@@ -420,6 +435,12 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
       handleRun={handleRun}
       panelsCollapsed={panelsCollapsed}
       onTogglePanels={togglePanels}
+      instanceOptions={newSession.options}
+      onInstanceOptionsChange={newSession.onOptionsChange}
+      showWorkspacePicker={newSession.showWorkspacePicker}
+      workspacePickerAvailable={newSession.pickerAvailable}
+      workspacePicking={newSession.picking}
+      onPickWorkspace={newSession.onPickWorkspace}
     />
   )
 }

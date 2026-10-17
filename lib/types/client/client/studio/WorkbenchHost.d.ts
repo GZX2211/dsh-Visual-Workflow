@@ -9,7 +9,7 @@ export interface WorkbenchHostContext {
 }
 /**
  * 工作台宿主组件。
- * @param ctx - 官方 client 上下文（仅用于读取 sessions 快照）。
+ * @param ctx - 官方 client 上下文（读取 sessions 快照、组装官方目录选择器接入缝）。
  * @param t - 文案词典（语言切换时由 entry.ts 重渲染传入）。
  */
 export declare function WorkbenchHost({ ctx, t }: {

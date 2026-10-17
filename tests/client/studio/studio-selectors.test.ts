@@ -14,10 +14,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   activeRunBadgeOf, activeRunIndexOf, agentPatchedNodeIdsOf, editorDataOf, instanceRunBadgesOf, memberLabelOf,
+  newSessionOptionsOf,
 } from '../../../src/client/studio/studio-selectors.js'
 import { createInitialState } from '../../../src/client/studio/studio-initial.js'
 import type { CanvasNode, StudioState } from '../../../src/client/studio/studio-types.js'
-import type { WorkflowDocument } from '../../../src/host/shared/graph-model.js'
+import type { WorkflowDocument, WorkflowTemplate } from '../../../src/host/shared/graph-model.js'
 
 describe('P4 代理补丁标注（agentPatchedNodeIdsOf）', () => {
   it('读取当前文档 lastPatch.nodeIds（去重 + 过滤空值 + 非数组安全）', () => {
@@ -159,5 +160,51 @@ describe('实例运行徽标投影（activeRunIndexOf / instanceRunBadgesOf）',
     expect(activeRunBadgeOf(index, 'wf-1', 's-1')).toEqual({ status: '', runId: 'r-1', sessionId: 's-1' })
     const empty = instanceRunBadgesOf([{ id: 'wf-9', sessionId: 's-9' }], { runId: null, snapshot: null }, activeRunIndexOf(base))
     expect(empty.get('wf-9')).toEqual({ active: null, currentSnapshot: null })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 新会话选项派生（模板级持久化配置 / 资产态一次性临时选项）
+// ---------------------------------------------------------------------------
+
+describe('新会话选项派生（newSessionOptionsOf）', () => {
+  const base = createInitialState('s-1')
+
+  /** 模板态现场：当前画布 = 该模板。 */
+  function templateState(template: WorkflowTemplate): StudioState {
+    return { ...base, currentKind: 'flowTemplate', currentId: template.id, flowTemplates: [template] }
+  }
+
+  const template: WorkflowTemplate = { id: 'tpl-1', mode: 'mode1', name: 'T', description: '', nodes: [], lines: [] }
+
+  it('模板态：勾选与路径来自当前模板的持久化字段', () => {
+    const state = templateState({ ...template, startNewSession: true, workspacePath: 'D:\\work\\ws' })
+    expect(newSessionOptionsOf(state)).toEqual({ newSession: true, workspacePath: 'D:\\work\\ws' })
+  })
+
+  it('模板态：字段缺失/类型漂移 → 未勾选、无路径（不伪造配置）', () => {
+    expect(newSessionOptionsOf(templateState(template))).toEqual({ newSession: false, workspacePath: '' })
+    const drifted = { ...template, startNewSession: 'yes', workspacePath: 42 } as unknown as WorkflowTemplate
+    expect(newSessionOptionsOf(templateState(drifted))).toEqual({ newSession: false, workspacePath: '' })
+  })
+
+  it('模板态：当前模板已不在列表 → 回退未勾选、无路径', () => {
+    const state: StudioState = { ...base, currentKind: 'flowTemplate', currentId: 'tpl-gone', flowTemplates: [] }
+    expect(newSessionOptionsOf(state)).toEqual({ newSession: false, workspacePath: '' })
+  })
+
+  it('资产态：勾选取一次性临时选项，路径恒为空（资产无持久化归属）', () => {
+    const state: StudioState = {
+      ...base,
+      currentKind: 'flowAsset',
+      currentId: 'a-1',
+      instanceOptions: { newSession: true },
+    }
+    expect(newSessionOptionsOf(state)).toEqual({ newSession: true, workspacePath: '' })
+  })
+
+  it('实例态/空态：同样读取临时选项（UI 不显示该选项，派生规则不因此分叉）', () => {
+    const state: StudioState = { ...base, instanceOptions: { newSession: true } }
+    expect(newSessionOptionsOf(state)).toEqual({ newSession: true, workspacePath: '' })
   })
 })

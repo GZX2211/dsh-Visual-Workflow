@@ -1,20 +1,20 @@
 // src/client/studio/useInstanceOptionsCache.ts
 //
-// 「开启新会话」+ 工作区路径（StudioState.instanceOptions）的落盘接线：写缓存的
-// 本体是 instance-options.ts（纯函数 + StorageLike 注入），本 hook 只负责「何时写」。
+// 「开启新会话」界面记忆（StudioState.instanceOptions）的落盘接线：写缓存的本体是
+// instance-options.ts（纯函数 + StorageLike 注入），本 hook 只负责「何时写」。
 //
-// 为什么不能沿用「effect 依赖 instanceOptions 就同步写」：工作区路径是逐字符 dispatch 的
-// 受控输入，逐字符同步写 localStorage 会在打字期间产生连续的同步磁盘写（输入框所在主线程
-// 被 IO 拖慢，长路径尤其明显）。与 panel-layout 的口径一致——写入必须由「值的真正变化」
-// 或「交互结束」触发，而不是每次按键。
+// 本缓存只服务**资产态**一次性勾选记忆（模板态的勾选/路径是模板持久化字段，变更即
+// 保存模板，见 useDocumentActions.setFlowTemplateOptions）：因此入参为
+// `InstanceOptions | null`，null 表示当前文档没有可记忆的临时选项（模板态/实例态），
+// 此时不写存储——避免把模板态的值写进全局记忆、污染资产态。
 //
-// 三条不变量：
+// 三条不变量（有值期间）：
 //   - 值未变不写：写前与上次已落盘的值（含初始恢复值）按序列化结果比对，相等即跳过；
-//   - 连续输入只写一次：改动后等 DEBOUNCE_MS 静默窗口，期间的新改动重新计时；
+//   - 连续变更只写一次：改动后等 DEBOUNCE_MS 静默窗口，期间的新改动重新计时；
 //   - 不为省写入而丢改动：窗口未结束就卸载时，由卸载清理补写最后一份待落盘的值。
 //
 // 防抖窗口与卸载补写拆成两个 effect：若把「补写」放在窗口 effect 的清理里，该清理在
-// **每次依赖变化**时都会执行（React 先清理再重建），于是每个按键都会立即写一次盘，
+// **每次依赖变化**时都会执行（React 先清理再重建），于是每个变更都会立即写一次盘，
 // 防抖形同虚设；故窗口 effect 的清理只取消定时器，补写只由「依赖不含 options」的
 // 卸载 effect 承担，二者以 pending 标记（而非定时器句柄）交接待落盘状态。
 
@@ -25,16 +25,17 @@ import type { StorageLike } from '../lib/storage.js'
 
 /**
  * 落盘防抖窗口。300ms 与「输入停顿即视为一次编辑」的交互节奏对齐：
- * 用户连打不写盘，停手后一次写入；同时短于用户能感知的「记忆延迟」。
+ * 用户连点/切换不写盘，停手后一次写入；同时短于用户能感知的「记忆延迟」。
  */
 export const INSTANCE_OPTIONS_DEBOUNCE_MS = 300
 
-/** 落盘值口径（与 keepInstanceOptions 的归一化一致），用于「值未变不写」比对。 */
-function optionsKeyOf(options: InstanceOptions): string {
-  return JSON.stringify({
-    newSession: options.newSession === true,
-    workspacePath: typeof options.workspacePath === 'string' ? options.workspacePath : '',
-  })
+/**
+ * 落盘值口径（与 keepInstanceOptions 的归一化一致），用于「值未变不写」比对。
+ * null = 当前文档没有可记忆的临时选项（模板态/实例态）。
+ */
+function optionsKeyOf(options: InstanceOptions | null): string | null {
+  if (options === null) return null
+  return JSON.stringify({ newSession: options.newSession === true })
 }
 
 /** 浏览器守卫：无 window / 取 localStorage 失败（隐私模式）时返回 null，落盘静默降级。 */
@@ -47,20 +48,22 @@ function storageOrNull(): StorageLike | null {
 }
 
 /**
- * 把 instanceOptions 防抖落盘到注入的存储（浏览器环境默认 localStorage；
+ * 把资产态 instanceOptions 防抖落盘到注入的存储（浏览器环境默认 localStorage；
  * 初始读取在 useStudioState 初始化工厂完成，本 hook 只写不读）。
+ * @param options - 需要记忆的临时选项；null 表示当前文档没有（模板态/实例态），不落盘。
+ * @param storage - 存储抽象（测试注入；缺省 localStorage）。
  */
 export function useInstanceOptionsCache(
-  options: InstanceOptions,
+  options: InstanceOptions | null,
   storage: StorageLike | null = storageOrNull(),
 ): void {
   /** 上次已落盘的值。以初始 state（可能来自缓存恢复）为基准：值未变时不产生任何写入。 */
-  const persistedRef = useRef(optionsKeyOf(options))
+  const persistedRef = useRef<string | null>(optionsKeyOf(options))
   /**
    * 最新值的镜像。卸载补写的 effect 依赖只有 storage，其清理闭包停留在首次渲染，
    * 只能经 ref 读到「此刻」的值。
    */
-  const latestRef = useRef(options)
+  const latestRef = useRef<InstanceOptions | null>(options)
   /** 待落盘的定时器句柄：存在即表示静默窗口尚未结束。 */
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   /**
@@ -72,6 +75,14 @@ export function useInstanceOptionsCache(
   useEffect(() => { latestRef.current = options }, [options])
 
   useEffect(() => {
+    // 当前文档没有临时选项（模板态/实例态）：取消待写窗口，不写盘
+    if (options === null) {
+      if (timerRef.current !== null) clearTimeout(timerRef.current)
+      timerRef.current = null
+      pendingRef.current = false
+      persistedRef.current = null
+      return undefined
+    }
     // 与已落盘的值一致 → 无改动可落；若曾改动后又回到该值，同时取消待写窗口，
     // 否则窗口到期会把已落盘的值再写一遍
     if (optionsKeyOf(options) === persistedRef.current) {
@@ -87,8 +98,10 @@ export function useInstanceOptionsCache(
     timerRef.current = setTimeout(() => {
       timerRef.current = null
       pendingRef.current = false
-      keepInstanceOptions(storage, latestRef.current)
-      persistedRef.current = optionsKeyOf(latestRef.current)
+      const latest = latestRef.current
+      if (latest === null) return
+      keepInstanceOptions(storage, latest)
+      persistedRef.current = optionsKeyOf(latest)
     }, INSTANCE_OPTIONS_DEBOUNCE_MS)
 
     // 清理只取消定时器：写盘由窗口到期或卸载补写承担
@@ -105,7 +118,9 @@ export function useInstanceOptionsCache(
     if (!pendingRef.current) return
     pendingRef.current = false
     if (!storage) return
-    keepInstanceOptions(storage, latestRef.current)
-    persistedRef.current = optionsKeyOf(latestRef.current)
+    const latest = latestRef.current
+    if (latest === null) return
+    keepInstanceOptions(storage, latest)
+    persistedRef.current = optionsKeyOf(latest)
   }, [storage])
 }

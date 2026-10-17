@@ -6,9 +6,9 @@
 // 画布上方「保存」按钮按当前对象态动态命名——模板态 = 「创建实例/创建服务」
 // （将画布内容保存为新实例，模板不变），实例态 = 「保存实例/保存服务」（保存到当前实例）。
 //
-// 工作台全局化改版：「开启新会话」（+ 工作区）复选框**仅在模板态显示**——
-// 它是「从模板创建实例」时的一次性临时选项（创建实例时新建主会话并绑定；
-// 不持久化到模板/实例文档）；实例态不显示（实例运行只认实例绑定的会话）。
+// 工作台全局化改版：「开启新会话」（+ 工作区）仅实例来源态显示。模板态的勾选与工作区
+// 路径是**模板级持久化配置**（随模板保存/删除）；资产态勾选是一次性临时选项（无路径归属）。
+// 工作区路径改为**官方目录选择器选择**（不提供手填），已选路径显示在按钮右方用于确认。
 
 import type { Dict } from '../../i18n.js'
 
@@ -37,12 +37,20 @@ export interface ToolbarProps {
   onOpenHistory(): void
   canHistory: boolean
   serviceStatus: { port?: number; status?: string } | null
-  /** 「开启新会话」是否显示（仅模板态；实例态不显示——实例只认绑定会话运行）。 */
+  /** 「开启新会话」是否显示（仅实例来源态；实例态不显示——实例只认绑定会话运行）。 */
   showNewSession: boolean
-  /** 「开启新会话」一次性临时选项（模板态编辑；不持久化到模板/实例文档）。 */
-  instanceOptions: { newSession: boolean; workspacePath: string }
-  /** 临时选项变更回调（写回 StudioState.instanceOptions）。 */
+  /** 「开启新会话」选项：模板态来自模板持久化字段；资产态为一次性临时选项（路径恒空）。 */
+  instanceOptions: { newSession: boolean; workspacePath?: string }
+  /** 临时选项/模板配置变更回调（模板态由上层立即保存模板，资产态写临时状态）。 */
   onInstanceOptionsChange(patch: { newSession?: boolean; workspacePath?: string }): void
+  /** 是否显示「选择工作区…」按钮（仅模板态；资产态无持久化归属）。 */
+  showWorkspacePicker: boolean
+  /** 官方目录选择器是否可用（不可用时按钮禁用并提示）。 */
+  workspacePickerAvailable: boolean
+  /** 目录选择器是否正在打开（防重复打开）。 */
+  workspacePicking: boolean
+  /** 打开官方目录选择器并保存所选路径。 */
+  onPickWorkspace(): void
 }
 
 export function Toolbar(props: ToolbarProps) {
@@ -50,6 +58,7 @@ export function Toolbar(props: ToolbarProps) {
     copy: t, mode, panelsCollapsed, onTogglePanels, saveLabel, onUndo, onRedo, onClear, canClear, clearTitle, onTidy, canTidy,
     onSave, canSave, running, onStop, onRun, onOpenHistory, canHistory, serviceStatus,
     showNewSession, instanceOptions, onInstanceOptionsChange,
+    showWorkspacePicker, workspacePickerAvailable, workspacePicking, onPickWorkspace,
   } = props
   const isMode2 = mode === 'mode2'
   // 运行状态指示（控制栏最右侧）：模式二含服务状态（停止/启动中/运行中·端口/崩溃）
@@ -87,9 +96,9 @@ export function Toolbar(props: ToolbarProps) {
         : <button type="button" className="wf-btn is-primary" onClick={onRun} disabled={!canSave}>{isMode2 ? t.startService : t.run}</button>}
       <button type="button" className="wf-btn is-ghost" onClick={onOpenHistory} disabled={!canHistory}>{t.history}</button>
       {statusText ? <span className={`wf-status${statusRunning ? ' is-running' : ''}`}>{statusText}</span> : null}
-      {/* 开启新会话（仅模板态显示；「从模板创建实例」的一次性临时选项——勾选后
-          创建实例时新建主会话并绑定；不持久化到模板/实例文档。实例态不显示：
-          实例运行只认实例绑定的会话，无「新会话」概念） */}
+      {/* 开启新会话（仅实例来源态显示）：模板态 = 模板级持久化配置（随模板保存/删除）；
+          资产态 = 一次性临时选项（资产无持久化归属，无路径选择）。实例态不显示：
+          实例运行只认实例绑定的会话，无「新会话」概念 */}
       {showNewSession
         ? (
             <label className="wf-toolbar__switch" title={t.newSessionHint}>
@@ -102,16 +111,28 @@ export function Toolbar(props: ToolbarProps) {
             </label>
           )
         : null}
-      {showNewSession && instanceOptions.newSession
+      {/* 工作区路径（需求：改为选择而非填写）：仅模板态且已勾选时出现，复用官方目录选择器；
+          已选择路径显示在按钮右方（用于 UI 显示与确认）。 */}
+      {showNewSession && showWorkspacePicker && instanceOptions.newSession
         ? (
-            <input
-              type="text"
-              className="wf-toolbar__workspace"
-              value={instanceOptions.workspacePath}
-              placeholder={t.workspacePlaceholder}
-              title={t.workspaceHint}
-              onChange={(event) => onInstanceOptionsChange({ workspacePath: event.target.value })}
-            />
+            <>
+              <button
+                type="button"
+                className="wf-btn is-ghost wf-toolbar__workspace-pick"
+                title={workspacePickerAvailable ? t.workspaceHint : t.workspacePickerUnavailable}
+                disabled={!workspacePickerAvailable || workspacePicking}
+                onClick={onPickWorkspace}
+              >
+                {t.pickWorkspace}
+              </button>
+              {instanceOptions.workspacePath
+                ? (
+                    <span className="wf-toolbar__workspace-path" title={instanceOptions.workspacePath}>
+                      {instanceOptions.workspacePath}
+                    </span>
+                  )
+                : null}
+            </>
           )
         : null}
     </div>

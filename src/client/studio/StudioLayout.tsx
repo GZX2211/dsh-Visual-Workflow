@@ -121,6 +121,18 @@ export interface StudioLayoutProps {
   panelsCollapsed: boolean
   /** 顶部一键折叠/展开左右侧栏回调。 */
   onTogglePanels: () => void
+  /** 「开启新会话」选项（模板态来自模板持久化字段；资产态为临时选项，路径恒空）。 */
+  instanceOptions: { newSession: boolean; workspacePath: string }
+  /** 选项变更回调（模板态由装配层立即保存模板；资产态写临时状态）。 */
+  onInstanceOptionsChange(patch: { newSession?: boolean; workspacePath?: string }): void
+  /** 是否显示「选择工作区…」按钮（仅模板态；资产态无持久化归属）。 */
+  showWorkspacePicker: boolean
+  /** 官方目录选择器是否可用（不可用时按钮禁用并提示）。 */
+  workspacePickerAvailable: boolean
+  /** 目录选择器是否正在打开（防重复打开）。 */
+  workspacePicking: boolean
+  /** 打开官方目录选择器并保存所选路径。 */
+  onPickWorkspace(): void
 }
 
 /** 工作台渲染层（JSX 组合 + 自动布局接线与弹层装配；数据/回调全部来自 props）。 */
@@ -137,6 +149,8 @@ export function StudioLayout(props: StudioLayoutProps) {
     modeMenuOpen, setModeMenuOpen, switchMode, canvasCaption,
     leftOpen, bottomOpen, inspectorOpen,
     handleRun, panelsCollapsed, onTogglePanels,
+    instanceOptions, onInstanceOptionsChange, showWorkspacePicker,
+    workspacePickerAvailable, workspacePicking, onPickWorkspace,
   } = props
 
   // 自动布局：打开/接收文档时若节点缺坐标（哨兵 {0,0}）
@@ -261,10 +275,15 @@ export function StudioLayout(props: StudioLayoutProps) {
             onOpenHistory={() => { void run.openHistory() }}
             canHistory={state.mode === 'mode1' && Boolean(currentFlow)}
             serviceStatus={state.mode === 'mode2' ? { port: currentService?.port, status: currentService?.status } : null}
-            // 「开启新会话」仅实例来源态（模版 / 资产）显示（一次性临时选项；实例态不显示——实例只认绑定会话）
+            // 「开启新会话」仅实例来源态（模版 / 资产）显示；模板态勾选与路径为模板级
+            // 持久化配置（变更即保存模板），资产态为一次性临时选项（无路径归属）。
             showNewSession={isInstanceSource}
-            instanceOptions={state.instanceOptions}
-            onInstanceOptionsChange={(patch) => dispatch({ type: 'INSTANCE_OPTIONS_SET', options: patch })}
+            instanceOptions={instanceOptions}
+            onInstanceOptionsChange={onInstanceOptionsChange}
+            showWorkspacePicker={showWorkspacePicker}
+            workspacePickerAvailable={workspacePickerAvailable}
+            workspacePicking={workspacePicking}
+            onPickWorkspace={onPickWorkspace}
           />
           {state.mode === 'mode2'
             ? <ServiceConsole

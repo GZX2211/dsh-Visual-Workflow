@@ -1,8 +1,8 @@
 // tests/host/scheduler/instantiate.test.ts
 //
 // 「开启新会话 + 工作区」数据模型单测（工作台全局化改版）：
-//   - 模板 → 实例**不再继承** startNewSession/workspacePath（一次性临时选项，
-//     字段已退役——实例文档不携带）；
+//   - 模板 → 实例**不继承** startNewSession/workspacePath（模板级持久化配置只在创建实例
+//     的会话策略里消费，不属于实例内容——实例文档不携带）；
 //   - 覆盖语义：overwriteInstanceFromTemplate 复用既有实例 id（每会话单实例）。
 // 工作区路径校验（resolveWorkspacePath）测试归其自身模块所在位置
 // （tests/host/workspace-path.test.ts）。
@@ -38,8 +38,8 @@ function existing(extra: Partial<WorkflowDocument> = {}): WorkflowDocument {
   }
 }
 
-describe('instantiateFromTemplate 新会话字段退役（不继承）', () => {
-  it('模板 startNewSession/workspacePath 不再随实例化继承（一次性临时选项，不落盘）', () => {
+describe('instantiateFromTemplate 不继承模板级新会话配置', () => {
+  it('模板 startNewSession/workspacePath 不随实例化继承（属创建策略，不是实例内容）', () => {
     const instance = instantiateFromTemplate(
       template({ startNewSession: true, workspacePath: 'D:\\work\\tpl-ws' }),
       'session-1',

@@ -35,6 +35,34 @@ export function isInstanceSourceKind(kind: StudioState['currentKind']): boolean 
   return kind === 'flowTemplate' || kind === 'flowAsset'
 }
 
+/** 「创建实例」的新会话选项。 */
+export interface NewSessionOptions {
+  /** 创建实例时是否新开会话。 */
+  newSession: boolean
+  /** 新会话工作区路径（空白 = 继承当前会话工作区）。 */
+  workspacePath: string
+}
+
+/**
+ * 派生「创建实例」的新会话选项（唯一取值口径）：
+ *   - 模板态：读**模板级持久化配置**（startNewSession / workspacePath，随模板保存与删除）；
+ *   - 资产态及其它：读一次性临时选项（资产无持久化归属，路径恒空）。
+ * 字段类型漂移一律按「未勾选 / 无路径」降级，不伪造配置。
+ */
+export function newSessionOptionsOf(state: StudioState): NewSessionOptions {
+  if (state.currentKind === 'flowTemplate') {
+    const template = currentFlowTemplateOf(state)
+    return {
+      newSession: template?.startNewSession === true,
+      workspacePath: typeof template?.workspacePath === 'string' ? template.workspacePath : '',
+    }
+  }
+  return {
+    newSession: state.instanceOptions.newSession === true,
+    workspacePath: '',
+  }
+}
+
 /** 当前服务文档。 */
 export function currentServiceOf(state: StudioState): ServiceState | null {
   if (state.currentKind !== 'service' || !state.currentId) return null

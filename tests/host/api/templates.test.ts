@@ -52,4 +52,46 @@ describe('工作流模板端点', () => {
     expect(await h.api.handle('deleteFlowTemplate', { id: 'tpl-1' })).toEqual({ deleted: true })
     await expect(h.api.handle('deleteFlowTemplate', { id: 'tpl-1' })).rejects.toMatchObject({ status: 404 })
   })
+
+  it('模板级新会话配置：startNewSession/workspacePath 随模板持久化（trim 后保留）', async () => {
+    const h = await makeHarness()
+    const saved = (await h.api.handle('putFlowTemplate', {
+      template: {
+        id: 'tpl-ws', mode: 'mode1', name: '带工作区模板', description: '', revision: 0, nodes: [], lines: [],
+        startNewSession: true,
+        workspacePath: '  D:\\work\\ws  ',
+      },
+    })) as { startNewSession?: boolean; workspacePath?: string }
+
+    expect(saved.startNewSession).toBe(true)
+    expect(saved.workspacePath).toBe('D:\\work\\ws')
+
+    // 列表回读同样保留（持久化而非仅本次响应）
+    const list = (await h.api.handle('listFlowTemplates', {})) as Array<{ startNewSession?: boolean; workspacePath?: string }>
+    expect(list).toHaveLength(1)
+    expect(list[0]).toMatchObject({ startNewSession: true, workspacePath: 'D:\\work\\ws' })
+
+    // 未勾选 / 空白路径 → 归一化为「无该配置」（不落空串/ false 噪音字段）
+    const cleared = (await h.api.handle('putFlowTemplate', {
+      template: {
+        id: 'tpl-ws', mode: 'mode1', name: '带工作区模板', description: '', revision: 1, nodes: [], lines: [],
+        startNewSession: false,
+        workspacePath: '   ',
+      },
+    })) as { startNewSession?: boolean; workspacePath?: string }
+    expect(cleared.startNewSession).toBeUndefined()
+    expect(cleared.workspacePath).toBeUndefined()
+  })
+
+  it('模板级新会话配置不校验目录存在性（选择器保证，创建实例时由 createSession 校验）', async () => {
+    const h = await makeHarness()
+    const saved = (await h.api.handle('putFlowTemplate', {
+      template: {
+        id: 'tpl-missing', mode: 'mode1', name: '失效路径模板', description: '', revision: 0, nodes: [], lines: [],
+        startNewSession: true,
+        workspacePath: 'Z:\\no-such-dir-xyz\\project',
+      },
+    })) as { workspacePath?: string }
+    expect(saved.workspacePath).toBe('Z:\\no-such-dir-xyz\\project')
+  })
 })

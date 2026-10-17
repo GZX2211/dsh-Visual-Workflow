@@ -45,19 +45,21 @@ export const toolbarStyles = `
   cursor: pointer;
 }
 
-.wf-toolbar__workspace {
-  width: 200px;
-  border: 1px solid var(--wf-border-strong);
-  border-radius: 7px;
-  background: var(--wf-layer-2);
-  color: var(--wf-ink);
-  padding: 5px 8px;
+/* 工作区路径选择（模板态 + 已勾选「开启新会话」时出现）：按钮复用官方目录选择器，
+   已选路径显示在按钮右方用于确认（过长省略，完整路径见 title）。 */
+.wf-toolbar__workspace-pick {
   font-size: 10px;
-  outline: 0;
 }
 
-.wf-toolbar__workspace:focus {
-  border-color: var(--wf-brand);
+.wf-toolbar__workspace-path {
+  display: inline-block;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+  color: var(--wf-ink-2);
+  font-size: 10px;
 }
 
 /* 顶部一键折叠/展开两侧按钮（批注：折叠时图标泛品牌色，提示当前可展开） */

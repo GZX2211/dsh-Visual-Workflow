@@ -9,7 +9,7 @@ import type { Dispatch } from 'react'
 import type { WorkflowDocument, WorkflowTemplate } from '../../host/shared/graph-model.js'
 import type { ServiceState } from '../../host/shared/types.js'
 import type { WorkflowAssetDetail } from '../../host/shared/asset-types.js'
-import { currentFlowOf, currentFlowTemplateOf, currentServiceOf, instanceRunningOf, isInstanceSourceKind, type CanvasEdge, type CanvasNode, type LibTab, type StudioAction, type StudioState } from '../studio/studio-state.js'
+import { currentFlowOf, currentFlowTemplateOf, currentServiceOf, instanceRunningOf, isInstanceSourceKind, newSessionOptionsOf, type CanvasEdge, type CanvasNode, type LibTab, type StudioAction, type StudioState } from '../studio/studio-state.js'
 import type { WorkflowsFace } from './useWorkflows.js'
 import type { FlowTemplatesFace } from './useFlowTemplates.js'
 import type { TemplatesFace } from './useTemplates.js'
@@ -49,15 +49,23 @@ export interface DocumentActionsFace {
   saveCanvas(options?: SaveCanvasOptions): Promise<WorkflowDocument | WorkflowTemplate | ServiceState | null>
   /**
    * 创建实例（模板态：模板内容存为新实例并切到实例态；实例态等价保存）。
-   * 工作台全局化改版：「开启新会话」为一次性临时选项——勾选时先新建主会话，
-   * 实例绑定该新会话；未勾选时在**当前主会话**创建，目标会话已有实例则弹
-   * 「覆盖旧工作流」二次确认（确认后复用旧实例 id 更新内容）。
+   * 「开启新会话」：模板态读**模板级持久化配置**（startNewSession / workspacePath，
+   * 随模板保存）——勾选时先新建主会话并绑定，未勾选时在**当前主会话**创建；资产态读
+   * 一次性临时选项（无路径）。目标会话已有同模式实例则弹「覆盖旧工作流」二次确认
+   * （确认后复用旧实例 id 更新内容）。
    * @param afterCreate 创建/覆盖成功后的回调（异步确认框路径同样触发）；
    *   「运行」入口用它接续启动（因为确认框是异步的，返回值不可依赖）。
    */
   createInstanceFromCanvas(afterCreate?: (created: WorkflowDocument | ServiceState) => void): Promise<WorkflowDocument | null>
   /** 实例 → 模板（另存为全局共享工作流模板）。 */
   saveCurrentAsFlowTemplate(): Promise<void>
+  /**
+   * 更新当前模板的「创建实例」新会话配置（勾选 / 工作区路径）。
+   * 模板级持久化配置：变更**立即保存当前模板**（复用模板保存通道，当前画布一并保存）；
+   * 保存失败回滚界面到保存前的模板并提示。草稿模板首次变更即入库。
+   * 空白 workspacePath 归一化为「移除该字段」；取消勾选保留已存路径。
+   */
+  setFlowTemplateOptions(patch: { startNewSession?: boolean; workspacePath?: string }): Promise<void>
   openFlowById(id: string): void
   openServiceById(id: string): void
   openFlowTemplateById(id: string): void
@@ -213,8 +221,9 @@ export function useDocumentActions(
    * 创建实例：
    *  - 实例态：等价于保存实例（名称动态为「保存实例/保存服务」）。
    *  - 模板态 / 资产态（「创建实例」/「创建服务」按钮，或该态「运行」前置）：
-   *      1. 目标会话 = 勾选「开启新会话」？新建主会话（createSession 端点，
-   *         一次性临时选项，不持久化）: 当前主会话（state.sessionId）；
+   *      1. 目标会话 = 模板勾选「开启新会话」？新建主会话（createSession 端点，
+   *         模板级持久化配置；工作区随模板保存，传参后由宿主校验存在性）:
+   *         当前主会话（state.sessionId）；资产态用一次性临时勾选，无路径；
    *      2. 目标会话已有同模式实例（每会话单实例）→ 弹二次确认「新运行的工作流
    *         将会覆盖旧的工作流」；确认后**复用旧实例 id 更新内容**（运行历史
    *         按 flowId 连续可追溯）；
@@ -239,7 +248,9 @@ export function useDocumentActions(
     if (!template) return null
 
     // ---- 目标会话：勾选「开启新会话」→ 新建主会话（一次性动作） ----
-    const { newSession, workspacePath } = state.instanceOptions
+    // 模板态读模板级持久化配置（startNewSession / workspacePath，随模板保存）；
+    // 资产态读一次性临时选项（无路径来源，继承当前会话工作区）。
+    const { newSession, workspacePath } = newSessionOptionsOf(state)
     let targetSessionId = state.sessionId
     if (newSession) {
       try {
@@ -341,6 +352,45 @@ export function useDocumentActions(
     return null
   }, [dispatch, handleSaveFailure, notify, remote, saveCanvas, serviceControl, state, t, toastError, workflows])
 
+  /**
+   * 更新当前模板的「创建实例」新会话配置（勾选 / 工作区路径）并**立即保存模板**。
+   *
+   * 为什么立即保存：该配置是模板级持久化字段（随模板删除而删除），用户主动勾选/
+   * 用官方目录选择器选定路径即视为一次配置提交；若等待其他保存时机，切走模板会静默
+   * 丢失配置。保存走模板保存通道（含当前画布），与属性栏「保存模板」同一落库路径。
+   *
+   * 失败语义：先乐观更新界面；保存失败回滚到保存前的模板并按既有冲突处理提示，
+   * 不静默吞掉（界面不残留未落盘的配置）。
+   */
+  const setFlowTemplateOptions = useCallback(async (
+    patch: { startNewSession?: boolean; workspacePath?: string },
+  ): Promise<void> => {
+    if (state.currentKind !== 'flowTemplate') return
+    const template = currentFlowTemplateOf(state)
+    if (!template) return
+    if (patch.startNewSession === undefined && patch.workspacePath === undefined) return
+    const next: WorkflowTemplate = { ...template }
+    if (patch.startNewSession === true) next.startNewSession = true
+    else if (patch.startNewSession === false) delete next.startNewSession
+    if (patch.workspacePath !== undefined) {
+      const path = patch.workspacePath.trim()
+      if (path) next.workspacePath = path
+      else delete next.workspacePath
+    }
+    // 乐观更新：勾选/路径立即反映到界面（selector 从模板对象派生）
+    dispatch({ type: 'FLOW_TEMPLATE_UPDATED', template: next })
+    try {
+      const saved = await flowTemplates.saveFlowTemplate(next, state.canvas.nodes, state.canvas.edges)
+      if (saved) {
+        dispatch({ type: 'MARK_SAVED' })
+        notify('success', t.toastSaved)
+      }
+    } catch (error) {
+      dispatch({ type: 'FLOW_TEMPLATE_UPDATED', template })
+      await handleSaveFailure(error, flowTemplates.loadFlowTemplates)
+    }
+  }, [dispatch, flowTemplates, handleSaveFailure, notify, state, t.toastSaved])
+
   /** 实例 → 模板（另存为模板）：当前实例内容复制为全局共享的工作流模板。 */
   const saveCurrentAsFlowTemplate = useCallback(async (): Promise<void> => {
     const source = state.currentKind === 'workflow'
@@ -439,11 +489,11 @@ export function useDocumentActions(
   // face 引用跨「同一 state 的重渲染」保持恒等（装配层用它作派生 props 的记忆化依赖）；
   // 依赖即 face 暴露的全部方法，均为 useCallback，故同一 state 下引用稳定。
   return useMemo(() => ({
-    saveCanvas, createInstanceFromCanvas, saveCurrentAsFlowTemplate,
+    saveCanvas, createInstanceFromCanvas, saveCurrentAsFlowTemplate, setFlowTemplateOptions,
     openFlowById, openServiceById, openFlowTemplateById,
     selectWorkflow, selectFlowTemplate, createNew,
   }), [
-    saveCanvas, createInstanceFromCanvas, saveCurrentAsFlowTemplate,
+    saveCanvas, createInstanceFromCanvas, saveCurrentAsFlowTemplate, setFlowTemplateOptions,
     openFlowById, openServiceById, openFlowTemplateById,
     selectWorkflow, selectFlowTemplate, createNew,
   ])

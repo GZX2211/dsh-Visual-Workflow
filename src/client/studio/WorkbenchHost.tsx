@@ -14,11 +14,12 @@
 //   ② 渲染 <Studio>；
 //   ③ 提供运行联动的沉浸式回调（官方右侧 Sidebar 若处于全屏则缩回普通态；非全屏保持原状）。
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { Dict } from '../i18n.js'
 import { Studio } from './Studio.js'
 import { currentSessionOf, rootSessionIdOf, type SessionsServiceLike } from '../sidebar/session-root.js'
 import { shrinkOfficialSidebarIfFullscreen } from '../sidebar/workbench-tab.js'
+import { createWorkspacePicker } from '../sidebar/workspace-picker.js'
 
 // 会话解析缝继续 re-export（历史导入路径不变；实现已迁至 sidebar/session-root.ts）。
 export { currentSessionOf, rootSessionIdOf }
@@ -37,11 +38,19 @@ function rootSessionOf(ctx: WorkbenchHostContext): string {
 
 /**
  * 工作台宿主组件。
- * @param ctx - 官方 client 上下文（仅用于读取 sessions 快照）。
+ * @param ctx - 官方 client 上下文（读取 sessions 快照、组装官方目录选择器接入缝）。
  * @param t - 文案词典（语言切换时由 entry.ts 重渲染传入）。
  */
 export function WorkbenchHost({ ctx, t }: { ctx: WorkbenchHostContext; t: Dict }) {
   const [sessionId, setSessionId] = useState(() => rootSessionOf(ctx))
+  // 官方目录选择器接入缝（preload 原生接口优先，回退 uiWorkspace.pickDirectory）。
+  const workspacePicker = useMemo(() => createWorkspacePicker(ctx), [ctx])
+  // 官方 uiWorkspace 服务可能晚于本插件激活：挂载后补一次重渲染，让按钮可用性刷新。
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    const timer = setTimeout(() => { setTick((value) => value + 1) }, 0)
+    return () => { clearTimeout(timer) }
+  }, [])
 
   // 会话变化时跟随（仅更新「当前」标签与新建实例的目标会话，不重置界面）
   useEffect(() => {
@@ -54,5 +63,5 @@ export function WorkbenchHost({ ctx, t }: { ctx: WorkbenchHostContext; t: Dict }
     }
   }, [ctx])
 
-  return <Studio t={t} sessionId={sessionId} onRunImmersive={shrinkOfficialSidebarIfFullscreen} />
+  return <Studio t={t} sessionId={sessionId} onRunImmersive={shrinkOfficialSidebarIfFullscreen} workspacePicker={workspacePicker} />
 }

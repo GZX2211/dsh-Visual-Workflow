@@ -6,8 +6,9 @@
 //
 // 画布控制栏禁用态矩阵（D07-16 补缺）：本组件此前无独立用例，只有 Studio 装配层间接渲染。
 // 逐条件锁定：无画布/无内容（canSave/canClear/canTidy/canHistory 全灰）、运行中（运行变停止、
-// 停止不受 canSave 影响）、模式一/模式二文案差异、服务状态指示四态、模板态才显示「开启新会话」
-// 及其工作区输入框。断言用户可观察的 disabled/文案/类名，不触碰内部实现。
+// 停止不受 canSave 影响）、模式一/模式二文案差异、服务状态指示四态、实例来源态才显示
+// 「开启新会话」（模板态勾选后出现官方目录选择按钮 + 已选路径展示；资产态无路径按钮）。
+// 断言用户可观察的 disabled/文案/类名，不触碰内部实现。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act } from 'react'
@@ -55,7 +56,11 @@ function props(partial: Partial<ToolbarProps> = {}): ToolbarProps {
     canHistory: true,
     serviceStatus: null,
     showNewSession: false,
-    instanceOptions: { newSession: false, workspacePath: '' },
+    showWorkspacePicker: false,
+    workspacePickerAvailable: false,
+    workspacePicking: false,
+    onPickWorkspace: vi.fn(),
+    instanceOptions: { newSession: false },
     onInstanceOptionsChange: vi.fn(),
     ...partial,
   }
@@ -184,35 +189,106 @@ describe('Toolbar 模式差异与服务状态指示', () => {
   })
 })
 
-describe('Toolbar 模板态临时选项（开启新会话/工作区）', () => {
-  it('实例态（showNewSession=false）：不显示复选框与工作区输入框', () => {
-    render({ showNewSession: false, instanceOptions: { newSession: true, workspacePath: 'D:/ws' } })
+describe('Toolbar 模板态新会话选项（勾选 + 官方目录选择器）', () => {
+  const pickerProps = {
+    showNewSession: true,
+    showWorkspacePicker: true,
+    workspacePickerAvailable: true,
+    onPickWorkspace: vi.fn(),
+  }
+
+  it('实例态（showNewSession=false）：不显示复选框、路径选择按钮与路径', () => {
+    render({ showNewSession: false, instanceOptions: { newSession: true } })
 
     expect(container!.querySelector('.wf-toolbar__switch')).toBeNull()
-    expect(container!.querySelector('.wf-toolbar__workspace')).toBeNull()
+    expect(container!.querySelector('.wf-toolbar__workspace-pick')).toBeNull()
+    expect(container!.querySelector('.wf-toolbar__workspace-path')).toBeNull()
   })
 
-  it('模板态未勾选：显示复选框（未选中）且不显示工作区输入框', () => {
-    render({ showNewSession: true, instanceOptions: { newSession: false, workspacePath: '' } })
+  it('模板态未勾选：显示复选框（未选中），不显示选择按钮与路径', () => {
+    render({ ...pickerProps, instanceOptions: { newSession: false } })
 
     const checkbox = container!.querySelector<HTMLInputElement>('.wf-toolbar__switch input')!
     expect(checkbox.checked).toBe(false)
-    expect(container!.querySelector('.wf-toolbar__workspace')).toBeNull()
+    expect(container!.querySelector('.wf-toolbar__workspace-pick')).toBeNull()
+    expect(container!.querySelector('.wf-toolbar__workspace-path')).toBeNull()
   })
 
-  it('模板态已勾选：复选框选中 + 显示工作区输入框（值为当前选项），变更各走回调', () => {
-    const p = render({ showNewSession: true, instanceOptions: { newSession: true, workspacePath: 'D:/ws' } })
+  it('模板态已勾选：显示「选择工作区…」按钮；未选择路径时按钮右侧无路径文本', () => {
+    render({ ...pickerProps, instanceOptions: { newSession: true } })
 
     const checkbox = container!.querySelector<HTMLInputElement>('.wf-toolbar__switch input')!
     expect(checkbox.checked).toBe(true)
-    const workspace = container!.querySelector<HTMLInputElement>('.wf-toolbar__workspace')!
-    expect(workspace.value).toBe('D:/ws')
-    expect(workspace.placeholder).toBe(zh.workspacePlaceholder)
+    const pick = container!.querySelector<HTMLButtonElement>('.wf-toolbar__workspace-pick')!
+    expect(pick.textContent).toBe(zh.pickWorkspace)
+    expect(pick.disabled).toBe(false)
+    expect(pick.getAttribute('title')).toBe(zh.workspaceHint)
+    expect(container!.querySelector('.wf-toolbar__workspace-path')).toBeNull()
+  })
 
-    act(() => {
-      checkbox.click()
+  it('已选择路径：路径显示在按钮右侧（完整路径），点击按钮只触发 onPickWorkspace', () => {
+    const onPickWorkspace = vi.fn()
+    const p = render({
+      ...pickerProps,
+      onPickWorkspace,
+      instanceOptions: { newSession: true, workspacePath: 'D:\\work\\project' },
     })
+
+    const pick = container!.querySelector<HTMLButtonElement>('.wf-toolbar__workspace-pick')!
+    const path = container!.querySelector<HTMLElement>('.wf-toolbar__workspace-path')!
+    expect(path.textContent).toBe('D:\\work\\project')
+    expect(path.getAttribute('title')).toBe('D:\\work\\project')
+    // 路径展示在按钮之后（DOM 顺序 = 右侧）
+    expect(pick.compareDocumentPosition(path) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    act(() => { pick.click() })
+    expect(p.onPickWorkspace).toHaveBeenCalledTimes(1)
+    expect(p.onInstanceOptionsChange).not.toHaveBeenCalled()
+  })
+
+  it('勾选/取消勾选 → 各走 onInstanceOptionsChange（仅携带 newSession）', () => {
+    const p = render({ ...pickerProps, instanceOptions: { newSession: true } })
+    const checkbox = container!.querySelector<HTMLInputElement>('.wf-toolbar__switch input')!
+
+    act(() => { checkbox.click() })
     expect(p.onInstanceOptionsChange).toHaveBeenLastCalledWith({ newSession: false })
+  })
+
+  it('官方选择器不可用：按钮禁用并显示不可用说明（不静默吞掉）', () => {
+    render({
+      ...pickerProps,
+      workspacePickerAvailable: false,
+      instanceOptions: { newSession: true },
+    })
+
+    const pick = container!.querySelector<HTMLButtonElement>('.wf-toolbar__workspace-pick')!
+    expect(pick.disabled).toBe(true)
+    expect(pick.getAttribute('title')).toBe(zh.workspacePickerUnavailable)
+  })
+
+  it('选择器打开中（picking）：按钮禁用（防重复打开）', () => {
+    render({
+      ...pickerProps,
+      workspacePicking: true,
+      instanceOptions: { newSession: true },
+    })
+
+    const pick = container!.querySelector<HTMLButtonElement>('.wf-toolbar__workspace-pick')!
+    expect(pick.disabled).toBe(true)
+  })
+
+  it('资产态（showWorkspacePicker=false）：勾选后仍不显示路径选择按钮（无持久化归属）', () => {
+    render({
+      showNewSession: true,
+      showWorkspacePicker: false,
+      workspacePickerAvailable: true,
+      onPickWorkspace: vi.fn(),
+      instanceOptions: { newSession: true },
+    })
+
+    expect(container!.querySelector('.wf-toolbar__switch')).toBeTruthy()
+    expect(container!.querySelector('.wf-toolbar__workspace-pick')).toBeNull()
+    expect(container!.querySelector('.wf-toolbar__workspace-path')).toBeNull()
   })
 })
 

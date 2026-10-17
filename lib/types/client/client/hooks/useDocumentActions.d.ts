@@ -38,15 +38,26 @@ export interface DocumentActionsFace {
     saveCanvas(options?: SaveCanvasOptions): Promise<WorkflowDocument | WorkflowTemplate | ServiceState | null>;
     /**
      * 创建实例（模板态：模板内容存为新实例并切到实例态；实例态等价保存）。
-     * 工作台全局化改版：「开启新会话」为一次性临时选项——勾选时先新建主会话，
-     * 实例绑定该新会话；未勾选时在**当前主会话**创建，目标会话已有实例则弹
-     * 「覆盖旧工作流」二次确认（确认后复用旧实例 id 更新内容）。
+     * 「开启新会话」：模板态读**模板级持久化配置**（startNewSession / workspacePath，
+     * 随模板保存）——勾选时先新建主会话并绑定，未勾选时在**当前主会话**创建；资产态读
+     * 一次性临时选项（无路径）。目标会话已有同模式实例则弹「覆盖旧工作流」二次确认
+     * （确认后复用旧实例 id 更新内容）。
      * @param afterCreate 创建/覆盖成功后的回调（异步确认框路径同样触发）；
      *   「运行」入口用它接续启动（因为确认框是异步的，返回值不可依赖）。
      */
     createInstanceFromCanvas(afterCreate?: (created: WorkflowDocument | ServiceState) => void): Promise<WorkflowDocument | null>;
     /** 实例 → 模板（另存为全局共享工作流模板）。 */
     saveCurrentAsFlowTemplate(): Promise<void>;
+    /**
+     * 更新当前模板的「创建实例」新会话配置（勾选 / 工作区路径）。
+     * 模板级持久化配置：变更**立即保存当前模板**（复用模板保存通道，当前画布一并保存）；
+     * 保存失败回滚界面到保存前的模板并提示。草稿模板首次变更即入库。
+     * 空白 workspacePath 归一化为「移除该字段」；取消勾选保留已存路径。
+     */
+    setFlowTemplateOptions(patch: {
+        startNewSession?: boolean;
+        workspacePath?: string;
+    }): Promise<void>;
     openFlowById(id: string): void;
     openServiceById(id: string): void;
     openFlowTemplateById(id: string): void;

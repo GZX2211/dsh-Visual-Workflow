@@ -63,7 +63,8 @@ export type StudioAction =
   | { type: 'SERVICE_UPDATED'; service: ServiceState }
   | { type: 'SERVICE_REMOVED'; id: string }
   | { type: 'ACTIVE_RUNS_LOADED'; items: Array<{ flowId: string; sessionId: string; status: string; runId: string }> }
-  | { type: 'INSTANCE_OPTIONS_SET'; options: Partial<{ newSession: boolean; workspacePath: string }> }
+  /** 资产态一次性「开启新会话」记忆（模板态勾选/路径走模板持久化字段，不经本动作）。 */
+  | { type: 'INSTANCE_OPTIONS_SET'; options: Partial<{ newSession: boolean }> }
   | { type: 'TEMPLATES_LOADED'; kind: TemplateKind; items: Array<RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate> }
   | { type: 'TEMPLATE_ADDED'; kind: TemplateKind; template: RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate }
   | { type: 'TEMPLATE_UPDATED'; kind: TemplateKind; template: RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate }

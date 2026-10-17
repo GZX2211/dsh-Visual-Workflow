@@ -389,11 +389,15 @@ export const zh = {
   resumedFrom: '续跑自',
   resumeFromNode: '断点节点',
   resumeRun: '恢复运行',
-  // 启动时开启新会话（仅模板态显示；创建实例时的一次性临时选项，不持久化到模板/实例文档）
+  // 开启新会话（模板态：模板级持久化配置——勾选与工作区路径随模板保存/删除；
+  // 资产态：一次性临时选项，无路径归属）
   newSession: '开启新会话',
-  newSessionHint: '勾选后从模板「创建实例」时先新建独立主会话，实例绑定该新会话；之后运行只认实例绑定的会话（一次性动作，不随模板/实例保存）',
+  newSessionHint: '勾选后从当前模板「创建实例」时先新建独立主会话，实例绑定该新会话；勾选状态与工作区路径随当前模板保存（删除模板即随之删除），之后运行只认实例绑定的会话',
+  // 定时任务表单仍为手填工作区（不在本次「模板态改选择器」范围内）
   workspacePlaceholder: '如 D:\\work\\project（新会话工作区，须为存在的目录；留空则继承当前会话工作区）',
-  workspaceHint: '新会话工作区路径（绝对路径目录）；该路径即新会话 cwd，也是沙箱 workspace-write 根，创建实例时校验存在，留空默认继承当前会话工作区',
+  workspaceHint: '新会话工作区路径（绝对路径目录）；该路径即新会话 cwd，也是沙箱 workspace-write 根；未选择则继承当前会话工作区',
+  pickWorkspace: '选择工作区…',
+  workspacePickerUnavailable: '当前环境不支持官方目录选择器，无法选择工作区（未选择时将继承当前会话工作区）',
   // 工作台全局化：每会话单实例 + 覆盖确认 + 当前会话标签
   currentSessionBadge: '当前',
   overwriteInstanceTitle: '覆盖已有实例',
@@ -896,11 +900,15 @@ export const en: Dict = {
   resumedFrom: 'resumed from',
   resumeFromNode: 'checkpoint',
   resumeRun: 'Resume',
-  // Start in a new session (template-only; one-shot option at instance creation, never persisted)
+  // Start in a new session (template: persisted with the template — checkbox and workspace
+  // path are saved together and removed with the template; asset: one-shot, no path).
   newSession: 'Start in new session',
-  newSessionHint: 'When on, creating an instance from a template first creates a fresh main session and binds the instance to it; subsequent runs only use the session the instance is bound to (one-shot option, never persisted to the template/instance)',
+  newSessionHint: 'When on, creating an instance from the current template first creates a fresh main session and binds the instance to it; the checkbox and workspace path are saved with the template (removed with it). Subsequent runs only use the session the instance is bound to',
+  // The scheduler form still types the workspace path (not part of the template picker change)
   workspacePlaceholder: 'e.g. D:\\work\\project (new-session workspace; must exist; blank inherits the current session workspace)',
-  workspaceHint: 'Absolute workspace path for the new session (session cwd = sandbox workspace-write root); validated at instance creation; blank inherits the current session workspace',
+  workspaceHint: 'New-session workspace path (absolute directory); it becomes the new-session cwd and the sandbox workspace-write root; unset inherits the current session workspace',
+  pickWorkspace: 'Choose workspace…',
+  workspacePickerUnavailable: 'The official directory picker is unavailable in this environment (the current session workspace is inherited when unset)',
   currentSessionBadge: 'Current',
   overwriteInstanceTitle: 'Overwrite existing instance',
   overwriteInstanceMessage: 'This session already holds a workflow instance; the new workflow will overwrite the old one (the old instance content is replaced with the new template content, run history is kept). Continue?',

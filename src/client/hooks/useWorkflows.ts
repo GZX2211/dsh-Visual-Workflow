@@ -92,8 +92,9 @@ export function useWorkflows(
 
   /**
    * 模板 → 实例：深拷贝模板（节点/连线全量内联，与模板完全断引用）。
-   * 目标会话由调用方决定（当前主会话 / 新建主会话）；不继承 startNewSession/workspacePath
-   * （一次性临时选项，字段已退役）。fallbackName 由调用方从词典注入（模板无名称时使用）。
+   * 目标会话由调用方决定（当前主会话 / 新建主会话）；不继承模板的
+   * startNewSession/workspacePath（模板级持久化配置，创建实例时一次性消费，
+   * 不是实例内容）。fallbackName 由调用方从词典注入（模板无名称时使用）。
    */
   const instantiateFromTemplate = useCallback((template: WorkflowTemplate, targetSessionId: string, fallbackName: string): WorkflowDocument => {
     const now = new Date().toISOString()
