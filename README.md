@@ -279,13 +279,19 @@ allowBuilds:
 dsh plugin --profile web add "github:GZX2211/dsh-Visual-Workflow#main"
 ```
 
+**桌面端可直接在左上角插件页面内添加**：
+
+```
+输入：github:GZX2211/dsh-Visual-Workflow#main，然后点击安装即可
+```
+
 3. **验证挂载**：（可选）
 
 ```bash
 dsh --profile web --dump-config | findstr "visual-workflow"
 ```
 
-4. **重启** `dsh web`。打开工作台：点击官方**左侧边栏底部的「工作流」入口**（在官方「设置」旁）→ 官方**右侧 Sidebar** 打开「工作流」标签页即完整工作台。
+1. **重启** `dsh web`。打开工作台：点击官方**左侧边栏底部的「工作流」入口**（在官方「设置」旁）→ 官方**右侧 Sidebar** 打开「工作流」标签页即完整工作台。
 
 ### 安装问题速查
 

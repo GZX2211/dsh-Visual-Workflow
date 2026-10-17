@@ -283,6 +283,12 @@ allowBuilds:
 dsh plugin --profile web add "github:GZX2211/dsh-Visual-Workflow#main"
 ```
 
+**On desktop, you can add it directly from the Plugins page in the top-left corner**:
+
+```
+Enter: github:GZX2211/dsh-Visual-Workflow#main, then click Install.
+```
+
 3. **Verify mounting**: (optional)
 
 ```bash
