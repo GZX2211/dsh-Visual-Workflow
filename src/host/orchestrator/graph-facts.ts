@@ -7,7 +7,8 @@
 //   - 节点执行上下文事实：dbToolHintOf、buildNodeContextFacts（上游产出/文件路径/db 提示）。
 // 全部为纯函数（不读时钟/随机源），不依赖全局状态。
 
-import { renderTemplate, RULE_DB_TOOL, type CommTarget } from '../prompts/index.js'
+import { isEnglishSystemLanguage } from '../system-language.js'
+import { renderTemplate, RULE_DB_TOOL, RULE_DB_TOOL_EN, type CommTarget } from '../prompts/index.js'
 import { autoContextSourceIds, ctxInEdges, dbInEdges, nodeById, nodeParticipatesInFlow, validateFlow } from '../graph/index.js'
 import type { DatabaseNode, GraphNode, GroupNode, RoleNode, WorkflowDocument } from '../shared/graph-model.js'
 import type { RunSnapshot } from '../shared/types.js'
@@ -23,13 +24,13 @@ import { WfError } from './errors.js'
  * - 无 db-in 连线时返回空串（工具白名单也不注入 wf_db_query）。
  * 纯函数：输入同则输出同，不读时钟/随机源。
  */
-export function dbToolHintOf(flow: WorkflowDocument, nodeId: string): string {
+export function dbToolHintOf(flow: WorkflowDocument, nodeId: string, systemLanguage?: string): string {
   const sources = dbInEdges(flow, nodeId)
     .map((line) => nodeById(flow, line.source))
     .filter((n): n is DatabaseNode => n?.kind === 'database')
   if (sources.length === 0) return ''
   const ids = sources.map((n) => `${n.id} (${labelOf(n)})`).join('; ')
-  return renderTemplate(RULE_DB_TOOL, { sources: ids })
+  return renderTemplate(isEnglishSystemLanguage(systemLanguage) ? RULE_DB_TOOL_EN : RULE_DB_TOOL, { sources: ids })
 }
 
 /** 节点人类可读名称（提示语与错误消息用）。 */
@@ -88,8 +89,8 @@ export function collabPromptOf(flow: WorkflowDocument, nodeId: string): string {
  * 上下游节点的 id 不进本清单——可通信面只由组关系决定，不由数据流决定。
  * 不列节点自身：wf_send_message 拒绝自投，列出只会误导模型。
  */
-export function commTargetsOf(flow: WorkflowDocument, nodeId: string): CommTarget[] {
-  const targets: CommTarget[] = [{ label: '父代理', id: PARENT_TARGET }]
+export function commTargetsOf(flow: WorkflowDocument, nodeId: string, systemLanguage?: string): CommTarget[] {
+  const targets: CommTarget[] = [{ label: isEnglishSystemLanguage(systemLanguage) ? 'Parent' : '父代理', id: PARENT_TARGET }]
   const group = flow.nodes.find(
     (n): n is GroupNode => n.kind === 'group' && ((n.data.memberIds ?? []) as string[]).includes(nodeId),
   )
@@ -136,6 +137,7 @@ export function buildNodeContextFacts(input: {
   /** 运行快照：上游角色节点最终产出（自动注入）的读取源。 */
   snapshot: RunSnapshot
   documentTextLimit: number
+  systemLanguage?: string
 }): { upstreamContext: Array<{ nodeId: string; source: string; content: string }>; filePaths: string[]; dbToolHint: string } {
   const { flow, node } = input
   const upstreamContext: Array<{ nodeId: string; source: string; content: string }> = []
@@ -190,6 +192,5 @@ export function buildNodeContextFacts(input: {
       content: truncateText(output, input.documentTextLimit),
     })
   }
-
-  return { upstreamContext, filePaths, dbToolHint: dbToolHintOf(flow, node.id) }
+  return { upstreamContext, filePaths, dbToolHint: dbToolHintOf(flow, node.id, input.systemLanguage ?? input.snapshot.systemLanguage) }
 }

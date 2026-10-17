@@ -3,8 +3,11 @@
 // 子代理侧提示词构建器：节点任务块（每次运行注入的那一段）。
 // 正文全部在 texts/child-node-task.ts；本文件只把事实翻译成模板变量并渲染一次。
 
+import { isEnglishSystemLanguage } from '../system-language.js'
+import { localizeOutputContract } from './defaults.js'
 import { flag, renderTemplate } from './render.js'
 import { CHILD_NODE_TASK } from './texts/child-node-task.js'
+import { CHILD_NODE_TASK_EN } from './texts/en/child-node-task.js'
 
 /**
  * 可通信对象（子代理可经 wf_send_message 触达的对象）。
@@ -48,18 +51,23 @@ export interface NodeTaskBlockParams {
 /** 节点任务块构建器（纯函数）：注入子代理「本轮该干什么 + 手上有什么 + 能找谁」的完整文本。 */
 export function buildNodeTaskBlock(params: NodeTaskBlockParams): string {
   const { facts } = params
-  return renderTemplate(CHILD_NODE_TASK, {
+  const english = isEnglishSystemLanguage(facts.systemLanguage)
+  return renderTemplate(english ? CHILD_NODE_TASK_EN : CHILD_NODE_TASK, {
     nodeLabel: facts.nodeLabel,
     systemLanguage: String(facts.systemLanguage ?? '').trim(),
     upstreamEntries: facts.upstreamContext
-      .map((entry) => `- ${entry.source}（id：${entry.nodeId}）：${entry.content}`)
+      .map((entry) => english
+        ? `- ${entry.source} (id: ${entry.nodeId}): ${entry.content}`
+        : `- ${entry.source}（id：${entry.nodeId}）：${entry.content}`)
       .join('\n'),
     noUpstream: flag(facts.upstreamContext.length === 0),
     filePathsText: (facts.filePaths ?? []).map((filePath) => `- ${filePath}`).join('\n'),
     inputContract: String(facts.inputContract ?? '').trim(),
     dbToolHint: String(facts.dbToolHint ?? '').trim(),
-    outputContract: String(facts.outputContract ?? '').trim(),
-    commTargets: (facts.commTargets ?? []).map((target) => `- ${target.label}（${target.id}）`).join('\n'),
+    outputContract: localizeOutputContract(facts.outputContract, facts.systemLanguage),
+    commTargets: (facts.commTargets ?? [])
+      .map((target) => english ? `- ${target.label} (${target.id})` : `- ${target.label}（${target.id}）`)
+      .join('\n'),
     collabNote: String(facts.collabNote ?? '').trim(),
   })
 }

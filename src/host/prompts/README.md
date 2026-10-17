@@ -12,16 +12,18 @@ src/host/prompts/
 │   ├── parent-hybrid.ts            # 父代理 · 情况2 编排 + 自执行
 │   ├── parent-executor.ts          # 父代理 · 情况3 纯执行 + 情况2 末段任务块
 │   ├── parent-planner.ts           # 父代理 · 规划期（/arrange）
-│   ├── child-node-task.ts          # 子代理 · 任务块 + 降级通道协作块
+│   ├── child-node-task.ts          # 子代理 · 任务块（含可通信对象清单）
 │   ├── task-fallback.ts            # 任务 · 任务块为空时的兜底首条消息
 │   ├── rule-graph-semantics.ts     # 规则 · 图语义（wf_org_catalog 返回）
 │   ├── rule-design-method.ts       # 规则 · 设计方法（wf_org_catalog 返回）
 │   ├── rule-patch-contract.ts      # 规则 · 写图契约（wf_org_catalog 返回 + 参数层错误引用）
 │   ├── rule-db-tool.ts             # 规则 · 数据库三模式说明
 │   ├── rule-soft-stop.ts           # 规则 · ReAct 软截停指令
-│   ├── notice-ask-message.ts       # 规则 · wf_ask_agent 协作消息
-│   └── notice-orchestration-change.ts  # 规则 · 运行期【编排变更】通知
+│   ├── notice-send-message.ts      # 规则 · wf_send_message 消息投递包装
+│   ├── notice-orchestration-change.ts  # 规则 · 运行期【编排变更】通知
+│   └── en/                         # 英文变体（同一场景的完整正文；按运行语言整体选择）
 ├── render.ts                       # 唯一渲染器（{{变量}} / {{#if}}）
+├── defaults.ts                     # 默认文本投影（中文规范存储 + 按语言本地化注入）
 ├── parents.ts / child.ts / planner.ts / rules.ts   # 事实 → 变量 → 渲染一次
 └── index.ts                        # 对外唯一入口（模块外只从这里导入）
 ```
@@ -50,16 +52,25 @@ src/host/prompts/
 | 场景 | 通道 |
 |---|---|
 | 父代理三模式 / 规划提示词 / 编排变更通知 | 用户消息（`followupRoot` / `steer`） |
-| 子代理任务块 + 协作块 | 子代理首条用户消息 / 复用派发消息 |
+| 子代理任务块（含可通信对象清单） | 子代理首条用户消息 / 复用派发消息 |
 | 图语义 / 设计方法 / 写图契约 | 工具调用返回（`wf_org_catalog` 索引） |
-| 协作消息（ask / reply） | 消息投递（`wf_ask_agent`） |
+| 协作消息投递包装 | 消息投递（`wf_send_message`） |
 | 软截停指令 | `agent/pre-step` 替换消息 + `tools.guard` 拒绝原因 |
 
 ## 5. 语言政策
 
-- 注入给模型的**提示词正文用中文**；工具名、工具 description 与其参数说明**保持英文**。
-- **按需返回的规则文本**（图语义、设计方法、写图契约、协作消息、软截停指令）同样用中文；
-  JSON 字段名、取值、工具名与稳定错误码保留原样。
+- **运行与节点构建器按本次运行语言注入中文或英文指令**：同一场景在 `texts/` 与 `texts/en/`
+  各有一份完整正文，由构建器按 `systemLanguage` 整体选择，不做逐句拼接。
+- 工作台启动时把当前官方 locale（含自动浏览器/原生选择）经运行端点传入；无 GUI 的调用
+  （调度器、服务、工具静默接续）使用 Host 设置。运行语言冻结进 `RunSnapshot.systemLanguage`，
+  子代理任务、编排变更通知与续跑继承沿用同一份事实；旧快照回退 Host 设置。
+- 工具名、工具 description 与其参数说明**保持英文**；JSON 字段名、取值、工具名与稳定错误码
+  保留原样。用户自定义 Prompt、输入/输出契约与文件内容**不自动翻译**。
+- **默认输出契约采用「中文规范存储 + 按语言本地化注入」**：磁盘保存
+  `DEFAULT_OUTPUT_CONTRACT_TEXT`（中文规范值），英文运行注入英文默认文本；用户自定义契约
+  原样透传（见 `defaults.ts`）。
+- 按需返回的规则文本（图语义、设计方法、写图契约、软截停指令）当前仍为中文；它们不属于
+  PR #19 的英文正文范围，后续如需英文需按 `texts/en/` 模式补齐。
 - 惯用英文技术词（`System Prompt` / `allow-list` / `ReAct` / `ctx`）保留原样。
 - **代码层约束不写入提示词**：只有 AI 有选择权、值得强调的软约束才进提示词。
 

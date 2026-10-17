@@ -7,4 +7,4 @@ export interface RemoteFace {
     stream(endpoint: string, args: Record<string, unknown>, onLine: (line: string) => void, signal?: AbortSignal): Promise<void>;
 }
 /** Stable remote-call face; dictionary changes replace only the error-copy mapping. */
-export declare function useRemote(copy: Dict): RemoteFace;
+export declare function useRemote(copy: Dict, language?: string): RemoteFace;

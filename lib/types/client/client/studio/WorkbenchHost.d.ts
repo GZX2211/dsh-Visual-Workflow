@@ -1,4 +1,4 @@
-import type { Dict } from '../i18n.js';
+import { type Dict } from '../i18n.js';
 import { currentSessionOf, rootSessionIdOf } from '../sidebar/session-root.js';
 export { currentSessionOf, rootSessionIdOf };
 /** 宿主上下文（兼容官方 client 注入的 ctx 最小形状）。 */

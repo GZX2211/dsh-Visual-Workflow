@@ -79,7 +79,9 @@ function probeChildCtx(): ChildCtxProbe {
 const cleanups: Array<() => Promise<void>> = []
 
 afterEach(async () => {
-  await Promise.all(cleanups.splice(0).map((fn) => fn()))
+  // 逆序串行清理：后创建的宿主先释放，再删它使用的 dataDir。并发执行会让 rm 与
+  // 宿主释放（SQLite 仍持有文件）竞态，Windows 上表现为 EPERM（文件被占用）。
+  for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
 })
 
 /** 取宿主私有事件处理器的调用面（与 host-assembly 集成测试同款最小结构收窄）。 */

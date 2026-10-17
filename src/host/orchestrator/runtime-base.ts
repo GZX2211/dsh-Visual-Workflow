@@ -18,8 +18,9 @@ import type { RoleNode, WorkflowDocument } from '../shared/graph-model.js'
 import type { RunSnapshot, RunStatus } from '../shared/types.js'
 import { cloneSnapshot, setNodeStatus } from './snapshot.js'
 import { RESUMABLE_STATUSES, type ResumeInput, type ResumeResult } from './resume.js'
-import { ORCH_CHANGE_TEXT, type ExecutorContextFacts } from '../prompts/index.js'
+import { orchestrationChangeTextOf, type ExecutorContextFacts } from '../prompts/index.js'
 import { effectiveRetryLimitOf } from './node-params.js'
+import { DEFAULT_SYSTEM_LANGUAGE, isEnglishSystemLanguage } from '../system-language.js'
 import { coordinatorMessage } from './send-message-protocol.js'
 import { summarizeFlowChange } from './flow-diff.js'
 import { buildNodeContextFacts } from './graph-facts.js'
@@ -139,11 +140,13 @@ export abstract class RuntimeBase {
     if (!existing || existing.status !== 'running') {
       setNodeStatus(snapshot, executor.nodeId, 'running', { now: this.now() })
     }
+    const systemLanguage = snapshot.systemLanguage ?? this.deps.systemLanguage?.() ?? DEFAULT_SYSTEM_LANGUAGE
     const context = buildNodeContextFacts({
       flow,
       node: parentNode,
       snapshot,
       documentTextLimit: this.deps.config.documentTextLimit,
+      systemLanguage,
     })
     // 重试预算与真实护栏同源（参数覆盖 > 节点配置 > 配置默认）：分母不再硬编码为 1，
     // 否则父代理在可重试的节点上被提示「只有 1 次尝试」而提前放弃。
@@ -152,7 +155,7 @@ export abstract class RuntimeBase {
       nodeId: executor.nodeId,
       nodeLabel: executor.nodeLabel,
       task: { ...context, nodeLabel: executor.nodeLabel },
-      runContextText: `runId=${snapshot.id}; attempt ${(existing?.attempts ?? 0) + 1}/${retryBudget}（父代理执行单元）`,
+      runContextText: `runId=${snapshot.id}; attempt ${(existing?.attempts ?? 0) + 1}/${retryBudget}${isEnglishSystemLanguage(systemLanguage) ? ' (parent execution unit)' : '（父代理执行单元）'}`,
     }
   }
 
@@ -558,7 +561,9 @@ export abstract class RuntimeBase {
         this.log().warn('[visual-workflow] 编排变更通知失败：父代理未激活')
         return
       }
-      const text = ORCH_CHANGE_TEXT
+      const text = orchestrationChangeTextOf(
+        entry.snapshot.systemLanguage ?? this.deps.systemLanguage?.() ?? DEFAULT_SYSTEM_LANGUAGE,
+      )
       const id = this.deps.uuid?.() ?? randomUUID()
       if (root.status === 'running' && typeof root.steer === 'function') {
         root.steer(coordinatorMessage(id, text, 'visual-workflow'))

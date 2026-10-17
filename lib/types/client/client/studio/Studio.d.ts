@@ -2,6 +2,8 @@ import type { Dict } from '../i18n.js';
 import { type RemoteFace } from '../hooks/useRemote.js';
 import type { WorkspacePicker } from '../sidebar/workspace-picker.js';
 export interface StudioProps {
+    /** 当前生效的 DSH 语言（含浏览器/原生自动选择），运行端点随请求携带。 */
+    language?: string;
     /** 文案词典。 */
     t: Dict;
     /** 绑定的会话 id。 */
@@ -20,4 +22,4 @@ export interface StudioProps {
      */
     workspacePicker?: WorkspacePicker | null;
 }
-export declare function Studio({ t, sessionId, remote: remoteProp, onRunImmersive, workspacePicker }: StudioProps): import("react").JSX.Element;
+export declare function Studio({ t, sessionId, remote: remoteProp, onRunImmersive, language, workspacePicker }: StudioProps): import("react").JSX.Element;

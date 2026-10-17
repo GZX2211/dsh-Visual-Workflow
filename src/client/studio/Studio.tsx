@@ -55,6 +55,8 @@ import { useNewSessionOptions } from '../hooks/useNewSessionOptions.js'
 import type { WorkspacePicker } from '../sidebar/workspace-picker.js'
 
 export interface StudioProps {
+  /** 当前生效的 DSH 语言（含浏览器/原生自动选择），运行端点随请求携带。 */
+  language?: string
   /** 文案词典。 */
   t: Dict
   /** 绑定的会话 id。 */
@@ -74,8 +76,8 @@ export interface StudioProps {
   workspacePicker?: WorkspacePicker | null
 }
 
-export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive, workspacePicker }: StudioProps) {
-  const defaultRemote = useRemote(t)
+export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive, language, workspacePicker }: StudioProps) {
+  const defaultRemote = useRemote(t, language)
   const remote = remoteProp ?? defaultRemote
   const { state, dispatch } = useStudioState(sessionId)
   const { toast, toastError } = useToast(dispatch)

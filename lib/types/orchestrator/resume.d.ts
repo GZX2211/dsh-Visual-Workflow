@@ -10,6 +10,8 @@ import type { RunSnapshot } from '../shared/types.js';
 export declare const RESUMABLE_STATUSES: readonly ["paused", "interrupted", "stopped"];
 /** 断点续跑入参（工具路径静默接续与端点/调度器显式续跑共用）。 */
 export interface ResumeInput {
+    /** 续跑时显式指定的 UI 语言；缺省继承断点快照的语言。 */
+    systemLanguage?: string;
     sessionId: string;
     flowId: string;
     /** 指定恢复的旧 run id；缺省取该工作流最近的可恢复记录。 */

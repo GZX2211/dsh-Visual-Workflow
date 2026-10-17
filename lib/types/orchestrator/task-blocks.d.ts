@@ -11,7 +11,8 @@ export declare function inputContractOf(node: RoleNode): string;
  *
  * 语义（用户裁决 2026-10）：不再有「有无下游 / 有无 ctx 出线」的注入判据——统一注入、
  * 但可注入为空。空串即该节点不配置契约（任务块不出现契约段）；配置文本逐字生效，
- * 不与默认文本叠加（默认文本在新建节点时已落盘，界面显示与实际注入是同一个值）。
+ * 不与默认文本叠加。默认文本在新建节点时已落盘（中文规范值）；英文运行注入时，若内容
+ * 与中文规范默认值逐字相等，则替换为英文默认文本（见 prompts/defaults.ts），自定义文本原样透传。
  */
 export declare function outputContractOf(node: RoleNode): string;
 /**

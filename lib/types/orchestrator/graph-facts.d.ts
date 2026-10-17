@@ -10,7 +10,7 @@ import { WfError } from './errors.js';
  * - 无 db-in 连线时返回空串（工具白名单也不注入 wf_db_query）。
  * 纯函数：输入同则输出同，不读时钟/随机源。
  */
-export declare function dbToolHintOf(flow: WorkflowDocument, nodeId: string): string;
+export declare function dbToolHintOf(flow: WorkflowDocument, nodeId: string, systemLanguage?: string): string;
 /** 节点人类可读名称（提示语与错误消息用）。 */
 export declare function labelOf(node: GraphNode): string;
 /** 流程中的暂停节点 id 清单（编排指令与节点任务块动态态共用）。 */
@@ -47,7 +47,7 @@ export declare function collabPromptOf(flow: WorkflowDocument, nodeId: string): 
  * 上下游节点的 id 不进本清单——可通信面只由组关系决定，不由数据流决定。
  * 不列节点自身：wf_send_message 拒绝自投，列出只会误导模型。
  */
-export declare function commTargetsOf(flow: WorkflowDocument, nodeId: string): CommTarget[];
+export declare function commTargetsOf(flow: WorkflowDocument, nodeId: string, systemLanguage?: string): CommTarget[];
 /** 运行前完整性检查：缺失的启动/结束节点（按模式渲染中文名）。 */
 export declare function missingStageLabels(flow: WorkflowDocument): string[];
 /** 运行前校验（防御：保存时已校验，此处拦截非法快照）。 */
@@ -69,6 +69,7 @@ export declare function buildNodeContextFacts(input: {
     /** 运行快照：上游角色节点最终产出（自动注入）的读取源。 */
     snapshot: RunSnapshot;
     documentTextLimit: number;
+    systemLanguage?: string;
 }): {
     upstreamContext: Array<{
         nodeId: string;

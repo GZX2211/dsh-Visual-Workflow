@@ -33,7 +33,7 @@ import { stageLabel } from '../../src/host/graph/index.js'
 import { VisualWorkflowApi, type ApiHost } from '../../src/host/api/index.js'
 import { SessionMap, ServiceManager, renderServePatch } from '../../src/host/service/index.js'
 import { registerWfSendMessage } from '../../src/host/tools/wf-send-message/tool.js'
-import { WF_SEND_MESSAGE } from '../../src/host/shared/protocol.js'
+import { DEFAULT_OUTPUT_CONTRACT_TEXT, WF_SEND_MESSAGE } from '../../src/host/shared/protocol.js'
 
 const cleanups: Array<() => Promise<void>> = []
 
@@ -141,7 +141,7 @@ interface Harness {
   root: FakeRoot
 }
 
-async function makeHarness(): Promise<Harness> {
+async function makeHarness(systemLanguage: () => string = () => '中文'): Promise<Harness> {
   const dir = await mkdtemp(join(tmpdir(), 'vw-e2e-'))
   cleanups.push(() => rm(dir, { recursive: true, force: true }))
   const store = new FlowStore(dir)
@@ -157,6 +157,7 @@ async function makeHarness(): Promise<Harness> {
   const runDefaults = resolveConfig({ dataDir: dir })
   const runtime = new OrchestratorRuntime({
     store,
+    systemLanguage,
     runner,
     agents,
     config: {
@@ -196,7 +197,7 @@ async function runNodeAndFinish(h: Harness, nodeId: string): Promise<{ childId: 
 }
 
 describe('e2e：编排运行全链路与双向同步', () => {
-  it.each([['en', en], ['zh', zh]] as const)('starts a saved %s canvas workflow without stage-label errors', async (_language, copy) => {
+  it.each([['en', en], ['zh', zh]] as const)('保存后的 %s 画布工作流可启动，且不出现阶段标签校验错误', async (_language, copy) => {
     const h = await makeHarness()
     const flow = makeFlow()
     const canvasNodes = flow.nodes.map((node) => node.kind === 'start' || node.kind === 'end'
@@ -480,5 +481,45 @@ describe('e2e：服务侧组合（fork 参数 / serve patch / 会话映射持久
     expect(patch).toContain('disabled: true')
     expect(patch).toContain('apiKey: null')
     expect(patch).toContain('visual-workflow-service')
+  })
+})
+
+describe('UI locale 贯穿真实运行装配', () => {
+  it.each([['en', 'English', '# Hard constraints'], ['zh', '中文', '# 硬性约束']])('%s 由父代理、子代理、断点与续跑共享', async (language, resolved, heading) => {
+    // 故意让 Host 设置与 UI 相反：本次运行以 Client 的自动 locale 为准。
+    const h = await makeHarness(() => language === 'en' ? '中文' : 'English')
+    const flow = makeFlow(true)
+    flow.name = 'Instagram Post Helper'
+    flow.description = 'Prepare an Instagram post'
+    for (const node of flow.nodes) {
+      if (node.kind !== 'agent') continue
+      node.data.label = node.id
+      node.data.outputSchema = DEFAULT_OUTPUT_CONTRACT_TEXT
+    }
+    await saveFlow(h, flow)
+    const start = await h.api.handle('run', { sessionId: flow.sessionId, flowId: flow.id, language }) as { runId: string }
+    const parent = h.root.messages[0]!.content.map(item => item.text).join('')
+    expect(parent).toContain(heading)
+    if (language === 'en') expect(parent).not.toMatch(/[\u3400-\u9fff]/)
+    expect(h.runtime.runSnapshot(start.runId)?.systemLanguage).toBe(resolved)
+    const child = await h.runtime.wfRunNode({ isChild: false, sessionId: flow.sessionId }, { nodeId: 'n-a1' })
+    const text = h.runner.calls[0]!.blocks.map(block => block.text).join('')
+    expect(text).toContain(heading)
+    if (language === 'en') {
+      expect(text).toContain('Conclusion / Output file paths / Key decisions / Open questions')
+      expect(text).not.toMatch(/[\u3400-\u9fff]/)
+    }
+    await h.runtime.handleSubagentEnd({ id: child.childId, stopReason: 'completed', lastAssistantMessage: [{ type: 'text', text: 'Research complete' }] })
+    await h.runtime.wfRunNode({ isChild: false, sessionId: flow.sessionId }, { nodeId: 'n-pause' })
+    expect((await h.store.getRun(start.runId))?.systemLanguage).toBe(resolved)
+    // 无 GUI 的续跑继承已持久化的运行语言，即使 Host 设置与它相反。
+    const resumed = await h.runtime.resumeRun({ sessionId: flow.sessionId, flowId: flow.id, fromRunId: start.runId })
+    expect(h.runtime.runSnapshot(resumed.runId)?.systemLanguage).toBe(resolved)
+    expect(h.root.messages.at(-1)!.content[0]!.text).toContain(heading)
+    await h.runtime.stopRun(resumed.runId)
+    // 显式切换 UI 语言只作用于本次新续跑的运行。
+    const switched = await h.api.handle('runResume', { sessionId: flow.sessionId, flowId: flow.id, runId: resumed.runId, language: language === 'en' ? 'zh' : 'en' }) as { runId: string }
+    expect(h.runtime.runSnapshot(switched.runId)?.systemLanguage).toBe(resolved === 'English' ? '中文' : 'English')
+    await h.runtime.stopRun(switched.runId)
   })
 })

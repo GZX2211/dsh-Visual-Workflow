@@ -40,6 +40,8 @@ export type NodeRunStatus =
  * 自旧 run 并标记来源，经 resumedFromRunId 追溯继承链（需求文档 §4.7 规则 2）。
  */
 export interface RunSnapshot {
+  /** 本次运行冻结的语言；旧快照缺失时回退 Host 设置。 */
+  systemLanguage?: string
   /** run 稳定标识（runId）。 */
   id: string
   /** 关联工作流 id（flowId）。 */

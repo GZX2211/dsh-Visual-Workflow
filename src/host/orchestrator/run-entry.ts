@@ -137,6 +137,8 @@ export interface OrchestratorDeps {
 }
 
 export interface StartRunOptions {
+  /** 已解析的 UI 语言；无 GUI 的调用方缺省时使用 Host 设置。 */
+  systemLanguage?: string
   /** 运行模式（缺省 mode1；模式二由服务管理器传入 mode2）。 */
   mode?: 'mode1' | 'mode2'
   /** 模式二：本次外部请求的用户问题（注入输入节点产出 + 编排指令动态段）。 */

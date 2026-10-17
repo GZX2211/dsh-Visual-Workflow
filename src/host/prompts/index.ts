@@ -37,6 +37,9 @@ export {
   type NodeTaskBlockParams,
 } from './child.js'
 
+// 语言相关的默认文本投影（存储保持中文规范值，注入时本地化）。
+export { defaultOutputContractOf, localizeOutputContract } from './defaults.js'
+
 // 规划期父代理提示词（/arrange）。
 export {
   buildOrgPlanPrompt,
@@ -50,6 +53,8 @@ export {
   ORG_SOP_DESIGN_METHOD,
   ORCH_CHANGE_MARKER,
   ORCH_CHANGE_TEXT,
+  ORCH_CHANGE_TEXT_EN,
+  orchestrationChangeTextOf,
 } from './rules.js'
 
 // 规则文本：写图契约（wf_org_catalog 按需返回 + wf_graph_patch 参数层错误消息引用）。
@@ -70,6 +75,7 @@ export { PARENT_ROLE_DUTIES } from './texts/parent-role-duties.js'
 export { REACT_CAP_MESSAGE, REACT_CAP_DENY_REASON } from './texts/rule-soft-stop.js'
 export { NOTICE_SEND_MESSAGE } from './texts/notice-send-message.js'
 export { RULE_DB_TOOL } from './texts/rule-db-tool.js'
+export { RULE_DB_TOOL_EN } from './texts/en/rule-db-tool.js'
 
 // 任务文本：子代理任务块为空时的兜底首条消息。
 export { TASK_FALLBACK } from './texts/task-fallback.js'

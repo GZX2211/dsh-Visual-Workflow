@@ -17,7 +17,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import React from 'react'
 import { Inspector } from '../../../../../src/client/components/panels/inspector/Inspector.js'
-import { zh } from '../../../../../src/client/i18n.js'
+import { en, zh } from '../../../../../src/client/i18n.js'
 import type { EditorData } from '../../../../../src/client/studio/studio-types.js'
 
 let container: HTMLDivElement | null = null
@@ -139,6 +139,23 @@ describe('P4 父代理模板可编辑（Inspector，D-20）', () => {
     const labels = Array.from(container!.querySelectorAll('button')).map((item) => item.textContent)
     expect(labels).not.toContain(zh.inspectorSave)
     expect(labels).toContain(zh.inspectorDelete)
+  })
+
+  it('阶段节点：阶段名按界面语言显示，存储值保持中文规范值', async () => {
+    await render(React.createElement(Inspector, {
+      ...common,
+      copy: en,
+      editorData: {
+        kind: 'stage',
+        data: { label: '启动' },
+        name: '启动',
+        nodeId: 's-1',
+        stageKind: 'start',
+        mode: 'mode1',
+      },
+    }))
+    expect(container!.textContent).toContain(en.nodeKinds.start)
+    expect(container!.textContent).not.toContain('启动')
   })
 })
 

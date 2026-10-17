@@ -5,10 +5,14 @@
 // 组装方式：正文全部在 texts/parent-*.ts；本文件只把事实翻译成模板变量并渲染一次。
 // 模板变量命名与 texts/ 文件头的「变量」注释一一对应。
 
+import { isEnglishSystemLanguage } from '../system-language.js'
 import { flag, renderTemplate, type TemplateVars } from './render.js'
 import { PARENT_ORCHESTRATOR } from './texts/parent-orchestrator.js'
 import { PARENT_HYBRID } from './texts/parent-hybrid.js'
 import { PARENT_EXECUTOR, PARENT_TASK_SPEC } from './texts/parent-executor.js'
+import { PARENT_ORCHESTRATOR_EN } from './texts/en/parent-orchestrator.js'
+import { PARENT_HYBRID_EN } from './texts/en/parent-hybrid.js'
+import { PARENT_EXECUTOR_EN, PARENT_TASK_SPEC_EN } from './texts/en/parent-executor.js'
 
 /** 父代理提示词变体（三情况组装分发）：orchestrator=纯编排 / hybrid=编排+自执行 / executor=纯执行。 */
 export type ParentPromptVariant = 'orchestrator' | 'hybrid' | 'executor'
@@ -81,9 +85,16 @@ export interface ParentExecutorPromptParams {
   systemLanguage: string
 }
 
-/** 上游产出行（多行文本；无上游时返回空串，由模板输出「（无）」）。 */
-function upstreamLinesOf(entries: Array<{ nodeId: string; source: string; content: string }>): string {
-  return entries.map((entry) => `- ${entry.source}（id：${entry.nodeId}）：${entry.content}`).join('\n')
+/** 上游产出行（多行文本；无上游时返回空串，由模板输出「（无）」/ "(none)"）。 */
+function upstreamLinesOf(
+  entries: Array<{ nodeId: string; source: string; content: string }>,
+  english: boolean,
+): string {
+  return entries
+    .map((entry) => english
+      ? `- ${entry.source} (id: ${entry.nodeId}): ${entry.content}`
+      : `- ${entry.source}（id：${entry.nodeId}）：${entry.content}`)
+    .join('\n')
 }
 
 /** 文件路径索引行（多行文本）。 */
@@ -92,10 +103,10 @@ function fileLinesOf(filePaths: string[]): string {
 }
 
 /** 执行单元上下文变量（情况2 任务块与情况3 提示词共用同一口径）。 */
-function executorContextVars(facts: ExecutorContextFacts): TemplateVars {
+function executorContextVars(facts: ExecutorContextFacts, english: boolean): TemplateVars {
   return {
     nodeLabel: facts.nodeLabel,
-    upstreamEntries: upstreamLinesOf(facts.upstreamContext),
+    upstreamEntries: upstreamLinesOf(facts.upstreamContext, english),
     noUpstream: flag(facts.upstreamContext.length === 0),
     filePathsText: fileLinesOf(facts.filePaths),
     dbToolHint: String(facts.dbToolHint ?? '').trim(),
@@ -103,10 +114,12 @@ function executorContextVars(facts: ExecutorContextFacts): TemplateVars {
 }
 
 /** Team 段变量（无 Team 卡片时不出现该段）。 */
-function teamVarsOf(facts: OrchestrationDirectiveParams['facts']): TemplateVars {
+function teamVarsOf(facts: OrchestrationDirectiveParams['facts'], english: boolean): TemplateVars {
   return {
     teamGroups: (facts.collabGroups ?? [])
-      .map((group) => `- ${group.groupId}（${group.label}）：成员节点 [${group.memberIds.join(', ')}]`)
+      .map((group) => english
+        ? `- ${group.groupId} (${group.label}): member nodes [${group.memberIds.join(', ')}]`
+        : `- ${group.groupId}（${group.label}）：成员节点 [${group.memberIds.join(', ')}]`)
       .join('\n'),
   }
 }
@@ -122,11 +135,12 @@ function dynamicVarsOf(dynamic: OrchestrationDirectiveParams['dynamic']): Templa
 /** 情况1（纯编排）父代理提示词构建器（纯函数）。 */
 export function buildOrchestratorPrompt(params: OrchestrationDirectiveParams): string {
   const { facts, dynamic } = params
-  return renderTemplate(PARENT_ORCHESTRATOR, {
+  const english = isEnglishSystemLanguage(facts.systemLanguage)
+  return renderTemplate(english ? PARENT_ORCHESTRATOR_EN : PARENT_ORCHESTRATOR, {
     workflowName: facts.workflowName,
     systemLanguage: String(facts.systemLanguage ?? '').trim(),
     workflowGoal: String(facts.workflowGoal ?? '').trim(),
-    ...teamVarsOf(facts),
+    ...teamVarsOf(facts, english),
     ...dynamicVarsOf(dynamic),
   })
 }
@@ -135,13 +149,14 @@ export function buildOrchestratorPrompt(params: OrchestrationDirectiveParams): s
 export function buildHybridPrompt(params: OrchestrationDirectiveParams): string {
   const { facts, dynamic } = params
   const parent = facts.parentNode
-  return renderTemplate(PARENT_HYBRID, {
+  const english = isEnglishSystemLanguage(facts.systemLanguage)
+  return renderTemplate(english ? PARENT_HYBRID_EN : PARENT_HYBRID, {
     workflowName: facts.workflowName,
     parentNodeLabel: parent ? parent.nodeLabel : '',
     parentNodeId: parent ? parent.nodeId : '',
     systemLanguage: String(facts.systemLanguage ?? '').trim(),
     workflowGoal: String(facts.workflowGoal ?? '').trim(),
-    ...teamVarsOf(facts),
+    ...teamVarsOf(facts, english),
     ...dynamicVarsOf(dynamic),
   })
 }
@@ -152,8 +167,9 @@ export function buildHybridPrompt(params: OrchestrationDirectiveParams): string 
  */
 export function buildParentTaskSpec(params: ParentTaskSpecParams): string {
   const { facts, runContextText } = params
-  return renderTemplate(PARENT_TASK_SPEC, {
-    ...executorContextVars(facts),
+  const english = isEnglishSystemLanguage(params.systemLanguage)
+  return renderTemplate(english ? PARENT_TASK_SPEC_EN : PARENT_TASK_SPEC, {
+    ...executorContextVars(facts, english),
     runContextText: String(runContextText ?? '').trim(),
   })
 }
@@ -161,10 +177,11 @@ export function buildParentTaskSpec(params: ParentTaskSpecParams): string {
 /** 情况3 纯执行父代理提示词构建器（纯函数）。 */
 export function buildParentExecutorPrompt(params: ParentExecutorPromptParams): string {
   const { workflowName, facts, runContextText, systemLanguage } = params
-  return renderTemplate(PARENT_EXECUTOR, {
+  const english = isEnglishSystemLanguage(systemLanguage)
+  return renderTemplate(english ? PARENT_EXECUTOR_EN : PARENT_EXECUTOR, {
     workflowName,
     systemLanguage: String(systemLanguage ?? '').trim(),
-    runContextText: String(runContextText ?? '').trim() || '（无）',
-    ...executorContextVars(facts),
+    runContextText: String(runContextText ?? '').trim() || (english ? '(none)' : '（无）'),
+    ...executorContextVars(facts, english),
   })
 }

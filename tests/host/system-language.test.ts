@@ -9,7 +9,7 @@
 // 运行环境：node（host 测试默认）。
 
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_SYSTEM_LANGUAGE, isChineseSystemLanguage, systemLanguageOf } from '../../src/host/system-language.js'
+import { DEFAULT_SYSTEM_LANGUAGE, isChineseSystemLanguage, systemLanguageOf, systemLanguageFromLocale } from '../../src/host/system-language.js'
 
 /** 构造 settings 服务 fake：describe() 返回官方形状的描述符数组。 */
 function settingsWithLocale(value: unknown): { describe: () => unknown } {
@@ -67,5 +67,14 @@ describe('isChineseSystemLanguage', () => {
   it('中文开头判定为中文；English 判为非中文', () => {
     expect(isChineseSystemLanguage('中文')).toBe(true)
     expect(isChineseSystemLanguage('English')).toBe(false)
+  })
+})
+
+describe('Client 当前 locale 解析', () => {
+  it.each([['en', 'English'], ['en-US', 'English'], [' EN-gb ', 'English'], ['zh-CN', '中文']])('%s 解析为 %s', (locale, expected) => {
+    expect(systemLanguageFromLocale(locale)).toBe(expected)
+  })
+  it.each([null, undefined, {}, 'enough', 'unknown', ''])('不支持的值交回 Host 回退：%j', locale => {
+    expect(systemLanguageFromLocale(locale)).toBeUndefined()
   })
 })
