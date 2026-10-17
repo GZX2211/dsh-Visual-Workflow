@@ -21,7 +21,6 @@ import type { TemplatesFace } from '../../../src/client/hooks/useTemplates.js'
 import type { ServiceControlFace } from '../../../src/client/hooks/useServiceControl.js'
 import type { StudioAction, StudioState } from '../../../src/client/studio/studio-state.js'
 import type { WorkflowDocument } from '../../../src/host/shared/graph-model.js'
-import { zh } from '../../../src/client/i18n.js'
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -76,7 +75,6 @@ async function bootWith(overrides: {
       dispatch as unknown as React.Dispatch<StudioAction>,
       vi.fn(),
       toastError,
-      zh,
       remote,
       workflows,
       flowTemplates,

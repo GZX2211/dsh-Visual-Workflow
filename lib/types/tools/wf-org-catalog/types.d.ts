@@ -17,8 +17,8 @@ export declare const INSTANCE_ID = "instance";
 /** ID 约定文本（判据本体；索引与错误提示共用同一份）。 */
 export declare const ID_CONVENTION: {
     readonly workflow: "flow-* = workflow asset -> complete skeleton (stage nodes / roles and groups / lines / data-node bodies)";
-    readonly role: "role-* = role asset -> full systemPrompt plus its mapping fields";
-    readonly inlineRole: "flow-xxx#<node id> = inline role pinned in that workflow asset -> full systemPrompt of that fixed version";
+    readonly role: "role-* = sub-agent role asset -> full systemPrompt plus its mapping fields (the parent agent's prompt is never recallable)";
+    readonly inlineRole: "flow-xxx#<node id> = inline sub-agent role pinned in that workflow asset -> full systemPrompt of that fixed version (the parent node is not recallable)";
 };
 /** 条目上限与摘要口径（超限截断并置 truncated，不做静默丢弃）。 */
 export declare const CATALOG_LIMITS: {

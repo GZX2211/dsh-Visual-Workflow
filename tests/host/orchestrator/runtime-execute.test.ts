@@ -221,6 +221,70 @@ describe('wfRunNode 异步路径与护栏', () => {
   })
 })
 
+describe('retryLimit 只约束失败重试（重跑已完成节点不计入）', () => {
+  /** 该节点在快照里的记录（断言 running/ok/fail 与失败重试计数）。 */
+  const snapshotNode = (entry: { snapshot: { nodes: Array<{ nodeId: string; status: string; attempts: number }> } }, nodeId: string) =>
+    entry.snapshot.nodes.find((node) => node.nodeId === nodeId)!
+
+  it('已完成节点被重新调度 5 次：不受 retryLimit 约束且失败重试计数不递增', async () => {
+    const h = await makeHarness()
+    const { entry } = await start(h, makeFlow())
+    // 第一次执行并成功结算 → 节点 ok（retryLimit=3：重试上限 4 次）
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    await h.runtime.handleSubagentEnd({
+      id: 'child-1',
+      stopReason: 'completed',
+      lastAssistantMessage: [{ type: 'text', text: '第一轮产出' }],
+    })
+    expect(snapshotNode(entry, 'n-a1').status).toBe('ok')
+    const attemptsAfterFirst = snapshotNode(entry, 'n-a1').attempts
+    expect(attemptsAfterFirst).toBe(1)
+
+    for (let round = 2; round <= 6; round += 1) {
+      const result = await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+      expect(result.status).toBe('started')
+      // 重新调度新任务不是失败重试：计数保持
+      expect(snapshotNode(entry, 'n-a1').attempts).toBe(attemptsAfterFirst)
+      await h.runtime.handleSubagentEnd({
+        id: `child-${round}`,
+        stopReason: 'completed',
+        lastAssistantMessage: [{ type: 'text', text: `第 ${round} 轮产出` }],
+      })
+      expect(snapshotNode(entry, 'n-a1').status).toBe('ok')
+    }
+    // run 级失败重试基数同样未被重跑推高
+    expect(entry.attempts.get('n-a1')).toBe(attemptsAfterFirst)
+  })
+
+  it('重新调度仍受全局调用上限约束', async () => {
+    const h = await makeHarness()
+    const { entry } = await start(h, makeFlow())
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    await h.runtime.handleSubagentEnd({ id: 'child-1', stopReason: 'completed', lastAssistantMessage: [] })
+    expect(snapshotNode(entry, 'n-a1').status).toBe('ok')
+
+    entry.callCount = GLOBAL_RUN_CALL_LIMIT
+    await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })).rejects.toMatchObject({ code: 'WF_GLOBAL_LIMIT' })
+  })
+
+  it('失败节点仍受 retryLimit 约束（成功前最多 4 次尝试）', async () => {
+    const h = await makeHarness()
+    const { entry } = await start(h, makeFlow())
+    // 第 1 次尝试失败
+    await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+    await h.runtime.handleSubagentEnd({ id: 'child-1', stopReason: 'error', lastAssistantMessage: [] })
+    expect(snapshotNode(entry, 'n-a1').status).toBe('fail')
+    // 第 2/3/4 次失败重试仍允许（attempts 递增）
+    for (let round = 2; round <= 4; round += 1) {
+      await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
+      expect(snapshotNode(entry, 'n-a1').attempts).toBe(round)
+      await h.runtime.handleSubagentEnd({ id: `child-${round}`, stopReason: 'error', lastAssistantMessage: [] })
+    }
+    // 第 5 次被上限拒绝
+    await expect(h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })).rejects.toMatchObject({ code: 'WF_RETRY_LIMIT' })
+  })
+})
+
 describe('暂停门（§4.4.2 规则 3 / §4.7 规则 4）', () => {
   it('wfRunNode(暂停节点)：run=paused + 断点持久化 + 锁保留', async () => {
     const h = await makeHarness()

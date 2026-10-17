@@ -202,9 +202,11 @@ export declare function restoreRoleAssetTo(ctx: RolePortContext, assetId: string
 export declare function retireRoleAssetRow(tx: AssetTxContext, assetId: string): void;
 /**
  * 角色晋升（算法 C）：
- *   1. 已有 Active 且绑定同一来源模版 → 走该资产的新版本路径（内容全等即 unchanged）；
- *   2. 否则内容去重：standalone 冲突直接拦截；inline/shared 冲突则合并（类型升 shared，不建新资产）；
- *   3. 均未命中 → 新建 standalone 资产（版本 1）。
+ *   1. 父代理提示词（kind='parent'）特例：资产管理只为「方便迭代」，且父代理提示词不参与
+ *      目录召回——一个工作流只有一个父代理，入库总是叠加到**唯一**那条父代理资产上；
+ *   2. 已有 Active 且绑定同一来源模版 → 走该资产的新版本路径（内容全等即 unchanged）；
+ *   3. 否则内容去重：standalone 冲突直接拦截；inline/shared 冲突则合并（类型升 shared，不建新资产）；
+ *   4. 均未命中 → 新建 standalone 资产（版本 1）。
  */
 export declare function promoteRoleVersion(ctx: RolePortContext, request: RolePromoteRequest): RoleWriteResult;
 /**

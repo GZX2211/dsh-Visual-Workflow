@@ -8,6 +8,7 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import type { Config } from './config.js'
 import { FlowStore } from './storage/flow-store.js'
 import { AssetStore } from './assets/index.js'
+import { PARENT_ROLE_DUTIES } from './prompts/index.js'
 import {
   OrchestratorRuntime,
   reconcileStaleRuns,
@@ -567,6 +568,17 @@ export class VisualWorkflowHost extends Service {
     // 数据目录结构初始化（幂等）
     await this.store.init()
 
+    // 内置父代理模板：模板库为空时播种（正文=五维职责唯一源）。模板侧无版本记账、
+    // 用户可随意改；版本化迭代走角色资产侧（见资产库播种与入库逻辑）。
+    // 失败只告警：模板播种失败不应让整个插件启动失败（用户仍可手工新建角色）。
+    try {
+      await this.ensureBuiltinParentTemplate()
+    } catch (error) {
+      this.ctx.logger.warn(
+        `[visual-workflow] 内置父代理模板播种失败（不影响启动）：${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+
     // 资产库（SQLite）初始化：失败降级为「不可用」而不是让 fiber 失败——模版编排、运行、
     // 定时任务等既有能力不依赖资产库，让新能力拖垮整个插件不划算；但降级必须显式：
     // 目录勘察与资产端点都以明确错误失败（见 requireAssetStore / ApiHost.assets 缺失 → 501），
@@ -760,6 +772,32 @@ export class VisualWorkflowHost extends Service {
     this.ctx.effect(() => () => this.dispose(), 'visualWorkflowHost.dispose')
 
     this.ctx.logger.info(`[visual-workflow] host service ready at ${this.config.dataDir}`)
+  }
+
+  /**
+   * 播种内置父代理模板（幂等）：模板库中没有任何 kind==='parent' 模板时写入一条。
+   *
+   * 为什么由宿主播种而不是 Client：模板是持久化事实，Client 只在 boot 时补齐会让落盘
+   * 文案随「当次界面语言」漂移，且插件未开界面时角色 Tab 无父代理模板。
+   * 存在性判据只有 kind==='parent'（不比对语言与内容）：库中已有任意父代理模板
+   * （用户自建或历史版本播种过的）时本次不补齐、不覆盖用户改动。
+   */
+  private async ensureBuiltinParentTemplate(): Promise<void> {
+    const roles = await this.store.listTemplates('role')
+    if (roles.some((role) => role.kind === 'parent')) return
+    await this.store.saveTemplate('role', {
+      id: 'role-parent-builtin',
+      kind: 'parent',
+      name: '父代理',
+      systemPrompt: PARENT_ROLE_DUTIES,
+      provider: '',
+      model: '',
+      presetId: 'standard',
+      retryLimit: 3,
+      reactLimit: null,
+      inputSchema: '',
+      outputSchema: '',
+    })
   }
 
   /**

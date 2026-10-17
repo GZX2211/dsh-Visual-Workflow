@@ -15,7 +15,7 @@ import { effectiveReactLimitOf, effectiveRetryLimitOf, effectiveThinkingOf } fro
 import { buildNodeBlocks } from './task-blocks.js'
 import { WfError } from './errors.js'
 import { createWaiter, type FinishArgs, type FinishResult, type RunEntry, type RunNodeArgs, type RunNodeResult, type Waiter } from './run-entry.js'
-import { setNodeStatus, terminalizeNodes } from './snapshot.js'
+import { hasProducedOutput, setNodeStatus, terminalizeNodes } from './snapshot.js'
 import { GLOBAL_RUN_CALL_LIMIT, type CallerInfo } from './seams.js'
 import { RuntimeLaunch } from './runtime-launch.js'
 
@@ -123,16 +123,23 @@ export class RuntimeExecute extends RuntimeLaunch {
     // 虚拟节点解析后一切以主节点 key 记账（共享同一子代理执行实例与快照记录）
     const resolvedNodeId = node.id
 
-    // 硬护栏：全局调用上限 + 单节点重试上限
+    // 硬护栏：全局调用上限 + 单节点失败重试上限。
     run.callCount += 1
     if (run.callCount > GLOBAL_RUN_CALL_LIMIT) {
       throw new WfError(`WF_GLOBAL_LIMIT: orchestration exceeded the global call limit (${GLOBAL_RUN_CALL_LIMIT} wf_run_node calls); stopped automatically`, 'WF_GLOBAL_LIMIT')
     }
-    const attempt = (run.attempts.get(resolvedNodeId) ?? 0) + 1
-    run.attempts.set(resolvedNodeId, attempt)
-    const effectiveRetryLimit = effectiveRetryLimitOf(node, args, this.deps.config.retryLimitDefault)
-    if (attempt > effectiveRetryLimit + 1) {
-      throw new WfError(`WF_RETRY_LIMIT: node "${labelOf(node)}" exceeded its retry limit (at most ${effectiveRetryLimit} retries)`, 'WF_RETRY_LIMIT')
+    // retryLimit 只约束**失败重试**（该节点上次已成功结算 → 本次是重新调度新任务，不算重试）：
+    // 已完成节点（ok / react-capped / armed）再次被调度既不递增失败重试计数、也不受
+    // retryLimit 约束，仍受上方全局调用上限约束。
+    const previousStatus = run.snapshot.nodes.find((item) => item.nodeId === resolvedNodeId)?.status
+    const rescheduled = previousStatus !== undefined && hasProducedOutput(previousStatus)
+    const attempt = (run.attempts.get(resolvedNodeId) ?? 0) + (rescheduled ? 0 : 1)
+    if (!rescheduled) {
+      run.attempts.set(resolvedNodeId, attempt)
+      const effectiveRetryLimit = effectiveRetryLimitOf(node, args, this.deps.config.retryLimitDefault)
+      if (attempt > effectiveRetryLimit + 1) {
+        throw new WfError(`WF_RETRY_LIMIT: node "${labelOf(node)}" exceeded its retry limit (at most ${effectiveRetryLimit} retries)`, 'WF_RETRY_LIMIT')
+      }
     }
     const effectiveReactLimit = effectiveReactLimitOf(node, args, this.deps.config.reactIterationLimitDefault)
     const thinking = effectiveThinkingOf(node, args)

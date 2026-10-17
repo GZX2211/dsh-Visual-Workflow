@@ -201,6 +201,27 @@ export function findRoleVersionByContent(
   return { assetId: parsed.assetId, versionId: parsed.versionId, row: parsed }
 }
 
+/**
+ * 唯一活跃父代理角色资产（Active 行指针）。
+ *
+ * 父代理提示词的资产管理只服务于迭代：一个工作流只有一个父代理，因此入库时总叠到同一条
+ * 资产上，而不是每改一次就新建一条。若历史数据里已有不止一条（改造前每次入库都新建），
+ * 按 Active 行的最近使用时间取第一条——此后入库只迭代它，不再继续扩散。
+ * 无活跃父代理资产返回 null（调用方按新建处理）。
+ */
+function activeParentRoleAsset(ctx: AssetTxContext): { assetId: string; versionId: number } | null {
+  const row = ctx.get(
+    `SELECT a.asset_id AS asset_id, a.version_id AS version_id
+       FROM role_asset_active a
+       JOIN role_asset_history h ON h.asset_id = a.asset_id AND h.version_id = a.version_id
+      WHERE h.kind = 'parent'
+      ORDER BY a.updated_at DESC, a.asset_id ASC
+      LIMIT 1`,
+  )
+  if (!row) return null
+  return { assetId: requireAssetId(row.asset_id), versionId: requireVersionId(row.version_id) }
+}
+
 /** 新建角色资产（版本 1）：写入历史行与 Active 行。 */
 export function createRoleAsset(
   ctx: RolePortContext,
@@ -632,13 +653,41 @@ export function retireRoleAssetRow(tx: AssetTxContext, assetId: string): void {
 
 /**
  * 角色晋升（算法 C）：
- *   1. 已有 Active 且绑定同一来源模版 → 走该资产的新版本路径（内容全等即 unchanged）；
- *   2. 否则内容去重：standalone 冲突直接拦截；inline/shared 冲突则合并（类型升 shared，不建新资产）；
- *   3. 均未命中 → 新建 standalone 资产（版本 1）。
+ *   1. 父代理提示词（kind='parent'）特例：资产管理只为「方便迭代」，且父代理提示词不参与
+ *      目录召回——一个工作流只有一个父代理，入库总是叠加到**唯一**那条父代理资产上；
+ *   2. 已有 Active 且绑定同一来源模版 → 走该资产的新版本路径（内容全等即 unchanged）；
+ *   3. 否则内容去重：standalone 冲突直接拦截；inline/shared 冲突则合并（类型升 shared，不建新资产）；
+ *   4. 均未命中 → 新建 standalone 资产（版本 1）。
  */
 export function promoteRoleVersion(ctx: RolePortContext, request: RolePromoteRequest): RoleWriteResult {
   const fields = roleContentFieldsOf(request.role)
   const templateId = request.sourceTemplateId
+  if (fields.kind === 'parent') {
+    const parentAsset = activeParentRoleAsset(ctx.tx)
+    if (parentAsset) {
+      const activeRow = readRoleVersionRow(ctx.tx, parentAsset.assetId, parentAsset.versionId)
+      if (activeRow && sameRoleFields(roleContentOf(activeRow), fields)) {
+        return {
+          assetId: parentAsset.assetId,
+          versionId: parentAsset.versionId,
+          rowId: versionRowId(parentAsset.assetId, parentAsset.versionId),
+          unchanged: true,
+          roleAssetType: activeRow.roleAssetType,
+          sharedRoleAssetIds: [],
+        }
+      }
+      const registration = addRoleVersion(ctx, {
+        assetId: parentAsset.assetId,
+        fields,
+        roleAssetType: activeRow ? activeRow.roleAssetType : 'standalone',
+        source: request.source,
+        // 与子代理入库同语义：来源绑定随本次入库刷新（「入库按钮锁定」据此判定）
+        inheritSource: { sourceTemplateId: templateId, sourceFingerprint: request.fingerprint },
+        ...(activeRow ? { previousRow: activeRow } : {}),
+      })
+      return { ...registration, sharedRoleAssetIds: [] }
+    }
+  }
   if (templateId) {
     const bound = ctx.tx.get(
       `SELECT a.asset_id AS asset_id, a.version_id AS version_id

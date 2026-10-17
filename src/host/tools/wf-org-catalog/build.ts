@@ -5,8 +5,8 @@
 //
 // 关键契约（用户裁决）：骨架必须自足——不可二次召回的内容（阶段节点、Team 配置、
 // 连线、数据节点正文与连接信息）一次性给全，保证「索引 + 多次详情召回」能拼出与
-// 工作流资产等价的完整信息；**唯一按需召回的长字段是角色 systemPrompt**，由骨架里的
-// 复合 id 指向。
+// 工作流资产等价的完整信息；**唯一按需召回的长字段是子代理角色的 systemPrompt**，
+// 由骨架里的复合 id 指向。父代理提示词不参与召回（见 DETAIL_HINT）。
 
 import { nodeParticipatesInFlow } from '../../graph/index.js'
 import { labelOf } from '../../orchestrator/index.js'
@@ -47,20 +47,24 @@ import type { GraphNode, Line, RoleNode, WorkflowDocument } from '../../shared/g
 /** 索引里的召回指引：目录是候选清单而非全部内容，详情按 ids 召回。 */
 export const DETAIL_HINT =
   'Index entries are **candidates** only (name / description / version); full content must be recalled by calling this tool again with ids: '
-  + '["flow-xxx"] = the workflow asset\'s complete skeleton; ["role-xxx"] = the role asset\'s full systemPrompt; '
+  + '["flow-xxx"] = the workflow asset\'s complete skeleton; ["role-xxx"] = the sub-agent role asset\'s full systemPrompt; '
   + '["flow-xxx#node-yyy"] = the full systemPrompt of that inline role\'s fixed version. '
   + 'The skeleton already contains stage nodes, group configuration, lines and data-node bodies (those have no second recall path); '
-  + 'the only long field recalled on demand is the role systemPrompt. A bad id among ids fails alone and does not block the rest.'
+  + 'the only long field recalled on demand is the role systemPrompt. '
+  + 'The parent agent\'s prompt is never recallable through this catalog, by any id shape. '
+  + 'A bad id among ids fails alone and does not block the rest.'
 
 /** 骨架返回体里的提示：角色提示词走复合 id 按需召回；角色版本无法解析时的取舍。 */
 export const WORKFLOW_DETAIL_NOTE =
-  'Role nodes in nodes (kind=agent|parent) omit systemPrompt: recall each one by its composite id from inlineRoles. '
+  'Role nodes in nodes (kind=agent) omit systemPrompt: recall each one by its composite id from inlineRoles. '
+  + 'The parent node (kind=parent) is the orchestrator itself: its prompt is never recallable and is absent from inlineRoles. '
   + 'roleAssetId / roleVersionId are the role asset and version this node is pinned to; when that role version row can no longer be resolved, both fields are omitted (the rest of the skeleton is unaffected).'
 
 /** 实例骨架返回体提示：第 3 层入口 + 孤立节点禁令（口径与资产骨架一致）。 */
 export const INSTANCE_DETAIL_NOTE =
   'This is the skeleton of the instance running in this session: topology only, no asset content. '
-  + 'Role nodes in nodes (kind=agent|parent) omit systemPrompt: recall each one by its instance#<node id> from inlineRoles. '
+  + 'Role nodes in nodes (kind=agent) omit systemPrompt: recall each one by its instance#<node id> from inlineRoles. '
+  + 'The parent node (kind=parent) is the orchestrator itself: its prompt is never recallable and is absent from inlineRoles. '
   + 'schedulable=false marks nodes left on the canvas without a flow line: never dispatch them.'
 
 /**
@@ -110,7 +114,12 @@ export function buildIndex(input: {
   models: CatalogModelSource[]
 }): CatalogIndex {
   const workflowEntries = input.workflows.map(workflowAssetEntryOf).filter((entry) => entry.id)
-  const roleEntries = input.roles.map(roleAssetEntryOf).filter((entry) => entry.id)
+  // 父代理提示词不参与召回（用户裁决）：父代理即调用者本人，召回它既无参考价值，
+  // 也会把「自己该是什么职责」变成可被目录内容改写的软事实。资产管理页仍可迭代它。
+  const roleEntries = input.roles
+    .filter((role) => role.kind !== 'parent')
+    .map(roleAssetEntryOf)
+    .filter((entry) => entry.id)
   const comboEntries = input.combos.map(comboEntryOf).filter((entry) => entry.id)
   const presetEntries = input.presets.map(presetEntryOf).filter((entry) => entry.id)
   const modelEntries = input.models.map(modelEntryOf).filter((entry) => entry.provider || entry.model)
@@ -280,8 +289,9 @@ export function buildWorkflowDetail(
     ...(asset.meta && Object.keys(asset.meta).length > 0 ? { meta: asset.meta } : {}),
     nodes: skeleton.nodes,
     lines: skeleton.lines,
+    // 只有 agent 的内联角色可召回；父代理提示词永不进目录（见 DETAIL_HINT）。
     inlineRoles: nodes
-      .filter((node) => node.kind === 'agent' || node.kind === 'parent')
+      .filter((node) => node.kind === 'agent')
       .map((node) => `${id}${INLINE_ROLE_SEPARATOR}${node.id}`),
     note: WORKFLOW_DETAIL_NOTE,
   }
@@ -314,8 +324,9 @@ export function buildInstanceDetail(flow: WorkflowDocument | null): CatalogInsta
     ...(flow.meta && Object.keys(flow.meta).length > 0 ? { meta: flow.meta } : {}),
     nodes: skeleton.nodes,
     lines: skeleton.lines,
+    // 只有 agent 的内联角色可召回；父代理提示词永不进目录（见 INSTANCE_DETAIL_NOTE）。
     inlineRoles: nodes
-      .filter((node) => node.kind === 'agent' || node.kind === 'parent')
+      .filter((node) => node.kind === 'agent')
       .map((node) => `${INSTANCE_ID}${INLINE_ROLE_SEPARATOR}${node.id}`),
     note: INSTANCE_DETAIL_NOTE,
   }
@@ -392,7 +403,7 @@ export function maskConnection(conn: unknown): Record<string, unknown> | undefin
   return out
 }
 
-/** 角色节点条目（不可召回字段给全；systemPrompt 走复合 id 按需召回）。 */
+/** 角色节点条目（不可召回字段给全；子代理的 systemPrompt 走复合 id 按需召回，父代理无召回通道）。 */
 function roleNodeEntry(node: RoleNode, roleAssetId?: string, roleVersionId?: number): CatalogRoleNodeEntry {
   const data = node.data
   const reasoning = trimmedOrNull(data.reasoning)

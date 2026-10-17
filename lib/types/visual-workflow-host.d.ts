@@ -204,6 +204,15 @@ export declare class VisualWorkflowHost extends Service {
     /** 启动装配（Service.init 语义：初始化失败让 fiber 失败，不吞错）。 */
     [Service.init](): Promise<void>;
     /**
+     * 播种内置父代理模板（幂等）：模板库中没有任何 kind==='parent' 模板时写入一条。
+     *
+     * 为什么由宿主播种而不是 Client：模板是持久化事实，Client 只在 boot 时补齐会让落盘
+     * 文案随「当次界面语言」漂移，且插件未开界面时角色 Tab 无父代理模板。
+     * 存在性判据只有 kind==='parent'（不比对语言与内容）：库中已有任意父代理模板
+     * （用户自建或历史版本播种过的）时本次不补齐、不覆盖用户改动。
+     */
+    private ensureBuiltinParentTemplate;
+    /**
      * 自主编排工具的宿主能力适配（P1）：把宿主 service 的 store / 运行时 / 生态枚举
      * 收敛成两个工具所需的最小缝。为什么要一层适配而不是把 service 直接传出：
      * 工具只应看到自己需要的能力（单测可替换 fake），避免工具层反向依赖宿主内部结构。

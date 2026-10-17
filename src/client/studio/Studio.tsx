@@ -252,7 +252,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
 
   // ---------- 初始化加载 ----------
   useStudioBoot(
-    state, dispatch, notify, toastError, t, remote, workflows, flowTemplates, templates, serviceControl,
+    state, dispatch, notify, toastError, remote, workflows, flowTemplates, templates, serviceControl,
     pickInitialInstanceForSession,
   )
 

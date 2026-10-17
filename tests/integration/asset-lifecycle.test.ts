@@ -225,13 +225,9 @@ describe('资产闭环（宿主装配 + SQLite + 勘察召回）', () => {
 
     const retiredIndex = (await executeOrgCatalog(seam, {})) as CatalogIndex
     expect(retiredIndex.assets.workflows).toEqual([])
-    // 流程归档不触发角色资产归档（流程与角色解耦）：工作流带来的内联角色资产仍是活跃资产
-    // 内置父代理资产（standalone）由宿主播种，不属于本用例的流程角色，故按其类型过滤后比对
-    expect(
-      retiredIndex.assets.roles
-        .filter((item) => item.id !== PARENT_DUTIES_ASSET_ID)
-        .map((item) => item.roleAssetType),
-    ).toEqual(['inline'])
+    // 流程归档不触发角色资产归档（流程与角色解耦）：工作流带来的内联角色资产仍是活跃资产。
+    // 内置父代理资产不进勘察索引（父代理提示词不参与召回），故索引里只剩流程内联角色。
+    expect(retiredIndex.assets.roles.map((item) => item.roleAssetType)).toEqual(['inline'])
     // 归档经验在召回面读取处即不可见（语义在读取处生效，不靠调用方自觉过滤）
     expect(await assets.getRows([experienceId], { activeOnly: true })).toEqual([])
 

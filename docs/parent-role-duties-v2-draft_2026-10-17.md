@@ -194,17 +194,16 @@
   两处断言排除该内置资产。
 - 验证：全量 246 文件 / 3051 用例通过。
 
-### 5.2 待办（后续批次）
+### 5.2 后续批次（已全部落地，按用户口径「第 2、3、4 批一起做」）
 
-| 批次 | 内容 | 关键点 |
+| 批次 | 内容 | 状态 |
 |---|---|---|
-| 第 2 批 | client 承载切换 | `useStudioBoot` 退役内置父代理模板播种；角色 Tab 的「父代理」卡固定指向 `role-parent-duties` 资产；放置节点时取该资产详情并经 `placeRoleAssetNode` 建立 `sourceAssetId` 引用（改提示词即资产叠加版本） |
-| 第 3 批 | 冲突硬编码清理 | `texts/parent-orchestrator.ts` / `parent-hybrid.ts`：「即终止运行」→ 放置暂停门；「只能重试一次」→ 与 `retryLimit` 实际语义一致 |
-| 第 4 批 | E5 计数分离 | `retryLimit` 只限制失败重试；「重新调度已完成节点」单独计数，仍受 `GLOBAL_RUN_CALL_LIMIT` 约束 |
-| 第 5 批 | 子代理侧对应条款 | 无法决策时上报父代理、问题在节点运行期内解决、结算汇报含未解决问题（§二C 表） |
+| 第 2 批 | 正文来源统一（D1 宿主播种模板）、召回限制（D2）、父代理节点不登记角色资产（D3）、父代理入库叠加唯一资产版本（D4） | ✅ 已落地（§七） |
+| 第 3 批 | 冲突硬编码清理 | ✅ 已落地（提交 `e9d586b`） |
+| 第 4 批 | E5 重跑与失败重试计数分离 | ✅ 已落地（§七） |
+| 第 5 批 | 子代理侧对应条款 | ⏸ 用户明确暂缓（下一期） |
 
-> 中间态说明：第 1 批落地后，资产库已有内置父代理职责资产，但**新建父代理节点仍走内置模板**
-> （模板正文仍是旧的一句话）——第 2 批完成后两条路径才合一。
+> 中间态已消除：新建父代理实例的模板正文 = 五维正文（host `texts/` 唯一源），与内置资产 V1 同源。
 
 ---
 
@@ -297,68 +296,36 @@
 
 ---
 
-## 七、执行交接（上下文压缩后按此继续）
+## 七、执行结果（D1–D4 / E5 已全部落地）
 
 ### 7.1 当前状态
 
-- 分支 `feature/branch-1`；工作区干净；
-- 提交：`f09b563`（第 1 批：五维正文 + 父代理职责资产播种）、
-  `e9d586b`（第 3 批 + D5：PATCH 禁止编排父代理 + 编排提示词改暂停门）；
-- `pnpm check` 全绿：**246 文件 / 3051 用例** + build + client-smoke。
+- 分支 `feature/branch-1`；
+- 提交：`f09b563`（第 1 批：五维正文 + 父代理职责资产播种）、`e9d586b`（第 3 批 + D5：
+  PATCH 禁止编排父代理 + 编排提示词改暂停门）、本提交（第 2/4 批：D1–D4 + E5）；
+- `pnpm check` 全绿：**246 文件 / 3069 用例** + build + client-smoke。
 
-### 7.2 已完成
+### 7.2 D1–D4 / E5 落地明细
 
-| 项 | 内容 |
+| 项 | 落点 |
 |---|---|
-| 五维正文 | `src/host/prompts/texts/parent-role-duties.ts`（`PARENT_ROLE_DUTIES`，经 `prompts/index.ts` 导出；中文单份、无模板变量、非组装） |
-| 资产播种 | `src/host/assets/parent-duties-seed.ts`（`PARENT_DUTIES_ASSET_ID = 'role-parent-duties'`、`seedParentDutiesAsset`）；`AssetStore.seedParentDuties()` 由宿主在 `store.init()` 后显式调用（**不要**放回 `AssetStore.init`，会让 19 个既有断言失效） |
-| 播种测试 | `tests/host/assets/parent-duties-seed.test.ts`（4 用例）；`tests/integration/asset-lifecycle.test.ts` 两处断言排除内置资产 |
-| D5（PATCH 禁父代理） | `src/host/tools/wf-graph-patch/apply.ts`：`rejectParentSelfEdit` / `assertNotParentNode` / `assertNoParentEndpoint` 三守卫，接入 create_node / remove_node / update_node_data / connect / disconnect；新稳定码 `WF_PARENT_SELF_EDIT` 已在 `api/routes.ts` 的 `ERROR_STATUS_EXEMPT` 登记 |
-| D6（提示词措辞） | `texts/parent-orchestrator.ts`、`texts/parent-hybrid.ts` 第 4 条：「即终止运行」→「放置暂停门」；「只能重试一次」→「失败重试受节点重试上限约束」 |
+| D1 内置父代理模板宿主播种 | `src/host/visual-workflow-host.ts`：init 内 `store.init()` 后调 `ensureBuiltinParentTemplate()`（失败只告警），正文 = `PARENT_ROLE_DUTIES`，id `role-parent-builtin`、name「父代理」、presetId 'standard'、retryLimit 3；模板库已有任意 `kind='parent'` 模板时跳过不覆盖。删除 `useStudioBoot` 的 client 播种（hook 入参随之去掉词典）与 `builtinParentPrompt` 词典项（中英两处） |
+| D2 catalog 禁召回父代理提示词 | `src/host/tools/wf-org-catalog/build.ts`：索引过滤 parent 资产、`inlineRoles` 只列 agent、DETAIL_HINT / WORKFLOW_DETAIL_NOTE / INSTANCE_DETAIL_NOTE 与 `ID_CONVENTION` 声明父代理不可召回；`tool.ts`：`role-*` 命中 parent、`<flow-id>#<父代理节点>`、`instance#<父代理节点>` 一律单条 `WF_BAD_ARGS`（`roleNodeNotRecallableError`），同批其余照常召回 |
+| D3 父代理节点不登记角色资产 | `src/host/assets/workflow-assets.ts`：`insertWorkflowVersion` 对 parent 走完整节点落库；`isFullNodeShell` 改为形状判据（非角色种类恒全节点；agent 恒壳；parent 有 `data` 即全节点，**旧版本行里的父代理壳仍按壳读回**，无需迁移）；`previewWorkflowAssetCascade` 同判据跳过 parent |
+| D4 父代理入库叠加唯一资产 | `src/host/assets/role-assets.ts`：`promoteRoleVersion` 顶部特例——`activeParentRoleAsset()`（Active JOIN history、`kind='parent'`、`updated_at DESC, asset_id ASC`）命中则 `addRoleVersion` 叠加版本（内容与 Active 全等 → `unchanged`），来源绑定刷新为**本次入库的模板 id + 指纹**（入库按钮锁定判据）；未命中走新建 standalone |
+| E5 重跑 / 失败重试计数分离 | `src/host/orchestrator/runtime-execute.ts`：读快照节点上次状态，`hasProducedOutput`（ok / react-capped / armed）→ 不递增 `run.attempts`、不做 `WF_RETRY_LIMIT` 判定；其余递增并受 `retryLimit`；`GLOBAL_RUN_CALL_LIMIT` 对两种路径都生效 |
 
-### 7.3 剩余工作（按 D1 → D2 → D3 → D4 → E5 顺序）
+测试增量（+18 用例）：`tests/host/visual-workflow-host.test.ts`（播种 + 重启不覆盖）、
+`tests/host/tools/wf-org-catalog/{build,tool}.test.ts`（索引/三种详情来源禁召回）、
+`tests/host/assets/workflow-assets.test.ts`（不产 parent 资产 / 内容完整保存 / 旧壳读回）、
+`tests/host/assets/role-assets.test.ts`（叠加版本 / unchanged / 回滚 / 不合并子代理资产）、
+`tests/host/orchestrator/runtime-execute.test.ts`（重跑 5 次不受限 / 全局上限仍生效 / 失败仍受限）。
 
-**D1｜内置父代理模板改由宿主播种（正文统一）**
-- 删除 client 播种：`src/client/hooks/useStudioBoot.ts` 中 `if (!roleItems.some((item) => item.kind === 'parent')) { ... saveTemplate('role', ...) }` 整块（约 80-102 行，含注释）。
-- 新增宿主播种：`src/host/visual-workflow-host.ts` 的 init 里 `await this.store.init()` 之后：
-  用 `await this.store.listTemplates('role')` 判有无 `kind === 'parent'`，没有则
-  `await this.store.saveTemplate('role', { id: 'role-parent-builtin', kind: 'parent', name: '父代理', systemPrompt: PARENT_ROLE_DUTIES, provider: '', model: '', presetId: 'standard', retryLimit: 3, reactLimit: null, inputSchema: '', outputSchema: '' })`。
-  正文 import 自 `./prompts/index.js`；name 与词典 `parentAgent` 一致（中文「父代理」，英文词典为 'Parent Agent'，单份中文播种即可）。
-- 注意：不要覆盖已有父代理模板（用户自建或已存在则跳过）。
-- 测试：`tests/host/visual-workflow-host.test.ts`（初始化后模板列表可断言新事实）；client 侧无播种后需确认 `builtinParentPrompt` 词典项是否还有消费方，没有则删除（中英两处）。
+### 7.3 剩余（下一期）
 
-**D2｜catalog 禁止召回父代理提示词（三种来源）**
-- 索引：`src/host/tools/wf-org-catalog/tool.ts` 的 `buildIndexFrom`（约 121-136 行）——`listRoleAssets()` 结果过滤 `kind !== 'parent'`。
-- 资产详情：同文件 `loadRole`（约 180-196 行）——`detail.kind === 'parent'` 时该 id 记错误（`WF_BAD_ARGS`，说明「父代理提示词不参与召回」）。
-- 内联角色：`inlineRole`（工作流资产内联，约 208 起）与 `instanceRole`（约 229-249 行）——节点 `kind === 'parent'` 同样拒绝（现有分支允许 agent/parent，把 parent 从允许集移除）。
-- 可选：`build.ts` 的 `idShapesHint`（约 52/62 行）补一句「父代理提示词不可召回」。
-- 测试：`tests/host/tools/wf-org-catalog/**`、`tests/integration/asset-lifecycle.test.ts`。
+- **第 5 批（用户明确暂缓）**：子代理侧条款（无法决策上报父代理、问题在节点运行期内解决、结算汇报含未解决问题）。
+- **资产复用 / 改造闭环**：`sourceAssetId` 被 `wf_graph_patch` 剥离的问题（用户排下一期）。
 
-**D3｜父代理节点不登记角色资产（改全节点壳）**
-- `src/host/assets/workflow-assets.ts` 的 `insertWorkflowVersion`（约 488-500 行）：把
-  `if (!isRoleNode(node))` 改为 `if (!isRoleNode(node) || node.kind === 'parent')`，父代理节点走 `shells.push(node)`。
-- `rebuildNodes` 已支持 full shell，无需改；旧版本行（父代理曾按 roleVersionIds 存）仍按原路径重建，无需迁移。
-- 注释说明理由：父代理提示词只存在于实例节点与用户入库的那条资产，工作流保存不再产生 parent 角色资产。
-- 测试：`tests/host/assets/workflow-assets.test.ts` 中涉及 parent 节点的用例（grep `kind: 'parent'`），断言「不再新增 parent 资产、工作流资产仍完整保存节点内容」。
-
-**D4｜父代理入库命中唯一资产则叠加版本**
-- 实现位置：`src/host/assets/role-assets.ts:639` `promoteRoleVersion`（`promoteRole` 的核心）。
-- 特例：`request.role.kind === 'parent'` 时
-  1. 查已有 parent 资产：`role_asset_active JOIN role_asset_history ... WHERE h.kind='parent' ORDER BY a.updated_at DESC LIMIT 1`；
-  2. 命中 → 用 `addRoleVersion`（该 assetId，新 fields，`inheritSource` 取该资产 Active 行的 sourceTemplateId/sourceFingerprint）追加版本并移动 Active；内容与 Active 全等时沿用现有 `unchanged` 语义；
-  3. 未命中 → 走现有 `createRoleAsset`。
-- 子代理逻辑不动。测试：`tests/host/assets/role-assets.test.ts` 新增「父代理模板入库 → 资产 id 不变、版本号 +1、可回滚」用例。
-
-**E5｜重跑与失败重试计数分离**
-- 位置：`src/host/orchestrator/runtime-execute.ts:131-135`
-  `const attempt = (run.attempts.get(resolvedNodeId) ?? 0) + 1` / `if (attempt > effectiveRetryLimit + 1) throw WF_RETRY_LIMIT`。
-- 改法：进入 `wfRunNode` 时读取该节点上次快照状态（`run.snapshot.nodes` 里 `nodeId === resolvedNodeId` 的 status）：
-  - 上次为 `ok`（已完成节点被重新调度处理新任务）→ **不递增** `run.attempts`、不做 `WF_RETRY_LIMIT` 判定（仍受 `GLOBAL_RUN_CALL_LIMIT`）；
-  - 其他（pending/failed/running）→ 现状：递增并受 `retryLimit` 约束。
-- `setNodeStatus(..., 'running', { attempts })` 继续写失败重试次数（重跑时保持旧值）。
-- 测试：`tests/host/orchestrator/runtime-execute.test.ts`（新增：已完成节点重跑 N 次不被 `WF_RETRY_LIMIT` 拒；失败节点仍受上限）。
-
-**第 5 批（用户明确暂缓）**：子代理侧条款（无法决策上报父代理、问题在节点运行期内解决、结算汇报含未解决问题）。
 
 ### 7.4 关键裁决与红线（不得偏离）
 
@@ -377,6 +344,10 @@
 - **暂停门**：`wf_run_node(pause 节点 id)` → run 置 `paused`、写 `resumeFromNodeId`、持久化，返回 `{status:'paused'}`（`runtime-execute.ts:87-99`）；pause 节点必须同时有 flow-in/flow-out。
 - **instance 骨架**已含数据节点正文与全部连线（`wf-org-catalog/build.ts:52,291-316`）→ 父代理可判定「图上是否已有任务」。
 - **资产列表排序**：`ORDER BY a.updated_at DESC, a.asset_id ASC` → 新入库自然置顶。
+- **父代理节点落库形状**：完整节点对象；读回判据是形状（`parent` 且带 `data` 即全节点），
+  旧版本行里的父代理壳（无 `data`）仍按壳从角色版本行回填 —— 不需要数据迁移。
+- **父代理入库的来源绑定**：刷新为本次入库的模板 id + 指纹（不是继承 Active 行），否则
+  「入库按钮锁定」（`isPromoteLocked`）会锁在旧模板上。
 - 模板/资产/实例三层现状见 §六.1（无需重构）。
 - 内置父代理资产 id：`role-parent-duties`（`src/host/assets/parent-duties-seed.ts`）。
 - 词典值：`parentAgent` 中文「父代理」、英文 'Parent Agent'（`src/client/i18n.ts:24/556`）。

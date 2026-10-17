@@ -33,7 +33,7 @@ import {
 } from './fixtures.js'
 import type { CatalogIndex, CatalogInstanceDetail, CatalogInstanceUnavailable, CatalogRoleNodeEntry, CatalogWorkflowDetail } from '../../../../src/host/tools/wf-org-catalog/types.js'
 import type { WorkflowAssetSummary } from '../../../../src/host/shared/asset-types.js'
-import type { WorkflowDocument } from '../../../../src/host/shared/graph-model.js'
+import type { GraphNode, WorkflowDocument } from '../../../../src/host/shared/graph-model.js'
 
 /** 取骨架里的角色节点条目（测试专用窄化）。 */
 function roleNodeOf(detail: CatalogWorkflowDetail, id: string): CatalogRoleNodeEntry {
@@ -449,5 +449,51 @@ describe('schedulable（孤立节点标注：与既有编排清单同口径）',
     for (const groupId of groupIds) {
       expect(detail.nodes.find((node) => node.id === groupId)).toMatchObject({ schedulable: false })
     }
+  })
+})
+
+describe('父代理提示词不参与召回（用户裁决）', () => {
+  /** 父代理节点样本：拓扑可见，但它的 systemPrompt 没有召回通道。 */
+  function parentNode(): GraphNode {
+    return {
+      id: 'pp',
+      kind: 'parent',
+      position: { x: 0, y: 0 },
+      data: {
+        label: '父代理',
+        systemPrompt: '父代理职责（不该被目录召回）',
+        provider: 'deepseek',
+        model: 'deepseek-chat',
+        presetId: 'standard',
+        retryLimit: 3,
+      },
+    }
+  }
+
+  it('索引不列父代理角色资产（资产管理页仍可迭代，召回目录不含它）', () => {
+    const index = buildIndex({
+      ...emptyIndexInput,
+      roles: [
+        roleAssetSummaryFixture({ assetId: 'role-parent', kind: 'parent', name: '父代理职责' }),
+        roleAssetSummaryFixture(),
+      ],
+    })
+    expect(index.assets.roles.map((role) => role.id)).toEqual(['role-1'])
+  })
+
+  it('工作流资产骨架：父代理节点保留拓扑，但不进 inlineRoles，note 声明不可召回', () => {
+    const base = workflowAssetDetailFixture()
+    const detail = buildWorkflowDetail({ ...base, nodes: [...base.nodes, parentNode()] })
+    expect(detail.nodes.find((node) => node.id === 'pp')).toMatchObject({ kind: 'parent', label: '父代理' })
+    expect(detail.inlineRoles).toEqual(['flow-1#a1'])
+    expect(detail.note).toContain('never recallable')
+  })
+
+  it('实例骨架同理：父代理节点保留拓扑，但 inlineRoles 只有 agent', () => {
+    const flow = instanceFlowFixture()
+    const detail = instanceSkeletonOf({ ...flow, nodes: [...flow.nodes, parentNode()] })
+    expect(detail.nodes.find((node) => node.id === 'pp')).toMatchObject({ kind: 'parent' })
+    expect(detail.inlineRoles).toEqual(['instance#a1', 'instance#a2'])
+    expect(detail.note).toContain('never recallable')
   })
 })

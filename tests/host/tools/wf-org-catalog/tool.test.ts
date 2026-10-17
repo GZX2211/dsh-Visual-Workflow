@@ -16,8 +16,9 @@ import { executeOrgCatalog, registerWfOrgCatalog } from '../../../../src/host/to
 import { listEcosystemModels } from '../../../../src/host/ecosystem-directory.js'
 import { CATALOG_LIMITS } from '../../../../src/host/tools/wf-org-catalog/types.js'
 import { WfError } from '../../../../src/host/orchestrator/index.js'
-import { makeCatalogHost } from './fixtures.js'
+import { makeCatalogHost, instanceFlowFixture, roleAssetDetailFixture, roleAssetSummaryFixture, workflowAssetDetailFixture } from './fixtures.js'
 import type { CatalogDetails, CatalogIndex, CatalogRoleNodeEntry, CatalogWorkflowDetail } from '../../../../src/host/tools/wf-org-catalog/types.js'
+import type { GraphNode } from '../../../../src/host/shared/graph-model.js'
 import type { ToolDefinitionLike } from '../../../../src/host/tools/infrastructure/define-tool.js'
 
 /** 工具注册用的最小 ctx fake（把注册到的定义收集起来）。 */
@@ -384,5 +385,98 @@ describe('executeOrgCatalog：instance 召回（运行实例的两层）', () =>
     const { host } = makeCatalogHost()
     const out = await executeOrgCatalog(host, { ids: ['flow-1'] }) as CatalogDetails
     expect(out.assets[0]).toMatchObject({ type: 'workflow', id: 'flow-1' })
+  })
+})
+
+describe('executeOrgCatalog：父代理提示词不参与召回（用户裁决）', () => {
+  const SESSION = 'sess-1'
+  const PARENT_PROMPT = '父代理职责（不该被目录召回）'
+
+  /** 父代理节点样本：拓扑可见，但它的 systemPrompt 没有召回通道。 */
+  function parentNode(): GraphNode {
+    return {
+      id: 'pp',
+      kind: 'parent',
+      position: { x: 0, y: 0 },
+      data: {
+        label: '父代理',
+        systemPrompt: PARENT_PROMPT,
+        provider: 'deepseek',
+        model: 'deepseek-chat',
+        presetId: 'standard',
+        retryLimit: 3,
+      },
+    }
+  }
+
+  it('索引不列父代理角色资产', async () => {
+    const base = makeCatalogHost().host
+    const host = {
+      ...base,
+      assets: {
+        ...base.assets,
+        async listRoleAssets() {
+          return [roleAssetSummaryFixture({ assetId: 'role-parent', kind: 'parent' }), roleAssetSummaryFixture()]
+        },
+      },
+    }
+    const out = await executeOrgCatalog(host, {}) as CatalogIndex
+    expect(out.assets.roles.map((role) => role.id)).toEqual(['role-1'])
+  })
+
+  it('父代理角色资产 id → 单条 WF_BAD_ARGS，且提示词不进返回体', async () => {
+    const base = makeCatalogHost().host
+    const host = {
+      ...base,
+      assets: {
+        ...base.assets,
+        async getRoleAsset(assetId: string) {
+          if (assetId === 'role-parent') {
+            return roleAssetDetailFixture({ assetId: 'role-parent', kind: 'parent', systemPrompt: PARENT_PROMPT })
+          }
+          return base.assets.getRoleAsset(assetId)
+        },
+      },
+    }
+    const out = await executeOrgCatalog(host, { ids: ['role-parent', 'role-1'] }) as CatalogDetails
+    expect(out.assets.map((asset) => asset.id)).toEqual(['role-1'])
+    expect(out.errors).toEqual([{
+      id: 'role-parent',
+      code: 'WF_BAD_ARGS',
+      message: expect.stringContaining('parent agent'),
+    }])
+    expect(JSON.stringify(out)).not.toContain(PARENT_PROMPT)
+  })
+
+  it('工作流资产里的父代理内联角色 → 单条 WF_BAD_ARGS，不影响同批子代理角色', async () => {
+    const nodes = [...workflowAssetDetailFixture().nodes, parentNode()]
+    const base = makeCatalogHost().host
+    const host = {
+      ...base,
+      assets: { ...base.assets, async getWorkflowAsset() { return workflowAssetDetailFixture({ nodes }) } },
+    }
+    const out = await executeOrgCatalog(host, { ids: ['flow-1#pp', 'flow-1#a1'] }) as CatalogDetails
+    expect(out.assets.map((asset) => asset.id)).toEqual(['flow-1#a1'])
+    expect(out.errors).toEqual([{
+      id: 'flow-1#pp',
+      code: 'WF_BAD_ARGS',
+      message: expect.stringContaining('parent agent'),
+    }])
+    expect(JSON.stringify(out)).not.toContain(PARENT_PROMPT)
+  })
+
+  it('运行实例里的父代理内联角色 → 单条 WF_BAD_ARGS', async () => {
+    const flow = instanceFlowFixture()
+    const host = makeCatalogHost({
+      getActiveRunFlow: async () => ({ ...flow, nodes: [...flow.nodes, parentNode()] }),
+    }).host
+    const out = await executeOrgCatalog(host, { ids: ['instance#pp'] }, SESSION) as CatalogDetails
+    expect(out.assets).toEqual([])
+    expect(out.errors).toEqual([{
+      id: 'instance#pp',
+      code: 'WF_BAD_ARGS',
+      message: expect.stringContaining('parent agent'),
+    }])
+    expect(JSON.stringify(out)).not.toContain(PARENT_PROMPT)
   })
 })

@@ -17,7 +17,6 @@ export declare const zh: {
     flowInstances: string;
     flowTemplates: string;
     parentAgent: string;
-    builtinParentPrompt: string;
     roleTemplates: string;
     files: string;
     databases: string;

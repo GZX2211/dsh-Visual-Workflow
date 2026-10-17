@@ -6,7 +6,6 @@ import type { FlowTemplatesFace } from './useFlowTemplates.js';
 import type { TemplatesFace } from './useTemplates.js';
 import type { ServiceControlFace } from './useServiceControl.js';
 import type { ToastFace } from './useToast.js';
-import type { Dict } from '../i18n.js';
 /** 自动选中实例判定（当前主会话实例列表 + 全量活跃 run；运行中>暂停>最新）。 */
 type PickInitialInstance = (currentSessionInstances: Array<{
     id: string;
@@ -17,7 +16,7 @@ type PickInitialInstance = (currentSessionInstances: Array<{
     status: string;
 }>) => string | null;
 /** 初始化加载（工作台全局化：挂载时执行一次；列表为全量跨会话）。 */
-export declare function useStudioBoot(state: StudioState, dispatch: Dispatch<StudioAction>, _notify: ToastFace['toast'], toastError: ToastFace['toastError'], t: Dict, remote: RemoteFace, workflows: WorkflowsFace, flowTemplates: FlowTemplatesFace, templates: TemplatesFace, serviceControl: ServiceControlFace, pickInitialInstance: PickInitialInstance): void;
+export declare function useStudioBoot(state: StudioState, dispatch: Dispatch<StudioAction>, _notify: ToastFace['toast'], toastError: ToastFace['toastError'], remote: RemoteFace, workflows: WorkflowsFace, flowTemplates: FlowTemplatesFace, templates: TemplatesFace, serviceControl: ServiceControlFace, pickInitialInstance: PickInitialInstance): void;
 /**
  * 进入工作台自动选中实例（工作台全局化改版）：从**当前主会话**的实例列表中
  * 选出默认打开的实例 id。规则（优先级）：

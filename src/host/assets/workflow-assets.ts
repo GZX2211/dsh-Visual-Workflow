@@ -61,7 +61,7 @@ import {
 /** 角色节点的壳（只保留结构字段，内容字段由角色版本行回填）。 */
 export interface NodeShell {
   id: string
-  /** 只有角色种类会落成壳；其余种类落库的是完整节点对象（见 PersistedShell）。 */
+  /** 只有子代理角色会落成壳；其余种类（含父代理）落库的是完整节点对象（见 PersistedShell）。 */
   kind: 'parent' | 'agent'
   position: { x: number; y: number }
   groupId?: string | null
@@ -69,18 +69,26 @@ export interface NodeShell {
 }
 
 /**
- * 持久化节点：非角色节点落库的是**完整节点对象**（内容自包含，无需 join），
- * 角色节点落库的是壳（内容在角色版本行）。判别联合让写侧与读侧都不必再用
+ * 持久化节点：非**角色登记**节点落库的是**完整节点对象**（内容自包含，无需 join），
+ * 角色节点（agent）落库的是壳（内容在角色版本行）。判别联合让写侧与读侧都不必再用
  * 双重断言掩盖「声明窄于事实」——磁盘 JSON 形状不变。
+ *
+ * 父代理节点按完整节点落库（不登记角色资产，用户裁决），但历史版本行里可能残留
+ * 父代理壳，故读侧判据必须兼容两种形状。
  */
 export type PersistedShell = NodeShell | GraphNode
 
 /**
- * 判别联合收窄：非角色节点落库的是完整节点对象（角色节点为壳）。
- * 与写侧的 `isRoleNode` 严格互补——两侧判据必须成对，否则读回会把壳误当完整节点。
+ * 判别联合收窄：落库的是完整节点对象还是角色壳。
+ *
+ * 非角色种类恒为完整节点；agent 恒为壳（写侧从不把 agent 落成完整节点）。
+ * 父代理自「不登记角色资产」改造起按完整节点落库，而旧数据里仍是壳——以有无 `data`
+ * 区分（壳不带 data），使新旧形状都能读回，无需数据迁移。
  */
 function isFullNodeShell(shell: PersistedShell): shell is GraphNode {
-  return shell.kind !== 'parent' && shell.kind !== 'agent'
+  if (shell.kind !== 'parent' && shell.kind !== 'agent') return true
+  if (shell.kind === 'agent') return false
+  return (shell as GraphNode).data !== undefined
 }
 
 /** 工作流资产版本行的内容字段（不含审计列）。 */
@@ -486,8 +494,10 @@ function insertWorkflowVersion(
   const roleRefs: WorkflowAssetRoleRef[] = []
   const shells: PersistedShell[] = []
   for (const node of request.nodes) {
-    if (!isRoleNode(node)) {
-      // 非角色节点原样落库（完整快照，无需 join）
+    // 父代理提示词不登记角色资产（用户裁决）：它只存在于实例节点正文与用户手工入库的
+    // 那条资产里；工作流保存因此不产生 parent 角色资产，父代理节点按完整节点对象落库。
+    if (!isRoleNode(node) || node.kind === 'parent') {
+      // 非角色登记节点原样落库（完整快照，无需 join）
       shells.push(node)
       continue
     }
@@ -672,7 +682,9 @@ export function previewWorkflowAssetCascade(
 ): RoleAssetReference[] {
   const impacted = new Map<string, RoleAssetReference>()
   for (const node of input.nodes) {
-    if (!isRoleNode(node)) continue
+    // 父代理节点不登记角色资产（与 insertWorkflowVersion 同一判据）：预览也不得声称
+    // 会因它牵连其他工作流资产。
+    if (!isRoleNode(node) || node.kind === 'parent') continue
     const declared = typeof node.data.sourceAssetId === 'string' ? node.data.sourceAssetId : ''
     if (!declared || !isRoleAssetLive(ctx, declared)) continue
     const active = readRoleActive(ctx, declared)
@@ -908,7 +920,7 @@ function workflowDetailOf(ctx: AssetTxContext, row: WorkflowAssetRow): WorkflowA
   }
 }
 
-/** 角色节点壳：只保留结构字段（内容字段由角色版本行回填）。 */
+/** 子代理角色节点壳：只保留结构字段（内容字段由角色版本行回填）。 */
 function roleShellOf(node: RoleNode): NodeShell {
   const shell: NodeShell = { id: node.id, kind: node.kind, position: node.position }
   if (node.data.groupId !== undefined) shell.groupId = node.data.groupId

@@ -6,7 +6,7 @@ import { type RolePortContext } from './role-assets.js';
 /** 角色节点的壳（只保留结构字段，内容字段由角色版本行回填）。 */
 export interface NodeShell {
     id: string;
-    /** 只有角色种类会落成壳；其余种类落库的是完整节点对象（见 PersistedShell）。 */
+    /** 只有子代理角色会落成壳；其余种类（含父代理）落库的是完整节点对象（见 PersistedShell）。 */
     kind: 'parent' | 'agent';
     position: {
         x: number;
@@ -16,9 +16,12 @@ export interface NodeShell {
     sourceAssetId?: string;
 }
 /**
- * 持久化节点：非角色节点落库的是**完整节点对象**（内容自包含，无需 join），
- * 角色节点落库的是壳（内容在角色版本行）。判别联合让写侧与读侧都不必再用
+ * 持久化节点：非**角色登记**节点落库的是**完整节点对象**（内容自包含，无需 join），
+ * 角色节点（agent）落库的是壳（内容在角色版本行）。判别联合让写侧与读侧都不必再用
  * 双重断言掩盖「声明窄于事实」——磁盘 JSON 形状不变。
+ *
+ * 父代理节点按完整节点落库（不登记角色资产，用户裁决），但历史版本行里可能残留
+ * 父代理壳，故读侧判据必须兼容两种形状。
  */
 export type PersistedShell = NodeShell | GraphNode;
 /** 工作流资产版本行的内容字段（不含审计列）。 */

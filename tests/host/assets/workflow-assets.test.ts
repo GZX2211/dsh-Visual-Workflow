@@ -1255,3 +1255,115 @@ describe('读路径的查询次数（N+1 与查重短路）', () => {
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// 父代理节点不登记角色资产（用户裁决）：父代理提示词只存在于实例节点正文与
+// 用户手工入库的那条资产；工作流保存按**完整节点**落库，不产生 parent 角色资产。
+// ---------------------------------------------------------------------------
+
+describe('父代理节点不登记角色资产', () => {
+  /** 含父代理 + 子代理节点的工作流（子代理节点用于对照「只有 agent 会登记」）。 */
+  function flowNodes(parentPrompt: string): RoleNode[] {
+    return [
+      roleNode({ id: 'pp', kind: 'parent', data: { label: '父代理', systemPrompt: parentPrompt } }),
+      roleNode({ id: 'n1' }),
+    ]
+  }
+
+  it('首次晋升：只有子代理被登记为角色资产，父代理节点内容随工作流资产完整保存', async () => {
+    const result = await store.promoteWorkflow({
+      templateId: 'tpl-flow-parent',
+      fingerprint: 'fp-parent-1',
+      mode: 'mode1',
+      name: '父代理流程',
+      description: '含父代理节点',
+      nodes: flowNodes('父代理职责正文'),
+      lines: [],
+      source: 'human',
+    })
+
+    // 资产库只有子代理角色资产：父代理不登记、不产生版本
+    const roles = await store.listRoleAssets()
+    expect(roles.map((role) => role.kind)).toEqual(['agent'])
+    expect(result.sharedRoleAssetIds).toEqual([])
+
+    const detail = await store.getWorkflowAsset(result.assetId)
+    expect(detail?.roleVersionIds.map((ref) => ref.nodeId)).toEqual(['n1'])
+    expect(detail?.nodes.find((node) => node.id === 'pp')).toMatchObject({
+      id: 'pp',
+      kind: 'parent',
+      data: { label: '父代理', systemPrompt: '父代理职责正文' },
+    })
+  })
+
+  it('再次保存改了父代理提示词：升版且内容生效，仍不新增角色资产', async () => {
+    const first = await store.promoteWorkflow({
+      templateId: 'tpl-flow-parent',
+      fingerprint: 'fp-parent-1',
+      mode: 'mode1',
+      name: '父代理流程',
+      description: '',
+      nodes: flowNodes('父代理职责正文 V1'),
+      lines: [],
+      source: 'human',
+    })
+    const second = await store.promoteWorkflow({
+      templateId: 'tpl-flow-parent',
+      fingerprint: 'fp-parent-2',
+      mode: 'mode1',
+      name: '父代理流程',
+      description: '',
+      nodes: flowNodes('父代理职责正文 V2'),
+      lines: [],
+      source: 'human',
+    })
+
+    expect(second).toMatchObject({ assetId: first.assetId, versionId: 2, unchanged: false })
+    expect((await store.listRoleAssets()).map((role) => role.kind)).toEqual(['agent'])
+    const detail = await store.getWorkflowAsset(first.assetId)
+    expect(detail?.versionId).toBe(2)
+    expect(detail?.nodes.find((node) => node.id === 'pp')).toMatchObject({
+      data: { systemPrompt: '父代理职责正文 V2' },
+    })
+  })
+
+  it('旧版本行里残留的父代理壳仍按壳读回（无迁移）', async () => {
+    const parentRole = await store.promoteRole({
+      templateId: 'tpl-parent',
+      fingerprint: 'fp-parent-role',
+      role: roleTemplate({ kind: 'parent', name: '父代理', systemPrompt: '旧形状父代理职责' }),
+      source: 'human',
+    })
+    const flow = await store.promoteWorkflow({
+      templateId: 'tpl-flow-parent',
+      fingerprint: 'fp-parent-legacy',
+      mode: 'mode1',
+      name: '旧父代理流程',
+      description: '',
+      nodes: [roleNode({ id: 'pp', kind: 'parent', data: { label: '父代理', systemPrompt: '旧形状父代理职责' } })],
+      lines: [],
+      source: 'human',
+    })
+    // 把新形状（完整节点）改写回旧形状（父代理壳 + 角色版本行引用），模拟改造前的资产行
+    store.close()
+    const raw = openAssetDatabase(root)
+    try {
+      const shells = [{ id: 'pp', kind: 'parent', position: { x: 10, y: 20 } }]
+      const refs = [{ nodeId: 'pp', roleVersionId: parentRole.rowId }]
+      runSql(
+        raw,
+        'UPDATE workflow_asset_history SET nodes_json = ?, role_version_ids = ? WHERE asset_id = ?',
+        [JSON.stringify(shells), JSON.stringify(refs), flow.assetId],
+      )
+      const { ctx } = countingContext(raw)
+      const detail = getWorkflowAssetDetail(ctx, flow.assetId)
+      expect(detail?.nodes.find((node) => node.id === 'pp')).toMatchObject({
+        id: 'pp',
+        kind: 'parent',
+        data: { label: '父代理', systemPrompt: '旧形状父代理职责' },
+      })
+    } finally {
+      raw.close()
+    }
+  })
+})
