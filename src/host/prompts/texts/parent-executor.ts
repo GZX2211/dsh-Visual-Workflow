@@ -5,7 +5,7 @@
 // 注入位置：用户消息 followup（startRun / resumeRun 一次性注入父代理会话）。
 // 渲染实现：src/host/prompts/executors.ts 的 buildParentExecutorPrompt（含情况2末段任务块）。
 // 变量：workflowName / nodeLabel / systemLanguage /
-//       upstreamEntries / noUpstream / filePathsText / dbToolHint / runContextText
+//       upstreamEntries / noUpstream / dbToolHint / runContextText
 
 export const PARENT_EXECUTOR = `# 硬性约束
 
@@ -21,10 +21,6 @@ export const PARENT_EXECUTOR = `# 硬性约束
 
 {{upstreamEntries}}
 {{/if}}{{#if noUpstream}}上游产出：（无）
-{{/if}}{{#if filePathsText}}
-文件路径索引（自行读取）：
-
-{{filePathsText}}
 {{/if}}{{#if dbToolHint}}
 数据库工具说明：{{dbToolHint}}
 {{/if}}
@@ -36,17 +32,13 @@ export const PARENT_EXECUTOR = `# 硬性约束
 
 // 情况2（hybrid）末段「你的节点任务」小节正文：父代理自执行单元的过程性信息。
 // 与上面分隔开，因为两者注入位置不同（整份提示词 vs 提示词末段小节），允许正文重复。
-// 变量：nodeLabel / upstreamEntries / noUpstream / filePathsText / dbToolHint / runContextText
+// 变量：nodeLabel / upstreamEntries / noUpstream / dbToolHint / runContextText
 export const PARENT_TASK_SPEC = `严格按照规范执行节点「{{nodeLabel}}」。
 
 {{#if upstreamEntries}}上游产出：
 
 {{upstreamEntries}}
 {{/if}}{{#if noUpstream}}上游产出：（无）
-{{/if}}{{#if filePathsText}}
-文件路径索引（自行读取）：
-
-{{filePathsText}}
 {{/if}}{{#if dbToolHint}}
 数据库工具说明：{{dbToolHint}}
 {{/if}}{{#if runContextText}}

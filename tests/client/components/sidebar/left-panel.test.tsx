@@ -63,7 +63,7 @@ function makeProps(partial: Partial<LeftPanelProps> = {}): LeftPanelProps {
     experiences: [],
     parentTemplate: null,
     roleTemplates: [],
-    fileTemplates: [],
+    taskTemplates: [],
     databaseTemplates: [],
     groupTemplates: [],
     stageKinds: [],

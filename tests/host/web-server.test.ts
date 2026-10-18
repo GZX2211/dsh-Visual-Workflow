@@ -4,7 +4,7 @@
 // （调用方按各自语义告警降级），形状符合 → 返回官方服务本身。
 //
 // 两个 HTTP 边界（api 与 service）消费同一解析守卫，本文件锁定契约本身；
-// 边界的降级行为见 tests/host/api/routes.test.ts 与 file-download.test.ts。
+// 边界的降级行为见 tests/host/api/routes.test.ts。
 
 import { describe, expect, it } from 'vitest'
 import { webServerOf } from '../../src/host/web-server.js'

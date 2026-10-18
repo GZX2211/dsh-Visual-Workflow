@@ -60,40 +60,15 @@ function stageLabelOf(kind: 'start' | 'end' | 'pause', mode: 'mode1' | 'mode2'):
 }
 
 /**
- * file 节点 data 归一化为**文本型**（D-07）。
- *
- * 为什么写图不产受管文件：`fileKind='file'` 必须指向已存在的受管副本（检查器 `dataNodeIncomplete`
- * 强制），而编排期真正要表达的是「未来要产出的交付文件」——受管限制会把这种规划直接挡掉。
- * 归一化**不静默**：被改写的节点 id 经结果返回，由工具层转成 warning 告知调用方。
- *
- * @returns data 为归一化后的形状；normalized 表示原本显式要求受管（需提示调用方）
+ * task 节点 data 归一化：只保留 label/content。
+ * 旧文件节点的受管字段随形态退役；创建与更新都走同一归一化，避免旧字段回流。
+ * 调用的 `raw` 可以是既有 data 与 patch 的合并结果；label 为空时回退节点 id。
  */
-function normalizeFileNodeData(raw: Record<string, unknown>, fallbackLabel: string): {
-  data: Record<string, unknown>
-  normalized: boolean
-} {
-  const wanted = String(raw.fileKind ?? '').trim()
-  const hasManagedPayload = Boolean(
-    String(raw.managedPath ?? '').trim()
-    || String(raw.fileName ?? '').trim()
-    || (Array.isArray(raw.files) && raw.files.length > 0),
-  )
+function normalizeTaskNodeData(raw: Record<string, unknown>, fallbackLabel: string): Record<string, unknown> {
   return {
-    data: {
-      label: String(raw.label ?? '').trim() || fallbackLabel,
-      fileKind: 'text',
-      content: String(raw.content ?? ''),
-    },
-    normalized: wanted === 'file' || hasManagedPayload,
+    label: String(raw.label ?? '').trim() || fallbackLabel,
+    content: String(raw.content ?? ''),
   }
-}
-
-/** 补丁是否**显式要求受管文件**（仅显式才归一化，避免改 label 时顺手抹掉既有受管配置）。 */
-function wantsManagedFile(raw: Record<string, unknown>): boolean {
-  return String(raw.fileKind ?? '').trim() === 'file'
-    || raw.managedPath !== undefined
-    || raw.files !== undefined
-    || raw.fileName !== undefined
 }
 
 /**
@@ -258,8 +233,6 @@ interface OpOutcome {
   updatedNodeIds: string[]
   connectedLineIds: string[]
   disconnectedLineIds: string[]
-  /** 被归一化为文本型的 file 节点（D-07；工具层据此出 warning）。 */
-  fileNodeTextOnlyIds: string[]
 }
 
 function emptyOpOutcome(): OpOutcome {
@@ -269,7 +242,6 @@ function emptyOpOutcome(): OpOutcome {
     updatedNodeIds: [],
     connectedLineIds: [],
     disconnectedLineIds: [],
-    fileNodeTextOnlyIds: [],
   }
 }
 
@@ -331,10 +303,12 @@ function applyGraphOpsInPlace(
           )
         }
         const raw = opTop.node as Record<string, unknown>
-        const kind = String(raw.kind ?? '').trim()
-        if (!kind) {
+        const rawKind = String(raw.kind ?? '').trim()
+        if (!rawKind) {
           badArgs(`create_node: node.kind is required; correct shape: ${OP_FIELD_SHAPES.create_node}`)
         }
+        // 旧提示词/旧调用方可能仍写 kind='file'：按任务节点接收（读取兼容，不告警）。
+        const kind = rawKind === 'file' ? 'task' : rawKind
         if (!NODE_KINDS.includes(kind as GraphNode['kind'])) {
           throw new WfError(`WF_GRAPH_INVALID: create_node: invalid node kind "${kind}" (allowed: ${NODE_KINDS.join('/')})`, 'WF_GRAPH_INVALID')
         }
@@ -387,11 +361,9 @@ function applyGraphOpsInPlace(
             size: (data.size as { w: number; h: number } | undefined) ?? { w: 300, h: 220 },
           }
         }
-        if (node.kind === 'file') {
-          // 写图只产文本型文件节点（D-07）：受管文件必须已存在，会挡掉「未来要产出的交付文件」
-          const normalized = normalizeFileNodeData((raw.data ?? {}) as Record<string, unknown>, id)
-          ;(node as unknown as { data: Record<string, unknown> }).data = normalized.data
-          if (normalized.normalized) outcome.fileNodeTextOnlyIds.push(id)
+        if (node.kind === 'task') {
+          // 任务节点只落 label/content；旧受管字段（fileKind/managedPath/files）随形态退役。
+          ;(node as unknown as { data: Record<string, unknown> }).data = normalizeTaskNodeData((raw.data ?? {}) as Record<string, unknown>, id)
         }
         doc.nodes.push(node)
         outcome.createdNodeIds.push(id)
@@ -462,16 +434,11 @@ function applyGraphOpsInPlace(
           if (nextProxySourceId !== undefined) (node as { proxySourceId: string }).proxySourceId = nextProxySourceId
           if (proxyData) (node as { data?: Record<string, unknown> }).data = proxyData
           else delete (node as { data?: unknown }).data
-        } else if (node.kind === 'file') {
-          const target = node as unknown as { data?: Record<string, unknown> }
-          // 只在补丁**显式要求受管**时归一化：仅改 label 等字段不应抹掉既有的受管配置
-          if (wantsManagedFile(patch)) {
-            const normalized = normalizeFileNodeData({ ...(target.data ?? {}), ...patch }, nodeId)
-            target.data = normalized.data
-            if (normalized.normalized) outcome.fileNodeTextOnlyIds.push(nodeId)
-          } else {
-            target.data = { ...(target.data ?? {}), ...patch }
-          }
+        } else if (node.kind === 'task' || String((node as unknown as { kind?: unknown }).kind ?? '') === 'file') {
+          // 任务节点：合并后只保留 label/content；旧 file 节点（读取兼容前）一并落任务形状。
+          const target = node as unknown as { kind: string; data?: Record<string, unknown> }
+          target.kind = 'task'
+          target.data = normalizeTaskNodeData({ ...(target.data ?? {}), ...patch }, nodeId)
         } else {
           const target = node as unknown as { data?: Record<string, unknown> }
           const next = { ...(target.data ?? {}), ...patch }

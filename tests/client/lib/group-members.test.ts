@@ -33,13 +33,13 @@ describe('Team 成员（原子入组 / 一致显示）', () => {
   })
 
   it('joinNodeToGroup：非角色节点 / 目标非 Team → 原样返回', () => {
-    const fileNode = node('f', 'file')
+    const taskNode = node('f', 'task')
     const g = node('g', 'group', { memberIds: [] })
     // 非角色入组
-    expect(joinNodeToGroup([g, fileNode], 'f', 'g')).toEqual([g, fileNode])
+    expect(joinNodeToGroup([g, taskNode], 'f', 'g')).toEqual([g, taskNode])
     // 目标不是 Team
     const other = node('o', 'agent')
-    expect(joinNodeToGroup([other, fileNode], 'o', 'f')).toEqual([other, fileNode])
+    expect(joinNodeToGroup([other, taskNode], 'o', 'f')).toEqual([other, taskNode])
   })
 
   it('joinNodeToGroup：在原组位置替换（不新增重复组节点，杜绝「卡有成员但列表空/只显示一个」）', () => {

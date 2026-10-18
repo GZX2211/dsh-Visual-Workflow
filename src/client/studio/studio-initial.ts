@@ -34,7 +34,7 @@ export function createInitialState(sessionId: string): StudioState {
     activeRuns: [],
     instanceOptions: { newSession: false },
     flowTemplates: [],
-    templates: { role: [], file: [], database: [], group: [] },
+    templates: { role: [], task: [], database: [], group: [] },
     combos: [],
     presets: [],
     models: [],

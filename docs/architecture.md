@@ -720,7 +720,7 @@ checkGraphInvariants
   组装格式为「上游节点名称（id：节点ID）：产出内容」，多前驱按流程线声明顺序分别列出；
   无产出的阶段节点（pause）被跳过并继续向前找；Team 与上下游解耦（既不注入也不回溯）。
 * **手动 ctx 交接退役**：角色节点（agent/parent/proxy）的 `ctx-out` 保留为连接点但不再生效
-  （技术债标记）；`ctx` 通道现仅剩「file 数据源 → 角色」的文本直通与受管路径索引注入。
+  （技术债标记）；`ctx` 通道现仅剩「task 数据源 → 角色」的任务描述直通注入。
 * **节点契约**：`inputSchema` / `outputSchema` 即「输入契约 / 输出契约」，柔性文本、不做结构校验；
   agent 节点新建时默认落盘默认输出契约文本（界面显示即实际生效），清空即不配置；父代理不参与节点交接。
 
@@ -828,7 +828,7 @@ Command 负责进入规划流程，不直接替代 Workflow Runtime。
 
 ## 7.8 api
 
-负责 GUI（Client）与 Host 之间的 HTTP API 边界：`POST /visual-workflow/<endpoint>` 端点分发（共享协议常量派生白名单）、受管文件下载路由与服务调试流式代理。
+负责 GUI（Client）与 Host 之间的 HTTP API 边界：`POST /visual-workflow/<endpoint>` 端点分发（共享协议常量派生白名单）与服务调试流式代理。
 
 边界（治理规则见 `src/host/api/AGENTS.md`）：
 

@@ -4,7 +4,7 @@
 // 适用：父代理是画布中唯一参与流程的执行单元。
 // 注入位置：用户消息 followup（startRun / resumeRun）。
 // 变量：workflowName / nodeLabel / systemLanguage /
-//       upstreamEntries / noUpstream / filePathsText / dbToolHint / runContextText
+//       upstreamEntries / noUpstream / dbToolHint / runContextText
 
 export const PARENT_EXECUTOR_EN = `# Hard constraints
 
@@ -20,10 +20,6 @@ You are execution node "{{nodeLabel}}" of workflow "{{workflowName}}".
 
 {{upstreamEntries}}
 {{/if}}{{#if noUpstream}}Upstream outputs: (none)
-{{/if}}{{#if filePathsText}}
-File paths (read them yourself):
-
-{{filePathsText}}
 {{/if}}{{#if dbToolHint}}
 Database tool instructions: {{dbToolHint}}
 {{/if}}
@@ -34,17 +30,13 @@ Current execution state:
 `
 
 // 情况2（hybrid）末段「你的节点任务」小节：父代理执行单元的过程性信息。
-// 变量：nodeLabel / upstreamEntries / noUpstream / filePathsText / dbToolHint / runContextText
+// 变量：nodeLabel / upstreamEntries / noUpstream / dbToolHint / runContextText
 export const PARENT_TASK_SPEC_EN = `Execute node "{{nodeLabel}}" strictly according to its specification.
 
 {{#if upstreamEntries}}Upstream outputs:
 
 {{upstreamEntries}}
 {{/if}}{{#if noUpstream}}Upstream outputs: (none)
-{{/if}}{{#if filePathsText}}
-File paths (read them yourself):
-
-{{filePathsText}}
 {{/if}}{{#if dbToolHint}}
 Database tool instructions: {{dbToolHint}}
 {{/if}}{{#if runContextText}}

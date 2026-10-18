@@ -353,7 +353,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive, langu
     experiences: state.experiences,
     parentTemplate,
     roleTemplates,
-    fileTemplates: state.templates.file as import('../../host/shared/types.js').FileTemplate[],
+    taskTemplates: state.templates.task as import('../../host/shared/types.js').TaskTemplate[],
     databaseTemplates: state.templates.database as import('../../host/shared/types.js').DatabaseTemplate[],
     groupTemplates,
     stageKinds,

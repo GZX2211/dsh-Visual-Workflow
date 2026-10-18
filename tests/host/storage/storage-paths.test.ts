@@ -8,7 +8,6 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   DIRS,
-  NESTED_DIRS,
   combosPath,
   flowTemplatePath,
   runsPath,
@@ -71,17 +70,10 @@ describe('safeFilePart 文件名消毒', () => {
 })
 
 describe('目录布局常量', () => {
-  it('顶层 DIRS 不含路径片段（嵌套目录由 NESTED_DIRS 表达）', () => {
+  it('顶层 DIRS 不含路径片段（目录布局只由顶层目录构成）', () => {
     for (const dir of DIRS) {
       expect(dir.includes('/'), `顶层目录不应含路径分隔符：${dir}`).toBe(false)
     }
-  })
-
-  it('NESTED_DIRS 的父目录属于顶层 DIRS', () => {
-    for (const nested of NESTED_DIRS) {
-      expect(DIRS).toContain(nested.split('/')[0])
-    }
-    expect(NESTED_DIRS).toContain('data/files')
   })
 })
 
@@ -95,7 +87,7 @@ describe('资源路径计算', () => {
   it('模板路径按种类分目录（role→roles / group→groups / 其余→data）', () => {
     expect(templateDir('role')).toBe('roles')
     expect(templateDir('group')).toBe('groups')
-    expect(templateDir('file')).toBe('data')
+    expect(templateDir('task')).toBe('data')
     expect(templateDir('database')).toBe('data')
     expect(templatePath(ROOT, 'role', 'r1')).toBe(join(ROOT, 'roles', 'r1.json'))
     expect(templatePath(ROOT, 'database', 'd1')).toBe(join(ROOT, 'data', 'd1.json'))

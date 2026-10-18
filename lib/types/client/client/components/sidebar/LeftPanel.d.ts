@@ -1,10 +1,10 @@
 import type { Dict } from '../../i18n.js';
 import type { LibTab, LibrarySource } from '../../studio/studio-state.js';
-import type { RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate } from '../../../host/shared/types.js';
+import type { RoleTemplate, TaskTemplate, DatabaseTemplate, GroupTemplate } from '../../../host/shared/types.js';
 import type { WorkflowTemplate } from '../../../host/shared/graph-model.js';
 import type { ExperienceEntry, RoleAssetSummary, WorkflowAssetSummary } from '../../../host/shared/asset-types.js';
 export interface LibSelectionInfo {
-    kind: 'workflow' | 'workflowTemplate' | 'flowAsset' | 'roleAsset' | 'experience' | 'role' | 'file' | 'database' | 'parentTemplate' | 'stage' | 'groupTemplate' | 'service';
+    kind: 'workflow' | 'workflowTemplate' | 'flowAsset' | 'roleAsset' | 'experience' | 'role' | 'task' | 'database' | 'parentTemplate' | 'stage' | 'groupTemplate' | 'service';
     id: string;
 }
 export interface DragPayload {
@@ -62,7 +62,7 @@ export interface LeftPanelProps {
     experiences: ExperienceEntry[];
     parentTemplate: RoleTemplate | null;
     roleTemplates: RoleTemplate[];
-    fileTemplates: FileTemplate[];
+    taskTemplates: TaskTemplate[];
     databaseTemplates: DatabaseTemplate[];
     /** Team 模板列表（全局共享；「其他」Tab Team 分区，用户批注：+ 新增/点击编辑/删除）。 */
     groupTemplates: GroupTemplate[];
@@ -86,7 +86,7 @@ export interface LeftPanelProps {
     /** 打开经验（资产态属性栏编辑；经验没有画布形态，故无拖入入口）。 */
     onOpenExperience(id: string): void;
     onSelectLib(kind: LibSelectionInfo['kind'], id: string): void;
-    onPlaceTemplate(kind: 'role' | 'file' | 'database', id: string, position: {
+    onPlaceTemplate(kind: 'role' | 'task' | 'database', id: string, position: {
         x: number;
         y: number;
     }): void;
@@ -112,7 +112,7 @@ export interface LeftPanelProps {
         x: number;
         y: number;
     }): void;
-    onCreateNew(tab: LibTab, section?: 'file' | 'database' | 'flowTemplate' | 'group'): void;
+    onCreateNew(tab: LibTab, section?: 'task' | 'database' | 'flowTemplate' | 'group'): void;
     onBeginDrag(event: React.PointerEvent, payload: DragPayload): void;
 }
 export declare function LeftPanel(props: LeftPanelProps): import("react").JSX.Element;

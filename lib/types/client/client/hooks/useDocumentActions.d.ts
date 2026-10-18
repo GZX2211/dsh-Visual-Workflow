@@ -66,7 +66,7 @@ export interface DocumentActionsFace {
     /** 打开工作流模板（未保存守卫后切换）。 */
     selectFlowTemplate(id: string): void;
     /** 新建（工作流 Tab / 角色 / 数据分区 / Team 分区；+ 号新建模板）。 */
-    createNew(tab: LibTab, section?: 'file' | 'database' | 'flowTemplate' | 'group'): void;
+    createNew(tab: LibTab, section?: 'task' | 'database' | 'flowTemplate' | 'group'): void;
 }
 /** 文档生命周期面（保存失败抛错/提示由保存路径处理）。 */
 export declare function useDocumentActions(state: StudioState, dispatch: Dispatch<StudioAction>, guard: UnsavedGuardFace, notify: ToastFace['toast'], toastError: ToastFace['toastError'], workflows: WorkflowsFace, flowTemplates: FlowTemplatesFace, templates: TemplatesFace, selection: SelectionFace, serviceControl: ServiceControlFace, remote: RemoteFace, t: Dict): DocumentActionsFace;

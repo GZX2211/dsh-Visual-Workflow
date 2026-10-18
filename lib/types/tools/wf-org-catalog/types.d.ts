@@ -175,19 +175,12 @@ export interface CatalogGroupNodeEntry {
      */
     schedulable?: boolean;
 }
-/** 文件数据源条目（正文无二次召回通道，一次性给全）。 */
-export interface CatalogFileNodeEntry {
+/** 任务节点条目（任务描述无二次召回通道，一次性给全）。 */
+export interface CatalogTaskNodeEntry {
     id: string;
-    kind: 'file';
+    kind: 'task';
     label: string;
-    fileKind: 'text' | 'file';
     content?: string;
-    fileName?: string;
-    managedPath?: string;
-    files?: Array<{
-        fileName: string;
-        managedPath: string;
-    }>;
 }
 /** 数据库数据源条目（连接信息一次性给全；密钥字段已脱敏）。 */
 export interface CatalogDatabaseNodeEntry {
@@ -203,7 +196,7 @@ export interface CatalogDatabaseNodeEntry {
     vectorOptions?: Record<string, unknown>;
 }
 /** 骨架里的节点条目（按 kind 判别）。 */
-export type CatalogNodeEntry = CatalogStageNodeEntry | CatalogRoleNodeEntry | CatalogProxyNodeEntry | CatalogGroupNodeEntry | CatalogFileNodeEntry | CatalogDatabaseNodeEntry;
+export type CatalogNodeEntry = CatalogStageNodeEntry | CatalogRoleNodeEntry | CatalogProxyNodeEntry | CatalogGroupNodeEntry | CatalogTaskNodeEntry | CatalogDatabaseNodeEntry;
 /** 连线条目（条件分支语义是编排事实，必须给全）。 */
 export interface CatalogLineEntry {
     id: string;

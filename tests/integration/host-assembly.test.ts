@@ -78,13 +78,11 @@ describe('VisualWorkflowHost 装配', () => {
     const host = root.get(VisualWorkflowHostServiceName) as VisualWorkflowHost
     expect(host).toBeInstanceOf(VisualWorkflowHost)
     expect(host.store).toBeInstanceOf(FlowStore)
-    // 数据目录结构建立（§6 目录规划；顶层目录 + 嵌套子目录）
+    // 数据目录结构建立（§6 目录规划；只含顶层目录，受管文件目录已退役）
     for (const d of FlowStore.DIRS) {
       expect(existsSync(join(dir, d)), `目录 ${d} 应存在`).toBe(true)
     }
-    for (const d of FlowStore.NESTED_DIRS) {
-      expect(existsSync(join(dir, d)), `嵌套目录 ${d} 应存在`).toBe(true)
-    }
+    expect(existsSync(join(dir, 'data', 'files')), '受管文件目录不应再创建').toBe(false)
     await root.fiber.dispose()
   })
 

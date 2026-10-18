@@ -5,5 +5,4 @@
 // 故不经本入口全量 re-export（避免形成「全量 barrel」与伪公共契约）。
 
 export { registerRoutes, VisualWorkflowApi } from './routes.js'
-export { registerDownloadRoute } from './file-download.js'
 export type { ApiHost, ExperienceDomainFace } from './boundary.js'

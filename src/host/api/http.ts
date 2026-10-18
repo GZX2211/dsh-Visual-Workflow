@@ -9,12 +9,12 @@
 import * as EP from '../shared/protocol.js'
 import { readRequestBody, sendJsonResponse, type BodyRequest, type JsonResponseSink } from '../http-io.js'
 
-/** 请求体上限（64MB——文件模板 base64 上传需要大体积）。按端点的分级见 GUI_BODY_LIMIT（K2）。 */
+/** 请求体上限（64MB——导入包体量可能较大）。按端点的分级见 GUI_BODY_LIMIT（K2）。 */
 const BODY_LIMIT = 64 * 1024 * 1024
 
 /**
  * GUI 请求体上限分级（K2 用户裁决：本 API 仅本机可信，但要按端点收敛资源占用）。
- * 分级体现的是端点载荷形状，不是「统一成一个值」——二进制/导入档必须保留 64MB 既有能力。
+ * 分级体现的是端点载荷形状，不是「统一成一个值」——导入包必须保留 64MB 既有能力。
  */
 export const GUI_BODY_LIMIT = {
   /** 无参端点（端点方法不读 args）：只承载空体或 `{"args":{}}`。 */
@@ -23,7 +23,7 @@ export const GUI_BODY_LIMIT = {
   normal: 2 * 1024 * 1024,
   /** 整份文档端点：工作流/服务/模板/资产文档整体上送。 */
   document: 16 * 1024 * 1024,
-  /** 二进制与导入包端点：fileUpload 的 base64 与 bundle JSON。 */
+  /** 导入包端点（bundle JSON）。 */
   binary: 64 * 1024 * 1024,
 } as const
 
@@ -48,9 +48,8 @@ const DOCUMENT_ENDPOINTS = new Set<string>([
   EP.EP_PREVIEW_ASSET_CASCADE,
 ])
 
-/** 二进制/导入包端点（64MB 档；未登记端点不得升档）。 */
+/** 导入包端点（64MB 档；未登记端点不得升档）。 */
 const BINARY_ENDPOINTS = new Set<string>([
-  EP.EP_FILE_UPLOAD,
   EP.EP_IMPORT_WORKFLOW,
   EP.EP_IMPORT_AGENT_TEMPLATE,
 ])

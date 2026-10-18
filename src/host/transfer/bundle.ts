@@ -7,16 +7,20 @@
 //
 // embedded.groups 语义（架构文档 §6.4 对齐）：Team 信息（id/name/collabPrompt）
 // 已内联在工作流节点（kind=group）中随 bundle 往返，**不作为独立模板库重建**
-// （store 的 TemplateKind 仅 role/file/database 三类，client 左侧栏「其他」Tab 的
-// Team 为静态入口而非模板列表）。故导入仅重建 roles/files/databases 与 combos，
+// （store 的 TemplateKind 仅 role/task/database 三类，client 左侧栏「其他」Tab 的
+// Team 为静态入口而非模板列表）。故导入仅重建 roles/tasks/databases 与 combos，
 // 返回值 importedTemplates 记录这三类实际导入数量（不含 groups，避免虚报）。
+//
+// 旧包兼容：v2 早期包使用 embedded.files 与 kind='file' 节点；读取时按任务归一化
+// （content 保留，受管文件字段丢弃），导出只写新形状 tasks。
 //
 // 职责边界：本模块只处理导出文件格式、嵌入式资源重建与名称冲突策略，不接触 HTTP
 // 传输层、不决定对外状态码——调用方（API 边界）负责把领域错误码映射为响应契约。
 
 import type { FlowStore, Template, TemplateKind } from '../storage/flow-store.js'
-import type { BundleV2, DatabaseTemplate, FileTemplate, GroupTemplate, RoleTemplate, ToolCombo } from '../shared/types.js'
+import type { BundleV2, DatabaseTemplate, GroupTemplate, LegacyFileTemplate, RoleTemplate, TaskTemplate, ToolCombo } from '../shared/types.js'
 import type { WorkflowDocument, WorkflowTemplate } from '../shared/graph-model.js'
+import { normalizeLegacyNodes } from '../graph/index.js'
 
 function safeClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value ?? null)) as T
@@ -80,7 +84,21 @@ function groupsOf(flow: WorkflowDocument): GroupTemplate[] {
 }
 
 /**
- * 嵌入模板入库（Bug 16）：角色/文件/数据库模板随 bundle 携带，导入时
+ * 旧文件模板 → 任务模板（仅旧包读取兼容）：content 保留，受管字段丢弃。
+ * id/name 必须保留，导入冲突与 id 换新依赖它们。
+ */
+function legacyFileTemplateToTask(template: LegacyFileTemplate): TaskTemplate {
+  return {
+    id: String(template.id ?? ''),
+    name: String(template.name ?? ''),
+    ...(template.content !== undefined ? { content: String(template.content) } : {}),
+    ...(template.createdAt !== undefined ? { createdAt: template.createdAt } : {}),
+    ...(template.updatedAt !== undefined ? { updatedAt: template.updatedAt } : {}),
+  }
+}
+
+/**
+ * 嵌入模板入库（Bug 16）：角色/任务/数据库模板随 bundle 携带，导入时
  * 按「名称」判定冲突——重名复用已有（不覆盖），id 冲突换新 id 后创建。
  * 与工具组合（combos）的导入语义一致（架构文档 §6.4 embedded 逐字段；
  * embedded.groups 不在此重建，见文件头部注释）。
@@ -90,9 +108,14 @@ async function importEmbeddedTemplates(
   embedded: BundleV2['embedded'] | undefined,
 ): Promise<number> {
   let imported = 0
-  const groups: Array<{ kind: TemplateKind; entries: RoleTemplate[] | FileTemplate[] | DatabaseTemplate[] }> = [
+  // 旧包 embedded.files 按任务读取（读取兼容），与新 embedded.tasks 合并后统一入库。
+  const taskEntries: TaskTemplate[] = [
+    ...(embedded?.tasks ?? []),
+    ...(embedded?.files ?? []).map(legacyFileTemplateToTask),
+  ]
+  const groups: Array<{ kind: TemplateKind; entries: RoleTemplate[] | TaskTemplate[] | DatabaseTemplate[] }> = [
     { kind: 'role', entries: embedded?.roles ?? [] },
-    { kind: 'file', entries: embedded?.files ?? [] },
+    { kind: 'task', entries: taskEntries },
     { kind: 'database', entries: embedded?.databases ?? [] },
   ]
   for (const group of groups) {
@@ -124,10 +147,10 @@ export async function exportWorkflowBundle(store: FlowStore, sessionId: string, 
     // 模式二：服务文档（同一入口，按 id 回退服务表）
     const service = await store.getService(sessionId, flowId)
     if (!service) throw new TransferError('TRANSFER_NOT_FOUND', `工作流/服务不存在：${flowId}`)
-    const [combos, roles, files, databases] = await Promise.all([
+    const [combos, roles, tasks, databases] = await Promise.all([
       store.listToolCombos(),
       store.listTemplates('role'),
-      store.listTemplates('file'),
+      store.listTemplates('task'),
       store.listTemplates('database'),
     ])
     const bundle: BundleV2 = {
@@ -142,7 +165,7 @@ export async function exportWorkflowBundle(store: FlowStore, sessionId: string, 
       },
       embedded: {
         roles: exportClone(roles),
-        files: exportClone(files),
+        tasks: exportClone(tasks),
         databases: exportClone(databases),
         groups: groupsOf(service as unknown as WorkflowDocument),
         combos: exportClone(combos),
@@ -152,10 +175,10 @@ export async function exportWorkflowBundle(store: FlowStore, sessionId: string, 
   }
   // 导出侧读取失败一律上浮：导出包是交付产物，静默丢资源会产出「格式合法但内容缺失」的包，
   // 用户无从察觉（区分「该资源确实为空」与「读取失败」由 storage 的列表读语义承担）。
-  const [combos, roles, files, databases] = await Promise.all([
+  const [combos, roles, tasks, databases] = await Promise.all([
     store.listToolCombos(),
     store.listTemplates('role'),
-    store.listTemplates('file'),
+    store.listTemplates('task'),
     store.listTemplates('database'),
   ])
   const bundle: BundleV2 = {
@@ -170,7 +193,7 @@ export async function exportWorkflowBundle(store: FlowStore, sessionId: string, 
     },
     embedded: {
       roles: exportClone(roles),
-      files: exportClone(files),
+      tasks: exportClone(tasks),
       databases: exportClone(databases),
       groups: groupsOf(flow),
       combos: exportClone(combos),
@@ -238,7 +261,7 @@ export async function importWorkflowBundle(
     existingCombos.push(final)
   }
 
-  // 嵌入式模板入库（Bug 16）：roles/files/databases 随 bundle 携带，导入时
+  // 嵌入式模板入库（Bug 16）：roles/tasks/databases 随 bundle 携带，导入时
   // 重建模板库（重名复用已有、id 冲突换新 id），保证导入后模板可继续拖拽复用。
   // embedded.groups 随工作流节点内联保留、不在此重建（见文件头部注释）。
   const importedCount = await importEmbeddedTemplates(store, bundle.embedded)
@@ -250,7 +273,7 @@ export async function importWorkflowBundle(
     name,
     description: String(payload.description ?? ''),
     revision: 0,
-    nodes: safeClone(payload.nodes ?? []),
+    nodes: safeClone(normalizeLegacyNodes(payload.nodes ?? [])),
     lines: safeClone(payload.lines ?? []),
     createdAt: now,
     updatedAt: now,

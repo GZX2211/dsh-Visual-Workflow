@@ -1,6 +1,6 @@
 import type { LibTab, LibSelKind, TemplateKind, CanvasNode, CanvasEdge, EditorRef, PanelLayout, ToastItem, PresetItem, ModelItem, GraphSnapshot, ConfirmState, LibrarySource } from './studio-types.js';
 import type { WorkflowDocument, WorkflowTemplate } from '../../host/shared/graph-model.js';
-import type { ServiceState, RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate, ToolCombo, RunSnapshot } from '../../host/shared/types.js';
+import type { ServiceState, RoleTemplate, TaskTemplate, DatabaseTemplate, GroupTemplate, ToolCombo, RunSnapshot } from '../../host/shared/types.js';
 import type { AssetKind, AssetVersionEntry, ExperienceEntry, RoleAssetDetail, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../../host/shared/asset-types.js';
 export type StudioAction = {
     type: 'SET_SESSION';
@@ -144,15 +144,15 @@ export type StudioAction = {
 } | {
     type: 'TEMPLATES_LOADED';
     kind: TemplateKind;
-    items: Array<RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate>;
+    items: Array<RoleTemplate | TaskTemplate | DatabaseTemplate | GroupTemplate>;
 } | {
     type: 'TEMPLATE_ADDED';
     kind: TemplateKind;
-    template: RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate;
+    template: RoleTemplate | TaskTemplate | DatabaseTemplate | GroupTemplate;
 } | {
     type: 'TEMPLATE_UPDATED';
     kind: TemplateKind;
-    template: RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate;
+    template: RoleTemplate | TaskTemplate | DatabaseTemplate | GroupTemplate;
 } | {
     type: 'TEMPLATE_REMOVED';
     kind: TemplateKind;

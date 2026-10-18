@@ -1,10 +1,6 @@
 import type { TemplateKind } from './template-model.js';
 /** 顶层数据目录（init 时创建；外部工具与测试以此为布局契约）。 */
 export declare const DIRS: readonly ["workflows", "services", "roles", "data", "groups", "runs", "flow-templates"];
-/** 嵌套子目录（相对 root 的路径；随顶层目录一并幂等创建）。 */
-export declare const NESTED_DIRS: readonly ["data/files"];
-/** 受管文件目录（data/files，存放非文本文件模板的受管拷贝）。 */
-export declare function managedFilesDir(root: string): string;
 /**
  * 文件名消毒：id 中非法字符替换为下划线（防路径穿越/坏文件名）。
  * `.` 与 `..` 单独出现时同样替换，避免生成指向目录自身的路径。
@@ -23,7 +19,7 @@ export declare function workflowPath(root: string, flowId: string): string;
 export declare function servicePath(root: string, serviceId: string): string;
 /** 服务会话映射文件路径（services/<id>.sessions.json）。 */
 export declare function sessionsPath(root: string, serviceId: string): string;
-/** 模板种类 → 目录（data/ 内 file 与 database 同目录，以字段判别）。 */
+/** 模板种类 → 目录（data/ 内 task 与 database 同目录，以字段判别）。 */
 export declare function templateDir(kind: TemplateKind): string;
 /** 模板文件路径。 */
 export declare function templatePath(root: string, kind: TemplateKind, id: string): string;

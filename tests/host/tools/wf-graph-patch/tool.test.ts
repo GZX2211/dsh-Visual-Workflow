@@ -1396,8 +1396,8 @@ describe('wf_graph_patch · 工具注册面回归', () => {
 // ---------------------------------------------------------------------------
 
 describe('wf_graph_patch · 参数层契约守卫', () => {
-  function fileNode(id: string): GraphNode {
-    return { id, kind: 'file', position: { x: 0, y: 0 }, data: { label: id, fileKind: 'text', content: '素材' } }
+  function taskNode(id: string): GraphNode {
+    return { id, kind: 'task', position: { x: 0, y: 0 }, data: { label: id, content: '素材' } }
   }
 
   it('connect 端点写成 from/to：WF_BAD_ARGS，并把正确字段名说清楚', async () => {
@@ -1458,7 +1458,7 @@ describe('wf_graph_patch · 参数层契约守卫', () => {
   it('connect 的 handle 与该节点种类不匹配：WF_GRAPH_INVALID 并列出可用连接点', async () => {
     const { host, storeState } = makeHost()
     storeState.workflows.set('wf-1', makeFlow('wf-1', {
-      nodes: [stageNode('s', 'start'), roleNode('a1'), fileNode('f1'), stageNode('e', 'end')],
+      nodes: [stageNode('s', 'start'), roleNode('a1'), taskNode('f1'), stageNode('e', 'end')],
       lines: [flowLine('l1', 's', 'a1'), flowLine('l2', 'a1', 'e')],
     }))
     const err = await expectWfError(() => executeGraphPatch(host, 'session-1', {
@@ -1558,13 +1558,13 @@ describe('wf_graph_patch · 参数层契约守卫', () => {
   })
 })
 
-describe('wf_graph_patch：file 节点只写文本型（D-07）', () => {
-  it('test_写受管文件节点_归一化为文本型并在 warnings 里告知', async () => {
-    const { host, storeState } = makeHost({ newTemplateId: () => 'tpl-file1' })
+describe('wf_graph_patch：任务节点写入归一化', () => {
+  it('写任务节点：只落 label/content，旧受管字段被丢弃且不再产生归一化 warning', async () => {
+    const { host, storeState } = makeHost({ newTemplateId: () => 'tpl-task1' })
     const ops = [
       { op: 'create_node', node: { id: 's', kind: 'start', data: { label: stageLabel('start', 'mode1') } } },
       { op: 'create_node', node: { id: 'a1', kind: 'agent', data: { label: '执行', systemPrompt: 'x', presetId: 'combo-1', retryLimit: 3, provider: '', model: '' } } },
-      { op: 'create_node', node: { id: 'f1', kind: 'file', data: { label: '交付文件', fileKind: 'file', managedPath: 'data/files/x.md' } } },
+      { op: 'create_node', node: { id: 'f1', kind: 'task', data: { label: '交付任务', content: '任务正文', fileKind: 'file', managedPath: 'data/files/x.md' } } },
       { op: 'create_node', node: { id: 'e', kind: 'end', data: { label: stageLabel('end', 'mode1') } } },
       { op: 'connect', source: 's', target: 'a1', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
       { op: 'connect', source: 'a1', target: 'e', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
@@ -1572,23 +1572,23 @@ describe('wf_graph_patch：file 节点只写文本型（D-07）', () => {
     ]
 
     const result = await executeGraphPatch(host, 'session-1', {
-      scope: 'template', create: { name: '文本型文件节点' }, ops,
+      scope: 'template', create: { name: '任务节点模板' }, ops,
     })
 
     expect(result.ok).toBe(true)
-    expect(result.warnings.some((w) => w.code === 'fileNodeTextOnly')).toBe(true)
-    const saved = storeState.templates.get('tpl-file1') as { nodes: Array<{ id: string; data: { fileKind?: string; content?: string } }> }
-    const fileNode = saved.nodes.find((node) => node.id === 'f1')
-    expect(fileNode?.data.fileKind).toBe('text')
-    expect(fileNode?.data.content).toBe('')
+    expect(result.warnings.some((w) => w.code === 'fileNodeTextOnly')).toBe(false)
+    const saved = storeState.templates.get('tpl-task1') as { nodes: Array<{ id: string; kind: string; data: Record<string, unknown> }> }
+    const task = saved.nodes.find((node) => node.id === 'f1')
+    expect(task?.kind).toBe('task')
+    expect(task?.data).toEqual({ label: '交付任务', content: '任务正文' })
   })
 
-  it('test_写文本型文件节点_不出归一化 warning', async () => {
-    const { host } = makeHost({ newTemplateId: () => 'tpl-file2' })
+  it('旧 kind=file 输入：读取兼容归一化为任务节点', async () => {
+    const { host, storeState } = makeHost({ newTemplateId: () => 'tpl-task2' })
     const ops = [
       { op: 'create_node', node: { id: 's', kind: 'start', data: { label: stageLabel('start', 'mode1') } } },
       { op: 'create_node', node: { id: 'a1', kind: 'agent', data: { label: '执行', systemPrompt: 'x', presetId: 'combo-1', retryLimit: 3, provider: '', model: '' } } },
-      { op: 'create_node', node: { id: 'f1', kind: 'file', data: { label: '任务书', fileKind: 'text', content: '正文' } } },
+      { op: 'create_node', node: { id: 'f1', kind: 'file', data: { label: '旧任务', content: '正文', fileKind: 'file', managedPath: 'data/files/x.md' } } },
       { op: 'create_node', node: { id: 'e', kind: 'end', data: { label: stageLabel('end', 'mode1') } } },
       { op: 'connect', source: 's', target: 'a1', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
       { op: 'connect', source: 'a1', target: 'e', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
@@ -1596,10 +1596,14 @@ describe('wf_graph_patch：file 节点只写文本型（D-07）', () => {
     ]
 
     const result = await executeGraphPatch(host, 'session-1', {
-      scope: 'template', create: { name: '文本节点' }, ops,
+      scope: 'template', create: { name: '旧输入兼容' }, ops,
     })
 
-    expect(result.warnings.some((w) => w.code === 'fileNodeTextOnly')).toBe(false)
+    expect(result.ok).toBe(true)
+    const saved = storeState.templates.get('tpl-task2') as { nodes: Array<{ id: string; kind: string; data: Record<string, unknown> }> }
+    const task = saved.nodes.find((node) => node.id === 'f1')
+    expect(task?.kind).toBe('task')
+    expect(task?.data).toEqual({ label: '旧任务', content: '正文' })
   })
 })
 

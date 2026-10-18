@@ -1,7 +1,7 @@
 // src/client/components/sidebar/library-model.ts
 //
 // 库内容模型构建器（纯函数，无副作用）：把「左侧库」的完整逻辑（来源（模版/资产）、
-// 四 Tag 分区、实例/模板/资产/角色/文件/数据库/阶段/Team 卡片、搜索过滤、
+// 四 Tag 分区、实例/模板/资产/角色/任务/数据库/阶段/Team 卡片、搜索过滤、
 // 拖拽 payload、选中高亮判定）提取为一份可复用的数据模型。左侧栏（LeftPanel，
 // 竖向列表）与底栏（BottomPanel，横向卡片流）共用同一 builder，保证两份显示的
 // 「内容与选中/拖拽逻辑」完全一致。
@@ -9,10 +9,10 @@
 // 单一职责：本文件只负责「从原始列表 + 回调构造卡片模型」，不渲染任何 JSX。
 //
 // 来源语义（用户裁决）：
-//   - 模版态：实例列表 + 工作流模板 / 父代理 + 角色模板 / 文件 + 数据库 / 阶段 + Team；
+//   - 模版态：实例列表 + 工作流模板 / 父代理 + 角色模板 / 任务 + 数据库 / 阶段 + Team；
 //   - 资产态：工作流资产 / 角色资产，各自再分「活跃资产」与「历史资产（已归档）」两栏；
 //     数据 Tag 在此态以「经验」呈现（用户批注：只在资产标签下改名并改变列表结构，
-//     模版界面仍是原本的文件 + 数据库），内容为经验库的「活跃经验 / 历史经验（已归档）」
+//     模版界面仍是原本的任务 + 数据库），内容为经验库的「活跃经验 / 历史经验（已归档）」
 //     两分栏；其他 Tag 显示空态提示（资产分类不含它们）。
 //   - 角色资产的活跃栏**不含内联资产**：内联角色的编辑入口在画布节点上，左栏并排显示
 //     会与画布形成两份互相看不出同步关系的视图（用户批注：信息不同步且冗余）；
@@ -26,7 +26,7 @@
 
 import type { Dict } from '../../i18n.js'
 import type { LibTab, LibSelKind, LibrarySource } from '../../studio/studio-state.js'
-import type { RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate } from '../../../host/shared/types.js'
+import type { RoleTemplate, TaskTemplate, DatabaseTemplate, GroupTemplate } from '../../../host/shared/types.js'
 import type { WorkflowTemplate } from '../../../host/shared/graph-model.js'
 import type { ExperienceEntry, RoleAssetSummary, WorkflowAssetSummary } from '../../../host/shared/asset-types.js'
 import type { DragPayload, LibSelectionInfo } from './LeftPanel.js'
@@ -59,7 +59,7 @@ export interface LibrarySectionModel {
   key: string
   title: string
   plus: boolean
-  plusKind?: 'file' | 'database' | 'flowTemplate' | 'group'
+  plusKind?: 'task' | 'database' | 'flowTemplate' | 'group'
   /** 本分区无卡片时的空态文案（模版态/资产态不同）。 */
   emptyText: string
   /** 是否提供折叠开关（历史资产分栏为 true）。 */
@@ -109,7 +109,7 @@ export interface LibraryModelInput {
   experiences?: ExperienceEntry[]
   parentTemplate: RoleTemplate | null
   roleTemplates: RoleTemplate[]
-  fileTemplates: FileTemplate[]
+  taskTemplates: TaskTemplate[]
   databaseTemplates: DatabaseTemplate[]
   groupTemplates: GroupTemplate[]
   stageKinds: Array<{ kind: string; label: string }>
@@ -126,13 +126,13 @@ export interface LibraryModelInput {
   /** 打开经验（资产态属性栏编辑；经验没有画布形态，故无拖入入口）。 */
   onOpenExperience?(id: string): void
   onSelectLib(kind: LibSelectionInfo['kind'], id: string): void
-  onPlaceTemplate(kind: 'role' | 'file' | 'database', id: string, position: { x: number; y: number }): void
+  onPlaceTemplate(kind: 'role' | 'task' | 'database', id: string, position: { x: number; y: number }): void
   onPlaceTemplateIntoGroup(kind: 'role', id: string, groupId: string, position: { x: number; y: number }): void
   onPlaceStage(kind: string, position: { x: number; y: number }): void
   onPlaceGroup(position: { x: number; y: number }): void
   onPlaceGroupFromTemplate(id: string, position: { x: number; y: number }): void
   onPlaceParent(id: string, position: { x: number; y: number }): void
-  onCreateNew(tab: LibTab, section?: 'file' | 'database' | 'flowTemplate' | 'group'): void
+  onCreateNew(tab: LibTab, section?: 'task' | 'database' | 'flowTemplate' | 'group'): void
 }
 
 /** 四 Tag（与左栏一致；底栏以图标展示）。 */
@@ -156,15 +156,8 @@ function roleSubline(template: RoleTemplate): string {
   return truncate(String(template.systemPrompt ?? ''), 20)
 }
 
-/** 文件模板卡副行：文本类型显示内容（单行省略）；文件类型显示所选文件名列表
- *  （保留中文文件名；超出单行省略）。 */
-function fileSubline(template: FileTemplate): string {
-  if (template.fileKind === 'file') {
-    const files = Array.isArray(template.files) && template.files.length > 0
-      ? template.files.map((item) => String(item?.fileName ?? '')).filter(Boolean)
-      : [String(template.fileName ?? '')].filter(Boolean)
-    return truncate(files.join('，'), 60)
-  }
+/** 任务模板卡副行：任务描述截断展示（单行省略）。 */
+function taskSubline(template: TaskTemplate): string {
   return truncate(String(template.content ?? ''), 60)
 }
 
@@ -172,7 +165,7 @@ function fileSubline(template: FileTemplate): string {
 export function buildLibraryModel(input: LibraryModelInput): LibraryModel {
   const {
     copy: t, libTab, workflows, currentSessionId, flowTemplates, parentTemplate,
-    roleTemplates, fileTemplates, databaseTemplates, groupTemplates, stageKinds, libSelection,
+    roleTemplates, taskTemplates, databaseTemplates, groupTemplates, stageKinds, libSelection,
     onSelectWorkflow, onSelectFlowTemplate, onSelectFlowAsset, onOpenRoleAsset, onPlaceRoleAsset, onOpenExperience,
     onSelectLib, onPlaceTemplate, onPlaceTemplateIntoGroup, onPlaceStage, onPlaceGroupFromTemplate,
     onPlaceParent,
@@ -408,18 +401,18 @@ export function buildLibraryModel(input: LibraryModelInput): LibraryModel {
     })
   } else if (libTab === 'data') {
     sections.push({
-      key: 'files',
-      title: t.files,
+      key: 'tasks',
+      title: t.tasks,
       plus: true,
-      plusKind: 'file',
+      plusKind: 'task',
       emptyText: t.libEmptyTemplates,
-      cards: (fileTemplates ?? [])
-        .filter((item) => hit(item.name, item.content, item.fileName))
+      cards: (taskTemplates ?? [])
+        .filter((item) => hit(item.name, item.content))
         .map((item) => card(
-          item.id, 'file', item.id, '▤', String(item.name ?? ''), fileSubline(item), {
+          item.id, 'task', item.id, '▤', String(item.name ?? ''), taskSubline(item), {
             label: String(item.name ?? ''),
-            onClick: () => onSelectLib('file', item.id),
-            onDrop: (position) => onPlaceTemplate('file', item.id, position ?? { x: 120, y: 80 }),
+            onClick: () => onSelectLib('task', item.id),
+            onDrop: (position) => onPlaceTemplate('task', item.id, position ?? { x: 120, y: 80 }),
           },
         )),
     })
@@ -487,7 +480,7 @@ export function buildLibraryModel(input: LibraryModelInput): LibraryModel {
 
   // 动态 tab 标签（模式二「其他」无暂停阶段等虽由 stageKinds 体现，但 tab 文案固定四类）。
   // 资产态的「数据」Tag 呈现经验库（用户批注：只在资产标签下显示为「经验」，界面结构随之改变；
-  // 模版态仍是原本的「数据」（文件 + 数据库））——两态共用同一 Tab key。
+  // 模版态仍是原本的「数据」（任务 + 数据库））——两态共用同一 Tab key。
   const tabs: LibraryTabModel[] = TAB_DEFS.map((def) => ({
     ...def,
     label: librarySource === 'asset' && def.key === 'data'

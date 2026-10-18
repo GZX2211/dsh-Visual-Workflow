@@ -29,7 +29,6 @@ function englishOnly(text: string): void {
 const context: ExecutorContextFacts = {
   nodeLabel: 'Writer',
   upstreamContext: [{ nodeId: 'research', source: 'Research', content: 'Audience: designers' }],
-  filePaths: ['/data/brief.pdf'],
   dbToolHint: 'Use wf_db_query',
 }
 
@@ -65,7 +64,6 @@ describe('英文父代理提示词', () => {
     })
     englishOnly(task)
     englishOnly(executor)
-    expect(task).toContain('/data/brief.pdf')
     expect(task).toContain('Audience: designers')
     expect(executor).toContain('wf_send_message')
     expect(executor).not.toContain('wf_run_node')
@@ -76,7 +74,6 @@ describe('英文子代理任务块', () => {
   const facts = {
     nodeLabel: 'Writer',
     upstreamContext: context.upstreamContext,
-    filePaths: context.filePaths,
     dbToolHint: '',
     commTargets: [{ label: 'Parent', id: 'parent' }],
     collabNote: '',
@@ -90,7 +87,6 @@ describe('英文子代理任务块', () => {
     englishOnly(text)
     expect(text).toContain('Conclusion / Output file paths / Key decisions / Open questions')
     expect(text).toContain('Audience: designers')
-    expect(text).toContain('/data/brief.pdf')
 
     const custom = buildNodeTaskBlock({
       facts: { ...facts, inputContract: '自定义输入 {query: string}', outputContract: '自定义输出 {result: string}' },

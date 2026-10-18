@@ -15,7 +15,6 @@
 import type {
   ConditionType,
   DatabaseNode,
-  FileNode,
   GraphNode,
   GroupNode,
   Handle,
@@ -24,6 +23,7 @@ import type {
   ProxyNode,
   RoleNode,
   StageNode,
+  TaskNode,
   WorkflowDocument,
   WorkflowMode,
 } from '../shared/graph-model.js'
@@ -46,7 +46,7 @@ export interface NodeHandleDef {
  *
  * 语义依据：
  *   - 角色节点（parent/agent）：左入 数据库/上下文/流程入，右出 上下文/流程出（§4.2.3.1/§4.2.3.2）
- *   - 文件节点：无左入，右出 上下文（文本内容直通 / 受管路径索引，§4.2.4.1）
+ *   - 任务节点：无左入，右出 上下文（任务描述文本直通，§4.2.4.1）
  *   - 数据库节点：无左入，右出 数据库（服务标识，§4.2.4.2）
  *   - 启动/输入（start）：无左入，右出 流程出 + 上下文出（上下文出仅模式二输入节点，§4.2.5.1）
  *   - 结束/输出（end）：左入 流程入（+ 上下文入仅模式二输出节点），无右出（§4.2.5.1）
@@ -65,7 +65,7 @@ export interface NodeHandleDef {
 export const NODE_HANDLES: Record<NodeKind, NodeHandleDef> = {
   parent: { inputs: ['flow-in', 'ctx-in', 'db-in'], outputs: ['flow-out', 'ctx-out'] },
   agent: { inputs: ['flow-in', 'ctx-in', 'db-in'], outputs: ['flow-out', 'ctx-out'] },
-  file: { inputs: [], outputs: ['ctx-out'] },
+  task: { inputs: [], outputs: ['ctx-out'] },
   database: { inputs: [], outputs: ['db-out'] },
   start: { inputs: [], outputs: ['flow-out', 'ctx-out'] },
   end: { inputs: ['flow-in', 'ctx-in'], outputs: [] },
@@ -151,7 +151,7 @@ export const CONDITION_TYPES: ConditionType[] = ['pass', 'fail', 'content']
 export const NODE_KINDS: NodeKind[] = [
   'parent',
   'agent',
-  'file',
+  'task',
   'database',
   'start',
   'end',
@@ -206,15 +206,15 @@ export function newRoleNode(kind: 'parent' | 'agent', label: string, position = 
 }
 
 /**
- * 新建文件节点（text 或受管 file，§4.2.4.1）。
- * label 为节点名称（卡片设计必填字段）。
+ * 新建任务节点（文本描述任务，§4.2.4.1）。
+ * label 为节点名称（卡片设计必填字段），content 为任务描述正文（允许为空）。
  */
-export function newFileNode(fileKind: 'text' | 'file', label: string, position = { x: 120, y: 80 }): FileNode {
+export function newTaskNode(label: string, position = { x: 120, y: 80 }): TaskNode {
   return {
     id: makeNodeId(),
-    kind: 'file',
+    kind: 'task',
     position: { x: position.x, y: position.y },
-    data: { fileKind, label, content: fileKind === 'text' ? '' : undefined, managedPath: undefined, fileName: '' },
+    data: { label, content: '' },
   }
 }
 
@@ -333,7 +333,7 @@ export function nodeHasFlowIn(flow: Partial<WorkflowDocument>, nodeId: string): 
 /**
  * 某节点的 ctx-in 入边列表。
  * 现状（技术债（ctx-out 停用））：角色节点的 ctx 出线已不再是注入来源，该查询只剩
- * file 数据源节点这一真实消费方——调用方必须按来源 kind 过滤，不得再把角色来源当上下文。
+ * task 数据源节点这一真实消费方——调用方必须按来源 kind 过滤，不得再把角色来源当上下文。
  */
 export function ctxInEdges(flow: Partial<WorkflowDocument>, nodeId: string): Line[] {
   return (flow.lines ?? []).filter((l) => l.target === nodeId && l.targetHandle === channelIn('ctx'))

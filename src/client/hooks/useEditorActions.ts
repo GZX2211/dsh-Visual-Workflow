@@ -62,7 +62,7 @@ export interface EditorActionsOptions {
 
 /**
  * 模版态「入库」目标（纯函数）：工作流模版 → workflow、角色模版 → role；
- * 其余模版（文件/数据库/Team）与实例态/资产态均无入库目标（返回 null）。
+ * 其余模版（任务/数据库/Team）与实例态/资产态均无入库目标（返回 null）。
  */
 export function promoteTargetOf(state: StudioState): { kind: AssetKind; templateId: string } | null {
   const editor = state.editor
@@ -246,7 +246,7 @@ export function useEditorActions(
       selection.selectEditor({ source: 'template', kind: 'group', id })
       return
     }
-    const editorKindMap: Record<string, 'role' | 'file' | 'database'> = { role: 'role', file: 'file', database: 'database' }
+    const editorKindMap: Record<string, 'role' | 'task' | 'database'> = { role: 'role', task: 'task', database: 'database' }
     const editorKind = editorKindMap[kind]
     if (editorKind) selection.selectEditor({ source: 'template', kind: editorKind, id })
   }, [experiences, selectFlowTemplate, selectWorkflow, selection])
@@ -287,7 +287,7 @@ export function useEditorActions(
       const node = state.canvas.nodes.find((item) => item.id === editor.id)
       if (!node) return
       // 画布节点的名称数据源为 label（模板才使用 name）；双写补丁在此消毒，
-      // 避免 file 节点 data 里残留多余的 name 字段（否则磁盘数据被污染）
+      // 避免任务节点 data 里残留多余的 name 字段（否则磁盘数据被污染）
       const normalized = { ...patch }
       delete normalized.name
       dispatch({ type: 'NODE_DATA_PATCH', id: editor.id, patch: normalized })

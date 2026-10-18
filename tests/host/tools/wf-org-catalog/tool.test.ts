@@ -136,7 +136,7 @@ describe('executeOrgCatalog：索引 / 详情分派', () => {
       'WF_BAD_ARGS', // 旧模版前缀不再支持
       'WF_BAD_ARGS', // 经验不再由本工具召回
     ])
-    expect(out.errors[2].message).toContain('file')
+    expect(out.errors[2].message).toContain('task')
     // 形状非法的 id 不为它触发资产读盘
     expect(calls.workflowReads).toEqual(['flow-1'])
     expect(calls.roleReads).toEqual(['role-404'])

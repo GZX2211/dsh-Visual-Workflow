@@ -23,7 +23,7 @@ export const zh = {
   flowTemplates: '工作流模板',
   parentAgent: '父代理',
   roleTemplates: '角色模板',
-  files: '文件',
+  tasks: '任务',
   databases: '数据库',
   stages: '阶段',
   groupTemplates: '团队',
@@ -200,7 +200,7 @@ export const zh = {
   nodeKinds: {
     parent: '父代理',
     agent: '子代理',
-    file: '文件',
+    task: '任务',
     database: '数据库',
     start: '启动',
     end: '结束',
@@ -210,7 +210,6 @@ export const zh = {
     group: '团队',
     proxy: '虚拟节点',
   },
-  fileKindLabel: { text: '文本', file: '文件' },
   dbLocalLabel: '本地库',
   dbBm25Badge: '相似度检索（非语义）',
   proxyBadge: '↻ 引用',
@@ -250,10 +249,9 @@ export const zh = {
   inputSchemaExample: '如：上游结论；产出文件路径',
   outputSchemaExample: '如：结论 / 产出文件路径 / 关键决策 / 未决问题',
   contractRestoreDefault: '恢复默认',
-  fileKind: '文件类型',
-  fileContent: '文件内容',
-  fileUnset: '未选择文件',
-  /** 文件多选提示（已选文件列表显示在按钮下方）。 */
+  taskContent: '任务描述',
+  /** 任务描述文本框下方的文件选择入口（只把路径追加进文本，不上传）。 */
+  pickFiles: '选择文件',
   /** 团队卡片拖拽悬停提示（放开以入组）。 */
   groupDropHint: '放开以加入团队',
   /** 角色卡元信息「模型」前缀。 */
@@ -321,7 +319,7 @@ export const zh = {
   newWorkflow: '新建工作流',
   deleteFlow: '删除工作流',
   // 模板
-  templateDefaultName: { workflow: '未命名工作流', role: '新角色模板', file: '新文件模板', database: '新数据库模板', group: '新团队模板' },
+  templateDefaultName: { workflow: '未命名工作流', role: '新角色模板', task: '新任务模板', database: '新数据库模板', group: '新团队模板' },
   // 草稿默认名（本地草稿未命名时使用；与模板默认名分开——实例/模板语义不同）
   untitledWorkflow: '未命名工作流',
   untitledService: '未命名服务',
@@ -569,7 +567,7 @@ export const en: Dict = {
   flowTemplates: 'Workflow templates',
   parentAgent: 'Parent Agent',
   roleTemplates: 'Agent templates',
-  files: 'Files',
+  tasks: 'Tasks',
   databases: 'Databases',
   stages: 'Stages',
   groupTemplates: 'Teams',
@@ -738,7 +736,7 @@ export const en: Dict = {
   nodeKinds: {
     parent: 'Parent',
     agent: 'Agent',
-    file: 'File',
+    task: 'Task',
     database: 'Database',
     start: 'Start',
     end: 'End',
@@ -748,7 +746,6 @@ export const en: Dict = {
     group: 'Team',
     proxy: 'Proxy',
   },
-  fileKindLabel: { text: 'Text', file: 'File' },
   dbLocalLabel: 'Local DB',
   dbBm25Badge: 'BM25 (non-semantic)',
   proxyBadge: '↻ ref',
@@ -787,9 +784,8 @@ export const en: Dict = {
   inputSchemaExample: 'e.g. upstream conclusion; artifact paths',
   outputSchemaExample: 'e.g. conclusion / artifact paths / key decisions / open questions',
   contractRestoreDefault: 'Restore default',
-  fileKind: 'File kind',
-  fileContent: 'File content',
-  fileUnset: 'No file selected',
+  taskContent: 'Task description',
+  pickFiles: 'Choose files',
   groupDropHint: 'Drop to join the Team',
   nodeMetaModel: 'Model',
   nodeMetaPreset: 'Preset',
@@ -850,7 +846,7 @@ export const en: Dict = {
   meta: 'Status',
   newWorkflow: 'New workflow',
   deleteFlow: 'Delete workflow',
-  templateDefaultName: { workflow: 'Untitled workflow', role: 'New agent template', file: 'New file template', database: 'New database template', group: 'New Team template' },
+  templateDefaultName: { workflow: 'Untitled workflow', role: 'New agent template', task: 'New task template', database: 'New database template', group: 'New Team template' },
   // Draft default names (used when a local draft has no name; separate from template defaults)
   untitledWorkflow: 'Untitled workflow',
   untitledService: 'Untitled service',

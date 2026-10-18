@@ -60,7 +60,7 @@ export const EP_SERVICE_DEBUG = 'serviceDebug'
  */
 export const EP_CREATE_SESSION = 'createSession'
 
-/** 模板列表端点名（角色/文件/数据库三类共用）。 */
+/** 模板列表端点名（角色/任务/数据库三类共用）。 */
 export const EP_LIST_TEMPLATES = 'listTemplates'
 /** 保存模板。 */
 export const EP_PUT_TEMPLATE = 'putTemplate'
@@ -72,8 +72,6 @@ export const EP_LIST_FLOW_TEMPLATES = 'listFlowTemplates'
 export const EP_PUT_FLOW_TEMPLATE = 'putFlowTemplate'
 /** 删除工作流模板。 */
 export const EP_DELETE_FLOW_TEMPLATE = 'deleteFlowTemplate'
-/** 受管文件上传端点名（非文本文件：base64 内容 → data/files/ 受管拷贝）。 */
-export const EP_FILE_UPLOAD = 'fileUpload'
 
 /** 官方预设列表端点名。 */
 export const EP_PRESETS = 'presets'
@@ -450,7 +448,6 @@ export const ENDPOINT_NAMES = [
   'listFlowTemplates',
   'putFlowTemplate',
   'deleteFlowTemplate',
-  'fileUpload',
   'presets',
   'models',
   'toolCombos',

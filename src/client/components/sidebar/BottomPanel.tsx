@@ -5,7 +5,7 @@
 // 仅显示布局不同——本次按要求改为：卡片只显示名称（不再显示描述、图标等）。
 //
 // Tag 区（底栏最左，竖向）显示 工作流/角色/数据/其他 四个图标（不显示文字，共 4 个 tag）；
-// 切换到不同 Tag 时，右侧卡片列表随动（实例/模板、角色模板、文件/数据库、阶段/Team）。
+// 切换到不同 Tag 时，右侧卡片列表随动（实例/模板、角色模板、任务/数据库、阶段/Team）。
 // 卡片横向排列、flex-wrap 自动换行：单排放不下时动态追加下一排（底栏够宽可无限追加排）。
 // 卡片支持拖拽入画布（与左栏一致，经 onBeginDrag）。
 //
@@ -14,7 +14,7 @@
 
 import type { Dict } from '../../i18n.js'
 import type { LibTab, LibrarySource } from '../../studio/studio-state.js'
-import type { RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate } from '../../../host/shared/types.js'
+import type { RoleTemplate, TaskTemplate, DatabaseTemplate, GroupTemplate } from '../../../host/shared/types.js'
 import type { WorkflowTemplate } from '../../../host/shared/graph-model.js'
 import type { ExperienceEntry, RoleAssetSummary, WorkflowAssetSummary } from '../../../host/shared/asset-types.js'
 import { buildLibraryModel } from './library-model.js'
@@ -45,7 +45,7 @@ export interface BottomPanelProps {
   experiences: ExperienceEntry[]
   parentTemplate: RoleTemplate | null
   roleTemplates: RoleTemplate[]
-  fileTemplates: FileTemplate[]
+  taskTemplates: TaskTemplate[]
   databaseTemplates: DatabaseTemplate[]
   groupTemplates: GroupTemplate[]
   stageKinds: Array<{ kind: string; label: string }>
@@ -59,13 +59,13 @@ export interface BottomPanelProps {
   onOpenExperience(id: string): void
   onPlaceRoleAsset(id: string, position: { x: number; y: number }): void
   onSelectLib(kind: LibSelectionInfo['kind'], id: string): void
-  onPlaceTemplate(kind: 'role' | 'file' | 'database', id: string, position: { x: number; y: number }): void
+  onPlaceTemplate(kind: 'role' | 'task' | 'database', id: string, position: { x: number; y: number }): void
   onPlaceTemplateIntoGroup(kind: 'role', id: string, groupId: string, position: { x: number; y: number }): void
   onPlaceStage(kind: string, position: { x: number; y: number }): void
   onPlaceGroup(position: { x: number; y: number }): void
   onPlaceGroupFromTemplate(id: string, position: { x: number; y: number }): void
   onPlaceParent(id: string, position: { x: number; y: number }): void
-  onCreateNew(tab: LibTab, section?: 'file' | 'database' | 'flowTemplate' | 'group'): void
+  onCreateNew(tab: LibTab, section?: 'task' | 'database' | 'flowTemplate' | 'group'): void
   onBeginDrag(event: React.PointerEvent, payload: DragPayload): void
 }
 

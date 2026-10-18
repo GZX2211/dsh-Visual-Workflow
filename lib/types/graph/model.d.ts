@@ -1,4 +1,4 @@
-import type { ConditionType, DatabaseNode, FileNode, GraphNode, GroupNode, Handle, Line, NodeKind, ProxyNode, RoleNode, StageNode, WorkflowDocument, WorkflowMode } from '../shared/graph-model.js';
+import type { ConditionType, DatabaseNode, GraphNode, GroupNode, Handle, Line, NodeKind, ProxyNode, RoleNode, StageNode, TaskNode, WorkflowDocument, WorkflowMode } from '../shared/graph-model.js';
 /** 单类节点的连接点定义：入点集合与出点集合。 */
 export interface NodeHandleDef {
     inputs: Handle[];
@@ -9,7 +9,7 @@ export interface NodeHandleDef {
  *
  * 语义依据：
  *   - 角色节点（parent/agent）：左入 数据库/上下文/流程入，右出 上下文/流程出（§4.2.3.1/§4.2.3.2）
- *   - 文件节点：无左入，右出 上下文（文本内容直通 / 受管路径索引，§4.2.4.1）
+ *   - 任务节点：无左入，右出 上下文（任务描述文本直通，§4.2.4.1）
  *   - 数据库节点：无左入，右出 数据库（服务标识，§4.2.4.2）
  *   - 启动/输入（start）：无左入，右出 流程出 + 上下文出（上下文出仅模式二输入节点，§4.2.5.1）
  *   - 结束/输出（end）：左入 流程入（+ 上下文入仅模式二输出节点），无右出（§4.2.5.1）
@@ -94,13 +94,13 @@ export declare function newRoleNode(kind: 'parent' | 'agent', label: string, pos
     y: number;
 }): RoleNode;
 /**
- * 新建文件节点（text 或受管 file，§4.2.4.1）。
- * label 为节点名称（卡片设计必填字段）。
+ * 新建任务节点（文本描述任务，§4.2.4.1）。
+ * label 为节点名称（卡片设计必填字段），content 为任务描述正文（允许为空）。
  */
-export declare function newFileNode(fileKind: 'text' | 'file', label: string, position?: {
+export declare function newTaskNode(label: string, position?: {
     x: number;
     y: number;
-}): FileNode;
+}): TaskNode;
 /**
  * 新建数据库节点（§4.2.4.2）。
  * label 为名称、description 为描述（卡片设计必填字段）。
@@ -153,7 +153,7 @@ export declare function nodeHasFlowIn(flow: Partial<WorkflowDocument>, nodeId: s
 /**
  * 某节点的 ctx-in 入边列表。
  * 现状（技术债（ctx-out 停用））：角色节点的 ctx 出线已不再是注入来源，该查询只剩
- * file 数据源节点这一真实消费方——调用方必须按来源 kind 过滤，不得再把角色来源当上下文。
+ * task 数据源节点这一真实消费方——调用方必须按来源 kind 过滤，不得再把角色来源当上下文。
  */
 export declare function ctxInEdges(flow: Partial<WorkflowDocument>, nodeId: string): Line[];
 /** 某节点的 db-in 入边列表（数据库服务标识来源；有边才注入 wf_db_query，§4.4.3 规则 5）。 */

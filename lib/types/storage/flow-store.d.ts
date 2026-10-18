@@ -1,7 +1,7 @@
 import { type Template, type TemplateKind } from './template-model.js';
 import { type SaveOptions } from './document-policy.js';
 import type { WorkflowDocument, WorkflowTemplate } from '../shared/graph-model.js';
-import type { ServiceState, ToolCombo, RunSnapshot, RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate } from '../shared/types.js';
+import type { ServiceState, ToolCombo, RunSnapshot, RoleTemplate, TaskTemplate, DatabaseTemplate, GroupTemplate } from '../shared/types.js';
 export type { Template, TemplateKind } from './template-model.js';
 export type { SaveOptions } from './document-policy.js';
 export { FlowNotFoundError, FlowRevisionConflictError } from './document-policy.js';
@@ -9,8 +9,6 @@ export declare class FlowStore {
     readonly root: string;
     /** 顶层数据目录（init 时创建；常量表供测试与外部工具断言布局）。 */
     static readonly DIRS: readonly ["workflows", "services", "roles", "data", "groups", "runs", "flow-templates"];
-    /** 嵌套子目录（相对 root；随顶层目录一并幂等创建）。 */
-    static readonly NESTED_DIRS: readonly ["data/files"];
     constructor(root: string);
     /** 初始化目录结构（幂等：mkdir recursive，重复调用安全）。 */
     init(): Promise<void>;
@@ -60,8 +58,8 @@ export declare class FlowStore {
     deleteService(sessionId: string, serviceId: string): Promise<boolean>;
     /** 列出角色模板（精确返回类型重载，供调用方免断言）。 */
     listTemplates(kind: 'role'): Promise<RoleTemplate[]>;
-    /** 列出文件模板（data/ 下按字段判别过滤）。 */
-    listTemplates(kind: 'file'): Promise<FileTemplate[]>;
+    /** 列出任务模板（data/ 下按字段判别过滤）。 */
+    listTemplates(kind: 'task'): Promise<TaskTemplate[]>;
     /** 列出数据库模板（data/ 下按字段判别过滤）。 */
     listTemplates(kind: 'database'): Promise<DatabaseTemplate[]>;
     /** 列出 Team 模板（groups/ 目录）。 */

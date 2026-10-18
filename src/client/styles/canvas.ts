@@ -202,7 +202,7 @@ g.is-locked .wf-graph__edge-hit {
   outline: 0;
 }
 
-/* 接点左右位置：普通卡片（角色/文件/数据库/阶段/虚拟）按交换状态动态指定 side；Team 卡固定 target/source */
+/* 接点左右位置：普通卡片（角色/任务/数据库/阶段/虚拟）按交换状态动态指定 side；Team 卡固定 target/source */
 .wf-graph__handle.is-side-left {
   left: -6px;
 }
@@ -497,32 +497,6 @@ g.is-locked .wf-graph__edge-hit {
   font-weight: 700;
   text-align: center;
   pointer-events: none;
-}
-
-/* 已选文件列表（文件表单，按钮下方显示） */
-.wf-file-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 6px;
-  border: 1px solid var(--wf-border);
-  border-radius: 8px;
-  background: var(--wf-layer-2);
-  max-height: 120px;
-  overflow: auto;
-  scrollbar-width: thin;
-}
-
-.wf-file-chip {
-  display: block;
-  font-size: 11px;
-  color: var(--wf-ink);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 2px 6px;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--wf-brand) 8%, transparent);
 }
 
 /* ---- Team 成员列表（缩小版角色卡） ---- */

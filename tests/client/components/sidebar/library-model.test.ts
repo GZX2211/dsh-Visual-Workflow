@@ -25,7 +25,7 @@ function makeInput(partial: Partial<LibraryModelInput> = {}): LibraryModelInput 
     flowTemplates: [],
     parentTemplate: null,
     roleTemplates: [],
-    fileTemplates: [],
+    taskTemplates: [],
     databaseTemplates: [],
     groupTemplates: [],
     stageKinds: [],
@@ -306,14 +306,25 @@ describe('资产态「数据」Tag 以「经验」呈现（用户批注）', () 
     expect(idsOf('prompt-1')).toEqual([])
   })
 
-  it('模版态数据 Tag 仍是文件 + 数据库（经验不参与）', () => {
+  it('模版态数据 Tag 仍是任务 + 数据库（经验不参与）', () => {
     const model = buildLibraryModel(makeInput({
       librarySource: 'template',
       libTab: 'data',
       experiences: [experience('ex-1', '上下文一', '经验一')],
     }))
-    expect(model.sections.map((section) => section.key)).toEqual(['files', 'databases'])
+    expect(model.sections.map((section) => section.key)).toEqual(['tasks', 'databases'])
     expect(model.emptyHint).toBeNull()
+  })
+
+  it('任务模板卡：副行显示任务描述，kind=task 可拖入画布', () => {
+    const model = buildLibraryModel(makeInput({
+      libTab: 'data',
+      taskTemplates: [{ id: 't-1', name: '任务一', content: '任务描述一' }],
+    }))
+    const section = model.sections.find((item) => item.key === 'tasks')
+    expect(section?.title).toBe(zh.tasks)
+    expect(section?.plusKind).toBe('task')
+    expect(section?.cards[0]).toMatchObject({ kind: 'task', name: '任务一', sub: '任务描述一' })
   })
 })
 

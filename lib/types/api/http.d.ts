@@ -1,7 +1,7 @@
 import { type BodyRequest, type JsonResponseSink } from '../http-io.js';
 /**
  * GUI 请求体上限分级（K2 用户裁决：本 API 仅本机可信，但要按端点收敛资源占用）。
- * 分级体现的是端点载荷形状，不是「统一成一个值」——二进制/导入档必须保留 64MB 既有能力。
+ * 分级体现的是端点载荷形状，不是「统一成一个值」——导入包必须保留 64MB 既有能力。
  */
 export declare const GUI_BODY_LIMIT: {
     /** 无参端点（端点方法不读 args）：只承载空体或 `{"args":{}}`。 */
@@ -10,7 +10,7 @@ export declare const GUI_BODY_LIMIT: {
     readonly normal: number;
     /** 整份文档端点：工作流/服务/模板/资产文档整体上送。 */
     readonly document: number;
-    /** 二进制与导入包端点：fileUpload 的 base64 与 bundle JSON。 */
+    /** 导入包端点（bundle JSON）。 */
     readonly binary: number;
 };
 /** 端点 → 请求体上限（未登记端点按常规档，未知端点亦不会拿到 64MB）。 */

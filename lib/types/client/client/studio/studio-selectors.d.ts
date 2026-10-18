@@ -112,7 +112,7 @@ export declare function panelsFullyCollapsedOf(state: StudioState): boolean;
 /**
  * 右侧属性栏是否显示：默认隐藏（折叠），仅当选中「具备属性」的对象时才展开。
  * 判定 = 编辑对象存在且其属性栏类型不是「阶段」（阶段节点/侧栏阶段卡片不具备属性，不弹）；
- * 其余（实例/工作流/服务/模板/角色/文件/数据库/Team/连线/画布角色节点含父代理节点/虚拟节点）都弹。
+ * 其余（实例/工作流/服务/模板/角色/任务/数据库/Team/连线/画布角色节点含父代理节点/虚拟节点）都弹。
  * 注意：父代理模板也具备属性（属性栏显示模板内容），此处一并弹出。
  */
 export declare function inspectorOpenOf(state: StudioState): boolean;

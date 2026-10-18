@@ -1,11 +1,11 @@
 // src/client/components/canvas/FlowNode.tsx
 //
-// 画布节点卡片：角色（父/子代理）/ 文件 / 数据库 / 阶段 / 虚拟节点。接点按 HANDLES 展开；
+// 画布节点卡片：角色（父/子代理）/ 任务 / 数据库 / 阶段 / 虚拟节点。接点按 HANDLES 展开；
 // 运行状态徽标（pending/running/ok/fail）回显；虚拟节点虚线边框 + 「↻ 引用」角标。
 //
 // 渲染约束：
 //   - 角色卡元信息两行：模型：<model> / 组合：<模式或组合名>；
-//   - 文件节点卡：文本类型显示内容（超两行省略）；文件类型显示所选文件名列表；
+//   - 任务节点卡：显示任务描述（超两行省略）；
 //   - 虚拟节点「↻ 引用」徽标只渲染一处；
 //   - 输入/输出节点各只保留一个连接点（模式二：输入=flow-out、输出=flow-in）；
 //   - 连接点按入口/出口区分颜色；交换左右连接点（swapPorts）随节点持久化，Team 卡片不提供该按钮。
@@ -77,20 +77,10 @@ function metaLinesOf(node: CanvasNode, copy: Dict & { modeName(id: string | null
     const presetLabel = String(copy.nodeMetaPreset)
     out.push(`${modelLabel}：${String(data.model ?? '').trim() || '—'}`)
     out.push(`${presetLabel}：${copy.modeName((data.presetId as string | null) ?? null)}`)
-  } else if (kind === 'file') {
-    const fileKind = String(data.fileKind ?? 'text')
-    const files = (data.files as Array<{ fileName?: unknown; managedPath?: unknown }> | undefined) ?? []
-    if (fileKind === 'text') {
-      // 文本类型：显示输入的内容（不显示文件类型词），超出两行省略
-      const content = clip(String(data.content ?? ''), 56)
-      if (content.trim()) out.push(content)
-    } else {
-      // 文件类型：显示所选文件名列表（不显示「文件」前缀），超出省略
-      const names = files.length > 0
-        ? files.map((item) => String(item?.fileName ?? '')).filter(Boolean)
-        : [String(data.fileName ?? '')].filter(Boolean)
-      if (names.length > 0) out.push(clip(names.join('，'), 40))
-    }
+  } else if (kind === 'task') {
+    // 任务节点：显示任务描述（不显示类型），超出两行省略
+    const content = clip(String(data.content ?? ''), 56)
+    if (content.trim()) out.push(content)
   } else if (kind === 'database') {
     out.push(data.dbType === 'server' ? `${String(data.dbKind ?? 'mysql')} · ${String(copy.dbTypeServer)}` : String(copy.dbLocalLabel))
     if (data.vectorSource === 'bm25') out.push(String(copy.dbBm25Badge))

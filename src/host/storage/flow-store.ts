@@ -31,7 +31,6 @@ import {
 } from './document-shape.js'
 import {
   DIRS as DATA_DIRS,
-  NESTED_DIRS as NESTED_DATA_DIRS,
   combosPath,
   flowTemplatePath,
   runsPath,
@@ -49,13 +48,14 @@ import {
   type SaveOptions,
 } from './document-policy.js'
 import { serviceToWorkflowView } from './service-view.js'
+import { normalizeLegacyNodes } from '../graph/index.js'
 import type { WorkflowDocument, WorkflowTemplate } from '../shared/graph-model.js'
 import type {
   ServiceState,
   ToolCombo,
   RunSnapshot,
   RoleTemplate,
-  FileTemplate,
+  TaskTemplate,
   DatabaseTemplate,
   GroupTemplate,
 } from '../shared/types.js'
@@ -149,6 +149,25 @@ function byUpdatedAtDesc<T extends { updatedAt?: string }>(a: T, b: T): number {
   return compareText(String(b.updatedAt ?? ''), String(a.updatedAt ?? ''))
 }
 
+/**
+ * 旧图读取/写入兼容：kind='file' 节点归一化为任务节点。
+ * 读取时保证调用方看到新契约；写入时保证旧快照不会把退役形态重新落盘。
+ */
+function withTaskNodes<T extends { nodes?: WorkflowDocument['nodes'] }>(doc: T): T {
+  return { ...doc, nodes: normalizeLegacyNodes(doc.nodes) }
+}
+
+/** 已退役的任务模板字段（旧文件模板形状）：读取兼容，保存时剥除。 */
+const RETIRED_TASK_TEMPLATE_FIELDS = ['fileKind', 'managedPath', 'fileName', 'files'] as const
+
+/** 保存前的模板净化：任务模板不得把已退役的受管文件字段重新写盘。 */
+function sanitizeTemplate(kind: TemplateKind, template: Template): Template {
+  if (kind !== 'task') return template
+  const next = { ...template } as Record<string, unknown>
+  for (const field of RETIRED_TASK_TEMPLATE_FIELDS) delete next[field]
+  return next as unknown as Template
+}
+
 // ---------------------------------------------------------------------------
 // FlowStore
 // ---------------------------------------------------------------------------
@@ -156,14 +175,12 @@ function byUpdatedAtDesc<T extends { updatedAt?: string }>(a: T, b: T): number {
 export class FlowStore {
   /** 顶层数据目录（init 时创建；常量表供测试与外部工具断言布局）。 */
   static readonly DIRS = DATA_DIRS
-  /** 嵌套子目录（相对 root；随顶层目录一并幂等创建）。 */
-  static readonly NESTED_DIRS = NESTED_DATA_DIRS
 
   constructor(public readonly root: string) {}
 
   /** 初始化目录结构（幂等：mkdir recursive，重复调用安全）。 */
   async init(): Promise<void> {
-    for (const dir of [...FlowStore.DIRS, ...FlowStore.NESTED_DIRS]) {
+    for (const dir of FlowStore.DIRS) {
       await mkdir(join(this.root, dir), { recursive: true })
     }
   }
@@ -183,7 +200,7 @@ export class FlowStore {
     for (const name of names) {
       if (!name.endsWith('.json')) continue
       const doc = await readListEntry<WorkflowDocument>(dir, name, isWorkflowDocument)
-      if (doc && (sessionId === undefined || doc.sessionId === sessionId)) items.push(doc)
+      if (doc && (sessionId === undefined || doc.sessionId === sessionId)) items.push(withTaskNodes(doc))
     }
     return items.sort(byUpdatedAtDesc)
   }
@@ -192,7 +209,7 @@ export class FlowStore {
   async getWorkflow(sessionId: string, flowId: string): Promise<WorkflowDocument | null> {
     const doc = await readDocument(workflowPath(this.root, flowId), isWorkflowDocument)
     if (!doc || doc.sessionId !== sessionId) return null
-    return doc
+    return withTaskNodes(doc)
   }
 
   /** 保存工作流（创建/更新统一；revision 递增 + 冲突保护 + 原子写）。 */
@@ -208,7 +225,7 @@ export class FlowStore {
       // 抛稳定码（而非普通 Error）：边界据此映射 404，不得落成 500。
       if (current && current.sessionId !== sessionId) throw new FlowNotFoundError(flow.id)
       const saved: WorkflowDocument = {
-        ...publishVersionedDocument(flow, current, options, new Date().toISOString()),
+        ...publishVersionedDocument(withTaskNodes(flow), current, options, new Date().toISOString()),
         sessionId,
       }
       await atomicWriteJson(path, saved)
@@ -241,7 +258,7 @@ export class FlowStore {
     for (const name of names) {
       if (!name.endsWith('.json') || name.endsWith('.sessions.json')) continue
       const doc = await readListEntry<ServiceState>(dir, name, isServiceState)
-      if (doc && (sessionId === undefined || doc.sessionId === sessionId)) items.push(doc)
+      if (doc && (sessionId === undefined || doc.sessionId === sessionId)) items.push(withTaskNodes(doc))
     }
     return items.sort(byUpdatedAtDesc)
   }
@@ -250,12 +267,13 @@ export class FlowStore {
   async getService(sessionId: string, serviceId: string): Promise<ServiceState | null> {
     const doc = await readDocument(servicePath(this.root, serviceId), isServiceState)
     if (!doc || doc.sessionId !== sessionId) return null
-    return doc
+    return withTaskNodes(doc)
   }
 
   /** 按 id 读取服务（不校验归属会话；服务管理器/服务进程用）。 */
   async getServiceById(serviceId: string): Promise<ServiceState | null> {
-    return readDocument(servicePath(this.root, serviceId), isServiceState)
+    const doc = await readDocument(servicePath(this.root, serviceId), isServiceState)
+    return doc ? withTaskNodes(doc) : null
   }
 
   /** 列出全部服务（不按会话过滤；自动恢复扫描用）。 */
@@ -266,7 +284,7 @@ export class FlowStore {
     for (const name of names) {
       if (!name.endsWith('.json') || name.endsWith('.sessions.json')) continue
       const doc = await readListEntry<ServiceState>(dir, name, isServiceState)
-      if (doc) items.push(doc)
+      if (doc) items.push(withTaskNodes(doc))
     }
     return items.sort(byUpdatedAtDesc)
   }
@@ -329,7 +347,7 @@ export class FlowStore {
     options: SaveOptions,
   ): Promise<ServiceState> {
     const saved: ServiceState = {
-      ...publishVersionedDocument(incoming, current, options, new Date().toISOString()),
+      ...publishVersionedDocument(withTaskNodes(incoming), current, options, new Date().toISOString()),
       sessionId,
     }
     await atomicWriteJson(path, saved)
@@ -352,15 +370,15 @@ export class FlowStore {
 
   /** 列出角色模板（精确返回类型重载，供调用方免断言）。 */
   async listTemplates(kind: 'role'): Promise<RoleTemplate[]>
-  /** 列出文件模板（data/ 下按字段判别过滤）。 */
-  async listTemplates(kind: 'file'): Promise<FileTemplate[]>
+  /** 列出任务模板（data/ 下按字段判别过滤）。 */
+  async listTemplates(kind: 'task'): Promise<TaskTemplate[]>
   /** 列出数据库模板（data/ 下按字段判别过滤）。 */
   async listTemplates(kind: 'database'): Promise<DatabaseTemplate[]>
   /** 列出 Team 模板（groups/ 目录）。 */
   async listTemplates(kind: 'group'): Promise<GroupTemplate[]>
   /** 列出某类模板（kind 联合兜底；具体子类型请用窄签名）。 */
   async listTemplates(kind: TemplateKind): Promise<Template[]>
-  /** 列出某类模板（roles/ 角色；groups/ Team；data/ 文件+数据库按字段判别过滤）。 */
+  /** 列出某类模板（roles/ 角色；groups/ Team；data/ 任务+数据库按字段判别过滤）。 */
   async listTemplates(kind: TemplateKind): Promise<Template[]> {
     const dir = join(this.root, templateDir(kind))
     const names = await readDirNames(dir)
@@ -369,8 +387,8 @@ export class FlowStore {
       if (!name.endsWith('.json')) continue
       const t = await readListEntry<Template>(dir, name, isTemplate)
       if (!t) continue
-      // 数据模板同目录混存：file 与 database 以 dbType 字段判别（§6 目录规划）
-      if (kind === 'file' && isDatabaseTemplate(t)) continue
+      // 数据模板同目录混存：task 与 database 以 dbType 字段判别（§6 目录规划）
+      if (kind === 'task' && isDatabaseTemplate(t)) continue
       if (kind === 'database' && !isDatabaseTemplate(t)) continue
       items.push(t)
     }
@@ -386,7 +404,7 @@ export class FlowStore {
   async getTemplate(kind: TemplateKind, id: string): Promise<Template | null> {
     const t = await readDocument(templatePath(this.root, kind, id), isTemplate)
     if (!t) return null
-    if (kind === 'file' && isDatabaseTemplate(t)) return null
+    if (kind === 'task' && isDatabaseTemplate(t)) return null
     if (kind === 'database' && !isDatabaseTemplate(t)) return null
     return t
   }
@@ -400,7 +418,7 @@ export class FlowStore {
     const path = templatePath(this.root, kind, template.id)
     return withJsonLock(path, async () => {
       const current = await readJson<Template | null>(path, null)
-      const saved = publishDocument(template, current, new Date().toISOString())
+      const saved = publishDocument(sanitizeTemplate(kind, template), current, new Date().toISOString())
       await atomicWriteJson(path, saved)
       return saved
     })
@@ -427,14 +445,15 @@ export class FlowStore {
     for (const name of names) {
       if (!name.endsWith('.json')) continue
       const t = await readListEntry<WorkflowTemplate>(dir, name, isWorkflowTemplate)
-      if (t) items.push(t)
+      if (t) items.push(withTaskNodes(t))
     }
     return items.sort(byUpdatedAtDesc)
   }
 
   /** 按 id 读取单个工作流模板（无则 null）。 */
   async getFlowTemplate(templateId: string): Promise<WorkflowTemplate | null> {
-    return readDocument(flowTemplatePath(this.root, templateId), isWorkflowTemplate)
+    const template = await readDocument(flowTemplatePath(this.root, templateId), isWorkflowTemplate)
+    return template ? withTaskNodes(template) : null
   }
 
   /** 保存工作流模板（新建/更新统一；revision 递增 + 冲突保护 + 原子写；无 sessionId 隔离）。 */
@@ -443,7 +462,7 @@ export class FlowStore {
     const path = flowTemplatePath(this.root, template.id)
     return withJsonLock(path, async () => {
       const current = await readJson<WorkflowTemplate | null>(path, null)
-      const saved = publishVersionedDocument(template, current, options, new Date().toISOString())
+      const saved = publishVersionedDocument(withTaskNodes(template), current, options, new Date().toISOString())
       await atomicWriteJson(path, saved)
       return saved
     })

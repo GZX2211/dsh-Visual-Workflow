@@ -14,7 +14,7 @@ export const HANDLES: Record<string, HandleSpec> = {
   parent: { inputs: ['db-in', 'ctx-in', 'flow-in'], outputs: ['ctx-out', 'flow-out'] },
   agent: { inputs: ['db-in', 'ctx-in', 'flow-in'], outputs: ['ctx-out', 'flow-out'] },
   proxy: { inputs: ['db-in', 'ctx-in', 'flow-in'], outputs: ['ctx-out', 'flow-out'] },
-  file: { inputs: [], outputs: ['ctx-out'] },
+  task: { inputs: [], outputs: ['ctx-out'] },
   database: { inputs: [], outputs: ['db-out'] },
   // 输入/输出节点仅保留一个流程连接点（连接点多了，应当只有一个；
   // 外部问题已自动注入输入节点，流式返回不依赖输出节点 ctx 连线）

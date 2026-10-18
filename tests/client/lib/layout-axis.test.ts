@@ -3,7 +3,7 @@
 // 主轴共线 + 数据节点 (n-1) 列分布（用户裁决 2026-09，见 assets/imgs/布局算法调整.png 批注）：
 //   - 主干（start/end/pause/角色/Team/proxy）保持一条水平直线，各列主干卡片共线于主轴 Y；
 //   - 同列多个主干节点以主轴为中心上下均分；
-//   - 数据节点（file/database）不占主干通道，放到与其关联角色所在列 n 的 **n-1** 列，
+//   - 数据节点（task/database）不占主干通道，放到与其关联角色所在列 n 的 **n-1** 列，
 //     并在该列内贴主轴上下堆叠（关联角色在主轴上方 → 数据节点贴上方，反之贴下方）；
 //   - 列右对齐；列间距 = 前一列最右边界 → 后一列最左边界 = columnGap；
 //   - 未关联角色的数据节点与未参与流程的主干节点进「孤立列」（流程最右侧之外）。
@@ -96,9 +96,9 @@ function centerYOf(id: string, nodes: LayoutNodeInput[], positions: Map<string, 
 // ---------------------------------------------------------------------------
 
 describe('节点分类：主干 / 数据', () => {
-  it('主干 = start/end/pause/parent/agent/group/proxy；数据 = file/database（proxy 属主干）', () => {
+  it('主干 = start/end/pause/parent/agent/group/proxy；数据 = task/database（proxy 属主干）', () => {
     expect([...SPINE_KINDS].sort()).toEqual(['agent', 'end', 'group', 'parent', 'pause', 'proxy', 'start'])
-    expect([...DATA_KINDS].sort()).toEqual(['database', 'file'])
+    expect([...DATA_KINDS].sort()).toEqual(['database', 'task'])
     expect([...SPINE_KINDS].some((kind) => DATA_KINDS.has(kind))).toBe(false)
   })
 })
@@ -139,7 +139,7 @@ describe('主轴：主干卡片共线于同一水平线', () => {
 
 describe('数据节点：列 = 关联角色列 - 1，贴主轴上下堆叠', () => {
   it('单个数据节点关联第 2 列角色 → 落在第 1 列，且与关联角色不同列', () => {
-    const nodes = [node('s', 'start'), node('a1', 'agent'), node('f1', 'file'), node('e', 'end')]
+    const nodes = [node('s', 'start'), node('a1', 'agent'), node('f1', 'task'), node('e', 'end')]
     const lines = [flowLine('l1', 's', 'a1'), flowLine('l2', 'a1', 'e'), ctxLine('c1', 'f1', 'a1')]
     const result = layoutGraph(nodes, lines)
     expect(result.colOf.get('a1')).toBe(1)
@@ -165,7 +165,7 @@ describe('数据节点：列 = 关联角色列 - 1，贴主轴上下堆叠', () 
   it('上下侧判定：关联角色位于主轴上方 → 数据节点贴主轴上方；位于下方 → 贴下方', () => {
     // 主干：start → {up, down}（同列并行）→ end；该列两个主干节点以主轴为中心上下展开
     const roles = [node('up', 'agent'), node('down', 'agent')]
-    const nodes = [node('s', 'start'), ...roles, node('e', 'end'), node('fUp', 'file'), node('fDown', 'file')]
+    const nodes = [node('s', 'start'), ...roles, node('e', 'end'), node('fUp', 'task'), node('fDown', 'task')]
     const lines = [
       flowLine('l1', 's', 'up'), flowLine('l2', 's', 'down'),
       flowLine('l3', 'up', 'e'), flowLine('l4', 'down', 'e'),
@@ -192,7 +192,7 @@ describe('数据节点：列 = 关联角色列 - 1，贴主轴上下堆叠', () 
   it('同列多数据节点：贴轴优先序 = 关联角色在主轴上的序号（越靠上越先贴轴），间隔不小于 rowGap', () => {
     const nodes = [
       node('s', 'start'), node('r1', 'agent'), node('r2', 'agent'), node('r3', 'agent'), node('e', 'end'),
-      node('f1', 'file'), node('f2', 'file'), node('f3', 'file'),
+      node('f1', 'task'), node('f2', 'task'), node('f3', 'task'),
     ]
     const lines = [
       flowLine('l1', 's', 'r1'), flowLine('l2', 's', 'r2'), flowLine('l3', 's', 'r3'),
@@ -213,7 +213,7 @@ describe('数据节点：列 = 关联角色列 - 1，贴主轴上下堆叠', () 
   })
 
   it('数据节点关联多个角色（跨列）：取最小列 - 1，保证确定且左靠', () => {
-    const nodes = [node('s', 'start'), node('a1', 'agent'), node('a2', 'agent'), node('f1', 'file'), node('e', 'end')]
+    const nodes = [node('s', 'start'), node('a1', 'agent'), node('a2', 'agent'), node('f1', 'task'), node('e', 'end')]
     const lines = [
       flowLine('l1', 's', 'a1'), flowLine('l2', 'a1', 'a2'), flowLine('l3', 'a2', 'e'),
       ctxLine('c1', 'f1', 'a1'), ctxLine('c2', 'f1', 'a2'),
@@ -225,7 +225,7 @@ describe('数据节点：列 = 关联角色列 - 1，贴主轴上下堆叠', () 
   })
 
   it('数据节点恒不与关联角色同列，且渲染盒子之间不重叠', () => {
-    const nodes = [node('s', 'start'), node('a1', 'agent'), node('d1', 'database'), node('f1', 'file'), node('e', 'end')]
+    const nodes = [node('s', 'start'), node('a1', 'agent'), node('d1', 'database'), node('f1', 'task'), node('e', 'end')]
     const lines = [
       flowLine('l1', 's', 'a1'), flowLine('l2', 'a1', 'e'),
       dbLine('b1', 'd1', 'a1'), ctxLine('c1', 'f1', 'a1'),
@@ -259,7 +259,7 @@ describe('列几何：右对齐与列间距', () => {
   })
 
   it('列间距 = 前一列最右边界 → 后一列最左边界 = columnGap（缺省 72；可覆盖为其他值）', () => {
-    const nodes = [node('s', 'start'), node('a1', 'agent'), node('f1', 'file'), node('e', 'end')]
+    const nodes = [node('s', 'start'), node('a1', 'agent'), node('f1', 'task'), node('e', 'end')]
     const lines = [flowLine('l1', 's', 'a1'), flowLine('l2', 'a1', 'e'), ctxLine('c1', 'f1', 'a1')]
     const result = layoutGraph(nodes, lines)
     const columns = columnsOf(nodes, result.colOf)
@@ -319,7 +319,7 @@ describe('虚拟节点：独立占位（不再与主节点重叠）', () => {
 
 describe('孤立节点：单独成列排在流程最右侧之外', () => {
   it('未关联角色的数据节点进孤立列，并给出可读告警', () => {
-    const nodes = [node('s', 'start'), node('a1', 'agent'), node('f1', 'file'), node('e', 'end')]
+    const nodes = [node('s', 'start'), node('a1', 'agent'), node('f1', 'task'), node('e', 'end')]
     const lines = [flowLine('l1', 's', 'a1'), flowLine('l2', 'a1', 'e')]
     const result = layoutGraph(nodes, lines)
     expect(result.colOf.get('f1')).toBeGreaterThan(result.maxCol)

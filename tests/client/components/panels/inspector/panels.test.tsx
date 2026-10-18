@@ -84,7 +84,7 @@ describe('P4 父代理模板可编辑（Inspector，D-20）', () => {
     onSave: () => {},
     onCopyProxy: () => {},
     onRemoveMember: () => {},
-    onFileSelect: () => {},
+    onFilesPicked: () => {},
     onLoadMd: () => {},
     onLoadGroupMd: () => {},
     onTestDb: () => {},
@@ -159,6 +159,47 @@ describe('P4 父代理模板可编辑（Inspector，D-20）', () => {
   })
 })
 
+describe('任务表单（TaskForm）', () => {
+  const common = {
+    copy: zh,
+    open: true,
+    width: 320,
+    presets,
+    models,
+    combos,
+    flowMeta: { nodeCount: 0, revision: 0 },
+    onPatch: () => {}, onDelete: () => {}, onSave: () => {},
+    onPromote: () => {}, onOpenVersions: () => {}, onRollbackVersion: () => {}, onCloseVersions: () => {},
+    onSaveAsTemplate: () => {},
+    onCopyProxy: () => {}, onRemoveMember: () => {}, onFilesPicked: () => {},
+    onLoadMd: () => {}, onLoadGroupMd: () => {}, onTestDb: () => {},
+    saveDisabled: false, importBusy: false,
+  }
+
+  it('任务表单：任务描述文本域 + 选择文件入口；没有文件类型选择', async () => {
+    const onFilesPicked = vi.fn()
+    await render(React.createElement(Inspector, {
+      ...common,
+      onFilesPicked,
+      editorData: { kind: 'task', data: { label: '任务一', content: '任务描述正文' }, name: '任务一', nodeId: 'n-1' },
+    }))
+
+    expect(container!.textContent).toContain(String(zh.taskContent))
+    expect(container!.querySelector('select')).toBeNull()
+    expect(container!.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('任务描述正文')
+
+    const input = container!.querySelector<HTMLInputElement>('input[type="file"]')
+    expect(input).not.toBeNull()
+    expect(input!.multiple).toBe(true)
+    expect(input!.getAttribute('aria-label')).toBe(String(zh.pickFiles))
+
+    const file = new File(['x'], 'a.txt')
+    Object.defineProperty(input!, 'files', { value: [file], configurable: true })
+    act(() => { input!.dispatchEvent(new Event('change', { bubbles: true })) })
+    expect(onFilesPicked).toHaveBeenCalledWith([file])
+  })
+})
+
 describe('Inspector 底部按钮分录（模版态 / 资产态）', () => {
   const common = {
     copy: zh,
@@ -169,7 +210,7 @@ describe('Inspector 底部按钮分录（模版态 / 资产态）', () => {
     onPatch: () => {}, onDelete: () => {}, onSave: () => {},
     onPromote: () => {}, onOpenVersions: () => {}, onRollbackVersion: () => {}, onCloseVersions: () => {},
     onSaveAsTemplate: () => {},
-    onCopyProxy: () => {}, onRemoveMember: () => {}, onFileSelect: () => {},
+    onCopyProxy: () => {}, onRemoveMember: () => {}, onFilesPicked: () => {},
     onLoadMd: () => {}, onLoadGroupMd: () => {}, onTestDb: () => {},
     saveDisabled: false, importBusy: false,
   }
@@ -190,8 +231,8 @@ describe('Inspector 底部按钮分录（模版态 / 资产态）', () => {
     expect(footerLabels()).toEqual([zh.inspectorSave, zh.inspectorDelete, zh.assetPromote])
   })
 
-  it('文件 / 数据库 / Team 模板：只有保存 + 删除（不显示入库）', async () => {
-    for (const kind of ['file', 'database', 'group'] as const) {
+  it('任务 / 数据库 / Team 模板：只有保存 + 删除（不显示入库）', async () => {
+    for (const kind of ['task', 'database', 'group'] as const) {
       await render(React.createElement(Inspector, {
         ...common,
         editorData: { kind, data: { name: '模板' }, name: '模板', template: true, templateId: 't-1' },
@@ -422,7 +463,7 @@ describe('Inspector 资产版本上拉列表接线（回滚入口）', () => {
     onPatch: () => {}, onDelete: () => {}, onSave: () => {},
     onPromote: () => {}, onOpenVersions: () => {}, onRollbackVersion: () => {}, onCloseVersions: () => {},
     onSaveAsTemplate: () => {},
-    onCopyProxy: () => {}, onRemoveMember: () => {}, onFileSelect: () => {},
+    onCopyProxy: () => {}, onRemoveMember: () => {}, onFilesPicked: () => {},
     onLoadMd: () => {}, onLoadGroupMd: () => {}, onTestDb: () => {},
     saveDisabled: false, importBusy: false,
   }

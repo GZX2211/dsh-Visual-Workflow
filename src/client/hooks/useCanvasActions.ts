@@ -62,7 +62,7 @@ export interface CanvasActionsFace {
   removeSelected(): void
   removeNodeNow(id: string): void
   removeLine(id: string): void
-  placeTemplateNode(kind: 'role' | 'file' | 'database', templateId: string, position: { x: number; y: number }): void
+  placeTemplateNode(kind: 'role' | 'task' | 'database', templateId: string, position: { x: number; y: number }): void
   /** 角色资产拖入画布：生成内联角色节点并写入来源资产 id（sourceAssetId）。 */
   placeRoleAssetNode(detail: RoleAssetDetail, position: { x: number; y: number }): void
   placeParentNode(templateId: string, position: { x: number; y: number }): void
@@ -242,7 +242,7 @@ export function useCanvasActions(
   }, [dispatch, history, locks, notify, t.toastDeleted])
 
   // ---------- 画布节点放置（模板深拷贝） ----------
-  const placeTemplateNode = useCallback((kind: 'role' | 'file' | 'database', templateId: string, position: { x: number; y: number }) => {
+  const placeTemplateNode = useCallback((kind: 'role' | 'task' | 'database', templateId: string, position: { x: number; y: number }) => {
     if (!state.currentId) return
     const template = state.templates[kind].find((item) => item.id === templateId)
     if (!template) return

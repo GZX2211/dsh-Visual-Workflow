@@ -1,8 +1,8 @@
 // src/client/hooks/useStudioTransfer.ts
 //
-// 导入导出与文件/数据库交互面：工作流/角色模板导入导出（含命名冲突确认）、
-// 系统 Prompt / 协作 Prompt 从 .md 加载、文件模板内容选择（文本直读 / 多选
-// 上传受管拷贝）、数据库测试连接。
+// 导入导出与任务/数据库交互面：工作流/角色模板导入导出（含命名冲突确认）、
+// 系统 Prompt / 协作 Prompt 从 .md 加载、任务描述追加文件路径（不上传）、
+// 数据库测试连接。
 
 import { useCallback } from 'react'
 import type { Dispatch } from 'react'
@@ -17,7 +17,7 @@ import type { EditorActionsFace } from './useEditorActions.js'
 import type { Dict } from '../i18n.js'
 import { EP } from '../lib/remote.js'
 import { remoteErrorMessageOf } from '../lib/remote-error.js'
-import { readFileAsText, readFileAsBase64, download } from '../lib/files.js'
+import { readFileAsText, download } from '../lib/files.js'
 import { isRoleTemplateBundle } from '../lib/bundle.js'
 
 export interface StudioTransferFace {
@@ -28,11 +28,12 @@ export interface StudioTransferFace {
   onPersonaMdSelected(file: File | null): Promise<void>
   loadGroupMd(): void
   onGroupMdSelected(file: File | null): Promise<void>
-  onFileSelect(picked: File[]): Promise<void>
+  /** 任务描述追加文件路径（只写路径文本，不读取/上传文件内容）。 */
+  pickFiles(picked: File[]): void
   testDbConnection(): Promise<void>
 }
 
-/** 导入导出与文件/数据库交互面（远端失败抛错，由调用方 toast）。 */
+/** 导入导出与任务/数据库交互面（远端失败抛错，由调用方 toast）。 */
 export function useStudioTransfer(
   state: StudioState,
   dispatch: Dispatch<StudioAction>,
@@ -143,7 +144,7 @@ export function useStudioTransfer(
     }
   }, [dispatch, notify, remote, state.confirm, t.toastImported, templates, flowTemplates, toastError])
 
-  // ---------- 文件选择（文件模板/节点：文本直接读；非文本读 base64 交后端受管拷贝） ----------
+  // ---------- 任务描述追加文件路径（不上传） ----------
   /** 角色系统提示词 .md 加载（卡片设计）。 */
   const loadPersonaMd = useCallback(async () => {
     personaInputRef.current?.click()
@@ -177,44 +178,16 @@ export function useStudioTransfer(
     }
   }, [notify, patchEditor, t.toastSaved, toastError])
 
-  const onFileSelect = useCallback(async (picked: File[]) => {
-    const editor = state.editor
-    if (!editor) return
-    // 目标：模板或画布节点（文件 kind）
-    const isTemplate = editor.source === 'template'
-    const isNode = editor.source === 'node'
-    if (!isTemplate && !isNode) return
-    try {
-      const fileKind = (editor.source === 'template'
-        ? (state.templates[editor.kind as 'file'] ?? []).find((item) => item.id === editor.id)
-        : state.canvas.nodes.find((item) => item.id === editor.id)?.data) as { fileKind?: string } | undefined
-      const kind = String(fileKind?.fileKind ?? 'text')
-      if (kind === 'text') {
-        // 文本类型：仅取第一个文件内容（多选仅对非文本文件生效；可多选所有类型）
-        const { file } = { file: picked[0] }
-        const content = await readFileAsText(file)
-        patchEditor({ content, fileName: file.name, files: [] })
-      } else {
-        // 文件类型：多选全部文件 → 逐个上传受管拷贝，累积 files 列表（支持多选所有类型文件）
-        const uploaded = []
-        for (const file of picked) {
-          const base64 = await readFileAsBase64(file)
-          const result = await remote.call(EP.EP_FILE_UPLOAD, { name: file.name, base64 }) as { managedPath?: string; fileName?: string }
-          uploaded.push({ fileName: result?.fileName ?? file.name, managedPath: result?.managedPath ?? '' })
-        }
-        const currentFiles = (() => {
-          const data = (editor.source === 'template'
-            ? (state.templates[editor.kind as 'file'] ?? []).find((item) => item.id === editor.id)
-            : state.canvas.nodes.find((item) => item.id === editor.id)?.data) as { files?: Array<{ fileName: string; managedPath: string }> } | undefined
-          return Array.isArray(data?.files) ? data.files : []
-        })()
-        patchEditor({ files: [...currentFiles, ...uploaded] })
-      }
-      notify('success', t.toastSaved)
-    } catch (error) {
-      toastError(error)
-    }
-  }, [notify, patchEditor, remote, state.canvas.nodes, state.editor, state.templates, t.toastSaved, toastError])
+  const pickFiles = useCallback((picked: File[]) => {
+    if (picked.length === 0) return
+    const paths = picked.map(pickedFilePathOf).filter((path) => path !== '')
+    if (paths.length === 0) return
+    const current = String(editorData?.data?.content ?? '')
+    const base = current.trimEnd()
+    const next = base ? `${base}\n${paths.join('\n')}` : paths.join('\n')
+    patchEditor({ content: next })
+    notify('success', t.toastSaved)
+  }, [editorData, notify, patchEditor, t.toastSaved])
 
   // ---------- 数据库测试连接 ----------
   const testDbConnection = useCallback(async () => {
@@ -233,6 +206,15 @@ export function useStudioTransfer(
   return {
     exportCurrent, handleImportFile, resolveImportConflict,
     loadPersonaMd, onPersonaMdSelected, loadGroupMd, onGroupMdSelected,
-    onFileSelect, testDbConnection,
+    pickFiles, testDbConnection,
   }
+}
+
+/**
+ * 选中文件的路径：优先 Electron 暴露的 File.path；浏览器安全模型下拿不到时回退文件名。
+ * 只用于写入任务描述文本，不做任何文件读取。
+ */
+function pickedFilePathOf(file: File): string {
+  const path = (file as File & { path?: unknown }).path
+  return typeof path === 'string' && path.trim() ? path.trim() : file.name
 }

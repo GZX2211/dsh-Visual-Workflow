@@ -3,14 +3,14 @@
 // 模板 → 画布节点（深拷贝解耦）：模板字段投影到节点 data。
 // 拖入即快照，此后节点与模板无引用关系。
 
-import type { RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate } from '../../host/shared/types.js'
+import type { RoleTemplate, TaskTemplate, DatabaseTemplate, GroupTemplate } from '../../host/shared/types.js'
 
 /** 模板字段 → 节点 data（深拷贝快照；模板 name → 节点 label，共享类型逐字段对齐）。
- *  kind 限定 role/file/database；传入 GroupTemplate 时按 None 处理（Team 模板走
+ *  kind 限定 role/task/database；传入 GroupTemplate 时按 None 处理（Team 模板走
  *  placeGroupFromTemplate，不进本函数）。 */
 export function templateToNodeData(
-  kind: 'role' | 'file' | 'database',
-  template: RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate | null | undefined,
+  kind: 'role' | 'task' | 'database',
+  template: RoleTemplate | TaskTemplate | DatabaseTemplate | GroupTemplate | null | undefined,
 ): Record<string, unknown> | null {
   if (!template) return null
   const label = String(template.name ?? '').trim() ? String(template.name) : ''
@@ -33,22 +33,11 @@ export function templateToNodeData(
       groupId: null,
     }
   }
-  if (kind === 'file') {
-    const file = template as FileTemplate
-    const managedPath = String(file.managedPath ?? '')
-    // files 列表（多选）优先；兼容单选旧字段（fileName/managedPath）——
-    // 拖入画布的数据形状以本函数为唯一实现（后端曾有的同名映射已随 storage 模块治理
-    // 删除：模板→节点映射属客户端画布职责），不丢失多选文件路径。
-    const files = Array.isArray(file.files) && file.files.length > 0
-      ? file.files.map((item) => ({ fileName: String(item?.fileName ?? ''), managedPath: String(item?.managedPath ?? '') }))
-      : []
+  if (kind === 'task') {
+    const task = template as TaskTemplate
     return {
       label,
-      fileKind: file.fileKind === 'file' ? 'file' : 'text',
-      content: String(file.content ?? ''),
-      managedPath: managedPath || undefined,
-      fileName: String(managedPath ? managedPath.split(/[\\/]/).pop() : ''),
-      ...(files.length > 0 ? { files } : {}),
+      content: String(task.content ?? ''),
     }
   }
   const db = template as DatabaseTemplate

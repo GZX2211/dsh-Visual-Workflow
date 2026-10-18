@@ -5,10 +5,9 @@
 //
 // tests/client/hooks/useStudioTransfer.test.tsx
 //
-// 导入 / 导出 / 命名冲突 / .md 加载 / 文件上传 / 数据库测试连接（D11-01 覆盖缺口）。
-// 这条链路是**不可撤销的用户数据操作**：导出取错会话、导入冲突传错模式、上传/读文件
-// 走错分支，用户看到的是「导出内容不是当前画布」或「导入后原模板消失」，而此前
-// tests/client 内没有任何用例读这条路径。
+// 导入 / 导出 / 命名冲突 / .md 加载 / 任务描述追加文件路径 / 数据库测试连接（D11-01 覆盖缺口）。
+// 这条链路是**不可撤销的用户数据操作**：导出取错会话、导入冲突传错模式、路径追加到错误
+// 编辑对象，用户看到的是「导出内容不是当前画布」或「导入后原模板消失」。
 //
 // 装配方式：真实调用 hook（12 个依赖全部按生产接口逐项构造），只把边界（远端、词典、
 // 通知面、文件读取）替身化；不使用 `as never` 之类的类型逃逸。
@@ -100,7 +99,7 @@ async function mountHarness(initial: StudioState, options: {
     }),
   }
   const templates = {
-    list: [], loadTemplates: vi.fn(async () => { counters.templates += 1; return { role: [], file: [], database: [], group: [] } }),
+    list: [], loadTemplates: vi.fn(async () => { counters.templates += 1; return { role: [], task: [], database: [], group: [] } }),
   } as unknown as TemplatesFace
   const flowTemplates = {
     list: [], loadFlowTemplates: vi.fn(async () => { counters.flowTemplates += 1 }),
@@ -175,7 +174,7 @@ function stateWithFlow(): StudioState {
   }
 }
 
-function stateWithNode(kind: 'file' | 'database', data: Record<string, unknown>): StudioState {
+function stateWithNode(kind: 'task' | 'database', data: Record<string, unknown>): StudioState {
   const base = createInitialState('s-1')
   return {
     ...base,
@@ -303,7 +302,7 @@ describe('useStudioTransfer · 导入与命名冲突', () => {
   })
 })
 
-describe('useStudioTransfer · .md 加载与文件上传', () => {
+describe('useStudioTransfer · .md 加载与任务路径追加', () => {
   it('角色 System Prompt 加载：写入 systemPrompt 并记录来源文件名', async () => {
     const h = await mountHarness(createInitialState('s-1'))
     const file = new File(['你是分析员。'], 'persona.md', { type: 'text/markdown' })
@@ -321,29 +320,35 @@ describe('useStudioTransfer · .md 加载与文件上传', () => {
     expect(h.patches).toEqual([{ collabPrompt: '协作规则' }])
   })
 
-  it('文件节点（fileKind=text）：读文本内容写入 content，不做上传', async () => {
-    const h = await mountHarness(stateWithNode('file', { fileKind: 'text' }))
-    const file = new File(['节点内容'], 'a.txt', { type: 'text/plain' })
-    await act(async () => { await h.face.onFileSelect([file]) })
+  it('任务描述：多选文件按行追加路径（已有描述保留，不上传）', async () => {
+    const h = await mountHarness(createInitialState('s-1'), {
+      editorData: { kind: 'task', data: { content: '已有描述' }, name: '任务', nodeId: 'n-1' },
+    })
+    act(() => { h.face.pickFiles([new File(['aaa'], 'a.txt'), new File(['bbb'], 'b.txt')]) })
 
     expect(h.calls).toEqual([])
-    expect(h.patches).toEqual([{ content: '节点内容', fileName: 'a.txt', files: [] }])
+    expect(h.patches).toEqual([{ content: '已有描述\na.txt\nb.txt' }])
   })
 
-  it('文件节点（fileKind=binary）：逐个走 base64 上传，累积受管路径', async () => {
-    const h = await mountHarness(stateWithNode('file', { fileKind: 'binary' }), {
-      remoteResult: (_endpoint, args) => ({ managedPath: `managed/${String(args.name)}`, fileName: String(args.name) }),
+  it('任务描述：优先写入 Electron 暴露的 File.path', async () => {
+    const h = await mountHarness(createInitialState('s-1'), {
+      editorData: { kind: 'task', data: { content: '' }, name: '任务', nodeId: 'n-1' },
     })
-    const a = new File(['aaa'], 'a.bin', { type: 'application/octet-stream' })
-    const b = new File(['bbb'], 'b.bin', { type: 'application/octet-stream' })
-    await act(async () => { await h.face.onFileSelect([a, b]) })
+    const file = new File(['x'], 'a.txt')
+    Object.defineProperty(file, 'path', { value: 'D:/ws/a.txt' })
+    act(() => { h.face.pickFiles([file]) })
 
-    expect(h.calls.map((c) => c.endpoint)).toEqual([EP.EP_FILE_UPLOAD, EP.EP_FILE_UPLOAD])
-    expect(h.calls.map((c) => typeof c.args.base64 === 'string')).toEqual([true, true])
-    expect(h.patches).toEqual([{ files: [
-      { fileName: 'a.bin', managedPath: 'managed/a.bin' },
-      { fileName: 'b.bin', managedPath: 'managed/b.bin' },
-    ] }])
+    expect(h.patches).toEqual([{ content: 'D:/ws/a.txt' }])
+  })
+
+  it('任务描述：空 content 直接写路径，不产生前导换行；空选择不产生补丁', async () => {
+    const h = await mountHarness(createInitialState('s-1'), {
+      editorData: { kind: 'task', data: {}, name: '任务', nodeId: 'n-1' },
+    })
+    act(() => { h.face.pickFiles([new File(['x'], 'a.txt')]) })
+    act(() => { h.face.pickFiles([]) })
+
+    expect(h.patches).toEqual([{ content: 'a.txt' }])
   })
 
   it('数据库节点：EP_DB_TEST 成功提示 / 失败走 error 提示且带后端文案', async () => {

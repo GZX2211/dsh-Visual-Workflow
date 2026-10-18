@@ -47,7 +47,7 @@ export function buildNodeBlocks(input: {
 }): Array<{ type: 'text'; text: string }> {
   const { flow, node } = input
   const data = node.data
-  const { upstreamContext, filePaths, dbToolHint } = buildNodeContextFacts({
+  const { upstreamContext, dbToolHint } = buildNodeContextFacts({
     flow,
     node,
     snapshot: input.snapshot,
@@ -59,7 +59,6 @@ export function buildNodeBlocks(input: {
     facts: {
       nodeLabel: data.label || node.id,
       upstreamContext,
-      filePaths,
       dbToolHint,
       commTargets: commTargetsOf(flow, node.id, input.systemLanguage),
       collabNote: collabPromptOf(flow, node.id),

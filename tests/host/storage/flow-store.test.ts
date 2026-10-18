@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FlowStore, FlowRevisionConflictError } from '../../../src/host/storage/flow-store.js'
 import type { WorkflowDocument } from '../../../src/host/shared/graph-model.js'
-import type { ServiceState, RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate, ToolCombo, RunSnapshot } from '../../../src/host/shared/types.js'
+import type { ServiceState, RoleTemplate, TaskTemplate, DatabaseTemplate, GroupTemplate, ToolCombo, RunSnapshot } from '../../../src/host/shared/types.js'
 import { newRoleNode, newStageNode, newLine } from '../../../src/host/graph/index.js'
 
 let dir: string
@@ -63,18 +63,12 @@ function makeRoleTemplate(id: string): RoleTemplate {
 }
 
 describe('FlowStore.init 目录结构', () => {
-  it('创建全部规划目录（顶层 DIRS + 嵌套 NESTED_DIRS）', async () => {
+  it('创建全部规划目录（顶层 DIRS）', async () => {
     const names = await readdir(dir)
     for (const d of FlowStore.DIRS) {
       expect(names, `缺少顶层目录 ${d}`).toContain(d)
     }
-    // 嵌套子目录（受管文件副本目录）单独成表，避免顶层目录常量混入路径片段
-    for (const d of FlowStore.NESTED_DIRS) {
-      const parts = d.split('/')
-      expect(names, `缺少顶层目录 ${parts[0]}`).toContain(parts[0])
-      const nested = await readdir(join(dir, parts[0]))
-      expect(nested, `缺少嵌套子目录 ${d}`).toContain(parts[1])
-    }
+    expect(names, '受管文件目录已退役').not.toContain('files')
     // 幂等：重复 init 不抛错
     await store.init()
   })
@@ -308,16 +302,16 @@ describe('形状守卫：JSON 合法但不是该资源的文档', () => {
 })
 
 describe('模板 CRUD（全局共享）与子类过滤', () => {
-  it('角色/文件/数据库三类模板增删查', async () => {
+  it('角色/任务/数据库三类模板增删查', async () => {
     const role = makeRoleTemplate('r1')
     await store.saveTemplate('role', role)
-    const fileT: FileTemplate = { id: 'ft1', name: '文本', fileKind: 'text', content: '内容' }
-    await store.saveTemplate('file', fileT)
+    const taskT: TaskTemplate = { id: 'ft1', name: '任务', content: '内容' }
+    await store.saveTemplate('task', taskT)
     const dbT: DatabaseTemplate = { id: 'dt1', name: '库', description: 'd', dbType: 'local', dbKind: 'sqlite', localPath: '/tmp/x.db' }
     await store.saveTemplate('database', dbT)
 
     expect((await store.listTemplates('role')).map((t) => t.id)).toEqual(['r1'])
-    expect((await store.listTemplates('file')).map((t) => t.id)).toEqual(['ft1'])
+    expect((await store.listTemplates('task')).map((t) => t.id)).toEqual(['ft1'])
     expect((await store.listTemplates('database')).map((t) => t.id)).toEqual(['dt1'])
 
     expect(await store.deleteTemplate('role', 'r1')).toBe(true)
@@ -342,18 +336,79 @@ describe('模板 CRUD（全局共享）与子类过滤', () => {
     expect(await store.listTemplates('group')).toEqual([])
   })
 
-  it('单资源读 getTemplate：file/database 同目录混存时按字段判别，不串类', async () => {
-    const fileT: FileTemplate = { id: 'dt-mix', name: '文本', fileKind: 'text', content: 'x' }
+  it('单资源读 getTemplate：task/database 同目录混存时按字段判别，不串类', async () => {
+    const taskT: TaskTemplate = { id: 'dt-mix', name: '任务', content: 'x' }
     const dbT: DatabaseTemplate = { id: 'dt-mix2', name: '库', description: '', dbType: 'local', dbKind: 'sqlite', localPath: '/tmp/x.db' }
-    await store.saveTemplate('file', fileT)
+    await store.saveTemplate('task', taskT)
     await store.saveTemplate('database', dbT)
 
-    expect(await store.getTemplate('file', 'dt-mix')).not.toBeNull()
+    expect(await store.getTemplate('task', 'dt-mix')).not.toBeNull()
     expect(await store.getTemplate('database', 'dt-mix2')).not.toBeNull()
-    // 同 id 但类型不符：按子类判别返回 null（不把库模板当文件模板返回）
+    // 同 id 但类型不符：按子类判别返回 null（不把库模板当任务模板返回）
     const other: DatabaseTemplate = { id: 'dt-dup', name: '库2', description: '', dbType: 'local', dbKind: 'sqlite', localPath: '/tmp/y.db' }
     await store.saveTemplate('database', other)
-    expect(await store.getTemplate('file', 'dt-dup')).toBeNull()
+    expect(await store.getTemplate('task', 'dt-dup')).toBeNull()
+  })
+
+  it('旧文件模板读取为任务模板：content 保留，旧受管字段在保存时剥离', async () => {
+    await writeFile(join(dir, 'data', 'legacy-1.json'), JSON.stringify({
+      id: 'legacy-1',
+      name: '旧资料',
+      fileKind: 'file',
+      managedPath: 'data/files/a.pdf',
+      fileName: 'a.pdf',
+      files: [{ fileName: 'a.pdf', managedPath: 'data/files/a.pdf' }],
+      content: '旧正文',
+    }), 'utf8')
+
+    const listed = await store.listTemplates('task')
+    expect(listed.map((t) => t.id)).toEqual(['legacy-1'])
+    expect((listed[0] as TaskTemplate).content).toBe('旧正文')
+
+    await store.saveTemplate('task', listed[0])
+    const disk = JSON.parse(await readFile(join(dir, 'data', 'legacy-1.json'), 'utf8')) as Record<string, unknown>
+    expect(disk).not.toHaveProperty('fileKind')
+    expect(disk).not.toHaveProperty('managedPath')
+    expect(disk).not.toHaveProperty('fileName')
+    expect(disk).not.toHaveProperty('files')
+    expect(disk.content).toBe('旧正文')
+  })
+
+  it('旧工作流文件节点：保存与读取都归一化为任务节点（content 保留，受管字段丢弃）', async () => {
+    const legacyNode = {
+      id: 'f1',
+      kind: 'file',
+      position: { x: 0, y: 0 },
+      data: { label: '需求', content: '正文', fileKind: 'file', managedPath: 'data/files/a.md', files: [{ fileName: 'a.md', managedPath: 'data/files/a.md' }] },
+    }
+    const saved = await store.saveWorkflow({
+      id: 'wf-legacy', sessionId: 's1', mode: 'mode1', name: '旧流程', description: '', revision: 0,
+      nodes: [legacyNode], lines: [],
+    } as never, 's1', { force: true })
+
+    const taskNode = { id: 'f1', kind: 'task', position: { x: 0, y: 0 }, data: { label: '需求', content: '正文' } }
+    expect(saved.nodes).toEqual([taskNode])
+    const disk = JSON.parse(await readFile(join(dir, 'workflows', 'wf-legacy.json'), 'utf8')) as { nodes: unknown[] }
+    expect(disk.nodes).toEqual([taskNode])
+
+    const read = await store.getWorkflow('s1', 'wf-legacy')
+    expect(read?.nodes).toEqual([taskNode])
+    expect((await store.listWorkflows('s1'))[0].nodes).toEqual([taskNode])
+  })
+
+  it('旧工作流模板文件节点：保存与读取都归一化为任务节点', async () => {
+    const legacyNode = {
+      id: 'f1', kind: 'file', position: { x: 0, y: 0 }, data: { label: '任务书', content: '正文' },
+    }
+    const saved = await store.saveFlowTemplate({
+      id: 'tpl-legacy', mode: 'mode1', name: '旧模板', description: '', revision: 0,
+      nodes: [legacyNode], lines: [],
+    } as never, { force: true })
+    expect(saved.nodes).toEqual([
+      { id: 'f1', kind: 'task', position: { x: 0, y: 0 }, data: { label: '任务书', content: '正文' } },
+    ])
+    expect((await store.getFlowTemplate('tpl-legacy'))?.nodes).toEqual(saved.nodes)
+    expect((await store.listFlowTemplates())[0].nodes).toEqual(saved.nodes)
   })
 
   it('单资源读 getTemplate 对损坏 JSON 抛 CorruptJsonError（不伪装成不存在）', async () => {
@@ -700,7 +755,7 @@ describe('列表读取的错误语义', () => {
     expect(await store.listServices()).toEqual([])
     expect(await store.listServicesAll()).toEqual([])
     expect(await store.listTemplates('role')).toEqual([])
-    expect(await store.listTemplates('file')).toEqual([])
+    expect(await store.listTemplates('task')).toEqual([])
     expect(await store.listTemplates('database')).toEqual([])
     expect(await store.listTemplates('group')).toEqual([])
     expect(await store.listFlowTemplates()).toEqual([])

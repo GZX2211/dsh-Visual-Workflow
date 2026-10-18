@@ -18,7 +18,7 @@ export declare const zh: {
     flowTemplates: string;
     parentAgent: string;
     roleTemplates: string;
-    files: string;
+    tasks: string;
     databases: string;
     stages: string;
     groupTemplates: string;
@@ -182,7 +182,7 @@ export declare const zh: {
     nodeKinds: {
         parent: string;
         agent: string;
-        file: string;
+        task: string;
         database: string;
         start: string;
         end: string;
@@ -191,10 +191,6 @@ export declare const zh: {
         output: string;
         group: string;
         proxy: string;
-    };
-    fileKindLabel: {
-        text: string;
-        file: string;
     };
     dbLocalLabel: string;
     dbBm25Badge: string;
@@ -238,10 +234,9 @@ export declare const zh: {
     inputSchemaExample: string;
     outputSchemaExample: string;
     contractRestoreDefault: string;
-    fileKind: string;
-    fileContent: string;
-    fileUnset: string;
-    /** 文件多选提示（已选文件列表显示在按钮下方）。 */
+    taskContent: string;
+    /** 任务描述文本框下方的文件选择入口（只把路径追加进文本，不上传）。 */
+    pickFiles: string;
     /** 团队卡片拖拽悬停提示（放开以入组）。 */
     groupDropHint: string;
     /** 角色卡元信息「模型」前缀。 */
@@ -309,7 +304,7 @@ export declare const zh: {
     templateDefaultName: {
         workflow: string;
         role: string;
-        file: string;
+        task: string;
         database: string;
         group: string;
     };

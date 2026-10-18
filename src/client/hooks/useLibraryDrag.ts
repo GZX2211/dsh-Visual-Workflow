@@ -52,7 +52,7 @@ export function useLibraryDrag(
         setDragPreview({ x: moveEvent.clientX, y: moveEvent.clientY, label: payload.label })
       }
       // 拖拽悬停检测：仅 Team 卡片表面（非连接点）→ 高亮 + 提示；
-      // 只有角色模板（含 onDropIntoGroup）才提示，其他卡片（文件/数据库/阶段）不显示悬浮提示、不能入组
+      // 只有角色模板（含 onDropIntoGroup）才提示，其他卡片（任务/数据库/阶段）不显示悬浮提示、不能入组
       setDropGroupId(payload.onDropIntoGroup ? groupSurfaceUnderPoint(moveEvent.clientX, moveEvent.clientY) : null)
     }
     // 只解绑监听与清理现场：卸载走这里，不得触发 onClick/落点放置（手势被中断，不是用户点击）

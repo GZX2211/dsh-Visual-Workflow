@@ -24,11 +24,10 @@ describe('按端点的请求体上限（K2）', () => {
     }
   })
 
-  it('整份文档端点取文档档，二进制/导入端点取 64MB 档（差异保留，不统一）', () => {
+  it('整份文档端点取文档档，导入端点取 64MB 档（差异保留，不统一）', () => {
     expect(guiBodyLimitOf('putWorkflow')).toBe(GUI_BODY_LIMIT.document)
     expect(guiBodyLimitOf('putFlowTemplate')).toBe(GUI_BODY_LIMIT.document)
     expect(guiBodyLimitOf('saveAssetVersion')).toBe(GUI_BODY_LIMIT.document)
-    expect(guiBodyLimitOf('fileUpload')).toBe(GUI_BODY_LIMIT.binary)
     expect(guiBodyLimitOf('importWorkflow')).toBe(GUI_BODY_LIMIT.binary)
   })
 

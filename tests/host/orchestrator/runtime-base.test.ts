@@ -8,7 +8,7 @@ import { createRunSnapshot, parentExecutorOf, setNodeStatus, sweepWatchdogOnce }
 import { ORCH_CHANGE_MARKER } from '../../../src/host/prompts/index.js'
 import { WF_DB_QUERY } from '../../../src/host/shared/protocol.js'
 import { type GraphNode, type RoleNode, type WorkflowDocument } from '../../../src/host/shared/graph-model.js'
-import { stage, agent, fileNode, parentNode, makeFlow, FakeRoot, type Harness, makeHarness, caller, start, cleanupTempDirs } from './fixtures/harness.js'
+import { stage, agent, taskNode, parentNode, makeFlow, FakeRoot, type Harness, makeHarness, caller, start, cleanupTempDirs } from './fixtures/harness.js'
 
 // 临时目录：makeHarness 登记，文件结束统一清理
 afterEach(cleanupTempDirs)
@@ -517,8 +517,8 @@ describe('父代理执行者模式', () => {
   it('startRun 执行者模式：快照父代理节点 running + 指令含执行者措辞与任务块（ctx/db 提示注入）', async () => {
     const h = await makeHarness()
     const flow = executorFlow()
-    // 文件节点 ctx-out → 父代理 ctx-in + 数据库 db-out → 父代理 db-in
-    flow.nodes.push(fileNode('n-file', '规格', { fileKind: 'text', content: '需求文本' }))
+    // 任务节点 ctx-out → 父代理 ctx-in + 数据库 db-out → 父代理 db-in
+    flow.nodes.push(taskNode('n-file', '规格', { content: '需求文本' }))
     flow.nodes.push({ id: 'n-db', kind: 'database', position: { x: 0, y: 0 }, data: { label: '库', description: '', dbType: 'local', dbKind: 'sqlite', localPath: '' } })
     flow.lines.push(
       { id: 'l-f', source: 'n-file', target: 'n-parent', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' },
@@ -530,7 +530,7 @@ describe('父代理执行者模式', () => {
     expect(entry.executorParentId).toBe('n-parent')
     const directive = h.agents.roots.get('session-1')!.messages[0].content.map((c) => c.text).join('\n')
     expect(directive).toContain('n-parent') // 父代理执行节点身份数据
-    expect(directive).toContain('需求文本') // 文件文本经 ctx 连线直通
+    expect(directive).toContain('需求文本') // 任务描述经 ctx 连线直通
     expect(directive).toContain(WF_DB_QUERY) // db 提示（工具名取自协议常量）
   })
 

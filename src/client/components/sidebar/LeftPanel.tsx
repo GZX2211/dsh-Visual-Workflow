@@ -1,7 +1,7 @@
 // src/client/components/sidebar/LeftPanel.tsx
 //
 // 左侧模板库：
-// 四 Tag：工作流 / 角色（父代理模板置顶）/ 数据（文件 + 数据库分区）/ 其他（阶段 + Team）。
+// 四 Tag：工作流 / 角色（父代理模板置顶）/ 数据（任务 + 数据库分区）/ 其他（阶段 + Team）。
 // 本次改动：四 Tag 由文字改为「图标」展示（图片批注：Tag 区以图标显示，不显示文字，
 // 共 4 个 tag；切换到不同 Tag 时下方列表内容随动，适配角色/数据/其他节点）。
 // 内容构建已提取到 library-model.ts（与底栏 BottomPanel 共用同一 builder，逻辑一致）。
@@ -16,7 +16,7 @@
 import { useState } from 'react'
 import type { Dict } from '../../i18n.js'
 import type { LibTab, LibrarySource } from '../../studio/studio-state.js'
-import type { RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate } from '../../../host/shared/types.js'
+import type { RoleTemplate, TaskTemplate, DatabaseTemplate, GroupTemplate } from '../../../host/shared/types.js'
 import type { WorkflowTemplate } from '../../../host/shared/graph-model.js'
 import type { ExperienceEntry, RoleAssetSummary, WorkflowAssetSummary } from '../../../host/shared/asset-types.js'
 import { statusLabelOf } from '../../lib/status-label.js'
@@ -24,7 +24,7 @@ import { ASSET_HISTORY_SECTIONS, buildLibraryModel } from './library-model.js'
 
 // 以下类型由本文件导出（供 useLibraryDrag/library-model 等消费，保持既有导入路径不变）。
 export interface LibSelectionInfo {
-  kind: 'workflow' | 'workflowTemplate' | 'flowAsset' | 'roleAsset' | 'experience' | 'role' | 'file' | 'database' | 'parentTemplate' | 'stage' | 'groupTemplate' | 'service'
+  kind: 'workflow' | 'workflowTemplate' | 'flowAsset' | 'roleAsset' | 'experience' | 'role' | 'task' | 'database' | 'parentTemplate' | 'stage' | 'groupTemplate' | 'service'
   id: string
 }
 
@@ -71,7 +71,7 @@ export interface LeftPanelProps {
   experiences: ExperienceEntry[]
   parentTemplate: RoleTemplate | null
   roleTemplates: RoleTemplate[]
-  fileTemplates: FileTemplate[]
+  taskTemplates: TaskTemplate[]
   databaseTemplates: DatabaseTemplate[]
   /** Team 模板列表（全局共享；「其他」Tab Team 分区，用户批注：+ 新增/点击编辑/删除）。 */
   groupTemplates: GroupTemplate[]
@@ -89,7 +89,7 @@ export interface LeftPanelProps {
   /** 打开经验（资产态属性栏编辑；经验没有画布形态，故无拖入入口）。 */
   onOpenExperience(id: string): void
   onSelectLib(kind: LibSelectionInfo['kind'], id: string): void
-  onPlaceTemplate(kind: 'role' | 'file' | 'database', id: string, position: { x: number; y: number }): void
+  onPlaceTemplate(kind: 'role' | 'task' | 'database', id: string, position: { x: number; y: number }): void
   /** 角色模板拖入 Team：生成节点并直接入组。 */
   onPlaceTemplateIntoGroup(kind: 'role', id: string, groupId: string, position: { x: number; y: number }): void
   onPlaceStage(kind: string, position: { x: number; y: number }): void
@@ -97,7 +97,7 @@ export interface LeftPanelProps {
   /** Team 模板拖入画布：按模板内容生成 Team 节点。 */
   onPlaceGroupFromTemplate(id: string, position: { x: number; y: number }): void
   onPlaceParent(id: string, position: { x: number; y: number }): void
-  onCreateNew(tab: LibTab, section?: 'file' | 'database' | 'flowTemplate' | 'group'): void
+  onCreateNew(tab: LibTab, section?: 'task' | 'database' | 'flowTemplate' | 'group'): void
   onBeginDrag(event: React.PointerEvent, payload: DragPayload): void
 }
 

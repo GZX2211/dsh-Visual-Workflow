@@ -115,13 +115,13 @@ describe('writtenModelSelectionsOf · 只收集本批显式写入项', () => {
     expect(items[0].effectiveModel).toBe(LING_MODEL)
   })
 
-  it('非角色节点（文件 / 阶段 / 虚拟节点）不进入模型选择判定', () => {
+  it('非角色节点（任务 / 阶段 / 虚拟节点）不进入模型选择判定', () => {
     const createOps = [
-      { op: 'create_node' as const, node: { id: 'f1', kind: 'file', data: { provider: 'p', model: 'm' } } },
+      { op: 'create_node' as const, node: { id: 'f1', kind: 'task', data: { provider: 'p', model: 'm' } } },
       { op: 'remove_node' as const, nodeId: 'a1' },
     ]
     expect(writtenModelSelectionsOf(createOps, { nodes: [] })).toEqual([])
-    const applied = { nodes: [{ id: 'f1', kind: 'file', position: { x: 0, y: 0 }, data: { provider: 'p', model: 'm' } } as unknown as GraphNode] }
+    const applied = { nodes: [{ id: 'f1', kind: 'task', position: { x: 0, y: 0 }, data: { provider: 'p', model: 'm' } } as unknown as GraphNode] }
     expect(writtenModelSelectionsOf([{ op: 'update_node_data' as const, nodeId: 'f1', data: { model: 'm' } }], applied)).toEqual([])
   })
 

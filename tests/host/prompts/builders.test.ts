@@ -64,11 +64,10 @@ describe('父代理提示词构建器（三模式结构）', () => {
 })
 
 describe('子代理任务块与协作块（数据与通道结构）', () => {
-  it('节点 label、上游产出与文件路径数据进入任务块', () => {
+  it('节点 label 与上游产出数据进入任务块', () => {
     const out = buildNodeTaskBlock({ facts: nodeFacts })
     expect(out).toContain(nodeFacts.nodeLabel)
     expect(out).toContain(nodeFacts.upstreamContext[0].content)
-    expect(out).toContain(nodeFacts.filePaths[0])
   })
 
   it('输入/输出契约按节点配置注入；未配置则输出中不出现该数据', () => {

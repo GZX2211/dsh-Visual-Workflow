@@ -28,8 +28,6 @@ export interface NodeTaskBlockParams {
     nodeLabel: string
     /** 上游产出上下文（全链路自动注入），可为空。 */
     upstreamContext: Array<{ nodeId: string; source: string; content: string }>
-    /** 文件路径索引（data/files/ 受管路径），可为空。 */
-    filePaths: string[]
     /** 数据库工具说明（存在 db-in 连线时说明 wf_db_query 三模式），无则空字符串。 */
     dbToolHint: string
     /**
@@ -61,7 +59,6 @@ export function buildNodeTaskBlock(params: NodeTaskBlockParams): string {
         : `- ${entry.source}（id：${entry.nodeId}）：${entry.content}`)
       .join('\n'),
     noUpstream: flag(facts.upstreamContext.length === 0),
-    filePathsText: (facts.filePaths ?? []).map((filePath) => `- ${filePath}`).join('\n'),
     inputContract: String(facts.inputContract ?? '').trim(),
     dbToolHint: String(facts.dbToolHint ?? '').trim(),
     outputContract: localizeOutputContract(facts.outputContract, facts.systemLanguage),

@@ -15,7 +15,6 @@ import { CATALOG_LIMITS, ID_CONVENTION, INLINE_ROLE_SEPARATOR, INSTANCE_ID } fro
 import type {
   CatalogComboEntry,
   CatalogDatabaseNodeEntry,
-  CatalogFileNodeEntry,
   CatalogGroupNodeEntry,
   CatalogIndex,
   CatalogInlineRoleDetail,
@@ -31,6 +30,7 @@ import type {
   CatalogRoleDetail,
   CatalogRoleNodeEntry,
   CatalogStageNodeEntry,
+  CatalogTaskNodeEntry,
   CatalogWorkflowDetail,
   RoleAssetEntry,
   WorkflowAssetEntry,
@@ -466,19 +466,13 @@ function nodeEntryOf(
       }
       return entry
     }
-    case 'file': {
+    case 'task': {
       const data = node.data
-      const entry: CatalogFileNodeEntry = {
+      const entry: CatalogTaskNodeEntry = {
         id: node.id,
-        kind: 'file',
+        kind: 'task',
         label: labelOf(node),
-        fileKind: data.fileKind === 'file' ? 'file' : 'text',
         ...(data.content !== undefined ? { content: textOf(data.content) } : {}),
-        ...(data.fileName !== undefined ? { fileName: textOf(data.fileName) } : {}),
-        ...(data.managedPath !== undefined ? { managedPath: textOf(data.managedPath) } : {}),
-        ...(Array.isArray(data.files)
-          ? { files: data.files.map((file) => ({ fileName: textOf(file.fileName), managedPath: textOf(file.managedPath) })) }
-          : {}),
       }
       return entry
     }

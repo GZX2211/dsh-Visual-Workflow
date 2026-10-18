@@ -8,7 +8,7 @@ import { GLOBAL_RUN_CALL_LIMIT, OUTPUT_SUMMARY_LIMIT, buildNodeBlocks, createRun
 import { DEFAULT_SYSTEM_LANGUAGE } from '../../../src/host/system-language.js'
 import { WF_SEND_MESSAGE } from '../../../src/host/shared/protocol.js'
 import type { RoleNode, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
-import { agent, fileNode, groupNode, makeFlow, stage, type Harness, makeHarness, caller, childCaller, start, cleanupTempDirs } from './fixtures/harness.js'
+import { agent, taskNode, groupNode, makeFlow, stage, type Harness, makeHarness, caller, childCaller, start, cleanupTempDirs } from './fixtures/harness.js'
 
 // 临时目录：makeHarness 登记，文件结束统一清理
 afterEach(cleanupTempDirs)
@@ -42,41 +42,31 @@ describe('wfRunNode 异步路径与护栏', () => {
     // 数据透传：画布节点 label 出现在任务块中
     expect(text).toContain('子任务A')
   })
-  it('文档 ctx-in：文本内容注入（超限截断）+ 受管文件路径索引', async () => {
+  it('任务节点 ctx-in：任务描述内容注入（超限截断）', async () => {
     const h = await makeHarness()
     const flow = makeFlow()
-    flow.nodes.splice(1, 0, fileNode('n-file-text', '文档A', { fileKind: 'text', content: '长'.repeat(300) }))
-    flow.nodes.splice(1, 0, fileNode('n-file-managed', '受管B', { fileKind: 'file', managedPath: 'data/files/b.pdf' }))
+    flow.nodes.splice(1, 0, taskNode('n-task', '文档A', { content: '长'.repeat(300) }))
     flow.lines.push(
-      { id: 'l-ctx-1', source: 'n-file-text', target: 'n-a1', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' },
-      { id: 'l-ctx-2', source: 'n-file-managed', target: 'n-a1', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' },
+      { id: 'l-ctx-1', source: 'n-task', target: 'n-a1', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' },
     )
     await start(h, flow)
     await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
     const text = h.runner.calls[0].blocks[0].text
     expect(text).toContain('文档A')
     expect(text).toContain('…（已截断）') // documentTextLimit 200 截断
-    expect(text).toContain('data/files/b.pdf')
   })
 
-  it('文档 ctx-in 多选 files：全部受管路径注入任务块（不因 managedPath 为空而丢失，§4.2.4.1）', async () => {
+  it('任务节点 ctx-in：描述为空时不注入任何上下文', async () => {
     const h = await makeHarness()
     const flow = makeFlow()
-    flow.nodes.splice(1, 0, fileNode('n-file-multi', '多选文档', {
-      fileKind: 'file',
-      files: [
-        { fileName: 'a.pdf', managedPath: 'data/files/a.pdf' },
-        { fileName: 'b.pdf', managedPath: 'data/files/b.pdf' },
-      ],
-    }))
-    flow.lines.push({ id: 'l-ctx-multi', source: 'n-file-multi', target: 'n-a1', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' })
+    flow.nodes.splice(1, 0, taskNode('n-task', '空任务', { content: '   ' }))
+    flow.lines.push(
+      { id: 'l-ctx-1', source: 'n-task', target: 'n-a1', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' },
+    )
     await start(h, flow)
     await h.runtime.wfRunNode(caller, { nodeId: 'n-a1' })
     const text = h.runner.calls[0].blocks[0].text
-    expect(text).toContain('data/files/a.pdf')
-    expect(text).toContain('data/files/b.pdf')
-    // 单选 managedPath 与多选重复时不重复列出（去重）
-    expect(text.match(/data\/files\/a\.pdf/g)).toHaveLength(1)
+    expect(text).not.toContain('空任务')
   })
 
   it('流程前驱产出自动注入：a1 → pause → a2 跳过暂停节点取上游产出（截断），来源标签正确', async () => {

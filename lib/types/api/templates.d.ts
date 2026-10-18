@@ -21,9 +21,4 @@ export declare class TemplateEndpoints extends VisualWorkflowApiBase {
     deleteFlowTemplate(args: {
         id?: unknown;
     }): Promise<unknown>;
-    /** 受管文件上传：base64 内容 → data/files/<safeName>（原子发布；返回 managedPath）。 */
-    fileUpload(args: {
-        name?: unknown;
-        base64?: unknown;
-    }): Promise<unknown>;
 }

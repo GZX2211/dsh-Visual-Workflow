@@ -8,7 +8,7 @@ import { cleanupAll, makeHarness } from './fixtures/api-harness.js'
 
 afterEach(cleanupAll)
 
-describe('模板端点（角色/文件/数据库）', () => {
+describe('模板端点（角色/任务/数据库）', () => {
   it('模板 CRUD：kind 校验 400、保存/列表往返、删除 404', async () => {
     const h = await makeHarness()
     await expect(h.api.handle('listTemplates', { kind: 'bad' })).rejects.toMatchObject({ status: 400 })
@@ -23,6 +23,21 @@ describe('模板端点（角色/文件/数据库）', () => {
     const deleted = await h.api.handle('deleteTemplate', { kind: 'role', id: 'role-1' })
     expect(deleted).toEqual({ deleted: true })
     await expect(h.api.handle('deleteTemplate', { kind: 'role', id: 'role-1' })).rejects.toMatchObject({ status: 404 })
+  })
+
+  it('任务模板：kind=task 保存/列表往返，旧受管字段不落盘', async () => {
+    const h = await makeHarness()
+    const saved = (await h.api.handle('putTemplate', {
+      kind: 'task',
+      template: { id: 'task-1', name: '任务一', content: '正文', fileKind: 'file', managedPath: 'data/files/x.md' },
+    })) as { id?: string; content?: string }
+    expect(saved.id).toBe('task-1')
+    expect(saved.content).toBe('正文')
+
+    const list = (await h.api.handle('listTemplates', { kind: 'task' })) as Array<Record<string, unknown>>
+    expect(list.map((item) => item.id)).toEqual(['task-1'])
+    expect(list[0]).not.toHaveProperty('fileKind')
+    expect(list[0]).not.toHaveProperty('managedPath')
   })
 })
 

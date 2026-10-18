@@ -21,7 +21,7 @@ import type { OrgMeta } from './org-meta.js'
 export type NodeKind =
   | 'parent' // 父代理节点：调度中枢与最终汇总者
   | 'agent' // 子代理节点：任务执行单元
-  | 'file' // 文件节点：文本/受管文件数据源
+  | 'task' // 任务节点：以文本描述任务的上下文数据源
   | 'database' // 数据库节点：本地/服务器数据源
   | 'start' // 启动阶段节点（模式一入口）
   | 'end' // 结束阶段节点（模式一出口）
@@ -117,24 +117,17 @@ export interface RoleNode extends BaseNode {
 }
 
 /**
- * 文件节点：文本或受管文件的上下文数据源。
- * 为独立 FileNode 接口。
+ * 任务节点：以文本描述任务的上下文数据源。
+ * 不提供文件类型选择，也不上传文件；「选择文件」只把路径追加进任务描述。
+ * 为独立 TaskNode 接口。
  */
-export interface FileNode extends BaseNode {
-  kind: 'file'
+export interface TaskNode extends BaseNode {
+  kind: 'task'
   data: {
-    /** 名称（左侧栏/右侧属性栏均展示）。 */
+    /** 任务名称（左侧栏/右侧属性栏均展示）。 */
     label: string
-    /** 文件类型：文本内容直通，或受管文件（仅注入路径索引）。 */
-    fileKind: 'text' | 'file'
-    /** 文本内容（fileKind='text' 时直通；注入上限默认 20000 字）。 */
+    /** 任务描述正文（注入上限默认 20000 字；允许为空）。 */
     content?: string
-    /** 受管文件路径（fileKind='file' 单选时；复制进 data/files/ 避免源删除失效）。 */
-    managedPath?: string
-    /** 源文件名（非文本类型展示用）。 */
-    fileName?: string
-    /** 多选文件列表（fileKind='file'；每项含受管路径与源文件名）。 */
-    files?: Array<{ fileName: string; managedPath: string }>
   }
 }
 
@@ -232,7 +225,7 @@ export interface ProxyNode extends BaseNode {
  */
 export type GraphNode =
   | RoleNode
-  | FileNode
+  | TaskNode
   | DatabaseNode
   | StageNode
   | GroupNode
@@ -250,7 +243,7 @@ export type GraphNode =
  */
 export type Handle =
   | 'flow-in' // 流程入：接收流程控制信号，触发节点执行
-  | 'ctx-in' // 上下文入：接收上游节点传递的文本内容/文件索引
+  | 'ctx-in' // 上下文入：接收任务描述等文本内容
   | 'db-in' // 数据库入：接数据节点，转换为检索/查询工具（不注入上下文）
   | 'flow-out' // 流程出：发送流程控制信号给下游
   | 'ctx-out' // 上下文出：将最终输出注入下游（非记忆注入）

@@ -1,16 +1,16 @@
 import type { WorkflowDocument, WorkflowTemplate } from '../../host/shared/graph-model.js';
-import type { ServiceState, RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate, ToolCombo, RunSnapshot } from '../../host/shared/types.js';
+import type { ServiceState, RoleTemplate, TaskTemplate, DatabaseTemplate, GroupTemplate, ToolCombo, RunSnapshot } from '../../host/shared/types.js';
 import type { AssetKind, AssetVersionEntry, ExperienceEntry, RoleAssetDetail, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../../host/shared/asset-types.js';
 import type { CanvasEdge, CanvasNode } from '../lib/canvas-model.js';
-/** 左侧栏 Tab：工作流 / 角色 / 数据（文件+数据库）/ 其他（阶段+Team）。
+/** 左侧栏 Tab：工作流 / 角色 / 数据（任务+数据库）/ 其他（阶段+Team）。
  *  资产态下「数据」以「经验」呈现（同一 Tab key，语义与内容随库来源切换）。 */
 export type LibTab = 'workflow' | 'role' | 'data' | 'other';
 /** 左侧库来源：模版（可随意修改的草稿）/ 资产（带版本控制的晋升形态）。 */
 export type LibrarySource = 'template' | 'asset';
 /** 左侧库选中种类（模板 kind + 固定卡片 + 工作流模板 + 资产 + 经验）。 */
-export type LibSelKind = 'workflow' | 'service' | 'workflowTemplate' | 'role' | 'file' | 'database' | 'parentTemplate' | 'stage' | 'groupTemplate' | 'flowAsset' | 'roleAsset' | 'experience';
+export type LibSelKind = 'workflow' | 'service' | 'workflowTemplate' | 'role' | 'task' | 'database' | 'parentTemplate' | 'stage' | 'groupTemplate' | 'flowAsset' | 'roleAsset' | 'experience';
 /** 模板种类（与后端 listTemplates 契约一致；group 为 Team 模板）。 */
-export type TemplateKind = 'role' | 'file' | 'database' | 'group';
+export type TemplateKind = 'role' | 'task' | 'database' | 'group';
 /**
  * 画布节点/连线投影类型的**本体在 lib/canvas-model.ts**（渲染、布局、连接校验共用
  * 同一份形状）；此处再导出，使既有调用方（studio 内各模块、组件、hooks）的
@@ -179,7 +179,7 @@ export interface StudioState {
     };
     /** 工作流模板列表（全局共享；部分仅含当前 mode 的模板，模板拖入画布后经「创建实例」转实例）。 */
     flowTemplates: WorkflowTemplate[];
-    templates: Record<TemplateKind, Array<RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate>>;
+    templates: Record<TemplateKind, Array<RoleTemplate | TaskTemplate | DatabaseTemplate | GroupTemplate>>;
     combos: ToolCombo[];
     presets: PresetItem[];
     models: ModelItem[];
@@ -226,7 +226,7 @@ export interface StudioState {
 }
 /** 编辑器数据（右侧面板渲染源；Inspector 按 kind 分发表单）。 */
 export interface EditorData {
-    kind: 'workflow' | 'service' | 'role' | 'file' | 'database' | 'group' | 'stage' | 'proxy' | 'edge' | 'experience';
+    kind: 'workflow' | 'service' | 'role' | 'task' | 'database' | 'group' | 'stage' | 'proxy' | 'edge' | 'experience';
     data: Record<string, unknown>;
     name: string;
     template?: boolean;

@@ -13,12 +13,12 @@ import { describe, expect, it } from 'vitest'
 import {
   connectionProblem,
   newDatabaseNode,
-  newFileNode,
   newGroupNode,
   newLine,
   newProxyNode,
   newRoleNode,
   newStageNode,
+  newTaskNode,
   validateFlow,
 } from '../../../src/host/graph/index.js'
 import type { GraphNode, WorkflowDocument } from '../../../src/host/shared/graph-model.js'
@@ -34,7 +34,7 @@ describe('单连线检测 connectionProblem：合法矩阵', () => {
   const end = newStageNode('end', 'mode1')
   const agent = newRoleNode('agent', 'a')
   const parent = newRoleNode('parent', 'p')
-  const file = newFileNode('text', 'f')
+  const task = newTaskNode('f')
   const db = newDatabaseNode('local', 'db')
   const proxy = newProxyNode(agent.id)
 
@@ -42,12 +42,12 @@ describe('单连线检测 connectionProblem：合法矩阵', () => {
     ['流程：start→agent', newLine(start.id, agent.id, 'flow-out', 'flow-in')],
     ['流程：agent→end', newLine(agent.id, end.id, 'flow-out', 'flow-in')],
     ['上下文：agent→agent', newLine(agent.id, parent.id, 'ctx-out', 'ctx-in')],
-    ['文件→上下文入', newLine(file.id, agent.id, 'ctx-out', 'ctx-in')],
+    ['任务→上下文入', newLine(task.id, agent.id, 'ctx-out', 'ctx-in')],
     ['数据库→db-in', newLine(db.id, agent.id, 'db-out', 'db-in')],
     ['虚拟节点流出入', newLine(proxy.id, end.id, 'flow-out', 'flow-in')],
     ['条件流程线（内容）', { ...newLine(agent.id, end.id, 'flow-out', 'flow-in'), condition: { type: 'content' as const, label: 'routing' } }],
   ])('%s 通过', (_name, line) => {
-    const nodes = [start, end, agent, parent, file, db, proxy]
+    const nodes = [start, end, agent, parent, task, db, proxy]
     expect(connectionProblem(nodes, line).valid).toBe(true)
   })
 })
@@ -55,9 +55,9 @@ describe('单连线检测 connectionProblem：合法矩阵', () => {
 describe('单连线检测 connectionProblem：非法用例', () => {
   const a = newRoleNode('agent', 'a')
   const b = newRoleNode('agent', 'b')
-  const file = newFileNode('text', 'f')
+  const task = newTaskNode('f')
   const db = newDatabaseNode('local', 'db')
-  const nodes = [a, b, file, db]
+  const nodes = [a, b, task, db]
 
   it('自环拒绝', () => {
     expect(connectionProblem(nodes, newLine(a.id, a.id, 'flow-out', 'flow-in')).code).toBe('selfLoop')
@@ -66,7 +66,7 @@ describe('单连线检测 connectionProblem：非法用例', () => {
     expect(connectionProblem(nodes, newLine(a.id, 'ghost', 'flow-out', 'flow-in')).code).toBe('invalidNode')
   })
   it('源节点无该出点拒绝', () => {
-    expect(connectionProblem(nodes, newLine(file.id, a.id, 'flow-out', 'flow-in')).code).toBe('invalidHandle')
+    expect(connectionProblem(nodes, newLine(task.id, a.id, 'flow-out', 'flow-in')).code).toBe('invalidHandle')
   })
   it('目标节点无该入点拒绝（数据库无 ctx-in）', () => {
     expect(connectionProblem(nodes, newLine(a.id, db.id, 'ctx-out', 'ctx-in')).code).toBe('invalidHandle')
@@ -157,9 +157,9 @@ describe('validateFlow 全量校验', () => {
   it('虚拟节点引用缺失 → proxySourceMissing；引用非角色 → proxySourceKind', () => {
     const ghost = newProxyNode('nope')
     expect(codes(makeFlow([ghost]))).toContain('proxySourceMissing')
-    const file = newFileNode('text', 'f')
-    const p2 = newProxyNode(file.id)
-    expect(codes(makeFlow([file, p2]))).toContain('proxySourceKind')
+    const task = newTaskNode('f')
+    const p2 = newProxyNode(task.id)
+    expect(codes(makeFlow([task, p2]))).toContain('proxySourceKind')
   })
 
   it('主/虚同时连入同一目标同一连接点 → proxyParallel', () => {
@@ -240,7 +240,7 @@ describe('validateFlow 全量校验', () => {
     g.data.memberIds = ['ghost']
     expect(codes(makeFlow([g]))).toContain('groupMemberMissing')
     const g2 = newGroupNode('g2')
-    const f = newFileNode('text', 'f')
+    const f = newTaskNode('f')
     g2.data.memberIds = [f.id]
     expect(codes(makeFlow([g2, f]))).toContain('groupMemberKind')
   })

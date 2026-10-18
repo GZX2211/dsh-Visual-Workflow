@@ -74,7 +74,7 @@ const EXPECTED_ENDPOINTS: string[] = [
   // 服务
   'listServices', 'getService', 'putService', 'deleteService', 'serviceStart', 'serviceStop', 'serviceStatus', 'serviceDebug',
   // 模板
-  'listTemplates', 'putTemplate', 'deleteTemplate', 'fileUpload',
+  'listTemplates', 'putTemplate', 'deleteTemplate',
   // 工作流模板（图2 交互改造：模板库全局共享）
   'listFlowTemplates', 'putFlowTemplate', 'deleteFlowTemplate',
   // 预设/模型（工具目录端点 tools 已退役：无入口）
@@ -115,10 +115,10 @@ function readProtocolEndpoints(): string[] {
 }
 
 describe('shared/protocol 端点清单', () => {
-  it('端点常量定义 59 个且无重复', () => {
+  it('端点常量定义 58 个且无重复', () => {
     const eps = readProtocolEndpoints()
-    expect(eps).toHaveLength(59)
-    expect(new Set(eps).size).toBe(59) // 59 端点名全部唯一（无重复常量）
+    expect(eps).toHaveLength(58)
+    expect(new Set(eps).size).toBe(58) // 58 端点名全部唯一（无重复常量）
   })
 
   it('端点名逐字覆盖 §4.6 清单（正反向双向一致）', () => {

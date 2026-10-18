@@ -15,7 +15,6 @@ export const orchFacts = {
 export const nodeFacts = {
   nodeLabel: '总结节点',
   upstreamContext: [{ nodeId: 'node-a', source: 'node-a', content: '这是上游节点产出的一段很长的摘要内容。' }],
-  filePaths: ['data/files/example.pdf'],
   dbToolHint: '已连接数据库节点：d1（产品库）。只可通过 wf_db_query 访问。',
   commTargets: [{ label: '父代理', id: 'parent' }, { label: '分析节点', id: 'node-a' }],
   inputContract: '',

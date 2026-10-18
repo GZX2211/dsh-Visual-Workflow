@@ -31,7 +31,7 @@ describe('连接点表与默认连接点', () => {
   it('默认出/入连接点：按 kind 取最后一个（缺省 agent）', () => {
     expect(defaultOutputHandle('agent')).toBe('flow-out')
     expect(defaultInputHandle('agent')).toBe('flow-in')
-    expect(defaultOutputHandle('file')).toBe('ctx-out')
+    expect(defaultOutputHandle('task')).toBe('ctx-out')
     expect(defaultOutputHandle('database')).toBe('db-out')
     expect(defaultOutputHandle('unknown-kind')).toBe('flow-out')
     expect(defaultInputHandle('unknown-kind')).toBe('flow-in')

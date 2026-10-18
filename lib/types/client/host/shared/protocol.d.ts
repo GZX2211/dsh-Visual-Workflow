@@ -35,7 +35,7 @@ export declare const EP_SERVICE_DEBUG = "serviceDebug";
  * 会话标题不在此定义：官方 agents.create 的会话元信息不接受自定义字段，故不带 label 入参。
  */
 export declare const EP_CREATE_SESSION = "createSession";
-/** 模板列表端点名（角色/文件/数据库三类共用）。 */
+/** 模板列表端点名（角色/任务/数据库三类共用）。 */
 export declare const EP_LIST_TEMPLATES = "listTemplates";
 /** 保存模板。 */
 export declare const EP_PUT_TEMPLATE = "putTemplate";
@@ -47,8 +47,6 @@ export declare const EP_LIST_FLOW_TEMPLATES = "listFlowTemplates";
 export declare const EP_PUT_FLOW_TEMPLATE = "putFlowTemplate";
 /** 删除工作流模板。 */
 export declare const EP_DELETE_FLOW_TEMPLATE = "deleteFlowTemplate";
-/** 受管文件上传端点名（非文本文件：base64 内容 → data/files/ 受管拷贝）。 */
-export declare const EP_FILE_UPLOAD = "fileUpload";
 /** 官方预设列表端点名。 */
 export declare const EP_PRESETS = "presets";
 /** 模型列表端点名（思考强度列表来自适配器公布的 reasoning efforts）。 */
@@ -289,7 +287,7 @@ export declare const EP_SCHEDULER_TASK_DELETE = "schedulerTaskDelete";
  * 新增端点：在对应段落新增 `EP_*` 常量后，必须把字面量同步登记到本数组
  * （缺失即端点 404；多余项由契约测试的「白名单每个名字都有实现方法」断言拦住）。
  */
-export declare const ENDPOINT_NAMES: readonly ["listWorkflows", "getWorkflow", "putWorkflow", "deleteWorkflow", "listServices", "getService", "putService", "deleteService", "serviceStart", "serviceStop", "serviceStatus", "serviceDebug", "createSession", "listTemplates", "putTemplate", "deleteTemplate", "listFlowTemplates", "putFlowTemplate", "deleteFlowTemplate", "fileUpload", "presets", "models", "toolCombos", "toolComboPut", "toolComboDelete", "pluginCatalog", "mcpPut", "mcpDelete", "mcpToggle", "toolSwitchPut", "toolSwitchPutMany", "run", "runStatus", "activeRuns", "runStop", "runHistory", "runResume", "runtimeConfig", "dbTest", "exportWorkflow", "importWorkflow", "exportAgentTemplate", "importAgentTemplate", "listAssets", "getAsset", "promoteAsset", "saveAssetVersion", "listAssetVersions", "rollbackAsset", "retireAsset", "previewAssetCascade", "restoreAsset", "listExperiences", "saveExperience", "retireExperience", "restoreExperience", "schedulerTasks", "schedulerTaskPut", "schedulerTaskDelete"];
+export declare const ENDPOINT_NAMES: readonly ["listWorkflows", "getWorkflow", "putWorkflow", "deleteWorkflow", "listServices", "getService", "putService", "deleteService", "serviceStart", "serviceStop", "serviceStatus", "serviceDebug", "createSession", "listTemplates", "putTemplate", "deleteTemplate", "listFlowTemplates", "putFlowTemplate", "deleteFlowTemplate", "presets", "models", "toolCombos", "toolComboPut", "toolComboDelete", "pluginCatalog", "mcpPut", "mcpDelete", "mcpToggle", "toolSwitchPut", "toolSwitchPutMany", "run", "runStatus", "activeRuns", "runStop", "runHistory", "runResume", "runtimeConfig", "dbTest", "exportWorkflow", "importWorkflow", "exportAgentTemplate", "importAgentTemplate", "listAssets", "getAsset", "promoteAsset", "saveAssetVersion", "listAssetVersions", "rollbackAsset", "retireAsset", "previewAssetCascade", "restoreAsset", "listExperiences", "saveExperience", "retireExperience", "restoreExperience", "schedulerTasks", "schedulerTaskPut", "schedulerTaskDelete"];
 /**
  * 定时任务「常用时区」下拉建议列表（**唯一本体**）。
  *

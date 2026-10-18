@@ -1,6 +1,6 @@
 import type { Dict } from '../../i18n.js';
 import type { LibTab, LibSelKind, LibrarySource } from '../../studio/studio-state.js';
-import type { RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate } from '../../../host/shared/types.js';
+import type { RoleTemplate, TaskTemplate, DatabaseTemplate, GroupTemplate } from '../../../host/shared/types.js';
 import type { WorkflowTemplate } from '../../../host/shared/graph-model.js';
 import type { ExperienceEntry, RoleAssetSummary, WorkflowAssetSummary } from '../../../host/shared/asset-types.js';
 import type { DragPayload, LibSelectionInfo } from './LeftPanel.js';
@@ -30,7 +30,7 @@ export interface LibrarySectionModel {
     key: string;
     title: string;
     plus: boolean;
-    plusKind?: 'file' | 'database' | 'flowTemplate' | 'group';
+    plusKind?: 'task' | 'database' | 'flowTemplate' | 'group';
     /** 本分区无卡片时的空态文案（模版态/资产态不同）。 */
     emptyText: string;
     /** 是否提供折叠开关（历史资产分栏为 true）。 */
@@ -84,7 +84,7 @@ export interface LibraryModelInput {
     experiences?: ExperienceEntry[];
     parentTemplate: RoleTemplate | null;
     roleTemplates: RoleTemplate[];
-    fileTemplates: FileTemplate[];
+    taskTemplates: TaskTemplate[];
     databaseTemplates: DatabaseTemplate[];
     groupTemplates: GroupTemplate[];
     stageKinds: Array<{
@@ -107,7 +107,7 @@ export interface LibraryModelInput {
     /** 打开经验（资产态属性栏编辑；经验没有画布形态，故无拖入入口）。 */
     onOpenExperience?(id: string): void;
     onSelectLib(kind: LibSelectionInfo['kind'], id: string): void;
-    onPlaceTemplate(kind: 'role' | 'file' | 'database', id: string, position: {
+    onPlaceTemplate(kind: 'role' | 'task' | 'database', id: string, position: {
         x: number;
         y: number;
     }): void;
@@ -131,7 +131,7 @@ export interface LibraryModelInput {
         x: number;
         y: number;
     }): void;
-    onCreateNew(tab: LibTab, section?: 'file' | 'database' | 'flowTemplate' | 'group'): void;
+    onCreateNew(tab: LibTab, section?: 'task' | 'database' | 'flowTemplate' | 'group'): void;
 }
 /** 构造库内容模型（纯函数；不渲染，不读 DOM/时钟）。 */
 export declare function buildLibraryModel(input: LibraryModelInput): LibraryModel;

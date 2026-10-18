@@ -22,12 +22,12 @@ import {
   isFlowLine,
   isGroupMember,
   newDatabaseNode,
-  newFileNode,
   newGroupNode,
   newLine,
   newProxyNode,
   newRoleNode,
   newStageNode,
+  newTaskNode,
   nodeHasFlowIn,
   nodeParticipatesInFlow,
   pairingTargetOf,
@@ -42,7 +42,7 @@ describe('连接点兼容矩阵（NODE_HANDLES）', () => {
     expect(NODE_KINDS).toHaveLength(9)
     expect(NODE_HANDLES.parent.inputs).toEqual(['flow-in', 'ctx-in', 'db-in'])
     expect(NODE_HANDLES.parent.outputs).toEqual(['flow-out', 'ctx-out'])
-    expect(NODE_HANDLES.file).toEqual({ inputs: [], outputs: ['ctx-out'] })
+    expect(NODE_HANDLES.task).toEqual({ inputs: [], outputs: ['ctx-out'] })
     expect(NODE_HANDLES.database).toEqual({ inputs: [], outputs: ['db-out'] })
     expect(NODE_HANDLES.start).toEqual({ inputs: [], outputs: ['flow-out', 'ctx-out'] })
     expect(NODE_HANDLES.end.outputs).toEqual([])
@@ -58,7 +58,7 @@ describe('拓扑助手（连线查询）', () => {
     const b = newRoleNode('agent', 'b')
     const c = newRoleNode('agent', 'c')
     const db = newDatabaseNode('local', 'db')
-    const f = newFileNode('text', 'f')
+    const f = newTaskNode('f')
     const lines = [
       newLine(a.id, b.id, 'flow-out', 'flow-in'),
       newLine(f.id, c.id, 'ctx-out', 'ctx-in'),
@@ -202,7 +202,7 @@ describe('流程线判定（isFlowLine）与流程参与度', () => {
     const a = newRoleNode('agent', 'a')
     const b = newRoleNode('agent', 'b')
     const db = newDatabaseNode('local', 'db')
-    const f = newFileNode('text', 'f')
+    const f = newTaskNode('f')
     expect(isFlowLine(newLine(a.id, b.id, 'flow-out', 'flow-in'))).toBe(true)
     expect(isFlowLine(newLine(f.id, b.id, 'ctx-out', 'ctx-in'))).toBe(false)
     expect(isFlowLine(newLine(db.id, b.id, 'db-out', 'db-in'))).toBe(false)

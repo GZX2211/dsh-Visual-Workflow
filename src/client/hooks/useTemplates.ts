@@ -1,21 +1,21 @@
 // src/client/hooks/useTemplates.ts
 //
-// 模板列表：四类（role/file/database/group）并行加载 / 本地草稿新建 / 保存 / 删除。
-// 数据模型对齐后端（RoleTemplate/FileTemplate/DatabaseTemplate/GroupTemplate）。
+// 模板列表：四类（role/task/database/group）并行加载 / 本地草稿新建 / 保存 / 删除。
+// 数据模型对齐后端（RoleTemplate/TaskTemplate/DatabaseTemplate/GroupTemplate）。
 
 import { useCallback, useMemo } from 'react'
 import type { Dispatch } from 'react'
 import { DEFAULT_OUTPUT_CONTRACT_TEXT } from '../../host/shared/protocol.js'
-import type { RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate } from '../../host/shared/types.js'
+import type { RoleTemplate, TaskTemplate, DatabaseTemplate, GroupTemplate } from '../../host/shared/types.js'
 import type { Drafted, StudioAction, TemplateKind } from '../studio/studio-state.js'
 import type { RemoteFace } from './useRemote.js'
 import { EP } from '../lib/remote.js'
 
-export type AnyTemplate = RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate
+export type AnyTemplate = RoleTemplate | TaskTemplate | DatabaseTemplate | GroupTemplate
 
 export interface TemplatesFace {
   /** 全部模板分类并行加载；返回按 kind 聚合的结果（某类失败不影响其他类）。 */
-  loadTemplates(): Promise<{ role: AnyTemplate[]; file: AnyTemplate[]; database: AnyTemplate[]; group: AnyTemplate[] }>
+  loadTemplates(): Promise<{ role: AnyTemplate[]; task: AnyTemplate[]; database: AnyTemplate[]; group: AnyTemplate[] }>
   /** 新建本地草稿（id 正式格式；保存落库后 id 不变，画布引用不失效）。name 由调用方从词典注入。 */
   createTemplateDraft(kind: TemplateKind, name: string): AnyTemplate
   saveTemplate(kind: TemplateKind, template: AnyTemplate): Promise<void>
@@ -24,7 +24,7 @@ export interface TemplatesFace {
 
 function draftOf(kind: TemplateKind, name: string): AnyTemplate {
   const now = new Date().toISOString()
-  const id = `${kind === 'role' ? 'role' : kind === 'file' ? 'file' : kind === 'group' ? 'group' : 'db'}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  const id = `${kind === 'role' ? 'role' : kind === 'task' ? 'task' : kind === 'group' ? 'group' : 'db'}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
   if (kind === 'role') {
     return {
       id, kind: 'agent', name, systemPrompt: '', provider: '', model: '',
@@ -35,8 +35,8 @@ function draftOf(kind: TemplateKind, name: string): AnyTemplate {
       _draft: true,
     } as Drafted<RoleTemplate>
   }
-  if (kind === 'file') {
-    return { id, kind: 'file', name, fileKind: 'text', content: '', createdAt: now, updatedAt: now, _draft: true } as Drafted<FileTemplate>
+  if (kind === 'task') {
+    return { id, name, content: '', createdAt: now, updatedAt: now, _draft: true } as Drafted<TaskTemplate>
   }
   if (kind === 'group') {
     return { id, name, collabPrompt: '', createdAt: now, updatedAt: now, _draft: true } as Drafted<GroupTemplate>
@@ -50,7 +50,7 @@ function draftOf(kind: TemplateKind, name: string): AnyTemplate {
 /** 模板列表面（远端失败抛错，由调用方 toast）。 */
 export function useTemplates(dispatch: Dispatch<StudioAction>, remote: RemoteFace): TemplatesFace {
   const loadTemplates = useCallback(async () => {
-    const kinds: TemplateKind[] = ['role', 'file', 'database', 'group']
+    const kinds: TemplateKind[] = ['role', 'task', 'database', 'group']
     // 并行加载必须用 allSettled：某类模板端点失败时其余类型仍正常加载（不得一损俱损）
     const results = await Promise.allSettled(
       kinds.map(async (kind) => {
@@ -58,7 +58,7 @@ export function useTemplates(dispatch: Dispatch<StudioAction>, remote: RemoteFac
         return { kind, items: Array.isArray(items) ? (items as AnyTemplate[]) : [] }
       }),
     )
-    const aggregated: { role: AnyTemplate[]; file: AnyTemplate[]; database: AnyTemplate[]; group: AnyTemplate[] } = { role: [], file: [], database: [], group: [] }
+    const aggregated: { role: AnyTemplate[]; task: AnyTemplate[]; database: AnyTemplate[]; group: AnyTemplate[] } = { role: [], task: [], database: [], group: [] }
     for (const result of results) {
       if (result.status !== 'fulfilled') continue // 失败类跳过（下轮加载重试），不影响其他类
       const { kind, items } = result.value

@@ -23,6 +23,7 @@ import type {
 } from '../shared/asset-types.js'
 import type { GraphNode, Line, RoleNode, WorkflowMode } from '../shared/graph-model.js'
 import type { OrgMeta } from '../shared/org-meta.js'
+import { normalizeLegacyNodes } from '../graph/index.js'
 import type { AssetTxContext } from './db.js'
 import { assetNotFound, assetVersionNotFound } from './errors.js'
 import { stableStringify } from './fingerprint.js'
@@ -899,7 +900,8 @@ function rebuildNodes(ctx: AssetTxContext, assetId: string, row: WorkflowAssetRo
       `工作流资产 ${assetId} v${row.versionId} 的角色版本映射指向不存在的节点 ${orphan.nodeId}：节点壳已损坏`,
     )
   }
-  return nodes
+  // 旧资产里的 kind='file' 壳在读取时归一化为任务节点（历史数据兼容）。
+  return normalizeLegacyNodes(nodes)
 }
 
 /** 版本行 → 详情契约（nodes 已重建）。 */

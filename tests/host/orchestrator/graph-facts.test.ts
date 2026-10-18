@@ -157,14 +157,9 @@ describe('上游产出自动注入（buildNodeContextFacts）', () => {
     return { id, kind: 'proxy', position: { x: 0, y: 0 }, proxySourceId }
   }
 
-  /** 文本型文件节点。 */
-  function fileNode(id: string, label: string, content: string): GraphNode {
-    return { id, kind: 'file', position: { x: 0, y: 0 }, data: { fileKind: 'text', label, content, fileName: '' } }
-  }
-
-  /** 受管文件节点（注入路径索引）。 */
-  function managedFileNode(id: string, label: string, managedPath: string): GraphNode {
-    return { id, kind: 'file', position: { x: 0, y: 0 }, data: { fileKind: 'file', label, managedPath, fileName: '需求.md' } }
+  /** 任务节点（文本描述）。 */
+  function taskNode(id: string, label: string, content: string): GraphNode {
+    return { id, kind: 'task', position: { x: 0, y: 0 }, data: { label, content } }
   }
 
   function flowLine(id: string, source: string, target: string): Line {
@@ -302,24 +297,22 @@ describe('上游产出自动注入（buildNodeContextFacts）', () => {
     expect(context.upstreamContext).toEqual([])
   })
 
-  it('file 节点 ctx 注入保留：文本直通（携带节点名称与节点 ID）', () => {
+  it('任务节点 ctx 注入保留：任务描述直通（携带节点名称与节点 ID）', () => {
     const flow = baseFlow(
-      [fileNode('f1', '需求文档', '正文内容'), role('a1', 'agent', '方案设计')],
+      [taskNode('f1', '需求文档', '正文内容'), role('a1', 'agent', '方案设计')],
       [ctxLine('c1', 'f1', 'a1')],
     )
     const context = factsOf(flow, 'a1', snapshotOf([]))
     expect(context.upstreamContext).toEqual([{ nodeId: 'f1', source: '需求文档', content: '正文内容' }])
-    expect(context.filePaths).toEqual([])
   })
 
-  it('file 节点 ctx 注入保留：受管文件注入路径索引（不进上下文正文）', () => {
+  it('任务节点 ctx 注入：描述为空/空白时不注入', () => {
     const flow = baseFlow(
-      [managedFileNode('f1', '需求文件', 'D:/ws/需求.md'), role('a1', 'agent', '方案设计')],
+      [taskNode('f1', '空任务', '   '), role('a1', 'agent', '方案设计')],
       [ctxLine('c1', 'f1', 'a1')],
     )
     const context = factsOf(flow, 'a1', snapshotOf([]))
     expect(context.upstreamContext).toEqual([])
-    expect(context.filePaths).toEqual(['D:/ws/需求.md'])
   })
 
   it('mode2 输入节点（start）产出自动注入首个节点（用户问题）', () => {

@@ -24,9 +24,10 @@ export type { ServiceState, ServiceStatus, UserIdMap } from './service-types.js'
 export type {
   BundleV2,
   DatabaseTemplate,
-  FileTemplate,
   GroupTemplate,
+  LegacyFileTemplate,
   RoleTemplate,
+  TaskTemplate,
   ToolCombo,
 } from './template-types.js'
 export type {

@@ -42,7 +42,7 @@ export interface OrchestrationDirectiveParams {
         parentTaskBlock?: string;
     };
 }
-/** 执行单元共用的过程性信息（上游产出 / 文件路径索引 / 数据库工具说明）。 */
+/** 执行单元共用的过程性信息（上游产出 / 数据库工具说明）。 */
 export interface ExecutorContextFacts {
     /** 节点人类可读名称。 */
     nodeLabel: string;
@@ -52,8 +52,6 @@ export interface ExecutorContextFacts {
         source: string;
         content: string;
     }>;
-    /** 文件路径索引（data/files/ 受管路径），可为空。 */
-    filePaths: string[];
     /** 数据库工具说明（db-in 连线存在时非空），可为空。 */
     dbToolHint: string;
 }

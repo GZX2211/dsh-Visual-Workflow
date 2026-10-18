@@ -1,7 +1,7 @@
 // tests/host/orchestrator/fixtures/harness.ts
 //
 // 编排运行时单测的共用装配（非测试文件，vitest 不收集）：
-//   - 图构造器（stage/agent/fileNode/parentNode/makeFlow）；
+//   - 图构造器（stage/agent/taskNode/parentNode/makeFlow）；
 //   - fake 依赖缝（FakeRoot/FakeAgents/FakeRunner）与真实 FlowStore 装配（makeHarness）；
 //   - 临时目录统一登记，测试文件在 afterEach 调 cleanupTempDirs()；
 //   - 固定时钟与确定性 id（时间、随机、异步可确定）。
@@ -25,7 +25,7 @@ import {
   type TurnEndInfo,
 } from '../../../../src/host/orchestrator/index.js'
 import { stageLabel } from '../../../../src/host/graph/index.js'
-import type { FileNode, GroupNode, RoleNode, StageNode, WorkflowDocument } from '../../../../src/host/shared/graph-model.js'
+import type { GroupNode, RoleNode, StageNode, TaskNode, WorkflowDocument } from '../../../../src/host/shared/graph-model.js'
 
 // ---------------------------------------------------------------------------
 // 测试替身与装配
@@ -66,13 +66,13 @@ export function agent(id: string, label: string, extra: Partial<RoleNode['data']
   }
 }
 
-/** 文件节点。 */
-export function fileNode(id: string, label: string, extra: Partial<FileNode['data']> = {}): FileNode {
+/** 任务节点（文本描述任务）。 */
+export function taskNode(id: string, label: string, extra: Partial<TaskNode['data']> = {}): TaskNode {
   return {
     id,
-    kind: 'file',
+    kind: 'task',
     position: { x: 0, y: 0 },
-    data: { label, fileKind: 'text', content: '', fileName: '', ...extra },
+    data: { label, content: '', ...extra },
   }
 }
 

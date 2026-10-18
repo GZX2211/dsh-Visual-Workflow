@@ -1,6 +1,6 @@
 import type { OrgMeta } from './org-meta.js';
 /** 节点种类：9 种判别的稳定字面量。 */
-export type NodeKind = 'parent' | 'agent' | 'file' | 'database' | 'start' | 'end' | 'pause' | 'group' | 'proxy';
+export type NodeKind = 'parent' | 'agent' | 'task' | 'database' | 'start' | 'end' | 'pause' | 'group' | 'proxy';
 /** 节点公共基座：所有节点的共有最小字段。 */
 export interface BaseNode {
     /** 节点稳定标识（画布内唯一；运行期以 sessionId:flowId:nodeId 复用子代理）。 */
@@ -90,27 +90,17 @@ export interface RoleNode extends BaseNode {
     };
 }
 /**
- * 文件节点：文本或受管文件的上下文数据源。
- * 为独立 FileNode 接口。
+ * 任务节点：以文本描述任务的上下文数据源。
+ * 不提供文件类型选择，也不上传文件；「选择文件」只把路径追加进任务描述。
+ * 为独立 TaskNode 接口。
  */
-export interface FileNode extends BaseNode {
-    kind: 'file';
+export interface TaskNode extends BaseNode {
+    kind: 'task';
     data: {
-        /** 名称（左侧栏/右侧属性栏均展示）。 */
+        /** 任务名称（左侧栏/右侧属性栏均展示）。 */
         label: string;
-        /** 文件类型：文本内容直通，或受管文件（仅注入路径索引）。 */
-        fileKind: 'text' | 'file';
-        /** 文本内容（fileKind='text' 时直通；注入上限默认 20000 字）。 */
+        /** 任务描述正文（注入上限默认 20000 字；允许为空）。 */
         content?: string;
-        /** 受管文件路径（fileKind='file' 单选时；复制进 data/files/ 避免源删除失效）。 */
-        managedPath?: string;
-        /** 源文件名（非文本类型展示用）。 */
-        fileName?: string;
-        /** 多选文件列表（fileKind='file'；每项含受管路径与源文件名）。 */
-        files?: Array<{
-            fileName: string;
-            managedPath: string;
-        }>;
     };
 }
 /**
@@ -212,7 +202,7 @@ export interface ProxyNode extends BaseNode {
  * 注：元参数规模统计口径的「可执行单元节点种类」是跨层常量，
  * 本文件保持纯形状，不含运行时值。
  */
-export type GraphNode = RoleNode | FileNode | DatabaseNode | StageNode | GroupNode | ProxyNode;
+export type GraphNode = RoleNode | TaskNode | DatabaseNode | StageNode | GroupNode | ProxyNode;
 /**
  * 连接点类型（Handle）：节点上的物理接线端，分方向属类。
  *  - 入侧：flow-in（流程入）、ctx-in（上下文入）、db-in（数据库入）

@@ -39,7 +39,7 @@ export interface CanvasActionsFace {
     removeSelected(): void;
     removeNodeNow(id: string): void;
     removeLine(id: string): void;
-    placeTemplateNode(kind: 'role' | 'file' | 'database', templateId: string, position: {
+    placeTemplateNode(kind: 'role' | 'task' | 'database', templateId: string, position: {
         x: number;
         y: number;
     }): void;

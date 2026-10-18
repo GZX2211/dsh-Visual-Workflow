@@ -81,14 +81,14 @@ describe('Studio 装配', () => {
     expect(remote.calls.some((call) => call.endpoint === EP.EP_PUT_WORKFLOW)).toBe(true)
   })
 
-  it('左侧栏 4 Tab：工作流/角色/数据/其他（Tag 图标化）；数据 Tab 含文件/数据库分区', async () => {
+  it('左侧栏 4 Tab：工作流/角色/数据/其他（Tag 图标化）；数据 Tab 含任务/数据库分区', async () => {
     await renderStudio()
     expect(Array.from(document.querySelectorAll('.wf-lib-tab')).map((item) => item.getAttribute('aria-label'))).toEqual(['工作流', '角色', '数据', '其他'])
     await act(async () => {
       libTab('数据')?.click()
     })
     const groups = textOf('.wf-docgroup').join('|')
-    expect(groups).toContain('文件')
+    expect(groups).toContain('任务')
     expect(groups).toContain('数据库')
     await act(async () => {
       libTab('其他')?.click()

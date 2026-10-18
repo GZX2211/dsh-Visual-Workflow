@@ -74,7 +74,7 @@ export interface DocumentActionsFace {
   /** 打开工作流模板（未保存守卫后切换）。 */
   selectFlowTemplate(id: string): void
   /** 新建（工作流 Tab / 角色 / 数据分区 / Team 分区；+ 号新建模板）。 */
-  createNew(tab: LibTab, section?: 'file' | 'database' | 'flowTemplate' | 'group'): void
+  createNew(tab: LibTab, section?: 'task' | 'database' | 'flowTemplate' | 'group'): void
 }
 
 /** 工作流资产详情 → 模板形状（实例化通道只消费 mode/name/description/nodes/lines/meta；id 仅为占位）。 */
@@ -446,7 +446,7 @@ export function useDocumentActions(
   }, [guard, openFlowTemplateById])
 
   // ---------- 新建 ----------
-  const createNew = useCallback((tab: LibTab, section?: 'file' | 'database' | 'flowTemplate' | 'group') => {
+  const createNew = useCallback((tab: LibTab, section?: 'task' | 'database' | 'flowTemplate' | 'group') => {
     if (tab === 'workflow') {
       if (section === 'flowTemplate') {
         // + 号新建「工作流模板」（空白模板，编辑后保存回模板库；
@@ -468,8 +468,8 @@ export function useDocumentActions(
       return
     }
     if (tab === 'data') {
-      // 数据 Tab 分区独立新建：文件分区建文件模板、数据库分区建数据库模板
-      const kind = section === 'database' ? 'database' : 'file'
+      // 数据 Tab 分区独立新建：任务分区建任务模板、数据库分区建数据库模板
+      const kind = section === 'database' ? 'database' : 'task'
       const template = templates.createTemplateDraft(kind, t.templateDefaultName[kind])
       selection.selectEditor({ source: 'template', kind, id: template.id })
       selection.selectLib(kind, (template as { id: string }).id)

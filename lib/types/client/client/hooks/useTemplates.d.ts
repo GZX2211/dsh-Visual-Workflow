@@ -1,13 +1,13 @@
 import type { Dispatch } from 'react';
-import type { RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate } from '../../host/shared/types.js';
+import type { RoleTemplate, TaskTemplate, DatabaseTemplate, GroupTemplate } from '../../host/shared/types.js';
 import type { StudioAction, TemplateKind } from '../studio/studio-state.js';
 import type { RemoteFace } from './useRemote.js';
-export type AnyTemplate = RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate;
+export type AnyTemplate = RoleTemplate | TaskTemplate | DatabaseTemplate | GroupTemplate;
 export interface TemplatesFace {
     /** 全部模板分类并行加载；返回按 kind 聚合的结果（某类失败不影响其他类）。 */
     loadTemplates(): Promise<{
         role: AnyTemplate[];
-        file: AnyTemplate[];
+        task: AnyTemplate[];
         database: AnyTemplate[];
         group: AnyTemplate[];
     }>;

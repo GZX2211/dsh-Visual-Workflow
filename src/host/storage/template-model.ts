@@ -6,18 +6,18 @@
 // 公共契约（调用方以 `TemplateKind` 指定目录族），其变化原因（新增模板种类）
 // 与资源 CRUD、锁语义、文档净化的变化原因无关。
 //
-// 数据模板同目录混存（data/）：file 与 database 以字段判别，因此判别函数必须与
+// 数据模板同目录混存（data/）：task 与 database 以字段判别，因此判别函数必须与
 // 类型联合保持同源，不得在读取路径写内联判别。
 
-import type { DatabaseTemplate, FileTemplate, GroupTemplate, RoleTemplate } from '../shared/types.js'
+import type { DatabaseTemplate, GroupTemplate, RoleTemplate, TaskTemplate } from '../shared/types.js'
 
-/** 模板种类：角色 / 文件 / 数据库 / Team（§4.2.3/§4.2.4/§4.2.5.2；左侧栏各 Tab）。 */
-export type TemplateKind = 'role' | 'file' | 'database' | 'group'
+/** 模板种类：角色 / 任务 / 数据库 / Team（§4.2.3/§4.2.4/§4.2.5.2；左侧栏各 Tab）。 */
+export type TemplateKind = 'role' | 'task' | 'database' | 'group'
 
-/** 全部模板的判别联合（按目录区分；data/ 内 file/database 以字段判别；groups/ 为 Team）。 */
-export type Template = RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate
+/** 全部模板的判别联合（按目录区分；data/ 内 task/database 以字段判别；groups/ 为 Team）。 */
+export type Template = RoleTemplate | TaskTemplate | DatabaseTemplate | GroupTemplate
 
-/** 判断数据模板对象是数据库模板（以 dbType 字段判别；data/ 目录内 file 与 database 混存）。 */
+/** 判断数据模板对象是数据库模板（以 dbType 字段判别；data/ 目录内 task 与 database 混存）。 */
 export function isDatabaseTemplate(t: Template): t is DatabaseTemplate {
   return typeof (t as DatabaseTemplate).dbType === 'string'
 }

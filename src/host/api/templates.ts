@@ -1,28 +1,27 @@
 // src/host/api/templates.ts
 //
-// GUI API 模板与受管文件端点组（TemplateEndpoints）：角色/文件/数据库模板 CRUD、
-// 工作流模板（全局共享）与受管文件上传（内容落盘归 storage 受管文件入口）。
+// GUI API 模板端点组（TemplateEndpoints）：角色/任务/数据库模板 CRUD 与
+// 工作流模板（全局共享）。
 
 import { httpError } from './http.js'
 import { ERR_REVISION_CONFLICT } from '../shared/protocol.js'
-import { copyIntoManagedFile } from '../storage/managed-files.js'
 import { presentationOf, VisualWorkflowApiBase } from './boundary.js'
 
 export class TemplateEndpoints extends VisualWorkflowApiBase {
-  // ---------- 模板（角色/文件/数据库） ----------
+  // ---------- 模板（角色/任务/数据库） ----------
 
   async listTemplates(args: { kind?: unknown }): Promise<unknown> {
     const kind = String(args?.kind ?? '')
-    if (kind !== 'role' && kind !== 'file' && kind !== 'database' && kind !== 'group') {
-      throw httpError(400, 'requires kind: role|file|database|group')
+    if (kind !== 'role' && kind !== 'task' && kind !== 'database' && kind !== 'group') {
+      throw httpError(400, 'requires kind: role|task|database|group')
     }
-    return this.host.store.listTemplates(kind as 'role' | 'file' | 'database' | 'group')
+    return this.host.store.listTemplates(kind as 'role' | 'task' | 'database' | 'group')
   }
 
   async putTemplate(args: { kind?: unknown; template?: unknown }): Promise<unknown> {
     const kind = String(args?.kind ?? '')
-    if (kind !== 'role' && kind !== 'file' && kind !== 'database' && kind !== 'group') {
-      throw httpError(400, 'requires kind: role|file|database|group')
+    if (kind !== 'role' && kind !== 'task' && kind !== 'database' && kind !== 'group') {
+      throw httpError(400, 'requires kind: role|task|database|group')
     }
     const template = args?.template as Record<string, unknown> | null | undefined
     if (!template || !String(template.id ?? '').trim()) throw httpError(400, 'requires a template id')
@@ -30,17 +29,17 @@ export class TemplateEndpoints extends VisualWorkflowApiBase {
       template.kind = 'agent'
     }
     // 前端快照标记由 storage 保存路径统一剥除，此处只做浅拷贝（不修改入参）。
-    return this.host.store.saveTemplate(kind as 'role' | 'file' | 'database' | 'group', { ...template } as never)
+    return this.host.store.saveTemplate(kind as 'role' | 'task' | 'database' | 'group', { ...template } as never)
   }
 
   async deleteTemplate(args: { kind?: unknown; id?: unknown }): Promise<unknown> {
     const kind = String(args?.kind ?? '')
     const id = String(args?.id ?? '')
-    if (kind !== 'role' && kind !== 'file' && kind !== 'database' && kind !== 'group') {
-      throw httpError(400, 'requires kind: role|file|database|group')
+    if (kind !== 'role' && kind !== 'task' && kind !== 'database' && kind !== 'group') {
+      throw httpError(400, 'requires kind: role|task|database|group')
     }
     if (!id) throw httpError(400, 'requires a template id')
-    const deleted = await this.host.store.deleteTemplate(kind as 'role' | 'file' | 'database' | 'group', id)
+    const deleted = await this.host.store.deleteTemplate(kind as 'role' | 'task' | 'database' | 'group', id)
     if (!deleted) throw httpError(404, presentationOf(this.host, `模板不存在：${id}`, `Template not found: ${id}`))
     return { deleted: true }
   }
@@ -85,12 +84,5 @@ export class TemplateEndpoints extends VisualWorkflowApiBase {
     const deleted = await this.host.store.deleteFlowTemplate(id)
     if (!deleted) throw httpError(404, presentationOf(this.host, `工作流模板不存在：${id}`, `Workflow template not found: ${id}`))
     return { deleted: true }
-  }
-  /** 受管文件上传：base64 内容 → data/files/<safeName>（原子发布；返回 managedPath）。 */
-  async fileUpload(args: { name?: unknown; base64?: unknown }): Promise<unknown> {
-    const name = String(args?.name ?? '').trim()
-    const base64 = String(args?.base64 ?? '')
-    if (!name || !base64) throw httpError(400, 'requires name and base64')
-    return copyIntoManagedFile(this.host.dataDir, { name, base64 })
   }
 }

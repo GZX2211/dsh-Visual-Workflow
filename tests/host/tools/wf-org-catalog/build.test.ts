@@ -285,9 +285,9 @@ describe('buildWorkflowDetail（骨架自足性）', () => {
     expect(proxy).toEqual({ id: 'p1', kind: 'proxy', label: '复核点', proxySourceId: 'a1' })
   })
 
-  it('文件节点正文一次性给全（没有二次召回通道）', () => {
-    const file = detail.nodes.find((node) => node.id === 'f1')
-    expect(file).toMatchObject({ kind: 'file', label: '基线说明', fileKind: 'text', content: '基线正文' })
+  it('任务节点描述一次性给全（没有二次召回通道）', () => {
+    const task = detail.nodes.find((node) => node.id === 'f1')
+    expect(task).toEqual({ id: 'f1', kind: 'task', label: '基线说明', content: '基线正文' })
   })
 
   it('数据库节点连接信息给全，但密码脱敏', () => {

@@ -127,7 +127,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
         y: Math.round(draggingNode.originY + dy),
       })
       // 悬停检测：仅「角色节点」拖到 Team 表面才高亮（排除被拖拽本体；连接点不具入组功能；
-      // 角色以外的卡片（文件/数据库/阶段/虚拟）不显示悬浮提示、也不能入组，用户批注）
+      // 角色以外的卡片（任务/数据库/阶段/虚拟）不显示悬浮提示、也不能入组，用户批注）
       const dragged = byId.get(draggingNode.nodeId)
       const canJoinGroup = !!dragged && (dragged.kind === 'parent' || dragged.kind === 'agent')
       setDragHoverGroupId(canJoinGroup ? groupSurfaceUnderPoint(event.clientX, event.clientY, draggingNode.nodeId) : null)
@@ -348,7 +348,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
               selected={node.id === selectedNode}
               highlighted={highlightedSet.has(node.id)}
               dragging={draggingNode?.nodeId === node.id}
-              // 用户批注：仅角色（agent/parent）节点显示/记录状态；阶段/文件/数据库/Team 卡片不渲染状态徽标。
+              // 用户批注：仅角色（agent/parent）节点显示/记录状态；阶段/任务/数据库/Team 卡片不渲染状态徽标。
               // parent 为编排执行单元（父代理节点），快照同样记录其状态，必须一并回显
               // （否则仅 parent 节点的工作流在画布上永远看不到节点运行状态）。
               runStatus={node.kind === 'agent' || node.kind === 'parent' ? runStatusOf(node.id) : null}

@@ -50,31 +50,47 @@ export interface RoleTemplate {
     updatedAt?: string;
 }
 /**
- * 文件模板（架构文档 §6.3）。
- * 非文本文件选择时复制到插件受管目录 data/files/（需求文档 §4.2.4.1 规则 2）。
- * 支持多选所有类型文件（files 列表，用户验收标注：已选文件列表显示在按钮下方）。
+ * 任务模板（架构文档 §6.3）。
+ * 任务以文本描述，不区分文件类型、不上传文件；拖入画布后成为任务节点。
  */
-export interface FileTemplate {
+export interface TaskTemplate {
     /** 模板稳定标识。 */
     id: string;
     /** 模板名称。 */
     name: string;
-    /** 文件类型。 */
-    fileKind: 'text' | 'file';
-    /** 文本内容（fileKind='text'）。 */
+    /** 任务描述正文（允许为空）。 */
     content?: string;
-    /** 受管文件路径（fileKind='file' 单选时的兼容字段）。 */
+    /** 创建时间（ISO 字符串，可选）：持久化层记账。 */
+    createdAt?: string;
+    /** 最近更新时间（ISO 字符串，可选）：持久化层保存时刷新。 */
+    updatedAt?: string;
+}
+/**
+ * 旧文件模板（**仅旧导入包读取兼容**，不得写入、不得用于新契约）。
+ * 旧包里的 embedded.files 与 data/ 目录中的历史模板按任务读取：content 保留，
+ * 受管文件字段随归一化丢弃。
+ */
+export interface LegacyFileTemplate {
+    /** 模板稳定标识。 */
+    id: string;
+    /** 模板名称。 */
+    name: string;
+    /** 旧文件类型（已退役）。 */
+    fileKind?: 'text' | 'file';
+    /** 旧文本内容（迁移后作为任务描述）。 */
+    content?: string;
+    /** 旧受管文件路径（已退役）。 */
     managedPath?: string;
-    /** 源文件名（fileKind='file' 左侧栏展示用，与 FileNode.data.fileName 对齐）。 */
+    /** 旧源文件名（已退役）。 */
     fileName?: string;
-    /** 多选文件列表（fileKind='file'；每项含受管路径与源文件名）。 */
+    /** 旧多选文件列表（已退役）。 */
     files?: Array<{
         fileName: string;
         managedPath: string;
     }>;
-    /** 创建时间（ISO 字符串，可选）：持久化层记账。 */
+    /** 创建时间（ISO 字符串，可选）。 */
     createdAt?: string;
-    /** 最近更新时间（ISO 字符串，可选）：持久化层保存时刷新。 */
+    /** 最近更新时间（ISO 字符串，可选）。 */
     updatedAt?: string;
 }
 /**
@@ -178,10 +194,12 @@ export interface BundleV2 {
         nodes: GraphNode[];
         lines: Line[];
     };
-    /** 嵌入式资源（角色/文件/数据库/Team 模板与工具组合；导入时解耦创建模板）。 */
+    /** 嵌入式资源（角色/任务/数据库/Team 模板与工具组合；导入时解耦创建模板）。 */
     embedded: {
         roles?: RoleTemplate[];
-        files?: FileTemplate[];
+        tasks?: TaskTemplate[];
+        /** 旧文件模板（仅旧包读取兼容；新导出不再写入）。 */
+        files?: LegacyFileTemplate[];
         databases?: DatabaseTemplate[];
         groups?: GroupTemplate[];
         combos?: ToolCombo[];

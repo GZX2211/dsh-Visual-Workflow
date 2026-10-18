@@ -54,7 +54,7 @@ import {
   type WfExperienceHost,
 } from './tools/index.js'
 import { registerArrangeCommand } from './commands/arrange.js'
-import { registerDownloadRoute, registerRoutes } from './api/index.js'
+import { registerRoutes } from './api/index.js'
 import type { ExperienceDomainFace } from './api/index.js'
 import { ExperienceService, scheduleExperienceRetirementSweep } from './experience/index.js'
 import type { ExperienceRuntimePort, ExperienceStorePort } from './experience/index.js'
@@ -777,17 +777,12 @@ export class VisualWorkflowHost extends Service {
       }
     }
 
-    // GUI API 路由：webServer 可用时挂载端点白名单分发与受管文件下载路由
+    // GUI API 路由：webServer 可用时挂载端点白名单分发
     // （webServer 缺失时 register 内部告警降级；disposer 随 fiber 注销）
     try {
       this.ctx.effect(() => registerRoutes(this.ctx, this), 'visualWorkflowHost.routes')
     } catch (error) {
       this.ctx.logger.warn(`[visual-workflow] GUI API 路由挂载失败：${error instanceof Error ? error.message : String(error)}`)
-    }
-    try {
-      this.ctx.effect(() => registerDownloadRoute(this.ctx, this.config.dataDir), 'visualWorkflowHost.downloadRoute')
-    } catch (error) {
-      this.ctx.logger.warn(`[visual-workflow] 受管文件下载路由挂载失败：${error instanceof Error ? error.message : String(error)}`)
     }
 
     // 显式清理通道：fiber 卸载时执行（中止运行/阻塞等待 reject/停止看护）。

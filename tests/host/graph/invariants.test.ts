@@ -91,9 +91,9 @@ function stage(id: string, kind: 'start' | 'end' | 'pause', mode: 'mode1' | 'mod
   return { id, kind, position: { x: 0, y: 0 }, data: { label: labels[kind][mode] } }
 }
 
-/** 文件节点（文本/受管）。 */
-function fileNode(id: string, data: Record<string, unknown> = {}): GraphNode {
-  return { id, kind: 'file', position: { x: 0, y: 0 }, data: { label: id, fileKind: 'text', content: 'x', ...data } }
+/** 任务节点（文本描述）。 */
+function taskNode(id: string, data: Record<string, unknown> = {}): GraphNode {
+  return { id, kind: 'task', position: { x: 0, y: 0 }, data: { label: id, content: 'x', ...data } }
 }
 
 /** 数据库节点。 */
@@ -377,9 +377,9 @@ describe('规则矩阵（每个 code 一例）', () => {
     expect(incomplete[0].nodeIds).toEqual(['d1'])
   })
 
-  it('受管文件节点未选文件：不再阻断（写图只产文本型，该校验已取消）', () => {
+  it('任务节点描述为空：不阻断（文本允许为空，运行期注入空串）', () => {
     const doc = flow(
-      [stage('s', 'start'), agent('a1'), fileNode('f1', { fileKind: 'file' }), stage('e', 'end')],
+      [stage('s', 'start'), agent('a1'), taskNode('f1', { content: '' }), stage('e', 'end')],
       [line('l1', 's', 'a1'), line('l2', 'a1', 'e'), line('c1', 'f1', 'a1', 'ctx')],
     )
     const issues = check({ flow: doc })
@@ -401,9 +401,9 @@ describe('规则矩阵（每个 code 一例）', () => {
     expect(codes(issues)).toContain('ctxSourceInvalid')
   })
 
-  it('dbLineTargetInvalid：数据库出线指向非角色节点（文件节点）', () => {
+  it('dbLineTargetInvalid：数据库出线指向非角色节点（任务节点）', () => {
     const doc = flow(
-      [stage('s', 'start'), agent('a1'), fileNode('f1'), dbNode('d1', { localPath: 'x.db' }), stage('e', 'end')],
+      [stage('s', 'start'), agent('a1'), taskNode('f1'), dbNode('d1', { localPath: 'x.db' }), stage('e', 'end')],
       [line('l1', 's', 'a1'), line('l2', 'a1', 'e'), line('c1', 'd1', 'f1', 'db')],
     )
     const issues = check({ flow: doc })

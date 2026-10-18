@@ -1,6 +1,6 @@
 import type { Dict } from '../../i18n.js';
 import type { LibTab, LibrarySource } from '../../studio/studio-state.js';
-import type { RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate } from '../../../host/shared/types.js';
+import type { RoleTemplate, TaskTemplate, DatabaseTemplate, GroupTemplate } from '../../../host/shared/types.js';
 import type { WorkflowTemplate } from '../../../host/shared/graph-model.js';
 import type { ExperienceEntry, RoleAssetSummary, WorkflowAssetSummary } from '../../../host/shared/asset-types.js';
 import type { DragPayload, LibSelectionInfo } from './LeftPanel.js';
@@ -36,7 +36,7 @@ export interface BottomPanelProps {
     experiences: ExperienceEntry[];
     parentTemplate: RoleTemplate | null;
     roleTemplates: RoleTemplate[];
-    fileTemplates: FileTemplate[];
+    taskTemplates: TaskTemplate[];
     databaseTemplates: DatabaseTemplate[];
     groupTemplates: GroupTemplate[];
     stageKinds: Array<{
@@ -56,7 +56,7 @@ export interface BottomPanelProps {
         y: number;
     }): void;
     onSelectLib(kind: LibSelectionInfo['kind'], id: string): void;
-    onPlaceTemplate(kind: 'role' | 'file' | 'database', id: string, position: {
+    onPlaceTemplate(kind: 'role' | 'task' | 'database', id: string, position: {
         x: number;
         y: number;
     }): void;
@@ -80,7 +80,7 @@ export interface BottomPanelProps {
         x: number;
         y: number;
     }): void;
-    onCreateNew(tab: LibTab, section?: 'file' | 'database' | 'flowTemplate' | 'group'): void;
+    onCreateNew(tab: LibTab, section?: 'task' | 'database' | 'flowTemplate' | 'group'): void;
     onBeginDrag(event: React.PointerEvent, payload: DragPayload): void;
 }
 export declare function BottomPanel(props: BottomPanelProps): import("react").JSX.Element;

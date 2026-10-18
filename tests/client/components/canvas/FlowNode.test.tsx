@@ -81,6 +81,13 @@ describe('P4 画布角标（FlowNode）', () => {
     await renderFlowNode(proxyNode({}))
     expect(container!.textContent).not.toContain(zh.agentPatchedBadge)
   })
+
+  it('任务节点：卡片显示种类名与任务描述（不显示文件类型）', async () => {
+    await renderFlowNode({ id: 't-1', kind: 'task', position: { x: 0, y: 0 }, data: { label: '任务一', content: '任务描述正文' } })
+    expect(container!.querySelector('.wf-node__kind')!.textContent).toContain(String(zh.nodeKinds.task))
+    expect(container!.querySelector('.wf-node__label')!.textContent).toBe('任务一')
+    expect(container!.querySelector('.wf-node__prompt')!.textContent).toBe('任务描述正文')
+  })
 })
 
 describe('stage names follow the active language', () => {

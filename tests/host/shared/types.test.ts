@@ -10,7 +10,6 @@ import { describe, expect, it } from 'vitest'
 import type {
   BundleV2,
   DatabaseTemplate,
-  FileTemplate,
   GroupTemplate,
   NodeOutputRecord,
   OrgBudget,
@@ -22,6 +21,7 @@ import type {
   ScheduledTaskRuntime,
   ScheduledTaskView,
   ServiceState,
+  TaskTemplate,
   ToolCombo,
   UserIdMap,
   WorkflowTemplate,
@@ -67,7 +67,7 @@ describe('shared/types 契约形态', () => {
     id: 't1', kind: 'agent', name: 'n', systemPrompt: '', provider: 'p', model: 'm', retryLimit: 3,
     createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-02T00:00:00Z',
   }
-  const _fileTemplate: FileTemplate = { id: 'f1', name: 'f', fileKind: 'text', content: '' }
+  const _taskTemplate: TaskTemplate = { id: 'f1', name: '任务', content: '' }
   const _dbTemplate: DatabaseTemplate = {
     id: 'd1', name: 'd', description: '', dbType: 'server', dbKind: 'mysql', conn: { host: 'h', port: 3306, user: 'u', password: 'p', db: 'x' },
   }
@@ -76,7 +76,7 @@ describe('shared/types 契约形态', () => {
   const _bundle: BundleV2 = {
     format: 'dsh-vw-bundle', version: 2, mode: 'mode1',
     workflow: { name: 'w', description: '', nodes: [_minRoleNode], lines: [] },
-    embedded: { roles: [_roleTemplate], files: [_fileTemplate], databases: [_dbTemplate], groups: [_groupTemplate], combos: [_combo] },
+    embedded: { roles: [_roleTemplate], tasks: [_taskTemplate], databases: [_dbTemplate], groups: [_groupTemplate], combos: [_combo] },
   }
   const _userIdMap: UserIdMap = { userId: 'u1', sessionId: 's1' }
   const _nodeOutput: NodeOutputRecord = {
@@ -131,7 +131,7 @@ describe('shared/types 契约形态', () => {
   it('模板契约与持久化层写入字段对齐（createdAt/updatedAt 可选但受支持）', () => {
     expect(_roleTemplate.createdAt).toBe('2026-01-01T00:00:00Z')
     expect(_roleTemplate.updatedAt).toBe('2026-01-02T00:00:00Z')
-    expect(_fileTemplate.createdAt).toBeUndefined()
+    expect(_taskTemplate.createdAt).toBeUndefined()
     expect(_groupTemplate.updatedAt).toBeUndefined()
   })
 
@@ -144,6 +144,7 @@ describe('shared/types 契约形态', () => {
     expect(_bundle.format).toBe('dsh-vw-bundle')
     expect(_bundle.version).toBe(2)
     expect(_bundle.embedded.roles).toHaveLength(1)
+    expect(_bundle.embedded.tasks).toHaveLength(1)
     expect(_bundle.embedded.combos).toHaveLength(1)
   })
 

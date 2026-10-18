@@ -53,14 +53,12 @@ export interface OrchestrationDirectiveParams {
   }
 }
 
-/** 执行单元共用的过程性信息（上游产出 / 文件路径索引 / 数据库工具说明）。 */
+/** 执行单元共用的过程性信息（上游产出 / 数据库工具说明）。 */
 export interface ExecutorContextFacts {
   /** 节点人类可读名称。 */
   nodeLabel: string
   /** 上游产出上下文（全链路自动注入；数组元素为「来源名称 + 来源节点 id + 内容」，可为空）。 */
   upstreamContext: Array<{ nodeId: string; source: string; content: string }>
-  /** 文件路径索引（data/files/ 受管路径），可为空。 */
-  filePaths: string[]
   /** 数据库工具说明（db-in 连线存在时非空），可为空。 */
   dbToolHint: string
 }
@@ -97,18 +95,12 @@ function upstreamLinesOf(
     .join('\n')
 }
 
-/** 文件路径索引行（多行文本）。 */
-function fileLinesOf(filePaths: string[]): string {
-  return filePaths.map((filePath) => `- ${filePath}`).join('\n')
-}
-
 /** 执行单元上下文变量（情况2 任务块与情况3 提示词共用同一口径）。 */
 function executorContextVars(facts: ExecutorContextFacts, english: boolean): TemplateVars {
   return {
     nodeLabel: facts.nodeLabel,
     upstreamEntries: upstreamLinesOf(facts.upstreamContext, english),
     noUpstream: flag(facts.upstreamContext.length === 0),
-    filePathsText: fileLinesOf(facts.filePaths),
     dbToolHint: String(facts.dbToolHint ?? '').trim(),
   }
 }

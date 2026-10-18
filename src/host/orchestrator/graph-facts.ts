@@ -38,7 +38,7 @@ export function labelOf(node: GraphNode): string {
   if (node.kind === 'proxy') return node.id
   if (node.kind === 'parent' || node.kind === 'agent') return node.data.label || node.id
   if (node.kind === 'group') return node.data.label || node.id
-  if (node.kind === 'file' || node.kind === 'database') return node.data.label || node.id
+  if (node.kind === 'task' || node.kind === 'database') return node.data.label || node.id
   return node.data.label
 }
 
@@ -121,13 +121,13 @@ export function validateFlowForRun(flow: WorkflowDocument): WfError | null {
 }
 
 /**
- * 节点执行上下文组装（纯函数）：上游产出 / 文件路径索引 / 数据库工具说明。
+ * 节点执行上下文组装（纯函数）：上游产出 / 任务节点描述 / 数据库工具说明。
  * buildNodeBlocks（子代理任务块）与 prepareParentExecutor（父代理执行单元）共用，
  * 保证同一节点的上下文注入完全一致。
  *
  * 上游来源有两条（用户裁决 2026-10）：
- *   - 数据源：file 节点经 ctx 出线注入的文本（截断直通）或受管文件路径索引——
- *     file 无流程线，只能靠手动连线，故该通道保留；
+ *   - 数据源：task 节点经 ctx 出线注入的任务描述（截断直通）——
+ *     task 无流程线，只能靠手动连线，故该通道保留；
  *   - 流程前驱产出：全链路自动注入（autoContextSourceIds），无需手动连线。
  * 角色节点之间的旧 ctx 交接线已停用（静默忽略）；Team 与上下游解耦，不参与注入。
  */
@@ -138,39 +138,22 @@ export function buildNodeContextFacts(input: {
   snapshot: RunSnapshot
   documentTextLimit: number
   systemLanguage?: string
-}): { upstreamContext: Array<{ nodeId: string; source: string; content: string }>; filePaths: string[]; dbToolHint: string } {
+}): { upstreamContext: Array<{ nodeId: string; source: string; content: string }>; dbToolHint: string } {
   const { flow, node } = input
   const upstreamContext: Array<{ nodeId: string; source: string; content: string }> = []
-  const filePaths: string[] = []
 
-  // ① 数据源：file 节点的 ctx 出线（文本直通 / 受管文件路径索引）。
+  // ① 数据源：task 节点的 ctx 出线（任务描述直通；空描述不注入）。
   //    技术债（ctx-out 停用）：角色节点（agent/parent/proxy）的 ctx 出线已不再是注入来源，
-  //    故此处只认 file 来源；角色来源的旧线静默忽略（不报错、不迁移）。
-  //    需求 §4.2.4.1：文本直通，非文本文件注入路径索引——单选 managedPath 与多选
-  //    files 列表都要注入：多选配置下 managedPath 通常为空、路径存在 files 数组中，
-  //    只认单字段会导致下游收不到任何文件索引（Bug 21）。
+  //    故此处只认 task 来源；角色来源的旧线静默忽略（不报错、不迁移）。
   for (const edge of ctxInEdges(flow, node.id)) {
     const src = nodeById(flow, edge.source)
-    if (!src || src.kind !== 'file') continue
-    if (src.data.fileKind === 'text' && String(src.data.content ?? '').trim()) {
+    if (!src || src.kind !== 'task') continue
+    if (String(src.data.content ?? '').trim()) {
       upstreamContext.push({
         nodeId: src.id,
         source: src.data.label ?? src.id,
         content: truncateText(src.data.content, input.documentTextLimit),
       })
-      continue
-    }
-    const seen = new Set(filePaths)
-    if (src.data.managedPath) {
-      filePaths.push(src.data.managedPath)
-      seen.add(src.data.managedPath)
-    }
-    for (const item of src.data.files ?? []) {
-      const p = String(item?.managedPath ?? '').trim()
-      if (p && !seen.has(p)) {
-        filePaths.push(p)
-        seen.add(p)
-      }
     }
   }
 
@@ -192,5 +175,5 @@ export function buildNodeContextFacts(input: {
       content: truncateText(output, input.documentTextLimit),
     })
   }
-  return { upstreamContext, filePaths, dbToolHint: dbToolHintOf(flow, node.id, input.systemLanguage ?? input.snapshot.systemLanguage) }
+  return { upstreamContext, dbToolHint: dbToolHintOf(flow, node.id, input.systemLanguage ?? input.snapshot.systemLanguage) }
 }

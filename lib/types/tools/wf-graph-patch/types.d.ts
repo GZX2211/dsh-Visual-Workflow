@@ -69,14 +69,6 @@ export interface GraphPatchResult {
     updatedNodeIds: string[];
     connectedLineIds: string[];
     disconnectedLineIds: string[];
-    /**
-     * 被归一化为「文本型」的文件节点 id（D-07）。
-     *
-     * 为什么写图只产文本型 file 节点：受管文件（fileKind='file'）必须指向**已存在**的受管副本
-     * （检查器 dataNodeIncomplete 强制），而编排要表达的是「未来要产出的交付文件」这一意图——
-     * 强制受管会把这类规划直接挡在门外。归一化不静默：工具层据此产出 warning 告知调用方。
-     */
-    fileNodeTextOnlyIds: string[];
 }
 /**
  * 单条补丁操作失败项（容错收集模式下的一条记录）。

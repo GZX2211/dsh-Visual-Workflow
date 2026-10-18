@@ -55,13 +55,13 @@ function flowOf(nodes: GraphNode[]): WorkflowDocument {
   }
 }
 
-/** 文本型文件节点。 */
-function fileNode(id: string, label = id): GraphNode {
-  return { id, kind: 'file', position: { x: 0, y: 0 }, data: { label, fileKind: 'text', content: '' } }
+/** 任务节点。 */
+function taskNode(id: string, label = id, content = ''): GraphNode {
+  return { id, kind: 'task', position: { x: 0, y: 0 }, data: { label, content } }
 }
 
-/** 既有受管文件节点（画布手工拖入的形态：带受管副本路径）。 */
-function managedFileNode(id: string, label = id): GraphNode {
+/** 旧文件节点（历史形状，读取兼容用）。 */
+function legacyFileNode(id: string, label = id): GraphNode {
   return {
     id,
     kind: 'file',
@@ -69,11 +69,12 @@ function managedFileNode(id: string, label = id): GraphNode {
     data: {
       label,
       fileKind: 'file',
+      content: '旧正文',
       managedPath: 'data/files/旧件.md',
       fileName: '旧件.md',
       files: [{ fileName: '旧件.md', managedPath: 'data/files/旧件.md' }],
     },
-  }
+  } as unknown as GraphNode
 }
 
 /** 最小含虚拟节点的合法图：start → m1(→p1) → a1 → end。 */
@@ -90,15 +91,15 @@ function proxyFlow(): WorkflowDocument {
   }
 }
 
-describe('file 节点：写图只产文本型（D-07）', () => {
-  /** 取节点 data：结果文档的 nodes 是真实节点联合，只在此收窄到 data 一层。 */
-  function dataOf(doc: { nodes: GraphNode[] }, id: string): Record<string, unknown> {
+describe('任务节点 data 归一化', () => {
+  /** 取节点：结果文档的 nodes 是真实节点联合。 */
+  function nodeOf(doc: { nodes: GraphNode[] }, id: string): GraphNode {
     const found = doc.nodes.find((node) => node.id === id)
     if (!found) throw new Error(`测试夹具缺少节点：${id}`)
-    return found.data as Record<string, unknown>
+    return found
   }
 
-  it('test_create_node 传受管文件_归一化为文本型并报告归一化', () => {
+  it('create_node kind=task：只保留 label/content，旧受管字段被丢弃', () => {
     const doc = flowOf([stage('s', 'start'), stage('e', 'end')])
 
     const result = applyGraphOps({
@@ -106,10 +107,11 @@ describe('file 节点：写图只产文本型（D-07）', () => {
       ops: [{
         op: 'create_node',
         node: {
-          kind: 'file',
+          kind: 'task',
           id: 'f1',
           data: {
-            label: '交付文件',
+            label: '交付任务',
+            content: '正文',
             fileKind: 'file',
             managedPath: 'data/files/x.md',
             files: [{ fileName: 'x.md', managedPath: 'data/files/x.md' }],
@@ -118,47 +120,48 @@ describe('file 节点：写图只产文本型（D-07）', () => {
       }],
     })
 
-    expect(dataOf(result.doc, 'f1')).toMatchObject({ fileKind: 'text', label: '交付文件' })
-    expect(dataOf(result.doc, 'f1').managedPath).toBeUndefined()
-    expect(dataOf(result.doc, 'f1').files).toBeUndefined()
-    expect(result.fileNodeTextOnlyIds).toEqual(['f1'])
+    expect(nodeOf(result.doc, 'f1')).toEqual({
+      id: 'f1', kind: 'task', position: { x: 0, y: 0 }, data: { label: '交付任务', content: '正文' },
+    })
   })
 
-  it('test_create_node 传文本型_不报告归一化', () => {
+  it('create_node 旧 kind=file：读取兼容归一化为任务节点', () => {
     const doc = flowOf([stage('s', 'start'), stage('e', 'end')])
 
     const result = applyGraphOps({
       doc,
-      ops: [{ op: 'create_node', node: { kind: 'file', id: 'f2', data: { label: '任务书', fileKind: 'text', content: '正文' } } }],
+      ops: [{ op: 'create_node', node: { kind: 'file', id: 'f1', data: { label: '交付文件', content: '任务正文', fileKind: 'file', managedPath: 'data/files/x.md' } } }],
     })
 
-    expect(dataOf(result.doc, 'f2')).toMatchObject({ label: '任务书', fileKind: 'text', content: '正文' })
-    expect(result.fileNodeTextOnlyIds).toEqual([])
+    expect(nodeOf(result.doc, 'f1')).toEqual({
+      id: 'f1', kind: 'task', position: { x: 0, y: 0 }, data: { label: '交付文件', content: '任务正文' },
+    })
   })
 
-  it('test_update_node_data 显式要求受管_归一化为文本型并报告', () => {
-    const doc = flowOf([stage('s', 'start'), fileNode('f1'), stage('e', 'end')])
+  it('update_node_data：任务节点合并后只保留 label/content（旧字段清除）', () => {
+    const doc = flowOf([stage('s', 'start'), taskNode('f1', '旧任务', '旧正文'), stage('e', 'end')])
 
     const result = applyGraphOps({
       doc,
-      ops: [{ op: 'update_node_data', nodeId: 'f1', data: { fileKind: 'file', managedPath: 'data/files/x.md' } }],
+      ops: [{ op: 'update_node_data', nodeId: 'f1', data: { label: '改名', fileKind: 'file', managedPath: 'data/files/x.md' } }],
     })
 
-    expect(dataOf(result.doc, 'f1')).toMatchObject({ fileKind: 'text' })
-    expect(dataOf(result.doc, 'f1').managedPath).toBeUndefined()
-    expect(result.fileNodeTextOnlyIds).toEqual(['f1'])
+    expect(nodeOf(result.doc, 'f1')).toEqual({
+      id: 'f1', kind: 'task', position: { x: 0, y: 0 }, data: { label: '改名', content: '旧正文' },
+    })
   })
 
-  it('test_update_node_data 仅改名称_保留既有受管配置', () => {
-    const doc = flowOf([stage('s', 'start'), managedFileNode('f1'), stage('e', 'end')])
+  it('update_node_data：旧 file 节点（读取兼容前）合并后落任务形状', () => {
+    const doc = flowOf([stage('s', 'start'), legacyFileNode('f1'), stage('e', 'end')])
 
     const result = applyGraphOps({
       doc,
-      ops: [{ op: 'update_node_data', nodeId: 'f1', data: { label: '改名' } }],
+      ops: [{ op: 'update_node_data', nodeId: 'f1', data: { label: '新名称' } }],
     })
 
-    expect(dataOf(result.doc, 'f1')).toMatchObject({ label: '改名', fileKind: 'file', managedPath: 'data/files/旧件.md' })
-    expect(result.fileNodeTextOnlyIds).toEqual([])
+    expect(nodeOf(result.doc, 'f1')).toEqual({
+      id: 'f1', kind: 'task', position: { x: 0, y: 0 }, data: { label: '新名称', content: '旧正文' },
+    })
   })
 })
 
@@ -412,7 +415,6 @@ function strictPerOp(doc: WorkflowDocument, ops: GraphPatchOp[]): {
   updatedNodeIds: string[]
   connectedLineIds: string[]
   disconnectedLineIds: string[]
-  fileNodeTextOnlyIds: string[]
 } {
   let current = doc
   const errors: Array<{ index: number; op: string; code: string; message: string }> = []
@@ -422,7 +424,6 @@ function strictPerOp(doc: WorkflowDocument, ops: GraphPatchOp[]): {
     updatedNodeIds: [] as string[],
     connectedLineIds: [] as string[],
     disconnectedLineIds: [] as string[],
-    fileNodeTextOnlyIds: [] as string[],
   }
   ops.forEach((op, index) => {
     try {
@@ -433,7 +434,6 @@ function strictPerOp(doc: WorkflowDocument, ops: GraphPatchOp[]): {
       ids.updatedNodeIds.push(...applied.updatedNodeIds)
       ids.connectedLineIds.push(...applied.connectedLineIds)
       ids.disconnectedLineIds.push(...applied.disconnectedLineIds)
-      ids.fileNodeTextOnlyIds.push(...applied.fileNodeTextOnlyIds)
     } catch (error) {
       if (!(error instanceof WfError)) throw error
       errors.push({
@@ -454,14 +454,14 @@ function canonicalDoc(doc: WorkflowDocument): string {
   return JSON.stringify(copy)
 }
 
-/** 成功与失败交错的混合批次（覆盖七种 op、级联删除、file 归一化与组一致性）。 */
+/** 成功与失败交错的混合批次（覆盖七种 op、级联删除、任务节点归一化与组一致性）。 */
 function mixedOps(): GraphPatchOp[] {
   return [
     { op: 'create_node', node: { id: 'a2', kind: 'agent', data: { label: '分析' } } },
     { op: 'connect', source: 'a1', target: 'a2', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
     { op: 'connect', source: 'a2', target: '不存在' },
     { op: 'update_node_data', nodeId: 'a2', data: { label: '分析②' } },
-    { op: 'create_node', node: { id: 'f1', kind: 'file', data: { label: '交付', fileKind: 'file', managedPath: 'data/files/x.md' } } },
+    { op: 'create_node', node: { id: 'f1', kind: 'task', data: { label: '交付', content: '正文' } } },
     { op: 'create_group', groupId: 'g1', label: 'Team', memberIds: ['a1'] },
     { op: 'set_group_members', groupId: 'g1', memberIds: ['a1', 'a2'] },
     { op: 'create_group', groupId: 'g2', label: '坏组', memberIds: ['不存在'] },
@@ -518,10 +518,10 @@ describe('容错应用 · 单份副本就地应用（D03-13）', () => {
     // 新增连线的 id 由 makeLineId() 随机生成，无法跨两次运行逐字节比较；这里只锁定
     // 「数量一致且互不重复」——连线的内容等价已由上面的文档逐字节比较覆盖。
     expect(new Set(tolerant.result.connectedLineIds).size).toBe(tolerant.result.connectedLineIds.length)
-    expect(tolerant.result.fileNodeTextOnlyIds).toEqual(reference.fileNodeTextOnlyIds)
+    const f1 = tolerant.result.doc.nodes.find((node) => node.id === 'f1')
+    expect(f1).toEqual({ id: 'f1', kind: 'task', position: { x: 0, y: 0 }, data: { label: '交付', content: '正文' } })
     // 失败项下标锁定：3 条 connect/引用类、2 条因 g2 未创建的组类、1 条入参类
     expect(tolerant.errors.map((item) => item.index)).toEqual([2, 7, 8, 10, 11, 12, 14])
-    expect(tolerant.result.fileNodeTextOnlyIds).toEqual(['f1'])
   })
 
   it('失败 op 不留半成品：成员校验失败后组不存在，后续针对该组的 op 仍失败', () => {

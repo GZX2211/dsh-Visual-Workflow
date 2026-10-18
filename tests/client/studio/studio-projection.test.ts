@@ -21,7 +21,7 @@ function nodesOf(): RawNode[] {
   return [
     { id: 'n1', kind: 'agent', position: { x: 10, y: 20 }, data: { label: '成员一' } },
     { id: 'p1', kind: 'proxy', data: { label: '' }, proxySourceId: 'n1' },
-    { id: 'n2', kind: 'file', data: {} },
+    { id: 'n2', kind: 'task', data: {} },
     { id: 'g1', kind: 'group', position: { x: 300, y: 300 }, data: { memberIds: ['n1', 'n1'] } },
     { id: 'g1', kind: 'group', position: { x: 300, y: 300 }, data: { memberIds: ['n2'] } },
   ]

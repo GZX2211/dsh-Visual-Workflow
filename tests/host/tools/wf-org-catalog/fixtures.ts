@@ -104,7 +104,7 @@ export function workflowAssetDetailFixture(overrides: Partial<WorkflowAssetDetai
       proxySourceId: 'a1',
       data: { label: '复核点' },
     },
-    { id: 'f1', kind: 'file', position: { x: 0, y: 0 }, data: { label: '基线说明', fileKind: 'text', content: '基线正文' } },
+    { id: 'f1', kind: 'task', position: { x: 0, y: 0 }, data: { label: '基线说明', content: '基线正文' } },
     {
       id: 'db1',
       kind: 'database',

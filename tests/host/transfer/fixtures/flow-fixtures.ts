@@ -91,9 +91,9 @@ export function roleTemplate(): Record<string, unknown> {
   return { id: 'role-1', kind: 'agent', name: '研究员', systemPrompt: 'x', provider: '', model: '', presetId: 'standard', retryLimit: 3 }
 }
 
-/** 文件模板（嵌入资源重建用）。 */
-export function fileTemplate(): Record<string, unknown> {
-  return { id: 'file-1', name: '资料.pdf', fileKind: 'file', managedPath: 'data/files/x.pdf', fileName: '资料.pdf' }
+/** 任务模板（嵌入资源重建用）。 */
+export function taskTemplate(): Record<string, unknown> {
+  return { id: 'task-1', name: '资料', content: '任务描述' }
 }
 
 /** 数据库模板（嵌入资源重建用）。 */

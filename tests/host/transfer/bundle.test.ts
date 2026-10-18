@@ -1,7 +1,7 @@
 // tests/host/transfer/bundle.test.ts
 //
 // 导入导出领域单测（src/host/transfer/bundle.ts）：v2 bundle 往返、名称冲突策略
-// （conflict / rename / overwrite）、嵌入式资源（roles/files/databases/combos）重建、
+// （conflict / rename / overwrite）、嵌入式资源（roles/tasks/databases/combos）重建、
 // embedded.groups 内联语义与稳定领域错误码。
 //
 // 断言对象是领域行为（bundle 形状与落库结果），不涉及 HTTP 层：领域码 → HTTP 状态
@@ -21,12 +21,12 @@ import {
   agent,
   cleanupAll,
   databaseTemplate,
-  fileTemplate,
   makeFlow,
   makeFlowWithGroup,
   makeStore,
   roleTemplate,
   stage,
+  taskTemplate,
 } from './fixtures/flow-fixtures.js'
 
 afterEach(cleanupAll)
@@ -215,21 +215,21 @@ describe('导出剔除连接凭据（D07-05）', () => {
   })
 })
 
-describe('bundle 嵌入资源（roles/files/databases/combos）', () => {
+describe('bundle 嵌入资源（roles/tasks/databases/combos）', () => {
   it('导出携带三类模板；导入到全新数据目录时重建模板库并回报 importedTemplates', async () => {
     const source = await makeStore()
     await source.saveWorkflow(makeFlow(), 'session-1', { force: true })
     await source.saveTemplate('role', roleTemplate() as never)
-    await source.saveTemplate('file', fileTemplate() as never)
+    await source.saveTemplate('task', taskTemplate() as never)
     await source.saveTemplate('database', databaseTemplate() as never)
 
     const json = await exportWorkflowBundle(source, 'session-1', 'flow-1')
     const bundle = JSON.parse(json) as {
-      embedded?: { roles?: Array<{ id?: string }>; files?: Array<{ id?: string }>; databases?: Array<{ id?: string }> }
+      embedded?: { roles?: Array<{ id?: string }>; tasks?: Array<{ id?: string }>; databases?: Array<{ id?: string }> }
     }
     // 导出必须包含三类模板（架构文档 §6.4 embedded 逐字段）
     expect(bundle.embedded?.roles?.map((t) => t.id)).toEqual(['role-1'])
-    expect(bundle.embedded?.files?.map((t) => t.id)).toEqual(['file-1'])
+    expect(bundle.embedded?.tasks?.map((t) => t.id)).toEqual(['task-1'])
     expect(bundle.embedded?.databases?.map((t) => t.id)).toEqual(['db-1'])
 
     // 导入到全新数据目录：模板库由嵌入式资源重建，计数为三类实际导入数
@@ -237,7 +237,7 @@ describe('bundle 嵌入资源（roles/files/databases/combos）', () => {
     const imported = (await importWorkflowBundle(target, json)) as { importedTemplates?: number }
     expect(imported.importedTemplates).toBe(3)
     expect((await target.listTemplates('role')).map((t) => t.name)).toEqual(['研究员'])
-    expect((await target.listTemplates('file')).map((t) => t.name)).toEqual(['资料.pdf'])
+    expect((await target.listTemplates('task')).map((t) => t.name)).toEqual(['资料'])
     expect((await target.listTemplates('database')).map((t) => t.name)).toEqual(['本地库'])
   })
 
@@ -245,15 +245,47 @@ describe('bundle 嵌入资源（roles/files/databases/combos）', () => {
     const store = await makeStore()
     await store.saveWorkflow(makeFlow(), 'session-1', { force: true })
     await store.saveTemplate('role', roleTemplate() as never)
-    await store.saveTemplate('file', fileTemplate() as never)
+    await store.saveTemplate('task', taskTemplate() as never)
     await store.saveTemplate('database', databaseTemplate() as never)
 
     const json = await exportWorkflowBundle(store, 'session-1', 'flow-1')
     const imported = (await importWorkflowBundle(store, json, { conflictMode: 'rename' })) as { importedTemplates?: number }
     expect(imported.importedTemplates).toBe(0)
     expect(await store.listTemplates('role')).toHaveLength(1)
-    expect(await store.listTemplates('file')).toHaveLength(1)
+    expect(await store.listTemplates('task')).toHaveLength(1)
     expect(await store.listTemplates('database')).toHaveLength(1)
+  })
+
+  it('旧包 embedded.files 与 kind=file 节点：按任务重建并归一化（读取兼容）', async () => {
+    const store = await makeStore()
+    const legacy = {
+      format: 'dsh-vw-bundle',
+      version: 2,
+      mode: 'mode1',
+      workflow: {
+        name: '旧流程',
+        description: '',
+        nodes: [{
+          id: 'f1',
+          kind: 'file',
+          position: { x: 0, y: 0 },
+          data: { label: '旧任务', content: '正文', fileKind: 'file', managedPath: 'data/files/x.md' },
+        }],
+        lines: [],
+      },
+      embedded: {
+        files: [{ id: 'file-old', name: '旧资料', fileKind: 'file', managedPath: 'data/files/x.md', content: '旧正文' }],
+      },
+    }
+
+    const imported = (await importWorkflowBundle(store, JSON.stringify(legacy))) as { template?: { nodes?: unknown[] } }
+    expect(imported.template?.nodes).toEqual([
+      { id: 'f1', kind: 'task', position: { x: 0, y: 0 }, data: { label: '旧任务', content: '正文' } },
+    ])
+    const tasks = await store.listTemplates('task')
+    expect(tasks.map((t) => t.name)).toEqual(['旧资料'])
+    expect((tasks[0] as { content?: string }).content).toBe('旧正文')
+    expect(tasks[0]).not.toHaveProperty('managedPath')
   })
 
   it('embedded.groups 随节点内联：导出可见但不重建模板库（架构文档 §6.4 语义）', async () => {

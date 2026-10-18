@@ -2,15 +2,15 @@ import type { LayoutNodeInput, LayoutOptions, LayoutResult } from './layout-type
 import type { Line } from '../../host/shared/graph-model.js';
 /**
  * 主干类节点 kind（参与流程主干；与 host NODE_HANDLES 的流程通道能力对应）。
- * proxy 是主节点的分身，同样属于主干（用户口径：主干 = 除 file/database 之外的全部节点）。
+ * proxy 是主节点的分身，同样属于主干（用户口径：主干 = 除 task/database 之外的全部节点）。
  */
 export declare const SPINE_KINDS: ReadonlySet<string>;
-/** 数据类节点 kind（上下文/数据库来源；按 (n-1) 列分布在主干两旁）。 */
+/** 数据类节点 kind（任务描述/数据库来源；按 (n-1) 列分布在主干两旁）。 */
 export declare const DATA_KINDS: ReadonlySet<string>;
 /** 仅流程线参与主干分层（ctx-out→ctx-in / db-out→db-in 不参与）。 */
 export declare function isFlowLine(line: Line): boolean;
 /**
- * 数据节点的关联线：文件（ctx-out）或数据库（db-out）指向角色节点的注入线。
+ * 数据节点的关联线：任务描述（ctx-out）或数据库（db-out）指向角色节点的注入线。
  * 与 isFlowLine 严格互补——同一批连线只会被其中一侧消费，不会既进主干又当数据关联。
  */
 export declare function isDataLine(line: Line): boolean;

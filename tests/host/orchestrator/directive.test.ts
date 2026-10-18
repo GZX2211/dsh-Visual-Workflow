@@ -76,7 +76,7 @@ function executorOf(nodeId: string, nodeLabel: string): { nodeId: string; nodeLa
   return {
     nodeId,
     nodeLabel,
-    task: { nodeLabel, upstreamContext: [], filePaths: [], dbToolHint: '' },
+    task: { nodeLabel, upstreamContext: [], dbToolHint: '' },
     runContextText: 'runId=run-1; attempt 1/1（父代理执行单元）',
   }
 }

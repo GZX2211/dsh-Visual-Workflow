@@ -32,7 +32,7 @@
         retryLimitDefault: 3
         # 节点完整输出持久化的字节上限（默认 100KB，需求 §4.7 可配置）。
         outputFullLimit: 102400
-        # 文本型文件节点内容注入上下文的字符上限（默认 20000 字，需求 §4.2.4.1）。
+        # 任务描述注入上下文的字符上限（默认 20000 字，需求 §4.2.4.1）。
         documentTextLimit: 20000
         # 本地嵌入模型资产目录；null 表示使用随包分发的 assets/models/bge-small-zh-v1.5。
         embeddingModelDir: null

@@ -2,7 +2,7 @@
 //
 // 子代理任务块 · **每次运行注入给节点子代理的那一段**（英文变体）。
 // 注入位置：用户消息（wf_run_node 启动或复用派发；可通信对象清单是本段的一节）。
-// 变量：nodeLabel / systemLanguage / upstreamEntries / noUpstream / filePathsText /
+// 变量：nodeLabel / systemLanguage / upstreamEntries / noUpstream /
 //       inputContract / outputContract / dbToolHint / commTargets / collabNote
 
 export const CHILD_NODE_TASK_EN = `# Hard constraints
@@ -17,10 +17,6 @@ You are executing node "{{nodeLabel}}".
 
 {{upstreamEntries}}
 {{/if}}{{#if noUpstream}}Upstream outputs: (none)
-{{/if}}{{#if filePathsText}}
-File paths (read them yourself):
-
-{{filePathsText}}
 {{/if}}{{#if inputContract}}
 Input contract (what you should receive; report to the parent if it is missing):
 

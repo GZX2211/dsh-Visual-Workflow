@@ -365,7 +365,7 @@ export function StudioLayout(props: StudioLayoutProps) {
           onSaveAsTemplate={() => { void doc.saveCurrentAsFlowTemplate() }}
           onCopyProxy={canvas.copyToProxy}
           onRemoveMember={canvas.removeGroupMember}
-          onFileSelect={(files) => { void transfer.onFileSelect(files) }}
+          onFilesPicked={(files) => { transfer.pickFiles(files) }}
           onLoadMd={() => { void transfer.loadPersonaMd() }}
           onLoadGroupMd={() => { void transfer.loadGroupMd() }}
           onTestDb={() => { void transfer.testDbConnection() }}

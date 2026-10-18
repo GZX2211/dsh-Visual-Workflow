@@ -21,12 +21,12 @@ export {
   makeLineId,
   makeNodeId,
   newDatabaseNode,
-  newFileNode,
   newGroupNode,
   newLine,
   newProxyNode,
   newRoleNode,
   newStageNode,
+  newTaskNode,
   stageLabel,
 } from './model.js'
 
@@ -47,6 +47,9 @@ export {
 // ── 图结构判定 ───────────────────────────────────────────────────────────
 export { isFlowLine } from './dag.js'
 export { nodeHasFlowIn, nodeParticipatesInFlow } from './model.js'
+
+// ── 旧图读取兼容（历史 kind='file' 节点 → 任务节点）───────────────────────
+export { normalizeLegacyNodes } from './legacy-nodes.js'
 
 // ── 虚拟节点与 Team 语义 ──────────────────────────────────────────────────
 export {

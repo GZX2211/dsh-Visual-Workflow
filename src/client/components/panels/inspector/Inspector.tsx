@@ -16,7 +16,7 @@ import { useState } from 'react'
 import type { Dict } from '../../../i18n.js'
 import type { EditorData, StudioState } from '../../../studio/studio-state.js'
 import { RoleForm } from './role-form.js'
-import { FileForm } from './file-form.js'
+import { TaskForm } from './task-form.js'
 import { DatabaseForm } from './database-form.js'
 import { GroupForm, ProxyForm, StageForm } from './node-forms.js'
 import { LinePanel, WorkflowForm } from './flow-forms.js'
@@ -52,7 +52,7 @@ export interface InspectorProps {
   assetVersions?: StudioState['assetVersions']
   onCopyProxy(): void
   onRemoveMember(memberId: string): void
-  onFileSelect(files: File[]): void
+  onFilesPicked(files: File[]): void
   onLoadMd(): void
   /** 协作 Prompt 从 .md 加载（与角色 System Prompt 一致）。 */
   onLoadGroupMd(): void
@@ -65,7 +65,7 @@ export function Inspector(props: InspectorProps) {
   const {
     copy: t, open, width, editorData, presets, models, combos, flowMeta,
     onPatch, onDelete, onSave, onSaveAsTemplate, onPromote, promoteLocked, onOpenVersions, onRollbackVersion, onCloseVersions, assetVersions,
-    onCopyProxy, onRemoveMember, onFileSelect, onLoadMd, onLoadGroupMd, onTestDb,
+    onCopyProxy, onRemoveMember, onFilesPicked, onLoadMd, onLoadGroupMd, onTestDb,
     saveDisabled, importBusy,
   } = props
   // 版本上拉列表的展开/收起属瞬时渲染态（数据面在状态机；收起不丢业务事实）。
@@ -102,8 +102,8 @@ export function Inspector(props: InspectorProps) {
           />
         )
         break
-      case 'file':
-        content = <FileForm data={data} copy={t} onPatch={onPatch} onFileSelect={onFileSelect} />
+      case 'task':
+        content = <TaskForm data={data} copy={t} onPatch={onPatch} onFilesPicked={onFilesPicked} />
         break
       case 'database':
         content = <DatabaseForm data={data} copy={t} onPatch={onPatch} onTest={onTestDb} />
@@ -161,7 +161,7 @@ export function Inspector(props: InspectorProps) {
     // 复制按钮：画布角色节点（含父代理节点）可创建虚拟节点；
     // 模板与父代理模板不可复制，角色资产与经验（都不在画布上）同样不可复制
     const canCopyProxy = kind === 'role' && !editorData.template && !isAsset
-    // 入库：仅工作流模版与角色模版（文件/数据库/Team 模板不显示；资产态与经验不显示）
+    // 入库：仅工作流模版与角色模版（任务/数据库/Team 模板不显示；资产态与经验不显示）
     const canPromote = !isAsset && !isExperienceEditor && editorData.template === true && (kind === 'workflow' || kind === 'role') && onPromote !== undefined
     if (!isStage) {
       footer.push(

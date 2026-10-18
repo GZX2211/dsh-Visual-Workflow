@@ -10,7 +10,7 @@ import type {
 } from './studio-types.js'
 import type { WorkflowDocument, WorkflowTemplate } from '../../host/shared/graph-model.js'
 import type {
-  ServiceState, RoleTemplate, FileTemplate, DatabaseTemplate, GroupTemplate, ToolCombo, RunSnapshot,
+  ServiceState, RoleTemplate, TaskTemplate, DatabaseTemplate, GroupTemplate, ToolCombo, RunSnapshot,
 } from '../../host/shared/types.js'
 import type {
   AssetKind, AssetVersionEntry, ExperienceEntry, RoleAssetDetail, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary,
@@ -65,9 +65,9 @@ export type StudioAction =
   | { type: 'ACTIVE_RUNS_LOADED'; items: Array<{ flowId: string; sessionId: string; status: string; runId: string }> }
   /** 资产态一次性「开启新会话」记忆（模板态勾选/路径走模板持久化字段，不经本动作）。 */
   | { type: 'INSTANCE_OPTIONS_SET'; options: Partial<{ newSession: boolean }> }
-  | { type: 'TEMPLATES_LOADED'; kind: TemplateKind; items: Array<RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate> }
-  | { type: 'TEMPLATE_ADDED'; kind: TemplateKind; template: RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate }
-  | { type: 'TEMPLATE_UPDATED'; kind: TemplateKind; template: RoleTemplate | FileTemplate | DatabaseTemplate | GroupTemplate }
+  | { type: 'TEMPLATES_LOADED'; kind: TemplateKind; items: Array<RoleTemplate | TaskTemplate | DatabaseTemplate | GroupTemplate> }
+  | { type: 'TEMPLATE_ADDED'; kind: TemplateKind; template: RoleTemplate | TaskTemplate | DatabaseTemplate | GroupTemplate }
+  | { type: 'TEMPLATE_UPDATED'; kind: TemplateKind; template: RoleTemplate | TaskTemplate | DatabaseTemplate | GroupTemplate }
   | { type: 'TEMPLATE_REMOVED'; kind: TemplateKind; id: string }
   | { type: 'COMBOS_LOADED'; items: ToolCombo[] }
   | { type: 'PRESETS_LOADED'; items: PresetItem[] }

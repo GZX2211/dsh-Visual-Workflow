@@ -11,7 +11,6 @@ import { describe, expect, it } from 'vitest'
 import type {
   ConditionType,
   DatabaseNode,
-  FileNode,
   GraphNode,
   GroupNode,
   Handle,
@@ -20,6 +19,7 @@ import type {
   ProxyNode,
   RoleNode,
   StageNode,
+  TaskNode,
   WorkflowDocument,
 } from '../../../src/host/shared/graph-model.js'
 
@@ -41,7 +41,7 @@ const _minRoleAgent: RoleNode = {
   position: { x: 1, y: 1 },
   data: { label: '子', systemPrompt: '', provider: 'deepseek', model: 'chat', retryLimit: 3 },
 }
-const _minFile: FileNode = { id: 'n3', kind: 'file', position: { x: 2, y: 2 }, data: { label: 'f', fileKind: 'text', content: 'hi' } }
+const _minTask: TaskNode = { id: 'n3', kind: 'task', position: { x: 2, y: 2 }, data: { label: '任务', content: 'hi' } }
 const _minDatabase: DatabaseNode = {
   id: 'n4',
   kind: 'database',
@@ -63,7 +63,7 @@ const _minProxy: ProxyNode = { id: 'n9', kind: 'proxy', position: { x: 8, y: 8 }
 const _graphNodes: GraphNode[] = [
   _minRoleParent,
   _minRoleAgent,
-  _minFile,
+  _minTask,
   _minDatabase,
   _minStageStart,
   _minStageEnd,
@@ -101,11 +101,11 @@ describe('shared/graph-model 纯形状层', () => {
     expect(new Set(kinds).size).toBe(9)
   })
 
-  it('NodeKind 九类字面量齐全（parent/agent/file/database/start/end/pause/group/proxy）', () => {
+  it('NodeKind 九类字面量齐全（parent/agent/task/database/start/end/pause/group/proxy）', () => {
     const expected: NodeKind[] = [
       'parent',
       'agent',
-      'file',
+      'task',
       'database',
       'start',
       'end',

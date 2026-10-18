@@ -46,7 +46,7 @@ export interface InspectorProps {
     assetVersions?: StudioState['assetVersions'];
     onCopyProxy(): void;
     onRemoveMember(memberId: string): void;
-    onFileSelect(files: File[]): void;
+    onFilesPicked(files: File[]): void;
     onLoadMd(): void;
     /** 协作 Prompt 从 .md 加载（与角色 System Prompt 一致）。 */
     onLoadGroupMd(): void;
