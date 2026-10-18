@@ -21,6 +21,7 @@ import { stageLabel } from '../../../../src/host/graph/index.js'
 import { OP_FIELD_SHAPES } from '../../../../src/host/prompts/index.js'
 import { DEFAULT_OUTPUT_CONTRACT_TEXT } from '../../../../src/host/shared/protocol.js'
 import type { GraphNode, Line, WorkflowDocument, WorkflowTemplate } from '../../../../src/host/shared/graph-model.js'
+import type { RoleAssetDetail, WorkflowAssetDetail } from '../../../../src/host/shared/asset-types.js'
 
 // ---------------------------------------------------------------------------
 // fake 宿主（store + orchestrator）
@@ -79,7 +80,128 @@ function makeStore(state: FakeStoreState) {
   }
 }
 
-function makeHost(overrides: Partial<GraphPatchHost> = {}, state?: FakeStoreState) {
+/**
+ * 角色引用取数样本：字段与目录清单的可用组合/模型配对保持一致，
+ * 使「资产展开后的值仍走存在性校验」这条链路可以被真实覆盖。
+ */
+function roleAssetFixture(overrides: Partial<RoleAssetDetail> = {}): RoleAssetDetail {
+  return {
+    assetId: 'role-1',
+    versionId: 3,
+    rowId: 'rar-1',
+    kind: 'agent',
+    roleAssetType: 'standalone',
+    name: '分析员',
+    systemPrompt: '你是分析员',
+    provider: 'commandcode',
+    model: 'inclusionai/ling-3.0-flash-sante:free',
+    reasoning: 'high',
+    presetId: 'combo-1',
+    retryLimit: 3,
+    inputSchema: '上游结论',
+    outputSchema: '分析报告路径',
+    systemPromptSource: '分析员.md',
+    referenceWorkflowIds: [],
+    createdAt: 1_700_000_000_000,
+    ...overrides,
+  }
+}
+
+/** 工作流资产样本：a1 为内联角色，roleVersionIds 指向 role-1（用于来源回溯）。 */
+function workflowAssetFixture(overrides: Partial<WorkflowAssetDetail> = {}): WorkflowAssetDetail {
+  return {
+    assetId: 'flow-1',
+    versionId: 2,
+    rowId: 'war-2',
+    mode: 'mode1',
+    name: '评审流程',
+    description: '',
+    nodes: [
+      { id: 's', kind: 'start', position: { x: 0, y: 0 }, data: { label: '启动' } },
+      {
+        id: 'a1',
+        kind: 'agent',
+        position: { x: 0, y: 0 },
+        data: {
+          label: '流程内角色',
+          systemPrompt: '你是流程内角色',
+          presetId: 'combo-1',
+          provider: 'commandcode',
+          model: 'inclusionai/ling-3.0-flash-sante:free',
+          reasoning: 'low',
+          retryLimit: 3,
+          inputSchema: '流程输入',
+          outputSchema: '流程输出',
+          sourceAssetId: 'role-1',
+        },
+      },
+      {
+        id: 'p1',
+        kind: 'parent',
+        position: { x: 0, y: 0 },
+        data: {
+          label: '父代理',
+          systemPrompt: '父代理提示词',
+          presetId: null,
+          provider: '',
+          model: '',
+          retryLimit: 3,
+        },
+      },
+      { id: 'e', kind: 'end', position: { x: 0, y: 0 }, data: { label: '结束' } },
+    ],
+    lines: [],
+    roleVersionIds: [{ nodeId: 'a1', roleVersionId: 'rar-1' }],
+    createdAt: 1_700_000_000_000,
+    ...overrides,
+  }
+}
+
+/** 当前运行实例样本：a1 有来源资产、a2 是无来源的内联角色。 */
+function instanceFlowFixture(): WorkflowDocument {
+  return {
+    id: 'wf-live',
+    sessionId: 'session-1',
+    mode: 'mode1',
+    name: '在跑实例',
+    description: '',
+    revision: 7,
+    nodes: [
+      { id: 's', kind: 'start', position: { x: 0, y: 0 }, data: { label: '启动' } },
+      {
+        id: 'a1',
+        kind: 'agent',
+        position: { x: 0, y: 0 },
+        data: {
+          label: '在跑角色',
+          systemPrompt: '你是在跑角色',
+          presetId: 'combo-1',
+          provider: 'commandcode',
+          model: 'inclusionai/ling-3.0-flash-sante:free',
+          reasoning: 'max',
+          inputSchema: '实例输入',
+          outputSchema: '实例输出',
+          retryLimit: 3,
+          sourceAssetId: 'role-1',
+        },
+      },
+      {
+        id: 'a2',
+        kind: 'agent',
+        position: { x: 0, y: 0 },
+        data: { label: '无来源角色', systemPrompt: '无来源提示词', presetId: 'combo-1', provider: '', model: '', retryLimit: 3 },
+      },
+      { id: 'e', kind: 'end', position: { x: 0, y: 0 }, data: { label: '结束' } },
+    ],
+    lines: [],
+  }
+}
+
+type GraphPatchHostOverrides = Omit<Partial<GraphPatchHost>, 'assets'> & {
+  assets?: Partial<NonNullable<GraphPatchHost['assets']>>
+}
+
+function makeHost(overrides: GraphPatchHostOverrides = {}, state?: FakeStoreState) {
   const storeState: FakeStoreState = state ?? {
     workflows: new Map(),
     templates: new Map(),
@@ -96,10 +218,30 @@ function makeHost(overrides: Partial<GraphPatchHost> = {}, state?: FakeStoreStat
   const touched: string[] = []
   const refreshed: string[] = []
   const entries = new Map<string, RunEntry>()
+  const roleAssets = new Map<string, RoleAssetDetail>([
+    ['role-1', roleAssetFixture()],
+    ['role-parent', roleAssetFixture({ assetId: 'role-parent', name: '父代理', kind: 'parent' })],
+    ['role-retired', roleAssetFixture({ assetId: 'role-retired', retired: true })],
+  ])
+  const workflowAssets = new Map<string, WorkflowAssetDetail>([['flow-1', workflowAssetFixture()]])
+  const defaultAssets = {
+    async getRoleAsset(assetId: string): Promise<RoleAssetDetail | null> {
+      return roleAssets.get(assetId) ?? null
+    },
+    async getWorkflowAsset(assetId: string): Promise<WorkflowAssetDetail | null> {
+      return workflowAssets.get(assetId) ?? null
+    },
+    async getRoleAssetVersion(rowId: string): Promise<RoleAssetDetail | null> {
+      return rowId === 'rar-1' ? roleAssets.get('role-1') ?? null : null
+    },
+  }
+  const { assets: assetsOverride, ...restOverrides } = overrides
   const host: GraphPatchHost = {
     store: makeStore(storeState) as GraphPatchHost['store'],
     listPresets: async () => storeState.presets.map((id) => ({ id })),
     listModels: async () => storeState.models,
+    assets: defaultAssets,
+    getActiveRunFlow: async () => instanceFlowFixture(),
     orchestrator: {
       activeRunForSession: (sessionId: string) => entries.get(sessionId) ?? null,
       flowLockInfo: () => null,
@@ -107,8 +249,11 @@ function makeHost(overrides: Partial<GraphPatchHost> = {}, state?: FakeStoreStat
       touchRunForSession: (sessionId: string) => { touched.push(sessionId); return true },
       refreshActiveDefinitions: async (flowId: string) => { refreshed.push(flowId) },
     },
-    ...overrides,
+    ...restOverrides,
   }
+  // overrides 中的 assets 只替换指定方法（保持其余默认缝可用），
+  // 避免每条用例都要重复构造整套资产 fake。
+  host.assets = { ...defaultAssets, ...(assetsOverride ?? {}) }
   return { host, storeState, touched, refreshed, entries }
 }
 
@@ -1230,6 +1375,11 @@ describe('wf_graph_patch · 工具注册面回归', () => {
     // 起手可用的最小示例保留（漏写 node 包装 / 端点字段名是历史高频错因）
     expect(ops).toContain('"op": "connect"')
     expect(ops).toContain('"node"')
+    // 角色引用是「只写流程与框架」的主入口：常驻描述必须给出字段名与三类 id
+    expect(ops).toContain('roleAssetId')
+    expect(ops).toContain('role-')
+    expect(ops).toContain('flow-')
+    expect(ops).toContain('instance#')
   })
 })
 
@@ -1450,5 +1600,301 @@ describe('wf_graph_patch：file 节点只写文本型（D-07）', () => {
     })
 
     expect(result.warnings.some((w) => w.code === 'fileNodeTextOnly')).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 角色引用（data.roleAssetId）：写图只写流程与框架，角色配置按 ID 复用
+// ---------------------------------------------------------------------------
+// 语义（用户裁决 2026-10）：
+//   - 支持 role-*（角色资产 Active 版本）、flow-*#<节点>（工作流资产内联角色固定版本）、
+//     instance#<节点>（当前运行实例的内联角色）；
+//   - 展开后的配置仍走既有的 presetId / provider / model 存在性校验；
+//   - 显式 data 字段覆盖带入值；update 以资产为基线整体重置，再叠加显式字段；
+//   - 来源写入 data.sourceAssetId（内联角色无来源时 update 清除旧绑定）；
+//   - 引用失败按参数层错误聚合，整批不落盘。
+
+describe('wf_graph_patch · 角色引用（data.roleAssetId）', () => {
+  function dataOf(storeState: FakeStoreState, id: string): Record<string, unknown> {
+    const node = storeState.workflows.get('wf-1')?.nodes.find((item) => item.id === id)
+    return (node?.data ?? {}) as Record<string, unknown>
+  }
+
+  it('create_node：role-* 展开为完整角色配置并写入来源资产', async () => {
+    const { host, storeState } = makeHost()
+    storeState.workflows.set('wf-1', makeFlow())
+    const result = await executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [
+        { op: 'create_node', node: { id: 'a2', kind: 'agent', data: { roleAssetId: 'role-1' } } },
+        { op: 'connect', source: 'a1', target: 'a2' },
+        { op: 'connect', source: 'a2', target: 'e' },
+        { op: 'disconnect', lineId: 'l2' },
+      ],
+    })
+    expect(result.ok).toBe(true)
+    const data = dataOf(storeState, 'a2')
+    expect(data).toMatchObject({
+      label: '分析员',
+      systemPrompt: '你是分析员',
+      presetId: 'combo-1',
+      provider: 'commandcode',
+      model: 'inclusionai/ling-3.0-flash-sante:free',
+      reasoning: 'high',
+      inputSchema: '上游结论',
+      outputSchema: '分析报告路径',
+      sourceAssetId: 'role-1',
+    })
+    // 引用字段只作为入参，不落盘；画布字段仍由系统默认接管
+    expect('roleAssetId' in data).toBe(false)
+    expect(data.retryLimit).toBe(3)
+    expect(data.injectSystemPrompt).toBe(false)
+  })
+
+  it('create_node：显式 data 覆盖资产值，未覆盖字段继续来自资产', async () => {
+    const { host, storeState } = makeHost()
+    storeState.workflows.set('wf-1', makeFlow())
+    const result = await executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [
+        {
+          op: 'create_node',
+          node: {
+            id: 'a2',
+            kind: 'agent',
+            data: {
+              roleAssetId: 'role-1',
+              label: '自定义名称',
+              systemPrompt: '覆盖后的提示词',
+              provider: 'deepseek-official',
+              model: 'deepseek-flash',
+              reasoning: 'low',
+            },
+          },
+        },
+        { op: 'connect', source: 'a1', target: 'a2' },
+        { op: 'connect', source: 'a2', target: 'e' },
+        { op: 'disconnect', lineId: 'l2' },
+      ],
+    })
+    expect(result.ok).toBe(true)
+    const data = dataOf(storeState, 'a2')
+    expect(data).toMatchObject({
+      label: '自定义名称',
+      systemPrompt: '覆盖后的提示词',
+      provider: 'deepseek-official',
+      model: 'deepseek-flash',
+      reasoning: 'low',
+      // 未覆盖的字段仍来自资产
+      presetId: 'combo-1',
+      inputSchema: '上游结论',
+      outputSchema: '分析报告路径',
+      sourceAssetId: 'role-1',
+    })
+  })
+
+  it('update_node_data：以资产为基线整体重置，再叠加显式 data；画布字段保留现值', async () => {
+    const { host, storeState } = makeHost()
+    const before = roleNode('a1', '旧名')
+    before.data = { ...before.data, retryLimit: 7, reactLimit: 11, systemPrompt: '旧提示词', presetId: null } as typeof before.data
+    storeState.workflows.set('wf-1', makeFlow('wf-1', {
+      nodes: [stageNode('s', 'start'), before, stageNode('e', 'end')],
+      lines: [flowLine('l1', 's', 'a1'), flowLine('l2', 'a1', 'e')],
+    }))
+    const result = await executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [{ op: 'update_node_data', nodeId: 'a1', data: { roleAssetId: 'role-1', label: '新名' } }],
+    })
+    expect(result.ok).toBe(true)
+    const data = dataOf(storeState, 'a1')
+    expect(data).toMatchObject({
+      label: '新名',
+      systemPrompt: '你是分析员',
+      presetId: 'combo-1',
+      provider: 'commandcode',
+      model: 'inclusionai/ling-3.0-flash-sante:free',
+      reasoning: 'high',
+      inputSchema: '上游结论',
+      outputSchema: '分析报告路径',
+      sourceAssetId: 'role-1',
+    })
+    // 画布字段不在资产引用面内：保留节点现值
+    expect(data.retryLimit).toBe(7)
+    expect(data.reactLimit).toBe(11)
+  })
+
+  it('flow-*#node：工作流资产内联角色按固定版本展开，来源回溯到角色资产', async () => {
+    const { host, storeState } = makeHost()
+    storeState.workflows.set('wf-1', makeFlow())
+    await executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [
+        { op: 'create_node', node: { id: 'a2', kind: 'agent', data: { roleAssetId: 'flow-1#a1' } } },
+        { op: 'connect', source: 'a1', target: 'a2' },
+        { op: 'connect', source: 'a2', target: 'e' },
+        { op: 'disconnect', lineId: 'l2' },
+      ],
+    })
+    expect(dataOf(storeState, 'a2')).toMatchObject({
+      label: '流程内角色',
+      systemPrompt: '你是流程内角色',
+      presetId: 'combo-1',
+      provider: 'commandcode',
+      model: 'inclusionai/ling-3.0-flash-sante:free',
+      reasoning: 'low',
+      inputSchema: '流程输入',
+      outputSchema: '流程输出',
+      sourceAssetId: 'role-1',
+    })
+  })
+
+  it('instance#node：运行实例内联角色复用，写入节点现有来源资产', async () => {
+    const { host, storeState } = makeHost()
+    storeState.workflows.set('wf-1', makeFlow())
+    await executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [
+        { op: 'create_node', node: { id: 'a2', kind: 'agent', data: { roleAssetId: 'instance#a1' } } },
+        { op: 'connect', source: 'a1', target: 'a2' },
+        { op: 'connect', source: 'a2', target: 'e' },
+        { op: 'disconnect', lineId: 'l2' },
+      ],
+    })
+    expect(dataOf(storeState, 'a2')).toMatchObject({
+      label: '在跑角色',
+      systemPrompt: '你是在跑角色',
+      presetId: 'combo-1',
+      reasoning: 'max',
+      inputSchema: '实例输入',
+      outputSchema: '实例输出',
+      sourceAssetId: 'role-1',
+    })
+  })
+
+  it('instance#node：无来源的内联角色在 update 时清除节点旧来源绑定', async () => {
+    const { host, storeState } = makeHost()
+    const before = roleNode('a1', '旧名')
+    before.data = { ...before.data, sourceAssetId: 'role-1' } as typeof before.data
+    storeState.workflows.set('wf-1', makeFlow('wf-1', {
+      nodes: [stageNode('s', 'start'), before, stageNode('e', 'end')],
+      lines: [flowLine('l1', 's', 'a1'), flowLine('l2', 'a1', 'e')],
+    }))
+    await executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [{ op: 'update_node_data', nodeId: 'a1', data: { roleAssetId: 'instance#a2' } }],
+    })
+    const data = dataOf(storeState, 'a1')
+    expect(data.label).toBe('无来源角色')
+    expect(data.systemPrompt).toBe('无来源提示词')
+    expect('sourceAssetId' in data).toBe(false)
+  })
+
+  it('引用失败：不存在 / 父代理 / 已归档 / 非法形状均单条报错并整批拒绝', async () => {
+    const cases: Array<{ roleAssetId: string; contains: string }> = [
+      { roleAssetId: 'role-missing', contains: 'role-missing' },
+      { roleAssetId: 'role-parent', contains: 'parent' },
+      { roleAssetId: 'role-retired', contains: 'retired' },
+      { roleAssetId: 'flow-1', contains: 'role references only' },
+      { roleAssetId: 'flow-1#p1', contains: 'parent' },
+      { roleAssetId: 'flow-1#missing', contains: 'missing' },
+      { roleAssetId: 'instance#missing', contains: 'missing' },
+    ]
+    for (const item of cases) {
+      const { host, storeState } = makeHost()
+      storeState.workflows.set('wf-1', makeFlow())
+      const error = await expectWfError(() => executeGraphPatch(host, 'session-1', {
+        scope: 'instance',
+        targetId: 'wf-1',
+        ops: [{ op: 'create_node', node: { id: 'a2', kind: 'agent', data: { roleAssetId: item.roleAssetId } } }],
+      }), 'WF_BAD_ARGS')
+      expect(error.message).toContain(item.contains)
+      // 整批不落盘
+      expect(storeState.workflows.get('wf-1')?.nodes.map((node) => node.id)).toEqual(['s', 'a1', 'e'])
+    }
+  })
+
+  it('引用失败：无活跃实例时 instance#node 报可行动错误', async () => {
+    const { host, storeState } = makeHost({ getActiveRunFlow: async () => null })
+    storeState.workflows.set('wf-1', makeFlow())
+    const error = await expectWfError(() => executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [{ op: 'create_node', node: { id: 'a2', kind: 'agent', data: { roleAssetId: 'instance#a1' } } }],
+    }), 'WF_BAD_ARGS')
+    expect(error.message).toContain('no instance')
+  })
+
+  it('引用展开后的配置仍走存在性校验：资产里的失效 presetId 整批拒绝', async () => {
+    const { host, storeState } = makeHost({
+      assets: {
+        async getRoleAsset() {
+          return roleAssetFixture({ presetId: 'combo-missing' })
+        },
+      },
+    })
+    storeState.workflows.set('wf-1', makeFlow())
+    const error = await expectWfError(() => executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [{ op: 'create_node', node: { id: 'a2', kind: 'agent', data: { roleAssetId: 'role-1' } } }],
+    }), 'WF_BAD_ARGS')
+    expect(error.message).toContain('combo-missing')
+    expect(storeState.workflows.get('wf-1')?.nodes.map((node) => node.id)).toEqual(['s', 'a1', 'e'])
+  })
+
+  it('引用展开后的配置仍走存在性校验：资产里的失效 provider 整批拒绝', async () => {
+    const { host, storeState } = makeHost({
+      assets: {
+        async getRoleAsset() {
+          return roleAssetFixture({ provider: 'bad-provider' })
+        },
+      },
+    })
+    storeState.workflows.set('wf-1', makeFlow())
+    const error = await expectWfError(() => executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [{ op: 'create_node', node: { id: 'a2', kind: 'agent', data: { roleAssetId: 'role-1' } } }],
+    }), 'WF_BAD_ARGS')
+    expect(error.message).toContain('bad-provider')
+    expect(storeState.workflows.get('wf-1')?.nodes.map((node) => node.id)).toEqual(['s', 'a1', 'e'])
+  })
+
+  it('资产库取数失败向上抛出，不伪装成参数错误', async () => {
+    const { host, storeState } = makeHost({
+      assets: {
+        async getRoleAsset() {
+          throw new Error('assets down')
+        },
+      },
+    })
+    storeState.workflows.set('wf-1', makeFlow())
+    await expect(executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [{ op: 'create_node', node: { id: 'a2', kind: 'agent', data: { roleAssetId: 'role-1' } } }],
+    })).rejects.toThrow('assets down')
+  })
+
+  it('模型伪造内部来源字段：入口剥离，不写 data.sourceAssetId', async () => {
+    const { host, storeState } = makeHost()
+    storeState.workflows.set('wf-1', makeFlow())
+    await executeGraphPatch(host, 'session-1', {
+      scope: 'instance',
+      targetId: 'wf-1',
+      ops: [
+        { op: 'create_node', node: { id: 'a2', kind: 'agent', data: { label: '手写角色' } }, __roleSourceAssetId: 'role-evil' } as never,
+        { op: 'connect', source: 'a1', target: 'a2' },
+        { op: 'connect', source: 'a2', target: 'e' },
+        { op: 'disconnect', lineId: 'l2' },
+      ],
+    })
+    expect('sourceAssetId' in dataOf(storeState, 'a2')).toBe(false)
   })
 })

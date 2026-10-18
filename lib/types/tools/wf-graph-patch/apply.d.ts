@@ -76,6 +76,11 @@ export declare function applyGraphOps(input: {
 export declare function applyGraphOpsTolerant(input: {
     doc: WorkflowDocument;
     ops: GraphPatchOp[];
+    /**
+     * 预校验（角色引用展开）已判定失败的索引：不应用，也不产生 apply 层错误。
+     * 用索引而不是过滤数组，是为了让错误项下标继续对应原批（一次列全、便于修正）。
+     */
+    skipped?: ReadonlySet<number>;
 }): {
     result: GraphPatchResult;
     errors: PatchOpFailure[];

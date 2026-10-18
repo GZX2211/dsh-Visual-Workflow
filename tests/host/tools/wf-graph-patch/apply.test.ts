@@ -557,3 +557,75 @@ describe('容错应用 · 单份副本就地应用（D03-13）', () => {
     expect(JSON.stringify(doc)).toBe(before)
   })
 })
+
+// ---------------------------------------------------------------------------
+// 角色引用展开层的内部来源字段（__roleSourceAssetId）
+// ---------------------------------------------------------------------------
+// 该字段只允许由 role-ref 展开层写入 op 顶层：apply 把它落成 data.sourceAssetId，
+// 模型手写的 sourceAssetId 仍按既有约束剥离。create 时非空才写；update 时空串表示
+// 「复用来源为空的内联角色」，必须清除节点旧绑定。
+
+describe('角色引用内部来源字段（__roleSourceAssetId）', () => {
+  const roleDataOf = (doc: { nodes: GraphNode[] }, id: string): Record<string, unknown> => {
+    const node = doc.nodes.find((item) => item.id === id) as unknown as { data: Record<string, unknown> }
+    return node.data
+  }
+
+  it('create_node：内部来源字段落成 data.sourceAssetId，且不污染节点顶层', () => {
+    const { doc } = applyGraphOps({
+      doc: flowOf([stage('s', 'start')]),
+      ops: [{
+        op: 'create_node',
+        node: { id: 'a1', kind: 'agent', data: { label: '复用角色', sourceAssetId: 'model-written' } },
+        __roleSourceAssetId: 'role-1',
+      } as unknown as GraphPatchOp],
+    })
+    expect(roleDataOf(doc, 'a1').sourceAssetId).toBe('role-1')
+    expect((doc.nodes.find((node) => node.id === 'a1') as unknown as Record<string, unknown>).__roleSourceAssetId).toBeUndefined()
+  })
+
+  it('create_node：没有内部来源字段时，模型手写的 sourceAssetId 仍被剥离', () => {
+    const { doc } = applyGraphOps({
+      doc: flowOf([stage('s', 'start')]),
+      ops: [{ op: 'create_node', node: { id: 'a1', kind: 'agent', data: { label: 'x', sourceAssetId: 'model-written' } } }],
+    })
+    expect('sourceAssetId' in roleDataOf(doc, 'a1')).toBe(false)
+  })
+
+  it('update_node_data：内部来源为空串时清除节点旧来源绑定', () => {
+    const bound = agentNode('a1')
+    bound.data = { ...bound.data, sourceAssetId: 'role-1' } as typeof bound.data
+    const { doc } = applyGraphOps({
+      doc: flowOf([stage('s', 'start'), bound]),
+      ops: [{
+        op: 'update_node_data',
+        nodeId: 'a1',
+        data: { label: '无来源' },
+        __roleSourceAssetId: '',
+      } as unknown as GraphPatchOp],
+    })
+    expect(roleDataOf(doc, 'a1').label).toBe('无来源')
+    expect('sourceAssetId' in roleDataOf(doc, 'a1')).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 预校验失败索引（skipped）：展开层已报告错误的 op 不得再应用
+// ---------------------------------------------------------------------------
+
+describe('容错应用 · skipped 索引', () => {
+  it('被跳过的 op 既不应用也不产生 apply 层错误，索引仍对应原批', () => {
+    const { result, errors } = applyGraphOpsTolerant({
+      doc: flowOf([stage('s', 'start'), agentNode('a1')]),
+      ops: [
+        { op: 'create_node', node: { id: 'a2', kind: 'agent', data: { label: '跳过' } } },
+        { op: 'create_node', node: { id: 'a3', kind: 'agent', data: { label: '保留' } } },
+      ],
+      skipped: new Set([0]),
+    })
+    expect(errors).toEqual([])
+    expect(result.createdNodeIds).toEqual(['a3'])
+    expect(result.doc.nodes.some((node) => node.id === 'a2')).toBe(false)
+    expect(result.doc.nodes.some((node) => node.id === 'a3')).toBe(true)
+  })
+})

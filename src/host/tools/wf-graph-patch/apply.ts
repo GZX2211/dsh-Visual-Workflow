@@ -21,6 +21,7 @@ import { WfError } from '../../orchestrator/index.js'
 import { OP_FIELD_SHAPES } from '../../prompts/index.js'
 import { DEFAULT_OUTPUT_CONTRACT_TEXT } from '../../shared/protocol.js'
 import type { GraphNode, Handle, Line, WorkflowDocument } from '../../shared/graph-model.js'
+import { ROLE_SOURCE_ASSET_ID_FIELD } from './types.js'
 import type { GraphPatchOp, GraphPatchResult, PatchOpFailure } from './types.js'
 
 /**
@@ -172,6 +173,19 @@ function stripParentUnconfigurableRoleFields(data: Record<string, unknown>): Rec
   const out = { ...data }
   for (const key of PARENT_UNCONFIGURABLE_ROLE_FIELDS) delete out[key]
   return out
+}
+
+/**
+ * 读取角色引用展开层注入的来源资产字段。
+ *
+ * 为什么来源走 op 顶层而不是 data：sourceAssetId 是父代理不可配置字段，模型手写值
+ * 必须继续被剥离；展开层是系统内部写入方，只有它设置的这个字段被 apply 接受。
+ * 出现但为空串 = 「引用成功但没有来源」（内联角色未绑定资产），update 据此清除旧绑定。
+ */
+function roleSourceAssetIdOf(op: unknown): string | undefined {
+  const record = op as Record<string, unknown>
+  if (!(ROLE_SOURCE_ASSET_ID_FIELD in record)) return undefined
+  return String(record[ROLE_SOURCE_ASSET_ID_FIELD] ?? '').trim()
 }
 
 /**
@@ -343,9 +357,14 @@ function applyGraphOpsInPlace(
         } else if (node.kind === 'parent' || node.kind === 'agent') {
           // 角色节点 data 补全（缺 data 也不崩：按空对象补默认值）
           const withCreateDefaults = applyRoleNodeCreateDefaults(raw.data)
-          ;(node as { data: Record<string, unknown> }).data = normalizeRoleNodeData(
+          const data = normalizeRoleNodeData(
             applyRoleNodeOutputContractDefault(withCreateDefaults, node.kind),
           )
+          // 引用来源在默认值归一之后落盘：sourceAssetId 被创建默认值剥离，
+          // 只有展开层注入的内部字段能把它写回新节点。
+          const sourceAssetId = roleSourceAssetIdOf(op)
+          if (sourceAssetId) data.sourceAssetId = sourceAssetId
+          ;(node as { data: Record<string, unknown> }).data = data
         }
         if (node.kind === 'proxy') {
           const sourceId = String((raw as { proxySourceId?: unknown }).proxySourceId ?? '')
@@ -460,6 +479,15 @@ function applyGraphOpsInPlace(
           delete next.memberIds
           // 角色节点：合并后再过一次规范化（补全被手改/导入数据抹掉的必填字段）
           target.data = isRoleNode ? normalizeRoleNodeData(next) : next
+          if (isRoleNode) {
+            // 引用来源：非空写入、空串清除。清除是必要的——把节点切换到无来源的内联角色后，
+            // 旧绑定若保留，下一次入库会把角色版本登记到错误的来源资产上。
+            const sourceAssetId = roleSourceAssetIdOf(op)
+            if (sourceAssetId !== undefined) {
+              if (sourceAssetId) target.data.sourceAssetId = sourceAssetId
+              else delete target.data.sourceAssetId
+            }
+          }
         }
         outcome.updatedNodeIds.push(nodeId)
         break
@@ -637,6 +665,11 @@ export function applyGraphOps(input: {
 export function applyGraphOpsTolerant(input: {
   doc: WorkflowDocument
   ops: GraphPatchOp[]
+  /**
+   * 预校验（角色引用展开）已判定失败的索引：不应用，也不产生 apply 层错误。
+   * 用索引而不是过滤数组，是为了让错误项下标继续对应原批（一次列全、便于修正）。
+   */
+  skipped?: ReadonlySet<number>
 }): { result: GraphPatchResult; errors: PatchOpFailure[] } {
   const errors: PatchOpFailure[] = []
   const outcome = emptyOpOutcome()
@@ -644,6 +677,7 @@ export function applyGraphOpsTolerant(input: {
   const mode: 'mode1' | 'mode2' = doc.mode === 'mode2' ? 'mode2' : 'mode1'
   const ops = input.ops ?? []
   for (let index = 0; index < ops.length; index += 1) {
+    if (input.skipped?.has(index)) continue
     const op = ops[index]
     try {
       applyGraphOpsInPlace(doc, [op], mode, outcome)

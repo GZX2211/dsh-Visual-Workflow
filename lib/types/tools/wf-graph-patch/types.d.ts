@@ -100,3 +100,12 @@ export declare function opGroupOf(op: unknown): 'graph' | null;
 export declare function unknownOpsOf(ops: unknown[]): string[];
 /** 全部允许的 op 名（写进错误文本，帮助模型自我修正）。 */
 export declare const ALLOWED_OP_NAMES_TEXT: string;
+/**
+ * 角色引用展开层写入 op 顶层的内部字段名（模型不可见）。
+ *
+ * 为什么需要它：`sourceAssetId` 属父代理不可配置字段（见 apply.ts 的
+ * PARENT_UNCONFIGURABLE_ROLE_FIELDS），但通过 roleAssetId 引用资产时又必须把来源
+ * 写进节点 data。展开层因此把它放在 op 顶层，apply 只认这个内部字段；执行入口会
+ * 先剥掉模型传入的同名字段，避免绕过既有护栏。
+ */
+export declare const ROLE_SOURCE_ASSET_ID_FIELD = "__roleSourceAssetId";

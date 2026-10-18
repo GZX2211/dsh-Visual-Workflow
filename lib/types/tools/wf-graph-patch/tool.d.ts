@@ -1,10 +1,11 @@
 import { hasBlockingIssues } from '../../graph/index.js';
+import { type RoleRefHost } from './role-ref.js';
 import { type PatchScope } from './types.js';
 import type { GraphNode, Line, WorkflowDocument, WorkflowTemplate } from '../../shared/graph-model.js';
 import type { OrgBudget } from '../../shared/types.js';
 import type { RunEntry } from '../../orchestrator/index.js';
 /** 工具层所需宿主能力（宿主 service 的最小结构适配；单测 fake）。 */
-export interface GraphPatchHost {
+export interface GraphPatchHost extends RoleRefHost {
     /** 数据层读写（模板/实例文档 + 编排基线刷新）。 */
     store: {
         getFlowTemplate(id: string): Promise<WorkflowTemplate | null>;

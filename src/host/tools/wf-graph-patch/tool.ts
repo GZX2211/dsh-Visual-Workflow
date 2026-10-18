@@ -5,6 +5,9 @@
 // 唯一语义：图结构变更（create_node/remove_node/update_node_data/connect/disconnect/
 // create_group/set_group_members）→ 取值存在性校验（presetId / provider / model /
 // reasoning）+ 检查器校验 + 元参数硬护栏 + 原子落盘。
+// 角色节点可按 ID 复用：data.roleAssetId（role-* / flow-*#<节点> / instance#<节点>）
+// 先由 role-ref 展开成完整角色配置，再走同一套规范化与存在性校验——父代理因此只需写
+// 流程与框架，不必每次搬运 systemPrompt 与模型/组合配置。
 // 元参数（组织预算）**不是**一种操作：它是约束改图方的硬护栏，被约束方不得自行调整，
 // 只能在画布/设置中由用户修改。
 //
@@ -38,9 +41,11 @@ import {
   type GraphIssue,
 } from '../../graph/index.js'
 import { applyGraphOpsTolerant } from './apply.js'
+import { expandRoleRefs, type RoleRefHost } from './role-ref.js'
 import { knownModelsOf, modelSelectionFailures, writtenModelSelectionsOf, type ModelCatalogEntry } from './policy.js'
 import {
   ALLOWED_OP_NAMES_TEXT,
+  ROLE_SOURCE_ASSET_ID_FIELD,
   unknownOpsOf,
   type GraphPatchOp,
   type GraphPatchResult,
@@ -54,7 +59,7 @@ import type { OrgBudget } from '../../shared/types.js'
 import type { RunEntry } from '../../orchestrator/index.js'
 
 /** 工具层所需宿主能力（宿主 service 的最小结构适配；单测 fake）。 */
-export interface GraphPatchHost {
+export interface GraphPatchHost extends RoleRefHost {
   /** 数据层读写（模板/实例文档 + 编排基线刷新）。 */
   store: {
     getFlowTemplate(id: string): Promise<WorkflowTemplate | null>
@@ -281,6 +286,23 @@ function assertKnownOps(ops: PatchOp[]): void {
   }
 }
 
+/**
+ * 剥离模型传入的内部字段（角色引用来源）。
+ *
+ * `__roleSourceAssetId` 只允许由 expandRoleRefs 写入；模型若直接传它，等于绕过
+ * 「sourceAssetId 属父代理不可配置字段」的既有护栏，因此在入口统一删除。
+ * data.roleAssetId 是合法入参，不在此列。
+ */
+function stripInternalRoleSourceFields(ops: PatchOp[]): PatchOp[] {
+  return ops.map((op) => {
+    const record = op as unknown as Record<string, unknown>
+    if (!(ROLE_SOURCE_ASSET_ID_FIELD in record)) return op
+    const copy = { ...record }
+    delete copy[ROLE_SOURCE_ASSET_ID_FIELD]
+    return copy as unknown as PatchOp
+  })
+}
+
 /** 图结构变更组：逐条容错应用 → 聚合拒绝或结构校验 → 元参数硬护栏 → 落盘 → 编排基线刷新。 */
 async function runGraphGroup(
   host: GraphPatchHost,
@@ -292,14 +314,19 @@ async function runGraphGroup(
   // 字段），故此处收敛一次。不引入类型体操：判据只是「模板在该管道内按文档处理」。
   const doc = (await loadDoc(host, input)) as WorkflowDocument
   const meta = effectiveOrgMeta(metaOfDocument(doc))
+  // 角色引用先异步展开（资产取数），再交给纯同步应用器：
+  //   - 成功项换成完整 data，后续存在性校验天然能看到资产带来的 presetId/provider/model；
+  //   - 失败项由 skipped 标记，apply 既不应用也不重复报错，错误索引仍对应原批。
+  const expansion = await expandRoleRefs(host, ops, input.sessionId)
   // 逐条应用并收集全部失败项：本工具不做部分应用（ops 有序依赖 + 整图检查器，
   // 部分应用会落盘半成品图），因此 errors 非空即整批拒绝。
-  const applied = applyGraphOpsTolerant({ doc, ops })
+  const applied = applyGraphOpsTolerant({ doc, ops: expansion.ops, skipped: expansion.skipped })
   const failures = [
+    ...expansion.errors,
     ...applied.errors,
-    ...await presetIdFailuresOf(host, ops, applied.result.doc),
-    ...await modelSelectionFailuresOf(host, ops, applied.result.doc),
-  ]
+    ...await presetIdFailuresOf(host, expansion.ops, applied.result.doc),
+    ...await modelSelectionFailuresOf(host, expansion.ops, applied.result.doc),
+  ].sort((left, right) => left.index - right.index)
   if (failures.length > 0) throwPatchErrors(failures)
   const result = applied.result
   // 串联既有结构校验：先 validateFlow（结构合法性）→ 再 checkGraphInvariants（编排质量）
@@ -520,7 +547,7 @@ export async function executeGraphPatch(
     throw new WfError("WF_SCOPE_INVALID: scope must be 'template' or 'instance'", 'WF_SCOPE_INVALID')
   }
   const spec = parseNewTemplateSpec(args?.create)
-  const ops = Array.isArray(args?.ops) ? (args?.ops as PatchOp[]) : []
+  const ops = stripInternalRoleSourceFields(Array.isArray(args?.ops) ? (args?.ops as PatchOp[]) : [])
   if (ops.length === 0) throw new WfError('WF_BAD_ARGS: the patch is empty; ops needs at least one operation', 'WF_BAD_ARGS')
   if (ops.length > PATCH_OPS_HARD_LIMIT) {
     throw new WfError(`WF_BAD_ARGS: too many ops in one patch (${ops.length} > ${PATCH_OPS_HARD_LIMIT}); split it into batches`, 'WF_BAD_ARGS')
@@ -595,8 +622,9 @@ export function registerWfGraphPatch(
     // wf_org_catalog 的 rules.patchContract 单点承载（指针在 ops 参数描述里），
     // 常驻文本只保留影响「是否/如何调用本工具」的内容。
     description:
-      'Apply one patch to a workflow template or the running instance. ' +
-      'For a NEW template pass scope=template with create and a complete graph.',
+      'Apply one patch to a workflow template or the running instance. '
+      + 'For a NEW template pass scope=template with create and a complete graph. '
+      + 'Role nodes can be configured by id: set data.roleAssetId to reuse a role recalled from wf_org_catalog instead of writing its full prompt and settings.',
     parameters: {
       scope: { type: 'string', required: true, enum: ['template', 'instance'] as const, description: 'template: plan a reusable workflow template; instance: adjust the current running instance.' },
       targetId: { type: 'string', description: 'Workflow template id (scope=template) or workflow/instance id (scope=instance). Required unless create is given; with create you may omit it to let the server mint a new id.' },
@@ -617,7 +645,10 @@ export function registerWfGraphPatch(
         description:
           'Patch operations. '
           + 'Exact field shapes are NOT listed here — read rules.patchContract from wf_org_catalog (omit ids). '
-          + 'Example: [{ "op": "create_node", "node": { "kind": "agent", "id": "n1", "data": { "label": "Analyze", "presetId": "<combo id>" } } }, '
+          + 'Role reuse: set data.roleAssetId to a role id from wf_org_catalog (role-*, flow-*#<node id>, or instance#<node id>); '
+          + 'the recalled systemPrompt / presetId / provider / model / reasoning / inputSchema / outputSchema are filled in, '
+          + 'explicit data fields override them, and the reference itself is never persisted. '
+          + 'Example: [{ "op": "create_node", "node": { "kind": "agent", "id": "n1", "data": { "roleAssetId": "role-xxx" } } }, '
           + '{ "op": "connect", "source": "n1", "target": "n2" }].',
         items: { type: 'object', additionalProperties: true },
       },
