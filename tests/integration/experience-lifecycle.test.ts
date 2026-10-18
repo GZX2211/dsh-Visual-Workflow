@@ -85,6 +85,8 @@ function storePortOf(store: AssetStore): ExperienceStorePort {
     insertChecked: (input) => store.insertChecked(input),
     updateFields: (id, patch, next) => store.updateFields(id, patch, next),
     setActive: (id, active) => store.setActive(id, active),
+    retireForPolicy: (id, reason) => store.retireForPolicy(id, reason),
+    listRetirementFacts: () => store.listRetirementFacts(),
     recordUsage: (input) => store.recordUsage(input),
     listInjectedIds: (input) => store.listInjectedIds(input),
     insertEvaluationsChecked: (input) => store.insertEvaluationsChecked(input),

@@ -40,7 +40,7 @@ export declare const EXPERIENCES_INDEXES_DDL: string[];
  * 为什么带外键：使用事实必须属于真实存在的经验，否则「该主体是否被注入过这条经验」的准入判据
  * 会与经验表脱节（评价准入是 feedback 的唯一防线）。
  */
-export declare const EXPERIENCE_USAGE_DDL = "\nCREATE TABLE IF NOT EXISTS experience_usage (\n  id TEXT PRIMARY KEY,\n  experience_id TEXT NOT NULL REFERENCES experiences(id),\n  run_id TEXT NOT NULL,\n  subject_id TEXT NOT NULL,\n  created_at INTEGER NOT NULL\n)";
+export declare const EXPERIENCE_USAGE_DDL = "\nCREATE TABLE IF NOT EXISTS experience_usage (\n  id TEXT PRIMARY KEY,\n  experience_id TEXT NOT NULL REFERENCES experiences(id),\n  run_id TEXT NOT NULL,\n  subject_id TEXT NOT NULL,\n  created_at INTEGER NOT NULL,\n  -- \u89D2\u8272\u8EAB\u4EFD\u7531\u8FD0\u884C\u65F6\u91C7\u96C6\uFF08\u89D2\u8272\u8D44\u4EA7 id \u4F18\u5148\uFF0C\u5176\u6B21\u89D2\u8272\u540D\uFF09\uFF1A\u7528\u4E8E\u8DE8\u89D2\u8272\u957F\u671F\u65E0\u7528\u5224\u5B9A\u4E0E\u672A\u6765\u89D2\u8272\u5206\u6790\u3002\n  -- \u653E\u5728\u672B\u5C3E\uFF0C\u4F7F ALTER TABLE \u5347\u7EA7\u540E\u7684\u7269\u7406\u5217\u5E8F\u4E0E\u65B0\u5E93\u4E00\u81F4\u3002\n  role_key TEXT NOT NULL DEFAULT '',\n  role_label TEXT NOT NULL DEFAULT ''\n)";
 export declare const EXPERIENCE_USAGE_INDEXES_DDL: string[];
 /**
  * 评价事实表：四维评分只允许五级锚点，取值约束由数据库保证（TS 联合类型运行期不存在）。
@@ -49,7 +49,7 @@ export declare const EXPERIENCE_USAGE_INDEXES_DDL: string[];
  * 「改公式后重放历史」（§25）就失去意义。为什么记录评分者主体与模型：为未来的评分者校准留数据
  * （§6.2），V1 不做任何归一化。
  */
-export declare const EXPERIENCE_EVALUATION_DDL = "\nCREATE TABLE IF NOT EXISTS experience_evaluation (\n  id TEXT PRIMARY KEY,\n  experience_id TEXT NOT NULL REFERENCES experiences(id),\n  run_id TEXT NOT NULL,\n  fit_score REAL NOT NULL CHECK(fit_score IN (0,0.25,0.5,0.75,1)),\n  decision_effect REAL NOT NULL CHECK(decision_effect IN (-1,-0.5,0,0.5,1)),\n  information_gain REAL NOT NULL CHECK(information_gain IN (0,0.25,0.5,0.75,1)),\n  causal_confidence REAL NOT NULL CHECK(causal_confidence IN (0,0.25,0.5,0.75,1)),\n  evidence TEXT NOT NULL DEFAULT '',\n  evaluator_subject_id TEXT NOT NULL,\n  evaluator_model TEXT NOT NULL DEFAULT '',\n  created_at INTEGER NOT NULL\n)";
+export declare const EXPERIENCE_EVALUATION_DDL = "\nCREATE TABLE IF NOT EXISTS experience_evaluation (\n  id TEXT PRIMARY KEY,\n  experience_id TEXT NOT NULL REFERENCES experiences(id),\n  run_id TEXT NOT NULL,\n  fit_score REAL NOT NULL CHECK(fit_score IN (0,0.25,0.5,0.75,1)),\n  decision_effect REAL NOT NULL CHECK(decision_effect IN (-1,-0.5,0,0.5,1)),\n  information_gain REAL NOT NULL CHECK(information_gain IN (0,0.25,0.5,0.75,1)),\n  causal_confidence REAL NOT NULL CHECK(causal_confidence IN (0,0.25,0.5,0.75,1)),\n  evidence TEXT NOT NULL DEFAULT '',\n  evaluator_subject_id TEXT NOT NULL,\n  evaluator_model TEXT NOT NULL DEFAULT '',\n  created_at INTEGER NOT NULL,\n  -- \u8BC4\u5206\u8005\u89D2\u8272\u8EAB\u4EFD\uFF08\u540C\u4F7F\u7528\u4E8B\u5B9E\u53E3\u5F84\uFF09\uFF1A\u7A7A\u4E32\u8868\u793A\u65E0\u89D2\u8272\u8282\u70B9\uFF0C\u4E0D\u53C2\u4E0E\u89D2\u8272\u591A\u6837\u6027\u5224\u5B9A\u3002\n  role_key TEXT NOT NULL DEFAULT '',\n  role_label TEXT NOT NULL DEFAULT ''\n)";
 export declare const EXPERIENCE_EVALUATION_INDEXES_DDL: string[];
 /**
  * 统计投影表：`experience_id` 即主键（每个经验至多一行），全部数值列都是**可重建的派生结果**（§3.2）。

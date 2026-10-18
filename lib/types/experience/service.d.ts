@@ -1,6 +1,7 @@
 import type { ExperienceEntry, ExperienceGenerationPromptEntry, ExperiencePatch, ExperienceRecallHit, ExperienceType } from "../shared/asset-types.js";
 import { type ExperienceFeedbackInput, type ExperienceFeedbackResult } from "./feedback.js";
 import type { ExperienceCaller, ExperienceEmbeddingPort, ExperienceRuntimePort, ExperienceStorePort } from "./ports.js";
+import { type ExperienceRetirementSweepResult } from "./retirement-sweep.js";
 /** 服务依赖（宿主在组合根装配；端口形状见 ./ports.js）。 */
 export interface ExperienceServiceDeps {
     store: ExperienceStorePort;
@@ -95,6 +96,13 @@ export declare class ExperienceService {
     rebuildStats(): Promise<{
         experienceCount: number;
     }>;
+    /**
+     * 执行一轮经验退役扫描（有害补偿 + 长期无用）。
+     *
+     * 为什么由宿主定时调用而不是服务内部自建定时器：定时器属宿主生命周期，经验域只负责
+     * 「一轮判定 + 条件归档」这一可重放动作；宿主负责启动延迟、周期与卸载清理。
+     */
+    sweepRetirements(): Promise<ExperienceRetirementSweepResult>;
     /** 释放全部初始化状态（插件卸载；幂等）。 */
     clearAllSessions(): void;
     /** 取生效生成 Prompt；缺失属配置事实，给出可行动错误。 */

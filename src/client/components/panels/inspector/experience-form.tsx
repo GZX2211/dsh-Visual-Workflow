@@ -45,6 +45,20 @@ function listOf(text: string): string[] {
   return text.split('\n').map((line) => line.trim()).filter((line) => line !== '')
 }
 
+/** 归档原因 → 词典文案；未知/缺失值显示占位符（不把磁盘原始值直接暴露给用户）。 */
+function retireReasonText(value: unknown, copy: Dict): string {
+  switch (value) {
+    case 'manual':
+      return copy.experienceRetireReasonManual
+    case 'harmful':
+      return copy.experienceRetireReasonHarmful
+    case 'long_unused':
+      return copy.experienceRetireReasonLongUnused
+    default:
+      return '—'
+  }
+}
+
 export function ExperienceForm({ data, copy, onPatch }: ExperienceFormProps) {
   const statRows = experienceStatRowsOf(data.stats)
   return (
@@ -121,6 +135,16 @@ export function ExperienceForm({ data, copy, onPatch }: ExperienceFormProps) {
             </dl>
           )}
         <span className="wf-hint">{copy.experienceStatsHint}</span>
+      </div>
+      {/* 只读：生命周期（归档原因由领域自动写入，恢复后保留最近恢复时间） */}
+      <div className="wf-form-stack">
+        <span className="wf-hint">{copy.experienceLifecycleTitle}</span>
+        <span className="wf-hint">
+          {`${copy.experienceLifecycleStatus}：${data.active === false ? copy.experienceStatusRetired : copy.experienceStatusActive}`}
+        </span>
+        <span className="wf-hint">{`${copy.experienceRetiredAt}：${timeText(data.retiredAt)}`}</span>
+        <span className="wf-hint">{`${copy.experienceRetiredReason}：${retireReasonText(data.retiredReason, copy)}`}</span>
+        <span className="wf-hint">{`${copy.experienceReactivatedAt}：${timeText(data.reactivatedAt)}`}</span>
       </div>
       {/* 只读：系统生成的检索投影（保存时由经验域重算，界面不参与） */}
       <div className="wf-form-stack">

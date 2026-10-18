@@ -12,6 +12,14 @@ export interface ExperienceSubject {
      * 子代理无所属编排运行、父代理没有活跃编排实例时都表达为「无来源运行」（空串，兼容磁盘列 NOT NULL）。
      */
     sourceRunId: string;
+    /**
+     * 当前角色身份（系统采集，模型不可填写）。
+     * 优先级由编排器推导：角色资产 id → 角色名 → 空串；空串表示无法归属到角色，
+     * 长期无用判定会保守地忽略这类证据。
+     */
+    roleKey: string;
+    /** 当前角色名（展示用；无角色时为空串）。 */
+    roleLabel: string;
     childId?: string;
 }
 /** 主体解析入参。 */

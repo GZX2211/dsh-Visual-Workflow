@@ -601,6 +601,8 @@ describe('Experience 最小运行事实 seam（只读语义化查询）', () => 
       runId: 'run-1',
       flowId: 'flow-1',
       sessionId: 'session-1',
+      roleKey: '',
+      roleLabel: '',
     })
     expect(h.runtime.activeRunForSession('session-1')).not.toBeNull()
     expect(h.runtime.activeRunForSession('session-2')).toBeNull()
@@ -617,6 +619,8 @@ describe('Experience 最小运行事实 seam（只读语义化查询）', () => 
       flowId: 'flow-1',
       sessionId: 'session-1',
       nodeId: 'n-a1',
+      roleKey: 'label:子任务A',
+      roleLabel: '子任务A',
     })
     expect(h.runtime.experienceRunForChild('child-none')).toBeNull()
   })

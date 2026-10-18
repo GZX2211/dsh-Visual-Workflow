@@ -54,8 +54,8 @@ export function insertEvaluationsCheckedRows(
     ctx.tx.run(
       `INSERT INTO experience_evaluation (
          id, experience_id, run_id, fit_score, decision_effect, information_gain, causal_confidence,
-         evidence, evaluator_subject_id, evaluator_model, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         evidence, evaluator_subject_id, evaluator_model, created_at, role_key, role_label
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         fact.experienceId,
@@ -68,6 +68,8 @@ export function insertEvaluationsCheckedRows(
         fact.evaluatorSubjectId,
         fact.evaluatorModel,
         createdAt,
+        fact.roleKey,
+        fact.roleLabel,
       ],
     )
     inserted.push({ id, ...fact, createdAt })
@@ -89,7 +91,11 @@ export function insertEvaluationsCheckedRows(
  * `runId` / `evidence` / `evaluatorModel` 允许空串（无运行来源、无证据、模型名未知都是真实事实，
  * 伪造默认值会让未来的评分者校准拿到假证据）；评分者主体身份与经验 id 必须非空。
  */
-function normalizeEvaluationRow(row: ExperienceEvaluationInsert): ExperienceEvaluationInsert {
+function normalizeEvaluationRow(
+  row: ExperienceEvaluationInsert,
+): Required<Pick<ExperienceEvaluationInsert,
+  "experienceId" | "runId" | "fitScore" | "decisionEffect" | "informationGain" | "causalConfidence"
+  | "evidence" | "evaluatorSubjectId" | "evaluatorModel" | "roleKey" | "roleLabel">> {
   return {
     experienceId: requireExperienceText(row.experienceId, "experience_evaluation.experience_id"),
     runId: typeof row.runId === "string" ? row.runId : "",
@@ -100,5 +106,8 @@ function normalizeEvaluationRow(row: ExperienceEvaluationInsert): ExperienceEval
     evidence: typeof row.evidence === "string" ? row.evidence : "",
     evaluatorSubjectId: requireExperienceText(row.evaluatorSubjectId, "experience_evaluation.evaluator_subject_id"),
     evaluatorModel: typeof row.evaluatorModel === "string" ? row.evaluatorModel : "",
+    // 角色身份由系统采集，空串是「无角色节点」的显式事实
+    roleKey: typeof row.roleKey === "string" ? row.roleKey.trim() : "",
+    roleLabel: typeof row.roleLabel === "string" ? row.roleLabel.trim() : "",
   }
 }

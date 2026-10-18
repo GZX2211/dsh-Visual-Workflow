@@ -168,6 +168,16 @@ export type AssetDetail = WorkflowAssetDetail | RoleAssetDetail;
  */
 export type ExperienceType = 'agent' | 'orchestrator';
 /**
+ * 经验退役（归档）原因。
+ *
+ * - manual：界面/接口显式归档；
+ * - harmful：任意一次评价的 decisionEffect < 0（一次有害影响即归档）；
+ * - long_unused：角色经验跨多个角色、或编排经验跨多个编排 run 被充分使用与评价，却从未产生有效价值。
+ */
+export type ExperienceRetirementReason = 'manual' | 'harmful' | 'long_unused';
+/** 自动退役原因（不含人工显式归档）。 */
+export type ExperienceAutoRetirementReason = Exclude<ExperienceRetirementReason, 'manual'>;
+/**
  * 经验条目（磁盘行的对外投影）。
  *
  * 分层（与数据结构文档一致）：
@@ -224,6 +234,17 @@ export interface ExperienceEntry {
     createdAt: number;
     /** 最后更新时间（epoch 毫秒；编辑语义字段即刷新）。 */
     updatedAt: number;
+    /** 归档时间（epoch 毫秒；未归档或旧数据未记录时省略）。 */
+    retiredAt?: number;
+    /** 归档原因（未归档或旧数据未记录时省略）。 */
+    retiredReason?: ExperienceRetirementReason;
+    /**
+     * 最近一次恢复时间（epoch 毫秒；从未恢复时省略）。
+     *
+     * 恢复是人工覆盖动作：旧的有害评价与长期无用证据都不再触发归档，
+     * 下一次自动判定只累计该时间之后的使用与评价。
+     */
+    reactivatedAt?: number;
     /**
      * 长期质量统计（派生投影；由评价历史聚合而来，不是经验本体的一部分）。
      *
@@ -400,11 +421,45 @@ export interface ExperienceEvaluationInsert extends ExperienceEvaluationScores {
     evaluatorSubjectId: string;
     /** 评分者模型名；无法确定时为空串（不伪造）。 */
     evaluatorModel: string;
+    /**
+     * 评分者角色身份（运行时采集：角色资产 id 优先，否则角色名；无角色节点时为空串）。
+     *
+     * 为什么由系统采集而不是模型填写：角色是「任务类型」的稳定代理，模型自由填写会因同义表述
+     * 漂移而让跨角色判定失效；该字段用于长期无用判定与未来角色提示词迭代，缺省为空串。
+     */
+    roleKey?: string;
+    /** 评分者角色名（展示与未来角色分析；无角色时为空串）。 */
+    roleLabel?: string;
 }
 /** 评价历史行投影（不可 update / delete 的历史事实）。 */
 export interface ExperienceEvaluationEntry extends ExperienceEvaluationInsert {
     id: string;
     createdAt: number;
+}
+/**
+ * 退役判定读盘事实（资产库投影，经验域据此做纯判定）。
+ *
+ * 为什么放在共享契约而不是资产库内部：读取（资产库）与判定（经验域）分属两个模块，
+ * 两者消费的必须是同一份形状；否则字段改名时只会在其中一侧编译失败。
+ */
+export interface ExperienceRetirementUsageFact {
+    runId: string;
+    createdAt: number;
+}
+export interface ExperienceRetirementEvaluationFact {
+    runId: string;
+    roleKey: string;
+    roleLabel?: string;
+    scores: ExperienceEvaluationScores;
+    createdAt: number;
+}
+export interface ExperienceRetirementFacts {
+    experienceId: string;
+    experienceType: ExperienceType;
+    /** 最近一次恢复时间（epoch 毫秒；从未恢复为 0）。 */
+    reactivatedAt: number;
+    usage: ExperienceRetirementUsageFact[];
+    evaluations: ExperienceRetirementEvaluationFact[];
 }
 /** 使用事实写入行（「该经验被显式注入过 agent 上下文」这一事实；id 同由资产库发号）。 */
 export interface ExperienceUsageInsert {
@@ -413,6 +468,10 @@ export interface ExperienceUsageInsert {
     runId: string;
     /** 被注入的主体身份（子代理 childId / 父代理会话 id）。 */
     subjectId: string;
+    /** 使用该经验时的角色身份（系统采集；无角色节点时为空串）。 */
+    roleKey?: string;
+    /** 使用该经验时的角色名（展示与未来角色分析；无角色时为空串）。 */
+    roleLabel?: string;
 }
 /** 使用事实历史行投影。 */
 export interface ExperienceUsageEntry extends ExperienceUsageInsert {

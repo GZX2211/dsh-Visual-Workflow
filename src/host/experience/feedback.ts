@@ -65,6 +65,8 @@ export interface ExperienceFeedbackRequest {
 export interface ExperienceFeedbackDeps {
   store: ExperienceStorePort
   runtime: ExperienceRuntimePort
+  /** 诊断缝：即时归档失败时留下告警；评价已写入，扫描会补偿。 */
+  logger?: { warn(message: string): void }
 }
 
 /** 入参错误出口：稳定码写进 message 文本（模型看不到 error.code）。 */
@@ -122,14 +124,48 @@ export async function submitExperienceFeedback(
     evidence: evaluation.evidence ?? "",
     evaluatorSubjectId: subject.subjectId,
     evaluatorModel,
+    // 评价者角色身份与使用事实同源：同一子代理实例在召回与评价时角色一致
+    roleKey: subject.roleKey,
+    roleLabel: subject.roleLabel,
   }))
   try {
     const { inserted } = await deps.store.insertEvaluationsChecked({ rows, aggregate: aggregateExperienceStats })
+    await retireHarmfulExperiences(deps, inserted)
     return { accepted: inserted, skipped }
   } catch (error) {
     throw feedbackFailed(
       `the feedback write failed (${messageOf(error)}); no evaluation of this batch was stored and the experiences plus their existing evaluation history are untouched — retry in the final completion stage of the task.`,
     )
+  }
+}
+
+/**
+ * 本次评价出现负向决策效果时立即归档（用户裁决：一次有害影响即退出召回面）。
+ *
+ * 为什么归档失败不让反馈失败：评价已经原子写入，失败的是「评价之后的治理动作」；
+ * 把整次反馈报成失败会让模型重试并重复写入评价历史（不可变事实，重复即污染）。
+ * 这里只告警，周期扫描会以同一套判定补偿。
+ *
+ * 为什么只看本批插入的评价：恢复后的旧负向评价已被恢复动作豁免，历史遗漏由扫描按
+ * `reactivatedAt` 过滤后统一补偿；即时路径只负责「刚发生的负向」这一最需要立刻生效的事实。
+ */
+async function retireHarmfulExperiences(
+  deps: ExperienceFeedbackDeps,
+  inserted: readonly ExperienceEvaluationEntry[],
+): Promise<void> {
+  const harmfulIds = [...new Set(
+    inserted
+      .filter((entry) => entry.decisionEffect < 0)
+      .map((entry) => entry.experienceId),
+  )]
+  for (const experienceId of harmfulIds) {
+    try {
+      await deps.store.retireForPolicy(experienceId, "harmful")
+    } catch (error) {
+      deps.logger?.warn(
+        `[visual-workflow] 有害经验即时归档失败（experience=${experienceId}）：${messageOf(error)}；下一轮扫描会重试。`,
+      )
+    }
   }
 }
 

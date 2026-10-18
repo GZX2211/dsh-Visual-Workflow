@@ -12,6 +12,7 @@
 import { normalizeVector } from "../../../../src/host/embedding/engine.js"
 import { NEUTRAL_STATS } from "../../../../src/host/experience/constants.js"
 import type {
+  ExperienceAutoRetirementReason,
   ExperienceDuplicateJudge,
   ExperienceEntry,
   ExperienceEvaluationEntry,
@@ -20,6 +21,7 @@ import type {
   ExperienceInsertCheckedInput,
   ExperienceInsertRow,
   ExperiencePatch,
+  ExperienceRetirementFacts,
   ExperienceRetrievalUpdate,
   ExperienceStatsEntry,
   ExperienceStatsRebuildInput,
@@ -42,8 +44,15 @@ export const FIXTURE_TYPES: readonly ExperienceType[] = ["agent", "orchestrator"
 
 /** 运行事实 fake 的内部状态（用例直接摆放事实，不经过业务方法）。 */
 export interface FakeRuntimeFacts {
-  activeRuns: Map<string, { runId: string; flowId: string; sessionId: string }>
-  childRuns: Map<string, { runId: string; flowId: string; sessionId: string; nodeId: string }>
+  activeRuns: Map<string, { runId: string; flowId: string; sessionId: string; roleKey?: string; roleLabel?: string }>
+  childRuns: Map<string, {
+    runId: string
+    flowId: string
+    sessionId: string
+    nodeId: string
+    roleKey?: string
+    roleLabel?: string
+  }>
   /** 主体身份 → 模型名（缺省回落 defaultModel；空串表达「无法确定」）。 */
   models: Map<string, string>
   /** 未登记模型名时的回落值。 */
@@ -309,9 +318,50 @@ export function createExperienceWorld(options: FakeWorldOptions = {}): FakeExper
       calls.push("store.setActive")
       const current = entries.get(id)
       if (!current) throw new Error(`fixture store 缺少经验行：${id}`)
-      const updated: ExperienceEntry = { ...current, active, updatedAt: now }
+      if (current.active === active) return current
+      const updated: ExperienceEntry = active
+        ? { ...current, active: true, retiredAt: undefined, retiredReason: undefined, reactivatedAt: now, updatedAt: now }
+        : { ...current, active: false, retiredAt: now, retiredReason: "manual", updatedAt: now }
       entries.set(id, updated)
       return updated
+    },
+    async retireForPolicy(id: string, reason: ExperienceAutoRetirementReason): Promise<boolean> {
+      calls.push("store.retireForPolicy")
+      const current = entries.get(id)
+      if (!current) throw new Error(`fixture store 缺少经验行：${id}`)
+      if (!current.active) return false
+      entries.set(id, { ...current, active: false, retiredAt: now, retiredReason: reason, updatedAt: now })
+      return true
+    },
+    async listRetirementFacts(): Promise<ExperienceRetirementFacts[]> {
+      calls.push("store.listRetirementFacts")
+      const facts: ExperienceRetirementFacts[] = []
+      for (const entry of entries.values()) {
+        if (!entry.active) continue
+        facts.push({
+          experienceId: entry.id,
+          experienceType: entry.experienceType,
+          reactivatedAt: entry.reactivatedAt ?? 0,
+          usage: usageRows
+            .filter((row) => row.experienceId === entry.id)
+            .map((row) => ({ runId: row.runId, createdAt: row.createdAt })),
+          evaluations: evaluationRows
+            .filter((row) => row.experienceId === entry.id)
+            .map((row) => ({
+              runId: row.runId,
+              roleKey: row.roleKey ?? "",
+              roleLabel: row.roleLabel ?? "",
+              scores: {
+                fitScore: row.fitScore,
+                decisionEffect: row.decisionEffect,
+                informationGain: row.informationGain,
+                causalConfidence: row.causalConfidence,
+              },
+              createdAt: row.createdAt,
+            })),
+        })
+      }
+      return facts
     },
     async recordUsage(input: ExperienceUsageRecordInput): Promise<{ recorded: number }> {
       calls.push("store.recordUsage")
@@ -394,11 +444,11 @@ export function createExperienceWorld(options: FakeWorldOptions = {}): FakeExper
   }
 
   const runtime: ExperienceRuntimePort = {
-    activeRunForSession(sessionId: string): { runId: string; flowId: string; sessionId: string } | null {
+    activeRunForSession(sessionId: string) {
       calls.push("runtime.activeRunForSession")
       return runtimeFacts.activeRuns.get(sessionId) ?? null
     },
-    runForChild(childId: string): { runId: string; flowId: string; sessionId: string; nodeId: string } | null {
+    runForChild(childId: string) {
       calls.push("runtime.runForChild")
       return runtimeFacts.childRuns.get(childId) ?? null
     },
@@ -512,22 +562,37 @@ export function seedPrompts(world: FakeExperienceWorld): void {
   for (const type of FIXTURE_TYPES) world.prompts.set(type, createPrompt(type))
 }
 
-/** 摆放一条运行事实：会话有活跃 run。 */
-export function seedActiveRun(world: FakeExperienceWorld, sessionId: string, runId = "run-1", flowId = "flow-1"): void {
-  world.runtimeFacts.activeRuns.set(sessionId, { runId, flowId, sessionId })
+/** 摆放一条运行事实：会话有活跃 run（可带父代理角色身份）。 */
+export function seedActiveRun(
+  world: FakeExperienceWorld,
+  sessionId: string,
+  runId = "run-1",
+  flowId = "flow-1",
+  role: { roleKey?: string; roleLabel?: string } = {},
+): void {
+  world.runtimeFacts.activeRuns.set(sessionId, { runId, flowId, sessionId, ...role })
 }
 
-/** 摆放一条运行事实：子代理可定位到 run。 */
+/** 摆放一条运行事实：子代理可定位到 run（可带角色身份）。 */
 export function seedChildRun(
   world: FakeExperienceWorld,
   childId: string,
-  facts: { runId?: string; flowId?: string; sessionId: string; nodeId?: string },
+  facts: {
+    runId?: string
+    flowId?: string
+    sessionId: string
+    nodeId?: string
+    roleKey?: string
+    roleLabel?: string
+  },
 ): void {
   world.runtimeFacts.childRuns.set(childId, {
     runId: facts.runId ?? "run-1",
     flowId: facts.flowId ?? "flow-1",
     sessionId: facts.sessionId,
     nodeId: facts.nodeId ?? "node-1",
+    ...(facts.roleKey === undefined ? {} : { roleKey: facts.roleKey }),
+    ...(facts.roleLabel === undefined ? {} : { roleLabel: facts.roleLabel }),
   })
 }
 

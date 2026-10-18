@@ -229,6 +229,12 @@ export interface ChildMeta {
     flowId: string;
     nodeId: string;
     /**
+     * 该 child 所属角色节点的稳定角色身份（由 roleIdentityOf 推导）。
+     * 经验域用它记录「哪类角色使用/评价了这条经验」；无角色节点时为空串。
+     */
+    roleKey?: string;
+    roleLabel?: string;
+    /**
      * 该 child 已被同节点的更新配置替换（子代理重建），不再参与节点结论汇聚。
      *
      * 为什么必须显式退役而不是直接删表项：删掉后旧 child 的 subagent/end 会走

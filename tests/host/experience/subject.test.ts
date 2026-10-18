@@ -243,3 +243,43 @@ describe("resolveExperienceSubject 读取侧（同一解析入口）", () => {
     expect(error.message.startsWith(`${ERR_EXPERIENCE_WRONG_TYPE}: `)).toBe(true)
   })
 })
+
+describe("resolveExperienceSubject 角色身份（系统采集）", () => {
+  it("test_子代理所属运行带角色_主体带回角色键与角色名", () => {
+    const world = createExperienceWorld()
+    seedChildRun(world, "child-1", {
+      sessionId: "session-1",
+      roleKey: "asset:role-backend",
+      roleLabel: "后端开发",
+    })
+
+    const subject = resolveExperienceSubject({ caller: childCaller(), type: "agent", runtime: world.runtime })
+
+    expect(subject).toMatchObject({ roleKey: "asset:role-backend", roleLabel: "后端开发" })
+  })
+
+  it("test_子代理无运行事实_角色身份为空（不伪造角色）", () => {
+    const world = createExperienceWorld()
+
+    const subject = resolveExperienceSubject({ caller: childCaller(), type: "agent", runtime: world.runtime })
+
+    expect(subject).toMatchObject({ roleKey: "", roleLabel: "" })
+  })
+
+  it("test_父代理活跃运行带角色_主体带回角色键与角色名", () => {
+    const world = createExperienceWorld()
+    seedActiveRun(world, "session-1", "run-1", "flow-1", { roleKey: "asset:role-parent", roleLabel: "父代理" })
+
+    const subject = resolveExperienceSubject({ caller: rootCaller(), type: "orchestrator", runtime: world.runtime })
+
+    expect(subject).toMatchObject({ roleKey: "asset:role-parent", roleLabel: "父代理" })
+  })
+
+  it("test_父代理无运行事实_角色身份为空", () => {
+    const world = createExperienceWorld()
+
+    const subject = resolveExperienceSubject({ caller: rootCaller(), type: "orchestrator", runtime: world.runtime })
+
+    expect(subject).toMatchObject({ roleKey: "", roleLabel: "" })
+  })
+})

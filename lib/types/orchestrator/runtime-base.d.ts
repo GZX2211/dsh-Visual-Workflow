@@ -94,16 +94,18 @@ export declare abstract class RuntimeBase {
     }>;
     /**
      * 某会话当前活跃运行的归属事实（Experience 域解析 subject 用）。
-     * 为什么返回最小三元组而不是 RunEntry：运行表与会话/工作流的定位口径是编排器内部
-     * 知识，模块外只应表达「这个会话当前在跑哪个 run」。
+     * 为什么返回最小结构而不是 RunEntry：运行表与会话/工作流的定位口径是编排器内部
+     * 知识，模块外只应表达「这个会话当前在跑哪个 run、以哪个父代理角色在跑」。
      */
     activeExperienceRunForSession(sessionId: string): {
         runId: string;
         flowId: string;
         sessionId: string;
+        roleKey: string;
+        roleLabel: string;
     } | null;
     /**
-     * 某子代理所属运行的归属事实（Experience 域解析来源 run 与节点用）。
+     * 某子代理所属运行的归属事实（Experience 域解析来源 run、节点与角色用）。
      * 已退役（被同节点新配置替换）或运行已非 running 时返回 null。
      */
     experienceRunForChild(childId: string): {
@@ -111,6 +113,8 @@ export declare abstract class RuntimeBase {
         flowId: string;
         sessionId: string;
         nodeId: string;
+        roleKey: string;
+        roleLabel: string;
     } | null;
     /**
      * 取「可直接执行节点」的激活运行；依次尝试：

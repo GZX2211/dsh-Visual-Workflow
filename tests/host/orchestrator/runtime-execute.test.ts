@@ -24,7 +24,13 @@ describe('wfRunNode 异步路径与护栏', () => {
     expect(node.status).toBe('running')
     expect(node.attempts).toBe(1)
     expect(entry.inflight.has('child-1')).toBe(true)
-    expect(h.runtime.childMetaFor('child-1')).toEqual({ sessionId: 'session-1', flowId: 'flow-1', nodeId: 'n-a1' })
+    expect(h.runtime.childMetaFor('child-1')).toEqual({
+      sessionId: 'session-1',
+      flowId: 'flow-1',
+      nodeId: 'n-a1',
+      roleKey: 'label:子任务A',
+      roleLabel: '子任务A',
+    })
   })
 
   it('任务块注入：节点身份数据透传（不断言提示词文案）', async () => {
@@ -518,7 +524,13 @@ describe('wfRunNode Team 卡片与成员路径', () => {
     expect(result).toMatchObject({ nodeId: 'n-dev', status: 'started', childId: 'child-1' })
     expect(h.runner.calls[0].teamMember).toBe(true)
     expect(entry.snapshot.nodes.find((n) => n.nodeId === 'n-dev')!.status).toBe('running')
-    expect(h.runtime.childMetaFor('child-1')).toEqual({ sessionId: 'session-1', flowId: 'flow-g', nodeId: 'n-dev' })
+    expect(h.runtime.childMetaFor('child-1')).toEqual({
+      sessionId: 'session-1',
+      flowId: 'flow-g',
+      nodeId: 'n-dev',
+      roleKey: 'label:后端开发工程师',
+      roleLabel: '后端开发工程师',
+    })
   })
 
   it('非成员节点：不携带 teamMember 标记（普通子代理路径）', async () => {

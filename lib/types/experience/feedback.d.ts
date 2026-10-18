@@ -33,6 +33,10 @@ export interface ExperienceFeedbackRequest {
 export interface ExperienceFeedbackDeps {
     store: ExperienceStorePort;
     runtime: ExperienceRuntimePort;
+    /** 诊断缝：即时归档失败时留下告警；评价已写入，扫描会补偿。 */
+    logger?: {
+        warn(message: string): void;
+    };
 }
 /**
  * 提交评价：解析主体 → 校验每条评分 → 准入判定 → 一笔事务写评价并重算统计。

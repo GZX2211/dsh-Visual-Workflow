@@ -9,11 +9,13 @@
 import type {
   AssetVersionEntry,
   AssetVersionSource,
+  ExperienceAutoRetirementReason,
   ExperienceEntry,
   ExperienceEvaluationInsertInput,
   ExperienceGenerationPromptEntry,
   ExperienceInsertCheckedInput,
   ExperiencePatch,
+  ExperienceRetirementFacts,
   ExperienceRetrievalUpdate,
   ExperienceStatsEntry,
   ExperienceStatsRebuildInput,
@@ -36,6 +38,10 @@ import {
   type ExperienceEvaluationsCheckedResult,
 } from './experience-evaluations.js'
 import { getActivePromptRow, listPromptRows } from './experience-prompts.js'
+import {
+  readRetirementFacts,
+  retireExperienceRowForPolicy,
+} from './experience-retirement.js'
 import { seedParentDutiesAsset } from './parent-duties-seed.js'
 import { readStatsRows, rebuildStatsRows } from './experience-stats.js'
 import { readInjectedExperienceIds, recordUsageRows } from './experience-usage.js'
@@ -518,6 +524,19 @@ export class AssetStore {
   /** 经验归档 / 恢复（状态写入的唯一入口；内容与检索投影一概不动）。 */
   setActive(id: string, active: boolean): Promise<ExperienceEntry> {
     return this.db.withTx((tx) => setExperienceActiveRow({ tx, now: this.now, ids: this.ids }, id, active))
+  }
+
+  /**
+   * 按策略自动归档（只对活跃行生效；已归档返回 false）。
+   * 手动归档与自动归档共用同一条状态写入边界，避免两套磁盘语义。
+   */
+  retireForPolicy(id: string, reason: ExperienceAutoRetirementReason): Promise<boolean> {
+    return this.db.withTx((tx) => retireExperienceRowForPolicy({ tx, now: this.now, ids: this.ids }, id, reason))
+  }
+
+  /** 全部活跃经验的退役判定事实（使用/评价历史 + 恢复基准；判定公式归经验域）。 */
+  listRetirementFacts(): Promise<ExperienceRetirementFacts[]> {
+    return this.db.withRead((tx) => readRetirementFacts({ tx, now: this.now, ids: this.ids }))
   }
 
   // -------------------------------------------------------------------------

@@ -32,13 +32,18 @@ export function recordUsageRows(
 
   const batchCounts = new Map<string, number>()
   for (const fact of facts) {
-    ctx.tx.run("INSERT INTO experience_usage (id, experience_id, run_id, subject_id, created_at) VALUES (?, ?, ?, ?, ?)", [
-      newExperienceUsageId(ctx.ids),
-      fact.experienceId,
-      fact.runId,
-      fact.subjectId,
-      ctx.now(),
-    ])
+    ctx.tx.run(
+      "INSERT INTO experience_usage (id, experience_id, run_id, subject_id, created_at, role_key, role_label) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [
+        newExperienceUsageId(ctx.ids),
+        fact.experienceId,
+        fact.runId,
+        fact.subjectId,
+        ctx.now(),
+        fact.roleKey,
+        fact.roleLabel,
+      ],
+    )
     batchCounts.set(fact.experienceId, (batchCounts.get(fact.experienceId) ?? 0) + 1)
   }
 
@@ -81,10 +86,13 @@ export function readInjectedExperienceIds(
  * `runId` 允许空串（无运行来源是显式事实，与经验 provenance 同口径）；
  * 经验 id 与主体身份必须非空，否则这行事实既无法归属也无法被准入判据使用。
  */
-function normalizeUsageRow(row: ExperienceUsageInsert): ExperienceUsageInsert {
+function normalizeUsageRow(row: ExperienceUsageInsert): Required<Pick<ExperienceUsageInsert, "experienceId" | "runId" | "subjectId" | "roleKey" | "roleLabel">> {
   return {
     experienceId: requireExperienceText(row.experienceId, "experience_usage.experience_id"),
     runId: typeof row.runId === "string" ? row.runId : "",
     subjectId: requireExperienceText(row.subjectId, "experience_usage.subject_id"),
+    // 角色身份由系统采集，空串是「无角色节点」的显式事实；不做任何猜测性回填
+    roleKey: typeof row.roleKey === "string" ? row.roleKey.trim() : "",
+    roleLabel: typeof row.roleLabel === "string" ? row.roleLabel.trim() : "",
   }
 }

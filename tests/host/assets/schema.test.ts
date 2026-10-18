@@ -58,6 +58,9 @@ const EXPERIENCES_COLUMNS = [
   "is_active",
   "created_at",
   "updated_at",
+  "retired_at",
+  "retired_reason",
+  "reactivated_at",
 ]
 
 const EXPERIENCES_INDEXES = [
@@ -83,7 +86,7 @@ const EXPERIENCE_PROMPT_COLUMNS = [
 const EXPERIENCE_PROMPT_INDEXES = ["idx_experience_prompts_active_type", "idx_experience_prompts_type"]
 
 /** 评价闭环三表的列集合（按 DDL 声明顺序）与索引（升序，便于与 PRAGMA 结果比对）。 */
-const EXPERIENCE_USAGE_COLUMNS = ["id", "experience_id", "run_id", "subject_id", "created_at"]
+const EXPERIENCE_USAGE_COLUMNS = ["id", "experience_id", "run_id", "subject_id", "created_at", "role_key", "role_label"]
 const EXPERIENCE_EVALUATION_COLUMNS = [
   "id",
   "experience_id",
@@ -96,6 +99,8 @@ const EXPERIENCE_EVALUATION_COLUMNS = [
   "evaluator_subject_id",
   "evaluator_model",
   "created_at",
+  "role_key",
+  "role_label",
 ]
 const EXPERIENCE_STATS_COLUMNS = [
   "experience_id",

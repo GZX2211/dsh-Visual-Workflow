@@ -56,7 +56,7 @@ import {
 import { registerArrangeCommand } from './commands/arrange.js'
 import { registerDownloadRoute, registerRoutes } from './api/index.js'
 import type { ExperienceDomainFace } from './api/index.js'
-import { ExperienceService } from './experience/index.js'
+import { ExperienceService, scheduleExperienceRetirementSweep } from './experience/index.js'
 import type { ExperienceRuntimePort, ExperienceStorePort } from './experience/index.js'
 import { EmbeddingService } from './embedding/engine.js'
 import { ServiceManager } from './service/index.js'
@@ -494,6 +494,8 @@ export class VisualWorkflowHost extends Service {
       insertChecked: (input) => store().insertChecked(input),
       updateFields: (id, patch, next) => store().updateFields(id, patch, next),
       setActive: (id, active) => store().setActive(id, active),
+      retireForPolicy: (id, reason) => store().retireForPolicy(id, reason),
+      listRetirementFacts: () => store().listRetirementFacts(),
       recordUsage: (input) => store().recordUsage(input),
       listInjectedIds: (input) => store().listInjectedIds(input),
       insertEvaluationsChecked: (input) => store().insertEvaluationsChecked(input),
@@ -754,6 +756,26 @@ export class VisualWorkflowHost extends Service {
 
     // 定时任务引擎：tick 扫描（触发/窗口挂起/续跑；disposer 随 fiber 注销）
     this.ctx.effect(() => this.scheduler.start(), 'visualWorkflowHost.scheduler')
+
+    // 经验退役扫描：启动延迟后跑一次，之后每 24h 一次；disposer 随 fiber 注销。
+    // 只治理「活跃经验」的状态，归档写入由经验域做条件更新（并发恢复/手动归档不会互相覆盖）。
+    // 资产库未就绪时不启动：没有可治理的数据，扫描只会在每轮留下失败告警。
+    if (this.assetStoreReady) {
+      try {
+        this.ctx.effect(
+          () => scheduleExperienceRetirementSweep({
+            sweep: () => this.experienceService.sweepRetirements(),
+            logger: {
+              warn: (message) => this.ctx.logger.warn(message),
+              info: (message) => this.ctx.logger.info(message),
+            },
+          }),
+          'visualWorkflowHost.experienceRetirement',
+        )
+      } catch (error) {
+        this.ctx.logger.warn(`[visual-workflow] 经验退役扫描启动失败：${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
 
     // GUI API 路由：webServer 可用时挂载端点白名单分发与受管文件下载路由
     // （webServer 缺失时 register 内部告警降级；disposer 随 fiber 注销）

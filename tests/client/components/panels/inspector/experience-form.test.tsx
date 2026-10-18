@@ -145,3 +145,31 @@ describe('ExperienceForm：长期统计只读展示（§34）', () => {
     expect(onPatch).toHaveBeenCalledWith({ responsibility: '改写后的责任' })
   })
 })
+
+describe('ExperienceForm：生命周期只读展示', () => {
+  it('test_已归档经验_展示归档状态原因与最近恢复时间', async () => {
+    await renderForm(entry({
+      active: false,
+      retiredAt: 1700000001000,
+      retiredReason: 'harmful',
+      reactivatedAt: 1700000002000,
+    }))
+
+    const text = container!.textContent ?? ''
+    expect(text).toContain(zh.experienceLifecycleTitle)
+    expect(text).toContain(zh.experienceStatusRetired)
+    expect(text).toContain(zh.experienceRetiredAt)
+    expect(text).toContain(zh.experienceRetiredReason)
+    expect(text).toContain(zh.experienceRetireReasonHarmful)
+    expect(text).toContain(zh.experienceReactivatedAt)
+  })
+
+  it('test_活跃经验_展示活跃状态且原因为占位符', async () => {
+    await renderForm(entry())
+
+    const text = container!.textContent ?? ''
+    expect(text).toContain(zh.experienceStatusActive)
+    expect(text).toContain(`${zh.experienceRetiredReason}：—`)
+    expect(text).not.toContain(zh.experienceRetireReasonHarmful)
+  })
+})

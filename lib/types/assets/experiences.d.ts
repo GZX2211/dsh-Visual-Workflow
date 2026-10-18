@@ -72,8 +72,14 @@ export declare function readExperiencesByIds(ctx: AssetTxContext, ids: string[],
  */
 export declare function listActiveExperienceEmbeddingRows(ctx: AssetTxContext, type: ExperienceType): ExperienceEmbeddingRow[];
 /**
- * 状态切换（归档 / 恢复）：只改 is_active 与 updated_at，内容与检索投影一概不动。
- * 经验没有版本，归档是唯一的状态事实，因此这里也是状态写入的唯一入口。
+ * 状态切换（归档 / 恢复）：只改状态与退役记账字段，内容与检索投影一概不动。
+ * 经验没有版本，归档是唯一的状态事实，因此这里也是手动状态写入的唯一入口。
+ *
+ * - 归档：写 `retired_reason = 'manual'` 与归档时间；自动归档走 `retireForPolicy`。
+ * - 恢复：清空退役原因/时间，并把恢复时间记为新的证据基准——恢复是人工覆盖决定，
+ *   旧的有害评价与长期无用证据不得再次触发归档。
+ * - 已是目标状态：直接返回当前行（幂等），不刷新恢复时间，避免一次无意义的调用
+ *   把证据累计基准凭空重置。
  */
 export declare function setExperienceActiveRow(ctx: ExperiencePortContext, id: string, active: boolean): ExperienceEntry;
 /**

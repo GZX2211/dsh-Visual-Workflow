@@ -12,6 +12,7 @@ import { isGroupMember, nodeById } from '../graph/index.js'
 import { DEFAULT_SYSTEM_LANGUAGE } from '../system-language.js'
 import { collabPromptOf, labelOf } from './graph-facts.js'
 import { effectiveReactLimitOf, effectiveRetryLimitOf, effectiveThinkingOf } from './node-params.js'
+import { roleIdentityOf } from './role-identity.js'
 import { buildNodeBlocks } from './task-blocks.js'
 import { WfError } from './errors.js'
 import { createWaiter, type FinishArgs, type FinishResult, type RunEntry, type RunNodeArgs, type RunNodeResult, type Waiter } from './run-entry.js'
@@ -201,7 +202,13 @@ export class RuntimeExecute extends RuntimeLaunch {
         if (retired) this.childIndex.set(replacedChildId, { ...retired, retired: true })
       }
       run.inflight.add(childId)
-      this.childIndex.set(childId, { sessionId: run.snapshot.sessionId, flowId: run.snapshot.flowId, nodeId: resolvedNodeId })
+      this.childIndex.set(childId, {
+        sessionId: run.snapshot.sessionId,
+        flowId: run.snapshot.flowId,
+        nodeId: resolvedNodeId,
+        // 角色身份在启动瞬间冻结：之后画布改角色名/资产引用不会改变这次使用的归属
+        ...roleIdentityOf(node),
+      })
       this.childByNode.set(resolvedNodeId, childId)
       if (!waitRequested) return { nodeId: resolvedNodeId, status: 'started', childId }
     } catch (error) {

@@ -1,4 +1,4 @@
-import type { ExperienceEntry, ExperienceEvaluationEntry, ExperienceEvaluationInsertInput, ExperienceGenerationPromptEntry, ExperienceInsertCheckedInput, ExperiencePatch, ExperienceRetrievalUpdate, ExperienceStatsEntry, ExperienceStatsRebuildInput, ExperienceType, ExperienceUsageRecordInput } from "../shared/asset-types.js";
+import type { ExperienceAutoRetirementReason, ExperienceEntry, ExperienceEvaluationEntry, ExperienceEvaluationInsertInput, ExperienceGenerationPromptEntry, ExperienceInsertCheckedInput, ExperiencePatch, ExperienceRetirementFacts, ExperienceRetrievalUpdate, ExperienceStatsEntry, ExperienceStatsRebuildInput, ExperienceType, ExperienceUsageRecordInput } from "../shared/asset-types.js";
 /**
  * 调用方身份（唯一本体）。
  *
@@ -54,6 +54,10 @@ export interface ExperienceStorePort {
     updateFields(id: string, patch: ExperiencePatch, next: ExperienceRetrievalUpdate): Promise<ExperienceEntry>;
     /** 置活跃 / 归档（两个方向同一操作，避免两套写入路径）。 */
     setActive(id: string, active: boolean): Promise<ExperienceEntry>;
+    /** 按策略自动归档（只对活跃行生效；已归档返回 false）。 */
+    retireForPolicy(id: string, reason: ExperienceAutoRetirementReason): Promise<boolean>;
+    /** 全部活跃经验的退役判定事实（使用/评价历史 + 恢复基准）。 */
+    listRetirementFacts(): Promise<ExperienceRetirementFacts[]>;
     /**
      * 记录使用事实（经验被显式注入 agent 上下文），同一笔事务内同步 recalled_count。
      *
@@ -98,12 +102,16 @@ export interface ExperienceRuntimePort {
         runId: string;
         flowId: string;
         sessionId: string;
+        roleKey?: string;
+        roleLabel?: string;
     } | null;
     runForChild(childId: string): {
         runId: string;
         flowId: string;
         sessionId: string;
         nodeId: string;
+        roleKey?: string;
+        roleLabel?: string;
     } | null;
     /**
      * 调用方当前使用的模型名（评价的评分者模型，用于未来的评分者校准）。

@@ -104,6 +104,16 @@ export declare const zh: {
     experienceUpdatedAt: string;
     experienceArchiveHint: string;
     experienceRestoreHint: string;
+    experienceLifecycleTitle: string;
+    experienceLifecycleStatus: string;
+    experienceStatusActive: string;
+    experienceStatusRetired: string;
+    experienceRetiredAt: string;
+    experienceRetiredReason: string;
+    experienceReactivatedAt: string;
+    experienceRetireReasonManual: string;
+    experienceRetireReasonHarmful: string;
+    experienceRetireReasonLongUnused: string;
     experienceRetireTitle: string;
     experienceRetireMessage: string;
     experienceRetireConfirm: string;

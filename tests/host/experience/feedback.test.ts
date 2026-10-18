@@ -359,3 +359,69 @@ describe("submitExperienceFeedback 写入与失败隔离（§24 / §35）", () =
     expect(result.accepted[0].evidence).toBe("")
   })
 })
+
+describe("submitExperienceFeedback 有害即时归档", () => {
+  it("test_本次评价出现负向决策效果_写入后立即按 harmful 归档", async () => {
+    const world = seedInjectedWorld()
+    const { deps } = createDeps(world)
+
+    const result = await submitExperienceFeedback(deps, {
+      caller: ROOT_CALLER,
+      type: "agent",
+      evaluations: [evaluation({ decisionEffect: -1 })],
+    })
+
+    expect(result.accepted).toHaveLength(1)
+    expect(world.calls).toContain("store.retireForPolicy")
+    expect(world.entries.get("ex-1")).toMatchObject({ active: false, retiredReason: "harmful" })
+  })
+
+  it("test_本次评价为正向_不触发即时归档", async () => {
+    const world = seedInjectedWorld()
+    const { deps } = createDeps(world)
+
+    await submitExperienceFeedback(deps, { caller: ROOT_CALLER, type: "agent", evaluations: [evaluation()] })
+
+    expect(world.calls.includes("store.retireForPolicy")).toBe(false)
+    expect(world.entries.get("ex-1")?.active).toBe(true)
+  })
+
+  it("test_即时归档失败_反馈仍成功并留下告警（扫描会补偿）", async () => {
+    const world = seedInjectedWorld()
+    world.store.retireForPolicy = async () => {
+      throw new Error("archive write failed")
+    }
+    const warnings: string[] = []
+    const deps: ExperienceFeedbackDeps = {
+      store: world.store,
+      runtime: world.runtime,
+      logger: { warn: (message) => warnings.push(message) },
+    }
+
+    const result = await submitExperienceFeedback(deps, {
+      caller: ROOT_CALLER,
+      type: "agent",
+      evaluations: [evaluation({ decisionEffect: -0.5 })],
+    })
+
+    expect(result.accepted).toHaveLength(1)
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain("ex-1")
+  })
+
+  it("test_评价行记录评分者角色身份", async () => {
+    const world = createExperienceWorld()
+    seedChildRun(world, "child-1", {
+      sessionId: "session-1",
+      roleKey: "asset:role-backend",
+      roleLabel: "后端开发",
+    })
+    seedEntry(world, { id: "ex-1", experienceType: "agent" })
+    seedInjected(world, { subjectId: "child-1", experienceId: "ex-1" })
+    const { deps } = createDeps(world)
+
+    const result = await submitExperienceFeedback(deps, { caller: CHILD_CALLER, type: "agent", evaluations: [evaluation()] })
+
+    expect(result.accepted[0]).toMatchObject({ roleKey: "asset:role-backend", roleLabel: "后端开发" })
+  })
+})

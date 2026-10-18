@@ -84,6 +84,32 @@ export declare function isDecisionEffectAnchor(value: unknown): value is Experie
 export declare const MAX_EVALUATIONS_PER_CALL = 8;
 /** 评价证据说明的长度上限（与磁盘 TEXT 列的业务护栏一致）。 */
 export declare const EVALUATION_EVIDENCE_LIMIT = 2000;
+/** 长期无用：总召回（显式注入）次数下限（角色经验与编排经验共用）。 */
+export declare const RETIREMENT_MIN_TOTAL_RECALLS = 10;
+/** 角色经验：不同使用 run 数下限。 */
+export declare const RETIREMENT_AGENT_MIN_USAGE_RUNS = 5;
+/** 角色经验：不同评价 run 数下限。 */
+export declare const RETIREMENT_AGENT_MIN_EVALUATION_RUNS = 5;
+/** 角色经验：不同角色数下限（角色身份为空与空 run 的评价不参与）。 */
+export declare const RETIREMENT_AGENT_MIN_ROLE_TYPES = 3;
+/** 编排经验：不同编排 run 数下限（父代理不走角色多样性）。 */
+export declare const RETIREMENT_ORCHESTRATOR_MIN_USAGE_RUNS = 10;
+/** 编排经验：不同评价 run 数下限。 */
+export declare const RETIREMENT_ORCHESTRATOR_MIN_EVALUATION_RUNS = 5;
+/**
+ * 长期无用：按 run 去重后的有效样本量下限（角色经验与编排经验共用）。
+ *
+ * 为什么按 run 去重后再算：同一任务里反复提交评价不应把「多次评价」刷到阈值；
+ * 有效样本量仍沿用 §10.2 的权重口径（fit × 因果置信度），证据质量不足不归档。
+ */
+export declare const RETIREMENT_MIN_EFFECTIVE_SAMPLES = 5;
+/**
+ * 退役扫描的启动延迟：宿主就绪后先让正常运行/注入完成，再在后台做一次全量判定。
+ * 延迟不是判定条件，只避免启动阶段与召回/写入争用同一条 SQLite 连接。
+ */
+export declare const EXPERIENCE_RETIREMENT_SWEEP_INITIAL_DELAY_MS = 60000;
+/** 退役扫描周期：长期无用只随使用/评价证据变化，每日一次足够且成本可控。 */
+export declare const EXPERIENCE_RETIREMENT_SWEEP_INTERVAL_MS: number;
 /**
  * 统计行的中性初值（§33 冷启动：n_eff = 0 时 quality_signal = 0、trust = 0.5）。
  *

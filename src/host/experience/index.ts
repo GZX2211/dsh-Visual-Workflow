@@ -35,6 +35,13 @@ export {
   SCORE_ANCHORS,
   SCORE_ANCHOR_TOLERANCE,
   SEMANTIC_FLOOR,
+  RETIREMENT_AGENT_MIN_EVALUATION_RUNS,
+  RETIREMENT_AGENT_MIN_ROLE_TYPES,
+  RETIREMENT_AGENT_MIN_USAGE_RUNS,
+  RETIREMENT_MIN_EFFECTIVE_SAMPLES,
+  RETIREMENT_MIN_TOTAL_RECALLS,
+  RETIREMENT_ORCHESTRATOR_MIN_EVALUATION_RUNS,
+  RETIREMENT_ORCHESTRATOR_MIN_USAGE_RUNS,
   STABILITY_SIGNAL_BASE,
   STABILITY_SIGNAL_SPAN,
   TRUST_ADJUSTMENT_BETA,
@@ -116,6 +123,26 @@ export {
 
 export type { QualitySignalInput } from "./trust.js"
 export { calculateQualitySignal, calculateTrust } from "./trust.js"
+
+export type {
+  ExperienceRetirementDecision,
+  ExperienceRetirementEvaluationFact,
+  ExperienceRetirementFacts,
+  ExperienceRetirementUsageFact,
+} from "./retirement.js"
+export { decideExperienceRetirement } from "./retirement.js"
+
+export type {
+  ExperienceRetirementSweepDeps,
+  ExperienceRetirementSweepResult,
+} from "./retirement-sweep.js"
+export { sweepExperienceRetirements } from "./retirement-sweep.js"
+
+export type {
+  ExperienceRetirementScheduleLogger,
+  ExperienceRetirementScheduleOptions,
+} from "./retirement-schedule.js"
+export { scheduleExperienceRetirementSweep } from "./retirement-schedule.js"
 
 export type {
   MmrSelectionInput,

@@ -40,6 +40,7 @@ import {
 import type { ExperienceCaller, ExperienceEmbeddingPort, ExperienceRuntimePort, ExperienceStorePort } from "./ports.js"
 import { buildRecallSummary, buildRetrievalProjection } from "./projection.js"
 import { rebuildExperienceStats } from "./rebuild.js"
+import { sweepExperienceRetirements, type ExperienceRetirementSweepResult } from "./retirement-sweep.js"
 import { normalizeTopK, recallActiveHits, type ExperienceScoredId, type ExperienceScoredRow } from "./retrieval.js"
 import { rankRecallCandidates, type RecallRankingCandidate } from "./retrieval-ranking.js"
 import { resolveExperienceSubject, type ExperienceSubject } from "./subject.js"
@@ -207,7 +208,7 @@ export class ExperienceService {
     type: ExperienceType
     evaluations: readonly ExperienceFeedbackInput[]
   }): Promise<ExperienceFeedbackResult> {
-    return submitExperienceFeedback({ store: this.deps.store, runtime: this.deps.runtime }, input)
+    return submitExperienceFeedback({ store: this.deps.store, runtime: this.deps.runtime, logger: this.deps.logger }, input)
   }
 
   /** 保存可编辑字段：事务外重算投影与向量，事务内落库。 */
@@ -257,6 +258,16 @@ export class ExperienceService {
    */
   async rebuildStats(): Promise<{ experienceCount: number }> {
     return rebuildExperienceStats({ store: this.deps.store })
+  }
+
+  /**
+   * 执行一轮经验退役扫描（有害补偿 + 长期无用）。
+   *
+   * 为什么由宿主定时调用而不是服务内部自建定时器：定时器属宿主生命周期，经验域只负责
+   * 「一轮判定 + 条件归档」这一可重放动作；宿主负责启动延迟、周期与卸载清理。
+   */
+  async sweepRetirements(): Promise<ExperienceRetirementSweepResult> {
+    return sweepExperienceRetirements({ store: this.deps.store, logger: this.deps.logger })
   }
 
   /** 释放全部初始化状态（插件卸载；幂等）。 */
@@ -411,6 +422,9 @@ export class ExperienceService {
           experienceId: entry.id,
           runId: subject.sourceRunId,
           subjectId: subject.subjectId,
+          // 角色身份在注入瞬间冻结：之后角色改名/改资产引用不改变这次使用事实的归属
+          roleKey: subject.roleKey,
+          roleLabel: subject.roleLabel,
         })),
         neutralStats: NEUTRAL_STATS,
       })

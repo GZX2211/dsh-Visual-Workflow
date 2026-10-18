@@ -1,4 +1,4 @@
-import type { AssetVersionEntry, AssetVersionSource, ExperienceEntry, ExperienceEvaluationInsertInput, ExperienceGenerationPromptEntry, ExperienceInsertCheckedInput, ExperiencePatch, ExperienceRetrievalUpdate, ExperienceStatsEntry, ExperienceStatsRebuildInput, ExperienceType, ExperienceUsageRecordInput, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, RoleAssetType, WorkflowAssetDetail, WorkflowAssetSummary } from '../shared/asset-types.js';
+import type { AssetVersionEntry, AssetVersionSource, ExperienceAutoRetirementReason, ExperienceEntry, ExperienceEvaluationInsertInput, ExperienceGenerationPromptEntry, ExperienceInsertCheckedInput, ExperiencePatch, ExperienceRetirementFacts, ExperienceRetrievalUpdate, ExperienceStatsEntry, ExperienceStatsRebuildInput, ExperienceType, ExperienceUsageRecordInput, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, RoleAssetType, WorkflowAssetDetail, WorkflowAssetSummary } from '../shared/asset-types.js';
 import type { GraphNode, Line, WorkflowMode } from '../shared/graph-model.js';
 import type { OrgMeta } from '../shared/org-meta.js';
 import type { RoleTemplate } from '../shared/template-types.js';
@@ -208,6 +208,13 @@ export declare class AssetStore {
     updateFields(id: string, patch: ExperiencePatch, next: ExperienceRetrievalUpdate): Promise<ExperienceEntry>;
     /** 经验归档 / 恢复（状态写入的唯一入口；内容与检索投影一概不动）。 */
     setActive(id: string, active: boolean): Promise<ExperienceEntry>;
+    /**
+     * 按策略自动归档（只对活跃行生效；已归档返回 false）。
+     * 手动归档与自动归档共用同一条状态写入边界，避免两套磁盘语义。
+     */
+    retireForPolicy(id: string, reason: ExperienceAutoRetirementReason): Promise<boolean>;
+    /** 全部活跃经验的退役判定事实（使用/评价历史 + 恢复基准；判定公式归经验域）。 */
+    listRetirementFacts(): Promise<ExperienceRetirementFacts[]>;
     /**
      * 记录使用事实（经验被显式注入 agent 上下文）：同一笔事务内插入使用行并同步统计的
      * `recalled_count`；首次记录时按调用方给的中性口径建立统计行。

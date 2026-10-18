@@ -12,6 +12,7 @@ import type {
   ExperienceEntry,
   ExperienceEvaluationScores,
   ExperienceGenerationPromptEntry,
+  ExperienceRetirementReason,
   ExperienceScoreAnchor,
   ExperienceType,
 } from "../shared/asset-types.js"
@@ -73,6 +74,23 @@ export function decodeRowEmbeddings(row: Record<string, unknown>): RowEmbeddings
 }
 
 /**
+ * 退役原因取值域（判据本体；数据库 CHECK 与行解码共用同一份语义）。
+ * 外部改坏库里的未知原因按「未记录原因」处理，不因单行损坏让列表读整次失败。
+ */
+const EXPERIENCE_RETIREMENT_REASON_TABLE: Record<ExperienceRetirementReason, true> = {
+  manual: true,
+  harmful: true,
+  long_unused: true,
+}
+
+/** 列值 → 退役原因；未知/空值返回 undefined（旧数据没有原因是显式事实）。 */
+function asRetirementReason(value: unknown): ExperienceRetirementReason | undefined {
+  const text = toNullableText(value)
+  if (!text) return undefined
+  return Object.hasOwn(EXPERIENCE_RETIREMENT_REASON_TABLE, text) ? (text as ExperienceRetirementReason) : undefined
+}
+
+/**
  * 经验行 → 契约条目。
  * 向量元信息与「两条向量都可用」同真同假：条目只声明向量元信息而不带向量本身，
  * 若元信息留在一条不可用的行上，调用方会据此认为该行可参与语义召回。
@@ -82,6 +100,9 @@ export function experienceRowToEntry(row: Record<string, unknown>): ExperienceEn
   const usable = taskEmbedding !== null && decisionEmbedding !== null
   const embeddingModel = toNullableText(row.embedding_model)
   const dimension = toNullableInteger(row.embedding_dimension)
+  const retiredAt = toNullableInteger(row.retired_at)
+  const retiredReason = asRetirementReason(row.retired_reason)
+  const reactivatedAt = toNullableInteger(row.reactivated_at)
   return {
     id: requireAssetId(row.id, "experiences.id"),
     active: toInteger(row.is_active, 1) !== 0,
@@ -104,6 +125,9 @@ export function experienceRowToEntry(row: Record<string, unknown>): ExperienceEn
     generationPromptVersion: String(row.generation_prompt_version ?? ""),
     createdAt: toInteger(row.created_at, 0),
     updatedAt: toInteger(row.updated_at, 0),
+    ...(retiredAt !== null ? { retiredAt } : {}),
+    ...(retiredReason ? { retiredReason } : {}),
+    ...(reactivatedAt !== null ? { reactivatedAt } : {}),
   }
 }
 

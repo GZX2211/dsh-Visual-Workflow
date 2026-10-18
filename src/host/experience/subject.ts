@@ -41,6 +41,14 @@ export interface ExperienceSubject {
    * 子代理无所属编排运行、父代理没有活跃编排实例时都表达为「无来源运行」（空串，兼容磁盘列 NOT NULL）。
    */
   sourceRunId: string
+  /**
+   * 当前角色身份（系统采集，模型不可填写）。
+   * 优先级由编排器推导：角色资产 id → 角色名 → 空串；空串表示无法归属到角色，
+   * 长期无用判定会保守地忽略这类证据。
+   */
+  roleKey: string
+  /** 当前角色名（展示用；无角色时为空串）。 */
+  roleLabel: string
   childId?: string
 }
 
@@ -68,6 +76,17 @@ function childTypeError(type: string): WfError {
   )
 }
 
+/** 角色身份归一：运行事实缺失或形状漂移时按空身份处理，绝不伪造角色。 */
+function roleIdentityOf(run: { roleKey?: string; roleLabel?: string } | null | undefined): {
+  roleKey: string
+  roleLabel: string
+} {
+  return {
+    roleKey: typeof run?.roleKey === "string" ? run.roleKey.trim() : "",
+    roleLabel: typeof run?.roleLabel === "string" ? run.roleLabel.trim() : "",
+  }
+}
+
 /**
  * 解析当前调用方对应的经验主体（写入侧与读取侧共用同一入口）。
  *
@@ -89,8 +108,25 @@ export function resolveExperienceSubject(input: ExperienceSubjectInput): Experie
     if (type !== "agent") throw childTypeError(type)
     const childRun = runtime.runForChild(childId)
     // 无所属编排运行时没有可归属的来源运行，按空串表达——经验本身仍然有效（见文件头注释）。
-    if (!childRun) return { experienceType: "agent", sessionId: caller.sessionId, subjectId: childId, sourceRunId: "", childId }
-    return { experienceType: "agent", sessionId: childRun.sessionId, subjectId: childId, sourceRunId: childRun.runId, childId }
+    if (!childRun) {
+      return {
+        experienceType: "agent",
+        sessionId: caller.sessionId,
+        subjectId: childId,
+        sourceRunId: "",
+        roleKey: "",
+        roleLabel: "",
+        childId,
+      }
+    }
+    return {
+      experienceType: "agent",
+      sessionId: childRun.sessionId,
+      subjectId: childId,
+      sourceRunId: childRun.runId,
+      ...roleIdentityOf(childRun),
+      childId,
+    }
   }
   // 父代理：类型由调用方按此刻执行的内容自选（无门禁）；来源运行取活跃实例，无实例即为空串。
   const run = runtime.activeRunForSession(caller.sessionId)
@@ -99,5 +135,6 @@ export function resolveExperienceSubject(input: ExperienceSubjectInput): Experie
     sessionId: caller.sessionId,
     subjectId: caller.sessionId,
     sourceRunId: run?.runId ?? "",
+    ...roleIdentityOf(run),
   }
 }
