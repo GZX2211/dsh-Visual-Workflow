@@ -8,6 +8,8 @@
 //   - 任务节点卡：显示任务描述（超两行省略）；
 //   - 虚拟节点「↻ 引用」徽标只渲染一处；
 //   - 输入/输出节点各只保留一个连接点（模式二：输入=flow-out、输出=flow-in）；
+//   - 角色卡（parent/agent/proxy）右「上下文出」接点已退役：渲染与交互都不再出现
+//     （连线契约保留在 lib/graph-handles.ts，旧数据由 CanvasEdges 隐藏）；
 //   - 连接点按入口/出口区分颜色；交换左右连接点（swapPorts）随节点持久化，Team 卡片不提供该按钮。
 
 import { memo } from 'react'
@@ -48,9 +50,14 @@ function nodeHandles(kind: string, mode: 'mode1' | 'mode2', swapped: boolean): {
   // 外部问题已自动注入输入节点产出，流式返回亦不依赖输出节点 ctx-in 连线）
   if (kind === 'start') return { left: [], right: ['flow-out'] }
   if (kind === 'end') return { left: ['flow-in'], right: [] }
+  // 角色卡的 ctx-out 已从 UI 退役（用户批注）：契约仍保留给历史图与结构校验，
+  // 但渲染层不再暴露该出点及其交互。
+  const isRole = kind === 'parent' || kind === 'agent' || kind === 'proxy'
   const inputs = (def.inputs ?? []).filter((handle) => !(mode === 'mode1' && kind === 'end' && handle === 'ctx-in'))
-  const outputs = (def.outputs ?? []).filter((handle) => !(mode === 'mode1' && kind === 'start' && handle === 'ctx-out'))
-  // 默认左入右出；交换后左出右入（批注：左侧上下文出、流程出；右侧数据库入、上下文入、流程入）
+  const outputs = (def.outputs ?? []).filter((handle) =>
+    !(isRole && handle === 'ctx-out')
+    && !(mode === 'mode1' && kind === 'start' && handle === 'ctx-out'))
+  // 默认左入右出；交换后左出右入（批注：左侧流程出；右侧数据库入、上下文入、流程入）
   const left = swapped ? [...outputs].reverse() : [...inputs].reverse()
   const right = swapped ? [...inputs].reverse() : [...outputs].reverse()
   return { left, right }

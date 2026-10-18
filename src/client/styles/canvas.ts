@@ -63,6 +63,12 @@ export const canvasStyles = `
   pointer-events: none;
 }
 
+/* 覆盖层：只画成员入线进入 Team 卡片后的短段。层级位于卡片内容之上（z-index:auto）
+   与接点（z-index:4）之下，使线端落到接点而不遮挡卡片文字与接点。 */
+.wf-graph__edges.is-overlay {
+  z-index: 3;
+}
+
 .wf-graph__edge {
   fill: none !important;
   stroke: var(--wf-flow);
@@ -475,6 +481,16 @@ g.is-locked .wf-graph__edge-hit {
   padding: 10px 12px;
 }
 
+/* 标题区固定单行：成员接点锚点按固定列表顶边计算，标题换行会把整列成员下移，
+   让连线端点逐行偏离实际接点（GROUP_MEMBER_LIST_TOP 的成立前提）。 */
+.wf-node--group .wf-node__kind,
+.wf-node--group .wf-node__label {
+  flex: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .wf-group-node {
   width: 300px;
   height: 220px;
@@ -549,18 +565,19 @@ g.is-locked .wf-graph__edge-hit {
   top: 50%;
 }
 
-/* 组内成员接点的固定纵向位置（成员行内锚点；用户批注：左侧 db/ctx 接点拉开间距，
-   避免两个接点贴在一起，右侧 ctx 接点居中）。 */
+/* 团队整体任务入点：靠近标题，与居中的流程入点拉开（用户批注：团队卡片新增上下文入） */
+.wf-graph__handle--group-ctx {
+  top: 30%;
+}
+
+/* 组内成员接点的固定纵向位置（成员行内锚点；用户批注：左侧 db/ctx 接点拉开间距）。
+   角色卡的上下文出点已从 UI 退役，成员迷你卡同步移除。 */
 .wf-graph__handle--member-db-in {
   top: 30%;
 }
 
 .wf-graph__handle--member-ctx-in {
   top: 64%;
-}
-
-.wf-graph__handle--member-ctx-out {
-  top: 47%;
 }
 
 .wf-graph__handle--mini:hover {

@@ -24,10 +24,20 @@ export const GRAPH_STAGE_WIDTH = 168
 export const GRAPH_STAGE_HEIGHT = 88
 export const GRAPH_GROUP_WIDTH = 300
 export const GRAPH_GROUP_HEIGHT = 220
-/** 组内成员行节距/列表起始（连线锚点用）：节距 = 成员行 min-height + 列表 gap，
- *  由 tests/client/components/canvas/GroupCard.test.tsx 与样式片段对锁，两处不得各自漂移。 */
-export const GROUP_MEMBER_ROW_H = 41
-export const GROUP_MEMBER_LIST_TOP = 78
+/** 成员行高（border-box）与行间距（与样式片段对锁；节距 = 两者之和）。 */
+export const GROUP_MEMBER_ROW_HEIGHT = 36
+export const GROUP_MEMBER_ROW_GAP = 5
+/** 组内成员行节距（连线锚点逐行推进用），由 tests/client/components/canvas/GroupCard.test.tsx
+ *  与样式片段对锁，两处不得各自漂移。 */
+export const GROUP_MEMBER_ROW_H = GROUP_MEMBER_ROW_HEIGHT + GROUP_MEMBER_ROW_GAP
+/**
+ * 首个成员行顶边相对 Team 卡片顶边的距离。
+ * 由卡片实际盒模型累加得出：外边框 1 + 卡片上内边距 10 + 种类行 16.5
+ * （成员计数 .wf-hint 为 11px × 1.5，撑高种类行）+ 下外边距 2 + 标题行 19.5
+ * + 成员列表上外边距 6 + 列表边框 1 + 列表上内边距 6 = 62。
+ * 标题/种类行由样式固定为单行，否则标题换行会把整列成员下移，连线锚点随之失准。
+ */
+export const GROUP_MEMBER_LIST_TOP = 62
 /** Team 卡片内成员横向留白（渲染尺寸与布局坐标共用同一常量）。 */
 export const GROUP_MEMBER_PADDING = 10
 

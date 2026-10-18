@@ -90,6 +90,27 @@ describe('P4 画布角标（FlowNode）', () => {
   })
 })
 
+describe('角色卡连接点（任务 3：右上下文出退役）', () => {
+  it.each(['agent', 'parent', 'proxy'] as const)('%s 卡片不渲染 ctx-out，但保留 flow-out', async (kind) => {
+    await renderFlowNode({
+      id: `n-${kind}`,
+      kind,
+      position: { x: 0, y: 0 },
+      data: { label: kind },
+      ...(kind === 'proxy' ? { proxySourceId: 'n-agent' } : {}),
+    })
+
+    expect(container!.querySelector('[data-handle="ctx-out"]')).toBeNull()
+    expect(container!.querySelector('[data-handle="flow-out"]')).not.toBeNull()
+    expect(container!.querySelector('[data-handle="ctx-in"]')).not.toBeNull()
+  })
+
+  it('任务节点仍保留 ctx-out（上下文来源不受角色卡退役影响）', async () => {
+    await renderFlowNode({ id: 't-1', kind: 'task', position: { x: 0, y: 0 }, data: { label: '任务一' } })
+    expect(container!.querySelector('[data-handle="ctx-out"]')).not.toBeNull()
+  })
+})
+
 describe('stage names follow the active language', () => {
   it.each([
     ['mode1', 'start', '启动', 'Start'],

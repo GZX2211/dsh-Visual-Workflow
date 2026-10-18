@@ -42,6 +42,17 @@ describe('连接校验', () => {
     expect(connectionProblem(groupNodes, [], { source: 'm', target: 'b', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' }).valid).toBe(true)
   })
 
+  it('合法：task → Team 卡片 ctx-in（团队整体任务，不注入成员）', () => {
+    const teamNodes: CanvasNode[] = [
+      { id: 'g', kind: 'group', position: { x: 400, y: 0 }, data: { label: '团队', memberIds: [] } },
+      { id: 't', kind: 'task', position: { x: 0, y: 0 }, data: { label: '团队任务目标', content: '交付登录页' } },
+    ]
+    const problem = connectionProblem(teamNodes, [], { source: 't', target: 'g', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' })
+    expect(problem.valid).toBe(true)
+    // Team 卡片仍无 ctx-out（不能作为上下文来源）
+    expect(connectionProblem(teamNodes, [], { source: 'g', target: 't', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' }).code).toBe('invalidHandle')
+  })
+
   it('非法：目标为启动节点（无入点）', () => {
     const problem = connectionProblem(nodes, lines, { source: 'a', target: 's' })
     expect(problem.code).toBe('invalidHandle')
@@ -53,7 +64,7 @@ describe('连接校验', () => {
     expect(problem.code).toBe('duplicateConnection')
   })
 
-  it('非法：主节点与虚拟节点连入同一连接点（防并行）', () => {
+  it('合法：主节点与虚拟节点可连入同一目标的同一连接点（护栏已取消）', () => {
     const withProxy: CanvasNode[] = [
       { id: 'm', kind: 'agent', position: { x: 0, y: 0 }, data: { label: '主' } },
       { id: 'x', kind: 'proxy', position: { x: 0, y: 100 }, data: {}, proxySourceId: 'm' },
@@ -61,7 +72,8 @@ describe('连接校验', () => {
     ]
     const withLine: CanvasEdge[] = [{ id: 'e-0', source: 'm', target: 'b', sourceHandle: 'flow-out', targetHandle: 'flow-in' }]
     const problem = connectionProblem(withProxy, withLine, { source: 'x', target: 'b' })
-    expect(problem.code).toBe('proxyParallel')
+    expect(problem.valid).toBe(true)
+    expect(problem.code).toBe('ok')
   })
 
   it('错误文案映射', () => {

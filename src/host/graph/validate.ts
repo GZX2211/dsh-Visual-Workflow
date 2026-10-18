@@ -9,10 +9,11 @@
 //   3. 连接点兼容矩阵：sourceHandle 必须是源节点出点、targetHandle 必须是目标节点入点，
 //      且三通道配对（flow-out→flow-in / ctx-out→ctx-in / db-out→db-in）；
 //   4. 条件仅流程线（§4.3 规则 4）；content 条件必须带 label（§4.3 规则 2）；
-//   5. Team 边界（§4.2.5.2 规则 4）：组成员仅 ctx/db 连接点；Team 卡片仅 flow 连接点；
+//   5. Team 边界（§4.2.5.2 规则 4）：组成员仅 ctx/db 连接点；Team 卡片仅 flow 连接点
+//      + ctx-in（团队整体任务，父代理读图理解、不注入成员）；
 //   6. 阶段节点唯一：start/end 各至多一个（§4.2.5.1 说明段）；pause 仅模式一；
 //   7. 父代理唯一：至多一个；模式二必须恰好一个（§4.2.3.1 / §4.1.3 规则 4）；
-//   8. 虚拟节点引用存在且主节点为角色节点；主/虚不得同时连入同一目标同一连接点（§4.2.3.2 规则 6）；
+//   8. 虚拟节点引用存在且主节点为角色节点（§4.2.3.2 规则 4/7）；
 //   9. 模式差异：mode1 的 start 禁用 ctx-out、end 禁用 ctx-in（上下文出/入仅模式二的输入/输出节点）。
 //
 // 为什么校验不做「保存前归一化」（2026.10 治理决策）：
@@ -147,7 +148,7 @@ export function validateFlow(flow: Partial<WorkflowDocument>): ValidateResult {
     }
   }
 
-  // —— 虚拟节点引用与主虚互斥（§4.2.3.2 规则 6/7）——
+  // —— 虚拟节点引用（§4.2.3.2 规则 4/7）——
   for (const node of nodes) {
     if (node.kind !== 'proxy' || !node.proxySourceId) continue
     const source = nodeMap.get(node.proxySourceId)
@@ -159,41 +160,8 @@ export function validateFlow(flow: Partial<WorkflowDocument>): ValidateResult {
       issues.push({ code: 'proxySourceKind', message: `proxy node ${node.id} can only reference a role node (currently ${source.kind})`, id: node.id })
     }
   }
-  // 主/虚不得同时连入同一目标节点的同一连接点（防止重复触发，§4.2.3.2 规则 6）
-  const inByTarget = new Map<string, Line[]>()
-  for (const l of lines) {
-    const key = `${l.target}|${l.targetHandle}`
-    const arr = inByTarget.get(key) ?? []
-    arr.push(l)
-    inByTarget.set(key, arr)
-  }
-  for (const [key, arr] of inByTarget) {
-    const [targetId] = key.split('|')
-    const seenSources = new Set<string>()
-    for (const l of arr) {
-      const sourceId = l.source
-      const source = nodeMap.get(sourceId)
-      if (!source) continue
-      // 主节点与其任一虚拟节点视为同一执行代理：同 target+handle 上二者并存即互斥。
-      // 分支判定 source 为主节点即可（id 全画布唯一，主节点 id 不可能出现在 proxy
-      // 节点集合中，无需再做 proxyIds 排除——原恒真条件已删，Bug 21 冗余清理）。
-      const effectiveIds = new Set<string>([sourceId])
-      if (source.kind === 'proxy' && source.proxySourceId) effectiveIds.add(source.proxySourceId)
-      if (source.kind === 'parent' || source.kind === 'agent') {
-        // 主节点：收集其虚拟节点 id
-        for (const p of nodes) {
-          if (p.kind === 'proxy' && p.proxySourceId === sourceId) effectiveIds.add(p.id)
-        }
-      }
-      for (const eff of effectiveIds) {
-        if (seenSources.has(eff)) {
-          issues.push({ code: 'proxyParallel', message: `a source node and its proxy node must not both connect to the same port of ${targetId}`, id: l.id })
-          break
-        }
-        seenSources.add(eff)
-      }
-    }
-  }
+  // 主节点与其虚拟节点可以同时连入同一目标的同一连接点（用户定案：取消该互斥护栏）。
+  // 相同来源的重复连线仍由下方 dupEdge 拦截。
 
   // —— 连线合法性 ——
   const lineKeys = new Set<string>()
@@ -219,7 +187,8 @@ export function validateFlow(flow: Partial<WorkflowDocument>): ValidateResult {
       }
     }
 
-    // Team 边界（§4.2.5.2 规则 4）：组内成员仅 ctx/db 连接点；Team 卡片仅 flow
+    // Team 边界（§4.2.5.2 规则 4）：组内成员仅 ctx/db 连接点；Team 卡片连接点由矩阵限定
+    // 为 flow-in / ctx-in / flow-out（ctx-in 表示团队整体任务，不注入成员）
     const source = nodeMap.get(line.source)
     const target = nodeMap.get(line.target)
     const sourceInGroup = source && (source.kind === 'parent' || source.kind === 'agent') && Boolean(source.data.groupId)
@@ -230,9 +199,8 @@ export function validateFlow(flow: Partial<WorkflowDocument>): ValidateResult {
     if (targetInGroup && line.targetHandle === channelIn('flow')) {
       issues.push({ code: 'groupMemberFlowHandle', message: `Team member ${line.target} only has context ports, no flow-in`, id: line.id })
     }
-    // Team 卡片仅 flow 连接点：矩阵（NODE_HANDLES.group 只有 flow-in/flow-out）已在
-    // connectionProblem 层拦截 Team 卡片的 ctx/db 连线（invalidHandle/handleMismatch），
-    // 此处无需重复检查（避免死代码）。
+    // Team 卡片连接点：矩阵（NODE_HANDLES.group = flow-in / ctx-in / flow-out）已在
+    // connectionProblem 层拦截其余通道（invalidHandle/handleMismatch），此处无需重复检查。
 
     // 模式差异（§4.2.5.1）：mode1 的 start 无 ctx-out；mode1 的 end 无 ctx-in
     if (mode === 'mode1') {

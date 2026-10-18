@@ -14,8 +14,9 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import React from 'react'
 import { GroupCard } from '../../../../src/client/components/canvas/GroupCard.js'
+import { GROUP_CTX_IN_TOP, MEMBER_HANDLE_TOP } from '../../../../src/client/components/canvas/geometry.js'
 import { zh } from '../../../../src/client/i18n.js'
-import { GROUP_MEMBER_ROW_H } from '../../../../src/client/lib/card-geometry.js'
+import { GROUP_MEMBER_ROW_GAP, GROUP_MEMBER_ROW_H, GROUP_MEMBER_ROW_HEIGHT } from '../../../../src/client/lib/card-geometry.js'
 import { canvasStyles } from '../../../../src/client/styles/canvas.js'
 import type { CanvasNode } from '../../../../src/client/studio/studio-state.js'
 
@@ -93,6 +94,36 @@ describe('GroupCard 状态与高亮', () => {
   })
 })
 
+describe('GroupCard 接点（任务 2/3）', () => {
+  it('Team 卡片提供 ctx-in（团队整体任务入点），flow 入/出保持不变', () => {
+    const card = renderCard()
+
+    const groupCtxIn = card.querySelector('.wf-graph__handle--group-ctx')
+    expect(groupCtxIn?.getAttribute('data-handle')).toBe('ctx-in')
+    const flowHandles = [...card.querySelectorAll('.wf-graph__handle--group-flow')]
+      .map((handle) => handle.getAttribute('data-handle'))
+    expect(flowHandles.sort()).toEqual(['flow-in', 'flow-out'])
+  })
+
+  it('成员迷你卡只保留 db-in / ctx-in，不再渲染 ctx-out', () => {
+    const card = renderCard()
+
+    const memberCards = [...card.querySelectorAll('.wf-group__member')]
+    expect(memberCards).toHaveLength(2)
+    for (const member of memberCards) {
+      expect(member.querySelector('[data-handle="db-in"]')).not.toBeNull()
+      expect(member.querySelector('[data-handle="ctx-in"]')).not.toBeNull()
+      expect(member.querySelector('[data-handle="ctx-out"]')).toBeNull()
+    }
+  })
+
+  it('接点纵向比例与连线几何常量同口径（样式/几何不得各自漂移）', () => {
+    expect(percentOf(canvasStyles, '.wf-graph__handle--member-db-in', 'top')).toBe(MEMBER_HANDLE_TOP['db-in'] * 100)
+    expect(percentOf(canvasStyles, '.wf-graph__handle--member-ctx-in', 'top')).toBe(MEMBER_HANDLE_TOP['ctx-in'] * 100)
+    expect(percentOf(canvasStyles, '.wf-graph__handle--group-ctx', 'top')).toBe(GROUP_CTX_IN_TOP * 100)
+  })
+})
+
 /** 取某选择器首个规则块内的 px 声明值（样式片段是纯 CSS 字符串，直接解析文本）。 */
 function pxOf(css: string, selector: string, property: string): number {
   const start = css.indexOf(`${selector} `)
@@ -101,12 +132,20 @@ function pxOf(css: string, selector: string, property: string): number {
   return Number(match?.[1])
 }
 
+/** 取某选择器首个规则块内的百分比声明值。 */
+function percentOf(css: string, selector: string, property: string): number {
+  const start = css.indexOf(`${selector} `)
+  const block = css.slice(start, css.indexOf('}', start) + 1)
+  const match = new RegExp(`${property}:\\s*([\\d.]+)%`).exec(block)
+  return Number(match?.[1])
+}
+
 describe('组内成员行节距与连线锚点同口径（D07-04）', () => {
   it('渲染行节距（min-height + gap）等于连线锚点使用的 GROUP_MEMBER_ROW_H', () => {
     const rowMinHeight = pxOf(canvasStyles, '.wf-group__member', 'min-height')
     const rowGap = pxOf(canvasStyles, '.wf-group__members', 'gap')
-    expect(rowMinHeight).toBeGreaterThan(0)
-    expect(rowGap).toBeGreaterThan(0)
+    expect(rowMinHeight).toBe(GROUP_MEMBER_ROW_HEIGHT)
+    expect(rowGap).toBe(GROUP_MEMBER_ROW_GAP)
     // 锚点按行节距推进；两者分叉会让成员连线端点逐行偏离实际接点
     expect(rowMinHeight + rowGap).toBe(GROUP_MEMBER_ROW_H)
   })

@@ -376,7 +376,6 @@ export const zh = {
   invalidConnection: '连接不合法',
   selfLoop: '不允许自环',
   duplicateConnection: '重复连线',
-  proxyParallel: '主节点与虚拟节点不得同时连入同一连接点',
   groupMemberFlowLine: '团队成员不能连流程线，仅可连上下文/数据库线',
   // 运行状态
   status: {
@@ -898,7 +897,6 @@ export const en: Dict = {
   invalidConnection: 'Invalid connection',
   selfLoop: 'Self loops are not allowed',
   duplicateConnection: 'Duplicate connection',
-  proxyParallel: 'Main node and its proxies cannot share the same target handle',
   groupMemberFlowLine: 'Team members can only connect context/database lines, not flow lines',
   status: {
     pending: 'Pending',

@@ -358,7 +358,6 @@ export declare const zh: {
     invalidConnection: string;
     selfLoop: string;
     duplicateConnection: string;
-    proxyParallel: string;
     groupMemberFlowLine: string;
     status: {
         pending: string;

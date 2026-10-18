@@ -3,7 +3,7 @@
 // 连线显示派生（条件标签 / 颜色 class）与「存储连线 → 画布连线」唯一映射。
 
 import { describe, expect, it } from 'vitest'
-import { conditionLabel, lineColorClass, lineToCanvasEdge } from '../../../src/client/lib/graph-edges.js'
+import { conditionLabel, isRetiredRoleContextOutEdge, lineColorClass, lineToCanvasEdge } from '../../../src/client/lib/graph-edges.js'
 import type { Line } from '../../../src/host/shared/graph-model.js'
 
 /** 条件标签文案（渲染层从词典注入；测试用中文词典值）。 */
@@ -43,6 +43,20 @@ describe('连线标签与颜色', () => {
 
   it('未知条件类型不吞通道：db 通道 + 未知条件 → is-db', () => {
     expect(lineColorClass({ id: 'e', source: 'a', target: 'b', sourceHandle: 'db-out', targetHandle: 'db-in', condition: { type: 'other' } as never })).toBe('is-db')
+  })
+})
+
+describe('角色 ctx-out 连线退役（任务 3）', () => {
+  it.each(['agent', 'parent', 'proxy'])('%s 的 ctx-out 连线隐藏（数据保留、UI/交互退役）', (kind) => {
+    expect(isRetiredRoleContextOutEdge({ sourceHandle: 'ctx-out' }, kind)).toBe(true)
+  })
+
+  it('task 的 ctx-out 连线仍显示（上下文来源）', () => {
+    expect(isRetiredRoleContextOutEdge({ sourceHandle: 'ctx-out' }, 'task')).toBe(false)
+  })
+
+  it('角色 flow-out 连线不受影响', () => {
+    expect(isRetiredRoleContextOutEdge({ sourceHandle: 'flow-out' }, 'agent')).toBe(false)
   })
 })
 

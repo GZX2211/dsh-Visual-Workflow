@@ -1,9 +1,9 @@
 // src/client/components/canvas/GraphCanvas.tsx
 //
 // 自研 SVG 画布。
-// 节点为绝对定位 HTML 卡片（左 db/ctx/flow 入点、右 ctx/flow/db 出点），连线为
-// SVG 贝塞尔曲线；支持拖拽、平移、缩放、连线、条件标签、运行态高亮、空画布引导。
-// Team 卡片渲染成员迷你列表（组内成员节点以迷你形态叠加于组内）。
+// 节点为绝对定位 HTML 卡片（角色卡左 db/ctx/flow 入点、右 flow 出点；ctx-out 已从 UI 退役），
+// 连线为 SVG 贝塞尔曲线；支持拖拽、平移、缩放、连线、条件标签、运行态高亮、空画布引导。
+// Team 卡片渲染成员迷你列表（组内成员节点以迷你形态叠加于组内），并提供 ctx-in 团队任务入点。
 //
 // 职责拆分（本文件 = 交互编排 + 组装）：
 //   - 视口（平移/缩放/适配/坐标换算）：./use-canvas-viewport.ts
@@ -360,6 +360,20 @@ export function GraphCanvas(props: GraphCanvasProps) {
               onToggleSwap={onSwapPorts}
             />
           ))}
+          {/* 成员入线内段：Team 卡片背景在连线层之上，需单独抬到卡片之上、接点之下 */}
+          <CanvasEdges
+            layer="overlay"
+            nodes={nodes}
+            edges={edges}
+            byId={byId}
+            memberGroups={memberGroups}
+            selectedEdge={selectedEdge}
+            runStatusOf={runStatusOf}
+            isLockedEdge={isLockedEdge}
+            copy={copy}
+            onEdgeSelect={onEdgeSelect}
+            draftPath={null}
+          />
         </div>
         {workflowCaption ? <div className="wf-canvas-caption">{workflowCaption}</div> : null}
         {nodes.length === 0 ? (

@@ -34,10 +34,12 @@ afterEach(() => {
 const nodes: CanvasNode[] = [
   { id: 'n-done', kind: 'agent', position: { x: 0, y: 0 }, data: { label: '已完成' } },
   { id: 'n-free', kind: 'agent', position: { x: 260, y: 0 }, data: { label: '待执行' } },
+  // 角色卡的 ctx-out 已从 UI 退役；非锁连线用 task 上下文来源验证点击选中
+  { id: 'n-task', kind: 'task', position: { x: 0, y: 200 }, data: { label: '任务' } },
 ]
 const edges: CanvasEdge[] = [
   { id: 'e-locked', source: 'n-done', target: 'n-free', sourceHandle: 'flow-out', targetHandle: 'flow-in' },
-  { id: 'e-free', source: 'n-free', target: 'n-free', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' },
+  { id: 'e-free', source: 'n-task', target: 'n-free', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' },
 ]
 
 function renderCanvas(overrides: Partial<GraphCanvasProps> = {}): void {

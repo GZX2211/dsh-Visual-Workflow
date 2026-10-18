@@ -47,7 +47,7 @@ describe('连接点兼容矩阵（NODE_HANDLES）', () => {
     expect(NODE_HANDLES.start).toEqual({ inputs: [], outputs: ['flow-out', 'ctx-out'] })
     expect(NODE_HANDLES.end.outputs).toEqual([])
     expect(NODE_HANDLES.pause).toEqual({ inputs: ['flow-in'], outputs: ['flow-out'] })
-    expect(NODE_HANDLES.group).toEqual({ inputs: ['flow-in'], outputs: ['flow-out'] })
+    expect(NODE_HANDLES.group).toEqual({ inputs: ['flow-in', 'ctx-in'], outputs: ['flow-out'] })
     expect(NODE_HANDLES.proxy).toEqual(NODE_HANDLES.agent)
   })
 })

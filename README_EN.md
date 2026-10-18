@@ -283,19 +283,20 @@ allowBuilds:
 dsh plugin --profile web add "github:GZX2211/dsh-Visual-Workflow#main"
 ```
 
-**On desktop, you can add it directly from the Plugins page in the top-left corner**:
+3. **On desktop, you can add it directly from the Plugins page in the top-left corner**:
 
+Enter then click Install：
 ```
-Enter: github:GZX2211/dsh-Visual-Workflow#main, then click Install.
+github:GZX2211/dsh-Visual-Workflow#main
 ```
 
-3. **Verify mounting**: (optional)
+4. **Verify mounting**: (optional)
 
 ```bash
 dsh --profile web --dump-config | findstr "visual-workflow"
 ```
 
-4. **Restart** `dsh web`. Open the workbench: click the **"Workflow" entry at the bottom of the official left sidebar** (next to the official "Settings") → open the "Workflow" tab in the official **right Sidebar** to access the full workbench.
+5. **Restart** `dsh web`. Open the workbench: click the **"Workflow" entry at the bottom of the official left sidebar** (next to the official "Settings") → open the "Workflow" tab in the official **right Sidebar** to access the full workbench.
 
 ### Installation Troubleshooting
 

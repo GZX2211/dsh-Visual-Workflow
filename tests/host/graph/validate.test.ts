@@ -162,13 +162,15 @@ describe('validateFlow 全量校验', () => {
     expect(codes(makeFlow([task, p2]))).toContain('proxySourceKind')
   })
 
-  it('主/虚同时连入同一目标同一连接点 → proxyParallel', () => {
+  it('主/虚同时连入同一目标同一连接点：护栏已取消，校验通过', () => {
     const main = newRoleNode('agent', 'main')
     const proxy = newProxyNode(main.id)
     const target = newRoleNode('agent', 'target')
     const l1 = newLine(main.id, target.id, 'ctx-out', 'ctx-in')
     const l2 = newLine(proxy.id, target.id, 'ctx-out', 'ctx-in')
-    expect(codes(makeFlow([main, proxy, target], [l1, l2]))).toContain('proxyParallel')
+    const result = validateFlow(makeFlow([main, proxy, target], [l1, l2]))
+    expect(result.ok).toBe(true)
+    expect(result.issues.map((issue) => issue.code)).not.toContain('proxyParallel')
   })
 
   it('主/虚连入不同连接点合法', () => {
@@ -200,15 +202,20 @@ describe('validateFlow 全量校验', () => {
     expect(validateFlow(makeFlow([g, member, outside], [line])).ok).toBe(true)
   })
 
-  it('Team 卡片 ctx/db 连线被矩阵层拒绝（Team 卡片仅 flow 连接点，§4.2.5.2）', () => {
+  it('Team 卡片 ctx-in 合法（团队整体任务），ctx-out / db 仍被矩阵层拒绝', () => {
     const g = newGroupNode('g')
+    const task = newTaskNode('团队任务目标')
     const a = newRoleNode('agent', 'a')
+    const db = newDatabaseNode('local', 'db')
+
+    // task → Team ctx-in：团队整体任务，结构合法（由父代理读图理解，不注入成员）
+    const groupCtxIn = newLine(task.id, g.id, 'ctx-out', 'ctx-in')
+    expect(validateFlow(makeFlow([g, task], [groupCtxIn])).ok).toBe(true)
+
     // Team 卡片无 ctx-out：源侧矩阵拒绝
-    const l1 = newLine(g.id, a.id, 'ctx-out', 'ctx-in')
-    // Team 卡片无 ctx-in：目标侧矩阵拒绝
-    const l2 = newLine(a.id, g.id, 'ctx-out', 'ctx-in')
-    const cs = codes(makeFlow([g, a], [l1, l2]))
-    expect(cs).toContain('invalidHandle')
+    expect(connectionProblem([g, a], newLine(g.id, a.id, 'ctx-out', 'ctx-in')).code).toBe('invalidHandle')
+    // Team 卡片无 db-in：目标侧矩阵拒绝
+    expect(connectionProblem([g, db], newLine(db.id, g.id, 'db-out', 'db-in')).code).toBe('invalidHandle')
   })
 
   it('mode1 下 start 的 ctx-out 拒绝、end 的 ctx-in 拒绝；mode2 下允许', () => {

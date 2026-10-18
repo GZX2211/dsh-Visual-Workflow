@@ -11,11 +11,16 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  GROUP_CTX_IN_TOP,
+  GROUP_MEMBER_HANDLE_INSET_X,
+  MEMBER_HANDLE_TOP,
   edgeGeometry,
   memberAnchor,
   memberGroupIndexOf,
+  memberInboundStubPath,
 } from '../../../../src/client/components/canvas/geometry.js'
 import type { MemberGroupIndex } from '../../../../src/client/components/canvas/geometry.js'
+import { GROUP_MEMBER_LIST_TOP, GROUP_MEMBER_ROW_H, GROUP_MEMBER_ROW_HEIGHT } from '../../../../src/client/lib/card-geometry.js'
 import type { CanvasEdge, CanvasNode } from '../../../../src/client/studio/studio-state.js'
 
 function nodeOf(id: string, kind: CanvasNode['kind'], extra: Record<string, unknown> = {}): CanvasNode {
@@ -51,20 +56,28 @@ describe('画布几何（Team/阶段）', () => {
     expect(index.get('nobody')).toBeUndefined()
   })
 
-  it('memberAnchor：成员行中心位于 Team 卡片左右边缘', () => {
+  it('memberAnchor：锚到成员行内的真实接点（卡片内侧 + 接点纵向比例）', () => {
     const group = nodeOf('g', 'group', { memberIds: ['a1', 'a2'], size: { w: 300, h: 220 } })
-    const left = memberAnchor(group, 'a2', 'left')
-    const right = memberAnchor(group, 'a2', 'right')
-    expect(left?.x).toBe(100)
-    expect(right?.x).toBe(400)
-    expect(left?.y).toBe(right?.y)
+    const rowTop = 200 + GROUP_MEMBER_LIST_TOP + GROUP_MEMBER_ROW_H
+    const ctxIn = memberAnchor(group, 'a2', 'ctx-in')
+    const dbIn = memberAnchor(group, 'a2', 'db-in')
+    const ctxOut = memberAnchor(group, 'a2', 'ctx-out')
+
+    // x 是成员迷你卡边缘的接点中心，而不是 Team 卡片外缘
+    expect(ctxIn?.x).toBe(100 + GROUP_MEMBER_HANDLE_INSET_X)
+    expect(ctxOut?.x).toBe(100 + 300 - GROUP_MEMBER_HANDLE_INSET_X)
+    // y 按接点自身在成员行内的比例（ctx-in 在行下部、db-in 在行上部），不再统一取行中心
+    expect(ctxIn?.y).toBeCloseTo(rowTop + GROUP_MEMBER_ROW_HEIGHT * MEMBER_HANDLE_TOP['ctx-in'], 6)
+    expect(dbIn?.y).toBeCloseTo(rowTop + GROUP_MEMBER_ROW_HEIGHT * MEMBER_HANDLE_TOP['db-in'], 6)
+    expect(dbIn!.y).toBeLessThan(ctxIn!.y)
   })
 
-  it('edgeGeometry：组流程接点居中；组内成员连线锚到成员行', () => {
+  it('edgeGeometry：组流程接点居中；Team ctx-in 按 30% 高度；成员连线锚到成员接点', () => {
     const group = nodeOf('g', 'group', { memberIds: ['a1'], size: { w: 300, h: 220 } })
     const a1 = nodeOf('a1', 'agent', { groupId: 'g' })
     const second = nodeOf('b', 'agent')
-    const byId = new Map<string, CanvasNode>([['g', group], ['a1', a1], ['b', second]])
+    const task = nodeOf('task', 'task')
+    const byId = new Map<string, CanvasNode>([['g', group], ['a1', a1], ['b', second], ['task', task]])
 
     // 组 → 下游（流程接点居中）
     const groupEdge = edgeGeometry(
@@ -74,13 +87,52 @@ describe('画布几何（Team/阶段）', () => {
     )
     expect(groupEdge!.start.y).toBe(200 + 220 * 0.5)
 
-    // 组内成员 ctx-out → 下游（锚到成员行，x 为组右缘）
-    const memberEdge = edgeGeometry(
-      { id: 'e2', source: 'a1', target: 'b', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' },
+    // task → Team 整体任务（ctx-in 位于卡片 30% 高度）
+    const groupCtxEdge = edgeGeometry(
+      { id: 'e-ctx', source: 'task', target: 'g', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' },
       byId,
       geometryIndex(byId),
     )
-    expect(memberEdge!.start.x).toBe(400)
+    expect(groupCtxEdge!.end.x).toBe(100)
+    expect(groupCtxEdge!.end.y).toBeCloseTo(200 + 220 * GROUP_CTX_IN_TOP, 6)
+
+    // 组内成员 ctx-in：端点落在成员迷你卡的内侧接点，而不是 Team 卡片左缘
+    const memberEdge = edgeGeometry(
+      { id: 'e2', source: 'task', target: 'a1', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' },
+      byId,
+      geometryIndex(byId),
+    )
+    const anchor = memberAnchor(group, 'a1', 'ctx-in')!
+    expect(memberEdge!.end.x).toBe(anchor.x)
+    expect(memberEdge!.end.y).toBeCloseTo(anchor.y, 6)
+  })
+
+  it('memberInboundStubPath：从 Team 卡片边缘切到成员接点（覆盖层用），非成员目标返回 null', () => {
+    const group = nodeOf('g', 'group', { memberIds: ['a1'], size: { w: 300, h: 220 } })
+    group.position = { x: 400, y: 200 }
+    const a1 = nodeOf('a1', 'agent', { groupId: 'g' })
+    const task = nodeOf('task', 'task')
+    task.position = { x: 0, y: 260 }
+    const byId = new Map<string, CanvasNode>([['g', group], ['a1', a1], ['task', task]])
+    const index = geometryIndex(byId)
+
+    const anchor = memberAnchor(group, 'a1', 'ctx-in')!
+    const stub = memberInboundStubPath(
+      { id: 'e', source: 'task', target: 'a1', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' },
+      byId,
+      index,
+    )
+    const points = numbersOf(stub!)
+    // M 起点（Team 卡片左缘）… C … 终点（成员接点）
+    expect(points[0]).toBeCloseTo(400, 6)
+    expect(points[points.length - 2]).toBeCloseTo(anchor.x, 6)
+    expect(points[points.length - 1]).toBeCloseTo(anchor.y, 6)
+
+    expect(memberInboundStubPath(
+      { id: 'e2', source: 'task', target: 'g', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' },
+      byId,
+      index,
+    )).toBeNull()
   })
 
   it('edgeGeometry：交换连接点的节点——源出点在左缘、目标入点在右缘（用户批注：防交叉换向）', () => {
@@ -163,6 +215,11 @@ describe('画布几何（连线不做逐边全节点扫描：D07-03）', () => {
     expect(byId.scans).toBe(scansAtBuild)
   })
 })
+
+/** 路径中的数值序列（M/C 均按 x y 成对出现，用于断言端点）。 */
+function numbersOf(path: string): number[] {
+  return [...path.matchAll(/-?\d+(?:\.\d+)?/g)].map((match) => Number(match[0]))
+}
 
 /** 采样贝塞尔路径的横坐标范围（按控制点重建，用于断言曲线不穿入节点卡片体）。 */
 function pathXRange(path: string): { min: number; max: number } {

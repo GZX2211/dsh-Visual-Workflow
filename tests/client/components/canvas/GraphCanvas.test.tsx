@@ -15,7 +15,9 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { GraphCanvas, type GraphCanvasProps } from '../../../../src/client/components/canvas/GraphCanvas.js'
+import { GROUP_MEMBER_HANDLE_INSET_X, MEMBER_HANDLE_TOP } from '../../../../src/client/components/canvas/geometry.js'
 import { zh } from '../../../../src/client/i18n.js'
+import { GROUP_MEMBER_LIST_TOP, GROUP_MEMBER_ROW_HEIGHT } from '../../../../src/client/lib/card-geometry.js'
 import type { CanvasEdge, CanvasNode } from '../../../../src/client/studio/studio-state.js'
 
 let container: HTMLDivElement | null = null
@@ -166,6 +168,93 @@ describe('FlowNode 交换按钮（阶段节点不渲染，审查 BUG-1 修复防
       agentSwap!.click()
     })
     expect(onSwapPorts).toHaveBeenCalledWith('a1')
+  })
+})
+
+/** 通用渲染入口（新用例按需覆盖 nodes/edges 等）。 */
+function renderGraph(props: Partial<GraphCanvasProps>): void {
+  const base: GraphCanvasProps = {
+    nodes: [],
+    edges: [],
+    copy: { ...zh, modeName: () => '' },
+    mode: 'mode1',
+    selectedNode: null,
+    selectedEdge: null,
+    runStatusByNode: {},
+    highlightedNodeIds: [],
+    onInit: () => {},
+    onNodeDragStart: () => {},
+    onNodeMove: () => {},
+    onNodeDropToGroup: () => {},
+    onNodeSelect: () => {},
+    onEdgeSelect: () => {},
+    onPaneClick: () => {},
+    onConnect: () => {},
+    onConnectionRejected: () => {},
+    onGroupResize: () => {},
+    onSwapPorts: () => {},
+    fitLabel: '',
+    zoomInLabel: '',
+    zoomOutLabel: '',
+    emptyHint: '',
+    ...props,
+  }
+  act(() => {
+    root = createRoot(container!)
+    root.render(<GraphCanvas {...base} />)
+  })
+}
+
+/** 路径中的数值序列（M/C 均按 x y 成对出现）。 */
+function pathNumbers(path: string): number[] {
+  return [...path.matchAll(/-?\d+(?:\.\d+)?/g)].map((match) => Number(match[0]))
+}
+
+describe('GraphCanvas 角色 ctx-out 退役与 Team 成员入线覆盖层（任务 1/3）', () => {
+  it('角色卡 ctx-out 历史连线不渲染、不可点击；task 的 ctx-out 连线照常渲染', () => {
+    const role: CanvasNode = { id: 'a', kind: 'agent', position: { x: 0, y: 0 }, data: { label: '角色' } }
+    const task: CanvasNode = { id: 't', kind: 'task', position: { x: 0, y: 200 }, data: { label: '任务' } }
+    const target: CanvasNode = { id: 'b', kind: 'agent', position: { x: 400, y: 0 }, data: { label: '下游' } }
+    const edges: CanvasEdge[] = [
+      { id: 'e-hidden', source: 'a', target: 'b', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' },
+      { id: 'e-visible', source: 't', target: 'b', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' },
+    ]
+
+    renderGraph({ nodes: [role, task, target], edges })
+
+    // 只保留 task 来源：可见路径与命中路径各一条
+    expect(container!.querySelectorAll('path.wf-graph__edge')).toHaveLength(1)
+    expect(container!.querySelectorAll('path.wf-graph__edge-hit')).toHaveLength(1)
+  })
+
+  it('Team 成员入线在覆盖层绘制到成员接点，Base 层保留可选中命中路径', () => {
+    const group: CanvasNode = {
+      id: 'g',
+      kind: 'group',
+      position: { x: 400, y: 200 },
+      data: { label: '团队', memberIds: ['m'], size: { w: 300, h: 220 } },
+    }
+    const member: CanvasNode = { id: 'm', kind: 'agent', position: { x: 0, y: 0 }, data: { label: '成员', groupId: 'g' } }
+    const task: CanvasNode = { id: 't', kind: 'task', position: { x: 0, y: 260 }, data: { label: '团队任务目标' } }
+    const edges: CanvasEdge[] = [
+      { id: 'e-member', source: 't', target: 'm', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' },
+    ]
+
+    renderGraph({ nodes: [group, member, task], edges })
+
+    const baseSvg = container!.querySelector('svg.wf-graph__edges:not(.is-overlay)')
+    const overlaySvg = container!.querySelector('svg.wf-graph__edges.is-overlay')
+    expect(baseSvg?.querySelectorAll('path.wf-graph__edge-hit')).toHaveLength(1)
+
+    const overlayPath = overlaySvg?.querySelector('path.wf-graph__edge')
+    expect(overlayPath).not.toBeNull()
+    const points = pathNumbers(overlayPath!.getAttribute('d')!)
+    // 覆盖层线段从 Team 卡片左缘（x=400）进入，终点是成员 ctx-in 接点
+    const expectedX = 400 + GROUP_MEMBER_HANDLE_INSET_X
+    const expectedY = 200 + GROUP_MEMBER_LIST_TOP + GROUP_MEMBER_ROW_HEIGHT * MEMBER_HANDLE_TOP['ctx-in']
+    expect(points[0]).toBeCloseTo(400, 6)
+    expect(points[points.length - 2]).toBeCloseTo(expectedX, 6)
+    expect(points[points.length - 1]).toBeCloseTo(expectedY, 6)
   })
 })
 

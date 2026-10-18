@@ -36,4 +36,9 @@ describe('连接点表与默认连接点', () => {
     expect(defaultOutputHandle('unknown-kind')).toBe('flow-out')
     expect(defaultInputHandle('unknown-kind')).toBe('flow-in')
   })
+
+  it('Team 卡片新增 ctx-in，但默认入点仍是流程入（省略 handle 时不得误连上下文通道）', () => {
+    expect(HANDLES.group.inputs).toEqual(['ctx-in', 'flow-in'])
+    expect(defaultInputHandle('group')).toBe('flow-in')
+  })
 })

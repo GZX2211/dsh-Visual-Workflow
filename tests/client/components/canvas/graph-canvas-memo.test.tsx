@@ -9,7 +9,8 @@
 // 因此「本地渲染态重渲染」「同输入重渲染」两类场景下计数必须不变，而输入变化时必须重算
 // （后半条防「把计数冻住」的假绿）：
 //   - 派生容器重建次数：节点数组上的 map/filter 调用（渲染期派生的唯一入口）；
-//   - 逐边几何计算次数：geometry.edgeGeometry 调用（每条边一次，含两次所属组反查）。
+//   - 逐边几何计算次数：geometry.edgeGeometry 调用（base 层每条边一次）；
+//   - 成员入线覆盖层内段计算次数：geometry.memberInboundStubPath 调用（每条成员入线一次）。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act } from 'react'
@@ -20,6 +21,8 @@ import type { CanvasEdge, CanvasNode } from '../../../../src/client/studio/studi
 
 /** 逐边几何计算计数（hoisted：vi.mock 工厂在模块求值前执行）。 */
 const edgeGeometryCalls = vi.hoisted(() => ({ count: 0 }))
+/** 成员入线覆盖层内段几何计数。 */
+const stubPathCalls = vi.hoisted(() => ({ count: 0 }))
 
 vi.mock('../../../../src/client/components/canvas/geometry.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../../src/client/components/canvas/geometry.js')>()
@@ -28,6 +31,10 @@ vi.mock('../../../../src/client/components/canvas/geometry.js', async (importOri
     edgeGeometry: (...args: Parameters<typeof actual.edgeGeometry>) => {
       edgeGeometryCalls.count += 1
       return actual.edgeGeometry(...args)
+    },
+    memberInboundStubPath: (...args: Parameters<typeof actual.memberInboundStubPath>) => {
+      stubPathCalls.count += 1
+      return actual.memberInboundStubPath(...args)
     },
   }
 })
@@ -51,6 +58,7 @@ let root: Root | null = null
 
 beforeEach(() => {
   edgeGeometryCalls.count = 0
+  stubPathCalls.count = 0
   container = document.createElement('div')
   document.body.append(container)
 })
@@ -69,11 +77,12 @@ const groupNode: CanvasNode = {
   data: { label: '组', memberIds: ['a1'], size: { w: 300, h: 220 } },
 }
 const memberNode: CanvasNode = { id: 'a1', kind: 'agent', position: { x: 340, y: 40 }, data: { label: '子代理' } }
+const taskNode: CanvasNode = { id: 't1', kind: 'task', position: { x: 0, y: 220 }, data: { label: '任务' } }
 const tailNode: CanvasNode = { id: 'n2', kind: 'agent', position: { x: 680, y: 40 }, data: { label: '下游' } }
 
 function nodesOf(): DerivedCountingNodes {
   const nodes = new DerivedCountingNodes()
-  nodes.push(groupNode, memberNode, tailNode)
+  nodes.push(groupNode, memberNode, taskNode, tailNode)
   return nodes
 }
 
@@ -105,9 +114,9 @@ function propsOf(nodes: CanvasNode[], edges: CanvasEdge[]): GraphCanvasProps {
   }
 }
 
-/** 组内成员 → 下游（含两次所属组反查的连线）。 */
+/** task → 组内成员 ctx-in（base 层 + 覆盖层各一次逐边几何）。 */
 function edgesOf(): CanvasEdge[] {
-  return [{ id: 'e1', source: 'a1', target: 'n2', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' }]
+  return [{ id: 'e1', source: 't1', target: 'a1', sourceHandle: 'ctx-out', targetHandle: 'ctx-in' }]
 }
 
 function render(props: GraphCanvasProps): void {
@@ -125,9 +134,11 @@ describe('GraphCanvas 渲染边界（D07-03）', () => {
 
     const readsAfterMount = nodes.derivedReads
     const geometryAfterMount = edgeGeometryCalls.count
-    // 防计数空转：挂载期必须真的发生过派生与逐边几何计算
+    const stubAfterMount = stubPathCalls.count
+    // 防计数空转：挂载期必须真的发生过派生、逐边几何与覆盖层内段计算
     expect(readsAfterMount).toBeGreaterThan(0)
     expect(geometryAfterMount).toBe(1)
+    expect(stubAfterMount).toBe(1)
 
     const zoomIn = container!.querySelector<HTMLButtonElement>('.wf-graph__controls button')!
     act(() => { zoomIn.click() })
@@ -135,6 +146,7 @@ describe('GraphCanvas 渲染边界（D07-03）', () => {
 
     expect(nodes.derivedReads).toBe(readsAfterMount)
     expect(edgeGeometryCalls.count).toBe(geometryAfterMount)
+    expect(stubPathCalls.count).toBe(stubAfterMount)
   })
 
   it('同输入重渲染：派生结构与连线几何的输入引用保持稳定，不重算', () => {
@@ -144,6 +156,7 @@ describe('GraphCanvas 渲染边界（D07-03）', () => {
 
     const readsAfterMount = nodes.derivedReads
     const geometryAfterMount = edgeGeometryCalls.count
+    const stubAfterMount = stubPathCalls.count
 
     // 同一 props 对象再渲染一次（如父级因无关状态重渲染）：输入引用未变
     act(() => {
@@ -152,6 +165,7 @@ describe('GraphCanvas 渲染边界（D07-03）', () => {
 
     expect(nodes.derivedReads).toBe(readsAfterMount)
     expect(edgeGeometryCalls.count).toBe(geometryAfterMount)
+    expect(stubPathCalls.count).toBe(stubAfterMount)
   })
 
   it('输入变化（连线集合变化）：逐边几何与派生容器照常重算（防把计数冻住的假绿）', () => {
@@ -161,12 +175,14 @@ describe('GraphCanvas 渲染边界（D07-03）', () => {
 
     const readsAfterMount = nodes.derivedReads
     const geometryAfterMount = edgeGeometryCalls.count
+    const stubAfterMount = stubPathCalls.count
 
     act(() => {
       root!.render(<GraphCanvas {...props} edges={[...props.edges, { id: 'e2', source: 'g1', target: 'n2', sourceHandle: 'flow-out', targetHandle: 'flow-in' }]} />)
     })
 
     expect(edgeGeometryCalls.count).toBeGreaterThan(geometryAfterMount)
+    expect(stubPathCalls.count).toBeGreaterThan(stubAfterMount)
     expect(nodes.derivedReads).toBe(readsAfterMount)
   })
 })

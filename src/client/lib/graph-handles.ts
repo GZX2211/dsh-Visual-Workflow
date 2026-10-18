@@ -8,8 +8,9 @@ import type { NodeKind } from '../../host/shared/graph-model.js'
 
 export type HandleSpec = { inputs: string[]; outputs: string[] }
 
-// 技术债（ctx-out 停用）：角色节点（parent/agent/proxy）仍保留 ctx-out 出点，连线也仍合法，
-// 但连上不再产生注入效果——上游产出改由流程线自动注入下游。见 host graph/model.ts 同标记。
+// 技术债（ctx-out 停用）：角色节点（parent/agent/proxy）仍保留 ctx-out 出点与连线合法性
+// （旧数据零迁移），但 UI 已删除该接点且历史连线隐藏，连上也不再产生注入效果——上游产出
+// 改由流程线自动注入下游。见 host graph/model.ts 同标记。
 export const HANDLES: Record<string, HandleSpec> = {
   parent: { inputs: ['db-in', 'ctx-in', 'flow-in'], outputs: ['ctx-out', 'flow-out'] },
   agent: { inputs: ['db-in', 'ctx-in', 'flow-in'], outputs: ['ctx-out', 'flow-out'] },
@@ -21,7 +22,9 @@ export const HANDLES: Record<string, HandleSpec> = {
   start: { inputs: [], outputs: ['flow-out'] },
   end: { inputs: ['flow-in'], outputs: [] },
   pause: { inputs: ['flow-in'], outputs: ['flow-out'] },
-  group: { inputs: ['flow-in'], outputs: ['flow-out'] },
+  // ctx-in 表示「团队整体任务」：由父代理读图理解，不注入成员；flow-in 仍排在末位，
+  // 使省略 handle 的默认入点保持为 flow-in（不得因数组顺序误连上下文通道）。
+  group: { inputs: ['ctx-in', 'flow-in'], outputs: ['flow-out'] },
 }
 
 export interface StageLabelCopy {

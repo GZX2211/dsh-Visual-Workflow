@@ -36,25 +36,8 @@ export function connectionProblem(nodes: CanvasNode[], lines: CanvasEdge[], conn
   if (channel === 'flow' && (memberSource || memberTarget)) return { valid: false, code: 'groupMemberFlow' }
   if (targetKind === 'start') return { valid: false, code: 'startInput' }
   if (sourceKind === 'end') return { valid: false, code: 'endOutput' }
-  // 虚拟节点与主节点：同一目标节点的同一连接点不得同时连入（防重复触发）
-  const relatedOf = (node: CanvasNode): CanvasNode[] => {
-    if (node.kind === 'proxy') {
-      return nodes.filter((item) => item.id === node.proxySourceId || (item.kind === 'proxy' && item.proxySourceId === node.proxySourceId))
-    }
-    if (node.kind === 'parent' || node.kind === 'agent') {
-      return nodes.filter((item) => item.kind === 'proxy' && item.proxySourceId === node.id)
-    }
-    return []
-  }
-  for (const node of [source, target]) {
-    for (const other of relatedOf(node)) {
-      const blocked = lines.some((line) =>
-        (line.source === other.id && line.target === target.id && (line.sourceHandle ?? '') === sourceHandle && (line.targetHandle ?? '') === targetHandle)
-        || (line.source === source.id && line.target === other.id && (line.sourceHandle ?? '') === sourceHandle && (line.targetHandle ?? '') === targetHandle)
-      )
-      if (blocked) return { valid: false, code: 'proxyParallel' }
-    }
-  }
+  // 主节点与其虚拟节点可以同时连入同一目标的同一连接点（用户定案：取消该互斥护栏）。
+  // 相同来源的重复连线仍由下方 duplicateConnection 拦截。
   if (lines.some((line) =>
     line.source === connection.source && line.target === connection.target
     && (line.sourceHandle ?? '') === sourceHandle
@@ -69,7 +52,6 @@ export function connectionProblemMessage(problem: ConnectionProblem, copy: Recor
   const messages: Record<string, string> = {
     selfLoop: copy.selfLoop,
     duplicateConnection: copy.duplicateConnection,
-    proxyParallel: copy.proxyParallel ?? copy.invalidConnection,
     channelMismatch: copy.invalidConnection,
     groupMemberFlow: copy.groupMemberFlowLine ?? copy.invalidConnection,
     startInput: copy.invalidConnection,

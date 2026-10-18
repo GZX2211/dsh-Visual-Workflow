@@ -2,7 +2,8 @@
 //
 // Team 卡片：组标签 + 成员迷你列表（可滚动）+ 右下角拉伸把手。
 // 成员节点为组内角色（data.groupId = 组 id），作为迷你卡片渲染于组内（见 GraphCanvas）；
-// Team 卡片仅提供流程入/出连接点（跨组上下文连线走成员接点）。
+// Team 卡片提供流程入/出与上下文入（团队整体任务，父代理读图理解，不注入成员），
+// 跨组上下文连线走成员接点；角色卡的上下文出点已退役，成员迷你卡也不再提供。
 //
 // 为什么 Team 卡片没有运行状态徽标：Team 卡片是包裹层、不是执行主体（用户裁决 2026-10），
 // 它不进入运行事实；运行状态只属于成员节点（每个成员各自有状态徽标）。
@@ -75,8 +76,8 @@ export const GroupCard = memo(function GroupCard({ node, copy, members, selected
                       <span className="wf-hint">{statusLabelOf(copy, member.status)}</span>
                     </span>
                   ) : null}
-                  {/* 组内成员仅数据库/上下文接点，无流程接点（流程由 Team 卡片承担）；
-                      成员为缩小版角色卡：仅名称 + 状态（用户批注） */}
+                  {/* 组内成员仅数据库/上下文入点，无流程接点（流程由 Team 卡片承担）；
+                      角色卡的上下文出点已退役，成员迷你卡同步移除（用户批注） */}
                   <span
                     className="wf-graph__handle wf-graph__handle--target wf-graph__handle--mini wf-graph__handle--member-db-in"
                     data-handle="db-in"
@@ -89,15 +90,16 @@ export const GroupCard = memo(function GroupCard({ node, copy, members, selected
                     title="ctx-in"
                     onPointerDown={(event) => { event.stopPropagation(); onHandlePointerDown(event, member.id, 'ctx-in') }}
                   />
-                  <span
-                    className="wf-graph__handle wf-graph__handle--source wf-graph__handle--mini wf-graph__handle--member-ctx-out"
-                    data-handle="ctx-out"
-                    title="ctx-out"
-                    onPointerDown={(event) => { event.stopPropagation(); onHandlePointerDown(event, member.id, 'ctx-out') }}
-                  />
                 </button>
               ))}
         </div>
+        {/* 团队整体任务入点：只供父代理读图理解，不注入成员 */}
+        <span
+          className="wf-graph__handle wf-graph__handle--target wf-graph__handle--group-ctx"
+          data-handle="ctx-in"
+          title="ctx-in"
+          onPointerDown={(event) => onHandlePointerDown(event, node.id, 'ctx-in')}
+        />
         <span
           className="wf-graph__handle wf-graph__handle--target wf-graph__handle--group-flow"
           data-handle="flow-in"

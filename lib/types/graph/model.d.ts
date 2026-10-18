@@ -14,7 +14,8 @@ export interface NodeHandleDef {
  *   - 启动/输入（start）：无左入，右出 流程出 + 上下文出（上下文出仅模式二输入节点，§4.2.5.1）
  *   - 结束/输出（end）：左入 流程入（+ 上下文入仅模式二输出节点），无右出（§4.2.5.1）
  *   - 暂停（pause）：左入 流程入，右出 流程出（流程门语义，仅模式一，§4.2.5.1）
- *   - Team（group）：左入 流程入，右出 流程出；Team 卡片不提供 ctx/db 连接点（§4.2.5.2）
+ *   - Team（group）：左入 流程入 / 上下文入，右出 流程出；ctx-in 表示团队整体任务
+ *     （父代理读图理解，不注入成员），Team 卡片不提供 ctx-out/db 连接点（§4.2.5.2）
  *   - 虚拟节点（proxy）：与主节点（角色）一致——运行时解析为主节点共享执行实例（§4.2.3.2 规则 7）
  *
  * 模式差异（mode1/mode2）不在此矩阵体现，由 validate.ts 按 flow.mode 做额外约束
@@ -22,8 +23,9 @@ export interface NodeHandleDef {
  *
  * 技术债（ctx-out 停用）：角色节点（parent/agent/proxy）的 ctx-out 已不再是注入来源——
  * 上游产出改由流程线自动注入下游（见 autoContextSourceIds）。该连接点**暂予保留**，
- * 连线仍然合法（结构校验不变、旧图零迁移），但连上不再产生任何注入效果；
- * 未来若需要「手动指定注入内容」可在此扩展。检索标记：`技术债（ctx-out 停用）`。
+ * 连线仍然合法（结构校验不变、旧图零迁移），但画布 UI 已删除该接点、历史连线隐藏，
+ * 连上也不再产生任何注入效果；未来若需要「手动指定注入内容」可在此扩展。
+ * 检索标记：`技术债（ctx-out 停用）`。
  */
 export declare const NODE_HANDLES: Record<NodeKind, NodeHandleDef>;
 /**

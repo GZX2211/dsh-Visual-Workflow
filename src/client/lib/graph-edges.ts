@@ -43,6 +43,15 @@ export function lineColorClass(line: Line): string {
 }
 
 /**
+ * 角色卡右「上下文出」已从 UI 退役（用户批注）：连线数据保留（旧图零迁移），
+ * 但不再渲染、不可交互；运行期本就不再生效。task 等其他来源的 ctx-out 不受影响。
+ */
+export function isRetiredRoleContextOutEdge(line: { sourceHandle?: string }, sourceKind: string | undefined): boolean {
+  if (line.sourceHandle !== 'ctx-out') return false
+  return sourceKind === 'parent' || sourceKind === 'agent' || sourceKind === 'proxy'
+}
+
+/**
  * 存储连线 → 画布连线（唯一映射本体）：只保留语义字段，条件对象浅拷贝
  * （视图编辑不得回写文档内对象）。
  */
