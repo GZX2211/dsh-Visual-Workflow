@@ -20,4 +20,9 @@ export interface StudioTransferFace {
     testDbConnection(): Promise<void>;
 }
 /** 导入导出与任务/数据库交互面（远端失败抛错，由调用方 toast）。 */
-export declare function useStudioTransfer(state: StudioState, dispatch: Dispatch<StudioAction>, notify: ToastFace['toast'], toastError: ToastFace['toastError'], t: Dict, remote: RemoteFace, templates: TemplatesFace, flowTemplates: FlowTemplatesFace, workflows: WorkflowsFace, patchEditor: EditorActionsFace['patchEditor'], editorData: EditorData | null, personaInputRef: React.RefObject<HTMLInputElement | null>, groupMdInputRef: React.RefObject<HTMLInputElement | null>): StudioTransferFace;
+export declare function useStudioTransfer(state: StudioState, dispatch: Dispatch<StudioAction>, notify: ToastFace['toast'], toastError: ToastFace['toastError'], t: Dict, remote: RemoteFace, templates: TemplatesFace, flowTemplates: FlowTemplatesFace, workflows: WorkflowsFace, patchEditor: EditorActionsFace['patchEditor'], editorData: EditorData | null, personaInputRef: React.RefObject<HTMLInputElement | null>, groupMdInputRef: React.RefObject<HTMLInputElement | null>, 
+/**
+ * 宿主接入层注入的文件路径解析器（桌面端走官方 __DSH_HOST_PATHS__.pathFor）。
+ * 缺省回退旧 File.path / 文件名：浏览器安全模型下拿不到本地绝对路径。
+ */
+resolveFilePath?: (file: File) => string): StudioTransferFace;

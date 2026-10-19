@@ -4,10 +4,13 @@
 // 拖拽预览/轻提示）。所有数据与回调由 Studio 主组件经 props 注入（各 controller
 // hook 的 face + 派生数据），本组件不拥有业务状态、不写状态机。
 //
-// 除 JSX 组合外，本层还承载两处装配职责（均作用于展示，不构成业务事实）：
+// 除 JSX 组合外，本层还承载三处装配职责（均作用于展示，不构成业务事实）：
 //   - 自动布局接线：useAutoLayout 挂在这里（打开文档后重排坐标并由调用方落盘）；
-//   - 弹层装配：由 props 注入的运行历史/组合/定时任务等弹层，其内部自带远端调用。
+//   - 弹层装配：由 props 注入的运行历史/组合/定时任务等弹层，其内部自带远端调用；
+//   - 文本扩展层装配：属性栏文本域的展开请求由本层持有，扩展层渲染在画布容器内，
+//     因此天然铺满中间画布（左栏/底栏/属性栏几何由 flex 布局牵引）。
 
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Dispatch } from 'react'
 import type { Dict } from '../i18n.js'
 import type { StudioAction, StudioState, EditorData, CanvasEdge } from './studio-state.js'
@@ -37,6 +40,12 @@ import type { LeftPanelProps } from '../components/sidebar/LeftPanel.js'
 import { BottomPanel } from '../components/sidebar/BottomPanel.js'
 import { Toolbar } from '../components/toolbar/Toolbar.js'
 import { Inspector } from '../components/panels/inspector/Inspector.js'
+import {
+  TextExpandOverlay,
+  TextExpandProvider,
+  type TextExpandHost,
+  type TextExpandRequest,
+} from '../components/panels/inspector/text-expand.js'
 import { ConfirmDialog } from '../components/confirm-dialog/ConfirmDialog.js'
 import { RunHistory } from '../components/run-history/RunHistory.js'
 import { ServiceConsole } from '../components/service-console/ServiceConsole.js'
@@ -152,6 +161,19 @@ export function StudioLayout(props: StudioLayoutProps) {
     instanceOptions, onInstanceOptionsChange, showWorkspacePicker,
     workspacePickerAvailable, workspacePicking, onPickWorkspace,
   } = props
+
+  // 属性栏多行文本域的扩展编辑层（纯渲染态，由本布局层持有）：
+  // 展开层渲染在画布容器内，因而天然铺满「左栏右边界 → 属性栏左边界」的中间画布；
+  // 切换编辑对象或收起属性栏时必须丢弃，否则旧字段的 onChange 会写进新对象。
+  const [textExpand, setTextExpand] = useState<TextExpandRequest | null>(null)
+  useEffect(() => {
+    setTextExpand(null)
+  }, [state.editor, inspectorOpen])
+  const textExpandHost = useMemo<TextExpandHost>(() => ({
+    open: setTextExpand,
+    expandLabel: String(t.textExpand),
+  }), [t.textExpand])
+  const closeTextExpand = useCallback(() => { setTextExpand(null) }, [])
 
   // 自动布局：打开/接收文档时若节点缺坐标（哨兵 {0,0}）
   // → 自动重排一次并静默落盘；已布局过的文档只检测重叠并提示，绝不覆盖用户手动调整。
@@ -325,6 +347,11 @@ export function StudioLayout(props: StudioLayoutProps) {
             emptyHint={t.emptyHint}
             workflowCaption={canvasCaption}
           />
+          {/* 文本扩展层：挂在画布容器内（canvas-shell），铺满工具栏以下的中间画布；
+              左栏/底栏切换、属性栏宽度变化都由 flex 布局自动带动，无需重新计算几何。 */}
+          {textExpand
+            ? <TextExpandOverlay copy={t} request={textExpand} onClose={closeTextExpand} />
+            : null}
         </div>
 
         {/* 批注：折叠时隐藏「拖动线」（splitter）。仅当右侧栏展开时才渲染 */}
@@ -339,41 +366,43 @@ export function StudioLayout(props: StudioLayoutProps) {
             )
           : null}
 
-        <Inspector
-          copy={t}
-          open={inspectorOpen}
-          width={state.panels.rightWidth}
-          editorData={editorData}
-          presets={state.presets}
-          models={state.models}
-          combos={state.combos as Array<{ id: string; name: string; tools?: string[]; mcpServers?: string[] }>}
-          flowMeta={{ nodeCount: state.canvas.nodes.length, revision: Number((currentFlow ?? currentService)?.revision ?? 0) }}
-          onPatch={editor.patchEditor}
-          onDelete={() => { void editor.deleteEditor() }}
-          // 属性栏「保存」调用点：实例/模版态 = 落库（useDocumentActions.saveCanvas）；
-          // 资产态（flowAsset/roleAsset）= 登记资产新版本（useEditorActions 内按 source 分流）。
-          onSave={() => { void editor.saveEditor() }}
-          // 模版态「入库」：先保存模版再 promote（保存未落库即中止）；锁定判定由
-          // useEditorActions 的纯函数给出（已入库且模版内容未再修改 → 按钮禁用）
-          onPromote={() => { void editor.promoteEditor() }}
-          promoteLocked={editor.promoteLocked}
-          // 资产态「回滚」：打开版本上拉列表 → 点击某项回滚 Active 指针
-          onOpenVersions={() => { void editor.openAssetVersions() }}
-          onRollbackVersion={(versionId) => { void editor.rollbackAssetVersion(versionId) }}
-          onCloseVersions={assets.closeVersions}
-          assetVersions={state.assetVersions}
-          onSaveAsTemplate={() => { void doc.saveCurrentAsFlowTemplate() }}
-          onCopyProxy={canvas.copyToProxy}
-          onRemoveMember={canvas.removeGroupMember}
-          onFilesPicked={(files) => { transfer.pickFiles(files) }}
-          onLoadMd={() => { void transfer.loadPersonaMd() }}
-          onLoadGroupMd={() => { void transfer.loadGroupMd() }}
-          onTestDb={() => { void transfer.testDbConnection() }}
-          // 属性栏「保存」：模式一运行中改为「保存 + 二次确认（会改写父代理后续编排）」，
-          // 故不再随运行禁用；模式二（服务常驻）维持原行为（运行中禁用）。
-          saveDisabled={state.mode === 'mode2' && toolbarRunning}
-          importBusy={false}
-        />
+        <TextExpandProvider host={textExpandHost}>
+          <Inspector
+            copy={t}
+            open={inspectorOpen}
+            width={state.panels.rightWidth}
+            editorData={editorData}
+            presets={state.presets}
+            models={state.models}
+            combos={state.combos as Array<{ id: string; name: string; tools?: string[]; mcpServers?: string[] }>}
+            flowMeta={{ nodeCount: state.canvas.nodes.length, revision: Number((currentFlow ?? currentService)?.revision ?? 0) }}
+            onPatch={editor.patchEditor}
+            onDelete={() => { void editor.deleteEditor() }}
+            // 属性栏「保存」调用点：实例/模版态 = 落库（useDocumentActions.saveCanvas）；
+            // 资产态（flowAsset/roleAsset）= 登记资产新版本（useEditorActions 内按 source 分流）。
+            onSave={() => { void editor.saveEditor() }}
+            // 模版态「入库」：先保存模版再 promote（保存未落库即中止）；锁定判定由
+            // useEditorActions 的纯函数给出（已入库且模版内容未再修改 → 按钮禁用）
+            onPromote={() => { void editor.promoteEditor() }}
+            promoteLocked={editor.promoteLocked}
+            // 资产态「回滚」：打开版本上拉列表 → 点击某项回滚 Active 指针
+            onOpenVersions={() => { void editor.openAssetVersions() }}
+            onRollbackVersion={(versionId) => { void editor.rollbackAssetVersion(versionId) }}
+            onCloseVersions={assets.closeVersions}
+            assetVersions={state.assetVersions}
+            onSaveAsTemplate={() => { void doc.saveCurrentAsFlowTemplate() }}
+            onCopyProxy={canvas.copyToProxy}
+            onRemoveMember={canvas.removeGroupMember}
+            onFilesPicked={(files) => { transfer.pickFiles(files) }}
+            onLoadMd={() => { void transfer.loadPersonaMd() }}
+            onLoadGroupMd={() => { void transfer.loadGroupMd() }}
+            onTestDb={() => { void transfer.testDbConnection() }}
+            // 属性栏「保存」：模式一运行中改为「保存 + 二次确认（会改写父代理后续编排）」，
+            // 故不再随运行禁用；模式二（服务常驻）维持原行为（运行中禁用）。
+            saveDisabled={state.mode === 'mode2' && toolbarRunning}
+            importBusy={false}
+          />
+        </TextExpandProvider>
       </main>
 
       {/* 底栏：与左栏相互切换（图片批注新增）。上方为可拖动边界线（横向，上下调整大小）；

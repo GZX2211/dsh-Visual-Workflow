@@ -149,6 +149,39 @@ describe('角色资产拖入画布（placeRoleAssetNode）', () => {
   })
 })
 
+describe('阶段节点放置护栏（启动唯一 / 结束可多个）', () => {
+  it('启动节点只允许一个：已有启动时再次放置被拒绝并提示', async () => {
+    const existing = {
+      id: 'start-1',
+      kind: 'start' as const,
+      position: { x: 0, y: 0 },
+      data: { label: zh.nodeKinds.start },
+    }
+    const h = await renderCanvas(assetState([existing]))
+
+    await act(async () => { h.face.placeStageNode('start', { x: 40, y: 60 }) })
+
+    expect(h.dispatched.some((action) => action.type === 'NODE_ADDED')).toBe(false)
+    expect(h.toasts).toEqual([{ kind: 'error', text: zh.stageDuplicatedHint }])
+  })
+
+  it('结束节点允许布置多个（用于拓扑交叉分流后各自收口）', async () => {
+    const existing = {
+      id: 'end-1',
+      kind: 'end' as const,
+      position: { x: 0, y: 0 },
+      data: { label: zh.nodeKinds.end },
+    }
+    const h = await renderCanvas(assetState([existing]))
+
+    await act(async () => { h.face.placeStageNode('end', { x: 40, y: 60 }) })
+
+    const added = h.dispatched.find((action) => action.type === 'NODE_ADDED')
+    expect((added!.node as { kind: string }).kind).toBe('end')
+    expect(h.toasts).toEqual([{ kind: 'success', text: zh.toastNodeAdded }])
+  })
+})
+
 describe('localized stage defaults', () => {
   it('test_new_stage_uses_current_copy_and_preserves_existing_saved_labels', async () => {
     const existing = { id: 'agent-1', kind: 'agent' as const, position: { x: 0, y: 0 }, data: { label: 'Saved agent name' } }

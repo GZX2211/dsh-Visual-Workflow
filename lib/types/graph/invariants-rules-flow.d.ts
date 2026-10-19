@@ -4,7 +4,7 @@ import type { CheckGraphInput, GraphIssue } from './invariants-types.js';
 export declare function ruleStartRequired({ flow }: CheckGraphInput): GraphIssue[];
 /** b) 启动节点的流程出 ≥1 且目标为可执行单元。 */
 export declare function ruleStartFlowOut(input: CheckGraphInput, dag: FlowDag): GraphIssue[];
-/** c) 恰好 1 个结束/输出节点。 */
+/** c) 至少 1 个结束/输出节点；允许多个（拓扑交叉的分流各自收口）。 */
 export declare function ruleEndRequired({ flow }: CheckGraphInput): GraphIssue[];
 /** d) 结束节点的流程入 ≥1 且来源为可执行单元。 */
 export declare function ruleEndFlowIn(input: CheckGraphInput, dag: FlowDag): GraphIssue[];

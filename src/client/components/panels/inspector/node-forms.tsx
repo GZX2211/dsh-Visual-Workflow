@@ -5,6 +5,7 @@
 import type { Dict } from '../../../i18n.js'
 import { Field } from '../form-field.js'
 import { NameField } from './form-primitives.js'
+import { ExpandableTextArea } from './text-expand.js'
 
 /** 阶段属性只读（无描述字段，无保存按钮）；名称由调用方按界面语言注入。 */
 export function StageForm({ copy, nodeLabel }: { copy: Dict; nodeLabel: string }) {
@@ -35,11 +36,11 @@ export function GroupForm({ data, copy, members, onPatch, onLoadMd, onRemoveMemb
       <NameField data={data} copy={copy} onPatch={onPatch} />
       <Field label={copy.collabPrompt}>
         <div className="wf-form-stack">
-          <textarea
-            value={String(data.collabPrompt ?? '')}
+          <ExpandableTextArea
+            label={copy.collabPrompt}
+            value={data.collabPrompt}
             placeholder={copy.collabPromptHint}
-            spellCheck={false}
-            onChange={(event) => onPatch({ collabPrompt: event.target.value })}
+            onChange={(value) => onPatch({ collabPrompt: value })}
           />
           <div className="wf-form-row">
             <button type="button" className="wf-btn" title={copy.loadMdTitle} onClick={onLoadMd}>{copy.loadMd}</button>

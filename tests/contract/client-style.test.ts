@@ -41,8 +41,8 @@ const COLOR_BASELINE: ReadonlyArray<{ readonly file: string; readonly literal: s
 const INLINE_STYLE_BASELINE: ReadonlyArray<{ readonly file: string; readonly count: number; readonly reason: string }> = [
   {
     file: 'components/panels/inspector/role-form.tsx',
-    count: 3,
-    reason: 'minHeight:130 与 whiteSpace:nowrap 属固定排版值，应改为语义类',
+    count: 2,
+    reason: '两处 whiteSpace:nowrap 属固定排版值，应改为语义类（minHeight 已由可展开文本域动态承载）',
   },
   {
     file: 'components/run-history/RunHistory.tsx',

@@ -72,6 +72,8 @@ async function mountHarness(initial: StudioState, options: {
   editorData?: EditorData | null
   remoteResult?: (endpoint: string, args: Record<string, unknown>) => unknown
   remoteError?: unknown
+  /** 宿主接入层注入的文件路径解析器（桌面端官方桥）；缺省 = 旧 File.path/文件名回退。 */
+  resolveFilePath?: (file: File) => string
 } = {}): Promise<Harness> {
   const calls: Call[] = []
   const dispatched: StudioAction[] = []
@@ -130,6 +132,7 @@ async function mountHarness(initial: StudioState, options: {
         : options.editorData,
       personaRef,
       groupRef,
+      options.resolveFilePath,
     )
     return null
   }
@@ -330,7 +333,19 @@ describe('useStudioTransfer · .md 加载与任务路径追加', () => {
     expect(h.patches).toEqual([{ content: '已有描述\na.txt\nb.txt' }])
   })
 
-  it('任务描述：优先写入 Electron 暴露的 File.path', async () => {
+  it('任务描述：注入官方路径解析器时优先使用它（桌面端稳定拿到绝对路径）', async () => {
+    const h = await mountHarness(createInitialState('s-1'), {
+      editorData: { kind: 'task', data: { content: '' }, name: '任务', nodeId: 'n-1' },
+      resolveFilePath: () => 'D:/ws/absolute/a.txt',
+    })
+    const file = new File(['x'], 'a.txt')
+    Object.defineProperty(file, 'path', { value: 'D:/ws/stale/a.txt' })
+    act(() => { h.face.pickFiles([file]) })
+
+    expect(h.patches).toEqual([{ content: 'D:/ws/absolute/a.txt' }])
+  })
+
+  it('任务描述：未注入解析器时回退 Electron 暴露的 File.path', async () => {
     const h = await mountHarness(createInitialState('s-1'), {
       editorData: { kind: 'task', data: { content: '' }, name: '任务', nodeId: 'n-1' },
     })

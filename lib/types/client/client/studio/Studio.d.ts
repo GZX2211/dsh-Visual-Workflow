@@ -21,5 +21,10 @@ export interface StudioProps {
      * 业务组件不直接触达官方服务，宿主能力经此注入面进入工作台。
      */
     workspacePicker?: WorkspacePicker | null;
+    /**
+     * 文件路径解析器（宿主接入层组装；缺省 = 旧 File.path / 文件名回退）。
+     * 「选择文件」把路径追加进任务描述时使用；业务组件不直接触达官方全局桥。
+     */
+    filePathResolver?: (file: File) => string;
 }
-export declare function Studio({ t, sessionId, remote: remoteProp, onRunImmersive, language, workspacePicker }: StudioProps): import("react").JSX.Element;
+export declare function Studio({ t, sessionId, remote: remoteProp, onRunImmersive, language, workspacePicker, filePathResolver }: StudioProps): import("react").JSX.Element;

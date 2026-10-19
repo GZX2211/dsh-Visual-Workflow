@@ -305,10 +305,13 @@ export function useCanvasActions(
     notify('success', t.toastNodeAdded)
   }, [dispatch, history, notify, state.canvas.nodes, state.currentId, state.templates.role, t.parentDuplicatedHint, t.toastNodeAdded])
 
-  /** 放置阶段节点（启动/结束各一）。 */
+  /**
+   * 放置阶段节点：启动节点全图唯一；结束节点允许布置多个——
+   * 拓扑交叉的分流可以各自收口到自己的结束节点，避免为汇合而拉出交叉连线。
+   */
   const placeStageNode = useCallback((kind: string, position: { x: number; y: number }) => {
     if (!state.currentId) return
-    if ((kind === 'start' || kind === 'end') && state.canvas.nodes.some((item) => item.kind === kind)) {
+    if (kind === 'start' && state.canvas.nodes.some((item) => item.kind === 'start')) {
       notify('error', t.stageDuplicatedHint)
       return
     }

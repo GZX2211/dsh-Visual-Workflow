@@ -74,9 +74,14 @@ export interface StudioProps {
    * 业务组件不直接触达官方服务，宿主能力经此注入面进入工作台。
    */
   workspacePicker?: WorkspacePicker | null
+  /**
+   * 文件路径解析器（宿主接入层组装；缺省 = 旧 File.path / 文件名回退）。
+   * 「选择文件」把路径追加进任务描述时使用；业务组件不直接触达官方全局桥。
+   */
+  filePathResolver?: (file: File) => string
 }
 
-export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive, language, workspacePicker }: StudioProps) {
+export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive, language, workspacePicker, filePathResolver }: StudioProps) {
   const defaultRemote = useRemote(t, language)
   const remote = remoteProp ?? defaultRemote
   const { state, dispatch } = useStudioState(sessionId)
@@ -232,7 +237,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive, langu
   const canvas = useCanvasActions(state, dispatch, notify, history, t, { locks: runLocks, saveCanvas: doc.saveCanvas, teamMemberLimit })
   const editor = useEditorActions(state, dispatch, notify, toastError, t, workflows, flowTemplates, templates, assets, experiences, selection, remote, doc.saveCanvas, canvas.removeSelected, canvas.removeLine, doc.selectWorkflow, doc.selectFlowTemplate, { locks: runLocks })
   const run = useRunActions(state, dispatch, notify, toastError, t, remote, runControl, serviceControl, doc.saveCanvas, doc.createInstanceFromCanvas)
-  const transfer = useStudioTransfer(state, dispatch, notify, toastError, t, remote, templates, flowTemplates, workflows, editor.patchEditor, editorData, personaInputRef, groupMdInputRef)
+  const transfer = useStudioTransfer(state, dispatch, notify, toastError, t, remote, templates, flowTemplates, workflows, editor.patchEditor, editorData, personaInputRef, groupMdInputRef, filePathResolver)
   const { beginLibraryDrag, dragPreview, dropGroupId } = useLibraryDrag(canvasShellRef, canvasApiRef)
   useKeyShortcuts(state, dispatch, selection, history, canvas.removeLine, canvas.removeSelected)
 

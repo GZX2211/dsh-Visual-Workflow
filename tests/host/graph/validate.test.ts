@@ -128,14 +128,14 @@ describe('validateFlow 全量校验', () => {
     expect(codes(makeFlow([a, b], [line]))).toContain('contentLabelRequired')
   })
 
-  it('启动节点重复 → startUnique；结束节点重复 → endUnique', () => {
+  it('启动节点重复 → startUnique；结束节点允许重复（拓扑交叉分流后各自收口）', () => {
     const s1 = newStageNode('start', 'mode1')
     const s2 = { ...newStageNode('start', 'mode1'), id: 'start-2' }
     const e1 = newStageNode('end', 'mode1')
     const e2 = { ...newStageNode('end', 'mode1'), id: 'end-2' }
     const cs = codes(makeFlow([s1, s2, e1, e2]))
     expect(cs).toContain('startUnique')
-    expect(cs).toContain('endUnique')
+    expect(cs).not.toContain('endUnique')
   })
 
   it('模式二出现暂停节点 → pauseMode2', () => {

@@ -256,14 +256,15 @@ describe('规则矩阵（每个 code 一例）', () => {
     expect(codes(issues)).not.toContain('orphanNode')
   })
 
-  it('endRequired：缺少结束节点 / 两个结束节点', () => {
+  it('endRequired：缺少结束节点报错；多个结束节点允许', () => {
     const missing = flow([stage('s', 'start'), agent('a1')], [line('l1', 's', 'a1')])
     expect(codes(check({ flow: missing }))).toContain('endRequired')
-    const duplicate = flow(
+    // 拓扑交叉的分流各自收口：两个结束节点都接流程入，不应报「结束节点唯一性」
+    const multiple = flow(
       [stage('s', 'start'), agent('a1'), stage('e1', 'end'), stage('e2', 'end')],
-      [line('l1', 's', 'a1'), line('l2', 'a1', 'e1')],
+      [line('l1', 's', 'a1'), line('l2', 'a1', 'e1'), line('l3', 'a1', 'e2')],
     )
-    expect(codes(check({ flow: duplicate }))).toContain('endRequired')
+    expect(codes(check({ flow: multiple }))).not.toContain('endRequired')
   })
 
   it('endNoFlowIn：结束节点无流程入线', () => {

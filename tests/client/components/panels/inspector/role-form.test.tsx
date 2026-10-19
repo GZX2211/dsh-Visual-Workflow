@@ -98,6 +98,13 @@ describe('角色表单模式下拉', () => {
     expect(container!.textContent).toContain('3')
   })
 
+  it('不再显示 .md 来源文件名预览（右侧属性栏只保留加载按钮）', async () => {
+    await renderRoleForm({ data: { presetId: 'standard', systemPrompt: '正文', systemPromptSource: 'persona.md' } })
+    expect(container!.textContent).not.toContain('persona.md')
+    const button = Array.from(container!.querySelectorAll('button')).find((item) => item.textContent === zh.loadMd)
+    expect(button).toBeTruthy()
+  })
+
   it('输出契约：提供「恢复默认」操作，点击写回默认契约文本（清空后的一键恢复）', async () => {
     const patches: Array<Record<string, unknown>> = []
     await renderRoleForm({ data: { presetId: 'standard', outputSchema: '' }, onPatch: (patch) => patches.push(patch) })

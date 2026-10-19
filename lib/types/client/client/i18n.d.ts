@@ -237,6 +237,10 @@ export declare const zh: {
     taskContent: string;
     /** 任务描述文本框下方的文件选择入口（只把路径追加进文本，不上传）。 */
     pickFiles: string;
+    /** 多行文本域右下角：展开到画布区域的大文本编辑层。 */
+    textExpand: string;
+    /** 扩展编辑层右上角：收起并回到属性栏。 */
+    textExpandCollapse: string;
     /** 团队卡片拖拽悬停提示（放开以入组）。 */
     groupDropHint: string;
     /** 角色卡元信息「模型」前缀。 */

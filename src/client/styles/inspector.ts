@@ -1,7 +1,9 @@
 // src/client/styles/inspector.ts
 //
-// 属性栏域。属性栏容器与表单控件、字段与表单行布局（各表单共用）、复选清单、提示与高级折叠、路径展示、图标按钮与竖向分隔条。
-// 注意：表单布局类由各表单组件共用，改动会影响全部属性栏表单。
+// 属性栏域。属性栏容器与表单控件、字段与表单行布局（各表单共用）、多行文本域的
+// 展开按钮与画布区域扩展层、复选清单、提示与高级折叠、路径展示、图标按钮与竖向分隔条。
+// 注意：表单布局类由各表单组件共用，改动会影响全部属性栏表单；扩展层虽渲染在画布容器内，
+// 但样式语义属于属性栏文本编辑，故归入本片段。
 //
 // 本文件内规则顺序即覆盖顺序（同特异性下后写的覆盖先写的），禁止重排。
 
@@ -212,10 +214,6 @@ export const inspectorStyles = `
 }
 
 /* 字段与表单行布局（属性栏表单共用；此前散落在各表单的内联 style） */
-.wf-field--gap6 {
-  gap: 6px;
-}
-
 .wf-form-stack {
   display: flex;
   flex-direction: column;
@@ -281,6 +279,120 @@ export const inspectorStyles = `
   align-items: center;
   gap: 6px;
   justify-content: flex-start;
+}
+
+/* ---- 多行文本域：右下角展开按钮 + 画布区域扩展层 ---- */
+.wf-textarea-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* 给右下角按钮留出文字安全区，避免最后一行文字被按钮遮住 */
+.wf-textarea-wrap>textarea {
+  padding-right: 30px;
+}
+
+.wf-textarea__expand {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--wf-border-strong);
+  border-radius: 6px;
+  background: var(--wf-layer-2);
+  color: var(--wf-ink-2);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color .14s ease, color .14s ease;
+}
+
+.wf-textarea__expand:hover {
+  border-color: var(--wf-brand);
+  color: var(--wf-brand);
+}
+
+/* 扩展层挂在画布容器内：左边界随左栏/底栏切换自动变化，右边界止于属性栏；
+   顶部从画布控制栏（52px）之下开始，不遮挡顶部控制栏。 */
+.wf-text-expand {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  right: 0;
+  top: 52px;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--wf-bg);
+  border-top: 1px solid var(--wf-border);
+}
+
+.wf-text-expand__head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--wf-border);
+  background: var(--wf-layer);
+}
+
+.wf-text-expand__title {
+  flex: 1;
+  min-width: 0;
+  color: var(--wf-ink);
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wf-text-expand__collapse {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--wf-border-strong);
+  border-radius: 7px;
+  background: var(--wf-layer-2);
+  color: var(--wf-ink-2);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.wf-text-expand__collapse:hover {
+  border-color: var(--wf-brand);
+  color: var(--wf-brand);
+}
+
+.wf-text-expand__input {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  border: 0;
+  border-radius: 0;
+  background: var(--wf-bg);
+  color: var(--wf-ink);
+  padding: 12px 14px;
+  outline: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 /* 复选框需覆盖 .wf-inspector input{width:100%}（否则被撑成大方框、不贴边） */

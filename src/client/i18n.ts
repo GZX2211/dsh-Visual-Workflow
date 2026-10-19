@@ -252,6 +252,10 @@ export const zh = {
   taskContent: '任务描述',
   /** 任务描述文本框下方的文件选择入口（只把路径追加进文本，不上传）。 */
   pickFiles: '选择文件',
+  /** 多行文本域右下角：展开到画布区域的大文本编辑层。 */
+  textExpand: '展开编辑',
+  /** 扩展编辑层右上角：收起并回到属性栏。 */
+  textExpandCollapse: '收起',
   /** 团队卡片拖拽悬停提示（放开以入组）。 */
   groupDropHint: '放开以加入团队',
   /** 角色卡元信息「模型」前缀。 */
@@ -368,7 +372,7 @@ export const zh = {
   toastServiceStopped: '服务已停止',
   toastResuming: '已从断点恢复运行',
   parentDuplicatedHint: '每个工作流画布最多一个父代理节点',
-  stageDuplicatedHint: '启动/结束节点在画布中只能分别存在一个',
+  stageDuplicatedHint: '启动节点在画布中只能存在一个',
   /** 运行中画布锁定（已完成流程不可变更）的悬停/角标提示文案。 */
   lockedCompletedNodeHint: '该节点已完成，其节点与连线不可修改、不可删除（可拖动移动）',
   lockedRunningNodeHint: '该节点执行中，其左侧入口连线不可修改、不可删除（可拖动移动）',
@@ -785,6 +789,8 @@ export const en: Dict = {
   contractRestoreDefault: 'Restore default',
   taskContent: 'Task description',
   pickFiles: 'Choose files',
+  textExpand: 'Expand editor',
+  textExpandCollapse: 'Collapse',
   groupDropHint: 'Drop to join the Team',
   nodeMetaModel: 'Model',
   nodeMetaPreset: 'Preset',
@@ -890,7 +896,7 @@ export const en: Dict = {
   toastServiceStopped: 'Service stopped',
   toastResuming: 'Resumed from checkpoint',
   parentDuplicatedHint: 'At most one parent agent node per canvas',
-  stageDuplicatedHint: 'Only one start/end node allowed on the canvas',
+  stageDuplicatedHint: 'Only one start node allowed on the canvas',
   lockedCompletedNodeHint: 'This node is done: it and its lines cannot be modified or deleted (dragging is allowed)',
   lockedRunningNodeHint: 'This node is running: its left inbound lines cannot be modified or deleted (dragging is allowed)',
   lockedEdgeHint: 'This line belongs to a finished or running flow: it cannot be modified or deleted',

@@ -198,6 +198,39 @@ describe('任务表单（TaskForm）', () => {
     act(() => { input!.dispatchEvent(new Event('change', { bubbles: true })) })
     expect(onFilesPicked).toHaveBeenCalledWith([file])
   })
+
+  it('任务表单：文件选择只显示一个与角色 .md 按钮同样式的按钮，不显示文件名预览', async () => {
+    await render(React.createElement(Inspector, {
+      ...common,
+      editorData: { kind: 'task', data: { label: '任务一', content: '' }, name: '任务一', nodeId: 'n-1' },
+    }))
+
+    // 原生 file input 隐藏（不渲染「未选择任何文件」这类浏览器外壳）
+    const input = container!.querySelector<HTMLInputElement>('input[type="file"]')
+    expect(input!.classList.contains('wf-import-hidden')).toBe(true)
+
+    const button = Array.from(container!.querySelectorAll<HTMLButtonElement>('button'))
+      .find((item) => item.textContent === zh.pickFiles)
+    expect(button).toBeTruthy()
+    expect(button!.classList.contains('wf-btn')).toBe(true)
+    // 按钮所在行与角色「从 .md 文件加载」按钮行同一布局语义
+    expect(button!.parentElement?.classList.contains('wf-form-row')).toBe(true)
+  })
+
+  it('任务表单：点击「选择文件」按钮打开隐藏的文件选择器', async () => {
+    await render(React.createElement(Inspector, {
+      ...common,
+      editorData: { kind: 'task', data: { label: '任务一', content: '' }, name: '任务一', nodeId: 'n-1' },
+    }))
+    const input = container!.querySelector<HTMLInputElement>('input[type="file"]')!
+    const click = vi.spyOn(input, 'click').mockImplementation(() => {})
+    const button = Array.from(container!.querySelectorAll<HTMLButtonElement>('button'))
+      .find((item) => item.textContent === zh.pickFiles)!
+
+    act(() => { button.click() })
+
+    expect(click).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('Inspector 底部按钮分录（模版态 / 资产态）', () => {

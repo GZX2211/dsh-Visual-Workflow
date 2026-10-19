@@ -5,6 +5,7 @@
 
 import type { Dict } from '../../../i18n.js'
 import { Field } from '../form-field.js'
+import { ExpandableTextArea } from './text-expand.js'
 
 export function InputField({ label, value, placeholder, onChange, type = 'text', step }: { label: string; value: unknown; placeholder?: string; onChange(value: string): void; type?: string; step?: string }) {
   return (
@@ -17,12 +18,12 @@ export function InputField({ label, value, placeholder, onChange, type = 'text',
 export function TextAreaField({ label, value, placeholder, onChange, minHeight }: { label: string; value: unknown; placeholder?: string; onChange(value: string): void; minHeight?: number }) {
   return (
     <Field label={label}>
-      <textarea
-        value={String(value ?? '')}
+      <ExpandableTextArea
+        label={label}
+        value={value}
         placeholder={placeholder}
-        spellCheck={false}
-        style={minHeight ? { minHeight } : undefined}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={onChange}
+        minHeight={minHeight}
       />
     </Field>
   )

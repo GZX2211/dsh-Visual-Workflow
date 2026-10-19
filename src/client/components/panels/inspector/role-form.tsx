@@ -10,6 +10,7 @@ import type { PresetItem, ModelItem } from '../../../studio/studio-state.js'
 import { DEFAULT_OUTPUT_CONTRACT_TEXT } from '../../../../host/shared/protocol.js'
 import { Field } from '../form-field.js'
 import { NameField, TextAreaField } from './form-primitives.js'
+import { ExpandableTextArea } from './text-expand.js'
 
 export interface ComboLike { id: string; name: string; tools?: string[]; mcpServers?: string[] }
 /** 预设条目（与 studio-state PresetItem 同构，复用避免双份漂移）。 */
@@ -67,18 +68,15 @@ export function RoleForm({ data, copy, presets, models, combos, onPatch, onLoadM
       <NameField data={data} copy={copy} onPatch={onPatch} />
       <Field label={copy.persona}>
         <div className="wf-form-stack">
-          <textarea
-            value={String(data.systemPrompt ?? '')}
+          <ExpandableTextArea
+            label={copy.persona}
+            value={data.systemPrompt}
             placeholder={copy.personaHint}
-            spellCheck={false}
-            style={{ minHeight: 130 }}
-            onChange={(event) => onPatch({ systemPrompt: event.target.value })}
+            minHeight={130}
+            onChange={(value) => onPatch({ systemPrompt: value })}
           />
           <div className="wf-form-row">
             <button type="button" className="wf-btn" title={copy.loadMdTitle} onClick={onLoadMd}>{copy.loadMd}</button>
-            {String(data.systemPromptSource ?? '').trim()
-              ? <span className="wf-hint" title={copy.loadMdTitle}>{String(data.systemPromptSource)}</span>
-              : null}
           </div>
           {/* 官方系统提示词开关：贴左边框；复选框需覆盖 .wf-inspector input{width:100%} 全局样式（否则被撑成大方框、不贴边） */}
           <div className="wf-form-check">

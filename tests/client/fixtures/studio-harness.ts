@@ -108,6 +108,8 @@ export interface StudioMountOptions {
   readonly flushBoot?: boolean
   /** 官方目录选择器替身（宿主接入层注入；缺省 = 当前环境没有可用的官方选择器）。 */
   readonly workspacePicker?: WorkspacePicker | null
+  /** 文件路径解析器替身（桌面端官方路径桥的注入面；缺省 = 旧 File.path/文件名回退）。 */
+  readonly filePathResolver?: (file: File) => string
 }
 
 /** 在容器内挂载 Studio（container/root 由用例持有，便于 afterEach 卸载）。 */
@@ -125,6 +127,7 @@ export async function mountStudio(
       sessionId: options.sessionId ?? 's-1',
       remote,
       ...(options.workspacePicker !== undefined ? { workspacePicker: options.workspacePicker } : {}),
+      ...(options.filePathResolver !== undefined ? { filePathResolver: options.filePathResolver } : {}),
     }))
   })
   if (options.flushBoot) {

@@ -20,6 +20,7 @@ import { detectLanguage, type Dict } from '../i18n.js'
 import { currentSessionOf, rootSessionIdOf, type SessionsServiceLike } from '../sidebar/session-root.js'
 import { shrinkOfficialSidebarIfFullscreen } from '../sidebar/workbench-tab.js'
 import { createWorkspacePicker } from '../sidebar/workspace-picker.js'
+import { createFilePathResolver } from '../sidebar/host-paths.js'
 
 // 会话解析缝继续 re-export（历史导入路径不变；实现已迁至 sidebar/session-root.ts）。
 export { currentSessionOf, rootSessionIdOf }
@@ -45,6 +46,8 @@ export function WorkbenchHost({ ctx, t }: { ctx: WorkbenchHostContext; t: Dict }
   const [sessionId, setSessionId] = useState(() => rootSessionOf(ctx))
   // 官方目录选择器接入缝（preload 原生接口优先，回退 uiWorkspace.pickDirectory）。
   const workspacePicker = useMemo(() => createWorkspacePicker(ctx), [ctx])
+  // 官方桌面文件路径桥接入缝（「选择文件」写入任务描述的绝对路径）。
+  const filePathResolver = useMemo(() => createFilePathResolver(), [])
   // 官方 uiWorkspace 服务可能晚于本插件激活：挂载后补一次重渲染，让按钮可用性刷新。
   const [, setTick] = useState(0)
   useEffect(() => {
@@ -63,5 +66,5 @@ export function WorkbenchHost({ ctx, t }: { ctx: WorkbenchHostContext; t: Dict }
     }
   }, [ctx])
 
-  return <Studio language={detectLanguage(ctx.get?.('locale') ?? ctx.locale)} t={t} sessionId={sessionId} onRunImmersive={shrinkOfficialSidebarIfFullscreen} workspacePicker={workspacePicker} />
+  return <Studio language={detectLanguage(ctx.get?.('locale') ?? ctx.locale)} t={t} sessionId={sessionId} onRunImmersive={shrinkOfficialSidebarIfFullscreen} workspacePicker={workspacePicker} filePathResolver={filePathResolver} />
 }
