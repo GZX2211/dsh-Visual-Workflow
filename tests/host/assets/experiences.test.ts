@@ -97,7 +97,7 @@ describe("经验批量判重写入", () => {
       embeddingModel: "test-embed",
       embeddingDimension: 3,
       sourceRunId: "run-1",
-      generationPromptId: "ep-agent-v1",
+      generationPromptId: "ep-agent@1",
       generationPromptVersion: "V1",
     })
     expect(result.inserted[0].createdAt).toBe(result.inserted[0].updatedAt)
@@ -148,7 +148,7 @@ describe("经验批量判重写入", () => {
         experienceRow("ex-agent", { decisionRetrievalText: "跨主体相同文本" }),
         experienceRow("ex-orch", {
           experienceType: "orchestrator",
-          generationPromptId: "ep-orchestrator-v1",
+          generationPromptId: "ep-orchestrator@1",
           decisionRetrievalText: "跨主体相同文本",
         }),
       ],
@@ -264,7 +264,7 @@ describe("活跃向量读盘（召回输入）", () => {
   it("test_读向量_按主体类型与活跃态过滤", async () => {
     await insertOne(experienceRow("ex-agent"))
     await insertOne(
-      experienceRow("ex-orch", { experienceType: "orchestrator", generationPromptId: "ep-orchestrator-v1" }),
+      experienceRow("ex-orch", { experienceType: "orchestrator", generationPromptId: "ep-orchestrator@1" }),
     )
     await insertOne(experienceRow("ex-archived"))
     await store.setActive("ex-archived", false)

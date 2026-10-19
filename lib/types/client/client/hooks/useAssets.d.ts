@@ -21,6 +21,7 @@ export interface AssetPromoteResult {
 export interface AssetsFace {
     assets: StudioState['assets'];
     assetDoc: StudioState['assetDoc'];
+    promptDoc: StudioState['promptDoc'];
     assetVersions: StudioState['assetVersions'];
     /** 重新加载资产列表（活跃 + 历史（已归档））。 */
     refresh(): Promise<void>;
@@ -58,6 +59,8 @@ export interface AssetsFace {
     openFlowAsset(assetId: string): Promise<void>;
     /** 打开角色资产：装载详情后在属性栏编辑。 */
     openRoleAsset(assetId: string): Promise<void>;
+    /** 打开经验生成提示词资产：装载详情后在属性栏编辑正文（无画布形态）。 */
+    openPromptAsset(assetId: string): Promise<void>;
 }
 /** 资产面（远端失败已就地翻译为提示；返回值 null 表示本次调用未产生结果）。 */
 export declare function useAssets(remote: RemoteFace, dispatch: Dispatch<StudioAction>, notify: ToastFace['toast'], toastError: ToastFace['toastError'], t: Dict, state: StudioState): AssetsFace;

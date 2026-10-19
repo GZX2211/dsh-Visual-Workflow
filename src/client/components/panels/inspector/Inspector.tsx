@@ -4,7 +4,8 @@
 // 所见即所操作——点击模板编辑模板、点击画布节点编辑节点实例、点击连线编辑连线；
 // 底部保存/删除作用于当前选中对象；阶段无保存（只读）；虚拟节点只读。
 // 底部按钮分录（用户裁决）：模版态 = 保存/删除/入库；资产态 = 保存/归档（历史资产为
-// 「恢复」）/回滚；经验 = 保存/归档（已归档为「恢复」），**没有回滚**（经验无版本控制）；
+// 「恢复」）/回滚；提示词资产 = 保存/回滚（必须保持活跃，无归档/恢复）；
+// 经验 = 保存/归档（已归档为「恢复」），**没有回滚**（经验无版本控制）；
 // 其余（实例/服务/节点/连线）= 保存/删除（+ 角色节点的复制、实例的另存为模板）。
 //
 // 按钮职责（用户批注，本文件是唯一判定点）：
@@ -22,6 +23,7 @@ import { GroupForm, ProxyForm, StageForm } from './node-forms.js'
 import { LinePanel, WorkflowForm } from './flow-forms.js'
 import { AssetVersions } from './asset-versions.js'
 import { ExperienceForm } from './experience-form.js'
+import { PromptAssetForm } from './prompt-asset-form.js'
 import { stageNodeLabelOf } from '../../../lib/graph-handles.js'
 
 export interface InspectorProps {
@@ -128,6 +130,9 @@ export function Inspector(props: InspectorProps) {
       case 'experience':
         content = <ExperienceForm data={data} copy={t} onPatch={onPatch} />
         break
+      case 'prompt':
+        content = <PromptAssetForm data={data} copy={t} onPatch={onPatch} />
+        break
       default:
         content = <div className="wf-empty">{t.inspectorEmpty}</div>
     }
@@ -144,6 +149,8 @@ export function Inspector(props: InspectorProps) {
   const rollbackAssetId = (editorData?.assetId ?? '') !== '' ? editorData!.assetId! : nodeSourceAssetId
   /** 经验编辑对象：经验没有版本控制，一切与版本相关的按钮（回滚 / 版本列表）都不出现。 */
   const isExperienceEditor = editorData?.experience === true
+  /** 提示词资产编辑对象：只有正文可编辑；可保存新版本与回滚，但没有归档 / 恢复入口。 */
+  const isPromptEditor = editorData?.promptAsset === true
   /** 已归档（历史资产 / 非活跃经验）：状态按钮翻转为「恢复」，版本列表一律收起。 */
   const isRetiredEditor = editorData?.retired === true
 
@@ -151,8 +158,8 @@ export function Inspector(props: InspectorProps) {
   if (editorData) {
     const kind = editorData.kind
     const isStage = kind === 'stage'
-    // 资产态（工作流资产 / 角色资产）：保存 = 登记新版本；经验：保存 = 就地更新（无版本）
-    const isAsset = editorData.asset === true || editorData.roleAsset === true
+    // 资产态（工作流 / 角色 / 提示词资产）：保存 = 登记新版本；经验：保存 = 就地更新（无版本）
+    const isAsset = editorData.asset === true || editorData.roleAsset === true || isPromptEditor
     // 归档 / 恢复只管状态转换，回滚只管版本与指针：历史资产与经验都不给回滚入口
     const canRollback = !isExperienceEditor && !isRetiredEditor && rollbackAssetId !== ''
       && (isAsset || (kind === 'role' && editorData.template !== true && nodeSourceAssetId !== ''))
@@ -172,20 +179,23 @@ export function Inspector(props: InspectorProps) {
     }
     if (isAsset || isExperienceEditor) {
       // 状态转换按钮（唯一入口）：活跃 → 归档；已归档 → 恢复。两种状态都可点，不再置灰。
-      footer.push(
-        <button
-          key="retire"
-          type="button"
-          className={`wf-btn${isRetiredEditor ? '' : ' is-danger'}`}
-          onClick={onDelete}
-          disabled={importBusy}
-          title={isExperienceEditor
-            ? (isRetiredEditor ? t.experienceRestoreHint : t.experienceArchiveHint)
-            : (isRetiredEditor ? t.assetRestoreHint : t.assetArchiveHint)}
-        >
-          {isRetiredEditor ? t.assetRestore : t.assetArchive}
-        </button>,
-      )
+      // 提示词资产必须保持活跃，故不提供该按钮，也不回落到「删除」。
+      if (!isPromptEditor) {
+        footer.push(
+          <button
+            key="retire"
+            type="button"
+            className={`wf-btn${isRetiredEditor ? '' : ' is-danger'}`}
+            onClick={onDelete}
+            disabled={importBusy}
+            title={isExperienceEditor
+              ? (isRetiredEditor ? t.experienceRestoreHint : t.experienceArchiveHint)
+              : (isRetiredEditor ? t.assetRestoreHint : t.assetArchiveHint)}
+          >
+            {isRetiredEditor ? t.assetRestore : t.assetArchive}
+          </button>,
+        )
+      }
     } else {
       footer.push(
         <button key="delete" type="button" className="wf-btn is-danger" onClick={onDelete} disabled={importBusy}>
@@ -252,7 +262,8 @@ export function Inspector(props: InspectorProps) {
   // 已归档对象的状态转换走「恢复」，两者都不在此列出（与回滚按钮同判据）。
   const showVersions = !isExperienceEditor && !isRetiredEditor
     && versionsAssetId !== null && rollbackAssetId !== '' && versionsAssetId === rollbackAssetId
-    && (editorData?.asset === true || editorData?.roleAsset === true || editorData?.sourceAssetId !== undefined)
+    && (editorData?.asset === true || editorData?.roleAsset === true || editorData?.promptAsset === true
+      || editorData?.sourceAssetId !== undefined)
 
   return (
     <aside className={`wf-inspector${open ? '' : ' is-collapsed'}`} style={{ width: open ? width : undefined }}>

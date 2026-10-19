@@ -1,14 +1,16 @@
 // src/client/components/sidebar/LeftPanel.tsx
 //
 // 左侧模板库：
-// 四 Tag：工作流 / 角色（父代理模板置顶）/ 数据（任务 + 数据库分区）/ 其他（阶段 + Team）。
+// 四 Tag：工作流 / 角色（父代理模板置顶）/ 数据（任务 + 数据库分区）/ 其他（阶段 + Team；
+// 资产态下为经验生成提示词资产）。
 // 本次改动：四 Tag 由文字改为「图标」展示（图片批注：Tag 区以图标显示，不显示文字，
 // 共 4 个 tag；切换到不同 Tag 时下方列表内容随动，适配角色/数据/其他节点）。
 // 内容构建已提取到 library-model.ts（与底栏 BottomPanel 共用同一 builder，逻辑一致）。
 //
 // 资产态改造（用户裁决）：四个 Tag 之下常驻搜索栏；列表之后（左栏底部）新增
 // 「模版 / 资产」来源切换——切换同时切左侧库来源与画布文档类型。
-// 资产态下「数据」Tag 以「经验」呈现（用户批注）：列表结构与内容随库来源切换。
+// 资产态下「数据」Tag 以「经验」呈现（用户批注）：列表结构与内容随库来源切换；
+// 「其他」Tag 展示不可归档的经验生成提示词资产。
 //
 // 分栏标题排版（用户批注）：折叠箭头置于标题**右侧**，使「历史资产」与上方
 // 「活跃资产」的文字左边缘对齐；工作流 / 角色（以及经验）的分栏一视同仁。
@@ -18,13 +20,13 @@ import type { Dict } from '../../i18n.js'
 import type { LibTab, LibrarySource } from '../../studio/studio-state.js'
 import type { RoleTemplate, TaskTemplate, DatabaseTemplate, GroupTemplate } from '../../../host/shared/types.js'
 import type { WorkflowTemplate } from '../../../host/shared/graph-model.js'
-import type { ExperienceEntry, RoleAssetSummary, WorkflowAssetSummary } from '../../../host/shared/asset-types.js'
+import type { ExperienceEntry, PromptAssetSummary, RoleAssetSummary, WorkflowAssetSummary } from '../../../host/shared/asset-types.js'
 import { statusLabelOf } from '../../lib/status-label.js'
 import { ASSET_HISTORY_SECTIONS, buildLibraryModel } from './library-model.js'
 
 // 以下类型由本文件导出（供 useLibraryDrag/library-model 等消费，保持既有导入路径不变）。
 export interface LibSelectionInfo {
-  kind: 'workflow' | 'workflowTemplate' | 'flowAsset' | 'roleAsset' | 'experience' | 'role' | 'task' | 'database' | 'parentTemplate' | 'stage' | 'groupTemplate' | 'service'
+  kind: 'workflow' | 'workflowTemplate' | 'flowAsset' | 'roleAsset' | 'promptAsset' | 'experience' | 'role' | 'task' | 'database' | 'parentTemplate' | 'stage' | 'groupTemplate' | 'service'
   id: string
 }
 
@@ -64,6 +66,7 @@ export interface LeftPanelProps {
   assets: {
     workflows: WorkflowAssetSummary[]
     roles: RoleAssetSummary[]
+    prompts: PromptAssetSummary[]
     retiredWorkflows: WorkflowAssetSummary[]
     retiredRoles: RoleAssetSummary[]
   }
@@ -88,6 +91,8 @@ export interface LeftPanelProps {
   onPlaceRoleAsset(id: string, position: { x: number; y: number }): void
   /** 打开经验（资产态属性栏编辑；经验没有画布形态，故无拖入入口）。 */
   onOpenExperience(id: string): void
+  /** 打开提示词资产（资产态属性栏编辑正文；没有画布形态，故无拖入入口）。 */
+  onOpenPromptAsset(id: string): void
   onSelectLib(kind: LibSelectionInfo['kind'], id: string): void
   onPlaceTemplate(kind: 'role' | 'task' | 'database', id: string, position: { x: number; y: number }): void
   /** 角色模板拖入 Team：生成节点并直接入组。 */

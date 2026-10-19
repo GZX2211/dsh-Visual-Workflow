@@ -22,7 +22,13 @@ import {
   type StudioAction,
   type CanvasNode,
 } from '../../../src/client/studio/studio-state.js'
-import type { ExperienceEntry, RoleAssetDetail, WorkflowAssetDetail } from '../../../src/host/shared/asset-types.js'
+import type {
+  ExperienceEntry,
+  PromptAssetDetail,
+  PromptAssetSummary,
+  RoleAssetDetail,
+  WorkflowAssetDetail,
+} from '../../../src/host/shared/asset-types.js'
 
 function baseState(): StudioState {
   return createInitialState('s-1')
@@ -311,6 +317,9 @@ describe('studioReducer', () => {
     ASSETS_LOADED: false,
     ASSET_DOC_LOADED: false,
     ROLE_ASSET_LOADED: false,
+    PROMPT_ASSET_LOADED: false,
+    OPEN_PROMPT_ASSET: false,
+    PROMPT_ASSET_PATCH: false,
     EXPERIENCES_LOADED: false,
     EXPERIENCE_LOADED: false,
     OPEN_EXPERIENCE: false,
@@ -635,7 +644,7 @@ describe('资产态状态机', () => {
     const state = baseState()
     expect(state.librarySource).toBe('template')
     expect(state.libSearch).toBe('')
-    expect(state.assets).toEqual({ workflows: [], roles: [], retiredWorkflows: [], retiredRoles: [] })
+    expect(state.assets).toEqual({ workflows: [], roles: [], prompts: [], retiredWorkflows: [], retiredRoles: [] })
     expect(state.assetDoc).toBeNull()
     expect(state.assetRoleDoc).toBeNull()
     expect(state.assetVersions).toBeNull()
@@ -654,6 +663,7 @@ describe('资产态状态机', () => {
       type: 'ASSETS_LOADED',
       workflows: [{ assetId: 'a-1', versionId: 1, name: '资产一', description: '', updatedAt: 1 }],
       roles: [{ assetId: 'a-r1', versionId: 1, name: '角色资产', kind: 'agent', roleAssetType: 'standalone', updatedAt: 1 }],
+      prompts: [],
       retiredWorkflows: [{ assetId: 'a-old', versionId: 1, name: '归档流程', description: '', updatedAt: 1 }],
       retiredRoles: [{ assetId: 'a-rold', versionId: 1, name: '归档角色', kind: 'agent', roleAssetType: 'standalone', updatedAt: 1 }],
     })
@@ -662,6 +672,80 @@ describe('资产态状态机', () => {
     // 归档资产与活跃资产分开持有：召回面（活跃列表）不会被历史资产污染
     expect(state.assets.retiredWorkflows.map((item) => item.assetId)).toEqual(['a-old'])
     expect(state.assets.retiredRoles.map((item) => item.assetId)).toEqual(['a-rold'])
+  })
+
+  it('ASSETS_LOADED：提示词资产进入独立列表（其他 Tab 数据源）', () => {
+    const prompt: PromptAssetSummary = {
+      assetId: 'ep-agent',
+      versionId: 1,
+      name: 'Agent Experience Generation Prompt',
+      description: '',
+      experienceType: 'agent',
+      promptVersion: 'V1',
+      prompt: '正文',
+      updatedAt: 1,
+    }
+    const state = studioReducer(baseState(), {
+      type: 'ASSETS_LOADED',
+      workflows: [],
+      roles: [],
+      prompts: [prompt],
+      retiredWorkflows: [],
+      retiredRoles: [],
+    })
+    expect(state.assets.prompts).toEqual([prompt])
+  })
+
+  it('PROMPT_ASSET_LOADED / OPEN_PROMPT_ASSET / PROMPT_ASSET_PATCH：只编辑正文并投影到属性栏', () => {
+    const detail: PromptAssetDetail = {
+      assetId: 'ep-agent',
+      versionId: 1,
+      rowId: 'ep-agent@1',
+      name: 'Agent Experience Generation Prompt',
+      description: '描述',
+      experienceType: 'agent',
+      promptVersion: 'V1',
+      prompt: '第一版正文',
+      updatedAt: 1,
+      createdAt: 1,
+    }
+    let state = studioReducer(baseState(), { type: 'PROMPT_ASSET_LOADED', detail })
+    expect(state.promptDoc).toEqual(detail)
+
+    state = studioReducer(state, { type: 'OPEN_PROMPT_ASSET', assetId: 'ep-agent' })
+    expect(state.selection.lib).toEqual({ kind: 'promptAsset', id: 'ep-agent' })
+    expect(state.editor).toEqual({ source: 'promptAsset', id: 'ep-agent' })
+    expect(editorDataOf(state)).toMatchObject({
+      kind: 'prompt',
+      promptAsset: true,
+      assetId: 'ep-agent',
+      data: { prompt: '第一版正文' },
+    })
+
+    state = studioReducer(state, { type: 'PROMPT_ASSET_PATCH', patch: { prompt: '第二版正文', name: '试图改名' } })
+    expect(state.promptDoc).toMatchObject({ prompt: '第二版正文', name: 'Agent Experience Generation Prompt' })
+  })
+
+  it('ASSET_CLOSED：关闭提示词资产时清空详情槽与编辑器引用', () => {
+    const detail: PromptAssetDetail = {
+      assetId: 'ep-agent',
+      versionId: 1,
+      rowId: 'ep-agent@1',
+      name: 'Agent Experience Generation Prompt',
+      description: '',
+      experienceType: 'agent',
+      promptVersion: 'V1',
+      prompt: '正文',
+      updatedAt: 1,
+      createdAt: 1,
+    }
+    let state = studioReducer(baseState(), { type: 'PROMPT_ASSET_LOADED', detail })
+    state = studioReducer(state, { type: 'OPEN_PROMPT_ASSET', assetId: 'ep-agent' })
+    state = studioReducer(state, { type: 'ASSET_CLOSED', assetId: 'ep-agent' })
+
+    expect(state.promptDoc).toBeNull()
+    expect(state.editor).toBeNull()
+    expect(state.selection.lib).toBeNull()
   })
 
   it('OPEN_FLOW_ASSET：画布 = 资产详情投影，切到资产态并重置选中/编辑器/未保存标记', () => {

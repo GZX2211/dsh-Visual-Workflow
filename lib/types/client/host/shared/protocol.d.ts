@@ -96,19 +96,28 @@ export declare const EP_IMPORT_WORKFLOW = "importWorkflow";
 export declare const EP_EXPORT_AGENT_TEMPLATE = "exportAgentTemplate";
 /** 导入角色模板端点名（v2 bundle）。 */
 export declare const EP_IMPORT_AGENT_TEMPLATE = "importAgentTemplate";
-/** 列出资产端点名（按 kind 取 Active 版本索引：工作流资产 / 角色资产）。 */
+/**
+ * 列出资产端点名（按 kind 取 Active 版本索引：工作流 / 角色 / 经验生成提示词资产）。
+ * 提示词资产只有活跃项（指针必须保持活跃），因此响应中的 prompts 没有历史分栏。
+ */
 export declare const EP_LIST_ASSETS = "listAssets";
 /** 取单个资产端点名（Active 版本详情；属性栏编辑与资产态画布打开共用）。 */
 export declare const EP_GET_ASSET = "getAsset";
 /** 资产入库端点名（模版 → 资产版本；同一模版再次入库即同一 asset 的新版本）。 */
 export declare const EP_PROMOTE_ASSET = "promoteAsset";
-/** 资产态保存端点名（登记该资产的新版本；不覆盖历史版本）。 */
+/**
+ * 资产态保存端点名（登记该资产的新版本；不覆盖历史版本）。
+ * 提示词资产只接受 `prompt` 正文，名称 / 描述等固定身份不可随载荷修改。
+ */
 export declare const EP_SAVE_ASSET_VERSION = "saveAssetVersion";
 /** 资产版本列表端点名（回滚上拉列表；含 Active 标记）。 */
 export declare const EP_LIST_ASSET_VERSIONS = "listAssetVersions";
 /** 资产回滚端点名（改 Active 指针指向历史版本；不新增版本）。 */
 export declare const EP_ROLLBACK_ASSET = "rollbackAsset";
-/** 资产退役（归档）端点名（Active 移除、历史版本保留；UI 侧二次确认；不删除任何版本行）。 */
+/**
+ * 资产退役（归档）端点名（Active 移除、历史版本保留；UI 侧二次确认；不删除任何版本行）。
+ * 提示词资产必须保持活跃：该端点对 `kind='prompt'` 返回 `ERR_PROMPT_ASSET_ACTIVE_ONLY`。
+ */
 export declare const EP_RETIRE_ASSET = "retireAsset";
 /**
  * 资产级联影响预览端点名（保存前的影响面告知）。
@@ -123,6 +132,7 @@ export declare const EP_PREVIEW_ASSET_CASCADE = "previewAssetCascade";
  *
  * 与回滚的职责分工（用户裁决）：`restore` 管**状态转换**（把归档资产恢复为活跃），
  * `rollback` 只管**版本与 Active 指针**。恢复取该资产的最新版本行重建 Active 指针。
+ * 提示词资产没有归档态，该端点对 `kind='prompt'` 明确拒绝（同 `ERR_PROMPT_ASSET_ACTIVE_ONLY`）。
  */
 export declare const EP_RESTORE_ASSET = "restoreAsset";
 /** 列出经验端点名（活跃 + 已归档，一次返回；条目自带 active 标记）。 */
@@ -332,6 +342,13 @@ export declare const ERR_ASSET_VERSION_NOT_FOUND = "WF_ASSET_VERSION_NOT_FOUND";
 export declare const ERR_ASSET_DUPLICATE = "WF_ASSET_DUPLICATE";
 /** 资产入参非法（kind/assetId/版本号/载荷形状），HTTP 400。 */
 export declare const ERR_ASSET_BAD_ARGS = "WF_ASSET_BAD_ARGS";
+/**
+ * 经验生成提示词资产只能保持活跃（HTTP 409）。
+ *
+ * 提示词资产是经验生成的当前策略，归档会让对应主体类型失去生成入口；因此它不支持
+ * 归档 / 恢复，状态转换端点必须明确拒绝而不是静默忽略。版本切换（回滚）不受影响。
+ */
+export declare const ERR_PROMPT_ASSET_ACTIVE_ONLY = "WF_PROMPT_ASSET_ACTIVE_ONLY";
 /**
  * 经验不存在（经验 id 在经验表里查不到），HTTP 404。
  * 消费方语义：客户端提示「经验不存在或已被清理」并刷新经验列表。

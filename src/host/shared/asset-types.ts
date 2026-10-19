@@ -20,8 +20,13 @@
 import type { GraphNode, Line, WorkflowMode } from './graph-model.js'
 import type { OrgMeta } from './org-meta.js'
 
-/** 资产种类：工作流资产 / 角色资产（V1 只此两类）。 */
-export type AssetKind = 'workflow' | 'role'
+/**
+ * 资产种类：工作流资产 / 角色资产 / 经验生成提示词资产。
+ *
+ * 提示词资产与另外两类共用同一套版本语义（历史不可变、Active 指针、回滚只移指针），
+ * 唯一的结构性差异是它**不允许归档**：Active 指针必须始终存在，因此列表只有活跃项。
+ */
+export type AssetKind = 'workflow' | 'role' | 'prompt'
 
 /** 角色资产的父/子角色种类（与 RoleNode.kind 同域）。 */
 export type RoleAssetKind = 'parent' | 'agent'
@@ -189,8 +194,38 @@ export interface WorkflowAssetDetail {
   createdAt: number
 }
 
-/** 资产 Active 详情（按 kind 判别）。 */
-export type AssetDetail = WorkflowAssetDetail | RoleAssetDetail
+/**
+ * 经验生成提示词资产索引条目（Active 版本投影）。
+ *
+ * 每个经验主体类型恰好一条提示词资产，且 Active 指针必须始终存在（不可归档）。
+ * `prompt` 随摘要一并返回：列表搜索需要匹配正文，而这里只有两条固定资产，
+ * 载荷规模可控；详情仍以 `PromptAssetDetail` 为准。
+ */
+export interface PromptAssetSummary {
+  assetId: string
+  versionId: number
+  name: string
+  description: string
+  /** 该提示词服务的主体类型（agent / orchestrator），资产身份的一部分。 */
+  experienceType: ExperienceType
+  /** 当前 Active 版本的行版本文本（如 V1 / V2；经验 provenance 使用同一文本）。 */
+  promptVersion: string
+  /** 当前 Active 版本的正文（列表搜索用）。 */
+  prompt: string
+  /** Active 指针最后更新时间（epoch 毫秒）。 */
+  updatedAt: number
+}
+
+/** 经验生成提示词资产详情（Active 版本；正文可编辑，其余字段不可改）。 */
+export interface PromptAssetDetail extends PromptAssetSummary {
+  /** 当前 Active 版本行 id（`<assetId>@<versionId>`；经验 provenance 使用同一 id）。 */
+  rowId: string
+  /** 当前版本创建时间（epoch 毫秒；历史不可变）。 */
+  createdAt: number
+}
+
+/** 资产 Active 详情（按 kind 判别；提示词资产没有 `kind` 字段，靠 `experienceType` 识别）。 */
+export type AssetDetail = WorkflowAssetDetail | RoleAssetDetail | PromptAssetDetail
 
 /**
  * 经验类型：按调用方**此刻正在执行的内容**选择，而不是按它自认为的主体身份选择

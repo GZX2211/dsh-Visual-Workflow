@@ -28,6 +28,8 @@ import type {
   AssetVersionEntry,
   ExperienceEntry,
   ExperiencePatch,
+  PromptAssetDetail,
+  PromptAssetSummary,
   RoleAssetDetail,
   RoleAssetReference,
   RoleAssetSummary,
@@ -220,11 +222,12 @@ export interface WorkflowSeed {
  */
 export class FakeAssetStore implements FakeAssets {
   /** 调用痕迹（断言「边界传了什么」用）。 */
-  calls: { promoteRole: unknown[]; promoteWorkflow: unknown[]; saveRole: unknown[]; saveWorkflow: unknown[]; rollback: unknown[]; retired: string[]; restored: string[]; preview: unknown[] } = {
+  calls: { promoteRole: unknown[]; promoteWorkflow: unknown[]; saveRole: unknown[]; saveWorkflow: unknown[]; savePrompt: unknown[]; rollback: unknown[]; retired: string[]; restored: string[]; preview: unknown[] } = {
     promoteRole: [],
     promoteWorkflow: [],
     saveRole: [],
     saveWorkflow: [],
+    savePrompt: [],
     rollback: [],
     retired: [],
     restored: [],
@@ -241,6 +244,8 @@ export class FakeAssetStore implements FakeAssets {
   retiredWorkflowAssets = new Map<string, WorkflowAssetDetail>()
   roleVersions = new Map<string, AssetVersionEntry[]>()
   workflowVersions = new Map<string, AssetVersionEntry[]>()
+  promptAssets = new Map<string, PromptAssetDetail>()
+  promptVersions = new Map<string, AssetVersionEntry[]>()
   /** 入库时记录的来源指纹（索引条目回填用；真实实现由 SQLite 索引行承载）。 */
   roleFingerprints = new Map<string, string>()
   workflowFingerprints = new Map<string, string>()
@@ -291,6 +296,33 @@ export class FakeAssetStore implements FakeAssets {
       { versionId, rowId: detail.rowId, name: detail.name, createdAt: detail.createdAt, source: 'human', active: true },
     ])
     this.setWorkflowFingerprint(seed.assetId, seed.sourceFingerprint)
+    return detail
+  }
+
+  /** 登记一条提示词资产（Active 版本 v1；只有正文可改的语义由 savePromptAssetVersion 体现）。 */
+  seedPrompt(seed: {
+    assetId: string
+    experienceType: PromptAssetDetail['experienceType']
+    name?: string
+    description?: string
+    prompt: string
+  }): PromptAssetDetail {
+    const detail: PromptAssetDetail = {
+      assetId: seed.assetId,
+      versionId: 1,
+      rowId: `${seed.assetId}@1`,
+      experienceType: seed.experienceType,
+      name: seed.name ?? `${seed.experienceType} prompt`,
+      description: seed.description ?? '',
+      prompt: seed.prompt,
+      promptVersion: 'V1',
+      updatedAt: 1_700_000_000_000,
+      createdAt: 1_700_000_000_000,
+    }
+    this.promptAssets.set(seed.assetId, detail)
+    this.promptVersions.set(seed.assetId, [
+      { versionId: 1, rowId: detail.rowId, name: detail.name, createdAt: detail.createdAt, source: 'human', active: true },
+    ])
     return detail
   }
 
@@ -455,6 +487,84 @@ export class FakeAssetStore implements FakeAssets {
     this.retiredWorkflowAssets.delete(assetId)
     this.workflowAssets.set(assetId, restored)
     return restored
+  }
+
+  private promptSummaryOf(detail: PromptAssetDetail): PromptAssetSummary {
+    return {
+      assetId: detail.assetId,
+      versionId: detail.versionId,
+      name: detail.name,
+      description: detail.description,
+      experienceType: detail.experienceType,
+      promptVersion: detail.promptVersion,
+      prompt: detail.prompt,
+      updatedAt: detail.updatedAt,
+    }
+  }
+
+  async listPromptAssets(): Promise<PromptAssetSummary[]> {
+    return [...this.promptAssets.values()].map((detail) => this.promptSummaryOf(detail))
+  }
+
+  async getPromptAsset(assetId: string): Promise<PromptAssetDetail | null> {
+    return this.promptAssets.get(assetId) ?? null
+  }
+
+  async listPromptVersions(assetId: string): Promise<AssetVersionEntry[]> {
+    // 与真实实现同序：版本号倒序（最新在前）
+    return [...(this.promptVersions.get(assetId) ?? [])].sort((left, right) => right.versionId - left.versionId)
+  }
+
+  async rollbackPromptAsset(assetId: string, versionId: number): Promise<PromptAssetDetail> {
+    this.calls.rollback.push({ kind: 'prompt', assetId, versionId })
+    const detail = this.promptAssets.get(assetId)
+    const versions = this.promptVersions.get(assetId) ?? []
+    const version = versions.find((item) => item.versionId === versionId)
+    if (!detail || !version) throw this.versionNotFound(assetId, versionId)
+    const rolled: PromptAssetDetail = { ...detail, versionId, rowId: version.rowId }
+    this.promptAssets.set(assetId, rolled)
+    this.promptVersions.set(assetId, versions.map((item) => ({ ...item, active: item.versionId === versionId })))
+    return rolled
+  }
+
+  async savePromptAssetVersion(input: { assetId: string; prompt: string }): Promise<AssetPromoteResult> {
+    this.calls.savePrompt.push(input)
+    const existing = this.promptAssets.get(input.assetId)
+    if (!existing) throw this.assetNotFound(input.assetId)
+    if (input.prompt === existing.prompt) {
+      return {
+        assetId: input.assetId,
+        versionId: existing.versionId,
+        rowId: existing.rowId,
+        unchanged: true,
+        sharedRoleAssetIds: [],
+        archivedRoleAssetIds: [],
+      }
+    }
+    const versionId = existing.versionId + 1
+    const rowId = `${input.assetId}@${versionId}`
+    const saved: PromptAssetDetail = {
+      ...existing,
+      versionId,
+      rowId,
+      prompt: input.prompt,
+      promptVersion: `V${versionId}`,
+      updatedAt: existing.updatedAt + 1,
+    }
+    this.promptAssets.set(input.assetId, saved)
+    const entries = this.promptVersions.get(input.assetId) ?? []
+    this.promptVersions.set(input.assetId, [
+      ...entries.map((item) => ({ ...item, active: false })),
+      { versionId, rowId, name: saved.name, createdAt: saved.createdAt, source: 'human', active: true },
+    ])
+    return {
+      assetId: input.assetId,
+      versionId,
+      rowId,
+      unchanged: false,
+      sharedRoleAssetIds: [],
+      archivedRoleAssetIds: [],
+    }
   }
 
   async previewAssetCascade(input: Parameters<FakeAssets['previewAssetCascade']>[0]): Promise<RoleAssetReference[]> {

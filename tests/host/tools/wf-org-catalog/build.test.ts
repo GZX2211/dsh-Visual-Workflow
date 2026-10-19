@@ -20,7 +20,7 @@ import {
   maskConnection,
 } from '../../../../src/host/tools/wf-org-catalog/build.js'
 import { CATALOG_LIMITS, ID_CONVENTION } from '../../../../src/host/tools/wf-org-catalog/types.js'
-import { ORG_SOP_DESIGN_METHOD, ORG_SOP_L1_GRAPH_SEMANTICS, PATCH_CONTRACT_TEXT } from '../../../../src/host/prompts/index.js'
+import { ORG_SOP_L1_GRAPH_SEMANTICS, PATCH_CONTRACT_TEXT } from '../../../../src/host/prompts/index.js'
 import { collabGroupList, orchestrationNodeList } from '../../../../src/host/orchestrator/index.js'
 import {
   instanceFlowFixture,
@@ -96,7 +96,8 @@ describe('buildIndex（资产索引装配）', () => {
   it('规则段与提示词基线 / 写图契约的常量同源（不在工具层复制文本）', () => {
     const index = buildIndex(emptyIndexInput)
     expect(index.rules.graphSemantics).toBe(ORG_SOP_L1_GRAPH_SEMANTICS)
-    expect(index.rules.designMethod).toBe(ORG_SOP_DESIGN_METHOD)
+    // 设计方法正文为空时装配层省略该字段（不向模型返回空槽位）
+    expect(index.rules).not.toHaveProperty('designMethod')
     expect(index.rules.patchContract).toBe(PATCH_CONTRACT_TEXT)
     // 闸门退役：契约段不再有闸门标记语义槽位
     expect(index.rules).not.toHaveProperty('gateMarking')

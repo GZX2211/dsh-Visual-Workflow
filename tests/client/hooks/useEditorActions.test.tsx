@@ -457,6 +457,30 @@ function roleAssetState(overrides: Partial<StudioState> = {}): StudioState {
   }
 }
 
+/** 提示词资产 Active 详情夹具（只有正文可编辑）。 */
+const PROMPT_DETAIL = {
+  assetId: 'ep-agent',
+  versionId: 1,
+  rowId: 'ep-agent@1',
+  name: 'Agent Experience Generation Prompt',
+  description: '为 Agent 提炼经验',
+  experienceType: 'agent' as const,
+  promptVersion: 'V1',
+  prompt: '第一版正文',
+  updatedAt: 1,
+  createdAt: 1,
+}
+
+/** 属性栏编辑中的提示词资产态。 */
+function promptAssetState(overrides: Partial<StudioState> = {}): StudioState {
+  return {
+    ...createInitialState('s-1'),
+    editor: { source: 'promptAsset', id: 'ep-agent' },
+    promptDoc: PROMPT_DETAIL as never,
+    ...overrides,
+  }
+}
+
 /**
  * 画布角色节点态（绑定来源角色资产 a-r1）。
  * `bound=false` 模拟从模版/实例拖入的内联节点（没有 sourceAssetId → 无回滚对象）。
@@ -527,6 +551,7 @@ describe('模版 → 资产入库：目标与锁定判据（纯函数）', () =>
     const assets = {
       workflows: [{ assetId: 'a-1', versionId: 1, name: '工作流资产', description: '', sourceTemplateId: 'tpl-1', sourceFingerprint: 'fp', currentTemplateFingerprint: 'fp', updatedAt: 1 }],
       roles: [{ assetId: 'a-r1', versionId: 1, name: '角色资产', kind: 'agent' as const, roleAssetType: 'standalone' as const, sourceTemplateId: 'r-1', sourceFingerprint: 'fp', currentTemplateFingerprint: 'fp-2', updatedAt: 1 }],
+      prompts: [],
       retiredWorkflows: [],
       retiredRoles: [],
     }
@@ -646,6 +671,7 @@ describe('模版 → 资产入库：编排（先保存，保存未落库即中�
       assets: {
         workflows: [{ assetId: 'a-1', versionId: 1, name: '资产', description: '', sourceTemplateId: 'tpl-1', sourceFingerprint: 'fp', currentTemplateFingerprint: 'fp', updatedAt: 1 }],
         roles: [],
+        prompts: [],
         retiredWorkflows: [],
         retiredRoles: [],
       },
@@ -1102,6 +1128,29 @@ describe('资产态保存与状态机联动（真实 reducer）', () => {
     }
   }
 
+  it('提示词资产保存：只提交正文，成功后重装载详情（无级联确认）', async () => {
+    const { remote, calls } = makeRemote((endpoint) => {
+      if (endpoint === EP.EP_SAVE_ASSET_VERSION) {
+        return { assetId: 'ep-agent', versionId: 2, rowId: 'ep-agent@2', unchanged: false }
+      }
+      if (endpoint === EP.EP_GET_ASSET) {
+        return { ...PROMPT_DETAIL, versionId: 2, rowId: 'ep-agent@2', prompt: '第二版正文' }
+      }
+      return { workflows: [], roles: [], prompts: [] }
+    })
+    const harness = await renderReducerHarness(promptAssetState({
+      promptDoc: { ...PROMPT_DETAIL, prompt: '第二版正文' } as never,
+    }), remote)
+
+    await act(async () => { await harness.editor.saveEditor() })
+
+    expect(calls[0]).toEqual({
+      endpoint: EP.EP_SAVE_ASSET_VERSION,
+      args: { kind: 'prompt', assetId: 'ep-agent', payload: { prompt: '第二版正文' } },
+    })
+    expect(harness.state.promptDoc).toMatchObject({ versionId: 2, rowId: 'ep-agent@2', prompt: '第二版正文' })
+  })
+
   it('flowAsset 保存成功后：dirty 清除、画布重投影为服务端最新详情（对齐实例态保存语义）', async () => {
     const { remote } = makeRemote((endpoint) => {
       if (endpoint === EP.EP_SAVE_ASSET_VERSION) return { assetId: 'a-1', versionId: 3, rowId: 'a-1@3', unchanged: false }
@@ -1125,5 +1174,60 @@ describe('资产态保存与状态机联动（真实 reducer）', () => {
     expect(harness.state.assetDoc?.versionId).toBe(3)
     expect(harness.state.canvas.nodes.map((node) => node.id)).toEqual(['n-server'])
     expect(harness.state.savedGraph?.nodes.map((node) => node.id)).toEqual(['n-server'])
+  })
+})
+
+describe('提示词资产的打开、编辑与版本切换', () => {
+  it('selectLibraryCard(promptAsset)：装载详情后打开属性栏', async () => {
+    const { remote, calls } = makeRemote((endpoint) => (endpoint === EP.EP_GET_ASSET ? PROMPT_DETAIL : []))
+    const harness = await renderAssetHarness(createInitialState('s-1'), { remote })
+
+    await act(async () => { harness.editor.selectLibraryCard('promptAsset', 'ep-agent') })
+
+    expect(calls[0]).toEqual({ endpoint: EP.EP_GET_ASSET, args: { kind: 'prompt', assetId: 'ep-agent' } })
+    expect(harness.dispatched.map((action) => action.type)).toEqual(['PROMPT_ASSET_LOADED', 'OPEN_PROMPT_ASSET'])
+  })
+
+  it('patchEditor：只把正文写入详情槽（名称等不可变字段被丢弃）', async () => {
+    const harness = await renderAssetHarness(promptAssetState(), { remote: makeRemote(() => []).remote })
+
+    act(() => { harness.editor.patchEditor({ prompt: '新正文', name: '试图改名' }) })
+
+    expect(harness.dispatched).toEqual([{ type: 'PROMPT_ASSET_PATCH', patch: { prompt: '新正文' } }])
+  })
+
+  it('deleteEditor：不发起归档请求，明确提示必须保持活跃', async () => {
+    const { remote, calls } = makeRemote(() => [])
+    const harness = await renderAssetHarness(promptAssetState(), { remote })
+
+    await act(async () => { await harness.editor.deleteEditor() })
+
+    expect(calls).toEqual([])
+    expect(harness.toasts).toEqual([{ kind: 'error', text: zh.promptAssetActiveOnly }])
+  })
+
+  it('openAssetVersions / rollbackAssetVersion：复用资产版本端点并刷新提示词详情', async () => {
+    const { remote, calls } = makeRemote((endpoint) => {
+      if (endpoint === EP.EP_LIST_ASSET_VERSIONS) {
+        return [{ versionId: 1, rowId: 'ep-agent@1', name: PROMPT_DETAIL.name, createdAt: 1, source: 'human', active: true }]
+      }
+      if (endpoint === EP.EP_ROLLBACK_ASSET) return PROMPT_DETAIL
+      if (endpoint === EP.EP_GET_ASSET) return PROMPT_DETAIL
+      return { workflows: [], roles: [], prompts: [] }
+    })
+    const harness = await renderAssetHarness(promptAssetState(), { remote })
+
+    await act(async () => { await harness.editor.openAssetVersions() })
+    await act(async () => { await harness.editor.rollbackAssetVersion(1) })
+
+    expect(calls.map((call) => call.endpoint)).toEqual([
+      EP.EP_LIST_ASSET_VERSIONS,
+      EP.EP_ROLLBACK_ASSET,
+      EP.EP_GET_ASSET,
+      EP.EP_LIST_ASSETS,
+    ])
+    expect(calls[0]!.args).toEqual({ kind: 'prompt', assetId: 'ep-agent' })
+    expect(calls[1]!.args).toEqual({ kind: 'prompt', assetId: 'ep-agent', versionId: 1 })
+    expect(harness.dispatched.some((action) => action.type === 'PROMPT_ASSET_LOADED')).toBe(true)
   })
 })

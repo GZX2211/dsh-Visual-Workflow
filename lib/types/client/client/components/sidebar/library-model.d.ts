@@ -2,7 +2,7 @@ import type { Dict } from '../../i18n.js';
 import type { LibTab, LibSelKind, LibrarySource } from '../../studio/studio-state.js';
 import type { RoleTemplate, TaskTemplate, DatabaseTemplate, GroupTemplate } from '../../../host/shared/types.js';
 import type { WorkflowTemplate } from '../../../host/shared/graph-model.js';
-import type { ExperienceEntry, RoleAssetSummary, WorkflowAssetSummary } from '../../../host/shared/asset-types.js';
+import type { ExperienceEntry, PromptAssetSummary, RoleAssetSummary, WorkflowAssetSummary } from '../../../host/shared/asset-types.js';
 import type { DragPayload, LibSelectionInfo } from './LeftPanel.js';
 /** 单张卡片模型（拖拽 payload + 展示字段；底栏只取 name，左栏取全部）。 */
 export interface LibraryCardModel {
@@ -49,7 +49,7 @@ export interface LibraryTabModel {
 export interface LibraryModel {
     tabs: LibraryTabModel[];
     sections: LibrarySectionModel[];
-    /** 整页空态（资产态数据/其他 Tag、搜索无结果）；null = 无整页空态。 */
+    /** 整页空态（搜索无结果）；null = 无整页空态（分区空态由 sections[].emptyText 表达）。 */
     emptyHint: string | null;
 }
 /** builder 输入：原始列表 + 选区 + 全部回调（与 LeftPanel props 高度重合）。 */
@@ -77,6 +77,8 @@ export interface LibraryModelInput {
     assets?: {
         workflows: WorkflowAssetSummary[];
         roles: RoleAssetSummary[];
+        /** 经验生成提示词资产（资产态「其他」Tab 的列表数据源）。 */
+        prompts?: PromptAssetSummary[];
         retiredWorkflows?: WorkflowAssetSummary[];
         retiredRoles?: RoleAssetSummary[];
     };
@@ -106,6 +108,8 @@ export interface LibraryModelInput {
     }): void;
     /** 打开经验（资产态属性栏编辑；经验没有画布形态，故无拖入入口）。 */
     onOpenExperience?(id: string): void;
+    /** 打开提示词资产（资产态属性栏编辑正文；没有画布形态，故无拖入入口）。 */
+    onOpenPromptAsset?(id: string): void;
     onSelectLib(kind: LibSelectionInfo['kind'], id: string): void;
     onPlaceTemplate(kind: 'role' | 'task' | 'database', id: string, position: {
         x: number;

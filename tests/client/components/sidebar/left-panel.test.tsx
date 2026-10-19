@@ -38,6 +38,7 @@ function assetLists(
   return {
     workflows: active.workflows ?? [],
     roles: active.roles ?? [],
+    prompts: [],
     retiredWorkflows: retired.retiredWorkflows ?? [],
     retiredRoles: retired.retiredRoles ?? [],
   }
@@ -75,6 +76,7 @@ function makeProps(partial: Partial<LeftPanelProps> = {}): LeftPanelProps {
     onOpenRoleAsset: () => {},
     onPlaceRoleAsset: () => {},
     onOpenExperience: () => {},
+    onOpenPromptAsset: () => {},
     onSelectLib: () => {},
     onPlaceTemplate: () => {},
     onPlaceTemplateIntoGroup: () => {},

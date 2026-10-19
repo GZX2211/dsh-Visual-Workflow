@@ -4,7 +4,7 @@ export { buildNodeTaskBlock, type CommTarget, type NodeTaskBlockParams, } from '
 export { defaultOutputContractOf, localizeOutputContract } from './defaults.js';
 export { buildOrgPlanPrompt, type OrgPlanPromptParams, type OrgPlanTargetKind, } from './planner.js';
 export { ORG_SOP_L1_GRAPH_SEMANTICS, ORG_SOP_DESIGN_METHOD, ORCH_CHANGE_MARKER, ORCH_CHANGE_TEXT, ORCH_CHANGE_TEXT_EN, orchestrationChangeTextOf, } from './rules.js';
-export { OP_FIELD_SHAPES, GRAPH_OP_FIELD_TEXT, ROLE_NODE_DATA_CONTRACT, PATCH_SUBMISSION_RULES, ERROR_CODE_SEMANTICS, PATCH_CONTRACT_TEXT, PATCH_OPS_MAX, } from './texts/rule-patch-contract.js';
+export { OP_FIELD_SHAPES, GRAPH_OP_FIELD_TEXT, ROLE_NODE_DATA_CONTRACT, PATCH_SUBMISSION_RULES, PATCH_CONTRACT_TEXT, PATCH_OPS_MAX, } from './texts/rule-patch-contract.js';
 export { PARENT_ROLE_DUTIES } from './texts/parent-role-duties.js';
 export { REACT_CAP_MESSAGE, REACT_CAP_DENY_REASON } from './texts/rule-soft-stop.js';
 export { NOTICE_SEND_MESSAGE } from './texts/notice-send-message.js';

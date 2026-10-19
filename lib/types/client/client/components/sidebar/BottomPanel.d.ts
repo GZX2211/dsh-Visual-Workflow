@@ -2,7 +2,7 @@ import type { Dict } from '../../i18n.js';
 import type { LibTab, LibrarySource } from '../../studio/studio-state.js';
 import type { RoleTemplate, TaskTemplate, DatabaseTemplate, GroupTemplate } from '../../../host/shared/types.js';
 import type { WorkflowTemplate } from '../../../host/shared/graph-model.js';
-import type { ExperienceEntry, RoleAssetSummary, WorkflowAssetSummary } from '../../../host/shared/asset-types.js';
+import type { ExperienceEntry, PromptAssetSummary, RoleAssetSummary, WorkflowAssetSummary } from '../../../host/shared/asset-types.js';
 import type { DragPayload, LibSelectionInfo } from './LeftPanel.js';
 export interface BottomPanelProps {
     copy: Dict;
@@ -29,6 +29,7 @@ export interface BottomPanelProps {
     assets: {
         workflows: WorkflowAssetSummary[];
         roles: RoleAssetSummary[];
+        prompts: PromptAssetSummary[];
         retiredWorkflows: WorkflowAssetSummary[];
         retiredRoles: RoleAssetSummary[];
     };
@@ -51,6 +52,8 @@ export interface BottomPanelProps {
     onOpenRoleAsset(id: string): void;
     /** 打开经验（资产态属性栏编辑；经验没有画布形态，故无拖入入口）。 */
     onOpenExperience(id: string): void;
+    /** 打开提示词资产（资产态属性栏编辑正文；没有画布形态，故无拖入入口）。 */
+    onOpenPromptAsset(id: string): void;
     onPlaceRoleAsset(id: string, position: {
         x: number;
         y: number;

@@ -52,6 +52,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         assets: {
           workflows: action.workflows,
           roles: action.roles,
+          prompts: action.prompts,
           retiredWorkflows: action.retiredWorkflows,
           retiredRoles: action.retiredRoles,
         },
@@ -60,6 +61,19 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       return { ...state, assetDoc: action.detail }
     case 'ROLE_ASSET_LOADED':
       return { ...state, assetRoleDoc: action.detail }
+    case 'PROMPT_ASSET_LOADED':
+      return { ...state, promptDoc: action.detail }
+    case 'OPEN_PROMPT_ASSET':
+      return {
+        ...state,
+        selection: { nodeId: null, edgeId: null, lib: { kind: 'promptAsset', id: action.assetId } },
+        editor: { source: 'promptAsset', id: action.assetId },
+      }
+    case 'PROMPT_ASSET_PATCH':
+      // 只允许正文：即使补丁携带 name/description 也不写入详情槽（Host 侧还会再拒绝一次）
+      return state.promptDoc && typeof action.patch.prompt === 'string'
+        ? { ...state, promptDoc: { ...state.promptDoc, prompt: action.patch.prompt } }
+        : state
     case 'EXPERIENCES_LOADED':
       return { ...state, experiences: action.items }
     case 'EXPERIENCE_LOADED': {
@@ -123,11 +137,13 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         ...state,
         assetDoc: state.assetDoc?.assetId === assetId ? null : state.assetDoc,
         assetRoleDoc: state.assetRoleDoc?.assetId === assetId ? null : state.assetRoleDoc,
+        promptDoc: state.promptDoc?.assetId === assetId ? null : state.promptDoc,
         assetVersions: state.assetVersions?.assetId === assetId ? null : state.assetVersions,
       }
       const closesCanvas = state.currentKind === 'flowAsset' && state.currentId === assetId
       const closesEditor = (state.editor?.source === 'roleAsset' && state.editor.id === assetId)
         || (state.editor?.source === 'flowAsset' && state.editor.id === assetId)
+        || (state.editor?.source === 'promptAsset' && state.editor.id === assetId)
       if (!closesCanvas && !closesEditor) return next
       return {
         ...next,

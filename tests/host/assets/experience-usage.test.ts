@@ -214,7 +214,7 @@ describe("记录使用事实", () => {
 describe("判定经验是否被显式注入（feedback 准入）", () => {
   it("test_已注入判定_主体与经验类型匹配_按入参顺序去重返回", async () => {
     await insertExperience("ex-agent")
-    await insertExperience("ex-orch", { experienceType: "orchestrator", generationPromptId: "ep-orchestrator-v1" })
+    await insertExperience("ex-orch", { experienceType: "orchestrator", generationPromptId: "ep-orchestrator@1" })
     await insertExperience("ex-other-subject")
     await store.recordUsage({
       rows: [
@@ -235,7 +235,7 @@ describe("判定经验是否被显式注入（feedback 准入）", () => {
   })
 
   it("test_已注入判定_经验类型不匹配_不返回该id", async () => {
-    await insertExperience("ex-orch", { experienceType: "orchestrator", generationPromptId: "ep-orchestrator-v1" })
+    await insertExperience("ex-orch", { experienceType: "orchestrator", generationPromptId: "ep-orchestrator@1" })
     await store.recordUsage({ rows: [usageRow("ex-orch")], neutralStats: neutralStatsFixture() })
 
     const injected = await store.listInjectedIds({

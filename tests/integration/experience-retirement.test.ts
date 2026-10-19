@@ -126,7 +126,7 @@ function rowOf(type: ExperienceType = "agent"): ExperienceInsertRow {
     embeddingModel: "test-embed",
     embeddingDimension: 3,
     sourceRunId: "run-source",
-    generationPromptId: type === "orchestrator" ? "ep-orchestrator-v1" : "ep-agent-v1",
+    generationPromptId: type === "orchestrator" ? "ep-orchestrator@1" : "ep-agent@1",
     generationPromptVersion: "V1",
   }
 }

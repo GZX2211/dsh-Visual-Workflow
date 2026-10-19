@@ -1,4 +1,4 @@
-/** 单个补丁的 op 数上限（与 wf_graph_patch 的整体护栏同源）。 */
+/** 单个补丁的 op 数上限（与 wf_graph_patch 的整体护栏同源；组织预算的 patchOpsMax 可能更小）。 */
 export declare const PATCH_OPS_MAX = 200;
 /**
  * 各图操作的**最小字段契约**（逐条模式）：键为 op 名，值为该 op 的形状说明。
@@ -15,10 +15,8 @@ export declare const GRAPH_OP_FIELD_TEXT: string;
 export declare const ROLE_NODE_DATA_CONTRACT: string;
 /** 提交规则：一次补丁怎么组织、哪些形态会被拒绝。 */
 export declare const PATCH_SUBMISSION_RULES: string;
-/** 稳定错误码语义（按「该改什么」分组，模型据此选择修正方向）。 */
-export declare const ERROR_CODE_SEMANTICS: string;
 /**
  * 写图契约全文（wf_org_catalog 的 rules.patchContract 直接引用这一段）。
- * 顺序即阅读顺序：先怎么提交，再各 op 形状，再节点 data 契约，最后错误码语义。
+ * 顺序即阅读顺序：先怎么提交，再各 op 形状，最后角色节点 data 契约。
  */
 export declare const PATCH_CONTRACT_TEXT: string;

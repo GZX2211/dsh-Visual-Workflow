@@ -39,7 +39,22 @@ export declare const zh: {
     libSectionExpand: string;
     libSectionCollapse: string;
     assetEmptyHint: string;
-    assetListNotSupported: string;
+    promptAssetsSection: string;
+    promptAssetsEmpty: string;
+    promptAssetTitle: string;
+    promptAssetName: string;
+    promptAssetDescription: string;
+    promptAssetExperienceType: string;
+    promptAssetVersion: string;
+    promptAssetVersionRowId: string;
+    promptAssetBody: string;
+    promptAssetImmutableHint: string;
+    promptAssetActiveOnlyHint: string;
+    promptAssetActiveOnly: string;
+    experienceTypeNames: {
+        agent: string;
+        orchestrator: string;
+    };
     roleAssetType: {
         standalone: string;
         inline: string;

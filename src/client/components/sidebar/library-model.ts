@@ -13,7 +13,7 @@
 //   - 资产态：工作流资产 / 角色资产，各自再分「活跃资产」与「历史资产（已归档）」两栏；
 //     数据 Tag 在此态以「经验」呈现（用户批注：只在资产标签下改名并改变列表结构，
 //     模版界面仍是原本的任务 + 数据库），内容为经验库的「活跃经验 / 历史经验（已归档）」
-//     两分栏；其他 Tag 显示空态提示（资产分类不含它们）。
+//     两分栏；其他 Tag 显示经验生成提示词资产（两份内置资产，只能保持活跃）。
 //   - 角色资产的活跃栏**不含内联资产**：内联角色的编辑入口在画布节点上，左栏并排显示
 //     会与画布形成两份互相看不出同步关系的视图（用户批注：信息不同步且冗余）；
 //     内联资产一旦被多个工作流引用升为共享资产，就会出现在活跃栏。
@@ -28,7 +28,7 @@ import type { Dict } from '../../i18n.js'
 import type { LibTab, LibSelKind, LibrarySource } from '../../studio/studio-state.js'
 import type { RoleTemplate, TaskTemplate, DatabaseTemplate, GroupTemplate } from '../../../host/shared/types.js'
 import type { WorkflowTemplate } from '../../../host/shared/graph-model.js'
-import type { ExperienceEntry, RoleAssetSummary, WorkflowAssetSummary } from '../../../host/shared/asset-types.js'
+import type { ExperienceEntry, PromptAssetSummary, RoleAssetSummary, WorkflowAssetSummary } from '../../../host/shared/asset-types.js'
 import type { DragPayload, LibSelectionInfo } from './LeftPanel.js'
 
 /** 单张卡片模型（拖拽 payload + 展示字段；底栏只取 name，左栏取全部）。 */
@@ -80,7 +80,7 @@ export interface LibraryTabModel {
 export interface LibraryModel {
   tabs: LibraryTabModel[]
   sections: LibrarySectionModel[]
-  /** 整页空态（资产态数据/其他 Tag、搜索无结果）；null = 无整页空态。 */
+  /** 整页空态（搜索无结果）；null = 无整页空态（分区空态由 sections[].emptyText 表达）。 */
   emptyHint: string | null
 }
 
@@ -102,6 +102,8 @@ export interface LibraryModelInput {
   assets?: {
     workflows: WorkflowAssetSummary[]
     roles: RoleAssetSummary[]
+    /** 经验生成提示词资产（资产态「其他」Tab 的列表数据源）。 */
+    prompts?: PromptAssetSummary[]
     retiredWorkflows?: WorkflowAssetSummary[]
     retiredRoles?: RoleAssetSummary[]
   }
@@ -125,6 +127,8 @@ export interface LibraryModelInput {
   onPlaceRoleAsset?(id: string, position: { x: number; y: number }): void
   /** 打开经验（资产态属性栏编辑；经验没有画布形态，故无拖入入口）。 */
   onOpenExperience?(id: string): void
+  /** 打开提示词资产（资产态属性栏编辑正文；没有画布形态，故无拖入入口）。 */
+  onOpenPromptAsset?(id: string): void
   onSelectLib(kind: LibSelectionInfo['kind'], id: string): void
   onPlaceTemplate(kind: 'role' | 'task' | 'database', id: string, position: { x: number; y: number }): void
   onPlaceTemplateIntoGroup(kind: 'role', id: string, groupId: string, position: { x: number; y: number }): void
@@ -167,6 +171,7 @@ export function buildLibraryModel(input: LibraryModelInput): LibraryModel {
     copy: t, libTab, workflows, currentSessionId, flowTemplates, parentTemplate,
     roleTemplates, taskTemplates, databaseTemplates, groupTemplates, stageKinds, libSelection,
     onSelectWorkflow, onSelectFlowTemplate, onSelectFlowAsset, onOpenRoleAsset, onPlaceRoleAsset, onOpenExperience,
+    onOpenPromptAsset,
     onSelectLib, onPlaceTemplate, onPlaceTemplateIntoGroup, onPlaceStage, onPlaceGroupFromTemplate,
     onPlaceParent,
   } = input
@@ -319,6 +324,26 @@ export function buildLibraryModel(input: LibraryModelInput): LibraryModel {
         ASSET_HISTORY_SECTIONS.experience, t.experienceHistorySection, t.experienceHistoryEmpty,
         retired.filter(hits).map(experienceCard),
       ))
+    } else if (libTab === 'other') {
+      // 资产态的「其他」Tag：经验生成提示词资产。它们必须保持活跃，因此只有一个分区、
+      // 没有历史/归档分栏；卡片只打开属性栏（没有画布形态，不可拖入）。
+      sections.push({
+        key: 'assetPrompts',
+        title: t.promptAssetsSection,
+        plus: false,
+        emptyText: t.promptAssetsEmpty,
+        cards: (assets.prompts ?? [])
+          .filter((item) => hit(item.name, item.description, item.prompt))
+          .map((item) => card(
+            item.assetId, 'promptAsset', item.assetId, '✎', String(item.name ?? ''),
+            // 副行显示主体类型与当前版本：这是「两份提示词」最容易区分的两个事实
+            `${String((t.experienceTypeNames as Record<string, string>)[item.experienceType] ?? item.experienceType)} · v${item.versionId}`,
+            {
+              label: String(item.name ?? ''),
+              onClick: () => onOpenPromptAsset?.(item.assetId),
+            },
+          )),
+      })
     }
   } else if (libTab === 'workflow') {
     // 左侧「工作流」Tag 拆两区——上方实例列表（无 + 号；运行中卡片
@@ -466,14 +491,12 @@ export function buildLibraryModel(input: LibraryModelInput): LibraryModel {
     })
   }
 
-  // 整页空态判定（顺序即优先级）：
-  //   ① 资产态的「其他」Tag 无资产分类 → 「该分类暂无资产」（工作流/角色/经验各有分栏）；
-  //   ② 搜索无命中 → 「没有匹配的条目」；
-  //   ③ 其余情况由分区自身的 emptyText 表达。
+  // 整页空态判定：
+  //   ① 搜索无命中 → 「没有匹配的条目」；
+  //   ② 其余情况由分区自身的 emptyText 表达（资产态「其他」现在有提示词分区）。
   let emptyHint: string | null = null
-  if (librarySource === 'asset' && libTab === 'other') emptyHint = t.assetListNotSupported
   const matched = sections.some((section) => section.cards.length > 0)
-  if (emptyHint === null && searching && !matched) emptyHint = t.searchNoResult
+  if (searching && !matched) emptyHint = t.searchNoResult
 
   // 搜索是「过滤」语义：无命中的分区不显示（避免出现「暂无模板，点击 + 新建」的误导空态）
   const visible = searching ? sections.filter((section) => section.cards.length > 0) : sections

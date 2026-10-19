@@ -21,7 +21,7 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { Dispatch } from 'react'
 import type {
-  AssetDetail, AssetKind, AssetVersionEntry, RoleAssetDetail, RoleAssetReference, RoleAssetType, WorkflowAssetDetail,
+  AssetDetail, AssetKind, AssetVersionEntry, PromptAssetDetail, RoleAssetDetail, RoleAssetReference, RoleAssetType, WorkflowAssetDetail,
 } from '../../host/shared/asset-types.js'
 import type { StudioAction, StudioState } from '../studio/studio-state.js'
 import type { RemoteFace } from './useRemote.js'
@@ -48,6 +48,7 @@ export interface AssetPromoteResult {
 export interface AssetsFace {
   assets: StudioState['assets']
   assetDoc: StudioState['assetDoc']
+  promptDoc: StudioState['promptDoc']
   assetVersions: StudioState['assetVersions']
   /** 重新加载资产列表（活跃 + 历史（已归档））。 */
   refresh(): Promise<void>
@@ -85,6 +86,8 @@ export interface AssetsFace {
   openFlowAsset(assetId: string): Promise<void>
   /** 打开角色资产：装载详情后在属性栏编辑。 */
   openRoleAsset(assetId: string): Promise<void>
+  /** 打开经验生成提示词资产：装载详情后在属性栏编辑正文（无画布形态）。 */
+  openPromptAsset(assetId: string): Promise<void>
 }
 
 /** 资产列表响应归一化（形状漂移一律降级为空列表，不因未知字段抛错）。 */
@@ -92,12 +95,14 @@ function normalizeList(payload: unknown): StudioState['assets'] {
   const record = (payload ?? {}) as {
     workflows?: unknown
     roles?: unknown
+    prompts?: unknown
     retiredWorkflows?: unknown
     retiredRoles?: unknown
   }
   return {
     workflows: Array.isArray(record.workflows) ? record.workflows : [],
     roles: Array.isArray(record.roles) ? record.roles : [],
+    prompts: Array.isArray(record.prompts) ? record.prompts : [],
     retiredWorkflows: Array.isArray(record.retiredWorkflows) ? record.retiredWorkflows : [],
     retiredRoles: Array.isArray(record.retiredRoles) ? record.retiredRoles : [],
   }
@@ -139,6 +144,11 @@ export function useAssets(
       notify('info', t.assetDuplicateCancelled)
       return true
     }
+    if (code === EP.ERR_PROMPT_ASSET_ACTIVE_ONLY) {
+      // 提示词资产永远活跃：归档/恢复请求被拒绝属预期语义，不是通用资产故障
+      notify('error', t.promptAssetActiveOnly)
+      return true
+    }
     if (code === EP.ERR_ASSET_NOT_FOUND || code === EP.ERR_ASSET_VERSION_NOT_FOUND) {
       notify('error', t.assetNotFound)
       if (reload) {
@@ -154,7 +164,7 @@ export function useAssets(
       return true
     }
     return false
-  }, [dispatch, notify, remote, t.assetDuplicateCancelled, t.assetNotFound])
+  }, [dispatch, notify, remote, t.assetDuplicateCancelled, t.assetNotFound, t.promptAssetActiveOnly])
 
   const refresh = useCallback(async (): Promise<void> => {
     const seq = ++listSeq.current
@@ -177,6 +187,7 @@ export function useAssets(
       if (!detail) return null
       if (!mounted.current || seq !== detailSeq.current) return null
       if (kind === 'role') dispatch({ type: 'ROLE_ASSET_LOADED', detail: detail as RoleAssetDetail })
+      else if (kind === 'prompt') dispatch({ type: 'PROMPT_ASSET_LOADED', detail: detail as PromptAssetDetail })
       else dispatch({ type: 'ASSET_DOC_LOADED', detail: detail as WorkflowAssetDetail })
       return detail
     } catch (error) {
@@ -297,6 +308,11 @@ export function useAssets(
 
   /** 归档资产（Active 移除、历史与版本内容全保留）；返回值 = 是否成功，语义同 rollback。 */
   const retire = useCallback(async (kind: AssetKind, assetId: string): Promise<boolean> => {
+    // 提示词资产必须保持活跃：界面不显示归档入口，这里再兜一层（快捷键/回调旁路）
+    if (kind === 'prompt') {
+      notify('error', t.promptAssetActiveOnly)
+      return false
+    }
     try {
       await remote.call(EP.EP_RETIRE_ASSET, { kind, assetId })
       if (!mounted.current) return true
@@ -308,13 +324,18 @@ export function useAssets(
       toastError(error)
       return false
     }
-  }, [handleAssetFailure, notify, refresh, remote, t.toastAssetRetired, toastError])
+  }, [handleAssetFailure, notify, refresh, remote, t.promptAssetActiveOnly, t.toastAssetRetired, toastError])
 
   /**
    * 恢复历史（已归档）资产：取最新版本行重建 Active 指针；返回值 = 恢复后的详情（失败 null）。
    * 与回滚的分工见共享协议：恢复管状态转换，回滚管版本与 Active 指针。
    */
   const restore = useCallback(async (kind: AssetKind, assetId: string): Promise<AssetDetail | null> => {
+    // 提示词资产没有归档态，恢复同样不可用
+    if (kind === 'prompt') {
+      notify('error', t.promptAssetActiveOnly)
+      return null
+    }
     try {
       await remote.call(EP.EP_RESTORE_ASSET, { kind, assetId })
       if (!mounted.current) return null
@@ -333,7 +354,7 @@ export function useAssets(
       toastError(error)
       return null
     }
-  }, [dispatch, handleAssetFailure, loadAsset, notify, refresh, remote, t.toastAssetRestored, toastError])
+  }, [dispatch, handleAssetFailure, loadAsset, notify, refresh, remote, t.promptAssetActiveOnly, t.toastAssetRestored, toastError])
 
   const openFlowAsset = useCallback(async (assetId: string): Promise<void> => {
     const detail = await loadAsset('workflow', assetId) as WorkflowAssetDetail | null
@@ -347,18 +368,25 @@ export function useAssets(
     dispatch({ type: 'OPEN_ROLE_ASSET', assetId })
   }, [dispatch, loadAsset])
 
+  const openPromptAsset = useCallback(async (assetId: string): Promise<void> => {
+    const detail = await loadAsset('prompt', assetId) as PromptAssetDetail | null
+    if (!detail || !mounted.current) return
+    dispatch({ type: 'OPEN_PROMPT_ASSET', assetId })
+  }, [dispatch, loadAsset])
+
   // face 引用必须跨「同一 state 的重渲染」保持恒等：装配层会把它当作派生 props 的记忆化
   // 依赖，每次渲染新建会让下游 props 比较与 memo 边界全部失效（D06-08/D08-07 同口径）。
   // 依赖即 face 暴露的全部内容——state 切片与 useCallback 方法，任何一项真正变化都应重建。
   return useMemo(() => ({
     assets: state.assets,
     assetDoc: state.assetDoc,
+    promptDoc: state.promptDoc,
     assetVersions: state.assetVersions,
     refresh, loadAsset, promote, saveVersion, previewCascade, openVersions, closeVersions, rollback, retire, restore,
-    openFlowAsset, openRoleAsset,
+    openFlowAsset, openRoleAsset, openPromptAsset,
   }), [
-    state.assets, state.assetDoc, state.assetVersions,
+    state.assets, state.assetDoc, state.promptDoc, state.assetVersions,
     refresh, loadAsset, promote, saveVersion, previewCascade, openVersions, closeVersions, rollback, retire, restore,
-    openFlowAsset, openRoleAsset,
+    openFlowAsset, openRoleAsset, openPromptAsset,
   ])
 }

@@ -76,6 +76,8 @@ export const ERROR_STATUS: Record<string, number> = {
   [EP.ERR_ASSET_NOT_FOUND]: 404,
   [EP.ERR_ASSET_VERSION_NOT_FOUND]: 404,
   [EP.ERR_ASSET_DUPLICATE]: 409,
+  // 提示词资产必须保持活跃：归档 / 恢复属于对调用方意图的明确拒绝（不是缺参）
+  [EP.ERR_PROMPT_ASSET_ACTIVE_ONLY]: 409,
   [EP.ERR_EXPERIENCE_NOT_FOUND]: 404,
   [EP.ERR_EXPERIENCE_BAD_ARGS]: 400,
 

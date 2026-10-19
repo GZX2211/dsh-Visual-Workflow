@@ -136,7 +136,8 @@ export function experienceRow(id: string, overrides: Partial<ExperienceInsertRow
     embeddingModel: "test-embed",
     embeddingDimension: 3,
     sourceRunId: "run-1",
-    generationPromptId: "ep-agent-v1",
+    // 新库播种的提示词版本行 id（`<assetId>@<versionId>`）；外键要求它真实存在
+    generationPromptId: "ep-agent@1",
     generationPromptVersion: "V1",
     ...overrides,
   }

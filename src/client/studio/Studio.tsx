@@ -372,6 +372,8 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive, langu
     onPlaceRoleAsset: placeRoleAsset,
     // 经验卡片：经验没有画布形态，只能打开到属性栏编辑（无拖入入口）
     onOpenExperience: (id: string) => editor.selectLibraryCard('experience', id),
+    // 提示词资产：同样没有画布形态，打开到属性栏编辑正文（无拖入入口）
+    onOpenPromptAsset: (id: string) => editor.selectLibraryCard('promptAsset', id),
     onSelectLib: editor.selectLibraryCard,
     onPlaceTemplate: canvas.placeTemplateNode,
     onPlaceTemplateIntoGroup: canvas.placeTemplateIntoGroup,

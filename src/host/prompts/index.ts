@@ -47,7 +47,7 @@ export {
   type OrgPlanTargetKind,
 } from './planner.js'
 
-// 规则文本与规则段（工具调用注入）：图语义 / 设计方法 / 编排变更通知。
+// 规则文本与规则段（工具调用注入）：图语义 / 设计方法（暂空）/ 编排变更通知。
 export {
   ORG_SOP_L1_GRAPH_SEMANTICS,
   ORG_SOP_DESIGN_METHOD,
@@ -57,13 +57,12 @@ export {
   orchestrationChangeTextOf,
 } from './rules.js'
 
-// 规则文本：写图契约（wf_org_catalog 按需返回 + wf_graph_patch 参数层错误消息引用）。
+// 规则文本：写图契约（wf_org_catalog 按需返回；op 形状另被 wf_graph_patch 参数层错误消息引用）。
 export {
   OP_FIELD_SHAPES,
   GRAPH_OP_FIELD_TEXT,
   ROLE_NODE_DATA_CONTRACT,
   PATCH_SUBMISSION_RULES,
-  ERROR_CODE_SEMANTICS,
   PATCH_CONTRACT_TEXT,
   PATCH_OPS_MAX,
 } from './texts/rule-patch-contract.js'

@@ -107,6 +107,7 @@ function assetTargetOf(state: StudioState): { kind: AssetKind; assetId: string; 
   if (!editor) return null
   if (editor.source === 'flowAsset') return { kind: 'workflow', assetId: editor.id }
   if (editor.source === 'roleAsset') return { kind: 'role', assetId: editor.id }
+  if (editor.source === 'promptAsset') return { kind: 'prompt', assetId: editor.id }
   if (editor.source === 'node') {
     const node = state.canvas.nodes.find((item) => item.id === editor.id)
     const sourceAssetId = typeof node?.data?.sourceAssetId === 'string' ? node.data.sourceAssetId : ''
@@ -229,6 +230,11 @@ export function useEditorActions(
       experiences.open(id)
       return
     }
+    if (kind === 'promptAsset') {
+      // 提示词资产没有画布形态：装载详情后由 OPEN_PROMPT_ASSET 同时设置选中与编辑器
+      void assets.openPromptAsset(id)
+      return
+    }
     selection.selectLib(kind, id)
     if (kind === 'parentTemplate') {
       // 父代理模板点击：具备属性（属性栏显示模板内容），应展开右侧属性栏。
@@ -249,7 +255,7 @@ export function useEditorActions(
     const editorKindMap: Record<string, 'role' | 'task' | 'database'> = { role: 'role', task: 'task', database: 'database' }
     const editorKind = editorKindMap[kind]
     if (editorKind) selection.selectEditor({ source: 'template', kind: editorKind, id })
-  }, [experiences, selectFlowTemplate, selectWorkflow, selection])
+  }, [assets, experiences, selectFlowTemplate, selectWorkflow, selection])
 
   // ---------- 编辑器 patch ----------
   const patchEditor = useCallback((patch: Record<string, unknown>) => {
@@ -281,6 +287,11 @@ export function useEditorActions(
       // 经验表单只下发九个可编辑语义字段：直接落详情槽，保存时再由 experiencePatchOf
       // 做一次投影——此处不复制字段清单，避免两处漂移。
       dispatch({ type: 'EXPERIENCE_PATCH', patch })
+      return
+    }
+    if (editor.source === 'promptAsset') {
+      // 提示词资产只有正文可编辑；名称/描述等固定字段即使被旁路提交也不写入详情槽
+      dispatch({ type: 'PROMPT_ASSET_PATCH', patch: { prompt: patch.prompt } })
       return
     }
     if (editor.source === 'node') {
@@ -413,6 +424,16 @@ export function useEditorActions(
       if (!entry || entry.id !== editor.id) return null
       return await experiences.save(entry)
     }
+    if (editor.source === 'promptAsset') {
+      // 提示词保存 = 只把正文登记为新版本；名称/描述/主体类型由 Host 从当前版本继承
+      const detail = state.promptDoc
+      if (!detail || detail.assetId !== editor.id) return null
+      const result = await assets.saveVersion('prompt', detail.assetId, { prompt: detail.prompt })
+      if (!result) return null
+      await assets.loadAsset('prompt', detail.assetId)
+      onSaved?.()
+      return result
+    }
     return null
   }, [assets, dispatch, experiences, needsCascadeConfirm, notify, saveCanvas, state, t.assetCascadeRoleMessage, t.assetCascadeWorkflowMessage, t.toastSaved, templates, toastError])
 
@@ -464,6 +485,11 @@ export function useEditorActions(
   const deleteEditor = useCallback(async () => {
     const editor = state.editor
     if (!editor) return
+    // 提示词资产必须保持活跃：界面无归档按钮，这里再兜一层，绝不发起归档请求
+    if (editor.source === 'promptAsset') {
+      notify('error', t.promptAssetActiveOnly)
+      return
+    }
     if (editor.source === 'workflow') {
       const flow = currentFlowOf(state)
       if (!flow) return
@@ -644,7 +670,7 @@ export function useEditorActions(
     if (editor.source === 'edge') {
       removeLine(editor.id)
     }
-  }, [assets, clearCanvasIfOwned, dispatch, experiences, notify, removeLine, removeSelected, state, t.assetRetireConfirm, t.assetRetireMessage, t.assetRetireSharedMessage, t.assetRetireTitle, t.confirmDelete, t.deleteFlow, t.experienceRetireConfirm, t.experienceRetireMessage, t.experienceRetireTitle, t.toastDeleted, templates, flowTemplates, toastError, workflows])
+  }, [assets, clearCanvasIfOwned, dispatch, experiences, notify, removeLine, removeSelected, state, t.assetRetireConfirm, t.assetRetireMessage, t.assetRetireSharedMessage, t.assetRetireTitle, t.confirmDelete, t.deleteFlow, t.experienceRetireConfirm, t.experienceRetireMessage, t.experienceRetireTitle, t.promptAssetActiveOnly, t.toastDeleted, templates, flowTemplates, toastError, workflows])
 
   // face 引用跨「同一 state 的重渲染」保持恒等（装配层用它作派生 props 的记忆化依赖）；
   // 依赖即 face 暴露的全部方法，均为 useCallback，故同一 state 下引用稳定。

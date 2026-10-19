@@ -105,6 +105,10 @@ const ROLE_DETAIL = {
   assetId: 'a-r1', versionId: 1, rowId: 'row-1', kind: 'agent', roleAssetType: 'standalone',
   name: '资产角色', systemPrompt: '', provider: '', model: '', retryLimit: 3, referenceWorkflowIds: [], createdAt: 1,
 }
+const PROMPT_DETAIL = {
+  assetId: 'ep-agent', versionId: 1, rowId: 'ep-agent@1', name: 'Agent Experience Generation Prompt',
+  description: '', experienceType: 'agent', promptVersion: 'V1', prompt: '正文', updatedAt: 1, createdAt: 1,
+}
 
 describe('useAssets：八个资产端点的调用与参数', () => {
   it('refresh → listAssets（无参）并写入规范化列表（活跃 + 历史）', async () => {
@@ -124,6 +128,7 @@ describe('useAssets：八个资产端点的调用与参数', () => {
         type: 'ASSETS_LOADED',
         workflows: [{ assetId: 'a-1' }],
         roles: [{ assetId: 'a-r1' }],
+        prompts: [],
         retiredWorkflows: [{ assetId: 'a-old' }],
         retiredRoles: [{ assetId: 'a-rold' }],
       },
@@ -136,7 +141,7 @@ describe('useAssets：八个资产端点的调用与参数', () => {
     await act(async () => { await face.refresh() })
     // 旧形状（无历史字段）同样降级为空历史列表：形状漂移不因未知字段抛错
     expect(dispatched).toEqual([
-      { type: 'ASSETS_LOADED', workflows: [], roles: [], retiredWorkflows: [], retiredRoles: [] },
+      { type: 'ASSETS_LOADED', workflows: [], roles: [], prompts: [], retiredWorkflows: [], retiredRoles: [] },
     ])
   })
 
@@ -284,6 +289,47 @@ describe('useAssets：八个资产端点的调用与参数', () => {
     expect(dispatched.map((action) => action.type)).toEqual([
       'ASSET_DOC_LOADED', 'OPEN_FLOW_ASSET', 'ROLE_ASSET_LOADED', 'OPEN_ROLE_ASSET',
     ])
+  })
+
+  it('loadAsset / openPromptAsset：prompt → PROMPT_ASSET_LOADED + OPEN_PROMPT_ASSET', async () => {
+    const { remote, calls } = makeRemote((endpoint) => (endpoint === EP.EP_GET_ASSET ? PROMPT_DETAIL : []))
+    const { face, dispatched } = await renderAssets(remote)
+
+    let detail: unknown = null
+    await act(async () => { detail = await face.loadAsset('prompt', 'ep-agent') })
+    expect(detail).toEqual(PROMPT_DETAIL)
+    await act(async () => { await face.openPromptAsset('ep-agent') })
+
+    expect(calls.every((call) => call.endpoint === EP.EP_GET_ASSET)).toBe(true)
+    expect(dispatched.map((action) => action.type)).toEqual([
+      'PROMPT_ASSET_LOADED', 'PROMPT_ASSET_LOADED', 'OPEN_PROMPT_ASSET',
+    ])
+  })
+
+  it('saveVersion prompt：只上送正文，成功后提示并刷新列表', async () => {
+    const saved = { assetId: 'ep-agent', versionId: 2, rowId: 'ep-agent@2', unchanged: false }
+    const { remote, calls } = makeRemoteWith(EP.EP_SAVE_ASSET_VERSION, saved)
+    const { face, toasts } = await renderAssets(remote)
+
+    await act(async () => { await face.saveVersion('prompt', 'ep-agent', { prompt: '新正文' }) })
+
+    expect(calls[0]).toEqual({
+      endpoint: EP.EP_SAVE_ASSET_VERSION,
+      args: { kind: 'prompt', assetId: 'ep-agent', payload: { prompt: '新正文' } },
+    })
+    expect(toasts).toEqual([{ kind: 'success', text: zh.toastAssetVersionSaved.replace('{id}', 'ep-agent').replace('{version}', '2') }])
+  })
+
+  it('retire prompt：不发起归档请求，明确提示「必须保持活跃」', async () => {
+    const { remote, calls } = makeRemote(() => [])
+    const { face, toasts } = await renderAssets(remote)
+
+    let retired = true
+    await act(async () => { retired = await face.retire('prompt', 'ep-agent') })
+
+    expect(retired).toBe(false)
+    expect(calls).toEqual([])
+    expect(toasts).toEqual([{ kind: 'error', text: zh.promptAssetActiveOnly }])
   })
 
   it('openFlowAsset：详情装载失败（未找到）→ 不切画布、不改编辑器', async () => {

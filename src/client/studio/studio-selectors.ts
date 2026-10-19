@@ -239,6 +239,17 @@ export function editorDataOf(state: StudioState): EditorData | null {
       ...(detail.retired === true ? { retired: true } : {}),
     }
   }
+  if (editor.source === 'promptAsset') {
+    const detail = state.promptDoc
+    if (!detail || detail.assetId !== editor.id) return null
+    return {
+      kind: 'prompt',
+      data: formDataOf(detail),
+      name: detail.name,
+      promptAsset: true,
+      assetId: detail.assetId,
+    }
+  }
   if (editor.source === 'experience') {
     const entry = state.experienceDoc
     if (!entry || entry.id !== editor.id) return null

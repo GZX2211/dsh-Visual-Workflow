@@ -21,6 +21,8 @@ import type {
   ExperienceStatsRebuildInput,
   ExperienceType,
   ExperienceUsageRecordInput,
+  PromptAssetDetail,
+  PromptAssetSummary,
   RoleAssetDetail,
   RoleAssetReference,
   RoleAssetSummary,
@@ -37,7 +39,15 @@ import {
   insertEvaluationsCheckedRows,
   type ExperienceEvaluationsCheckedResult,
 } from './experience-evaluations.js'
-import { getActivePromptRow, listPromptRows } from './experience-prompts.js'
+import {
+  getActivePromptRow,
+  getPromptAssetDetail,
+  listPromptAssets,
+  listPromptRows,
+  readPromptVersionEntries,
+  rollbackPromptAssetTo,
+  savePromptAssetVersion as savePromptAssetVersionRow,
+} from './experience-prompts.js'
 import {
   readRetirementFacts,
   retireExperienceRowForPolicy,
@@ -98,7 +108,12 @@ export { EXPERIENCE_TYPE_VALUES } from './experience-codec.js'
 export type { ExperienceEmbeddingRow, ExperienceInsertCheckedResult } from './experiences.js'
 export type { ExperienceEvaluationsCheckedResult } from './experience-evaluations.js'
 export { EXPERIENCE_LIST_MAX_LIMIT } from './experiences.js'
-export { EXPERIENCE_PROMPT_SEED_VERSION, EXPERIENCE_PROMPT_SEEDS, type ExperiencePromptSeed } from './experience-seeds.js'
+export {
+  EXPERIENCE_PROMPT_ASSET_IDS,
+  EXPERIENCE_PROMPT_SEED_VERSION,
+  EXPERIENCE_PROMPT_SEEDS,
+  type ExperiencePromptSeed,
+} from './experience-seeds.js'
 export { PARENT_DUTIES_ASSET_ID, PARENT_DUTIES_ASSET_NAME, hasParentRoleAsset, seedParentDutiesAsset } from './parent-duties-seed.js'
 export {
   EXPERIENCE_EVALUATION_ID_PREFIX,
@@ -479,9 +494,51 @@ export class AssetStore {
     return this.db.withRead((tx) => getActivePromptRow(tx, type))
   }
 
-  /** 全量经验生成 Prompt（含历史版本；同类型内活跃行排在前）。 */
+  /** 全量经验生成 Prompt（含历史版本；同资产内活跃行排在前）。 */
   listPrompts(): Promise<ExperienceGenerationPromptEntry[]> {
     return this.db.withRead((tx) => listPromptRows(tx))
+  }
+
+  // -------------------------------------------------------------------------
+  // 经验生成提示词资产（只可切换版本，不可归档）
+  // -------------------------------------------------------------------------
+
+  /** 提示词资产列表（两条内置资产；Active 版本投影，无历史/归档分栏）。 */
+  listPromptAssets(): Promise<PromptAssetSummary[]> {
+    return this.db.withRead((tx) => listPromptAssets(tx))
+  }
+
+  /** 提示词资产详情（Active 版本；Active 指针损坏时只读回落到最新版本）。 */
+  getPromptAsset(assetId: string): Promise<PromptAssetDetail | null> {
+    return this.db.withRead((tx) => getPromptAssetDetail(tx, assetId))
+  }
+
+  /** 提示词资产版本列表（版本号倒序；不可归档，所有版本都属于同一活跃资产）。 */
+  listPromptVersions(assetId: string): Promise<AssetVersionEntry[]> {
+    return this.db.withRead((tx) => readPromptVersionEntries(tx, assetId))
+  }
+
+  /**
+   * 保存提示词资产新版本：**只接受正文**，名称/描述/主体类型从当前版本继承。
+   * 内容全等返回 unchanged（不新增版本）；空正文在领域层拒绝。
+   */
+  savePromptAssetVersion(input: { assetId: string; prompt: string }): Promise<AssetPromoteResult> {
+    return this.db.withTx((tx) => {
+      const result = savePromptAssetVersionRow({ tx, now: this.now }, input)
+      return {
+        assetId: result.assetId,
+        versionId: result.versionId,
+        rowId: result.rowId,
+        unchanged: result.unchanged,
+        sharedRoleAssetIds: [],
+        archivedRoleAssetIds: [],
+      }
+    })
+  }
+
+  /** 回滚提示词资产到指定版本（只移 Active 指针；不存在归档/恢复分支）。 */
+  rollbackPromptAsset(assetId: string, versionId: number): Promise<PromptAssetDetail> {
+    return this.db.withTx((tx) => rollbackPromptAssetTo({ tx, now: this.now }, assetId, versionId))
   }
 
   /** 界面经验列表（活跃与归档一并返回，条目自带 active 标记；超出上限按上限截断）。 */

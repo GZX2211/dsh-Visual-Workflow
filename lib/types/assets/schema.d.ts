@@ -31,6 +31,15 @@ export declare const WORKFLOW_ASSET_ACTIVE_DDL = "\nCREATE TABLE IF NOT EXISTS w
 export declare const WORKFLOW_ASSET_ACTIVE_INDEXES_DDL: string[];
 export declare const EXPERIENCE_PROMPTS_DDL: string;
 export declare const EXPERIENCE_PROMPTS_INDEXES_DDL: string[];
+/**
+ * 提示词资产的 Active 指针表。
+ *
+ * 与其他资产一致：一行 = 一条逻辑资产的当前版本；回滚只改此表，历史行不动。
+ * 结构性差异：本表**没有删除路径**（归档被禁止），每个主体类型恰好一行，
+ * 由 `experience_type` 唯一索引与初始化自愈共同保证「指针必须保持活跃」。
+ */
+export declare const EXPERIENCE_PROMPT_ACTIVE_DDL = "\nCREATE TABLE IF NOT EXISTS experience_prompt_active (\n  asset_id TEXT PRIMARY KEY,\n  version_id INTEGER NOT NULL,\n  experience_type TEXT NOT NULL CHECK (experience_type IN ('agent','orchestrator')),\n  name TEXT NOT NULL,\n  updated_at INTEGER NOT NULL,\n  FOREIGN KEY (asset_id, version_id) REFERENCES experience_prompts(asset_id, version_id)\n)";
+export declare const EXPERIENCE_PROMPT_ACTIVE_INDEXES_DDL: string[];
 export declare const EXPERIENCES_DDL: string;
 export declare const EXPERIENCES_INDEXES_DDL: string[];
 /**
@@ -71,8 +80,13 @@ export declare const SCHEMA_STATEMENTS: string[];
  * 经验索引不放进 SCHEMA_STATEMENTS：旧形状的 experiences 还没有 experience_type 列，
  * 先建索引会因「no such column」失败，必须等形状迁移完成后再建。
  *
- * 迁移顺序：旧形状 experiences 先换成带 experience_type 的形状，team 退役迁移再在其上
- * 按相同的今形状重建（两表 DDL 都已被收窄），最后才是索引与播种——播种排在迁移之后，
- * 退役类型的旧 Prompt 行已删除，不会再被判定为「该类型已有行」。
+ * 迁移顺序：
+ *   1. 旧形状 experiences 换成带 experience_type 的形状；
+ *   2. team 退役迁移在旧形状上删行并收窄 CHECK（提示词表此时仍是旧形状，
+ *      用 legacy DDL / 旧列清单重建）；
+ *   3. 提示词资产化迁移把旧形状（行上 is_active）升级为「历史版本表 + Active 指针表」，
+ *      同时把存量经验行的 generation_prompt_id 映射到新的版本行 id；
+ *   4. 最后建 Active 表/索引并保证每个主体类型都有活跃版本——播种排在迁移之后，
+ *      退役类型的旧 Prompt 行已删除，不会被重新播种。
  */
 export declare function initSchema(db: DatabaseSync, now?: () => number): void;

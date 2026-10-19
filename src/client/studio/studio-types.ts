@@ -9,16 +9,27 @@
 
 import type { WorkflowDocument, WorkflowTemplate } from '../../host/shared/graph-model.js'
 import type { ServiceState, RoleTemplate, TaskTemplate, DatabaseTemplate, GroupTemplate, ToolCombo, RunSnapshot } from '../../host/shared/types.js'
-import type { AssetKind, AssetVersionEntry, ExperienceEntry, RoleAssetDetail, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../../host/shared/asset-types.js'
+import type {
+  AssetKind,
+  AssetVersionEntry,
+  ExperienceEntry,
+  PromptAssetDetail,
+  PromptAssetSummary,
+  RoleAssetDetail,
+  RoleAssetSummary,
+  WorkflowAssetDetail,
+  WorkflowAssetSummary,
+} from '../../host/shared/asset-types.js'
 import type { CanvasEdge, CanvasNode } from '../lib/canvas-model.js'
 
 /** 左侧栏 Tab：工作流 / 角色 / 数据（任务+数据库）/ 其他（阶段+Team）。
- *  资产态下「数据」以「经验」呈现（同一 Tab key，语义与内容随库来源切换）。 */
+ *  资产态下「数据」以「经验」呈现、「其他」显示经验生成提示词资产
+ *  （同一 Tab key，语义与内容随库来源切换）。 */
 export type LibTab = 'workflow' | 'role' | 'data' | 'other'
 /** 左侧库来源：模版（可随意修改的草稿）/ 资产（带版本控制的晋升形态）。 */
 export type LibrarySource = 'template' | 'asset'
-/** 左侧库选中种类（模板 kind + 固定卡片 + 工作流模板 + 资产 + 经验）。 */
-export type LibSelKind = 'workflow' | 'service' | 'workflowTemplate' | 'role' | 'task' | 'database' | 'parentTemplate' | 'stage' | 'groupTemplate' | 'flowAsset' | 'roleAsset' | 'experience'
+/** 左侧库选中种类（模板 kind + 固定卡片 + 工作流模板 + 资产 + 经验 + 提示词资产）。 */
+export type LibSelKind = 'workflow' | 'service' | 'workflowTemplate' | 'role' | 'task' | 'database' | 'parentTemplate' | 'stage' | 'groupTemplate' | 'flowAsset' | 'roleAsset' | 'experience' | 'promptAsset'
 /** 模板种类（与后端 listTemplates 契约一致；group 为 Team 模板）。 */
 export type TemplateKind = 'role' | 'task' | 'database' | 'group'
 
@@ -55,6 +66,7 @@ export type EditorRef =
   | { source: 'flowTemplate'; id: string }
   | { source: 'flowAsset'; id: string }
   | { source: 'roleAsset'; id: string }
+  | { source: 'promptAsset'; id: string }
   | { source: 'experience'; id: string }
   | { source: 'template'; kind: TemplateKind; id: string }
   | { source: 'node'; id: string }
@@ -122,6 +134,8 @@ export interface StudioState {
   assets: {
     workflows: WorkflowAssetSummary[]
     roles: RoleAssetSummary[]
+    /** 经验生成提示词资产（两块内置资产；只能保持活跃，无历史分栏）。 */
+    prompts: PromptAssetSummary[]
     retiredWorkflows: WorkflowAssetSummary[]
     retiredRoles: RoleAssetSummary[]
   }
@@ -129,6 +143,8 @@ export interface StudioState {
   assetDoc: WorkflowAssetDetail | null
   /** 资产态属性栏编辑的角色资产详情（打开/拖入角色资产时装载）。 */
   assetRoleDoc: RoleAssetDetail | null
+  /** 属性栏编辑的提示词资产详情（点击「其他」Tab 的提示词卡片时装载）。 */
+  promptDoc: PromptAssetDetail | null
   /**
    * 经验列表（资产态「经验」Tab 的数据源）：活跃与已归档一并持有，条目自带 active 标记。
    * 与资产拆两份列表不同——经验的召回面是 catalog 索引（另一条查询），此处只服务人工管理。
@@ -186,7 +202,7 @@ export interface StudioState {
 
 /** 编辑器数据（右侧面板渲染源；Inspector 按 kind 分发表单）。 */
 export interface EditorData {
-  kind: 'workflow' | 'service' | 'role' | 'task' | 'database' | 'group' | 'stage' | 'proxy' | 'edge' | 'experience'
+  kind: 'workflow' | 'service' | 'role' | 'task' | 'database' | 'group' | 'stage' | 'proxy' | 'edge' | 'experience' | 'prompt'
   data: Record<string, unknown>
   name: string
   template?: boolean
@@ -199,6 +215,8 @@ export interface EditorData {
   roleAsset?: boolean
   /** 经验来源标记（属性栏按经验语义渲染：只有保存与归档/恢复，**无回滚**）。 */
   experience?: boolean
+  /** 提示词资产来源标记（只有正文可编辑；有保存与回滚，无归档/恢复）。 */
+  promptAsset?: boolean
   /** 资产 id（保存新版本 / 回滚 / 归档 / 恢复按此定位；与当前画布 currentId 同源）。 */
   assetId?: string
   /** 经验 id（保存 / 归档 / 恢复按此定位）。 */

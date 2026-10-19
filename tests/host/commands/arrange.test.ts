@@ -4,7 +4,7 @@
 //   1. 只采集 + 注入：命令 handler 只经 ctx.get('commands') 取服务、只 followup 一条用户消息，
 //      **不产生任何图变更**（不断言 store 写接口「没被调用」那么简单——直接断言 get 调用面
 //      只有 commands，即命令层根本没碰过数据层/运行时）；
-//   2. 提示词内容：规划变体标记（HEAD/MID/TAIL）齐备，且**不再注入规则正文**——规则改由
+//   2. 提示词内容：规划变体正文齐备（身份/目标/用户意图），且**不再注入规则正文**——规则改由
 //      wf_org_catalog 返回，注入文本里只给来源指引；
 //   3. 降级与错误：无命令面（headless/模式二）静默跳过；空意图给用法不注入；Agent 未激活给错误；
 //   4. 生命周期：register 的 disposer 被透传注销；消息 id 走注入缝（单测确定性）。
@@ -18,10 +18,7 @@ import {
   registerArrangeCommand,
   type ArrangeInjectedMessage,
 } from '../../../src/host/commands/arrange.js'
-import {
-  ORG_SOP_L1_GRAPH_SEMANTICS,
-  ORG_SOP_DESIGN_METHOD,
-} from '../../../src/host/prompts/index.js'
+import { ORG_SOP_L1_GRAPH_SEMANTICS } from '../../../src/host/prompts/index.js'
 
 // ---------------------------------------------------------------------------
 // fake 命令面（只暴露 register；记录注册/注销）
@@ -136,7 +133,6 @@ describe('/arrange handler：只采集 + 注入，绝不改图', () => {
     const text = messages[0].content[0].text
     // 规则不再随 /arrange 注入（改由 wf_org_catalog 返回，规划期与运行期共用同一份）
     expect(text).not.toContain(ORG_SOP_L1_GRAPH_SEMANTICS)
-    expect(text).not.toContain(ORG_SOP_DESIGN_METHOD)
     expect(text).toContain('做一个内容生产流水线')
   })
 

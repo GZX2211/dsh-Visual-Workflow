@@ -1,7 +1,7 @@
 import type { LibTab, LibSelKind, TemplateKind, CanvasNode, CanvasEdge, EditorRef, PanelLayout, ToastItem, PresetItem, ModelItem, GraphSnapshot, ConfirmState, LibrarySource } from './studio-types.js';
 import type { WorkflowDocument, WorkflowTemplate } from '../../host/shared/graph-model.js';
 import type { ServiceState, RoleTemplate, TaskTemplate, DatabaseTemplate, GroupTemplate, ToolCombo, RunSnapshot } from '../../host/shared/types.js';
-import type { AssetKind, AssetVersionEntry, ExperienceEntry, RoleAssetDetail, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../../host/shared/asset-types.js';
+import type { AssetKind, AssetVersionEntry, ExperienceEntry, PromptAssetDetail, PromptAssetSummary, RoleAssetDetail, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../../host/shared/asset-types.js';
 export type StudioAction = {
     type: 'SET_SESSION';
     sessionId: string;
@@ -22,11 +22,12 @@ export type StudioAction = {
     type: 'SET_LIB_SEARCH';
     query: string;
 }
-/** 资产列表（活跃 + 历史（已归档））加载完成。 */
+/** 资产列表（活跃 + 历史（已归档） + 提示词资产）加载完成。 */
  | {
     type: 'ASSETS_LOADED';
     workflows: WorkflowAssetSummary[];
     roles: RoleAssetSummary[];
+    prompts: PromptAssetSummary[];
     retiredWorkflows: WorkflowAssetSummary[];
     retiredRoles: RoleAssetSummary[];
 }
@@ -39,6 +40,21 @@ export type StudioAction = {
  | {
     type: 'ROLE_ASSET_LOADED';
     detail: RoleAssetDetail;
+}
+/** 提示词资产详情装载（属性栏编辑数据源）。 */
+ | {
+    type: 'PROMPT_ASSET_LOADED';
+    detail: PromptAssetDetail;
+}
+/** 打开提示词资产（属性栏编辑；提示词没有画布形态）。 */
+ | {
+    type: 'OPEN_PROMPT_ASSET';
+    assetId: string;
+}
+/** 提示词正文编辑（只允许 prompt 字段；保存时登记新版本）。 */
+ | {
+    type: 'PROMPT_ASSET_PATCH';
+    patch: Record<string, unknown>;
 }
 /** 经验列表装载（资产态「经验」Tab 数据源；活跃与已归档一并返回）。 */
  | {

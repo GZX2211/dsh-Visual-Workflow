@@ -19,15 +19,6 @@ export const PARENT_PLANNER_EN = `# Hard constraints
 
 {{goal}}
 
-The orchestration rules (graph semantics, design method, and graph-editing contract) come from wf_org_catalog: call it without ids to get the full rules and asset index before editing.
-
-Pre-submit checklist (confirm every item; fix before submitting):
-
-- Deliverables: every deliverable has a node, and nodes do not duplicate responsibilities.
-- Paths and consumers: every deliverable states which file it writes and who reads it (upstream outputs are injected automatically into downstream nodes, so no ctx line is needed for that).
-- Read path: every downstream node knows where to read upstream outputs (injected upstream output, or a written file whose path is stated in the task).
-- Node configuration: every agent node has a systemPrompt and a non-empty presetId (tool combination).
-
 Current planning task:
 
 - User intent: {{userIntent}}

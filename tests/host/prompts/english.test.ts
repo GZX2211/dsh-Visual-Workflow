@@ -65,7 +65,7 @@ describe('英文父代理提示词', () => {
     englishOnly(task)
     englishOnly(executor)
     expect(task).toContain('Audience: designers')
-    expect(executor).toContain('wf_send_message')
+    expect(executor).not.toContain('wf_send_message')
     expect(executor).not.toContain('wf_run_node')
   })
 })

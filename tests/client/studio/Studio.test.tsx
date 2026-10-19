@@ -358,6 +358,18 @@ function assetRemoteStub(): RemoteFace & { calls: Array<{ endpoint: string; args
         return {
           workflows: [{ assetId: 'a-1', versionId: 2, name: '资产流程', description: '资产描述', updatedAt: 1 }],
           roles: [{ assetId: 'a-r1', versionId: 1, name: '资产角色', kind: 'agent', roleAssetType: 'standalone', updatedAt: 1 }],
+          prompts: [
+            {
+              assetId: 'ep-agent', versionId: 1, name: 'Agent Experience Generation Prompt',
+              description: '为 Agent 提炼经验', experienceType: 'agent', promptVersion: 'V1',
+              prompt: 'agent 正文', updatedAt: 1,
+            },
+            {
+              assetId: 'ep-orchestrator', versionId: 1, name: 'Orchestration Experience Generation Prompt',
+              description: '为编排提炼经验', experienceType: 'orchestrator', promptVersion: 'V1',
+              prompt: '编排正文', updatedAt: 1,
+            },
+          ],
         }
       }
       if (endpoint === EP.EP_GET_ASSET) return args?.kind === 'role' ? roleDetail : workflowDetail
@@ -439,12 +451,15 @@ describe('资产态：库来源切换与搜索', () => {
     expect(textOf('.wf-docitem__label')).toEqual(['重构旧模块'])
   })
 
-  it('资产态「其他」Tag：无分区 + 整页空态提示', async () => {
+  it('资产态「其他」Tag：经验生成提示词分区（两张卡片）', async () => {
     await renderStudioWith(assetRemoteStub())
     await switchLibrarySource(zh.libSourceAsset)
     await act(async () => { libTab(zh.libTab.other)?.click() })
-    expect(textOf('.wf-docgroup')).toEqual([])
-    expect(document.querySelector('.wf-hint')?.textContent).toBe(zh.assetListNotSupported)
+    expect(textOf('.wf-docgroup')).toEqual([zh.promptAssetsSection])
+    expect(textOf('.wf-docitem__label')).toEqual([
+      'Agent Experience Generation Prompt',
+      'Orchestration Experience Generation Prompt',
+    ])
   })
 
   it('搜索栏过滤资产卡片；无命中显示空态文案', async () => {

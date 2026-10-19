@@ -4,7 +4,7 @@ import type { OrchestratorRuntime } from '../orchestrator/index.js';
 import type { EmbeddingEngine } from '../embedding/engine.js';
 import type { SchedulerEngine, SchedulerTaskStore } from '../scheduler/index.js';
 import type { ToolSwitchStore } from '../tools/index.js';
-import type { AssetVersionEntry, ExperienceEntry, ExperiencePatch, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../shared/asset-types.js';
+import type { AssetVersionEntry, ExperienceEntry, ExperiencePatch, PromptAssetDetail, PromptAssetSummary, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../shared/asset-types.js';
 import type { RoleTemplate } from '../shared/template-types.js';
 import type { GraphNode, Line, WorkflowMode } from '../shared/graph-model.js';
 import type { OrgMeta } from '../shared/org-meta.js';
@@ -34,6 +34,14 @@ interface AssetStoreLike {
     rollbackWorkflowAsset(assetId: string, versionId: number): Promise<WorkflowAssetDetail>;
     restoreWorkflowAsset(assetId: string): Promise<WorkflowAssetDetail>;
     retireWorkflowAsset(assetId: string): Promise<void>;
+    listPromptAssets(): Promise<PromptAssetSummary[]>;
+    getPromptAsset(assetId: string): Promise<PromptAssetDetail | null>;
+    listPromptVersions(assetId: string): Promise<AssetVersionEntry[]>;
+    rollbackPromptAsset(assetId: string, versionId: number): Promise<PromptAssetDetail>;
+    savePromptAssetVersion(input: {
+        assetId: string;
+        prompt: string;
+    }): Promise<PromoteResult>;
     previewAssetCascade(input: AssetCascadePreviewInput): Promise<RoleAssetReference[]>;
     promoteRole(input: {
         templateId: string;

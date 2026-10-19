@@ -21,6 +21,8 @@ import type {
   AssetVersionEntry,
   ExperienceEntry,
   ExperiencePatch,
+  PromptAssetDetail,
+  PromptAssetSummary,
   RoleAssetDetail,
   RoleAssetReference,
   RoleAssetSummary,
@@ -63,6 +65,11 @@ interface AssetStoreLike {
   rollbackWorkflowAsset(assetId: string, versionId: number): Promise<WorkflowAssetDetail>
   restoreWorkflowAsset(assetId: string): Promise<WorkflowAssetDetail>
   retireWorkflowAsset(assetId: string): Promise<void>
+  listPromptAssets(): Promise<PromptAssetSummary[]>
+  getPromptAsset(assetId: string): Promise<PromptAssetDetail | null>
+  listPromptVersions(assetId: string): Promise<AssetVersionEntry[]>
+  rollbackPromptAsset(assetId: string, versionId: number): Promise<PromptAssetDetail>
+  savePromptAssetVersion(input: { assetId: string; prompt: string }): Promise<PromoteResult>
   previewAssetCascade(input: AssetCascadePreviewInput): Promise<RoleAssetReference[]>
   promoteRole(input: { templateId: string; fingerprint: string; role: RoleTemplate; source: 'human' | 'agent' }): Promise<PromoteResult>
   promoteWorkflow(input: {

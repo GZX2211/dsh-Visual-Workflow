@@ -1,4 +1,4 @@
-import type { AssetKind, AssetVersionEntry, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../shared/asset-types.js';
+import type { AssetKind, AssetVersionEntry, PromptAssetDetail, PromptAssetSummary, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../shared/asset-types.js';
 import { VisualWorkflowApiBase, type ApiHost } from './boundary.js';
 /** 资产库能力缝（形状由 boundary 的宿主能力缝定义，本模块不自建第二份）。 */
 type Assets = NonNullable<ApiHost['assets']>;
@@ -14,13 +14,14 @@ export declare class AssetEndpoints extends VisualWorkflowApiBase {
     }): Promise<{
         workflows: WorkflowAssetSummary[];
         roles: RoleAssetSummary[];
+        prompts: PromptAssetSummary[];
         retiredWorkflows: WorkflowAssetSummary[];
         retiredRoles: RoleAssetSummary[];
     }>;
     getAsset(args: {
         kind?: unknown;
         assetId?: unknown;
-    }): Promise<WorkflowAssetDetail | RoleAssetDetail>;
+    }): Promise<WorkflowAssetDetail | RoleAssetDetail | PromptAssetDetail>;
     promoteAsset(args: {
         kind?: unknown;
         templateId?: unknown;
@@ -56,7 +57,7 @@ export declare class AssetEndpoints extends VisualWorkflowApiBase {
         kind?: unknown;
         assetId?: unknown;
         versionId?: unknown;
-    }): Promise<WorkflowAssetDetail | RoleAssetDetail>;
+    }): Promise<WorkflowAssetDetail | RoleAssetDetail | PromptAssetDetail>;
     retireAsset(args: {
         kind?: unknown;
         assetId?: unknown;
@@ -74,6 +75,6 @@ export declare class AssetEndpoints extends VisualWorkflowApiBase {
     restoreAsset(args: {
         kind?: unknown;
         assetId?: unknown;
-    }): Promise<WorkflowAssetDetail | RoleAssetDetail>;
+    }): Promise<WorkflowAssetDetail | RoleAssetDetail | PromptAssetDetail>;
 }
 export {};

@@ -73,17 +73,21 @@ const EXPERIENCES_INDEXES = [
 
 const EXPERIENCE_PROMPT_COLUMNS = [
   "id",
+  "version_id",
+  "asset_id",
   "experience_type",
   "name",
   "description",
   "prompt",
   "prompt_version",
-  "is_active",
+  "source",
   "created_at",
-  "updated_at",
 ]
 
-const EXPERIENCE_PROMPT_INDEXES = ["idx_experience_prompts_active_type", "idx_experience_prompts_type"]
+const EXPERIENCE_PROMPT_INDEXES = ["idx_experience_prompts_asset", "idx_experience_prompts_type"]
+
+const EXPERIENCE_PROMPT_ACTIVE_COLUMNS = ["asset_id", "version_id", "experience_type", "name", "updated_at"]
+const EXPERIENCE_PROMPT_ACTIVE_INDEXES = ["idx_experience_prompt_active_type"]
 
 /** 评价闭环三表的列集合（按 DDL 声明顺序）与索引（升序，便于与 PRAGMA 结果比对）。 */
 const EXPERIENCE_USAGE_COLUMNS = ["id", "experience_id", "run_id", "subject_id", "created_at", "role_key", "role_label"]
@@ -261,66 +265,80 @@ afterEach(async () => {
 })
 
 describe("经验域磁盘形状", () => {
-  it("test_初始化_新库_两类表列与索引齐备且外键指向Prompt表", async () => {
+  it("test_初始化_新库_历史表Active表列与索引齐备且外键指向Prompt表", async () => {
     const raw = await openRawDb(root)
     let experienceColumns: string[] = []
     let promptColumns: string[] = []
+    let activeColumns: string[] = []
     let experienceIndexes: string[] = []
     let promptIndexes: string[] = []
+    let activeIndexes: string[] = []
     let activeIndexSql = ""
-    let foreignKeys: Record<string, unknown>[] = []
+    let experienceForeignKeys: Record<string, unknown>[] = []
+    let activeForeignKeys: Record<string, unknown>[] = []
     try {
-      experienceColumns = (raw.prepare("PRAGMA table_info(experiences)").all() as Record<string, unknown>[]).map(
-        (row) => String(row.name),
-      )
-      promptColumns = (raw.prepare("PRAGMA table_info(experience_prompts)").all() as Record<string, unknown>[]).map(
-        (row) => String(row.name),
-      )
+      experienceColumns = columnsOf(raw, "experiences")
+      promptColumns = columnsOf(raw, "experience_prompts")
+      activeColumns = columnsOf(raw, "experience_prompt_active")
       experienceIndexes = indexNamesOf(raw, "experiences")
       promptIndexes = indexNamesOf(raw, "experience_prompts")
+      activeIndexes = indexNamesOf(raw, "experience_prompt_active")
       activeIndexSql = String(
         (
           raw
-            .prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_experience_prompts_active_type'")
+            .prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_experience_prompt_active_type'")
             .get() as Record<string, unknown>
         ).sql,
       )
-      foreignKeys = raw.prepare("PRAGMA foreign_key_list(experiences)").all() as Record<string, unknown>[]
+      experienceForeignKeys = raw.prepare("PRAGMA foreign_key_list(experiences)").all() as Record<string, unknown>[]
+      activeForeignKeys = raw.prepare("PRAGMA foreign_key_list(experience_prompt_active)").all() as Record<
+        string,
+        unknown
+      >[]
     } finally {
       raw.close()
     }
 
     expect(experienceColumns).toEqual(EXPERIENCES_COLUMNS)
     expect(promptColumns).toEqual(EXPERIENCE_PROMPT_COLUMNS)
+    expect(activeColumns).toEqual(EXPERIENCE_PROMPT_ACTIVE_COLUMNS)
     expect(experienceIndexes).toEqual(EXPERIENCES_INDEXES)
     expect(promptIndexes).toEqual(EXPERIENCE_PROMPT_INDEXES)
-    // 活跃唯一性必须由数据库保证：索引 SQL 里必须带 is_active = 1 的部分条件
-    expect(activeIndexSql).toMatch(/WHERE\s+is_active\s*=\s*1/i)
-    expect(foreignKeys).toHaveLength(1)
-    expect(foreignKeys[0]).toMatchObject({ table: "experience_prompts", from: "generation_prompt_id", to: "id" })
+    expect(activeIndexes).toEqual(EXPERIENCE_PROMPT_ACTIVE_INDEXES)
+    // 每个主体类型至多一个活跃提示词资产：唯一性由数据库索引保证，不靠 TS 约定
+    expect(activeIndexSql).toMatch(/UNIQUE/i)
+    expect(activeIndexSql).toMatch(/experience_type/i)
+    expect(experienceForeignKeys).toHaveLength(1)
+    expect(experienceForeignKeys[0]).toMatchObject({ table: "experience_prompts", from: "generation_prompt_id", to: "id" })
+    // 复合外键在 PRAGMA 中按列展开：asset_id → asset_id、version_id → version_id
+    expect(activeForeignKeys).toHaveLength(2)
+    expect(activeForeignKeys).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ table: "experience_prompts", from: "asset_id", to: "asset_id" }),
+        expect.objectContaining({ table: "experience_prompts", from: "version_id", to: "version_id" }),
+      ]),
+    )
   })
 
-  it("test_初始化_同类型第二个活跃Prompt_被部分唯一索引拒绝", async () => {
+  it("test_初始化_版本唯一性与每类型Active唯一性_被数据库约束拒绝", async () => {
     const raw = await openRawDb(root)
+    const insertVersion = (id: string, versionId: number, assetId: string, type: "agent" | "orchestrator"): void => {
+      raw.exec(`INSERT INTO experience_prompts
+        (id, version_id, asset_id, experience_type, name, description, prompt, prompt_version, source, created_at)
+        VALUES ('${id}', ${versionId}, '${assetId}', '${type}', '标题', '', '正文', 'V${versionId}', 'human', 1)`)
+    }
     try {
+      // 同一资产同一版本号重复插入：版本行 id 与 (asset_id, version_id) 都必须唯一
+      expect(() => insertVersion("ep-agent@1", 1, "ep-agent", "agent")).toThrow(/UNIQUE/i)
+
+      // 同一资产的历史版本可以共存（历史不可变）
+      insertVersion("ep-agent@2", 2, "ep-agent", "agent")
+      insertVersion("ep-agent-alt@1", 1, "ep-agent-alt", "agent")
+      // 每个主体类型至多一个 Active 指针：第二个 agent 活跃指针被唯一索引拒绝
       expect(() =>
-        raw.exec(`INSERT INTO experience_prompts
-          (id, experience_type, name, description, prompt, prompt_version, is_active, created_at, updated_at)
-          VALUES ('ep-agent-dup', 'agent', '重复活跃', '', '正文', 'V1', 1, 1, 1)`),
+        raw.exec(`INSERT INTO experience_prompt_active (asset_id, version_id, experience_type, name, updated_at)
+          VALUES ('ep-agent-alt', 1, 'agent', '另一个资产', 1)`),
       ).toThrow(/UNIQUE/i)
-
-      // 部分索引只约束活跃行：同类型的多个非活跃版本必须可以共存（Prompt 历史保留）
-      raw.exec(`INSERT INTO experience_prompts
-        (id, experience_type, name, description, prompt, prompt_version, is_active, created_at, updated_at)
-        VALUES ('ep-agent-old', 'agent', '旧版本', '', '旧正文', 'V0', 0, 1, 1)`)
-      raw.exec(`INSERT INTO experience_prompts
-        (id, experience_type, name, description, prompt, prompt_version, is_active, created_at, updated_at)
-        VALUES ('ep-agent-older', 'agent', '更旧版本', '', '更旧正文', 'V00', 0, 1, 1)`)
-
-      const active = raw
-        .prepare("SELECT COUNT(*) AS total FROM experience_prompts WHERE experience_type = 'agent' AND is_active = 1")
-        .get() as Record<string, unknown>
-      expect(active).toMatchObject({ total: 1 })
     } finally {
       raw.close()
     }
@@ -348,8 +366,8 @@ describe("经验域磁盘形状", () => {
       // 绕过 store 与 TS 类型（外部工具、补数据脚本都会走这条路径）：边界必须由数据库把住
       expect(() =>
         raw.exec(`INSERT INTO experience_prompts
-          (id, experience_type, name, description, prompt, prompt_version, is_active, created_at, updated_at)
-          VALUES ('ep-team-injected', 'team', '退役类型', '', '正文', 'V1', 1, 1, 1)`),
+          (id, version_id, asset_id, experience_type, name, description, prompt, prompt_version, source, created_at)
+          VALUES ('ep-team-injected', 1, 'ep-team', 'team', '退役类型', '', '正文', 'V1', 'human', 1)`),
       ).toThrow(/CHECK/i)
       expect(() =>
         raw.exec(`INSERT INTO experiences (
@@ -359,7 +377,7 @@ describe("经验域磁盘形状", () => {
           is_active, created_at, updated_at
         ) VALUES (
           'ex-team-injected', 'team', '职责', '软件开发', '决策域', '情境', '触发',
-          '原则', '行动', '[]', '[]', '任务侧', '决策侧', 'run-1', 'ep-agent-v1', 'V1', 1, 1, 1
+          '原则', '行动', '[]', '[]', '任务侧', '决策侧', 'run-1', 'ep-agent@1', 'V1', 1, 1, 1
         )`),
       ).toThrow(/CHECK/i)
     } finally {
@@ -595,7 +613,7 @@ describe("经验生成 Prompt 播种", () => {
     for (const seed of EXPERIENCE_PROMPT_SEEDS) {
       const stored = prompts.find((prompt) => prompt.experienceType === seed.experienceType)
       expect(stored).toMatchObject({
-        id: seed.id,
+        id: `${seed.assetId}@1`,
         name: seed.name,
         description: seed.description,
         prompt: seed.prompt,
@@ -615,7 +633,7 @@ describe("经验生成 Prompt 播种", () => {
   it("test_播种_重复初始化_不覆盖用户改动也不重复插入", async () => {
     const raw = await openRawDb(root)
     try {
-      raw.exec("UPDATE experience_prompts SET prompt = '用户改写后的正文', updated_at = 99 WHERE experience_type = 'agent'")
+      raw.exec("UPDATE experience_prompts SET prompt = '用户改写后的正文' WHERE asset_id = 'ep-agent' AND version_id = 1")
     } finally {
       raw.close()
     }
@@ -862,11 +880,19 @@ describe("旧形状 experiences 迁移（用户裁决：旧数据直接删除）
 })
 
 describe("team 主体类型退役迁移（用户裁决：存量 team 数据物理删除）", () => {
-  const TABLES = ["experiences", "experience_prompts", "experience_usage", "experience_evaluation", "experience_stats"]
+  const TABLES = [
+    "experiences",
+    "experience_prompts",
+    "experience_prompt_active",
+    "experience_usage",
+    "experience_evaluation",
+    "experience_stats",
+  ]
   const SNAPSHOT_KEYS = [...TABLES].sort()
   const SNAPSHOT_ORDER_BY: Record<string, string> = {
     experiences: "id",
     experience_prompts: "id",
+    experience_prompt_active: "asset_id",
     experience_usage: "id",
     experience_evaluation: "id",
     experience_stats: "experience_id",
@@ -921,11 +947,26 @@ describe("team 主体类型退役迁移（用户裁决：存量 team 数据物�
       trust: 0.725,
     })
 
-    // Prompt 表：team 行被删，agent/orchestrator（含归档版本与用户改写的正文）原样保留
-    expect(idsOf(snapshot.experience_prompts, "id")).toEqual(["ep-agent-v0", "ep-agent-v1", "ep-orchestrator-v1"])
+    // Prompt 表：team 行被删，agent/orchestrator（含旧归档版本与用户改写的正文）全部转为历史版本；
+    // 版本行 id 统一为 <assetId>@<versionId>，原 is_active 事实改由 Active 表表达。
+    expect(idsOf(snapshot.experience_prompts, "id")).toEqual(["ep-agent@1", "ep-agent@2", "ep-orchestrator@1"])
     const promptsById = new Map(snapshot.experience_prompts.map((row) => [String(row.id), row]))
-    expect(promptsById.get("ep-agent-v1")).toMatchObject({ prompt: "遗留 agent 正文", is_active: 1 })
-    expect(promptsById.get("ep-orchestrator-v1")).toMatchObject({ prompt: "遗留编排正文", is_active: 1 })
+    expect(promptsById.get("ep-agent@2")).toMatchObject({
+      asset_id: "ep-agent",
+      version_id: 2,
+      prompt: "遗留 agent 正文",
+      prompt_version: "V1",
+    })
+    expect(promptsById.get("ep-orchestrator@1")).toMatchObject({
+      asset_id: "ep-orchestrator",
+      version_id: 1,
+      prompt: "遗留编排正文",
+    })
+    // 原活跃行成为 Active 指针；orchestrator 旧行没有 is_active=1，自愈取最新版本
+    expect(snapshot.experience_prompt_active).toEqual([
+      { asset_id: "ep-agent", version_id: 2, experience_type: "agent", name: "Agent Experience Generation Prompt", updated_at: expect.any(Number) },
+      { asset_id: "ep-orchestrator", version_id: 1, experience_type: "orchestrator", name: "Orchestration Experience Generation Prompt", updated_at: expect.any(Number) },
+    ])
   })
 
   it("test_退役迁移_两表原文不再含team且活跃Prompt唯一索引仍生效", async () => {
@@ -950,9 +991,8 @@ describe("team 主体类型退役迁移（用户裁决：存量 team 数据物�
       experienceIndexes = indexNamesOf(raw, "experiences")
       foreignKeyViolations = raw.prepare("PRAGMA foreign_key_check").all() as Record<string, unknown>[]
       try {
-        raw.exec(`INSERT INTO experience_prompts
-          (id, experience_type, name, description, prompt, prompt_version, is_active, created_at, updated_at)
-          VALUES ('ep-agent-dup', 'agent', '重复活跃', '', '正文', 'V1', 1, 1, 1)`)
+        raw.exec(`INSERT INTO experience_prompt_active (asset_id, version_id, experience_type, name, updated_at)
+          VALUES ('ep-agent', 1, 'agent', '重复活跃', 1)`)
       } catch {
         secondActiveRejected = true
       }
@@ -1017,8 +1057,8 @@ describe("team 主体类型退役迁移（用户裁决：存量 team 数据物�
       expect(experienceTypeCheckValues(tableDdl(raw, "experiences"))).toEqual([...EXPERIENCE_TYPE_VALUES])
       try {
         raw.exec(`INSERT INTO experience_prompts
-          (id, experience_type, name, description, prompt, prompt_version, is_active, created_at, updated_at)
-          VALUES ('ep-team-revived', 'team', '退役类型', '', '正文', 'V1', 1, 1, 1)`)
+          (id, version_id, asset_id, experience_type, name, description, prompt, prompt_version, source, created_at)
+          VALUES ('ep-team-revived', 1, 'ep-team', 'team', '退役类型', '', '正文', 'V1', 'human', 1)`)
       } catch {
         promptRejected = true
       }
@@ -1030,7 +1070,7 @@ describe("team 主体类型退役迁移（用户裁决：存量 team 数据物�
           is_active, created_at, updated_at
         ) VALUES (
           'ex-team-revived', 'team', '职责', '软件开发', '决策域', '情境', '触发',
-          '原则', '行动', '[]', '[]', '任务侧', '决策侧', 'run-1', 'ep-agent-v1', 'V1', 1, 1, 1
+          '原则', '行动', '[]', '[]', '任务侧', '决策侧', 'run-1', 'ep-agent@2', 'V1', 1, 1, 1
         )`)
       } catch {
         experienceRejected = true
@@ -1068,15 +1108,15 @@ describe("team 主体类型退役迁移（用户裁决：存量 team 数据物�
         raw.close()
       }
 
-      // 宽 CHECK 的那张表被收窄，team Prompt 行被删
+      // 宽 CHECK 的那张表被收窄，team Prompt 行被删；剩余行转为历史版本
       expect(promptsDdl).not.toContain("team")
-      expect(prompts.map((row) => row.id)).toEqual(["ep-agent-v0", "ep-agent-v1", "ep-orchestrator-v1"])
+      expect(prompts.map((row) => row.id)).toEqual(["ep-agent@1", "ep-agent@2", "ep-orchestrator@1"])
       // 已收窄的那张表不重建也不动数据
       expect(experiencesDdl).not.toContain("team")
       expect(experiences.map((row) => row.id)).toEqual(["ex-agent", "ex-orch"])
-      // 两类主体仍各有活跃 Prompt 可用
-      expect((await migrated.getActivePrompt("agent"))?.id).toBe("ep-agent-v1")
-      expect((await migrated.getActivePrompt("orchestrator"))?.id).toBe("ep-orchestrator-v1")
+      // 两类主体仍各有活跃 Prompt 可用（原活跃行成为 Active）
+      expect((await migrated.getActivePrompt("agent"))?.id).toBe("ep-agent@2")
+      expect((await migrated.getActivePrompt("orchestrator"))?.id).toBe("ep-orchestrator@1")
     } finally {
       migrated.close()
       await removeTempRoot(mixedRoot)

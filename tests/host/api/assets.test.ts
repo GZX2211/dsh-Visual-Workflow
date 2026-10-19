@@ -511,6 +511,6 @@ describe('资产错误码到 HTTP 状态的映射（路由层）', () => {
     // 边界自身的参数错误仍为 400（kind 缺失/非法按既有约定抛 HttpError，不带领域码）
     await post('listAssets', { kind: 'asset' })
     expect(responses[3].status).toBe(400)
-    expect(JSON.parse(responses[3].body)).toMatchObject({ ok: false, error: { message: 'requires kind: workflow|role' } })
+    expect(JSON.parse(responses[3].body)).toMatchObject({ ok: false, error: { message: 'requires kind: workflow|role|prompt' } })
   })
 })

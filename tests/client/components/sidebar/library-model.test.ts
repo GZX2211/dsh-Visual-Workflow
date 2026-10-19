@@ -53,8 +53,28 @@ function assetLists(
   return {
     workflows: active.workflows ?? [],
     roles: active.roles ?? [],
+    prompts: [],
     retiredWorkflows: retired.workflows ?? [],
     retiredRoles: retired.roles ?? [],
+  }
+}
+
+/** 提示词资产（两款内置资产；测试只关心列表投影与打开回调）。 */
+function promptAsset(
+  assetId: string,
+  experienceType: 'agent' | 'orchestrator',
+  name: string,
+  prompt: string,
+): NonNullable<NonNullable<LibraryModelInput['assets']>['prompts']>[number] {
+  return {
+    assetId,
+    versionId: 1,
+    name,
+    description: `${experienceType} 描述`,
+    experienceType,
+    promptVersion: 'V1',
+    prompt,
+    updatedAt: 1,
   }
 }
 
@@ -155,10 +175,34 @@ describe('资产态分区（活跃资产 / 历史资产）', () => {
     expect(model.sections[0].cards.map((card) => card.name)).toEqual(['独立角色', '共享角色'])
   })
 
-  it('其他 Tag：无分区 + 整页空态提示（资产分类只含工作流 / 角色 / 经验）', () => {
+  it('其他 Tag：经验生成提示词分区（两块内置资产，无历史分栏）', () => {
+    const model = buildLibraryModel(makeInput({
+      librarySource: 'asset',
+      libTab: 'other',
+      assets: {
+        ...assetLists(),
+        prompts: [
+          promptAsset('ep-agent', 'agent', 'Agent Experience Generation Prompt', 'agent 正文'),
+          promptAsset('ep-orchestrator', 'orchestrator', 'Orchestration Experience Generation Prompt', '编排正文'),
+        ],
+      },
+    }))
+    expect(model.emptyHint).toBeNull()
+    expect(model.sections.map((section) => section.key)).toEqual(['assetPrompts'])
+    expect(model.sections[0].title).toBe(zh.promptAssetsSection)
+    expect(model.sections[0].cards.map((card) => card.kind)).toEqual(['promptAsset', 'promptAsset'])
+    expect(model.sections[0].cards.map((card) => card.name)).toEqual([
+      'Agent Experience Generation Prompt',
+      'Orchestration Experience Generation Prompt',
+    ])
+    expect(model.sections[0].cards[0].sub).toContain(zh.experienceTypeNames.agent)
+    expect(model.sections[0].cards[0].sub).toContain('v1')
+  })
+
+  it('其他 Tag：提示词列表为空时显示分区空态，而不是整页「该分类暂无资产」', () => {
     const model = buildLibraryModel(makeInput({ librarySource: 'asset', libTab: 'other' }))
-    expect(model.sections).toEqual([])
-    expect(model.emptyHint).toBe(zh.assetListNotSupported)
+    expect(model.emptyHint).toBeNull()
+    expect(model.sections[0].emptyText).toBe(zh.promptAssetsEmpty)
   })
 
   it('资产为空：活跃分区保留但卡片为空，空态文案为「资产只能由模版入库晋升」', () => {
@@ -360,6 +404,40 @@ describe('历史资产分栏的折叠语义', () => {
     expect(model.sections.map((section) => section.key)).toEqual([ASSET_HISTORY_SECTIONS.workflow])
     expect(model.sections[0].collapsed).toBe(true)
     expect(model.sections[0].cards.map((card) => card.name)).toEqual(['归档资产'])
+  })
+})
+
+describe('提示词资产卡片（其他 Tab）', () => {
+  const promptAssets = {
+    ...assetLists(),
+    prompts: [
+      promptAsset('ep-agent', 'agent', 'Agent Experience Generation Prompt', 'agent 正文'),
+      promptAsset('ep-orchestrator', 'orchestrator', 'Orchestration Experience Generation Prompt', '编排正文'),
+    ],
+  }
+
+  it('点击卡片打开提示词资产（无拖入入口：提示词没有画布形态）', () => {
+    const onOpenPromptAsset = vi.fn()
+    const model = buildLibraryModel(makeInput({
+      librarySource: 'asset',
+      libTab: 'other',
+      assets: promptAssets,
+      onOpenPromptAsset,
+    }))
+    const card = model.sections[0].cards[0]
+    card.payload.onClick()
+    expect(onOpenPromptAsset).toHaveBeenCalledWith('ep-agent')
+    expect(card.payload.onDrop).toBeUndefined()
+  })
+
+  it('搜索命中提示词正文（不只名称 / 描述）', () => {
+    const model = buildLibraryModel(makeInput({
+      librarySource: 'asset',
+      libTab: 'other',
+      libSearch: '编排正文',
+      assets: promptAssets,
+    }))
+    expect(model.sections[0].cards.map((card) => card.id)).toEqual(['ep-orchestrator'])
   })
 })
 

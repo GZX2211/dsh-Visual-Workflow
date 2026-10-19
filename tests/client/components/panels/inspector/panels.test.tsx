@@ -309,6 +309,38 @@ describe('Inspector 底部按钮分录（模版态 / 资产态）', () => {
     }
   })
 
+  it('提示词资产：只有保存 + 回滚（无归档/恢复、无入库），正文可编辑而名称只读', async () => {
+    const data = {
+      assetId: 'ep-agent',
+      versionId: 1,
+      rowId: 'ep-agent@1',
+      name: 'Agent Experience Generation Prompt',
+      description: '为 Agent 提炼经验',
+      experienceType: 'agent',
+      promptVersion: 'V1',
+      prompt: '第一版正文',
+      updatedAt: 1,
+      createdAt: 1,
+    }
+    await render(React.createElement(Inspector, {
+      ...common,
+      editorData: { kind: 'prompt', data, name: data.name, promptAsset: true, assetId: 'ep-agent' },
+    }))
+
+    expect(footerLabels()).toEqual([zh.inspectorSave, zh.assetRollback])
+    expect(footerButton(zh.assetArchive)).toBeUndefined()
+    expect(footerButton(zh.assetRestore)).toBeUndefined()
+    const text = container!.textContent ?? ''
+    expect(text).toContain(zh.promptAssetName)
+    expect(text).toContain(data.name)
+    expect(text).toContain(zh.promptAssetImmutableHint)
+    expect(text).toContain(zh.promptAssetActiveOnlyHint)
+    const body = Array.from(container!.querySelectorAll<HTMLTextAreaElement>('textarea'))
+      .find((item) => item.value === '第一版正文')
+    expect(body).toBeTruthy()
+    expect(body!.disabled).toBe(false)
+  })
+
   it('经验（活跃 / 已归档）：只有保存 + 归档（或恢复），没有回滚与入库', async () => {
     const entry = { id: 'ex-1', active: true, responsibility: '责任一', taskType: '软件开发', principle: '经验一', createdAt: 1, updatedAt: 1 }
     await render(React.createElement(Inspector, {

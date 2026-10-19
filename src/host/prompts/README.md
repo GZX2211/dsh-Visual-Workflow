@@ -15,8 +15,8 @@ src/host/prompts/
 │   ├── child-node-task.ts          # 子代理 · 任务块（含可通信对象清单）
 │   ├── task-fallback.ts            # 任务 · 任务块为空时的兜底首条消息
 │   ├── rule-graph-semantics.ts     # 规则 · 图语义（wf_org_catalog 返回）
-│   ├── rule-design-method.ts       # 规则 · 设计方法（wf_org_catalog 返回）
-│   ├── rule-patch-contract.ts      # 规则 · 写图契约（wf_org_catalog 返回 + 参数层错误引用）
+│   ├── rule-design-method.ts       # 规则 · 设计方法（暂空；启用后经 wf_org_catalog 返回）
+│   ├── rule-patch-contract.ts      # 规则 · 写图契约（wf_org_catalog 返回）
 │   ├── rule-db-tool.ts             # 规则 · 数据库三模式说明
 │   ├── rule-soft-stop.ts           # 规则 · ReAct 软截停指令
 │   ├── notice-send-message.ts      # 规则 · wf_send_message 消息投递包装
@@ -47,13 +47,13 @@ src/host/prompts/
 | `parent-executor.ts` | 情况3 纯执行 | 父代理是唯一执行主体（无其他执行主体） |
 | `parent-planner.ts` | 规划期 | `/arrange` 命令注入（无运行实例） |
 
-## 4. 注入位置（谁能看到）
+## 4. 注入位置
 
 | 场景 | 通道 |
 |---|---|
 | 父代理三模式 / 规划提示词 / 编排变更通知 | 用户消息（`followupRoot` / `steer`） |
 | 子代理任务块（含可通信对象清单） | 子代理首条用户消息 / 复用派发消息 |
-| 图语义 / 设计方法 / 写图契约 | 工具调用返回（`wf_org_catalog` 索引） |
+| 图语义 / 写图契约（设计方法暂空，不返回该字段） | 工具调用返回（`wf_org_catalog` 索引） |
 | 协作消息投递包装 | 消息投递（`wf_send_message`） |
 | 软截停指令 | `agent/pre-step` 替换消息 + `tools.guard` 拒绝原因 |
 
@@ -61,20 +61,15 @@ src/host/prompts/
 
 - **运行与节点构建器按本次运行语言注入中文或英文指令**：同一场景在 `texts/` 与 `texts/en/`
   各有一份完整正文，由构建器按 `systemLanguage` 整体选择，不做逐句拼接。
-- 工作台启动时把当前官方 locale（含自动浏览器/原生选择）经运行端点传入；无 GUI 的调用
-  （调度器、服务、工具静默接续）使用 Host 设置。运行语言冻结进 `RunSnapshot.systemLanguage`，
-  子代理任务、编排变更通知与续跑继承沿用同一份事实；旧快照回退 Host 设置。
 - 工具名、工具 description 与其参数说明**保持英文**；JSON 字段名、取值、工具名与稳定错误码
   保留原样。用户自定义 Prompt、输入/输出契约与文件内容**不自动翻译**。
 - **默认输出契约采用「中文规范存储 + 按语言本地化注入」**：磁盘保存
   `DEFAULT_OUTPUT_CONTRACT_TEXT`（中文规范值），英文运行注入英文默认文本；用户自定义契约
   原样透传（见 `defaults.ts`）。
-- 按需返回的规则文本（图语义、设计方法、写图契约、软截停指令）当前仍为中文；它们不属于
-  PR #19 的英文正文范围，后续如需英文需按 `texts/en/` 模式补齐。
 - 惯用英文技术词（`System Prompt` / `allow-list` / `ReAct` / `ctx`）保留原样。
 - **代码层约束不写入提示词**：只有 AI 有选择权、值得强调的软约束才进提示词。
 
-## 6. 工具 description 英文写作规范（未变）
+## 6. 工具 description 英文写作规范
 
 写作顺序（与官方 `packages/fs/tool-fs` 一致）：
 
@@ -83,6 +78,3 @@ src/host/prompts/
 3. **失败语义**：超时 / 拒绝 / 护栏错误 / 未找到等失败时的结果。
 4. **副作用**（如适用）：阻塞 / 插队 / 持久化 / 覆盖等。
 5. 精炼无客户化口吻；参数 description 同样英文短句。
-
-> 工具 description / parameters / `output.schema` 是**常驻可见面**，另有治理体系
-> （`docs/model-facing-surface-rules.md`）；它们不属于"提示词正文"，改动时走该体系。

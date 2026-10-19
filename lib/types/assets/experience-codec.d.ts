@@ -34,7 +34,13 @@ export declare function decodeRowEmbeddings(row: Record<string, unknown>): RowEm
  * 若元信息留在一条不可用的行上，调用方会据此认为该行可参与语义召回。
  */
 export declare function experienceRowToEntry(row: Record<string, unknown>): ExperienceEntry;
-/** 经验生成 Prompt 行 → 契约条目。 */
+/**
+ * 经验生成 Prompt 版本行 → 契约条目。
+ *
+ * `id` 是版本行 id（`<assetId>@<versionId>`），正是经验 provenance 的 generation_prompt_id；
+ * `active` 与 `updatedAt` 由查询的 Active 指针 JOIN 别名提供：历史版本行本身不可变，
+ * 没有自己的 updated_at（回退到 created_at，避免伪造更新时间）。
+ */
 export declare function experiencePromptRowToEntry(row: Record<string, unknown>): ExperienceGenerationPromptEntry;
 /**
  * 评价行 → 四维评分（聚合器的输入）。

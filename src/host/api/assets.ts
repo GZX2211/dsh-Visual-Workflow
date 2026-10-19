@@ -3,11 +3,24 @@
 // GUI API 资产端点组（AssetEndpoints）：模版晋升入库、资产态保存、版本列表、
 // 回滚、归档、影响面预览、列表与详情。资产事实由 assets 模块的 AssetStore（SQLite）拥有，
 // 本层只做「请求 → 领域调用 → 稳定响应/错误码」的翻译。
+//
+// 提示词资产复用同一组端点（kind='prompt'）：保存只接受正文；归档/恢复被明确拒绝，
+// 因为它的 Active 指针必须始终存在。
 
-import { ERR_ASSET_BAD_ARGS, ERR_ASSET_NOT_FOUND } from '../shared/protocol.js'
+import { ERR_ASSET_BAD_ARGS, ERR_ASSET_NOT_FOUND, ERR_PROMPT_ASSET_ACTIVE_ONLY } from '../shared/protocol.js'
 import { contentFingerprint } from '../assets/index.js'
 import { NODE_KINDS } from '../graph/index.js'
-import type { AssetKind, AssetVersionEntry, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../shared/asset-types.js'
+import type {
+  AssetKind,
+  AssetVersionEntry,
+  PromptAssetDetail,
+  PromptAssetSummary,
+  RoleAssetDetail,
+  RoleAssetReference,
+  RoleAssetSummary,
+  WorkflowAssetDetail,
+  WorkflowAssetSummary,
+} from '../shared/asset-types.js'
 import type { RoleTemplate } from '../shared/template-types.js'
 import type { GraphNode, Line } from '../shared/graph-model.js'
 import type { OrgMeta } from '../shared/org-meta.js'
@@ -47,8 +60,19 @@ const assetsOf = (host: ApiHost): Assets => requireAssets(host)
 /** 校验并归一化资产种类（必填，取值域闭集）。 */
 function requireKind(args: { kind?: unknown }): AssetKind {
   const kind = String(args?.kind ?? '')
-  if (kind !== 'workflow' && kind !== 'role') throw httpError(400, 'requires kind: workflow|role')
+  if (kind !== 'workflow' && kind !== 'role' && kind !== 'prompt') {
+    throw httpError(400, 'requires kind: workflow|role|prompt')
+  }
   return kind
+}
+
+/** 提示词资产只能保持活跃：归档 / 恢复属于明确拒绝，而不是 404 或静默无操作。 */
+function promptAssetActiveOnly(): Error {
+  return httpError(
+    409,
+    '经验生成提示词资产必须保持活跃：不支持归档 / 恢复，只能切换版本',
+    ERR_PROMPT_ASSET_ACTIVE_ONLY,
+  )
 }
 
 /** 取必填的 payload 对象（晋升/保存/预览共用同一形状校验）。 */
@@ -157,34 +181,43 @@ export class AssetEndpoints extends VisualWorkflowApiBase {
   async listAssets(args: { kind?: unknown }): Promise<{
     workflows: WorkflowAssetSummary[]
     roles: RoleAssetSummary[]
+    prompts: PromptAssetSummary[]
     retiredWorkflows: WorkflowAssetSummary[]
     retiredRoles: RoleAssetSummary[]
   }> {
-    // kind 缺省即「两类都返回」；给了值就必须在取值域内（此处先校验，能力缝缺失时才轮得到 501）。
+    // kind 缺省即「全部返回」；给了值就必须在取值域内（此处先校验，能力缝缺失时才轮得到 501）。
     const rawKind = args?.kind
     const kind = rawKind === undefined || rawKind === null || rawKind === '' ? null : requireKind(args)
     const assets = assetsOf(this.host)
     const wantWorkflow = kind === null || kind === 'workflow'
     const wantRole = kind === null || kind === 'role'
-    const [workflows, roles, retiredWorkflows, retiredRoles] = await Promise.all([
+    const wantPrompt = kind === null || kind === 'prompt'
+    const [workflows, roles, prompts, retiredWorkflows, retiredRoles] = await Promise.all([
       wantWorkflow ? assets.listWorkflowAssets() : [],
       wantRole ? assets.listRoleAssets() : [],
+      wantPrompt ? assets.listPromptAssets() : [],
       wantWorkflow ? assets.listRetiredWorkflowAssets() : [],
       wantRole ? assets.listRetiredRoleAssets() : [],
     ])
     return {
       workflows: await fillCurrentFingerprints(workflows, (templateId) => this.host.store.getFlowTemplate(templateId)),
       roles: await fillCurrentFingerprints(roles, (templateId) => this.host.store.getTemplate('role', templateId)),
+      // 提示词资产没有来源模版，也没有归档列表（指针必须保持活跃）
+      prompts,
       retiredWorkflows: await fillCurrentFingerprints(retiredWorkflows, (templateId) => this.host.store.getFlowTemplate(templateId)),
       retiredRoles: await fillCurrentFingerprints(retiredRoles, (templateId) => this.host.store.getTemplate('role', templateId)),
     }
   }
 
-  async getAsset(args: { kind?: unknown; assetId?: unknown }): Promise<WorkflowAssetDetail | RoleAssetDetail> {
+  async getAsset(args: { kind?: unknown; assetId?: unknown }): Promise<WorkflowAssetDetail | RoleAssetDetail | PromptAssetDetail> {
     const kind = requireKind(args)
     const assetId = requireAssetId(args)
     const assets = assetsOf(this.host)
-    const detail = kind === 'workflow' ? await assets.getWorkflowAsset(assetId) : await assets.getRoleAsset(assetId)
+    const detail = kind === 'workflow'
+      ? await assets.getWorkflowAsset(assetId)
+      : kind === 'role'
+        ? await assets.getRoleAsset(assetId)
+        : await assets.getPromptAsset(assetId)
     if (!detail) throw httpError(404, presentationOf(this.host, `资产不存在或已退役：${assetId}`, `Asset does not exist or was retired: ${assetId}`), ERR_ASSET_NOT_FOUND)
     return detail
   }
@@ -195,6 +228,7 @@ export class AssetEndpoints extends VisualWorkflowApiBase {
     const kind = requireKind(args)
     const templateId = String(args?.templateId ?? '').trim()
     if (!templateId) throw httpError(400, 'requires templateId')
+    if (kind === 'prompt') throw assetBadArgs('经验生成提示词资产是内置资产，不能由模版入库晋升')
     const assets = assetsOf(this.host)
     // 入库来源恒为人类动作；agent 来源（代理生成资产）V1 不开放。
     return kind === 'role' ? this.promoteRoleTemplate(assets, templateId) : this.promoteWorkflowTemplate(assets, templateId)
@@ -232,6 +266,16 @@ export class AssetEndpoints extends VisualWorkflowApiBase {
     const payload = requirePayload(args?.payload)
     const assets = assetsOf(this.host)
     // 资产态保存由资产库登记新版本（永不覆盖历史版本），故这里只校验形状、不落盘。
+    if (kind === 'prompt') {
+      // 用户裁决：提示词资产只有正文可改；名称 / 描述 / 主体类型是固定身份，
+      // 出现其他字段说明调用方在尝试改不可变事实，明确拒绝而不是静默忽略。
+      const unexpected = Object.keys(payload).filter((field) => field !== 'prompt')
+      if (unexpected.length > 0) {
+        throw assetBadArgs(`prompt asset only accepts the prompt field; immutable fields: ${unexpected.join(', ')}`)
+      }
+      const prompt = requireString(payload, 'prompt', 'prompt')
+      return assets.savePromptAssetVersion({ assetId, prompt })
+    }
     if (kind === 'role') {
       const input: RoleSaveInput = { assetId, role: roleTemplateOf(payload, assetId), source: 'human' }
       return assets.saveRoleVersion(input)
@@ -266,6 +310,9 @@ export class AssetEndpoints extends VisualWorkflowApiBase {
   }> {
     const kind = requireKind(args)
     const assetId = String(args?.assetId ?? '').trim() || null
+    if (kind === 'prompt') {
+      throw assetBadArgs('经验生成提示词资产没有工作流引用影响面，不提供级联预览')
+    }
     const payload = requirePayload(args?.payload)
     const assets = assetsOf(this.host)
     if (kind === 'role') {
@@ -287,21 +334,31 @@ export class AssetEndpoints extends VisualWorkflowApiBase {
     const kind = requireKind(args)
     const assetId = requireAssetId(args)
     const assets = assetsOf(this.host)
-    return kind === 'role' ? assets.listRoleVersions(assetId) : assets.listWorkflowVersions(assetId)
+    if (kind === 'role') return assets.listRoleVersions(assetId)
+    if (kind === 'workflow') return assets.listWorkflowVersions(assetId)
+    return assets.listPromptVersions(assetId)
   }
 
-  async rollbackAsset(args: { kind?: unknown; assetId?: unknown; versionId?: unknown }): Promise<WorkflowAssetDetail | RoleAssetDetail> {
+  async rollbackAsset(args: {
+    kind?: unknown
+    assetId?: unknown
+    versionId?: unknown
+  }): Promise<WorkflowAssetDetail | RoleAssetDetail | PromptAssetDetail> {
     const kind = requireKind(args)
     const assetId = requireAssetId(args)
     const versionId = requireVersionId(args)
     const assets = assetsOf(this.host)
     // 回滚只改 Active 指针；历史版本内容由资产库保证不被改写。
-    return kind === 'role' ? assets.rollbackRoleAsset(assetId, versionId) : assets.rollbackWorkflowAsset(assetId, versionId)
+    if (kind === 'role') return assets.rollbackRoleAsset(assetId, versionId)
+    if (kind === 'workflow') return assets.rollbackWorkflowAsset(assetId, versionId)
+    return assets.rollbackPromptAsset(assetId, versionId)
   }
 
   async retireAsset(args: { kind?: unknown; assetId?: unknown }): Promise<{ kind: AssetKind; assetId: string; retired: true }> {
     const kind = requireKind(args)
     const assetId = requireAssetId(args)
+    // 提示词资产必须保持活跃：明确 409，而不是调用一个不存在的删除入口
+    if (kind === 'prompt') throw promptAssetActiveOnly()
     const assets = assetsOf(this.host)
     if (kind === 'role') await assets.retireRoleAsset(assetId)
     else await assets.retireWorkflowAsset(assetId)
@@ -314,9 +371,14 @@ export class AssetEndpoints extends VisualWorkflowApiBase {
    * 与回滚的职责分工（用户裁决）：本端点只管状态转换（归档 → 活跃），回滚只管版本与
    * Active 指针；恢复不接版本号，需要旧版本时恢复后再回滚。
    */
-  async restoreAsset(args: { kind?: unknown; assetId?: unknown }): Promise<WorkflowAssetDetail | RoleAssetDetail> {
+  async restoreAsset(args: {
+    kind?: unknown
+    assetId?: unknown
+  }): Promise<WorkflowAssetDetail | RoleAssetDetail | PromptAssetDetail> {
     const kind = requireKind(args)
     const assetId = requireAssetId(args)
+    // 提示词资产没有归档态，恢复同样被明确拒绝（页面也不提供该入口）
+    if (kind === 'prompt') throw promptAssetActiveOnly()
     const assets = assetsOf(this.host)
     return kind === 'role' ? assets.restoreRoleAsset(assetId) : assets.restoreWorkflowAsset(assetId)
   }

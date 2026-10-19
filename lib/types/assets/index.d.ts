@@ -1,4 +1,4 @@
-import type { AssetVersionEntry, AssetVersionSource, ExperienceAutoRetirementReason, ExperienceEntry, ExperienceEvaluationInsertInput, ExperienceGenerationPromptEntry, ExperienceInsertCheckedInput, ExperiencePatch, ExperienceRetirementFacts, ExperienceRetrievalUpdate, ExperienceStatsEntry, ExperienceStatsRebuildInput, ExperienceType, ExperienceUsageRecordInput, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, RoleAssetType, WorkflowAssetDetail, WorkflowAssetSummary } from '../shared/asset-types.js';
+import type { AssetVersionEntry, AssetVersionSource, ExperienceAutoRetirementReason, ExperienceEntry, ExperienceEvaluationInsertInput, ExperienceGenerationPromptEntry, ExperienceInsertCheckedInput, ExperiencePatch, ExperienceRetirementFacts, ExperienceRetrievalUpdate, ExperienceStatsEntry, ExperienceStatsRebuildInput, ExperienceType, ExperienceUsageRecordInput, PromptAssetDetail, PromptAssetSummary, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, RoleAssetType, WorkflowAssetDetail, WorkflowAssetSummary } from '../shared/asset-types.js';
 import type { GraphNode, Line, WorkflowMode } from '../shared/graph-model.js';
 import type { OrgMeta } from '../shared/org-meta.js';
 import type { RoleTemplate } from '../shared/template-types.js';
@@ -13,7 +13,7 @@ export { EXPERIENCE_TYPE_VALUES } from './experience-codec.js';
 export type { ExperienceEmbeddingRow, ExperienceInsertCheckedResult } from './experiences.js';
 export type { ExperienceEvaluationsCheckedResult } from './experience-evaluations.js';
 export { EXPERIENCE_LIST_MAX_LIMIT } from './experiences.js';
-export { EXPERIENCE_PROMPT_SEED_VERSION, EXPERIENCE_PROMPT_SEEDS, type ExperiencePromptSeed } from './experience-seeds.js';
+export { EXPERIENCE_PROMPT_ASSET_IDS, EXPERIENCE_PROMPT_SEED_VERSION, EXPERIENCE_PROMPT_SEEDS, type ExperiencePromptSeed, } from './experience-seeds.js';
 export { PARENT_DUTIES_ASSET_ID, PARENT_DUTIES_ASSET_NAME, hasParentRoleAsset, seedParentDutiesAsset } from './parent-duties-seed.js';
 export { EXPERIENCE_EVALUATION_ID_PREFIX, EXPERIENCE_ID_PREFIX, EXPERIENCE_USAGE_ID_PREFIX, ROLE_ASSET_ID_PREFIX, WORKFLOW_ASSET_ID_PREFIX, newExperienceEvaluationId, newExperienceId, newExperienceUsageId, newRoleAssetId, newWorkflowAssetId, versionRowId, type IdGeneratorDeps, type RandomSource, } from './ids.js';
 export { ASSET_DB_FILE } from './schema.js';
@@ -180,8 +180,24 @@ export declare class AssetStore {
     nextId(): string;
     /** 某主体类型当前生效的经验生成 Prompt（无活跃行返回 null，即该类型经验生成被关闭）。 */
     getActivePrompt(type: ExperienceType): Promise<ExperienceGenerationPromptEntry | null>;
-    /** 全量经验生成 Prompt（含历史版本；同类型内活跃行排在前）。 */
+    /** 全量经验生成 Prompt（含历史版本；同资产内活跃行排在前）。 */
     listPrompts(): Promise<ExperienceGenerationPromptEntry[]>;
+    /** 提示词资产列表（两条内置资产；Active 版本投影，无历史/归档分栏）。 */
+    listPromptAssets(): Promise<PromptAssetSummary[]>;
+    /** 提示词资产详情（Active 版本；Active 指针损坏时只读回落到最新版本）。 */
+    getPromptAsset(assetId: string): Promise<PromptAssetDetail | null>;
+    /** 提示词资产版本列表（版本号倒序；不可归档，所有版本都属于同一活跃资产）。 */
+    listPromptVersions(assetId: string): Promise<AssetVersionEntry[]>;
+    /**
+     * 保存提示词资产新版本：**只接受正文**，名称/描述/主体类型从当前版本继承。
+     * 内容全等返回 unchanged（不新增版本）；空正文在领域层拒绝。
+     */
+    savePromptAssetVersion(input: {
+        assetId: string;
+        prompt: string;
+    }): Promise<AssetPromoteResult>;
+    /** 回滚提示词资产到指定版本（只移 Active 指针；不存在归档/恢复分支）。 */
+    rollbackPromptAsset(assetId: string, versionId: number): Promise<PromptAssetDetail>;
     /** 界面经验列表（活跃与归档一并返回，条目自带 active 标记；超出上限按上限截断）。 */
     listRows(limit: number): Promise<ExperienceEntry[]>;
     /**
