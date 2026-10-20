@@ -482,48 +482,6 @@ pnpm check          # Type check + test + build + smoke
 
 ---
 
-## Directory Structure (Core)
-
-```
-dsh-visual-workflow/
-├── src/
-│   ├── host/
-│   │   ├── shared/               # Frontend/backend shared pure type contracts
-│   │   ├── agent/                # Agent creation, model selection, Prompt injection, execution guardrails
-│   │   ├── assets/               # SQLite asset library and experience persistence
-│   │   ├── experience/           # Experience domain (validation/projection/vectors/dedup/recall/subject resolution)
-│   │   ├── orchestrator/         # Runtime, state machine, dynamic orchestration, runtime facts, team-experience injection
-│   │   ├── tools/                # wf_* orchestration tools
-│   │   ├── graph/                # Graph model, structural validation, organizational constraints and budget
-│   │   ├── team/                 # Agent Team capability adaptation
-│   │   ├── storage/              # Template/instance/run record file storage
-│   │   ├── embedding/            # Vector embedding and indexing
-│   │   ├── mcp/                  # MCP registration and configuration
-│   │   ├── scheduler/            # Scheduled tasks
-│   │   ├── service/              # Mode 2 service management
-│   │   ├── api/                  # GUI API
-│   │   ├── commands/             # /arrange and other commands
-│   │   └── prompts/              # Orchestration, planning, team-experience Prompts
-│   │
-│   └── client/
-│       ├── sidebar/              # Official Sidebar slot and workbench entry
-│       ├── studio/               # Workbench main state and state machine
-│       ├── components/           # Canvas, assets, history, scheduled tasks and other UI
-│       ├── hooks/                # UI / data single-responsibility hooks
-│       ├── styles/               # Style files
-│       └── lib/                  # graph / remote / storage and other pure logic
-│
-├── tests/                        # Unit, integration, and contract tests
-├── scripts/                      # Build, smoke, and development scripts
-├── assets/models/                # BGE-small-zh-v1.5 and other model assets
-├── docs/                         # Architecture docs and archives
-├── cordis.patch.yml              # Web profile mounting layer
-├── serve.patch.yml               # Mode 2 service process composition layer
-└── package.json
-```
-
----
-
 ## Core Research Directions (Roadmap)
 
 The project's research direction has shifted from "how to design a better Workflow" to:

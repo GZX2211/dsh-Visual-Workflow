@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="README_EN.md">English</a> · <b>简体中文</b>
+  <a href="README.en.md">English</a> · <b>简体中文</b>
 </p>
 
 <p align="center">
@@ -477,48 +477,6 @@ pnpm check          # 类型检查 + 测试 + 构建 + smoke
 ```
 
 > 修改 Client 需重新构建并硬刷新浏览器；修改 Host 需重启 `dsh web`。
-
----
-
-## 目录结构（核心）
-
-```
-dsh-visual-workflow/
-├── src/
-│   ├── host/
-│   │   ├── shared/               # 前后端共享纯类型契约
-│   │   ├── agent/                # Agent 创建、模型选择、Prompt 注入、执行护栏
-│   │   ├── assets/               # SQLite 资产库与经验持久化
-│   │   ├── experience/           # 经验域（校验/投影/向量/判重/召回/主体解析）
-│   │   ├── orchestrator/         # 运行时、状态机、动态编排、运行事实、团队经验注入
-│   │   ├── tools/                # wf_* 编排工具
-│   │   ├── graph/                # 图模型、结构校验、组织约束与预算
-│   │   ├── team/                 # Agent Team 能力适配
-│   │   ├── storage/              # 模板/实例/运行记录等文件存储
-│   │   ├── embedding/            # 向量嵌入与索引
-│   │   ├── mcp/                  # MCP 注册与配置
-│   │   ├── scheduler/            # 定时任务
-│   │   ├── service/              # Mode 2 服务管理
-│   │   ├── api/                  # GUI API
-│   │   ├── commands/             # /arrange 等命令
-│   │   └── prompts/              # 编排、规划、团队经验 Prompt
-│   │
-│   └── client/
-│       ├── sidebar/              # 官方 Sidebar 插槽与工作台入口
-│       ├── studio/               # 工作台主状态与状态机
-│       ├── components/           # 画布、资产、历史、定时任务等 UI
-│       ├── hooks/                # UI / 数据职责单一 hooks
-│       ├── styles/               # 样式文件
-│       └── lib/                  # graph / remote / storage 等纯逻辑
-│
-├── tests/                        # 单元、集成与 contract 测试
-├── scripts/                      # 构建、冒烟与开发脚本
-├── assets/models/                # BGE-small-zh-v1.5 等模型资产
-├── docs/                         # 架构文档与归档文件
-├── cordis.patch.yml              # Web profile 挂载层
-├── serve.patch.yml               # Mode 2 服务进程组合层
-└── package.json
-```
 
 ---
 

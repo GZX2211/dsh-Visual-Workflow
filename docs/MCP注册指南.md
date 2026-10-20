@@ -1,4 +1,4 @@
-# MCP 注册标准指南
+# MCP 注册指南
 
 > 本文面向「组合管理 → MCP 服务器」页面的注册流程，涵盖本地全局、npx、远程 URL 三种启动方式，
 > 并以 CodeGraph（`@colbymchenry/codegraph`）为例给出可直接照抄的取值。配合本插件的「单行启动命令」
