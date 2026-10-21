@@ -44,9 +44,9 @@ async function renderStudioWith(remote: RemoteFace): Promise<void> {
 }
 
 describe('Studio 装配', () => {
-  it('标题顶栏 = 工作流设计器一行（无额外标题栏）；导入/导出/模式/组合/关闭按钮', async () => {
+  it('标题顶栏 = 工作台一行（无额外标题栏）；导入/导出/模式/组合/关闭按钮', async () => {
     await renderStudio()
-    expect(textOf('.wf-titlebar__title')).toEqual(['工作流设计器'])
+    expect(textOf('.wf-titlebar__title')).toEqual(['工作台'])
     expect(textOf('.wf-titlebar__badge')).toEqual(['可视化编排'])
     const buttons = textOf('.wf-tabs .wf-btn').join('|')
     expect(buttons).toContain('组合')

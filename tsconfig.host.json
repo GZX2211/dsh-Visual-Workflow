@@ -15,6 +15,9 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "verbatimModuleSyntax": true,
+    // 内置模板种子以 JSON 随包分发（builtin-templates/flow-design-guide.json）：
+    // 需要 JSON 模块解析；被 import 的 JSON 会作为输入文件随 tsc 发射到 lib/。
+    "resolveJsonModule": true,
     "declaration": false,
     "sourceMap": true,
     "noEmitOnError": true,

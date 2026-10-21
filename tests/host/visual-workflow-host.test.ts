@@ -9,12 +9,13 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { VisualWorkflowHost, VisualWorkflowHostServiceName, type Config } from '../../src/host/index.js'
 import { VISUAL_WORKFLOW_PROMPT_SECTION } from '../../src/host/agent/prompt-setup.js'
 import { PARENT_ROLE_DUTIES } from '../../src/host/prompts/index.js'
+import type { SettingsServiceLike } from '../../src/host/system-language.js'
 
 /** 构造含临时 dataDir 的完整配置（其余键取 schema 默认）。 */
 function makeConfig(dir: string): Config {
@@ -91,10 +92,15 @@ type HostEventSurface = {
   onAgentDisposed(payload: unknown): void
 }
 
-async function bootHost(dataDir?: string): Promise<{ root: Context; host: VisualWorkflowHost; dir: string }> {
+async function bootHost(
+  dataDir?: string,
+  settings?: SettingsServiceLike,
+): Promise<{ root: Context; host: VisualWorkflowHost; dir: string }> {
   const dir = dataDir ?? (await mkdtemp(join(tmpdir(), 'vw-r4-host-')))
   cleanups.push(() => rm(dir, { recursive: true, force: true }))
   const root = new Context()
+  // 界面语言在宿主 init 时由 settings.describe() 读取：必须在 plugin 装配前提供。
+  if (settings) root.provide('settings', settings)
   await root.plugin(VisualWorkflowHost, makeConfig(dir))
   const host = root.get(VisualWorkflowHostServiceName) as VisualWorkflowHost
   cleanups.push(async () => {
@@ -132,6 +138,58 @@ describe('宿主卸载后的事件观察（D01-06）', () => {
     expect(() => surface.onAgentDisposed({ agent: { id: 'child-after-dispose' } })).not.toThrow()
     // 重复卸载仍幂等（与既有断言同口径）
     expect(() => host.dispose()).not.toThrow()
+  })
+})
+
+describe('内置预设模板播种', () => {
+  it('首次启动自动带上流程设计指南预设模板', async () => {
+    const { host } = await bootHost()
+    const preset = (await host.store.listFlowTemplates()).find((item) => item.id === 'tpl-mvciz28k-jvzw9u')
+    expect(preset?.name).toBe('流程设计指南（预设模版）')
+    expect(preset?.mode).toBe('mode1')
+  })
+
+  it('英文界面首次启动注入英文版；中文界面注入中文版', async () => {
+    const english = await bootHost(undefined, {
+      describe: () => [{ ns: 'locale', value: { preference: 'en' } }],
+    })
+    expect((await english.host.store.getFlowTemplate('tpl-mvciz28k-jvzw9u'))?.name).toBe(
+      'Process Design Guide (Preset Template)',
+    )
+
+    const chinese = await bootHost(undefined, {
+      describe: () => [{ ns: 'locale', value: { preference: 'zh' } }],
+    })
+    expect((await chinese.host.store.getFlowTemplate('tpl-mvciz28k-jvzw9u'))?.name).toBe('流程设计指南（预设模版）')
+  })
+
+  it('删除预设模板后重启不复活（播种标记随数据目录持久化）', async () => {
+    const { root, host, dir } = await bootHost()
+    expect(await host.store.deleteFlowTemplate('tpl-mvciz28k-jvzw9u')).toBe(true)
+    await root.fiber.dispose()
+
+    const second = await bootHost(dir)
+    expect(await second.host.store.getFlowTemplate('tpl-mvciz28k-jvzw9u')).toBeNull()
+  })
+
+  it('播种标记损坏时只告警，不阻断插件启动（best-effort 降级）', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vw-r4-host-'))
+    cleanups.push(() => rm(dir, { recursive: true, force: true }))
+    await writeFile(join(dir, 'builtin-seeds.json'), '{ 不是合法 JSON', 'utf8')
+
+    const { host } = await bootHost(dir)
+    // 播种被跳过：不把「标记读不到」误当成「从未播种」，也不写入模板。
+    expect(await host.store.listFlowTemplates()).toEqual([])
+    // 宿主其余能力照常：数据目录仍可正常读写。
+    await host.store.saveFlowTemplate({
+      id: 'tpl-after-corrupt-seed',
+      mode: 'mode1',
+      name: '仍可保存',
+      description: '',
+      nodes: [],
+      lines: [],
+    })
+    expect((await host.store.listFlowTemplates()).map((item) => item.id)).toContain('tpl-after-corrupt-seed')
   })
 })
 

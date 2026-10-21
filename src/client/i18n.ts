@@ -4,7 +4,7 @@
 
 export const zh = {
   // 标题顶栏
-  studio: '工作流设计器',
+  studio: '工作台',
   badge: '可视化编排',
   note: '拖拽卡片 · 连线编排 · 一键运行',
   // 工作台 × 官方右侧 Sidebar 标签页（0.1.5-rc.1 迁移）：
@@ -247,7 +247,7 @@ export const zh = {
   loadMdTitle: '选择一个 Markdown 文件作为角色与任务内容',
   provider: '服务商',
   model: '模型',
-  modeLabel: '模式',
+  modeLabel: '工具组合',
   thinking: '思考强度',
   thinkingUnsupportedHint: '该模型不支持思考强度（保持默认）',
   modeNames: { standard: '标准', minimal: '极简', ptc: 'ptc' },
@@ -431,8 +431,8 @@ export const zh = {
   toastInstanceOverwritten: '已覆盖实例',
   toastServiceRunningCannotOverwrite: '该会话的服务实例正在运行，请先停止服务后再覆盖',
   // 组合管理
-  combos: '组合',
-  comboManager: '组合管理',
+  combos: '工具组合',
+  comboManager: '工具组合管理',
   comboTabDsh: '工具',
   comboTabTool: '项',
   comboTabMcp: 'MCP 服务器',
@@ -568,7 +568,7 @@ export const zh = {
 export type Dict = typeof zh
 
 export const en: Dict = {
-  studio: 'Workflow Designer',
+  studio: 'Workbench',
   badge: 'Visual Orchestration',
   note: 'Drag cards · Wire connections · Run',
   workbenchInUse: 'The studio is already open in another tab',
@@ -798,7 +798,7 @@ export const en: Dict = {
   loadMdTitle: 'Choose a Markdown file as the role & task content',
   provider: 'Provider',
   model: 'Model',
-  modeLabel: 'Mode',
+  modeLabel: 'Tools combos',
   thinking: 'Thinking effort',
   thinkingUnsupportedHint: 'This model does not support thinking effort (keep default)',
   modeNames: { standard: 'Standard', minimal: 'Minimal', ptc: 'ptc' },
@@ -963,8 +963,8 @@ export const en: Dict = {
   overwriteInstanceConfirm: 'Overwrite',
   toastInstanceOverwritten: 'Instance overwritten',
   toastServiceRunningCannotOverwrite: 'The service instance of this session is running; stop it before overwriting',
-  combos: 'Combos',
-  comboManager: 'Combo Manager',
+  combos: 'Tools combos',
+  comboManager: 'Tools Combo Manager',
   comboTabDsh: 'Tools',
   comboTabTool: 'items',
   comboTabMcp: 'MCP servers',

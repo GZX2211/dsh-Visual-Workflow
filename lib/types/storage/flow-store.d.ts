@@ -89,6 +89,20 @@ export declare class FlowStore {
     /** 删除工作流模板（仅删文件，不影响已生成的实例——模板/实例深拷贝解耦语义）。 */
     deleteFlowTemplate(templateId: string): Promise<boolean>;
     /**
+     * 读取已播种的内置模板 id（文件不存在 → 空数组）。
+     *
+     * 为什么损坏必须抛错而不是返回空数组：空数组会被播种逻辑理解为「从未播种」，
+     * 于是一个已播种后被用户删除的模板会在重启时复活——「确实没有标记」与「标记读不到」
+     * 必须可区分（见 ./AGENTS.md「读取语义」）。
+     */
+    listAppliedBuiltinSeeds(): Promise<string[]>;
+    /**
+     * 合并写入已播种的内置模板 id（读改写在同一临界区内完成；重复 id 去重）。
+     * 空列表是空操作：不创建标记文件，避免「没有播种」也留下一次性状态。
+     * 既有标记损坏时上浮错误，绝不覆盖用户的标记文件。
+     */
+    addAppliedBuiltinSeeds(ids: readonly string[]): Promise<void>;
+    /**
      * 列出某工作流的全部 run（按 startedAt 倒序）。
      * @param sessionId 可选会话过滤：传入时仅返回归属该会话的 run（历史查询端点
      *   必须传，防跨会话运行历史泄露；resume 侧因调用前已按会话定位 flow 可不传）。

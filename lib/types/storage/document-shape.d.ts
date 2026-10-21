@@ -26,6 +26,18 @@ export declare function isWorkflowTemplate(value: unknown): value is WorkflowTem
 /** run 快照文档（runs/<runId>.json）。 */
 export declare function isRunSnapshot(value: unknown): value is RunSnapshot;
 /**
+ * 内置模板播种标记（builtin-seeds.json）。
+ * 逐项校验字符串：读取方会把它展开成「已播种 id 集合」，非字符串项会让某个模板的
+ * 标记静默失效（表现为已删除模板重新播种）。
+ */
+export interface BuiltinSeedState {
+    /** 已播种的内置模板 id（写入时去重；用户删除模板后仍保留）。 */
+    seededTemplateIds: string[];
+    /** 最近一次写入时间（ISO 字符串；由 storage 记账）。 */
+    updatedAt?: string;
+}
+export declare function isBuiltinSeedState(value: unknown): value is BuiltinSeedState;
+/**
  * 工具组合文档（combos.json 单文件）。
  * 为什么这里必须校验容器字段：读取方会直接 spread 这个字段，非数组会被展开成
  * 下标/字符项的垃圾数据（形状漂移在此不是「降级可用」而是「写出错误结果」）。

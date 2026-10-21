@@ -746,6 +746,38 @@ describe('列表排序的确定性', () => {
 // （storage/AGENTS.md：列表读可用，但不得把权限等读取失败伪装成空列表）
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// 内置模板播种标记（builtin-seeds.json）：一次性标记，模板被用户删除后不再播种
+// ---------------------------------------------------------------------------
+
+describe('内置模板播种标记', () => {
+  it('未写入时为空；写入后合并去重并持久化', async () => {
+    expect(await store.listAppliedBuiltinSeeds()).toEqual([])
+
+    await store.addAppliedBuiltinSeeds(['tpl-a', 'tpl-b'])
+    await store.addAppliedBuiltinSeeds(['tpl-b', 'tpl-c'])
+    expect(await store.listAppliedBuiltinSeeds()).toEqual(['tpl-a', 'tpl-b', 'tpl-c'])
+
+    // 新实例重读：标记必须已原子落盘，而不是只在本次进程内有效
+    expect(await new FlowStore(dir).listAppliedBuiltinSeeds()).toEqual(['tpl-a', 'tpl-b', 'tpl-c'])
+  })
+
+  it('空列表写入是空操作（不创建标记文件）', async () => {
+    await store.addAppliedBuiltinSeeds([])
+    expect(await store.listAppliedBuiltinSeeds()).toEqual([])
+  })
+
+  it('标记文件损坏 → 抛出带路径的可诊断错误（不伪装成空标记）', async () => {
+    await writeFile(join(dir, 'builtin-seeds.json'), '{ 坏的', 'utf8')
+    await expect(store.listAppliedBuiltinSeeds()).rejects.toThrow(/builtin-seeds\.json/)
+  })
+
+  it('标记形状不合法（seededTemplateIds 含非字符串）→ 抛可诊断错误', async () => {
+    await writeFile(join(dir, 'builtin-seeds.json'), JSON.stringify({ seededTemplateIds: [1] }), 'utf8')
+    await expect(store.listAppliedBuiltinSeeds()).rejects.toThrow(/builtin-seeds\.json/)
+  })
+})
+
 describe('列表读取的错误语义', () => {
   it('目录不存在 → 各列表入口都返回空（合法降级，不抛错）', async () => {
     for (const name of ['workflows', 'services', 'roles', 'data', 'groups', 'flow-templates', 'runs']) {

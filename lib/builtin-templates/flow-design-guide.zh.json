@@ -1,0 +1,836 @@
+{
+    "id": "tpl-mvciz28k-jvzw9u",
+    "mode": "mode1",
+    "name": "流程设计指南（预设模版）",
+    "description": "用于说明该插件的流程设计方式，以方便用户理解和使用。\n\n1、自己定义标准任务（通过任务节点，原文件节点改名）：\n流程会严格按照用户的预设执行，父代理会自己解决流程冲突或任务冲突（若有）。\n\n2、不定义任务，只定义目标（节点无明确任务）：\n此时流程中的各个节点和顺序，只表示此次为了完成这个目标应该有哪些执行节点，但不定义每个节点具体怎么做。父代理会自己安排并为每个节点发布任务。\n\n这个插件的使用方式其实很灵活，既可以定义编排的执行（改父代理提示词），也可以定义节点的执行（子代理提示词），可以发挥想象去设计，他不是完全固定的工作流。甚至于不想设计也可以使用 /arrange 指令让父代理生成，但是质量会受到你已有的经验和资产的先验影响。",
+    "revision": 521,
+    "nodes": [
+        {
+            "id": "start-mvdopbzz-orbc",
+            "kind": "start",
+            "position": {
+                "x": 615,
+                "y": 182
+            },
+            "data": {
+                "label": "启动"
+            }
+        },
+        {
+            "id": "agent-mvdouxo8-lt7j",
+            "kind": "agent",
+            "position": {
+                "x": 849,
+                "y": 162
+            },
+            "data": {
+                "label": "角色名称（用于标识）",
+                "systemPrompt": "建议在此处不要写详细的任务，而定义角色的标准职责，这样角色可以在多个任务中被复用，并且可以被迭代，也更方便管理。\n\n建议形式（标准五维度，你也可以自由调整或让AI生成）：\n1、角色定位\n一句话定位：你是XXX，负责XXX\n2、职责范围\n什么工作应该交给他？通常不与其他角色重叠。\n3、工作约束\n必须遵守什么？必须先做什么，后做什么？禁止做什么？\n4、决策权限\n什么事子代理能够决定？什么必须报告父代理决策？什么事应该问用户？（决策链）\n5、交接契约\n如何与其上下游进行交接？如何与其他子代理进行协作等？\n\n高级选项中有输入契约和输出契约，可以定义针对任务的稳定交接模式（有默认值，可改）。",
+                "provider": "",
+                "model": "",
+                "reasoning": null,
+                "presetId": "standard",
+                "retryLimit": 3,
+                "reactLimit": null,
+                "inputSchema": "",
+                "outputSchema": "结论 / 产出文件路径 / 关键决策 / 未决问题",
+                "injectSystemPrompt": true,
+                "injectToolSections": true,
+                "groupId": null
+            }
+        },
+        {
+            "id": "task-mvdv1ojz-scob",
+            "kind": "task",
+            "position": {
+                "x": 575,
+                "y": 56
+            },
+            "data": {
+                "label": "任务名称（标识）",
+                "content": "一个适配该角色职责范围的标准化任务，一些循环任务可以写入模版复用。\n\n任务最好定义清晰的：\n1、执行路径（在哪里做？）\n2、执行方式（怎么做？）\n3、验收标准（怎么算完成？）\n\n而执行原则、约束、权限等持久恒定的内容由角色职责承载。\n（提示词分层机制，会在用户手册中详细说明）"
+            }
+        },
+        {
+            "id": "agent-mvdvwziq-qq1b",
+            "kind": "agent",
+            "position": {
+                "x": 1125,
+                "y": 162
+            },
+            "data": {
+                "label": "角色节点",
+                "systemPrompt": "关于角色的选择，这里建议对于无上下文依赖的任务才建立串行链，进行多代理执行。\n\n如果将任务拆分过细，且对前置任务有较强的上下文依赖关系，不建议采用多代理，这会非常消耗 Token，且会影响任务执行的准确度。\n\n那什么时候才应该启用多代理工作流？\n我的回答是：当任务已经大到一个代理的上下文无法装下，或者说即便能装下，但上下文污染过于严重且无法形成有效注意力的时候，或者需要大量并行提高工作效率的时候，这种情况多代理会展现其工作价值。",
+                "provider": "",
+                "model": "",
+                "reasoning": null,
+                "presetId": "standard",
+                "retryLimit": 3,
+                "reactLimit": null,
+                "inputSchema": "",
+                "outputSchema": "结论 / 产出文件路径 / 关键决策 / 未决问题",
+                "injectSystemPrompt": true,
+                "injectToolSections": true,
+                "groupId": null
+            }
+        },
+        {
+            "id": "task-mvdvxlq7-gbj6",
+            "kind": "task",
+            "position": {
+                "x": 847,
+                "y": 37
+            },
+            "data": {
+                "label": "串行任务",
+                "content": "简单串行链：任务2通常依赖前置任务1，如果不依赖，可以改并行。\n底下的“选择文件”按钮点击选择后可以将文件路径填入文本框。"
+            }
+        },
+        {
+            "id": "group-mvdxt99q-u0s5",
+            "kind": "group",
+            "position": {
+                "x": 1405,
+                "y": 122
+            },
+            "data": {
+                "label": "Agent Team（智能体团队）",
+                "collabPrompt": "",
+                "memberIds": [
+                    "agent-mve04tlp-a730",
+                    "agent-mve07m7z-snky"
+                ],
+                "size": {
+                    "w": 300,
+                    "h": 220
+                }
+            }
+        },
+        {
+            "id": "agent-mve04tlp-a730",
+            "kind": "agent",
+            "position": {
+                "x": 1434,
+                "y": 168
+            },
+            "data": {
+                "label": "团队成员1",
+                "systemPrompt": "团队成员会被按需启动，而不是一定全量并行。",
+                "provider": "",
+                "model": "",
+                "reasoning": null,
+                "presetId": "standard",
+                "retryLimit": 3,
+                "reactLimit": null,
+                "inputSchema": "",
+                "outputSchema": "结论 / 产出文件路径 / 关键决策 / 未决问题",
+                "injectSystemPrompt": true,
+                "injectToolSections": true,
+                "groupId": "group-mvdxt99q-u0s5"
+            }
+        },
+        {
+            "id": "agent-mve07m7z-snky",
+            "kind": "agent",
+            "position": {
+                "x": 1425,
+                "y": 229
+            },
+            "data": {
+                "label": "团队成员2",
+                "systemPrompt": "",
+                "provider": "",
+                "model": "",
+                "reasoning": null,
+                "presetId": "standard",
+                "retryLimit": 3,
+                "reactLimit": null,
+                "inputSchema": "",
+                "outputSchema": "结论 / 产出文件路径 / 关键决策 / 未决问题",
+                "injectSystemPrompt": true,
+                "injectToolSections": true,
+                "groupId": "group-mvdxt99q-u0s5"
+            }
+        },
+        {
+            "id": "agent-mve0bc48-17w7",
+            "kind": "agent",
+            "position": {
+                "x": 1794,
+                "y": 81
+            },
+            "data": {
+                "label": "并行角色1",
+                "systemPrompt": "这个角色连接了数据库节点，会被分配数据库检索工具，在执行任务时，会按需检索数据库内容。",
+                "provider": "",
+                "model": "",
+                "reasoning": null,
+                "presetId": "standard",
+                "retryLimit": 3,
+                "reactLimit": null,
+                "inputSchema": "",
+                "outputSchema": "结论 / 产出文件路径 / 关键决策 / 未决问题",
+                "injectSystemPrompt": true,
+                "injectToolSections": true,
+                "groupId": null
+            }
+        },
+        {
+            "id": "agent-mve0bvzj-g0ps",
+            "kind": "agent",
+            "position": {
+                "x": 1794,
+                "y": 211
+            },
+            "data": {
+                "label": "并行角色2",
+                "systemPrompt": "简单并行链，需要进行任务拆解和分配，避免并行改动冲突或探索重复。",
+                "provider": "",
+                "model": "",
+                "reasoning": null,
+                "presetId": "standard",
+                "retryLimit": 3,
+                "reactLimit": null,
+                "inputSchema": "",
+                "outputSchema": "结论 / 产出文件路径 / 关键决策 / 未决问题",
+                "injectSystemPrompt": true,
+                "injectToolSections": true,
+                "groupId": null
+            }
+        },
+        {
+            "id": "task-mve0dfoc-bauv",
+            "kind": "task",
+            "position": {
+                "x": 1124,
+                "y": 36
+            },
+            "data": {
+                "label": "团队任务目标",
+                "content": "连接团队卡片上的上下文节点可以定义团队的整体目标，任务分配由父代理根据目标执行。"
+            }
+        },
+        {
+            "id": "agent-mve0og0x-wok1",
+            "kind": "agent",
+            "position": {
+                "x": 2089,
+                "y": 146
+            },
+            "data": {
+                "label": "并行汇聚",
+                "systemPrompt": "并行链汇聚，并行角色的最终交接结果会自动交付给下游。串行链的交接也是自动交接。自动交接的“输出契约”在高级选项中配置。",
+                "provider": "",
+                "model": "",
+                "reasoning": null,
+                "presetId": "standard",
+                "retryLimit": 3,
+                "reactLimit": null,
+                "inputSchema": "",
+                "outputSchema": "结论 / 产出文件路径 / 关键决策 / 未决问题",
+                "injectSystemPrompt": true,
+                "injectToolSections": true,
+                "groupId": null
+            }
+        },
+        {
+            "id": "database-mve0sw4t-ks5q",
+            "kind": "database",
+            "position": {
+                "x": 1497,
+                "y": -6
+            },
+            "data": {
+                "label": "数据库（本地/服务）",
+                "description": "1、对于本地数据库：在数据库节点连接后，在下方填入数据库文件路径即可启用。\n2、对于服务型数据库：需要填写服务端口、用户名、密码等，并测试连接，成功后即可启用。\n\n目前仅支持 SQLite（本地）、MySQL（关系性）、PostgreSQL（支持向量）。\n可在高级选项中配置召回条数、相似度阈值、分块窗口等。",
+                "dbType": "local",
+                "dbKind": "sqlite",
+                "localPath": "",
+                "vectorSource": "embedding"
+            }
+        },
+        {
+            "id": "agent-mve18dqb-a68c",
+            "kind": "agent",
+            "position": {
+                "x": 2406,
+                "y": 25
+            },
+            "data": {
+                "label": "角色节点",
+                "systemPrompt": "",
+                "provider": "",
+                "model": "",
+                "reasoning": null,
+                "presetId": "standard",
+                "retryLimit": 3,
+                "reactLimit": null,
+                "inputSchema": "",
+                "outputSchema": "结论 / 产出文件路径 / 关键决策 / 未决问题",
+                "injectSystemPrompt": true,
+                "injectToolSections": true,
+                "groupId": null
+            }
+        },
+        {
+            "id": "agent-mve18gqa-65fx",
+            "kind": "agent",
+            "position": {
+                "x": 2406,
+                "y": 278
+            },
+            "data": {
+                "label": "执行角色（待审批）",
+                "systemPrompt": "",
+                "provider": "",
+                "model": "",
+                "reasoning": null,
+                "presetId": "standard",
+                "retryLimit": 3,
+                "reactLimit": null,
+                "inputSchema": "",
+                "outputSchema": "结论 / 产出文件路径 / 关键决策 / 未决问题",
+                "injectSystemPrompt": true,
+                "injectToolSections": true,
+                "groupId": null
+            }
+        },
+        {
+            "id": "agent-mve1ri2g-m8q3",
+            "kind": "agent",
+            "position": {
+                "x": 2743,
+                "y": 278
+            },
+            "data": {
+                "label": "审批角色（无环演示）",
+                "systemPrompt": "",
+                "provider": "",
+                "model": "",
+                "reasoning": null,
+                "presetId": "standard",
+                "retryLimit": 3,
+                "reactLimit": null,
+                "inputSchema": "",
+                "outputSchema": "结论 / 产出文件路径 / 关键决策 / 未决问题",
+                "injectSystemPrompt": true,
+                "injectToolSections": true,
+                "groupId": null,
+                "swapPorts": false
+            }
+        },
+        {
+            "id": "agent-mve1v3tq-s1a1",
+            "kind": "agent",
+            "position": {
+                "x": 3054,
+                "y": 278
+            },
+            "data": {
+                "label": "下一个流程角色",
+                "systemPrompt": "",
+                "provider": "",
+                "model": "",
+                "reasoning": null,
+                "presetId": "standard",
+                "retryLimit": 3,
+                "reactLimit": null,
+                "inputSchema": "",
+                "outputSchema": "结论 / 产出文件路径 / 关键决策 / 未决问题",
+                "injectSystemPrompt": true,
+                "injectToolSections": true,
+                "groupId": null
+            }
+        },
+        {
+            "id": "proxy-mve1wsd6-i4iv",
+            "kind": "proxy",
+            "position": {
+                "x": 2744,
+                "y": 411
+            },
+            "data": {
+                "swapPorts": true,
+                "label": "点击右下角“复制”，复用原执行角色"
+            },
+            "proxySourceId": "agent-mve18gqa-65fx"
+        },
+        {
+            "id": "proxy-mve1xmg7-63sh",
+            "kind": "proxy",
+            "position": {
+                "x": 2745,
+                "y": 542
+            },
+            "data": {
+                "label": "复用原审批角色"
+            },
+            "proxySourceId": "agent-mve1ri2g-m8q3"
+        },
+        {
+            "id": "end-mve1xwr6-oc9f",
+            "kind": "end",
+            "position": {
+                "x": 3373,
+                "y": 298
+            },
+            "data": {
+                "label": "结束"
+            }
+        },
+        {
+            "id": "pause-mve1xz88-e6r3",
+            "kind": "pause",
+            "position": {
+                "x": 3055,
+                "y": 563
+            },
+            "data": {
+                "label": "暂停"
+            }
+        },
+        {
+            "id": "agent-mve2scw0-3ojt",
+            "kind": "agent",
+            "position": {
+                "x": 2406,
+                "y": 410
+            },
+            "data": {
+                "label": "审批角色（回环演示）",
+                "systemPrompt": "",
+                "provider": "",
+                "model": "",
+                "reasoning": null,
+                "presetId": "standard",
+                "retryLimit": 3,
+                "reactLimit": null,
+                "inputSchema": "",
+                "outputSchema": "结论 / 产出文件路径 / 关键决策 / 未决问题",
+                "injectSystemPrompt": true,
+                "injectToolSections": true,
+                "groupId": null,
+                "swapPorts": true
+            }
+        },
+        {
+            "id": "proxy-mve2t34j-yowz",
+            "kind": "proxy",
+            "position": {
+                "x": 2406,
+                "y": 542
+            },
+            "data": {},
+            "proxySourceId": "agent-mve1v3tq-s1a1"
+        },
+        {
+            "id": "agent-mve31b6l-1ebw",
+            "kind": "agent",
+            "position": {
+                "x": 2742,
+                "y": -45
+            },
+            "data": {
+                "label": "路由节点1",
+                "systemPrompt": "",
+                "provider": "",
+                "model": "",
+                "reasoning": null,
+                "presetId": "standard",
+                "retryLimit": 3,
+                "reactLimit": null,
+                "inputSchema": "",
+                "outputSchema": "结论 / 产出文件路径 / 关键决策 / 未决问题",
+                "injectSystemPrompt": true,
+                "injectToolSections": true,
+                "groupId": null,
+                "systemPromptSource": "AGENTS.md"
+            }
+        },
+        {
+            "id": "agent-mve31r07-ssww",
+            "kind": "agent",
+            "position": {
+                "x": 2743,
+                "y": 84
+            },
+            "data": {
+                "label": "路由节点2",
+                "systemPrompt": "",
+                "provider": "",
+                "model": "",
+                "reasoning": null,
+                "presetId": "standard",
+                "retryLimit": 3,
+                "reactLimit": null,
+                "inputSchema": "",
+                "outputSchema": "结论 / 产出文件路径 / 关键决策 / 未决问题",
+                "injectSystemPrompt": true,
+                "injectToolSections": true,
+                "groupId": null
+            }
+        },
+        {
+            "id": "task-mve36p8c-vj1q",
+            "kind": "task",
+            "position": {
+                "x": 2405,
+                "y": -106
+            },
+            "data": {
+                "label": "条件分区说明（先看这）",
+                "content": "条件分区节点较多，不用挨个点，看此说明即可。\n\n三种条件分支线，并非机械判断，而是父代理语义判断，可以演化出多种可能性。\n\n常见使用场景（可扩展）：\n1、审批流：审批流可使用虚拟节点进行单向有限次数审批，也可以人工设置回环，需设定回流重试上限（默认3次）。\n2、路由分支：当执行到该节点时，父代理会依据条件线上所承载的语义判断该走哪个分支。\n一个工作流可以承载多种执行分支情况，实现树形分叉后汇聚。\n\n审批流无环流程演示（如下方流程），点击角色属性栏右下角复制按钮，可复制为虚拟节点。\n虚拟节点的定义是：在流程中复用原执行角色（上下文不丢失），同时避免“回环”。环被解构为有限流程。\n\n若在有限回环内无法被解决，可接入暂停节点。\n流程会被暂停，直到人工裁决复核后点击运行或指示父代理继续。\n若使用有环审批流，在回环次数达到上限后代理会被强制停止。\n\n为什么有两种使用方法？\n这是初期设计虚拟节点时衍生的用法，各有优点，若使用无环流程，整个工作流全局可被穷举，内部回环流程也能显示在画布上。就是会多几个拖节点的步骤。\n"
+            }
+        },
+        {
+            "id": "agent-mve3hzy4-2q31",
+            "kind": "agent",
+            "position": {
+                "x": 3049,
+                "y": 18
+            },
+            "data": {
+                "label": "条件汇聚",
+                "systemPrompt": "实际仍是串行链",
+                "provider": "",
+                "model": "",
+                "reasoning": null,
+                "presetId": "standard",
+                "retryLimit": 3,
+                "reactLimit": null,
+                "inputSchema": "",
+                "outputSchema": "结论 / 产出文件路径 / 关键决策 / 未决问题",
+                "injectSystemPrompt": true,
+                "injectToolSections": true,
+                "groupId": null
+            }
+        },
+        {
+            "id": "task-mvep2foq-bm6t",
+            "kind": "task",
+            "position": {
+                "x": 1123,
+                "y": 287
+            },
+            "data": {
+                "label": "团队协作任务",
+                "content": "也可以连接到成员自身的节点为各个成员安排协作任务。\n一份协作任务可以为多个成员安排。会注入到连接的每个成员上下文。"
+            }
+        },
+        {
+            "id": "task-mvh1rap8-hra6",
+            "kind": "task",
+            "position": {
+                "x": 1496,
+                "y": -132
+            },
+            "data": {
+                "label": "团队说明（右下角可展开）",
+                "content": "和官方的 Agent Team 机制接轨，本插件只做流程引导，所有交接机制和任务板全部都是官方负责。\n\n1、当你未开启官方 Agent Team 机制时，它会退化为插件自带的团队，不携带任务板，只有消息发送的协作机制。\n2、开启时，请把官方的 spawn_teammate 工具和 send_message 工具禁用，这会与本插件自带工具冲突（不可避免，这是官方 send_message 工具既有缺陷）。\n\n在团队卡片的协作 Prompt 内可以写入供团队所有成员使用的协作规范，他会同时注入团队内所有成员的上下文。\n\n协作规范写不写都不影响运行，若要写建议为：\n1、成员间如何沟通？什么情况需要沟通？（通常不允许随意发送消息，这涉及到你的token消耗和效率质量）\n2、交接字数限制或契约。涉及发送信息的格式。\n3、其他你需要定义的协作约束。\n\n团队使用方法：\n1、自己将预设定的角色拖入：此时，当流程进行到团队节点时，父代理会在已有角色基础上进行任务分发（也可自己设定任务）。与并行节点区别是多了成员沟通渠道和官方任务板机制，设计时进行取舍，看任务是否真的需要沟通？或复杂到需要使用任务板？\n2、连接团队节点但留空，不拖入角色：此时，当流程进行到该节点时，父代理会根据团队目标自行决定角色和职责分配，以及任务分发。你只需要定义团队任务目标即可（控制力更弱）。\n\n这里做一个设计说明：\n从理论上来讲，Agent Team 团队可以把本工作流所有可以做的任务做完，事实上，其和工作流本身应当是冲突的。\n但在我的定义里面，这其实就是控制力强弱的问题。你如果希望流程全部被自己掌控，那就不要使用团队，自己布置任务、分发节点，而不是把决策权全权交给 Agent。你如果希望流程部分被自己掌控，那就把它作为一个节点。你如果希望流程更加灵活不在意执行细节和流程控制，那就不要使用工作流，直接使用官方的 Agent Team 即可。"
+            }
+        },
+        {
+            "id": "pause-mvh2ih56-fiyp",
+            "kind": "pause",
+            "position": {
+                "x": 2407,
+                "y": 166
+            },
+            "data": {
+                "label": "暂停"
+            }
+        },
+        {
+            "id": "end-mvh2k2pm-hadg",
+            "kind": "end",
+            "position": {
+                "x": 2743,
+                "y": 672
+            },
+            "data": {
+                "label": "结束"
+            }
+        }
+    ],
+    "lines": [
+        {
+            "id": "e-mvdv10yg-568d",
+            "source": "start-mvdopbzz-orbc",
+            "target": "agent-mvdouxo8-lt7j",
+            "sourceHandle": "flow-out",
+            "targetHandle": "flow-in"
+        },
+        {
+            "id": "e-mvdv1ruu-g46d",
+            "source": "task-mvdv1ojz-scob",
+            "target": "agent-mvdouxo8-lt7j",
+            "sourceHandle": "ctx-out",
+            "targetHandle": "ctx-in"
+        },
+        {
+            "id": "e-mvdvx47g-x4u2",
+            "source": "agent-mvdouxo8-lt7j",
+            "target": "agent-mvdvwziq-qq1b",
+            "sourceHandle": "flow-out",
+            "targetHandle": "flow-in"
+        },
+        {
+            "id": "e-mvdxtd5y-jhrz",
+            "source": "agent-mvdvwziq-qq1b",
+            "target": "group-mvdxt99q-u0s5",
+            "sourceHandle": "flow-out",
+            "targetHandle": "flow-in"
+        },
+        {
+            "id": "e-mve0bugb-97f1",
+            "source": "group-mvdxt99q-u0s5",
+            "target": "agent-mve0bc48-17w7",
+            "sourceHandle": "flow-out",
+            "targetHandle": "flow-in"
+        },
+        {
+            "id": "e-mve0c13d-fejk",
+            "source": "group-mvdxt99q-u0s5",
+            "target": "agent-mve0bvzj-g0ps",
+            "sourceHandle": "flow-out",
+            "targetHandle": "flow-in"
+        },
+        {
+            "id": "e-mve0s5zt-7x4t",
+            "source": "agent-mve0bc48-17w7",
+            "target": "agent-mve0og0x-wok1",
+            "sourceHandle": "flow-out",
+            "targetHandle": "flow-in"
+        },
+        {
+            "id": "e-mve0s73x-46vb",
+            "source": "agent-mve0bvzj-g0ps",
+            "target": "agent-mve0og0x-wok1",
+            "sourceHandle": "flow-out",
+            "targetHandle": "flow-in"
+        },
+        {
+            "id": "e-mve19cdp-520o",
+            "source": "agent-mve0og0x-wok1",
+            "target": "agent-mve18gqa-65fx",
+            "sourceHandle": "flow-out",
+            "targetHandle": "flow-in",
+            "condition": {
+                "type": "pass",
+                "label": ""
+            }
+        },
+        {
+            "id": "e-mve19ga0-mbtc",
+            "source": "agent-mve0og0x-wok1",
+            "target": "agent-mve18dqb-a68c",
+            "sourceHandle": "flow-out",
+            "targetHandle": "flow-in",
+            "condition": {
+                "type": "content",
+                "label": "这是语义路由"
+            }
+        },
+        {
+            "id": "e-mve1sqb2-jyrr",
+            "source": "agent-mve18gqa-65fx",
+            "target": "agent-mve1ri2g-m8q3",
+            "sourceHandle": "flow-out",
+            "targetHandle": "flow-in",
+            "condition": {
+                "type": "content",
+                "label": "无环"
+            }
+        },
+        {
+            "id": "e-mve1w6sk-aq5e",
+            "source": "agent-mve1ri2g-m8q3",
+            "target": "agent-mve1v3tq-s1a1",
+            "sourceHandle": "flow-out",
+            "targetHandle": "flow-in",
+            "condition": {
+                "type": "pass",
+                "label": ""
+            }
+        },
+        {
+            "id": "e-mve1ww5i-9lwk",
+            "source": "agent-mve1ri2g-m8q3",
+            "target": "proxy-mve1wsd6-i4iv",
+            "sourceHandle": "flow-out",
+            "targetHandle": "flow-in",
+            "condition": {
+                "type": "fail",
+                "label": ""
+            }
+        },
+        {
+            "id": "e-mve1xovj-cxnn",
+            "source": "proxy-mve1wsd6-i4iv",
+            "target": "proxy-mve1xmg7-63sh",
+            "sourceHandle": "flow-out",
+            "targetHandle": "flow-in"
+        },
+        {
+            "id": "e-mve26i8o-62ug",
+            "source": "proxy-mve1xmg7-63sh",
+            "target": "pause-mve1xz88-e6r3",
+            "sourceHandle": "flow-out",
+            "targetHandle": "flow-in",
+            "condition": {
+                "type": "fail",
+                "label": ""
+            }
+        },
+        {
+            "id": "e-mve2sq1x-k8ig",
+            "source": "agent-mve18gqa-65fx",
+            "target": "agent-mve2scw0-3ojt",
+            "sourceHandle": "flow-out",
+            "targetHandle": "flow-in",
+            "condition": {
+                "type": "content",
+                "label": "有环"
+            }
+        },
+        {
+            "id": "e-mve2ssap-7sin",
+            "source": "agent-mve2scw0-3ojt",
+            "target": "agent-mve18gqa-65fx",
+            "sourceHandle": "flow-out",
+            "targetHandle": "flow-in",
+            "condition": {
+                "type": "fail",
+                "label": ""
+            }
+        },
+        {
+            "id": "e-mve2t6v7-yicz",
+            "source": "agent-mve2scw0-3ojt",
+            "target": "proxy-mve2t34j-yowz",
+            "sourceHandle": "flow-out",
+            "targetHandle": "flow-in",
+            "condition": {
+                "type": "pass",
+                "label": ""
+            }
+        },
+        {
+            "id": "e-mve323az-tzji",
+            "source": "agent-mve18dqb-a68c",
+            "target": "agent-mve31b6l-1ebw",
+            "sourceHandle": "flow-out",
+            "targetHandle": "flow-in",
+            "condition": {
+                "type": "content",
+                "label": "条件1"
+            }
+        },
+        {
+            "id": "e-mve32493-lh5c",
+            "source": "agent-mve18dqb-a68c",
+            "target": "agent-mve31r07-ssww",
+            "sourceHandle": "flow-out",
+            "targetHandle": "flow-in",
+            "condition": {
+                "type": "content",
+                "label": "条件2"
+            }
+        },
+        {
+            "id": "e-mve3it8q-8rpx",
+            "source": "agent-mve31b6l-1ebw",
+            "target": "agent-mve3hzy4-2q31",
+            "sourceHandle": "flow-out",
+            "targetHandle": "flow-in"
+        },
+        {
+            "id": "e-mve3iv0o-plu5",
+            "source": "agent-mve31r07-ssww",
+            "target": "agent-mve3hzy4-2q31",
+            "sourceHandle": "flow-out",
+            "targetHandle": "flow-in"
+        },
+        {
+            "id": "e-mve3r6v0-c6dg",
+            "source": "agent-mve3hzy4-2q31",
+            "target": "end-mve1xwr6-oc9f",
+            "sourceHandle": "flow-out",
+            "targetHandle": "flow-in"
+        },
+        {
+            "id": "e-mve3r85t-fnvs",
+            "source": "agent-mve1v3tq-s1a1",
+            "target": "end-mve1xwr6-oc9f",
+            "sourceHandle": "flow-out",
+            "targetHandle": "flow-in"
+        },
+        {
+            "id": "e-mve6rdci-zvry",
+            "source": "task-mvdvxlq7-gbj6",
+            "target": "agent-mvdvwziq-qq1b",
+            "sourceHandle": "ctx-out",
+            "targetHandle": "ctx-in"
+        },
+        {
+            "id": "e-mve6rs1p-x1c2",
+            "source": "task-mve0dfoc-bauv",
+            "target": "group-mvdxt99q-u0s5",
+            "sourceHandle": "ctx-out",
+            "targetHandle": "ctx-in"
+        },
+        {
+            "id": "e-mve6rzzf-abmk",
+            "source": "proxy-mve1xmg7-63sh",
+            "target": "agent-mve1v3tq-s1a1",
+            "sourceHandle": "flow-out",
+            "targetHandle": "flow-in",
+            "condition": {
+                "type": "pass",
+                "label": ""
+            }
+        },
+        {
+            "id": "e-mvep0v4q-yf2h",
+            "source": "database-mve0sw4t-ks5q",
+            "target": "agent-mve0bc48-17w7",
+            "sourceHandle": "db-out",
+            "targetHandle": "db-in"
+        },
+        {
+            "id": "e-mvep2kmo-zgos",
+            "source": "task-mvep2foq-bm6t",
+            "target": "agent-mve04tlp-a730",
+            "sourceHandle": "ctx-out",
+            "targetHandle": "ctx-in"
+        },
+        {
+            "id": "e-mvep2mwh-q93z",
+            "source": "task-mvep2foq-bm6t",
+            "target": "agent-mve07m7z-snky",
+            "sourceHandle": "ctx-out",
+            "targetHandle": "ctx-in"
+        },
+        {
+            "id": "e-mvh2ijvi-zilm",
+            "source": "agent-mve0og0x-wok1",
+            "target": "pause-mvh2ih56-fiyp",
+            "sourceHandle": "flow-out",
+            "targetHandle": "flow-in",
+            "condition": {
+                "type": "fail",
+                "label": ""
+            }
+        },
+        {
+            "id": "e-mvh2k62m-cz94",
+            "source": "proxy-mve2t34j-yowz",
+            "target": "end-mvh2k2pm-hadg",
+            "sourceHandle": "flow-out",
+            "targetHandle": "flow-in"
+        }
+    ],
+    "createdAt": "2026-10-17T15:02:05.588Z",
+    "updatedAt": "2026-10-20T19:41:30.485Z",
+    "startNewSession": true
+}

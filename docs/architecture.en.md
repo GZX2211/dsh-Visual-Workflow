@@ -6,11 +6,6 @@
 
 This document describes the core architecture, design intent, and key trade-offs of this project.
 
-> **Related documents:**
->
-> - See [README.md](README.md) for node concepts, tool configuration, and installation.
-> - See [AGENTS.md](AGENTS.md) for module responsibility navigation and project development conventions.
-
 ---
 
 ## 1. Problem and Positioning

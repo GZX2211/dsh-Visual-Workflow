@@ -21,6 +21,7 @@ import { join, resolve } from 'node:path'
 import { atomicWriteJson, readJson, withJsonLock, CorruptJsonError } from './atomic.js'
 import {
   InvalidDocumentError,
+  isBuiltinSeedState,
   isRunSnapshot,
   isServiceState,
   isSessionIdMap,
@@ -29,8 +30,10 @@ import {
   isWorkflowDocument,
   isWorkflowTemplate,
 } from './document-shape.js'
+import type { BuiltinSeedState } from './document-shape.js'
 import {
   DIRS as DATA_DIRS,
+  builtinSeedsPath,
   combosPath,
   flowTemplatePath,
   runsPath,
@@ -476,6 +479,37 @@ export class FlowStore {
       if (!exists) return false
       await rm(path, { force: true })
       return true
+    })
+  }
+
+  // ---- 内置模板播种标记（builtin-seeds.json；一次性标记，不随模板删除） ----
+
+  /**
+   * 读取已播种的内置模板 id（文件不存在 → 空数组）。
+   *
+   * 为什么损坏必须抛错而不是返回空数组：空数组会被播种逻辑理解为「从未播种」，
+   * 于是一个已播种后被用户删除的模板会在重启时复活——「确实没有标记」与「标记读不到」
+   * 必须可区分（见 ./AGENTS.md「读取语义」）。
+   */
+  async listAppliedBuiltinSeeds(): Promise<string[]> {
+    const state = await readDocument<BuiltinSeedState>(builtinSeedsPath(this.root), isBuiltinSeedState)
+    return state ? [...state.seededTemplateIds] : []
+  }
+
+  /**
+   * 合并写入已播种的内置模板 id（读改写在同一临界区内完成；重复 id 去重）。
+   * 空列表是空操作：不创建标记文件，避免「没有播种」也留下一次性状态。
+   * 既有标记损坏时上浮错误，绝不覆盖用户的标记文件。
+   */
+  async addAppliedBuiltinSeeds(ids: readonly string[]): Promise<void> {
+    const added = [...new Set(ids.map((id) => String(id)).filter((id) => id.trim() !== ''))]
+    if (added.length === 0) return
+    const path = builtinSeedsPath(this.root)
+    await withJsonLock(path, async () => {
+      const current = await readDocument<BuiltinSeedState>(path, isBuiltinSeedState)
+      const merged = [...new Set([...(current?.seededTemplateIds ?? []), ...added])]
+      const state: BuiltinSeedState = { seededTemplateIds: merged, updatedAt: new Date().toISOString() }
+      await atomicWriteJson(path, state)
     })
   }
 

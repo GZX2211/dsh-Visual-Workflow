@@ -29,3 +29,10 @@ export declare function flowTemplatePath(root: string, templateId: string): stri
 export declare function runsPath(root: string, runId: string): string;
 /** 工具组合文件路径（combos.json 单文件）。 */
 export declare function combosPath(root: string): string;
+/**
+ * 内置模板播种标记文件路径（builtin-seeds.json 单文件）。
+ *
+ * 为什么不放在 flow-templates/ 下：标记必须在模板文件被用户删除后仍然存在，否则
+ * 「删除后不再播种」的语义无法成立；同时避免被模板列表读取入口当成模板文档。
+ */
+export declare function builtinSeedsPath(root: string): string;

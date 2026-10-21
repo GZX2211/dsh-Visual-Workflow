@@ -9,6 +9,7 @@ import type { Config } from './config.js'
 import { FlowStore } from './storage/flow-store.js'
 import { AssetStore } from './assets/index.js'
 import { PARENT_ROLE_DUTIES } from './prompts/index.js'
+import { installBuiltinFlowTemplates } from './builtin-templates/install.js'
 import {
   OrchestratorRuntime,
   reconcileStaleRuns,
@@ -578,6 +579,21 @@ export class VisualWorkflowHost extends Service {
     } catch (error) {
       this.ctx.logger.warn(
         `[visual-workflow] 内置父代理模板播种失败（不影响启动）：${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+
+    // 内置预设模板（流程设计指南）：首次启动播种一份普通模板，之后与用户模板同权。
+    // 播种由「已播种标记」驱动（builtin-seeds.json）：用户删除/修改后不再写回；
+    // 已有数据目录的老用户升级后也会补上一次。语言按当前界面语言选择（英文界面注入
+    // 英文版，其余回退中文）。失败只告警，不阻断插件启动。
+    try {
+      const installed = await installBuiltinFlowTemplates(this.store, this.systemLanguage())
+      if (installed.length > 0) {
+        this.ctx.logger.info(`[visual-workflow] 已安装内置预设模板：${installed.join(', ')}`)
+      }
+    } catch (error) {
+      this.ctx.logger.warn(
+        `[visual-workflow] 内置预设模板播种失败（不影响启动）：${error instanceof Error ? error.message : String(error)}`,
       )
     }
 

@@ -1,16 +1,17 @@
+```markdown
 <p align="center">
-  <img src="https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/流程编排.png" alt="UI Preview" width="100%" />
+  <img src="https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/预设模版.png" width="100%" />
 </p>
 
 <h1 align="center">Visual Agent Orchestration Platform</h1>
 
 <p align="center">
   A visual Agent orchestration platform built on <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a><br>
-  Supports fixed Workflows, visual flow design, Agent autonomous meta-orchestration, real-time intervention during execution, and continuous self-evolution through organizational memory and feedback distillation
+  Supports fixed Workflows, visual flow design, and Agent autonomous meta-orchestration, with real-time intervention during runtime and continuous evolution through feedback-driven experience accumulation
 </p>
 
 <p align="center">
-  <a href="README.md">简体中文</a> · <b>English</b>
+  <b>English</b> · <a href="README.md">简体中文</a>
 </p>
 
 <p align="center">
@@ -25,77 +26,51 @@
 
 ---
 
-## Project Positioning
+## What This Project Is
 
-This is an Agent orchestration platform that "gets smarter the more you use it" — no longer just a workflow.
+This is an Agent orchestration platform that "gets smarter the more you use it" — no longer just a plain workflow.
 
 The project combines **Workflow, Agent Team, Meta-Orchestration, Human-in-the-loop, and Organizational Memory** into a single visual workbench:
 
 ```text
-                    ┌─────────────────────┐
-                    │    Human Design      │
-                    │   Fixed Workflow     │
-                    └──────────┬──────────┘
-                               │
-                               ▼
-┌─────────────────┐     ┌───────────────┐     ┌──────────────────┐
-│ Agent Autonomous │ ──► │ Organization  │ ◄── │ Runtime Human    │
-│    Planning       │    │ Generation/   │     │  Intervention    │
-│Meta-Orchestration│    │  Execution     │     └──────────────────┘
-└─────────────────┘     └───────┬───────┘
+                    ┌───────────────────────┐
+                    │      Human Design     │
+                    │     Fixed Workflow    │
+                    └───────────┬───────────┘
                                 │
                                 ▼
-                         ┌─────────────────┐
-                         │  Self-directed   │
-                         │  Experience      │
-                         │    Learning      │
-                         └────────┬────────┘
-                                  │
-                                  ▼
-                         ┌─────────────────┐
-                         │Organizational   │
-                         │    Memory       │
-                         │Assets + Experience│
-                         └────────┬────────┘
-                                  │
-                                  └──────► Next Organization Generation
+┌─────────────────────┐   ┌─────────────────┐   ┌──────────────────────┐
+│  Agent Autonomous   │──►│ Org Generation  │◄──│   Live Human         │
+│  Planning           │   │ / Execution     │   │   Intervention       │
+│  Meta-Orchestration │   └────────┬────────┘   └──────────────────────┘
+└─────────────────────┘            │
+                                   ▼
+                          ┌────────────────────┐
+                          │     Autonomous     │
+                          │ Experience Learning│
+                          └─────────┬──────────┘
+                                    │
+                                    ▼
+                          ┌────────────────────┐
+                          │  Organizational    │
+                          │  Memory            │
+                          │ Assets + Experience│
+                          └─────────┬──────────┘
+                                    │
+                                    └──────► Next organization generation
 ```
 
-> Therefore, the project is hereby officially renamed from dsh Visual Workflow to: Visual Agent Orchestration Platform.
+> Therefore, the project is now officially renamed from the former *dsh Visual Workflow* to: **Visual Agent Orchestration Platform**.
 
 ---
 
 ## Core Highlights
 
 ✦ **Agent Meta-Orchestration**
-  - Agents are no longer limited to executing pre-drawn fixed DAGs. During orchestration, they can **retrieve organizational assets and experience, generate and adjust organizational structures based on the current task, and continuously improve through feedback reinforcement learning**
+  - Agents are no longer limited to executing a fixed DAG drawn in advance by humans. During orchestration they can **retrieve organizational assets and experience, generate and adjust the organizational structure based on the current task, and keep improving through feedback-driven reinforcement learning**
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/界面优化.png" width="100%" />
-</p>
-
-✦ **Human-in-the-loop Real-time Adjustment**
-  - After humans modify the flow, the orchestrator perceives the latest topology in real time and dynamically adjusts subsequent orchestration; after Agents modify the graph, the canvas displays changes in real time, keeping orchestration and canvas always consistent — **observable and correctable** during execution.
-
-<table>
-  <tr>
-    <td width="65%" valign="top">
-      <img src="https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/API服务模式.png" width="100%" />
-    </td>
-    <td width="35%" valign="top">
-      <img src="https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/终端输出.png" width="100%" />
-    </td>
-  </tr>
-</table>
-
-> Deploy DSH as a standalone backend service, persist headless Agents running in the background, and connect external apps (e.g., QQ bots, Feishu) or custom frontends.
-
-✦ **Dual-Mode Architecture**
-  - **Flow Orchestration Mode**: Intelligent scheduling for long-running multi-Agent workflows; parent agent autonomously advances; supports pause/resume from breakpoint and real-time status feedback.
-  - **API Service Mode**: One-click publish as a standalone REST API service (OpenAI-compatible protocol), multi-tenant session isolation, automatic port allocation.
-
-✦ **Deep Customization**
-  - Each sub-agent node independently configures system prompt, LLM model, thinking intensity, tool combinations, ReAct iteration limit, and retry limit; the parent agent can also freely choose models and scheduling templates for fine-grained orchestration.
+✦ **Real-time human-in-the-loop adjustment**
+  - After a human modifies the flow, the orchestrator perceives the latest topology in real time and dynamically adjusts subsequent orchestration; after an Agent modifies the graph, the canvas reflects the changes in real time. Orchestration and canvas always stay in sync, so runs are **observable and correctable**.
 
 <table>
   <tr>
@@ -108,23 +83,43 @@ The project combines **Workflow, Agent Team, Meta-Orchestration, Human-in-the-lo
   </tr>
 </table>
 
-> Tools are freely combinable and assignable to individual agents, preventing useless tools from occupying context; MCP servers are auto-registered with a single line of configuration and support hot-reload for immediate effect.
+> Tools can be freely combined and assigned to each agent, preventing useless tools from occupying context; an MCP server only needs one line of configuration to be registered automatically, with hot reload taking effect immediately.
 
-✦ **Collaboration Groups & Agent Team**
-  - Drag multiple role nodes into a collaboration group to connect with the official Agent Team mechanism, linking custom configurations to teammates. Precisely control collaboration behavior, models, tool groups, etc.; runtime and coordination tools are handled by the official mechanism.
-  - When Agent Team is disabled, collaboration within the group degrades to the plugin's own communication mechanism, using the `wf_ask_agent` tool for intra-group communication.
+✦ **Deep customization**
+  - Each sub-agent node independently configures its system prompt, LLM model, thinking intensity, tool combo, ReAct iteration cap, and retry-on-reflow cap; the parent agent can also freely choose its model and scheduling template to meet fine-grained orchestration needs.
 
-✦ **Scheduled Triggers**
-  - Built-in scheduled tasks in the workbench: select a workflow template, configure execution windows and trigger policies, automatically create instances and run them. Missed windows are automatically suspended/resumed, supporting off-peak API calls — saving money and effort.
+✦ **Scheduled triggers**
+  - The workbench has built-in scheduled tasks: pick a workflow template, configure the execution window and trigger strategy, and instances are created and run automatically. Missed windows are automatically suspended/resumed, and off-peak API calls are supported.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/定时任务管理.png" width="100%" />
 </p>
 
-> Fully automated operations management: scheduled automatic workflow execution, peak/off-peak time-shifted API calls, automatic suspension, flow data persistence, and automatic execution during off-peak hours.
+> Fully automated operations: workflows run automatically on schedule, support off-peak staggered API calls, auto-pause, save flow data, and auto-run during off-peak hours.
 
-✦ **Zero Official Package Dependencies**
-  - All DSH ecosystem services (LLM, sub-agents, tools, user questions, etc.) are resolved at runtime via `ctx.get()`. Host tools are registered as plain object definitions. The plugin itself has no compile-time dependency on any official package, ensuring stronger upgrade compatibility.
+✦ **Dual-mode architecture**
+  - **Workflow Orchestration Mode**: intelligent scheduling of long-running multi-Agent flows; the parent agent advances autonomously, with pause-anytime checkpoint resume and real-time status feedback.
+  - **API Service Mode**: one-click publish as a standalone REST API service (OpenAI-compatible protocol), multi-tenant session isolation, automatic port allocation.
+
+✦ **Agent Team**
+  - Drag multiple role nodes into a team card to connect to the official Agent Team mechanism. Custom configurations are wired to teammates, allowing precise control over their collaboration behavior, models used, tool groups, etc. Runtime and coordination tools are handled by the official mechanism.
+  - When the Agent Team feature is disabled, it degrades to in-group collaboration via the plugin's own communication mechanism (no task board), using the `wf_send_message` tool for in-group messaging.
+
+<table>
+  <tr>
+    <td width="65%" valign="top">
+      <img src="https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/API服务模式.png" width="100%" />
+    </td>
+    <td width="35%" valign="top">
+      <img src="https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/终端输出.png" width="100%" />
+    </td>
+  </tr>
+</table>
+
+> Deploy DSH as a standalone backend service with persistent headless Agents running in the background, connectable to external apps (e.g., QQ bots, Feishu/Lark) or a custom frontend.
+
+✦ **Zero official package dependencies**
+  - All DSH ecosystem services (LLM, sub-agents, tools, user questions, etc.) are resolved at runtime via `ctx.get()`; Host tools are registered as plain object definitions. The plugin itself has no compile-time dependency on any official package, giving stronger upgrade compatibility.
 
 ---
 
@@ -132,19 +127,19 @@ The project combines **Workflow, Agent Team, Meta-Orchestration, Human-in-the-lo
 
 | Concept | Description |
 |------|------|
-| **Meta-Orchestration** | An orchestration architecture that **retrieves organizational assets and experience during orchestration, generates and adjusts organizational structures based on the current task, and continuously improves through feedback reinforcement learning** |
-| **Asset** | Roles, workflow configurations, rules, etc. that have been formally promoted and can be recalled by future orchestration; stored separately from templates with version control |
-| **Template** | "Blueprint" for roles/files/databases/workflows, stored in `~/.dsh/visual-workflow/`; templates and instances are deeply decoupled via deep copy — modifying a template does not affect already-generated nodes |
-| **Instance** | A specific running instance of a workflow or service (`workflows/` and `services/`); can only be created from a workflow template, editable on canvas and savable |
-| **Node** | Cards on the canvas, categorized into parent agent, sub-agent, file, database, stage (start/end/pause), collaboration group, and virtual node |
-| **Edge** | Transmits flow direction (flow edge), context content (context edge), database identifier (database edge); flow edges can carry condition labels, semantically evaluated by the parent agent |
-| **Parent Agent** | The core scheduler of orchestration; in Mode 1 responsible for supervision and scheduling, in Mode 2 the final responder; can be directed by users to adjust the orchestration flow |
-| **Sub-Agent** | Task executor; independently configures role prompt, model, tools, etc.; created and scheduled on demand by the parent agent |
-| **Orchestration** | The main Agent autonomously advances the flow using tools like `wf_run_node` / `wf_finish`, controlling node states |
-| **Mode** | The plugin provides two execution modes: Flow Orchestration Mode (Mode 1) and API Service Mode (Mode 2), switchable via the top bar |
-| **Breakpoint Resume** | After flow pause or unexpected host interruption, executed node states are persisted; on recovery, they are not re-executed — execution continues from the breakpoint |
-| **Collaboration Group** | Combines multiple role nodes into an Agent Team; members can freely communicate and collaborate within the group |
-| **Virtual Node** | An alias reference to a primary node; stores no independent configuration, shares the primary node's execution instance, used for topology reuse |
+| **Meta-Orchestration** | An orchestration architecture that, during orchestration, **retrieves organizational assets and experience, generates and adjusts the organizational structure based on the current task, and keeps improving through feedback-driven reinforcement learning** |
+| **Asset** | Roles, workflow configurations, rules, etc. that have been formally promoted and can be recalled by future orchestrations; stored separately from templates and version-controlled |
+| **Template** | The "blueprint" of roles/files/databases/workflows, stored in `~/.dsh/visual-workflow/`; templates and instances are decoupled by deep copy, so editing a template does not affect already-generated nodes |
+| **Instance** | A concrete running instance of a workflow or service (`workflows/` and `services/`); can only be created from a workflow template, and can be edited and saved on the canvas |
+| **Node** | A card on the canvas, categorized as parent agent, sub-agent, file, database, stage (start/end/pause), team, and virtual node |
+| **Edge** | Carries flow direction (flow edge), context content (context edge), or database identity (database edge); flow edges can carry condition labels judged semantically by the parent agent |
+| **Parent Agent** | The core scheduler of orchestration: supervises and schedules in Mode 1, and is the final responder in Mode 2; the user can instruct it to adjust the orchestration flow |
+| **Sub-agent** | The task executor, with independently configured role prompt, model, tools, etc., created and scheduled on demand by the parent agent |
+| **Orchestration** | The main Agent autonomously advances the flow using tools such as `wf_run_node` / `wf_finish`, and controls node states |
+| **Mode** | The plugin provides two run modes: Workflow Orchestration Mode (Mode 1) and API Service Mode (Mode 2), switchable from the top bar |
+| **Checkpoint resume** | After a flow pauses or the host is unexpectedly interrupted, the states of executed nodes are persisted; on resume they are not re-run, and the flow continues from the checkpoint |
+| **Team** | Combines multiple role nodes into an Agent Team, within which members can freely communicate and collaborate |
+| **Virtual node** | An alias reference to a main node; stores no independent configuration and shares the main node's execution instance, used for topology reuse |
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/资产管理与版本控制.png" width="100%" />
@@ -154,121 +149,122 @@ The project combines **Workflow, Agent Team, Meta-Orchestration, Human-in-the-lo
 
 ## Node Cards
 
-### 1. Role Node (Task Execution Unit)
+### 1. Role Node (task execution unit)
 
-Card layout (**3 inputs on left, 2 outputs on right**):
+Card layout (**3 inputs on the left, 1 output on the right**):
 
 ```
         ┌─────────────────────────┐
-  L1 ●│ [Role Card] Title        │● R1
-(DB)   │  Type Badge / Model /    │(Context)
-  L2 ●│  Tool Combo Badges       │● R2
-(Ctx)  │                          │(Flow Out)
-  L3 ●│                          │
-(Flow) │                          │
-       └─────────────────────────┘
+  L1 ●  │  [Role Card] Title      │
+ (DB)   │  Type badge / Model /   │
+  L2 ●  │  Tool combo badge       │● R1
+ (Ctx)  │                         │ (Flow out)
+  L3 ●  │                         │
+(Flow in)│                        │
+        └─────────────────────────┘
 ```
 
 | Port | Name | Semantics |
 |---|---|---|
-| L1 | Database Input | Connects to database nodes, injects retrieval/query tools |
-| L2 | Context Input | Receives upstream context (not inherited if unconnected) |
-| L3 | Flow Input | Controls execution order |
-| R1 | Context Output | Passes this node's output to downstream |
-| R2 | Flow Output | Sequential execution / conditional branching (pass/fail/content) |
+| L1 | Database input | Connects to a database node and injects retrieval/query tools |
+| L2 | Context input | Receives upstream context (not inherited if unconnected) |
+| L3 | Flow input | Controls execution order |
+| R1 | Flow output | Sequential execution / conditional branching (pass/fail/content) |
 
-**Property Configuration**:
+Note: the right-side `ctx-out` context output port has been retired.
 
-| Config Item | Description |
+**Property configuration**:
+
+| Setting | Description |
 |---|---|
 | **Name** | Node name |
-| **system prompt** | Text input or reference to .md; sets the role's system prompt |
-| **LLM Model** | Independently select provider + model |
-| **Thinking Intensity** | Consistent with official dropdown |
-| **Tool Combination** | Built-in presets (Standard/Minimal/ptc/Creative) + custom combinations (created in Combination Management) |
-| **ReAct Iteration Limit** | Soft cutoff: after reaching the limit, forced wrap-up (no new tool calls initiated, output existing conclusions), default 50 |
-| **Retry Limit** | Node-level attempt count guard, default 3 |
-| **Input/Output Data Structure** | Text/JSON description (assists model understanding) |
-| **System Prompt Toggle** | Controls official system prompt injection (enabled by default); **disabling the tool prose section does not affect tool-calling capability** |
+| **system prompt** | Text input or reference to a `.md` file, defining the role's system prompt |
+| **System prompt toggle** | Controls injection of the official system prompt (enabled by default); turning off the tool prose section does not affect tool-calling capability |
+| **LLM model** | Independently select provider + model |
+| **Thinking intensity** | Consistent with the official dropdown |
+| **Tool combo** | Built-in presets (Standard / Minimal / PTC / Creative) + custom combos (created in Combo Management) |
+| **ReAct iteration cap** | Upper limit on tool calls; soft stop, unlimited by default |
+| **Retry-on-reflow cap** | Node-level attempt counter guard, default 3 |
+| **Input contract** | What this node should receive; used for pre-task self-check |
+| **Output contract** | What this node should hand off downstream; controls the output structure of the final reply |
 
-**Virtual Node**: Click "Copy" to generate a virtual node (dashed border + "↻ Reference" badge); shares configuration and execution instance with the primary node; cascade-deleted when the primary node is removed.
+**Virtual node**: Click "Copy" to generate a virtual node that shares configuration and context with the main node; deleting the main node cascades the removal.
 
-### 2. File Node
+### 2. Task Node
 
-- File content stored directly in the template (text / PDF-extracted text / images and other non-text files stored at managed paths)
-- Right-side property panel allows upload/replace; after saving, all referencing nodes are synchronized
-- Purpose: Inject prompts, requirements, compressed summaries, and other context into role nodes
+- Tasks are described in text (the content is stored directly in the template/node and serves as agent context at runtime)
+- The right-side property panel lets you edit the task name and description; the "Select file" button below the text box appends the selected file path to the description
+- Purpose: inject task instructions, requirements, acceptance criteria, and other context into role nodes
 
 ### 3. Database Node
 
-- Local type: Supports SQLite files with built-in vector retrieval (bge-small-zh-v1.5, CPU inference; automatically degrades to BM25 if model assets are missing or fail to load)
-- Server type: Supports MySQL / PostgreSQL, providing structured read-only queries and vector retrieval (locally built index)
-- Right-side panel configures connection info, tests connections, and adjusts advanced retrieval options (recall count, chunk window, similarity threshold, index capacity)
-- Purpose: Connect to enterprise/personal knowledge bases to retrieve relevant information and perform queries
+- Local type: supports SQLite files with built-in vector retrieval (`bge-small-zh-v1.5`; automatically falls back to BM25 on failure)
+- Server type: supports MySQL / PostgreSQL, providing structured read-only queries and vector retrieval (index built locally)
+- The right-side panel lets you configure connection info, test the connection, and tune advanced retrieval options (recall count, chunk window, similarity threshold, etc.)
+- Purpose: connect to enterprise/personal knowledge bases or memory stores to fetch relevant information and run queries
 
 ### 4. Stage Node
 
-- Start (Mode 1) / Input (Mode 2): Flow entry point; in Mode 2, automatically receives external user questions as initial context
-- End (Mode 1) / Output (Mode 2): Flow endpoint; in Mode 2, aggregates parent agent's final output and returns it as a stream
-- Pause (Mode 1): Flow gate; execution pauses here and saves a breakpoint (manual review point); next run continues from the right output
+- Start (Mode 1) / Input (Mode 2): flow entry; in Mode 2 it automatically receives the external user question as the initial context
+- End (Mode 1) / Output (Mode 2): flow terminus; in Mode 2 it aggregates the parent agent's final output and returns it as a stream
+- Pause (Mode 1): a flow gate that pauses execution here and saves a checkpoint (human review point); the next run continues from the right output
 
-### 5. Collaboration Group Node (Agent Team)
+### 5. Team Node (Agent Team)
 
-- Drag multiple role nodes into a collaboration group; group members are registered as Teammates, launched in parallel, and participate in collaboration
-- Collaboration Prompt is appended to the end of each member's first user message, automatically listing all members' IDs and role names (plugin collaboration mechanism, now superseded by the official mechanism, retained as fallback)
-- Group Agents communicate asynchronously via `wf_ask_agent` and ask users questions via `wf_ask` (retained as fallback)
-- Cards support stretch expansion; internal member list is scrollable
+- Drag multiple role nodes into a team card; in-group roles are registered as Teammates, started on demand, and participate in collaboration
+- The collaboration prompt is appended to the end of each member's first user message (optional)
+- Team members communicate asynchronously via `wf_send_message` and ask the user questions via `wf_ask_user`
+- The card can be resized/extended, and the internal member list is scrollable
 
 ---
 
 ## Edges
 
-**Edge Types and Colors**:
+**Edge types and colors**:
 
-| Edge Type | Semantics | Color |
+| Edge type | Semantics | Color |
 |----------|----------|------|
-| Flow Edge | Controls execution order | ⚪ Cool Gray / Silver White |
-| Context Edge | Transmits text content, file index | 🟡 Amber Gold |
-| Database Edge | Transmits database service identifier | 🔵 Sky Blue |
-| Condition: Pass | Condition evaluates true, execute this branch | 🟢 Emerald Green |
-| Condition: Fail | Condition evaluates false, execute this branch or loop back | 🔴 Coral Red |
-| Condition: Content | Custom semantic evaluation (routing label) | 🟣 Violet |
+| Flow edge | Controls execution order | ⚪ Cool gray / silver white |
+| Context edge | Carries text content such as task descriptions | 🟡 Amber gold |
+| Database edge | Carries the database service identity | 🔵 Sky blue |
+| Condition: Pass | Condition is true; execute this branch | 🟢 Emerald green |
+| Condition: Fail | Condition is false; execute this branch or reflow | 🔴 Coral red |
+| Condition: Content | Custom semantic judgment (routing label) | 🟣 Violet |
 
-> After editing a condition, the condition color overrides the initial color; condition evaluation is performed semantically by the parent agent.
+> After a condition is edited, the condition color overrides the initial color; condition evaluation is performed semantically by the parent agent.
 
 ---
 
-## Orchestration Tools
-
-The following tools constitute the primary control plane of the current orchestration layer:
+## Plugin Tools
 
 | Tool | Purpose |
 |---|---|
-| **`wf_run_node`** | Mode 1: asynchronously launch an Agent node or an entire collaboration group; returns immediately without blocking the parent agent |
-| **`wf_run_node_wait`** | Mode 2: launch an Agent node and block-wait, returning `ok / fail` with final output |
-| **`wf_finish`** | Mark this orchestration as complete/failed, persist run records, and release the run lock; idempotent |
-| **`wf_ask`** | Ask the user via an official question card and wait for the answer; one call carries a batch of questions; any agent may use it (a child asks through its session root) |
-| **`wf_ask_agent`** | Non-blocking `ask / reply` message communication between Agents within a collaboration group; cold recovery supported when target is offline |
-| **`wf_db_query`** | Database read-only access in three modes: `search / query / schema` |
-| **`wf_org_catalog`** | Recall organizational assets, tool combinations, presets, models, and orchestration rules; parent agent only |
-| **`wf_graph_patch`** | Controlled graph modification on workflow templates or running instances; supports create, update, delete, edge adjustment, etc. |
-| **`wf_experience_learn`** | Store the subject's own experiences: call with an empty array to get the generation prompt, or submit candidates for validation and storage (available to all agents) |
-| **`wf_experience_recall`** | Semantic recall of existing experiences by subject type: first fetch candidate summaries, then fetch full content by id (available to all agents) |
+| **`wf_run_node`** | Mode 1: asynchronously start an Agent node; returns immediately without blocking; parent-agent only |
+| **`wf_run_node_wait`** | Mode 2: start an Agent node and block until it finishes; parent-agent only |
+| **`wf_finish`** | Mark this orchestration as succeeded/failed, persist the run record, and release the run lock; parent-agent only |
+| **`wf_ask_user`** | Raise an official question card to the user and block until answered; multiple questions can be batched |
+| **`wf_send_message`** | Send a message to another agent; returns immediately after delivery without waiting for a reply. `target` is `parent` or the node ID of a reachable member |
+| **`wf_db_query`** | Read-only database access in three modes: `search` / `query` / `schema` |
+| **`wf_org_catalog`** | Tiered recall of organizational assets, tool combos, presets, models, and orchestration rules; parent-agent only |
+| **`wf_graph_patch`** | Controlled graph modification of a workflow template or running instance; supports create, update, delete, edge adjustment, etc.; parent-agent only |
+| **`wf_experience_learn`** | Store experience: call with an empty array to get the experience-generation prompt, or pass candidates to validate and store them |
+| **`wf_experience_recall`** | Tiered recall of existing experience: fetch candidate summaries first, then full content by id |
+| **`wf_experience_feedback`** | Rate the experience actually used in this task; fetch the scoring rubric first, then submit the rating |
 
-> Difference: Unlike official Teammate scheduling which can only pass the parent's tools and model, Agent nodes created by `wf_run_node` can freely combine any tools, set different models, and define different system prompts.
+> Difference: unlike official Teammate scheduling, which can only pass on the parent's tools and model, agent nodes created by `wf_run_node` can freely combine any tools and set a different model and system prompt.
 
 ---
 
 ## Installation (Windows)
 
-> **Version Compatibility**: This plugin is compatible with **DeepSeek Harness `0.2.0-rc.1`**. Please install or upgrade the host first (fully stop the dsh process in an external terminal before upgrading):
+> **Version compatibility**: This plugin targets **DeepSeek Harness `0.2.1-rc.2`**. Install or upgrade the host first (fully stop the dsh process in an external terminal before upgrading):
 >
 > ```bash
-> npm install -g @deepseek-ai/dsh@0.2.0-rc.1
+> npm install -g @deepseek-ai/dsh@0.2.1-rc.2
 > ```
-> Tips: You can directly copy the following section to an AI assistant such as Claude Codex to install this plugin.
+> Tip: you can copy the following section to an AI assistant such as Claude Codex to install the plugin.
 
-1. **Locate via File Manager**: `%USERPROFILE%\.dsh\profiles\web\pnpm-workspace.yaml`, add the following:
+1. **Locate the file**: `%USERPROFILE%\.dsh\profiles\web\pnpm-workspace.yaml` and add the following to it:
 
 ```yaml
 allowBuilds:
@@ -277,40 +273,39 @@ allowBuilds:
   sharp: true
 ```
 
-2. **Run the plugin installation command**:
+2. **Run the plugin install command**:
 
 ```bash
 dsh plugin --profile web add "github:GZX2211/dsh-Visual-Workflow#main"
 ```
 
-3. **On desktop, you can add it directly from the Plugins page in the top-left corner**:
+3. **On desktop, you can also add and install it directly from the plugin page in the top-left corner**:
 
-Enter then click Install：
 ```
 github:GZX2211/dsh-Visual-Workflow#main
 ```
 
-4. **Verify mounting**: (optional)
+4. **Verify mounting** (optional):
 
 ```bash
 dsh --profile web --dump-config | findstr "visual-workflow"
 ```
 
-5. **Restart** `dsh web`. Open the workbench: click the **"Workflow" entry at the bottom of the official left sidebar** (next to the official "Settings") → open the "Workflow" tab in the official **right Sidebar** to access the full workbench.
+5. **Restart** `dsh web`. Open the workbench: click the official **"Workflow" entry at the bottom of the left sidebar** (next to the official "Settings") → open the "Workflow" tab in the official **right sidebar** to get the full workbench.
 
 ### Installation Troubleshooting
 
-**Encountering `Host key verification failed` error**
+**Getting a `Host key verification failed` error**
 
-Run in **PowerShell** or **CMD**:
+Run the following in **PowerShell** or **CMD**:
 
 ```bash
 git config --global url."https://github.com/".insteadOf "git@github.com:"
 ```
 
-**pnpm interception notice: `prepare` declared, `allowBuilds` required** (common)
+**pnpm blocking with "declares `prepare`, needs `allowBuilds`" (common)**
 
-Locate via File Manager: `%USERPROFILE%\.dsh\profiles\web\pnpm-workspace.yaml`, add the package names from the error message to the `allowBuilds` list, save, and reinstall.
+Locate `%USERPROFILE%\.dsh\profiles\web\pnpm-workspace.yaml` in your file manager, add the package names from the error message to the `allowBuilds` list, save, and reinstall.
 
 ### Uninstall
 
@@ -318,143 +313,42 @@ Locate via File Manager: `%USERPROFILE%\.dsh\profiles\web\pnpm-workspace.yaml`, 
 dsh plugin --profile web remove dsh-visual-workflow
 ```
 
-> If no longer in use, also clean up: `~/.dsh/visual-workflow/` folder.
-
----
+> If you no longer use it, you can also clean up the `~/.dsh/visual-workflow/` folder.
 
 ## Quick Start
 
-### Approach 1: Manually Design a Workflow
-
-1. Open the "Workflow" workbench.
-2. Create a workflow template.
-3. Create role templates.
-4. Drag roles, files, databases, stages, and collaboration groups onto the canvas.
-5. Connect with `flow / ctx / db` edges.
-6. Configure each Agent's model, Prompt, and tool combination.
-7. Create an instance.
-8. Click Run.
-
-### Approach 2: Let the Agent Design the Organization
-
-In the main session, enter:
-
-```text
-/arrange <your planning intent>
-```
-
-For example:
-
-```text
-/arrange Build a content production pipeline with five stages: topic selection, research, drafting, review, and publishing
-```
-
-The Agent will:
-
-```text
-Natural Language Intent
-    ↓
-wf_org_catalog
-    ↓
-Read relevant assets / experience / rules
-    ↓
-Generate organization plan
-    ↓
-wf_graph_patch
-    ↓
-Create / modify workflow template
-    ↓
-User confirmation
-    ↓
-Run
-```
-
-`/arrange` itself only injects planning instructions; it does not automatically run the workflow upon planning completion.
-
-### Approach 3: Runtime Manual Adjustment
-
-After running a Workflow:
-
-1. Observe real-time node states on the canvas.
-2. Directly modify nodes or edges on the canvas.
-3. Save changes.
-4. The orchestrator perceives the latest topology.
-5. Subsequent scheduling continues based on the latest organization.
-
-You can also use `pause` nodes in the flow to establish manual review points.
-
-### Approach 4: Agent Automatically Adjusts Organization During Runtime
-
-When the parent agent discovers from runtime facts that the current organization is no longer suitable, it will call `wf_graph_patch` to modify the current instance itself:
-
-For example:
-
-```text
-Current Organization
-A → B → C
-
-Discovers B is unsuitable for the current task
-
-Dynamic Adjustment
-A → D → C
-```
-
-Modifications undergo graph validation, organizational budget, and revision checks before being persisted, and are synchronized to the runtime fact source.
-You can also disable this tool in the **Combination Management** interface to prevent agents from self-adjusting. Similarly, all other features can be adjusted at runtime directly through tool management.
-
-> **Combination Management**: The "Combination" button in the top bar allows creating custom tool combinations (official tools/custom tools + MCP servers), which can be selected in role modes.
-> **Scheduled Tasks**: The "Scheduled Tasks" entry in the top bar; select a workflow template, configure execution windows and trigger policies, and automatic scheduling begins.
-> **Cold Start**: Assets and experience cannot be generated on first use. If you want the Agent to have excellent organizational capabilities from the start, it is best to introduce high-quality external prompts.
+Want to learn about the project architecture? See [Architecture](docs/architecture.en.md).
+Want to contribute? See [Contributing](docs/CONTRIBUTING.en.md).
+Want to know how to use the plugin? See the [User Guide](docs/USER_GUIDE.en.md).
+Doing secondary development? See [Project Development Guidelines](AGENTS.en.md).
+How to install and an overview of the project? This file: [README.en.md](README.en.md)
 
 ---
 
 ## Data Storage
 
-All files are located in `~/.dsh/visual-workflow/`, human-readable JSON:
+All files live under `~/.dsh/visual-workflow/` as human-readable JSON:
 
 ```
 workflows/                  # Mode 1 workflow instances
 services/                   # Mode 2 service instances
-flow-templates/             # Editable Workflow templates
-roles/                      # Editable role templates
-files/                      # File templates
-databases/                  # Database templates
-combos.json                 # Custom tool combinations
+flow-templates/             # editable workflow templates
+roles/                      # editable role templates
+files/                      # file templates
+databases/                  # database templates
+combos.json                 # custom tool combos
+builtin-seeds.json          # built-in preset template seed marker
 
-runs/                       # Run snapshots and history
-orchestrations/             # Orchestration fact source during runtime
+runs/                       # run snapshots and history
+orchestrations/             # source of truth for orchestration during a run
 
-assets.db                   # Formal role/workflow assets + Experience
-data/files/                 # Managed non-text files
-data/vector/                # Database vector indexes
-scheduler/                  # Scheduled task definitions and trigger records
+assets.db                   # formal role/workflow assets + Experience
+data/files/                 # managed non-text files
+data/vector/                # database vector index
+scheduler/                  # scheduled task definitions and trigger records
 ```
 
----
-
-## Configuration
-
-Default values can be overridden in `cordis.patch.yml`:
-
-```yaml
-- insert:
-    - id: visual-workflow
-      name: dsh-visual-workflow
-      config:
-        dataDir: !!js dshHomePath('visual-workflow')
-        servicePortBase: 7860
-        apiKey: null
-        maxConcurrentPerService: 50
-        wfAskAgentTtlMs: 120000
-        runIdleTimeoutMs: 1800000
-        reactIterationLimitDefault: 0
-        retryLimitDefault: 3
-        outputFullLimit: 102400
-        documentTextLimit: 20000
-        embeddingModelDir: null
-        embeddingEndpoint: null
-        runPollMs: 2000
-```
+> Preset templates are seeded only once on first startup (in the UI language active at that time). If you accidentally delete them and need to restore, delete the entire `builtin-seeds.json` file and restart the plugin to regenerate them in the current UI language.
 
 ---
 
@@ -470,29 +364,28 @@ dsh plugin --profile web add "link:$PWD"
 Common commands:
 
 ```bash
-pnpm typecheck      # Host / Client / Test type checking
 pnpm build          # Build Host + Client
 pnpm test           # Unit tests
 pnpm gates          # Contract / gate tests
-pnpm client-smoke   # Client smoke tests
-pnpm check          # Type check + test + build + smoke
+pnpm client-smoke   # Client smoke test
+pnpm check          # Type check + tests + build + smoke
 ```
 
-> Modifying Client requires rebuilding and hard-refreshing the browser; modifying Host requires restarting `dsh web`.
+> Client changes require a rebuild and a hard browser refresh; Host changes require restarting `dsh web` or the desktop app.
 
 ---
 
-## Core Research Directions (Roadmap)
+## Core Research Direction (Roadmap)
 
-The project's research direction has shifted from "how to design a better Workflow" to:
+The project's research direction has moved beyond "how to design a better Workflow" toward:
 
- **How to enable Agents to dynamically form, adjust, and continuously leverage an intelligent organization suited to the current objective based on the task at hand**
+**how to let Agents continuously accumulate effective resources across runs and use them to accomplish task goals more efficiently in the future**
 
-> The long-term goal of the project is to explore the ultimate implementation and boundaries of meta-orchestration architecture — to build a continuously evolving AI system.
-> Attaching to a mature Harness plugin framework is an excellent starting point. We hope to continue improving and deliver a high-quality "product" for the dsh plugin ecosystem.
+> The long-term goal is to explore the ultimate implementation and boundaries of the meta-orchestration architecture, and to build an AI system that can continuously evolve. Building on a mature Harness plugin framework is an excellent starting point; we hope to keep improving and to contribute a high-quality "plugin" to the dsh ecosystem.
 
 ---
 
 ## License
 
-[MIT](LICENSE) © GZX2211. Issues / PRs welcome. Community project; UI form factor references [dsh-deepseek-flow](https://github.com/kanghelyu/dsh-deepseek-flow).
+[MIT](LICENSE) © GZX2211. Issues / PRs are welcome. This is a community project; the UI form is inspired by [dsh-deepseek-flow](https://github.com/kanghelyu/dsh-deepseek-flow).
+```

@@ -20,6 +20,9 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "verbatimModuleSyntax": true,
+    // Host 源码的 JSON 种子（builtin-templates/flow-design-guide.json）被测源码 import，
+    // 测试 program 必须与 host program 使用同一解析口径。
+    "resolveJsonModule": true,
     "noEmit": true,
     "types": ["node"]
   },

@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   DIRS,
+  builtinSeedsPath,
   combosPath,
   flowTemplatePath,
   runsPath,
@@ -97,6 +98,11 @@ describe('资源路径计算', () => {
     expect(flowTemplatePath(ROOT, 'tpl1')).toBe(join(ROOT, 'flow-templates', 'tpl1.json'))
     expect(runsPath(ROOT, 'run1')).toBe(join(ROOT, 'runs', 'run1.json'))
     expect(combosPath(ROOT)).toBe(join(ROOT, 'combos.json'))
+  })
+
+  it('内置模板播种标记落在数据根目录（不随 flow-templates/ 删除而消失）', () => {
+    expect(builtinSeedsPath(ROOT)).toBe(join(ROOT, 'builtin-seeds.json'))
+    expect(builtinSeedsPath(ROOT).startsWith(join(ROOT, 'flow-templates'))).toBe(false)
   })
 
   it('id 一律经消毒后才拼进文件名（穿越尝试不会逃出数据目录）', () => {

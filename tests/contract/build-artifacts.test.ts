@@ -109,6 +109,23 @@ describe('T-003 构建链路（client bundle + host/client 并存）', () => {
     expect(existsSync(resolve(root, 'lib/index.js')), message).toBe(true)
   })
 
+  it('内置预设模板中英种子随 lib 产物分发（下载插件即自带）', () => {
+    const seeds = [
+      { rel: 'lib/builtin-templates/flow-design-guide.zh.json', name: '流程设计指南（预设模版）' },
+      { rel: 'lib/builtin-templates/flow-design-guide.en.json', name: 'Process Design Guide (Preset Template)' },
+    ]
+    for (const { rel, name } of seeds) {
+      // 该 JSON 是 host 播种逻辑的模块依赖，由 tsc 随模块图发射到 lib/（package.json
+      // files 已包含 lib）；缺失意味着构建链路没有把它带进发布包。
+      const seed = JSON.parse(readArtifact(rel)) as { id?: string; mode?: string; name?: string; nodes?: unknown[] }
+      expect(seed.id).toBe('tpl-mvciz28k-jvzw9u')
+      expect(seed.mode).toBe('mode1')
+      expect(seed.name).toBe(name)
+      expect(Array.isArray(seed.nodes)).toBe(true)
+      expect(seed.nodes!.length).toBeGreaterThan(0)
+    }
+  })
+
   it('lib/client.js 声明 sourcemap 引用（映射文件按 .gitignore 不入库）', () => {
     // 为什么不断言 lib/client.js.map 存在：*.map 被 .gitignore 显式排除（运行时无需），
     // 全新检出在 pnpm build 之前必然没有该文件；门禁只读、不得依赖未入库产物。

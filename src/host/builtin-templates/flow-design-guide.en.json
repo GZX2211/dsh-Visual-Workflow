@@ -1,0 +1,836 @@
+{
+  "id": "tpl-mvciz28k-jvzw9u",
+  "mode": "mode1",
+  "name": "Process Design Guide (Preset Template)",
+  "description": "Explains how to design flows with this plugin, to help users understand and use it.\n\n1. Define standard tasks yourself (via task nodes; the former file nodes were renamed):\nThe flow follows the user's preset strictly; the parent agent resolves any flow or task conflicts on its own (if any).\n\n2. Define only goals, not tasks (nodes have no explicit task):\nIn this case, the nodes and their order only indicate which execution steps are needed to achieve the goal, without specifying how each step should be done. The parent agent arranges the work and assigns tasks to each node itself.\n\nThis plugin is actually very flexible: you can define orchestration behavior (edit the parent agent prompt) as well as node execution behavior (sub-agent prompts), and design freely — it is not a fully fixed workflow. Even if you do not want to design anything, you can use the /arrange command to have the parent agent generate a flow, though quality will be influenced by the prior of your existing experience and assets.",
+  "revision": 521,
+  "nodes": [
+    {
+      "id": "start-mvdopbzz-orbc",
+      "kind": "start",
+      "position": {
+        "x": 615,
+        "y": 182
+      },
+      "data": {
+        "label": "启动"
+      }
+    },
+    {
+      "id": "agent-mvdouxo8-lt7j",
+      "kind": "agent",
+      "position": {
+        "x": 849,
+        "y": 162
+      },
+      "data": {
+        "label": "Role Name (identifier)",
+        "systemPrompt": "It is recommended not to write detailed tasks here, but to define the role's standard responsibilities, so the role can be reused across tasks, iterated on, and managed more easily.\n\nSuggested form (the standard five dimensions; you can adjust freely or let AI generate them):\n1. Role positioning\nOne-sentence positioning: You are XXX, responsible for XXX.\n2. Scope of responsibility\nWhat work should be assigned to this role? Usually it should not overlap with other roles.\n3. Working constraints\nWhat must be followed? What must be done first, and what later? What is prohibited?\n4. Decision authority\nWhat can the sub-agent decide on its own? What must be reported to the parent agent for a decision? What should be asked of the user? (decision chain)\n5. Handoff contract\nHow should it hand off to upstream/downstream? How should it collaborate with other sub-agents?\n\nAdvanced options include input and output contracts, which define a stable task handoff pattern (defaults are provided and can be changed).",
+        "provider": "",
+        "model": "",
+        "reasoning": null,
+        "presetId": "standard",
+        "retryLimit": 3,
+        "reactLimit": null,
+        "inputSchema": "",
+        "outputSchema": "Conclusion / Output file paths / Key decisions / Open questions",
+        "injectSystemPrompt": true,
+        "injectToolSections": true,
+        "groupId": null
+      }
+    },
+    {
+      "id": "task-mvdv1ojz-scob",
+      "kind": "task",
+      "position": {
+        "x": 575,
+        "y": 56
+      },
+      "data": {
+        "label": "Task Name (identifier)",
+        "content": "A standardized task that fits the scope of this role's responsibilities; recurring tasks can be written into templates for reuse.\n\nA task should clearly define:\n1. Execution path (where to do it?)\n2. Execution method (how to do it?)\n3. Acceptance criteria (what counts as done?)\n\nPrinciples, constraints, permissions, and other persistent content belong to the role's responsibilities.\n(The prompt layering mechanism is explained in detail in the user guide.)"
+      }
+    },
+    {
+      "id": "agent-mvdvwziq-qq1b",
+      "kind": "agent",
+      "position": {
+        "x": 1125,
+        "y": 162
+      },
+      "data": {
+        "label": "Role Node",
+        "systemPrompt": "When choosing roles, build sequential chains for multi-agent execution only for tasks that have no context dependency.\n\nIf tasks are split too finely and have a strong context dependency on preceding tasks, multi-agent execution is not recommended: it consumes a lot of tokens and can reduce execution accuracy.\n\nSo when should a multi-agent workflow be enabled?\nMy answer: when a task is already too large for one agent's context, or even if it fits the context is so polluted that effective attention cannot form, or when a large amount of parallelism is needed to improve efficiency — in these cases multi-agent execution shows its value.",
+        "provider": "",
+        "model": "",
+        "reasoning": null,
+        "presetId": "standard",
+        "retryLimit": 3,
+        "reactLimit": null,
+        "inputSchema": "",
+        "outputSchema": "Conclusion / Output file paths / Key decisions / Open questions",
+        "injectSystemPrompt": true,
+        "injectToolSections": true,
+        "groupId": null
+      }
+    },
+    {
+      "id": "task-mvdvxlq7-gbj6",
+      "kind": "task",
+      "position": {
+        "x": 847,
+        "y": 37
+      },
+      "data": {
+        "label": "Sequential Task",
+        "content": "A simple sequential chain: Task 2 usually depends on the preceding Task 1; if it does not, make them parallel.\nThe \"Choose File\" button below fills the selected file path into the text box."
+      }
+    },
+    {
+      "id": "group-mvdxt99q-u0s5",
+      "kind": "group",
+      "position": {
+        "x": 1405,
+        "y": 122
+      },
+      "data": {
+        "label": "Agent Team",
+        "collabPrompt": "",
+        "memberIds": [
+          "agent-mve04tlp-a730",
+          "agent-mve07m7z-snky"
+        ],
+        "size": {
+          "w": 300,
+          "h": 220
+        }
+      }
+    },
+    {
+      "id": "agent-mve04tlp-a730",
+      "kind": "agent",
+      "position": {
+        "x": 1434,
+        "y": 168
+      },
+      "data": {
+        "label": "Team Member 1",
+        "systemPrompt": "Team members are launched on demand rather than always running fully in parallel.",
+        "provider": "",
+        "model": "",
+        "reasoning": null,
+        "presetId": "standard",
+        "retryLimit": 3,
+        "reactLimit": null,
+        "inputSchema": "",
+        "outputSchema": "Conclusion / Output file paths / Key decisions / Open questions",
+        "injectSystemPrompt": true,
+        "injectToolSections": true,
+        "groupId": "group-mvdxt99q-u0s5"
+      }
+    },
+    {
+      "id": "agent-mve07m7z-snky",
+      "kind": "agent",
+      "position": {
+        "x": 1425,
+        "y": 229
+      },
+      "data": {
+        "label": "Team Member 2",
+        "systemPrompt": "",
+        "provider": "",
+        "model": "",
+        "reasoning": null,
+        "presetId": "standard",
+        "retryLimit": 3,
+        "reactLimit": null,
+        "inputSchema": "",
+        "outputSchema": "Conclusion / Output file paths / Key decisions / Open questions",
+        "injectSystemPrompt": true,
+        "injectToolSections": true,
+        "groupId": "group-mvdxt99q-u0s5"
+      }
+    },
+    {
+      "id": "agent-mve0bc48-17w7",
+      "kind": "agent",
+      "position": {
+        "x": 1794,
+        "y": 81
+      },
+      "data": {
+        "label": "Parallel Role 1",
+        "systemPrompt": "This role is connected to a database node and is assigned database retrieval tools, so it searches the database content on demand while executing tasks.",
+        "provider": "",
+        "model": "",
+        "reasoning": null,
+        "presetId": "standard",
+        "retryLimit": 3,
+        "reactLimit": null,
+        "inputSchema": "",
+        "outputSchema": "Conclusion / Output file paths / Key decisions / Open questions",
+        "injectSystemPrompt": true,
+        "injectToolSections": true,
+        "groupId": null
+      }
+    },
+    {
+      "id": "agent-mve0bvzj-g0ps",
+      "kind": "agent",
+      "position": {
+        "x": 1794,
+        "y": 211
+      },
+      "data": {
+        "label": "Parallel Role 2",
+        "systemPrompt": "A simple parallel chain: tasks must be decomposed and assigned to avoid conflicting parallel changes or duplicated exploration.",
+        "provider": "",
+        "model": "",
+        "reasoning": null,
+        "presetId": "standard",
+        "retryLimit": 3,
+        "reactLimit": null,
+        "inputSchema": "",
+        "outputSchema": "Conclusion / Output file paths / Key decisions / Open questions",
+        "injectSystemPrompt": true,
+        "injectToolSections": true,
+        "groupId": null
+      }
+    },
+    {
+      "id": "task-mve0dfoc-bauv",
+      "kind": "task",
+      "position": {
+        "x": 1124,
+        "y": 36
+      },
+      "data": {
+        "label": "Team Task Goal",
+        "content": "A context node connected to the team card defines the team's overall goal; the parent agent assigns tasks based on that goal."
+      }
+    },
+    {
+      "id": "agent-mve0og0x-wok1",
+      "kind": "agent",
+      "position": {
+        "x": 2089,
+        "y": 146
+      },
+      "data": {
+        "label": "Parallel Merge",
+        "systemPrompt": "Parallel chain merge: the final handoff results of the parallel roles are delivered to downstream nodes automatically. Sequential chains also hand off automatically. The \"output contract\" for automatic handoff is configured in the advanced options.",
+        "provider": "",
+        "model": "",
+        "reasoning": null,
+        "presetId": "standard",
+        "retryLimit": 3,
+        "reactLimit": null,
+        "inputSchema": "",
+        "outputSchema": "Conclusion / Output file paths / Key decisions / Open questions",
+        "injectSystemPrompt": true,
+        "injectToolSections": true,
+        "groupId": null
+      }
+    },
+    {
+      "id": "database-mve0sw4t-ks5q",
+      "kind": "database",
+      "position": {
+        "x": 1497,
+        "y": -6
+      },
+      "data": {
+        "label": "Database (Local/Server)",
+        "description": "1. Local databases: connect the database node, then enter the database file path below to enable it.\n2. Server databases: enter the service port, username, password, etc., and test the connection; once successful, it is enabled.\n\nCurrently supported: SQLite (local), MySQL (relational), PostgreSQL (vector support).\nAdvanced options let you configure the number of recalled records, similarity threshold, chunk window, etc.",
+        "dbType": "local",
+        "dbKind": "sqlite",
+        "localPath": "",
+        "vectorSource": "embedding"
+      }
+    },
+    {
+      "id": "agent-mve18dqb-a68c",
+      "kind": "agent",
+      "position": {
+        "x": 2406,
+        "y": 25
+      },
+      "data": {
+        "label": "Role Node",
+        "systemPrompt": "",
+        "provider": "",
+        "model": "",
+        "reasoning": null,
+        "presetId": "standard",
+        "retryLimit": 3,
+        "reactLimit": null,
+        "inputSchema": "",
+        "outputSchema": "Conclusion / Output file paths / Key decisions / Open questions",
+        "injectSystemPrompt": true,
+        "injectToolSections": true,
+        "groupId": null
+      }
+    },
+    {
+      "id": "agent-mve18gqa-65fx",
+      "kind": "agent",
+      "position": {
+        "x": 2406,
+        "y": 278
+      },
+      "data": {
+        "label": "Executor Role (pending approval)",
+        "systemPrompt": "",
+        "provider": "",
+        "model": "",
+        "reasoning": null,
+        "presetId": "standard",
+        "retryLimit": 3,
+        "reactLimit": null,
+        "inputSchema": "",
+        "outputSchema": "Conclusion / Output file paths / Key decisions / Open questions",
+        "injectSystemPrompt": true,
+        "injectToolSections": true,
+        "groupId": null
+      }
+    },
+    {
+      "id": "agent-mve1ri2g-m8q3",
+      "kind": "agent",
+      "position": {
+        "x": 2743,
+        "y": 278
+      },
+      "data": {
+        "label": "Approver Role (acyclic demo)",
+        "systemPrompt": "",
+        "provider": "",
+        "model": "",
+        "reasoning": null,
+        "presetId": "standard",
+        "retryLimit": 3,
+        "reactLimit": null,
+        "inputSchema": "",
+        "outputSchema": "Conclusion / Output file paths / Key decisions / Open questions",
+        "injectSystemPrompt": true,
+        "injectToolSections": true,
+        "groupId": null,
+        "swapPorts": false
+      }
+    },
+    {
+      "id": "agent-mve1v3tq-s1a1",
+      "kind": "agent",
+      "position": {
+        "x": 3054,
+        "y": 278
+      },
+      "data": {
+        "label": "Next Step Role",
+        "systemPrompt": "",
+        "provider": "",
+        "model": "",
+        "reasoning": null,
+        "presetId": "standard",
+        "retryLimit": 3,
+        "reactLimit": null,
+        "inputSchema": "",
+        "outputSchema": "Conclusion / Output file paths / Key decisions / Open questions",
+        "injectSystemPrompt": true,
+        "injectToolSections": true,
+        "groupId": null
+      }
+    },
+    {
+      "id": "proxy-mve1wsd6-i4iv",
+      "kind": "proxy",
+      "position": {
+        "x": 2744,
+        "y": 411
+      },
+      "data": {
+        "swapPorts": true,
+        "label": "Click \"Copy\" in the bottom-right corner to reuse the original executor role"
+      },
+      "proxySourceId": "agent-mve18gqa-65fx"
+    },
+    {
+      "id": "proxy-mve1xmg7-63sh",
+      "kind": "proxy",
+      "position": {
+        "x": 2745,
+        "y": 542
+      },
+      "data": {
+        "label": "Reuse the original approver role"
+      },
+      "proxySourceId": "agent-mve1ri2g-m8q3"
+    },
+    {
+      "id": "end-mve1xwr6-oc9f",
+      "kind": "end",
+      "position": {
+        "x": 3373,
+        "y": 298
+      },
+      "data": {
+        "label": "结束"
+      }
+    },
+    {
+      "id": "pause-mve1xz88-e6r3",
+      "kind": "pause",
+      "position": {
+        "x": 3055,
+        "y": 563
+      },
+      "data": {
+        "label": "暂停"
+      }
+    },
+    {
+      "id": "agent-mve2scw0-3ojt",
+      "kind": "agent",
+      "position": {
+        "x": 2406,
+        "y": 410
+      },
+      "data": {
+        "label": "Approver Role (loop demo)",
+        "systemPrompt": "",
+        "provider": "",
+        "model": "",
+        "reasoning": null,
+        "presetId": "standard",
+        "retryLimit": 3,
+        "reactLimit": null,
+        "inputSchema": "",
+        "outputSchema": "Conclusion / Output file paths / Key decisions / Open questions",
+        "injectSystemPrompt": true,
+        "injectToolSections": true,
+        "groupId": null,
+        "swapPorts": true
+      }
+    },
+    {
+      "id": "proxy-mve2t34j-yowz",
+      "kind": "proxy",
+      "position": {
+        "x": 2406,
+        "y": 542
+      },
+      "data": {},
+      "proxySourceId": "agent-mve1v3tq-s1a1"
+    },
+    {
+      "id": "agent-mve31b6l-1ebw",
+      "kind": "agent",
+      "position": {
+        "x": 2742,
+        "y": -45
+      },
+      "data": {
+        "label": "Routing Node 1",
+        "systemPrompt": "",
+        "provider": "",
+        "model": "",
+        "reasoning": null,
+        "presetId": "standard",
+        "retryLimit": 3,
+        "reactLimit": null,
+        "inputSchema": "",
+        "outputSchema": "Conclusion / Output file paths / Key decisions / Open questions",
+        "injectSystemPrompt": true,
+        "injectToolSections": true,
+        "groupId": null,
+        "systemPromptSource": "AGENTS.md"
+      }
+    },
+    {
+      "id": "agent-mve31r07-ssww",
+      "kind": "agent",
+      "position": {
+        "x": 2743,
+        "y": 84
+      },
+      "data": {
+        "label": "Routing Node 2",
+        "systemPrompt": "",
+        "provider": "",
+        "model": "",
+        "reasoning": null,
+        "presetId": "standard",
+        "retryLimit": 3,
+        "reactLimit": null,
+        "inputSchema": "",
+        "outputSchema": "Conclusion / Output file paths / Key decisions / Open questions",
+        "injectSystemPrompt": true,
+        "injectToolSections": true,
+        "groupId": null
+      }
+    },
+    {
+      "id": "task-mve36p8c-vj1q",
+      "kind": "task",
+      "position": {
+        "x": 2405,
+        "y": -106
+      },
+      "data": {
+        "label": "Conditional Partition Guide (read first)",
+        "content": "There are many conditional-partition nodes here; you do not need to open each one — just read this guide.\n\nThe three kinds of conditional branch edges are not mechanical checks but semantic judgments made by the parent agent, and can evolve into many possibilities.\n\nCommon use cases (extensible):\n1. Approval flows: use virtual nodes for one-way approval with a limited number of attempts, or set up loops manually; set a loop retry limit (default 3).\n2. Routing branches: when execution reaches this node, the parent agent decides which branch to take based on the semantics carried by the conditional edges.\nA single workflow can carry multiple execution branches, forming a tree that forks and then merges.\n\nAcyclic approval-flow demo (the flow below): click the copy button at the bottom-right of the role property panel to copy a role as a virtual node.\nA virtual node reuses the original execution role in the flow (without losing context) while avoiding a \"loop\". A loop is decomposed into a finite flow.\n\nIf a bounded loop cannot resolve the issue, add a pause node.\nThe flow pauses until a human reviews and clicks Run, or instructs the parent agent to continue.\nIf you use a cyclic approval flow, the agent is forcibly stopped after the loop count reaches the limit.\n\nWhy are there two ways to do this?\nThis usage emerged from the early design of virtual nodes, and each has advantages. With an acyclic flow, the whole workflow can be exhaustively enumerated and inner loops remain visible on the canvas — at the cost of a few extra node-dragging steps."
+      }
+    },
+    {
+      "id": "agent-mve3hzy4-2q31",
+      "kind": "agent",
+      "position": {
+        "x": 3049,
+        "y": 18
+      },
+      "data": {
+        "label": "Conditional Merge",
+        "systemPrompt": "Still a sequential chain in practice",
+        "provider": "",
+        "model": "",
+        "reasoning": null,
+        "presetId": "standard",
+        "retryLimit": 3,
+        "reactLimit": null,
+        "inputSchema": "",
+        "outputSchema": "Conclusion / Output file paths / Key decisions / Open questions",
+        "injectSystemPrompt": true,
+        "injectToolSections": true,
+        "groupId": null
+      }
+    },
+    {
+      "id": "task-mvep2foq-bm6t",
+      "kind": "task",
+      "position": {
+        "x": 1123,
+        "y": 287
+      },
+      "data": {
+        "label": "Team Collaboration Task",
+        "content": "You can also connect to individual member nodes to assign collaboration tasks to each member.\nOne collaboration task can be assigned to multiple members; it is injected into the context of every connected member."
+      }
+    },
+    {
+      "id": "task-mvh1rap8-hra6",
+      "kind": "task",
+      "position": {
+        "x": 1496,
+        "y": -132
+      },
+      "data": {
+        "label": "Team Guide (expand at bottom right)",
+        "content": "It connects to the official Agent Team mechanism; this plugin only guides the flow, while all handoff mechanisms and the task board are handled officially.\n\n1. When the official Agent Team mechanism is disabled, it degrades to the plugin's built-in team, which has no task board and only message-based collaboration.\n2. When enabled, disable the official spawn_teammate and send_message tools, since they conflict with the plugin's built-in tools (unavoidable; this is a known flaw of the official send_message tool).\n\nThe collaboration prompt on the team card can contain collaboration rules for all team members; it is injected into the context of every member in the team.\n\nThe collaboration rules are optional. If you write them, the recommended content is:\n1. How should members communicate? When is communication needed? (In general, do not send messages casually — this affects token consumption and efficiency/quality.)\n2. Handoff length limits or contracts, including the format of sent messages.\n3. Any other collaboration constraints you want to define.\n\nHow to use the team:\n1. Drag in predefined roles yourself: when the flow reaches the team node, the parent agent distributes tasks based on the existing roles (you can also define tasks yourself). Compared with parallel nodes, it adds member communication channels and the official task board; decide during design whether the task really needs communication, or is complex enough to need a task board.\n2. Connect the team node but leave it empty (drag no roles): when the flow reaches this node, the parent agent decides the roles, responsibility allocation, and task distribution based on the team goal. You only need to define the team's task goal (weaker control).\n\nA design note:\nIn theory, an Agent Team could complete every task this workflow could do; in fact, it should be in conflict with the workflow itself.\nBut in my definition, this is really a question of how much control you want. If you want to control the entire flow, do not use a team — assign tasks and distribute nodes yourself instead of handing decision-making entirely to the Agent. If you want to control part of the flow, use it as a node. If you want a more flexible flow and do not care about execution details or flow control, do not use a workflow at all — just use the official Agent Team."
+      }
+    },
+    {
+      "id": "pause-mvh2ih56-fiyp",
+      "kind": "pause",
+      "position": {
+        "x": 2407,
+        "y": 166
+      },
+      "data": {
+        "label": "暂停"
+      }
+    },
+    {
+      "id": "end-mvh2k2pm-hadg",
+      "kind": "end",
+      "position": {
+        "x": 2743,
+        "y": 672
+      },
+      "data": {
+        "label": "结束"
+      }
+    }
+  ],
+  "lines": [
+    {
+      "id": "e-mvdv10yg-568d",
+      "source": "start-mvdopbzz-orbc",
+      "target": "agent-mvdouxo8-lt7j",
+      "sourceHandle": "flow-out",
+      "targetHandle": "flow-in"
+    },
+    {
+      "id": "e-mvdv1ruu-g46d",
+      "source": "task-mvdv1ojz-scob",
+      "target": "agent-mvdouxo8-lt7j",
+      "sourceHandle": "ctx-out",
+      "targetHandle": "ctx-in"
+    },
+    {
+      "id": "e-mvdvx47g-x4u2",
+      "source": "agent-mvdouxo8-lt7j",
+      "target": "agent-mvdvwziq-qq1b",
+      "sourceHandle": "flow-out",
+      "targetHandle": "flow-in"
+    },
+    {
+      "id": "e-mvdxtd5y-jhrz",
+      "source": "agent-mvdvwziq-qq1b",
+      "target": "group-mvdxt99q-u0s5",
+      "sourceHandle": "flow-out",
+      "targetHandle": "flow-in"
+    },
+    {
+      "id": "e-mve0bugb-97f1",
+      "source": "group-mvdxt99q-u0s5",
+      "target": "agent-mve0bc48-17w7",
+      "sourceHandle": "flow-out",
+      "targetHandle": "flow-in"
+    },
+    {
+      "id": "e-mve0c13d-fejk",
+      "source": "group-mvdxt99q-u0s5",
+      "target": "agent-mve0bvzj-g0ps",
+      "sourceHandle": "flow-out",
+      "targetHandle": "flow-in"
+    },
+    {
+      "id": "e-mve0s5zt-7x4t",
+      "source": "agent-mve0bc48-17w7",
+      "target": "agent-mve0og0x-wok1",
+      "sourceHandle": "flow-out",
+      "targetHandle": "flow-in"
+    },
+    {
+      "id": "e-mve0s73x-46vb",
+      "source": "agent-mve0bvzj-g0ps",
+      "target": "agent-mve0og0x-wok1",
+      "sourceHandle": "flow-out",
+      "targetHandle": "flow-in"
+    },
+    {
+      "id": "e-mve19cdp-520o",
+      "source": "agent-mve0og0x-wok1",
+      "target": "agent-mve18gqa-65fx",
+      "sourceHandle": "flow-out",
+      "targetHandle": "flow-in",
+      "condition": {
+        "type": "pass",
+        "label": ""
+      }
+    },
+    {
+      "id": "e-mve19ga0-mbtc",
+      "source": "agent-mve0og0x-wok1",
+      "target": "agent-mve18dqb-a68c",
+      "sourceHandle": "flow-out",
+      "targetHandle": "flow-in",
+      "condition": {
+        "type": "content",
+        "label": "This is semantic routing"
+      }
+    },
+    {
+      "id": "e-mve1sqb2-jyrr",
+      "source": "agent-mve18gqa-65fx",
+      "target": "agent-mve1ri2g-m8q3",
+      "sourceHandle": "flow-out",
+      "targetHandle": "flow-in",
+      "condition": {
+        "type": "content",
+        "label": "Acyclic"
+      }
+    },
+    {
+      "id": "e-mve1w6sk-aq5e",
+      "source": "agent-mve1ri2g-m8q3",
+      "target": "agent-mve1v3tq-s1a1",
+      "sourceHandle": "flow-out",
+      "targetHandle": "flow-in",
+      "condition": {
+        "type": "pass",
+        "label": ""
+      }
+    },
+    {
+      "id": "e-mve1ww5i-9lwk",
+      "source": "agent-mve1ri2g-m8q3",
+      "target": "proxy-mve1wsd6-i4iv",
+      "sourceHandle": "flow-out",
+      "targetHandle": "flow-in",
+      "condition": {
+        "type": "fail",
+        "label": ""
+      }
+    },
+    {
+      "id": "e-mve1xovj-cxnn",
+      "source": "proxy-mve1wsd6-i4iv",
+      "target": "proxy-mve1xmg7-63sh",
+      "sourceHandle": "flow-out",
+      "targetHandle": "flow-in"
+    },
+    {
+      "id": "e-mve26i8o-62ug",
+      "source": "proxy-mve1xmg7-63sh",
+      "target": "pause-mve1xz88-e6r3",
+      "sourceHandle": "flow-out",
+      "targetHandle": "flow-in",
+      "condition": {
+        "type": "fail",
+        "label": ""
+      }
+    },
+    {
+      "id": "e-mve2sq1x-k8ig",
+      "source": "agent-mve18gqa-65fx",
+      "target": "agent-mve2scw0-3ojt",
+      "sourceHandle": "flow-out",
+      "targetHandle": "flow-in",
+      "condition": {
+        "type": "content",
+        "label": "Cyclic"
+      }
+    },
+    {
+      "id": "e-mve2ssap-7sin",
+      "source": "agent-mve2scw0-3ojt",
+      "target": "agent-mve18gqa-65fx",
+      "sourceHandle": "flow-out",
+      "targetHandle": "flow-in",
+      "condition": {
+        "type": "fail",
+        "label": ""
+      }
+    },
+    {
+      "id": "e-mve2t6v7-yicz",
+      "source": "agent-mve2scw0-3ojt",
+      "target": "proxy-mve2t34j-yowz",
+      "sourceHandle": "flow-out",
+      "targetHandle": "flow-in",
+      "condition": {
+        "type": "pass",
+        "label": ""
+      }
+    },
+    {
+      "id": "e-mve323az-tzji",
+      "source": "agent-mve18dqb-a68c",
+      "target": "agent-mve31b6l-1ebw",
+      "sourceHandle": "flow-out",
+      "targetHandle": "flow-in",
+      "condition": {
+        "type": "content",
+        "label": "Condition 1"
+      }
+    },
+    {
+      "id": "e-mve32493-lh5c",
+      "source": "agent-mve18dqb-a68c",
+      "target": "agent-mve31r07-ssww",
+      "sourceHandle": "flow-out",
+      "targetHandle": "flow-in",
+      "condition": {
+        "type": "content",
+        "label": "Condition 2"
+      }
+    },
+    {
+      "id": "e-mve3it8q-8rpx",
+      "source": "agent-mve31b6l-1ebw",
+      "target": "agent-mve3hzy4-2q31",
+      "sourceHandle": "flow-out",
+      "targetHandle": "flow-in"
+    },
+    {
+      "id": "e-mve3iv0o-plu5",
+      "source": "agent-mve31r07-ssww",
+      "target": "agent-mve3hzy4-2q31",
+      "sourceHandle": "flow-out",
+      "targetHandle": "flow-in"
+    },
+    {
+      "id": "e-mve3r6v0-c6dg",
+      "source": "agent-mve3hzy4-2q31",
+      "target": "end-mve1xwr6-oc9f",
+      "sourceHandle": "flow-out",
+      "targetHandle": "flow-in"
+    },
+    {
+      "id": "e-mve3r85t-fnvs",
+      "source": "agent-mve1v3tq-s1a1",
+      "target": "end-mve1xwr6-oc9f",
+      "sourceHandle": "flow-out",
+      "targetHandle": "flow-in"
+    },
+    {
+      "id": "e-mve6rdci-zvry",
+      "source": "task-mvdvxlq7-gbj6",
+      "target": "agent-mvdvwziq-qq1b",
+      "sourceHandle": "ctx-out",
+      "targetHandle": "ctx-in"
+    },
+    {
+      "id": "e-mve6rs1p-x1c2",
+      "source": "task-mve0dfoc-bauv",
+      "target": "group-mvdxt99q-u0s5",
+      "sourceHandle": "ctx-out",
+      "targetHandle": "ctx-in"
+    },
+    {
+      "id": "e-mve6rzzf-abmk",
+      "source": "proxy-mve1xmg7-63sh",
+      "target": "agent-mve1v3tq-s1a1",
+      "sourceHandle": "flow-out",
+      "targetHandle": "flow-in",
+      "condition": {
+        "type": "pass",
+        "label": ""
+      }
+    },
+    {
+      "id": "e-mvep0v4q-yf2h",
+      "source": "database-mve0sw4t-ks5q",
+      "target": "agent-mve0bc48-17w7",
+      "sourceHandle": "db-out",
+      "targetHandle": "db-in"
+    },
+    {
+      "id": "e-mvep2kmo-zgos",
+      "source": "task-mvep2foq-bm6t",
+      "target": "agent-mve04tlp-a730",
+      "sourceHandle": "ctx-out",
+      "targetHandle": "ctx-in"
+    },
+    {
+      "id": "e-mvep2mwh-q93z",
+      "source": "task-mvep2foq-bm6t",
+      "target": "agent-mve07m7z-snky",
+      "sourceHandle": "ctx-out",
+      "targetHandle": "ctx-in"
+    },
+    {
+      "id": "e-mvh2ijvi-zilm",
+      "source": "agent-mve0og0x-wok1",
+      "target": "pause-mvh2ih56-fiyp",
+      "sourceHandle": "flow-out",
+      "targetHandle": "flow-in",
+      "condition": {
+        "type": "fail",
+        "label": ""
+      }
+    },
+    {
+      "id": "e-mvh2k62m-cz94",
+      "source": "proxy-mve2t34j-yowz",
+      "target": "end-mvh2k2pm-hadg",
+      "sourceHandle": "flow-out",
+      "targetHandle": "flow-in"
+    }
+  ],
+  "createdAt": "2026-10-17T15:02:05.588Z",
+  "updatedAt": "2026-10-20T19:41:30.485Z",
+  "startNewSession": true
+}
