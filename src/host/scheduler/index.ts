@@ -56,6 +56,23 @@ export { isValidDate, isWithinWindow, nextWindowStartAt, timeInRanges } from './
 // ── 触发点计算（第二层）──────────────────────────────────────────────────
 export { nextTriggerAt, triggerPointsForDate } from './trigger.js'
 
+// ── 条件触发（第三层）：纯规则 + 执行器缝 ──────────────────────────────────
+export {
+  createConditionScriptRunner,
+  validateConditionScriptPath,
+} from './condition-script.js'
+export type {
+  ConditionScriptInput,
+  ConditionScriptOutcome,
+  ConditionScriptRunner,
+  ConditionScriptRunnerOptions,
+} from './condition-script.js'
+export {
+  hasSupportedScriptExtension,
+  isAbsoluteConditionScriptPath,
+  parseConditionOutput,
+} from './condition-config.js'
+
 // ── 模板 → 实例（触发时刻的实例化语义）────────────────────────────────────
 export { instantiateFromTemplate, overwriteInstanceFromTemplate } from './instantiate.js'
 export type { IdGenerator } from './instantiate.js'

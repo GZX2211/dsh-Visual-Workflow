@@ -5,6 +5,7 @@
 //   + 触发策略（定点时刻/固定间隔）+ 运行时策略说明 + 运行态摘要（只读）。
 // 表单草稿与所有写回回调由容器注入（本组件不发起请求、不持有业务事实）。
 
+import { useRef } from 'react'
 import type { ScheduledTask, ScheduledTaskView, TimeRangeConfig } from '../../../host/shared/types.js'
 import type { Dict } from '../../i18n.js'
 import type { TemplateOption } from '../../hooks/useSchedulerTasks.js'
@@ -39,6 +40,8 @@ export interface SchedulerTaskFormProps {
   onPatchTimePoint(index: number, value: string): void
   onAddTimePoint(): void
   onRemoveTimePoint(index: number): void
+  /** 条件脚本文件选择结果（绝对路径解析由容器负责；本组件只交出 File）。 */
+  onScriptFilePicked(file: File): void
   onSave(): void
   onDelete(): void
 }
@@ -47,8 +50,13 @@ export function SchedulerTaskForm(props: SchedulerTaskFormProps) {
   const {
     copy, draft, templates, timezoneOptions, unbounded, calendarOpen, dateRange, activeView, busy, confirmDelete,
     onPatch, onPatchWindow, onToggleUnbounded, onToggleCalendar, onCloseCalendar, onSetDaysAll, onToggleDay,
-    onPatchRange, onAddRange, onRemoveRange, onPatchTimePoint, onAddTimePoint, onRemoveTimePoint, onSave, onDelete,
+    onPatchRange, onAddRange, onRemoveRange, onPatchTimePoint, onAddTimePoint, onRemoveTimePoint,
+    onScriptFilePicked, onSave, onDelete,
   } = props
+  const scriptInputRef = useRef<HTMLInputElement | null>(null)
+  // 旧任务没有 condition 字段：按「未启用」呈现，不凭空补值（保存时才由 Host 收敛）
+  const conditionEnabled = draft?.condition?.enabled === true
+  const conditionScriptPath = draft?.condition?.scriptPath ?? ''
 
   return (
     <div className="wf-sched__form">
@@ -239,6 +247,57 @@ export function SchedulerTaskForm(props: SchedulerTaskFormProps) {
             </div>
           )}
           <span className="wf-sched-field__hint">{copy.schedulerIntervalHint}</span>
+        </section>
+
+        <section className="wf-sched-group">
+          <h5>{copy.schedulerCondition}</h5>
+          <label className="wf-sched-enabled">
+            <input
+              type="checkbox"
+              checked={conditionEnabled}
+              disabled={!draft}
+              onChange={(event) => onPatch({
+                condition: { enabled: event.target.checked, scriptPath: conditionScriptPath },
+              })}
+            />
+            <span>{copy.schedulerConditionEnable}</span>
+          </label>
+          <Field variant="scheduler" label={copy.schedulerConditionScript}>
+            <div className="wf-sched-dates">
+              <input
+                type="text"
+                value={conditionScriptPath}
+                placeholder={copy.schedulerConditionScriptPlaceholder}
+                onChange={(event) => onPatch({
+                  condition: { enabled: conditionEnabled, scriptPath: event.target.value },
+                })}
+                disabled={!draft || !conditionEnabled}
+              />
+              <button
+                type="button"
+                className="wf-btn"
+                onClick={() => scriptInputRef.current?.click()}
+                disabled={!draft || !conditionEnabled}
+              >
+                {copy.schedulerConditionPick}
+              </button>
+              {/* 隐藏的原生选择器：只取 File，绝对路径由容器经桌面桥解析 */}
+              <input
+                ref={scriptInputRef}
+                type="file"
+                accept=".mjs,.cjs,.js"
+                className="wf-import-hidden"
+                aria-label={String(copy.schedulerConditionPick)}
+                onChange={(event) => {
+                  const picked = event.target.files?.[0]
+                  if (picked) onScriptFilePicked(picked)
+                  event.target.value = ''
+                }}
+              />
+            </div>
+          </Field>
+          <span className="wf-sched-field__hint">{copy.schedulerConditionScriptHint}</span>
+          <span className="wf-sched-field__hint">{copy.schedulerConditionLateHint}</span>
         </section>
 
         <section className="wf-sched-group">

@@ -8,9 +8,11 @@
 import { httpError } from './http.js'
 import { presentationOf, VisualWorkflowApiBase } from './boundary.js'
 import {
+  isAbsoluteConditionScriptPath,
   normalizeScheduledTask,
   parseScheduledTaskInput,
   ScheduledTaskInputError,
+  validateConditionScriptPath,
   validateScheduledTask,
 } from '../scheduler/index.js'
 import { resolveWorkspacePath } from '../workspace-path.js'
@@ -63,6 +65,19 @@ export class SchedulerEndpoints extends VisualWorkflowApiBase {
       if (error instanceof ScheduledTaskInputError || isInputShapeError(error)) throw httpError(400, messageOf(error))
       throw error
     }
+    // 条件脚本的读盘校验先于纯字段校验：路径存在但类型不对（如目录）时，「不是文件」
+    // 比扩展名错误更贴近事实；相对/空路径不读盘，仍由 validateScheduledTask 报错。
+    if (task.condition?.enabled === true) {
+      const scriptPath = task.condition.scriptPath.trim()
+      if (isAbsoluteConditionScriptPath(scriptPath)) {
+        try {
+          await validateConditionScriptPath(scriptPath)
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          throw httpError(400, message)
+        }
+      }
+    }
     const validation = validateScheduledTask(task)
     if (validation !== null) throw httpError(400, validation)
     // 新会话工作区校验（存在且为目录；new-session 模式下无效路径直接报错）
@@ -74,6 +89,7 @@ export class SchedulerEndpoints extends VisualWorkflowApiBase {
         throw httpError(400, message)
       }
     }
+    // 条件脚本路径校验已在纯字段校验前完成（见上）；此处不再重复读盘。
     const saved = await store.save(normalizeScheduledTask(task))
     return saved
   }

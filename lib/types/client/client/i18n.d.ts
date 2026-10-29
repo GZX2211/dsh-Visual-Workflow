@@ -514,6 +514,14 @@ export declare const zh: {
     schedulerInterval: string;
     schedulerIntervalStartFrom: string;
     schedulerIntervalHint: string;
+    schedulerCondition: string;
+    schedulerConditionEnable: string;
+    schedulerConditionScript: string;
+    schedulerConditionScriptPlaceholder: string;
+    schedulerConditionScriptHint: string;
+    schedulerConditionPick: string;
+    schedulerConditionPickUnavailable: string;
+    schedulerConditionLateHint: string;
     schedulerPolicy: string;
     schedulerPolicyText: string;
     schedulerEnabled: string;

@@ -10,6 +10,7 @@
 
 import type { ScheduledTask } from '../shared/types.js'
 import { parseDateOnly, parseTime } from './calendar.js'
+import { CONDITION_SCRIPT_EXTENSION_MESSAGE, hasSupportedScriptExtension, isAbsoluteConditionScriptPath } from './condition-config.js'
 
 /** 请求体形状非法（消息为中文；HTTP 端点转 400，其它调用方按输入错误处理）。 */
 export class ScheduledTaskInputError extends Error {
@@ -64,6 +65,14 @@ export function parseScheduledTaskInput(raw: unknown, options: { now?: () => num
       ? { intervalMinutes: Number(input.intervalConfig.intervalMinutes), startFrom: String(input.intervalConfig.startFrom ?? '') }
       : null,
     runtimePolicy: { missedTrigger: 'skip', concurrency: 'skip', configUpdate: 'immediate' },
+    // 条件层必须写在 `...(input)` 之后：展开会带出请求体里未收敛的原始值，
+    // 对象字面量后者优先，写在前面会被原值覆盖（「整任务替换」语义下统一给 null）。
+    condition: input.condition && typeof input.condition === 'object' && !Array.isArray(input.condition)
+      ? {
+          enabled: input.condition.enabled === true,
+          scriptPath: String(input.condition.scriptPath ?? '').trim(),
+        }
+      : null,
     // 新会话工作区（仅 new-session 模式生效；空值忽略）
     ...(String(input.workspacePath ?? '').trim() ? { workspacePath: String(input.workspacePath).trim() } : {}),
     createdAt: String(input.createdAt ?? now),
@@ -77,7 +86,7 @@ export function parseScheduledTaskInput(raw: unknown, options: { now?: () => num
  */
 export function validateScheduledTask(task: Pick<
   ScheduledTask,
-  'name' | 'workflowTemplateId' | 'sessionMode' | 'ownerSessionId' | 'timezone' | 'window' | 'triggerMode' | 'dailyTimeConfig' | 'intervalConfig'
+  'name' | 'workflowTemplateId' | 'sessionMode' | 'ownerSessionId' | 'timezone' | 'window' | 'triggerMode' | 'dailyTimeConfig' | 'intervalConfig' | 'condition'
 >): string | null {
   if (!String(task?.name ?? '').trim()) return '任务名称不能为空'
   if (!String(task?.workflowTemplateId ?? '').trim()) return '请选择工作流模板'
@@ -122,6 +131,14 @@ export function validateScheduledTask(task: Pick<
   } else {
     return '触发模式无效'
   }
+  // 条件层仅在启用时校验路径（关闭时允许保留历史值；文件存在性属保存端点的 IO 校验）
+  const condition = task.condition
+  if (condition?.enabled === true) {
+    const scriptPath = String(condition.scriptPath ?? '').trim()
+    if (!scriptPath) return '启用条件触发时请选择脚本文件'
+    if (!isAbsoluteConditionScriptPath(scriptPath)) return '条件脚本路径必须是绝对路径'
+    if (!hasSupportedScriptExtension(scriptPath)) return CONDITION_SCRIPT_EXTENSION_MESSAGE
+  }
   return null
 }
 
@@ -164,6 +181,15 @@ export function normalizeScheduledTask(task: ScheduledTask): ScheduledTask {
       concurrency: 'skip',
       configUpdate: 'immediate',
     },
+    // 同样必须显式覆盖 `...task` 带出的原始值：关闭且空路径化简为 null，
+    // 关闭但有路径保留（重新开启不必重填）；与会话策略无关。
+    condition: task?.condition
+      ? task.condition.enabled === true
+        ? { enabled: true, scriptPath: String(task.condition.scriptPath ?? '').trim() }
+        : String(task.condition.scriptPath ?? '').trim()
+          ? { enabled: false, scriptPath: String(task.condition.scriptPath ?? '').trim() }
+          : null
+      : null,
   }
   // 工作区路径仅新会话模式有意义：非 new-session 时剥除（避免旧数据残留污染）；
   // new-session 时空值同样剥除（保持存储干净）

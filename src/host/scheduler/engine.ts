@@ -23,6 +23,7 @@ import { isWithinWindow } from './window.js'
 import { nextTriggerAt } from './trigger.js'
 import { instantiateFromTemplate, overwriteInstanceFromTemplate } from './instantiate.js'
 import { emptyPersistedRuntime, SchedulerTaskStore, type PersistedRuntime } from './task-store.js'
+import type { ConditionScriptOutcome, ConditionScriptRunner } from './condition-script.js'
 
 /** 编排运行时的引擎视图（宿主装配；单测 fake）。 */
 export interface SchedulerOrchestrator {
@@ -63,6 +64,8 @@ export interface SchedulerEngineDeps {
   /** tick 间隔（缺省 30s；触发/暂停精度分钟级）。 */
   tickMs?: number
   logger?: SchedulerLogger
+  /** 条件脚本执行器（宿主装配；测试 fake）。未装配且任务启用条件时按不通过处理。 */
+  conditionRunner?: ConditionScriptRunner
 }
 
 /** 默认 tick 间隔（30s：秒级恢复误差可接受，写盘/扫描开销低）。 */
@@ -306,7 +309,51 @@ export class SchedulerEngine {
     const nextT = nextTriggerAt(task, rt.lastConsumedTriggerAt ?? this.startedAtMs, task.timezone)
     if (nextT === null || nextT > now) return
     // 触发点已到且窗口有效（nextTriggerAt 已保证点落在窗口内）：
-    await this.fire(task, rt, nextT)
+    await this.gateAndFire(task, rt, nextT)
+  }
+
+  /**
+   * 第三层门控：条件启用时先运行脚本，仅 true 才进入 fire。
+   * 只在 idle 分支的新触发点调用——窗口挂起、窗口续跑、并发跳过都不经过这里。
+   */
+  private async gateAndFire(task: ScheduledTask, rt: PersistedRuntime, triggerAt: number): Promise<void> {
+    if (task.condition?.enabled === true) {
+      const outcome = await this.evaluateCondition(task, triggerAt)
+      if (!outcome.pass) {
+        // 触发点作废：推进游标、记录跳过原因，不补打、不重试
+        rt.lastConsumedTriggerAt = triggerAt
+        rt.lastResult = 'skipped'
+        rt.lastTriggeredAt = new Date(triggerAt).toISOString()
+        rt.lastError = outcome.detail
+        await this.persist(task.taskId, rt)
+        this.deps.logger?.info?.(`[visual-workflow] 定时任务 ${task.taskId} 条件未通过，跳过本轮：${outcome.detail}`)
+        return
+      }
+    }
+    // 条件未启用或通过：走现有触发路径（内部消费触发点并落盘）
+    await this.fire(task, rt, triggerAt)
+  }
+
+  /** 条件脚本评估：任何异常都收敛为「不通过」，避免单任务故障中断整批扫描。 */
+  private async evaluateCondition(task: ScheduledTask, triggerAt: number): Promise<ConditionScriptOutcome> {
+    const condition = task.condition
+    if (condition?.enabled !== true) return { pass: true, detail: '' }
+    if (!condition.scriptPath.trim()) return { pass: false, detail: '条件脚本路径为空' }
+    const runner = this.deps.conditionRunner
+    if (!runner) return { pass: false, detail: '条件脚本执行器未装配' }
+    try {
+      return await runner.run({
+        scriptPath: condition.scriptPath,
+        taskId: task.taskId,
+        taskName: task.name,
+        templateId: task.workflowTemplateId,
+        triggerAt,
+        timezone: task.timezone,
+        ownerSessionId: task.ownerSessionId,
+      })
+    } catch (error) {
+      return { pass: false, detail: `条件脚本执行失败：${String(error instanceof Error ? error.message : error)}` }
+    }
   }
 
   /** 触发执行：模板 → 实例（会话策略分派 + 每会话单实例覆盖）→ startRun。 */

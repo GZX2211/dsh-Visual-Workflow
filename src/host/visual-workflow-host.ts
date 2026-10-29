@@ -61,7 +61,7 @@ import { ExperienceService, scheduleExperienceRetirementSweep } from './experien
 import type { ExperienceRuntimePort, ExperienceStorePort } from './experience/index.js'
 import { EmbeddingService } from './embedding/engine.js'
 import { ServiceManager } from './service/index.js'
-import { SchedulerEngine, SchedulerTaskStore } from './scheduler/index.js'
+import { createConditionScriptRunner, SchedulerEngine, SchedulerTaskStore } from './scheduler/index.js'
 import { CordisSessionProvider, sessionCwdResolver } from './sessions/session-provider.js'
 
 export const VisualWorkflowHostServiceName = 'visualWorkflowHost'
@@ -250,6 +250,7 @@ export class VisualWorkflowHost extends Service {
       orchestrator: this.orchestrator,
       sessionProvider: new CordisSessionProvider(ctx),
       sessionCwdOf: sessionCwdResolver(ctx),
+      conditionRunner: createConditionScriptRunner(),
       logger: {
         info: (message) => ctx.logger.info(message),
         warn: (message) => ctx.logger.warn(message),

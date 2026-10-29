@@ -135,7 +135,7 @@ interface Harness {
   clock: { now: number }
 }
 
-async function makeHarness(task: ScheduledTask): Promise<Harness> {
+async function makeHarness(task: ScheduledTask, extraDeps: Record<string, unknown> = {}): Promise<Harness> {
   const dir = await mkdtemp(join(tmpdir(), 'vw-sched-'))
   cleanups.push(() => rm(dir, { recursive: true, force: true }))
   const flowStore = new FlowStore(dir)
@@ -154,7 +154,8 @@ async function makeHarness(task: ScheduledTask): Promise<Harness> {
     now: () => clock.now,
     tickMs: 30_000,
     logger: { info: () => {}, warn: () => {}, error: () => {} },
-  })
+    ...extraDeps,
+  } as unknown as ConstructorParameters<typeof SchedulerEngine>[0])
   // 启动基准 = 当前时钟前 1 分钟（missedTrigger=skip：不追溯 1970；10:00 触发点仍在未来）
   ;(engine as unknown as { startedAtMs: number }).startedAtMs = clock.now - 60_000
   return { engine, taskStore, flowStore, orche, sessions, clock }
@@ -380,5 +381,133 @@ describe('调度引擎', () => {
     expect(() => disposer()).not.toThrow()
     await h.engine.sweep()
     expect(h.orche.startCalls).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 第三层：条件触发门控（gateAndFire）
+//
+// 条件层只在 idle 分支的新触发点评估：不通过 → 消费触发点 + skipped + lastError，
+// 不补打不重试；未装配执行器同样按不通过处理（绝不误触发）。
+// ---------------------------------------------------------------------------
+
+interface ConditionRunnerProbe {
+  run(input: unknown): Promise<{ pass: boolean; detail: string }>
+}
+
+const ENABLED_CONDITION = {
+  enabled: true,
+  scriptPath: process.platform === 'win32' ? 'C:\\scripts\\check-issue.mjs' : '/opt/scripts/check-issue.mjs',
+}
+
+/** 记录调用的执行器探针；可返回固定结果或抛错。 */
+function makeRunner(result: { pass: boolean; detail: string } | Error): { runner: ConditionRunnerProbe; calls: unknown[] } {
+  const calls: unknown[] = []
+  const runner: ConditionRunnerProbe = {
+    async run(input) {
+      calls.push(input)
+      if (result instanceof Error) throw result
+      return result
+    },
+  }
+  return { runner, calls }
+}
+
+/** 带条件层的任务（condition 尚未在共享类型中声明，夹具负责透传原始形状）。 */
+function taskWithCondition(overrides: Partial<ScheduledTask>, condition: unknown): ScheduledTask {
+  return makeTask({ ...overrides, condition } as unknown as Partial<ScheduledTask>)
+}
+
+describe('条件触发门控', () => {
+  it('条件返回 false → 不触发，记 skipped + 原因、消费触发点、任务状态仍为 idle', async () => {
+    const { runner, calls } = makeRunner({ pass: false, detail: '条件脚本返回 false' })
+    const h = await makeHarness(taskWithCondition({}, ENABLED_CONDITION), { conditionRunner: runner })
+
+    await h.engine.sweep()
+
+    expect(calls).toHaveLength(1)
+    expect(h.sessions.created).toHaveLength(0)
+    expect(h.orche.startCalls).toHaveLength(0)
+    const rt = await h.taskStore.readRuntime('task-1')
+    expect(rt.lastResult).toBe('skipped')
+    expect(rt.lastError).toBe('条件脚本返回 false')
+    expect(rt.lastConsumedTriggerAt).toBe(localToUtc({ year: 2026, month: 9, day: 1, hour: 10, minute: 0 }, TZ))
+    const views = await h.engine.listViews()
+    expect(views[0]?.runtime.status).toBe('idle')
+
+    // 同一触发点不再评估（不补打、不重试）
+    await h.engine.sweep()
+    expect(calls).toHaveLength(1)
+  })
+
+  it('条件返回 true → 与未启用时一致地触发（started、lastError 清空）', async () => {
+    const { runner, calls } = makeRunner({ pass: true, detail: '' })
+    const h = await makeHarness(taskWithCondition({}, ENABLED_CONDITION), { conditionRunner: runner })
+
+    await h.engine.sweep()
+
+    // 评估必须真实发生，且把任务上下文交给执行器（否则「通过」只是没评估）
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({
+      scriptPath: ENABLED_CONDITION.scriptPath,
+      taskId: 'task-1',
+      taskName: '测试任务',
+      templateId: 'tpl-1',
+      triggerAt: localToUtc({ year: 2026, month: 9, day: 1, hour: 10, minute: 0 }, TZ),
+      timezone: TZ,
+      ownerSessionId: 'session-owner',
+    })
+    expect(h.sessions.created).toHaveLength(1)
+    expect(h.orche.startCalls).toHaveLength(1)
+    const rt = await h.taskStore.readRuntime('task-1')
+    expect(rt.lastResult).toBe('started')
+    expect(rt.lastError).toBe('')
+  })
+
+  it('未启用条件 → 不调用执行器，行为与升级前一致', async () => {
+    const { runner, calls } = makeRunner({ pass: false, detail: '不应被调用' })
+    const h = await makeHarness(makeTask(), { conditionRunner: runner })
+
+    await h.engine.sweep()
+
+    expect(calls).toHaveLength(0)
+    expect(h.orche.startCalls).toHaveLength(1)
+  })
+
+  it('启用条件但执行器未装配 → 按不通过处理，原因可排查', async () => {
+    const h = await makeHarness(taskWithCondition({}, ENABLED_CONDITION))
+
+    await h.engine.sweep()
+
+    expect(h.orche.startCalls).toHaveLength(0)
+    const rt = await h.taskStore.readRuntime('task-1')
+    expect(rt.lastResult).toBe('skipped')
+    expect(rt.lastError).toContain('未装配')
+  })
+
+  it('执行器抛错 → 按不通过处理，异常不向上冒泡', async () => {
+    const { runner } = makeRunner(new Error('boom'))
+    const h = await makeHarness(taskWithCondition({}, ENABLED_CONDITION), { conditionRunner: runner })
+
+    await expect(h.engine.sweep()).resolves.toBeUndefined()
+
+    expect(h.orche.startCalls).toHaveLength(0)
+    const rt = await h.taskStore.readRuntime('task-1')
+    expect(rt.lastResult).toBe('skipped')
+    expect(rt.lastError).toContain('执行失败')
+  })
+
+  it('并发跳过路径不评估条件（上轮 running 时新触发点直接消费）', async () => {
+    const { runner, calls } = makeRunner({ pass: true, detail: '' })
+    const h = await makeHarness(taskWithCondition({}, ENABLED_CONDITION), { conditionRunner: runner })
+
+    await h.engine.sweep() // 10:00 触发（评估一次）
+    expect(calls).toHaveLength(1)
+    h.clock.now = Date.UTC(2026, 8, 1, 6, 0, 0) // 14:00 上海（第二触发点，上轮仍 running）
+    await h.engine.sweep()
+
+    expect(calls).toHaveLength(1)
+    const rt = await h.taskStore.readRuntime('task-1')
+    expect(rt.lastResult).toBe('skipped')
   })
 })

@@ -70,6 +70,8 @@ export function createTaskDraft(ownerSessionId: string, now = new Date()): Sched
     dailyTimeConfig: { timePoints: ['09:00'] },
     intervalConfig: { intervalMinutes: 120, startFrom: '09:00' },
     runtimePolicy: { missedTrigger: 'skip', concurrency: 'skip', configUpdate: 'immediate' },
+    // 条件层默认关闭（第三层可开关；旧任务无该字段时表单按可选值处理）
+    condition: { enabled: false, scriptPath: '' },
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
   }
@@ -85,6 +87,16 @@ export function validateTaskDraft(task: ScheduledTask): string | null {
   if (!String(task.name ?? '').trim()) return 'schedulerNeedName'
   if (!String(task.workflowTemplateId ?? '').trim()) return 'schedulerNeedTemplate'
   return null
+}
+
+/**
+ * 粗判宿主绝对路径（Windows 盘符/UNC 或 POSIX 根路径）。
+ * 仅用于筛选文件选择结果，避免把浏览器给的文件名当路径写进草稿；
+ * 保存时的权威判定在 Host（path.isAbsolute + 文件存在性）。
+ */
+export function isAbsoluteHostPath(value: string): boolean {
+  const path = String(value ?? '').trim()
+  return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\') || path.startsWith('/')
 }
 
 /**

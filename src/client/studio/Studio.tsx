@@ -450,6 +450,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive, langu
       workspacePickerAvailable={newSession.pickerAvailable}
       workspacePicking={newSession.picking}
       onPickWorkspace={newSession.onPickWorkspace}
+      filePathResolver={filePathResolver}
     />
   )
 }

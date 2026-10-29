@@ -27,6 +27,8 @@ export interface SchedulerTaskFormProps {
     onPatchTimePoint(index: number, value: string): void;
     onAddTimePoint(): void;
     onRemoveTimePoint(index: number): void;
+    /** 条件脚本文件选择结果（绝对路径解析由容器负责；本组件只交出 File）。 */
+    onScriptFilePicked(file: File): void;
     onSave(): void;
     onDelete(): void;
 }

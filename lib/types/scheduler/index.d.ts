@@ -7,5 +7,8 @@ export { addDays, dateOnlyOf, formatDateOnly, formatMinutes, localToUtc, parseDa
 export type { ZonedParts } from './calendar.js';
 export { isValidDate, isWithinWindow, nextWindowStartAt, timeInRanges } from './window.js';
 export { nextTriggerAt, triggerPointsForDate } from './trigger.js';
+export { createConditionScriptRunner, validateConditionScriptPath, } from './condition-script.js';
+export type { ConditionScriptInput, ConditionScriptOutcome, ConditionScriptRunner, ConditionScriptRunnerOptions, } from './condition-script.js';
+export { hasSupportedScriptExtension, isAbsoluteConditionScriptPath, parseConditionOutput, } from './condition-config.js';
 export { instantiateFromTemplate, overwriteInstanceFromTemplate } from './instantiate.js';
 export type { IdGenerator } from './instantiate.js';
