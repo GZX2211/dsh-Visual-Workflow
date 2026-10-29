@@ -149,9 +149,32 @@ export const schedulerStyles = `
   font-weight: 600;
 }
 
-.wf-sched-day:hover {
-  border-color: var(--wf-brand);
-  color: var(--wf-ink);
+/* 触摸设备的 sticky hover 会让触摸过的按钮持续高亮；悬停反馈只对精细指针设备生效 */
+@media (hover: hover) and (pointer: fine) {
+  .wf-sched-day:hover {
+    border-color: var(--wf-brand);
+    color: var(--wf-ink);
+  }
+}
+
+/* 清除宿主施加的焦点圈：宿主 focus 视觉与 hover 同款，指针离开后不清理会与另一个按钮同时高亮 */
+.wf-sched-day:focus {
+  outline: 0;
+  box-shadow: none;
+}
+
+/* 鼠标点击后的焦点残留复位为基础态；键盘聚焦（:focus-visible）与选中态不在此列 */
+.wf-sched-day:not(.is-active):focus:not(:focus-visible):not(:hover) {
+  border-color: var(--wf-border);
+  color: var(--wf-ink-2);
+  background: var(--wf-layer);
+  box-shadow: none;
+}
+
+/* 键盘导航仍需要可见焦点指示：用外描边与悬停态区分，不改变按钮尺寸 */
+.wf-sched-day:focus-visible {
+  outline: 2px solid var(--wf-brand);
+  outline-offset: 2px;
 }
 
 .wf-sched-day.is-active {

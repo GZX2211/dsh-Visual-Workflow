@@ -428,13 +428,13 @@ export function StudioLayout(props: StudioLayoutProps) {
 
       {/* 确认弹窗：「保存并继续」在真实保存完成后才继续原操作——需要二次确认的路径
           （运行中实例保存）本次返回 null，落库发生在用户确认之后，经 onSaved 接续。
-          保存统一经 editor.saveEditor：实例/模版态转 saveCanvas（同上），资产态走
-          「登记资产新版本」分支（此前直连 saveCanvas 对资产态返回 null，只能放弃修改）。 */}
+          未保存守卫保存的是**当前画布文档**（editor.saveCanvasDocument），与属性栏选中对象无关；
+          属性栏「保存」仍走 editor.saveEditor（画布类来源复用同一保存通道）。 */}
       <ConfirmDialog
         confirm={state.confirm}
         copy={t}
         onClose={() => dispatch({ type: 'CONFIRM_SET', confirm: null })}
-        onSaveAndProceed={() => { void guard.saveAndProceed((onSaved) => editor.saveEditor({ onSaved })) }}
+        onSaveAndProceed={() => { void guard.saveAndProceed((onSaved) => editor.saveCanvasDocument({ onSaved })) }}
         onDiscardAndProceed={guard.discardAndProceed}
         onResolveImport={(mode) => { void transfer.resolveImportConflict(mode as 'rename' | 'overwrite') }}
       />
