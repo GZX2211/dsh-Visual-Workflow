@@ -275,3 +275,90 @@ pnpm check
 - 宿主主题对 `button:focus` 的具体声明无法在本仓库内直接查看（官方 UI 为运行时注入，不在 `node_modules`）；本方案以 `sidebar-entry.ts` 的既有收敛先例 + 截图像素为证据，并在 §4.1 同时覆盖焦点残留与触摸 sticky hover 两种成因。
 - 若在混合输入设备（触摸 + 精细指针）上仍能复现，按 §2.4 的触摸步骤取证；届时再评估是否引入 JS 指针状态管理（会扩大改动面，本次不做）。
 - Issue 未提供浏览器/操作系统信息；若维护者能拿到用户环境，补充后可进一步缩小到单一成因，但不影响本次修复方案落地。
+
+---
+
+## 7. 复核结论（复核与测试编写 Agent，2026-10-29）
+
+复核对象：本方案 §1–§6。复核依据：`src/client/styles/scheduler.ts`（第 134–166 行实测）、`src/client/components/scheduler/SchedulerTaskForm.tsx`（第 160–176 行实测）、`src/client/styles/sidebar-entry.ts`（第 67–74 行先例）、`tests/contract/client-style.test.ts`（既有样式门禁口径）。
+
+### 7.1 复核通过的部分
+
+1. **定位层级正确**：异常是纯视觉状态，`daysOfWeek` 推导的 `is-active` 与点击回调均正确；缺陷确实落在 `scheduler.ts` 对 `.wf-sched-day` 的状态表达缺失，不在组件或状态机。改动面收敛到单一样式文件，符合“根因位置即修改位置”。
+2. **证据链可复核**：截图三处采样（「日」背景 `#232323` = 基础色、边框 `#FAFAFC` = brand、「每天」背景 `#3D3D3D` ≈ `color-mix(brand 12%, layer)`）与 `scheduler.ts` 的声明逐项吻合，可排除「`is-active` 误判」这一竞争解释。
+3. **影响范围声明属实**：新增规则只组合既有 token（`--wf-border` / `--wf-ink-2` / `--wf-layer` / `--wf-brand` / `--wf-ink`），不新增类名、不新增颜色字面量、不新增 token；与 `tests/contract/client-style.test.ts` 的「死类名」「token 单一来源」「颜色字面量」三道门禁无冲突，无需改基线。
+4. **可访问性口径与仓库一致**：`outline: 0` 与 `:focus-visible` 并存的写法，与 `overlays.ts` / `canvas.ts` 的既有做法一致；未采用 `blur()` 方案的理由成立。
+
+### 7.2 复核发现的问题（需修正）
+
+**F1（必改）：改动二只清 `outline`，没有清 `box-shadow`，焦点残留可能原样保留。**
+
+- 依据：仓库既有的宿主焦点收敛先例 `src/client/styles/sidebar-entry.ts` 第 67–74 行同时声明了 `outline: none; box-shadow: none; -webkit-tap-highlight-color: transparent;`。注释原文为「清除聚焦/点击后的发光焦点环（含默认浏览器/主题 focus 圈）」——「发光环」在宿主主题里通常由 `box-shadow` 实现，`outline: 0` 单独并不足以清除。
+- 影响：方案 §4.1 的复位规则 `:not(.is-active):focus:not(:focus-visible):not(:hover)` 只在指针**已离开**按钮时生效；指针仍停在按钮上（`hover` 生效）时，宿主 `box-shadow` 焦点环没有任何规则清除，会与 `:hover` 同帧叠加，仍可能出现「多个按钮同时有白圈」的同款观感。
+- 可执行修正：把 §4.1 改动二的第一条改为
+
+  ```css
+  .wf-sched-day:focus {
+    outline: 0;
+    box-shadow: none;
+  }
+  ```
+
+  （`-webkit-tap-highlight-color: transparent` 为可选项：它消除触摸点击瞬间的系统高亮覆盖，若人工验证 §9 步骤 6 仍见「日」点击瞬间闪白，再补该声明；它不属于颜色字面量，不会触发 `client-style.test.ts` 的颜色门禁。）
+
+**F2（必改）：§5 只有人工回归，没有可自动化断言的契约点。**
+
+- 依据：`vitest + jsdom` 不计算伪类与 `@media`（方案 §2.4 已自认），但 `schedulerStyles` 是**导出字符串常量**，其规则语义（选择器 + 声明 + 所属媒体查询）可在测试中静态验证；`tests/contract/client-style.test.ts` 已建立「解析样式片段再做语义断言」的既有范式。
+- 影响：若只留人工步骤，本次缺陷的回归保护为零，任何人删除 `@media` 门控或复位规则都不会有测试报警。
+- 可执行修正：以 §8 的测试契约作为本次修复的可自动化验收面；人工步骤保留为「测试不可覆盖的伪类渲染」补充（见 §9）。
+
+**F3（补强）：契约缺「焦点复位不得误伤选中态」的显式条款。**
+
+- 依据：复位规则以 `:not(.is-active)` 排除选中态，这是本方案唯一防止「修复 hover 时把选中态一起打回基础态」的机制，但 §4.1 只以「设计说明」提及，没有可验证条款。
+- 可执行修正：§8 条款 T24-6 把选中态的 brand 描边 / 亮背景冻结为回归护栏。
+
+### 7.3 复核未采纳的质疑（记录以免重复讨论）
+
+- 「直接删掉 `:hover`」：会让桌面端失去悬停反馈，且不解决焦点残留，不采纳。
+- 「在组件里 `blur()`」：破坏键盘焦点，与仓库可访问性口径冲突，不采纳（§4.4 已述）。
+- 「用 JS 维护 pointer 状态」：改动面从样式扩到组件状态，超出缺陷修复范围；方案已将其列为混合设备兜底，本次不做。
+- 「截图可能只是用户未移开指针」：截图同时显示「五」（指针位置）与「日」两处 brand 描边，与「只有指针所在按钮高亮」的预期矛盾，竞争解释不成立。
+
+## 8. 测试契约（复核与测试编写 Agent）
+
+### 8.1 契约主体与判定口径
+
+- 被测单元：`src/client/styles/scheduler.ts` 导出的 `schedulerStyles: string`。
+- 判定对象：把该字符串按 CSS 规则解析为 `{ selector, media, declarations }` 三元组后，**选择器语义 + 声明集合**。解析需剥除 `/* */` 注释、按顶层逗号拆分选择器组、记录每条规则的祖先 `@media` 条件。
+- 明确不约束（不得写进断言）：规则在文本中的先后位置、声明书写顺序、空白与缩进、注释内容、选择器内部伪类排列顺序、声明是否使用等价简写（如 `outline` vs `outline-style`+`outline-width`）。
+- 测试层级与位置：`tests/client/styles/scheduler.test.ts`（`tests/client/` 镜像 `src/client/`；断言对象是模块导出的纯数据，属单元层，不依赖 jsdom）。
+
+### 8.2 条款
+
+| 编号 | 条款 | 判定方式（语义） | 边界 / 错误路径 |
+|---|---|---|---|
+| T24-1 | 悬停反馈只对具备悬停能力的精细指针设备生效 | 所有同时含 `.wf-sched-day` 与 `:hover` 的规则，其 `media` 必须非空且同时包含 `hover: hover` 与 `pointer: fine`（`any-hover` / `any-pointer` 写法视为等价通过） | 片段中不存在任何 `.wf-sched-day:hover` 规则 → 失败（悬停反馈被删除，属回归）；存在无 `media` 的同名规则 → 失败（触摸设备 sticky hover 未被收敛） |
+| T24-2 | 桌面端悬停反馈内容不变 | 每条 `.wf-sched-day:hover` 规则声明 `border-color: var(--wf-brand)` 且 `color: var(--wf-ink)` | 缺任一声明 → 失败（用「去掉 hover」冒充「收敛 hover」） |
+| T24-3 | 鼠标点击后指针已离开时的焦点残留被复位为基础态 | 存在选择器同时含 `.wf-sched-day`、`:focus`、`:not(:focus-visible)`、`:not(.is-active)` 的规则；其声明 `border-color: var(--wf-border)`、`color: var(--wf-ink-2)`、`background: var(--wf-layer)`、`box-shadow: none` | 规则不存在 → 失败；只复位部分属性（漏 `box-shadow` 或 `background`）→ 失败：宿主可能施加任一属性，漏一项即残留 |
+| T24-4 | 键盘聚焦仍有可见焦点指示 | 存在选择器含 `.wf-sched-day` 与 `:focus-visible`、且不排除 `:not` 的规则；其声明提供可见描边：`outline` 简写非 `none` 且不以 `0` 开头，或 `outline-style` 非 `none` 且 `outline-width` 非 `0`，或 `box-shadow` 非 `none` | 规则不存在 → 失败；只声明 `outline: none`／`outline: 0` → 失败（键盘用户失去焦点指示） |
+| T24-5 | 任意焦点中的星期按钮都清除宿主焦点圈 | 存在选择器含 `.wf-sched-day` 与 `:focus`、且**不含** `:focus-visible` 的规则；其声明 `outline` 为 `0`/`none`（或 `outline-style: none`）**且** `box-shadow: none` | 规则只对 `:not(:focus-visible)` 成立 → 失败：键盘聚焦时宿主 `box-shadow` 不被清除；漏 `box-shadow` → 失败（F1） |
+| T24-6 | 焦点复位不得削弱选中态 | 存在选择器含 `.wf-sched-day.is-active` 的规则，声明 `border-color: var(--wf-brand)` 且 `color: var(--wf-brand)`，`background` 含 `color-mix(` | 选中态规则被删/被改为基础色 → 失败 |
+| T24-7 | 只改样式，不改组件契约 | `SchedulerTaskForm` 的星期按钮仍以 `is-active` 表达选中态，且不新增 `onBlur`/`blur()` 等焦点管理副作用 | 组件层出现 `blur()` 调用或新增焦点状态类 → 判定为超出修复范围（本缺陷不接受「丢失键盘焦点」的修法） |
+
+### 8.3 与人工验证的分工
+
+- T24-1–T24-6 为自动化门禁（jsdom 无关，`tests/client/styles/scheduler.test.ts`）。
+- 伪类真实渲染、`@media` 设备匹配、宿主主题注入的焦点圈：**不可自动化**，由 §9 人工清单覆盖，理由见 §2.4。
+
+## 9. 人工验证清单（测试不可覆盖部分）
+
+在 DSH Web profile 的真实浏览器中执行，浅色与深色主题各一轮：
+
+1. 点击「日」选中，再点一次取消；指针移到「五」：只有「五」显示 brand 描边与亮文字，「日」回到基础态（本次缺陷的正向验收）。
+2. 指针停在「日」上不移动：仍应显示悬停高亮（不得因修复丢失悬停反馈）。
+3. 选中「一、三」，指针移开：选中态仍为 brand 描边 + 亮背景；「每天」未选中。
+4. 点击「每天」：选中态正常，具体星期按钮全部回到基础态。
+5. 键盘 Tab 进入星期按钮组：当前按钮显示外描边焦点环（不与悬停态混淆），空格/回车可切换。
+6. 键盘切换后 Tab 移开：无残留焦点圈。
+7. DevTools 设备模拟（触摸）点击「日」，再用鼠标悬停「五」：「日」不再保留白边（验证 T24-1 的设备门控）。
+8. 混合输入设备（触摸屏笔记本）重复步骤 1：若仍复现，记录设备与浏览器版本，按 §4.3 评估 JS 指针状态兜底（不在本次范围）。

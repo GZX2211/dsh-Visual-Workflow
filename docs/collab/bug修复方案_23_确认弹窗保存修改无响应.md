@@ -340,3 +340,105 @@ pnpm check
 
 - 新入口命名 `saveCanvasDocument` 是否与仓库术语一致；若维护者倾向复用 `saveCanvas` 命名，可改为 `saveCurrentDocument`，实现不变。
 - §4.2 改动 5 的错误文案键名需按 `src/client/i18n.ts` 现有风格新增（中英文各一条）；若担心扩大改动面，可先复用 `remoteErrorMessageOf` 的通用文案。
+
+---
+
+## 7. 复核结论（复核与测试编写 Agent，2026-10-29）
+
+复核依据（实测源码，非推断）：`src/client/hooks/useEditorActions.ts`（`saveEditor` 全部分支、`workflowAssetPayload`、`needsCascadeConfirm`）、`src/client/hooks/useDocumentActions.ts`（`saveCanvas` 的四种 `currentKind` 分支）、`src/client/hooks/useUnsavedGuard.ts`（`saveAndProceed` 全文）、`src/client/studio/studio-reducer.ts`（第 17–35 行 `openDocument`、第 96–124 行 `OPEN_FLOW_ASSET`、第 236–248 行 `CLEAR_CANVAS`、第 288 行 `SELECT_EDITOR`、第 314–360 行 `DOC_PATCH`）、`src/client/studio/studio-types.ts`（`EditorRef` 与 `currentKind` 定义）、`src/client/studio/StudioLayout.tsx`（第 433–440 行装配）。
+
+### 7.1 复核通过的部分
+
+1. **失败链准确**：`saveEditor` 第 348–357 行确实先取 `state.editor` 并在 `null` 时 `return null`；`node` / `edge` 一律转 `saveCanvas`；`saveCanvas` 对 `currentKind === 'flowAsset'` 确实直接 `return null`（`useDocumentActions.ts` 中注释「本函数对资产不落库」）。三处事实与方案 §2.5 的表格逐格吻合。
+2. **`dirty` 语义准确**：`dirty: true` 只由画布图动作（第 252–308 行）与 `DOC_PATCH`（第 314–360 行，仅 `workflow` / `flowTemplate` / `service` / `flowAsset` 四种 `currentKind` 命中）置位；`roleAsset` / `promptAsset` / `experience` 编辑不会置 `dirty`，因此不会进入未保存守卫。`saveCanvasDocument` 只需覆盖这四种 `currentKind`，分派范围完整，不存在「角色资产也 dirty 但保存入口漏了」的缺口。
+3. **`EditorRef` 与画布身份的一致性是方案改动 2 的前提，且事实成立**：`openDocument`（第 17–35 行）与 `OPEN_FLOW_ASSET`（第 96–124 行）在设置 `currentKind` / `currentId` 的同时同步重置 `editor`；`CLEAR_CANVAS` 与 `ASSET_CLOSED` 清 `currentKind` 时一并清 `editor`。故 `editor.source === 'flowAsset'` ⇒ `state.currentKind === 'flowAsset' && state.currentId === editor.id`，改动 2 把该分支改调 `saveCanvasDocument` 是行为等价的。
+4. **`saveAndProceed` 语义成立**：弹窗先关、只有返回值非 `null/undefined` 或 `onSaved` 才 `proceed`，`proceeded` 标志防重复；方案「不回改 `useUnsavedGuard`」的判断正确——问题在传入的 `save` 实现选错了入口。
+5. **改动 1 的资产分支可复用**：`workflowAssetPayload(state, detail)` 已存在（第 129 行起），`needsCascadeConfirm` 已存在，资产分支可从 `saveEditor` 平移，不需要新增 Host 端点。
+
+### 7.2 复核发现的问题（需修正）
+
+**F23-1（必改）：资产分支必须原样保留 `state.dirty` 门控，方案伪代码把它省掉了。**
+
+- 依据：现实现 `const pending = state.dirty ? await needsCascadeConfirm(...) : false`，且注释明确「无未保存改动时内容与已入库版本全等……省掉一次预览往返（重复点击保存是『无改动保存』的最常见来源）」。方案 §4.2 改动 1 用 `// ...原第 376-399 行 doSave` 省略了这段，照此实现会让每次保存（含属性栏重复点保存）都多一次 `previewCascade` 往返。
+- 可执行修正：`saveCanvasDocument` 的 `flowAsset` 分支整体平移 `saveEditor` 第 371–400 行的逻辑，**包括** `const pending = state.dirty ? await needsCascadeConfirm(...) : false` 与「`pending` 为真则本次返回 null、由 `onSaved` 接续」的语义；仅把定位条件从 `detail.assetId !== editor.id` 改为 `detail.assetId !== state.currentId`。
+
+**F23-2（必改）：§4.2 改动 5 必须从「建议」升级为契约，否则仍是「静默无反应」。**
+
+- 依据：方案 §3 自己要求「修复后应保证任何 dirty 的画布文档都能落到正确通道」，但改动 5 写「建议」。`flowAsset` 态下 `state.assetDoc` 与 `state.currentId` 可以不一致（`ASSET_DOC_LOADED` 会覆盖 `assetDoc`，例如属性栏/列表装载了另一份资产详情，而画布仍打开旧资产），此时新入口只能返回 `null`；弹窗已关闭，用户看到的仍是「点保存没反应」。
+- 可执行修正：定位失败分支必须 `notify('error', t.<新增 key>)`（或 `toastError`）后再返回 `null`；新增 key 必须在 `src/client/i18n.ts` **同时**补中文与英文条目（父代理裁决）：建议 key `toastSaveUnavailable`，中文「当前文档无法保存，请重新打开后重试」、英文「Unable to save the current document. Reopen it and try again.」。禁止在 hook 内写死中文/英文字面量。
+
+**F23-3（必改）：`StudioLayout.tsx` 第 431–432 行的装配注释必须同步改写。**
+
+- 依据：该注释现写「保存统一经 editor.saveEditor：实例/模版态转 saveCanvas……」，改动 3 之后该装配点不再经过 `saveEditor`。按根 `AGENTS.md` 注释规范「行为变更同步更新或删除注释」，留着会误导下一位维护者。
+- 可执行修正：改为说明「未保存守卫按**当前画布文档**保存（`saveCanvasDocument`），与属性栏选中对象无关；属性栏保存仍走 `saveEditor`」。
+
+**F23-4（补强）：§5.1 用例 5 的断言不足以证明「失败语义完整」。**
+
+- 依据：资产保存失败时除了返回 `null`，还必须「不重投影画布（不 dispatch `OPEN_FLOW_ASSET`）、不调 `onSaved`」；否则守卫可能接续原操作，用户数据在无落库的情况下被后续操作覆盖。方案只写了「返回值 null、`onSaved` 未调用」。
+- 可执行修正：按 §8 的 T23-6 三条断言同时验证。
+
+### 7.3 未采纳的质疑（记录以免重复讨论）
+
+- 「把保存逻辑塞进 `ConfirmDialog`」：破坏 `StudioLayout` 装配 / hook 持有业务面的现有分层，不采纳（§4.3 已述）。
+- 「放宽 `saveCanvas` 的 `flowAsset` 分支让其落库」：会误写模板端点，且违背该分支「防误写」的刻意设计，不采纳（§4.3 已述）。
+- 「在 `saveEditor` 里给 `editor === null` 猜当前文档」：会让属性栏无对象时的保存按钮凭空产生行为，改变可见交互语义；新增独立入口更小，采纳方案原判。
+- 「跨态不一致（`editor` 指向 flowAsset 而 `currentKind` 为 workflow）需要防御」：实测该状态不可达（`openDocument` / `OPEN_FLOW_ASSET` / `ASSET_CLOSED` / `CLEAR_CANVAS` 都同步重置 `editor`，`SELECT_EDITOR` 的唯一调用方 `useSelection.selectEditor` 只承接画布/属性栏的同态选择）。故不为它写用例（见 §8.4 有意未覆盖），但要求 `saveCanvasDocument` **不得再读 `state.editor`**，从根上避免这类不一致重新出现。
+
+## 8. 测试契约（复核与测试编写 Agent）
+
+### 8.1 契约主体与实现归属
+
+- 出口：`src/client/hooks/useEditorActions.ts` 的 `EditorActionsFace` 新增
+  ```ts
+  saveCanvasDocument(options?: { onSaved?: () => void }): Promise<unknown>
+  ```
+  - `options.onSaved`：**仅当本次调用真实落库时**调用（运行中实例保存、级联确认后的落库都经它转达）。
+  - 返回：非 `null`/`undefined` = 本次已真实落库；`null` = 未落库（待二次确认 / 定位失败 / 失败）。调用方（`useUnsavedGuard.saveAndProceed`）只据此决定是否继续。
+- **归属判定（父代理裁决 2 要求给出理由与调用关系）**：放在 `useEditorActions.ts`，不放在 `useDocumentActions.ts`。
+  - 理由：`saveCanvasDocument` 的分派必须同时触达「画布落库通道」（`saveCanvas`，来自 `useDocumentActions`）与「资产版本登记」（`assets.saveVersion` + `OPEN_FLOW_ASSET` + `needsCascadeConfirm`，已全部在 `useEditorActions` 的闭包内）。放进 `useDocumentActions` 会把资产版本登记逻辑搬进「文档生命周期面」，并让 `flowAsset` 保存出现两处实现（违反仓库反复强调的「唯一实现」）。
+  - 调用关系（装配顺序不变，仅新增一条边）：
+    ```
+    StudioLayout
+      ├─ ConfirmDialog.onSaveAndProceed ──► useUnsavedGuard.saveAndProceed
+      │                                       └─► editor.saveCanvasDocument({ onSaved })
+      │                                             ├─ currentKind=workflow|service|flowTemplate ──► useDocumentActions.saveCanvas
+      │                                             └─ currentKind=flowAsset ──► assets.previewCascade? ──► assets.saveVersion ──► assets.loadAsset ──► OPEN_FLOW_ASSET ──► onSaved
+      └─ InspectorPanel.onSave ──► editor.saveEditor        （属性栏语义不变；画布类分支复用 saveCanvasDocument）
+    ```
+
+### 8.2 条款
+
+| 编号 | 条款 | 入参 / 出参 | 核心行为 | 边界与错误路径 |
+|---|---|---|---|---|
+| T23-1 | 入口存在且不看 `state.editor` | `(options?) => Promise<unknown>` | 从 `EditorActionsFace` 可取到（`typeof === 'function'`） | 实现内出现 `state.editor` 读取 → 违约（由 T23-2..T23-5 的「editor 取 null / node / edge 结果一致」用例间接证明） |
+| T23-2 | 实例态委派画布保存 | `currentKind='workflow'`，`editor` ∈ {`null`, `node`, `edge`} | 调用注入的 `saveCanvas` 一次，透传 `onSaved`，返回其返回值 | `saveCanvas` 返回 `null`（运行中待确认）→ 本入口也返回 `null`，不得把 `null` 当成功 |
+| T23-3 | 服务态委派画布保存 | `currentKind='service'`，`editor=null` | 同 T23-2 | 同上 |
+| T23-4 | 模板态委派画布保存 | `currentKind='flowTemplate'`，`editor=null` | 同 T23-2 | 同上 |
+| T23-5 | 资产态按 `currentId` 登记新版本，与 `editor` 无关 | `currentKind='flowAsset'`，`currentId='a-1'`，`assetDoc.assetId='a-1'`，`dirty=true`，`editor` ∈ {`null`, `node`, `edge`} | 调用序：`previewCascade` → `saveVersion(workflow, a-1)` → `loadAsset` → dispatch `OPEN_FLOW_ASSET(assetId='a-1')` → `onSaved`；返回非 `null` | 不得调用注入的 `saveCanvas`；三次 `editor` 变化的调用序列必须一致 |
+| T23-6 | 资产态：无改动保存不打预览；失败语义完整 | `dirty=false` / `saveVersion` 抛错 | `dirty=false` → 跳过 `previewCascade`，仍重装载并 `onSaved`；`saveVersion` 抛错 → 返回 `null`、`onSaved` 未调用、按 `toastError` 报错、不 dispatch `OPEN_FLOW_ASSET` | 级联确认路径（`previewCascade` 有牵连）→ 本次返回 `null` 且不落库，确认后的落库经 `onSaved` 转达（既有语义） |
+| T23-7 | 资产态定位不到当前文档必须显式报错 | `assetDoc=null` 或 `assetDoc.assetId !== currentId` | 返回 `null`、不发起任何写端点、给出错误提示（`notify('error', t.toastSaveUnavailable)` 或 `toastError`） | 静默返回 `null`（无任何提示）→ 违约：这正是 Issue 的「点了没反应」 |
+| T23-8 | 属性栏保存与守卫共用同一通道（正向修复） | `currentKind='flowAsset'`，`dirty=true`，`editor={source:'node'}` | `saveEditor()` 走资产登记（`previewCascade` + `saveVersion`），不得委派 `saveCanvas`；返回非 `null` | `editor={source:'edge'}` 同；`editor=null` 时 `saveEditor` 仍返回 `null`（属性栏无对象，`T23-1` 不受影响） |
+| T23-9 | 守卫端到端接续一次 | `dirty` 画布 + `confirm={kind:'unsaved', proceed}` + `editor=null` + `currentKind='flowAsset'` | `guard.saveAndProceed((onSaved) => saveCanvasDocument({ onSaved }))` → 真实落库后 `proceed` 恰好被调用一次 | 保存失败 → `proceed` 未调用；二次确认路径 → `proceed` 在确认并落库后调用（不得重复） |
+
+### 8.3 i18n 契约（父代理裁决 3）
+
+- 需要新增的 key 仅在 T23-7 使用：`toastSaveUnavailable`（中文 + 英文各一条，写入 `src/client/i18n.ts`）。
+- 复用约束：能复用 `toastSaved`（成功）与 `revisionConflictRetry`（乐观锁）既有语义时必须复用，不得新增近义 key；不得在 `useEditorActions.ts` 或组件内写死文案。
+- 改动 `i18n.ts` 后按根 `AGENTS.md` 最小验证表执行 `pnpm check`。
+
+### 8.4 有意未覆盖（说明理由）
+
+- 跨态不一致（`editor.source==='flowAsset'` 而 `currentKind!=='flowAsset'`）：实测不可达（见 §7.3 末条），不为不可达状态写用例；改以「`saveCanvasDocument` 不读 `state.editor`」从结构上排除。
+- `roleAsset` / `promptAsset` / `experience` 的保存：不置 `dirty`，与未保存守卫无关；既有 `useEditorActions.test.tsx` 用例已覆盖，不重复。
+- `ConfirmDialog` 按钮回调是否被点击：纯表现层装配，既有 `ConfirmDialog` 测试与本缺陷无关（弹窗按钮确实被接通），不重复。
+
+## 9. 人工回归补充清单
+
+在 §5.3 六条之外补测（自动化不可覆盖的装配与真实远端交互）：
+
+1. 资产界面：属性栏保持「资产本身」，**不点空白**直接切换 → 「保存修改」→ 版本号递增、继续切换（既有行为不回退）。
+2. 资产界面：先选中节点，再**点画布空白**，然后切换 → 「保存修改」→ 版本号递增、继续切换（Issue 主诉）。
+3. 资产界面：保存失败（断网）→ 出现错误提示、仍停留原界面、未保存标记仍在。
+4. 实例态（非运行中）：点空白后切换 → 「保存修改」→ 保存成功 toast + 继续切换。
+5. 运行中实例：点空白后切换 → 「保存修改」→ 先弹运行中保存二次确认 → 确认后落库并继续；取消则停留且仍 dirty。
+6. 属性栏保存按钮（资产画布选中节点时）：点击后出现「版本已保存」提示，节点选择被重投影刷新（已知行为，见 §7.1 第 3 条）。
