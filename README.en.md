@@ -89,7 +89,7 @@ The project combines **Workflow, Agent Team, Meta-Orchestration, Human-in-the-lo
   - Each sub-agent node independently configures its system prompt, LLM model, thinking intensity, tool combo, ReAct iteration cap, and retry-on-reflow cap; the parent agent can also freely choose its model and scheduling template to meet fine-grained orchestration needs.
 
 ✦ **Scheduled triggers**
-  - The workbench has built-in scheduled tasks: pick a workflow template, configure the execution window and trigger strategy, and instances are created and run automatically. Missed windows are automatically suspended/resumed, and off-peak API calls are supported.
+  - The workbench has built-in scheduled tasks: pick a workflow template, configure the execution window and trigger strategy, and instances are created and run automatically. Missed windows are automatically suspended/resumed, and off-peak API calls are supported. A task can also mount a condition script that runs at each trigger point; the instance is created only if the script's last output line is `true`.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/定时任务管理.png" width="100%" />
