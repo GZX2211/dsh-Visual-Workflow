@@ -43,6 +43,12 @@ export interface EditorActionsFace {
    * 由 onSaved 在真实落库后转达）。
    */
   saveEditor(options?: { onSaved?: () => void }): Promise<unknown>
+  /**
+   * 保存当前画布文档（实例 / 服务 / 工作流模板 / 工作流资产），与属性栏选中对象无关。
+   * 未保存守卫「保存并继续」使用本入口：画布 dirty 只来自当前画布文档，
+   * 而 state.editor 可能为 null / 节点 / 连线。返回语义同 saveEditor。
+   */
+  saveCanvasDocument(options?: { onSaved?: () => void }): Promise<unknown>
   deleteEditor(): Promise<void>
   /** 模版 → 资产入库（先保存模版；保存未落库即中止）。 */
   promoteEditor(): Promise<void>
@@ -345,15 +351,63 @@ export function useEditorActions(
     return true
   }, [assets, dispatch, t.assetCascadeConfirm, t.assetCascadeTitle])
 
+  /**
+   * 保存当前画布文档：按 state.currentKind 分派落库通道，不读 state.editor。
+   *
+   * 为什么要独立入口：未保存守卫面对的是画布 dirty，而 dirty 只由画布/画布文档动作置位；
+   * 属性栏选中对象（state.editor）可能为 null / 节点 / 连线，以它为保存入口会让守卫
+   * 「弹窗关掉却没有保存」。返回非 null/undefined = 本次已真实落库；null = 未落库
+   * （运行中待确认 / 定位失败 / 保存失败），由 onSaved 转达延迟落库。
+   */
+  const saveCanvasDocument = useCallback(async (options?: { onSaved?: () => void }): Promise<unknown> => {
+    const onSaved = options?.onSaved
+    if (state.currentKind === 'workflow' || state.currentKind === 'service' || state.currentKind === 'flowTemplate') {
+      return await saveCanvas({ onSaved })
+    }
+    if (state.currentKind !== 'flowAsset') return null
+    // 资产态以 assetDoc / currentId 定位当前画布文档；属性栏或列表可能装载了别的资产详情
+    const detail = state.assetDoc
+    if (!detail || state.currentId === null || detail.assetId !== state.currentId) {
+      // 守卫弹窗已关闭：定位失败若不提示，用户看到的仍是「点了没反应」
+      notify('error', t.toastSaveUnavailable)
+      return null
+    }
+    const payload = workflowAssetPayload(state, detail)
+    const doSave = async (): Promise<unknown> => {
+      // 资产态保存 = 登记该资产的新版本（历史版本内容永不被改写）
+      const result = await assets.saveVersion('workflow', detail.assetId, payload)
+      if (!result) return null
+      // 画布正打开该资产：重装载详情并重投影画布（清除 dirty + 更新已保存快照）。
+      // 装载失败则保留画布现状（未落库的编辑不丢）。
+      const reloaded = await assets.loadAsset('workflow', detail.assetId)
+      if (reloaded) dispatch({ type: 'OPEN_FLOW_ASSET', assetId: detail.assetId })
+      onSaved?.()
+      return result
+    }
+    // 无未保存改动时内容与已入库版本全等：不可能为任何角色资产登记新版本，
+    // 也就没有影响面可告知——省掉一次预览往返（重复点保存是「无改动保存」最常见来源）。
+    const pending = state.dirty
+      ? await needsCascadeConfirm(
+        'workflow', detail.assetId, payload,
+        (names) => t.assetCascadeWorkflowMessage.replace('{names}', names),
+        () => { void doSave() },
+      )
+      : false
+    if (pending) return null
+    return await doSave()
+  }, [assets, dispatch, needsCascadeConfirm, notify, saveCanvas, state, t.assetCascadeWorkflowMessage, t.toastSaveUnavailable])
+
   const saveEditor = useCallback(async (options?: { onSaved?: () => void }): Promise<unknown> => {
     const editor = state.editor
     if (!editor) return null
     const onSaved = options?.onSaved
     if (
       editor.source === 'workflow' || editor.source === 'service' || editor.source === 'flowTemplate'
-      || editor.source === 'node' || editor.source === 'edge'
+      || editor.source === 'node' || editor.source === 'edge' || editor.source === 'flowAsset'
     ) {
-      return await saveCanvas({ onSaved })
+      // 属性栏保存与未保存守卫共用同一落库通道：资产画布上选中节点/连线时，
+      // saveCanvas 对资产态刻意不落库（防误写模板端点），必须走资产登记通道，否则保存无反应。
+      return await saveCanvasDocument({ onSaved })
     }
     if (editor.source === 'template') {
       const template = state.templates[editor.kind].find((item) => item.id === editor.id)
@@ -367,36 +421,6 @@ export function useEditorActions(
         toastError(error)
         return null
       }
-    }
-    if (editor.source === 'flowAsset') {
-      // 资产态保存 = 登记该资产的新版本（历史版本内容永不被改写）
-      const detail = state.assetDoc
-      if (!detail || detail.assetId !== editor.id) return null
-      const payload = workflowAssetPayload(state, detail)
-      const doSave = async (): Promise<unknown> => {
-        const result = await assets.saveVersion('workflow', detail.assetId, payload)
-        if (!result) return null
-        if (state.currentKind === 'flowAsset' && state.currentId === detail.assetId) {
-          // 画布正打开该资产：重装载详情并重投影画布（清除 dirty + 更新已保存快照，
-          // 对齐实例态保存语义）。装载失败则保留画布现状（未落库的编辑不丢）。
-          const reloaded = await assets.loadAsset('workflow', detail.assetId)
-          if (reloaded) dispatch({ type: 'OPEN_FLOW_ASSET', assetId: detail.assetId })
-        }
-        onSaved?.()
-        return result
-      }
-      // 无未保存改动时内容与已入库版本全等：保存只会被后端判为「内容未变化」，
-      // 不可能为任何角色资产登记新版本，也就没有影响面可告知——省掉一次预览往返
-      // （重复点击保存是「无改动保存」的最常见来源）。
-      const pending = state.dirty
-        ? await needsCascadeConfirm(
-          'workflow', detail.assetId, payload,
-          (names) => t.assetCascadeWorkflowMessage.replace('{names}', names),
-          () => { void doSave() },
-        )
-        : false
-      if (pending) return null
-      return await doSave()
     }
     if (editor.source === 'roleAsset') {
       const detail = state.assetRoleDoc
@@ -435,7 +459,7 @@ export function useEditorActions(
       return result
     }
     return null
-  }, [assets, dispatch, experiences, needsCascadeConfirm, notify, saveCanvas, state, t.assetCascadeRoleMessage, t.assetCascadeWorkflowMessage, t.toastSaved, templates, toastError])
+  }, [assets, experiences, needsCascadeConfirm, notify, saveCanvasDocument, state, t.assetCascadeRoleMessage, t.toastSaved, templates, toastError])
 
   const promoteEditor = useCallback(async () => {
     const target = promoteTargetOf(state)
@@ -675,10 +699,10 @@ export function useEditorActions(
   // face 引用跨「同一 state 的重渲染」保持恒等（装配层用它作派生 props 的记忆化依赖）；
   // 依赖即 face 暴露的全部方法，均为 useCallback，故同一 state 下引用稳定。
   return useMemo(() => ({
-    selectLibraryCard, patchEditor, saveEditor, deleteEditor,
+    selectLibraryCard, patchEditor, saveEditor, saveCanvasDocument, deleteEditor,
     promoteEditor, promoteLocked, openAssetVersions, rollbackAssetVersion,
   }), [
-    selectLibraryCard, patchEditor, saveEditor, deleteEditor,
+    selectLibraryCard, patchEditor, saveEditor, saveCanvasDocument, deleteEditor,
     promoteEditor, promoteLocked, openAssetVersions, rollbackAssetVersion,
   ])
 }

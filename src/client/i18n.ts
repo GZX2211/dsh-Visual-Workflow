@@ -371,6 +371,8 @@ export const zh = {
   toastRunning: '运行已开始',
   toastStopped: '运行已停止',
   toastSaved: '已保存',
+  // 未保存守卫的保存入口定位不到当前画布文档：弹窗已关闭，必须显式告知否则形同无响应
+  toastSaveUnavailable: '当前文档无法保存，请重新打开后重试',
   // 服务状态形状漂移（稳定码 SERVICE_STATE_SHAPE）：界面语言由调用方持有，故由调用方映射
   toastServiceStateShape: '宿主返回的服务状态不完整（缺少标识），工作区未更新；请重试该操作或重新打开服务列表',
   // 乐观锁冲突（后端稳定码 ERR_REVISION_CONFLICT）：刷新列表后提示用户重试保存
@@ -908,6 +910,8 @@ export const en: Dict = {
   toastRunning: 'Run started',
   toastStopped: 'Run stopped',
   toastSaved: 'Saved',
+  // Guard save entry cannot locate the current canvas document: the dialog is already closed
+  toastSaveUnavailable: 'Unable to save the current document. Reopen it and try again.',
   // Service-state shape drift (stable code SERVICE_STATE_SHAPE): mapped where the UI language is owned
   toastServiceStateShape: 'The host returned an incomplete service state (missing id); the workspace was not updated — retry the action or reopen the service list',
   // Optimistic-lock conflict (backend code ERR_REVISION_CONFLICT): reload lists, ask user to retry

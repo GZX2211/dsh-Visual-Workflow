@@ -357,6 +357,7 @@ export declare const zh: {
     toastRunning: string;
     toastStopped: string;
     toastSaved: string;
+    toastSaveUnavailable: string;
     toastServiceStateShape: string;
     revisionConflictRetry: string;
     sessionCreateFailed: string;

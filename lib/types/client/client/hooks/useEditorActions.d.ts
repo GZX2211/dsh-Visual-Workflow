@@ -24,6 +24,14 @@ export interface EditorActionsFace {
     saveEditor(options?: {
         onSaved?: () => void;
     }): Promise<unknown>;
+    /**
+     * 保存当前画布文档（实例 / 服务 / 工作流模板 / 工作流资产），与属性栏选中对象无关。
+     * 未保存守卫「保存并继续」使用本入口：画布 dirty 只来自当前画布文档，
+     * 而 state.editor 可能为 null / 节点 / 连线。返回语义同 saveEditor。
+     */
+    saveCanvasDocument(options?: {
+        onSaved?: () => void;
+    }): Promise<unknown>;
     deleteEditor(): Promise<void>;
     /** 模版 → 资产入库（先保存模版；保存未落库即中止）。 */
     promoteEditor(): Promise<void>;
