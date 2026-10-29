@@ -1416,7 +1416,9 @@ describe('画布文档保存入口：资产态按当前画布文档登记新版�
     expect(result).toBeNull()
     expect(onSaved).not.toHaveBeenCalled()
     expect(harness.dispatched.some((action) => action.type === 'OPEN_FLOW_ASSET')).toBe(false)
-    expect(harness.errors).toEqual([failure])
+    // 稳定码由 useAssets.handleAssetFailure 翻译为 error toast，故证据在 toasts 而非 errors（不重复提示）
+    expect(harness.toasts).toContainEqual({ kind: 'error', text: zh.assetNotFound })
+    expect(harness.errors).toEqual([])
   })
 
   it('当前资产详情缺失/错位（无法定位画布文档）→ 返回 null 并显式报错，不得静默', async () => {
@@ -1471,8 +1473,10 @@ describe('未保存守卫接续：保存对象是当前画布文档（Issue #23�
       await harness.guard.saveAndProceed((onSaved) => saverOf(harness.editor).saveCanvasDocument({ onSaved }))
     })
 
-    // 确实走到了资产保存（不是「入口不存在」被 try/catch 吞掉）才谈得上失败不继续
-    expect(harness.errors).toEqual([failure])
+    // 确实走到了资产保存（不是「入口不存在」被 try/catch 吞掉）才谈得上失败不继续。
+    // 稳定码由 useAssets.handleAssetFailure 翻译为 error toast，故证据在 toasts 而非 errors（不重复提示）
+    expect(harness.toasts).toContainEqual({ kind: 'error', text: zh.assetNotFound })
+    expect(harness.errors).toEqual([])
     expect(proceeded).toBe(0)
   })
 })
