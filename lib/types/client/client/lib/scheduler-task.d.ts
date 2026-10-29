@@ -20,6 +20,12 @@ export declare function taskFromView(view: ScheduledTaskView): ScheduledTask;
 /** 表单即时校验：返回第一处错误消息（null = 通过基础检查）。 */
 export declare function validateTaskDraft(task: ScheduledTask): string | null;
 /**
+ * 粗判宿主绝对路径（Windows 盘符/UNC 或 POSIX 根路径）。
+ * 仅用于筛选文件选择结果，避免把浏览器给的文件名当路径写进草稿；
+ * 保存时的权威判定在 Host（path.isAbsolute + 文件存在性）。
+ */
+export declare function isAbsoluteHostPath(value: string): boolean;
+/**
  * 显示格式化：ISO → 本地可读。
  * locale 由调用方从词典注入（lib 不持有词典）：年月日/时分顺序与 AM/PM 表达随界面
  * 语言变化，硬编码 'zh-CN' 会让英文界面一直显示中文习惯的日期格式。
