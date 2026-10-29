@@ -20,6 +20,6 @@ export declare function parseScheduledTaskInput(raw: unknown, options?: {
  * 任务配置校验（字段级中文错误消息；返回 null 表示有效）。
  * 依据：prompt/定时任务开发.md §二（intervalMinutes 1..1439、timePoints 升序等硬性规则）。
  */
-export declare function validateScheduledTask(task: Pick<ScheduledTask, 'name' | 'workflowTemplateId' | 'sessionMode' | 'ownerSessionId' | 'timezone' | 'window' | 'triggerMode' | 'dailyTimeConfig' | 'intervalConfig'>): string | null;
+export declare function validateScheduledTask(task: Pick<ScheduledTask, 'name' | 'workflowTemplateId' | 'sessionMode' | 'ownerSessionId' | 'timezone' | 'window' | 'triggerMode' | 'dailyTimeConfig' | 'intervalConfig' | 'condition'>): string | null;
 /** 任务规范化（保存前补齐/清洗：名称 trim、时刻升序去重、policy 兜底）。 */
 export declare function normalizeScheduledTask(task: ScheduledTask): ScheduledTask;
