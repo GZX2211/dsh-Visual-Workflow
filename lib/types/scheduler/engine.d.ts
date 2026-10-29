@@ -1,6 +1,7 @@
 import type { RunSnapshot, ScheduledTaskView } from '../shared/types.js';
 import type { WorkflowDocument, WorkflowTemplate } from '../shared/graph-model.js';
 import { SchedulerTaskStore } from './task-store.js';
+import type { ConditionScriptRunner } from './condition-script.js';
 /** 编排运行时的引擎视图（宿主装配；单测 fake）。 */
 export interface SchedulerOrchestrator {
     startRun(input: {
@@ -60,6 +61,8 @@ export interface SchedulerEngineDeps {
     /** tick 间隔（缺省 30s；触发/暂停精度分钟级）。 */
     tickMs?: number;
     logger?: SchedulerLogger;
+    /** 条件脚本执行器（宿主装配；测试 fake）。未装配且任务启用条件时按不通过处理。 */
+    conditionRunner?: ConditionScriptRunner;
 }
 /** 默认 tick 间隔（30s：秒级恢复误差可接受，写盘/扫描开销低）。 */
 export declare const DEFAULT_TICK_MS = 30000;
@@ -116,6 +119,13 @@ export declare class SchedulerEngine {
     /** 清空引擎本轮引用（交还控制权：run 终态/用户接管）。 */
     private clearRound;
     private runTaskOnce;
+    /**
+     * 第三层门控：条件启用时先运行脚本，仅 true 才进入 fire。
+     * 只在 idle 分支的新触发点调用——窗口挂起、窗口续跑、并发跳过都不经过这里。
+     */
+    private gateAndFire;
+    /** 条件脚本评估：任何异常都收敛为「不通过」，避免单任务故障中断整批扫描。 */
+    private evaluateCondition;
     /** 触发执行：模板 → 实例（会话策略分派 + 每会话单实例覆盖）→ startRun。 */
     private fire;
     /** 窗口 end 挂起：run → paused（锁保留、不中断在执行的子代理），等待下一窗口续跑。 */
