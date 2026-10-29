@@ -314,11 +314,11 @@ dsh plugin --profile web remove dsh-visual-workflow
 
 ## 快速开始
 
-了解项目架构？请看 [架构文档](docs/architecture.md)
-参与贡献？请看 [贡献](docs/CONTRIBUTING.md)
-了解如何使用插件？请看 [用户使用手册](docs/USER_GUIDE.md)
-二次开发？请看 [项目开发规范](AGENTS.md)
-如何安装以及项目概览？本文件[README.md](README.md)
+- 了解项目架构？请看 [架构文档](docs/architecture.md)
+- 参与贡献？请看 [贡献](docs/CONTRIBUTING.md)
+- 了解如何使用插件？请看 [用户使用手册](docs/USER_GUIDE.md)
+- 二次开发？请看 [项目开发规范](AGENTS.md)
+- 如何安装以及项目概览？本文件[README.md](README.md)
 
 ---
 
@@ -386,3 +386,11 @@ pnpm check          # 类型检查 + 测试 + 构建 + smoke
 ## 许可
 
 [MIT](LICENSE) © GZX2211。欢迎提 Issue / PR。社区项目，界面形态参考 [dsh-deepseek-flow](https://github.com/kanghelyu/dsh-deepseek-flow)。
+
+## 加入交流群
+
+<p>
+  <img src="https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/群二维码.jpg" width="30%" />
+</p>
+
+> 可以进来玩玩，讨论交流~

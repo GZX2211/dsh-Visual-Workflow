@@ -317,11 +317,11 @@ dsh plugin --profile web remove dsh-visual-workflow
 
 ## Quick Start
 
-Want to learn about the project architecture? See [Architecture](docs/architecture.en.md).
-Want to contribute? See [Contributing](docs/CONTRIBUTING.en.md).
-Want to know how to use the plugin? See the [User Guide](docs/USER_GUIDE.en.md).
-Doing secondary development? See [Project Development Guidelines](AGENTS.en.md).
-How to install and an overview of the project? This file: [README.en.md](README.en.md)
+- Want to learn about the project architecture? See [Architecture](docs/architecture.en.md).
+- Want to contribute? See [Contributing](docs/CONTRIBUTING.en.md).
+- Want to know how to use the plugin? See the [User Guide](docs/USER_GUIDE.en.md).
+- Doing secondary development? See [Project Development Guidelines](AGENTS.en.md).
+- How to install and an overview of the project? This file: [README.en.md](README.en.md)
 
 ---
 
