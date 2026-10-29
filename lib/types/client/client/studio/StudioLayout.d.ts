@@ -107,6 +107,8 @@ export interface StudioLayoutProps {
     workspacePicking: boolean;
     /** 打开官方目录选择器并保存所选路径。 */
     onPickWorkspace(): void;
+    /** 桌面端文件路径桥（Web 端缺省；定时任务条件脚本选择用）。 */
+    filePathResolver?: (file: File) => string;
 }
 /** 工作台渲染层（JSX 组合 + 自动布局接线与弹层装配；数据/回调全部来自 props）。 */
 export declare function StudioLayout(props: StudioLayoutProps): import("react").JSX.Element;

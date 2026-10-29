@@ -16,7 +16,7 @@ import { useSchedulerTasks } from '../../hooks/useSchedulerTasks.js'
 import { remoteErrorMessageOf } from '../../lib/remote-error.js'
 import type { DateRangeValue } from '../date-picker/DateRangePicker.js'
 import {
-  createTaskDraft, detectLocalTimezone, localDateOnly, shiftDateOnly,
+  createTaskDraft, detectLocalTimezone, isAbsoluteHostPath, localDateOnly, shiftDateOnly,
   taskFromView, validateTaskDraft,
 } from '../../lib/scheduler-task.js'
 import { SchedulerTaskForm } from './SchedulerTaskForm.js'
@@ -27,11 +27,13 @@ export interface SchedulerManagerProps {
   copy: Dict
   remote: RemoteFace
   sessionId: string
+  /** 桌面端文件路径桥（Web 端缺省）：条件脚本选择需要把 File 解析为绝对路径。 */
+  filePathResolver?: (file: File) => string
   onClose(): void
   onToast(kind: 'info' | 'success' | 'error', text: string): void
 }
 
-export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: SchedulerManagerProps) {
+export function SchedulerManager({ copy, remote, sessionId, filePathResolver, onClose, onToast }: SchedulerManagerProps) {
   const tasks = useSchedulerTasks(remote)
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
   const [draft, setDraft] = useState<ScheduledTask | null>(null)
@@ -101,6 +103,19 @@ export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: 
   const patch = useCallback((part: Partial<ScheduledTask>): void => {
     setDraft((current) => (current ? { ...current, ...part } : current))
   }, [])
+
+  /**
+   * 条件脚本选择结果：只在解析到宿主绝对路径时写入草稿。
+   * 浏览器拿不到绝对路径（降级为文件名）时提示手填，避免把文件名当路径让保存必然失败。
+   */
+  const pickScriptFile = useCallback((file: File): void => {
+    const resolved = filePathResolver?.(file) ?? ''
+    if (!isAbsoluteHostPath(resolved)) {
+      onToast('error', copy.schedulerConditionPickUnavailable)
+      return
+    }
+    patch({ condition: { enabled: true, scriptPath: resolved } })
+  }, [copy.schedulerConditionPickUnavailable, filePathResolver, onToast, patch])
 
   const patchWindow = useCallback((part: Partial<ScheduledTask['window']>): void => {
     setDraft((current) => (current ? { ...current, window: { ...current.window, ...part } } : current))
@@ -258,6 +273,7 @@ export function SchedulerManager({ copy, remote, sessionId, onClose, onToast }: 
           onPatchTimePoint={patchTimePoint}
           onAddTimePoint={addTimePoint}
           onRemoveTimePoint={removeTimePoint}
+          onScriptFilePicked={pickScriptFile}
           onSave={() => { void saveTask() }}
           onDelete={() => { void deleteTask() }}
         />

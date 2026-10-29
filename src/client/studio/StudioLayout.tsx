@@ -142,6 +142,8 @@ export interface StudioLayoutProps {
   workspacePicking: boolean
   /** 打开官方目录选择器并保存所选路径。 */
   onPickWorkspace(): void
+  /** 桌面端文件路径桥（Web 端缺省；定时任务条件脚本选择用）。 */
+  filePathResolver?: (file: File) => string
 }
 
 /** 工作台渲染层（JSX 组合 + 自动布局接线与弹层装配；数据/回调全部来自 props）。 */
@@ -160,6 +162,7 @@ export function StudioLayout(props: StudioLayoutProps) {
     handleRun, panelsCollapsed, onTogglePanels,
     instanceOptions, onInstanceOptionsChange, showWorkspacePicker,
     workspacePickerAvailable, workspacePicking, onPickWorkspace,
+    filePathResolver,
   } = props
 
   // 属性栏多行文本域的扩展编辑层（纯渲染态，由本布局层持有）：
@@ -467,6 +470,7 @@ export function StudioLayout(props: StudioLayoutProps) {
             copy={t}
             remote={remote}
             sessionId={sessionId}
+            filePathResolver={filePathResolver}
             onClose={() => dispatch({ type: 'SCHEDULER_OPEN', open: false })}
             onToast={(kind, text) => toast(kind, text)}
           />
