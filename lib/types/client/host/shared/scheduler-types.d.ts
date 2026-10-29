@@ -44,6 +44,19 @@ export interface ScheduleRuntimePolicy {
 /** 会话策略：每轮新建会话运行 / 复用任务创建者会话运行（用户裁决，2026）。 */
 export type ScheduleSessionMode = 'new-session' | 'current-session';
 /**
+ * 第三层：条件触发配置（可选；未配置 = 未启用）。
+ * 开启后每个新触发点先运行脚本，仅当脚本返回 true 才执行任务。
+ */
+export interface ScheduleConditionConfig {
+    /** 是否启用条件层。 */
+    enabled: boolean;
+    /**
+     * 条件脚本绝对路径（.mjs/.cjs/.js）。
+     * 关闭条件层时保留原值，便于重新开启；运行期不读取。
+     */
+    scriptPath: string;
+}
+/**
  * 定时任务（持久化实体）：选择工作流模板（全局共享，非实例），按窗口+触发策略
  * 自动触发。触发语义 =「模板态点击运行」（自动创建实例并运行，与画布逻辑一致）；
  * 暂停/续跑一律在当前执行会话内进行（不新建会话），停用/删除只影响未来触发。
@@ -79,6 +92,8 @@ export interface ScheduledTask {
     intervalConfig: IntervalConfig | null;
     /** 运行时行为策略（兜底约定；本阶段固定 skip/skip/immediate）。 */
     runtimePolicy: ScheduleRuntimePolicy;
+    /** 第三层：条件触发（可选；缺省 = 未启用，旧数据兼容）。 */
+    condition?: ScheduleConditionConfig | null;
     /** 创建时间（ISO 字符串）。 */
     createdAt: string;
     /** 最近更新时间（ISO 字符串）。 */
@@ -98,7 +113,7 @@ export interface ScheduledTaskRuntime {
     currentRunId: string | null;
     /** 最近一次触发时刻（ISO 字符串或 null）。 */
     lastTriggeredAt: string | null;
-    /** 最近一次触发结果：started 触发运行 / resumed 窗口续跑 / failed 触发失败 / skipped 并发跳过。 */
+    /** 最近一次触发结果：started 触发运行 / resumed 窗口续跑 / failed 触发失败 / skipped 并发跳过或条件不通过。 */
     lastResult: 'started' | 'resumed' | 'failed' | 'skipped' | null;
     /** 最近一次错误信息（无错误为空串）。 */
     lastError: string;

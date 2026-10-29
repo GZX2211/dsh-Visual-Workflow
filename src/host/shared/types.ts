@@ -33,6 +33,7 @@ export type {
 export type {
   DailyTimeConfig,
   IntervalConfig,
+  ScheduleConditionConfig,
   ScheduledTask,
   ScheduledTaskRuntime,
   ScheduledTaskView,
