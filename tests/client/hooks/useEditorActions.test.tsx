@@ -1231,3 +1231,270 @@ describe('提示词资产的打开、编辑与版本切换', () => {
     expect(harness.dispatched.some((action) => action.type === 'PROMPT_ASSET_LOADED')).toBe(true)
   })
 })
+
+// ---------------------------------------------------------------------------
+// 画布文档保存入口（Issue #23）
+//
+// 未保存守卫保存的是「当前画布文档」（dirty 的唯一来源），不是属性栏当前选中对象
+// （state.editor 可以是 null / node / edge）。`saveCanvasDocument` 是这条唯一入口；
+// 属性栏的 `saveEditor` 对画布类来源复用同一入口。
+// ---------------------------------------------------------------------------
+
+/** 待实现入口的形态：当前代码没有该方法，缺失既可在运行时断言，也可在此收窄类型。 */
+interface CanvasDocumentSaver {
+  saveCanvasDocument(options?: { onSaved?: () => void }): Promise<unknown>
+}
+
+function saverOf(editor: EditorActionsFace): CanvasDocumentSaver {
+  return editor as unknown as CanvasDocumentSaver
+}
+
+const EMPTY_ASSETS = { workflows: [], roles: [] }
+
+/** 实例态（画布打开工作流实例）。 */
+function workflowState(overrides: Partial<StudioState> = {}): StudioState {
+  return {
+    ...createInitialState('s-1'),
+    currentKind: 'workflow',
+    currentId: 'wf-1',
+    editor: { source: 'workflow', id: 'wf-1' },
+    dirty: true,
+    ...overrides,
+  }
+}
+
+/** 模板态（画布打开工作流模板）。 */
+function flowTemplateState(overrides: Partial<StudioState> = {}): StudioState {
+  return {
+    ...createInitialState('s-1'),
+    currentKind: 'flowTemplate',
+    currentId: 'tpl-1',
+    editor: { source: 'flowTemplate', id: 'tpl-1' },
+    dirty: true,
+    ...overrides,
+  }
+}
+
+/** 服务态（画布打开服务实例）。 */
+function serviceState(overrides: Partial<StudioState> = {}): StudioState {
+  return {
+    ...createInitialState('s-1'),
+    currentKind: 'service',
+    currentId: 'sv-1',
+    editor: { source: 'service', id: 'sv-1' },
+    dirty: true,
+    ...overrides,
+  }
+}
+
+describe('画布文档保存入口：画布类来源委派画布保存（Issue #23）', () => {
+  it('EditorActionsFace 暴露保存当前画布文档的入口', async () => {
+    const { remote } = makeRemote(() => EMPTY_ASSETS)
+    const harness = await renderAssetHarness(flowAssetState(), { remote })
+
+    expect(typeof saverOf(harness.editor).saveCanvasDocument).toBe('function')
+  })
+
+  it('实例态：属性栏无选中对象（点画布空白）也能保存当前画布文档', async () => {
+    const saveCanvas = vi.fn(async (_options?: { onSaved?: () => void }) => 'canvas-saved')
+    const { remote } = makeRemote(() => EMPTY_ASSETS)
+    const harness = await renderAssetHarness(workflowState({ editor: null }), { remote, saveCanvas })
+
+    const onSaved = vi.fn()
+    let result: unknown = 'sentinel'
+    await act(async () => { result = await saverOf(harness.editor).saveCanvasDocument({ onSaved }) })
+
+    expect(saveCanvas).toHaveBeenCalledTimes(1)
+    // 延迟落库（运行中实例二次确认）路径要靠这个回调接续，必须原样透传
+    expect(saveCanvas.mock.calls[0]![0]?.onSaved).toBe(onSaved)
+    expect(result).toBe('canvas-saved')
+  })
+
+  it('实例态：画布保存本次未落库（运行中待确认）→ 原样返回 null，不当成功', async () => {
+    const saveCanvas = vi.fn(async (_options?: { onSaved?: () => void }) => null)
+    const { remote } = makeRemote(() => EMPTY_ASSETS)
+    const harness = await renderAssetHarness(workflowState({ editor: null }), { remote, saveCanvas })
+
+    let result: unknown = 'sentinel'
+    await act(async () => { result = await saverOf(harness.editor).saveCanvasDocument() })
+
+    expect(result).toBeNull()
+  })
+
+  it('模板态：属性栏无选中对象也能保存当前模板画布', async () => {
+    const saveCanvas = vi.fn(async (_options?: { onSaved?: () => void }) => 'template-saved')
+    const { remote } = makeRemote(() => EMPTY_ASSETS)
+    const harness = await renderAssetHarness(flowTemplateState({ editor: null }), { remote, saveCanvas })
+
+    let result: unknown = null
+    await act(async () => { result = await saverOf(harness.editor).saveCanvasDocument() })
+
+    expect(saveCanvas).toHaveBeenCalledTimes(1)
+    expect(result).toBe('template-saved')
+  })
+
+  it('服务态：属性栏无选中对象也能保存当前服务画布', async () => {
+    const saveCanvas = vi.fn(async (_options?: { onSaved?: () => void }) => 'service-saved')
+    const { remote } = makeRemote(() => EMPTY_ASSETS)
+    const harness = await renderAssetHarness(serviceState({ editor: null }), { remote, saveCanvas })
+
+    let result: unknown = null
+    await act(async () => { result = await saverOf(harness.editor).saveCanvasDocument() })
+
+    expect(saveCanvas).toHaveBeenCalledTimes(1)
+    expect(result).toBe('service-saved')
+  })
+})
+
+describe('画布文档保存入口：资产态按当前画布文档登记新版本（Issue #23）', () => {
+  const savedVersion = { assetId: 'a-1', versionId: 3, rowId: 'a-1@3', unchanged: false }
+
+  it('属性栏无选中对象（点画布空白）→ 仍登记当前资产新版本并接续', async () => {
+    const { remote, calls } = assetWriteRemote({ endpoint: EP.EP_SAVE_ASSET_VERSION, value: savedVersion })
+    const saveCanvas = vi.fn(async (_options?: { onSaved?: () => void }) => 'never-called')
+    const harness = await renderAssetHarness(flowAssetState({ editor: null }), { remote, saveCanvas })
+
+    const onSaved = vi.fn()
+    let result: unknown = null
+    await act(async () => { result = await saverOf(harness.editor).saveCanvasDocument({ onSaved }) })
+
+    expect(calls.map((call) => call.endpoint)).toContain(EP.EP_PREVIEW_ASSET_CASCADE)
+    expect(calls.map((call) => call.endpoint)).toContain(EP.EP_SAVE_ASSET_VERSION)
+    expect(saveCanvas, '资产态不得走画布通道（该通道对资产刻意不落库）').not.toHaveBeenCalled()
+    expect(onSaved).toHaveBeenCalledTimes(1)
+    expect(result).not.toBeNull()
+    expect(harness.dispatched).toContainEqual({ type: 'OPEN_FLOW_ASSET', assetId: 'a-1' })
+  })
+
+  it('属性栏选中节点 → 仍登记当前资产新版本（不再被画布通道吞掉）', async () => {
+    const { remote, calls } = assetWriteRemote({ endpoint: EP.EP_SAVE_ASSET_VERSION, value: savedVersion })
+    const harness = await renderAssetHarness(flowAssetState({ editor: { source: 'node', id: 'n-new' } }), { remote })
+
+    const onSaved = vi.fn()
+    let result: unknown = null
+    await act(async () => { result = await saverOf(harness.editor).saveCanvasDocument({ onSaved }) })
+
+    expect(calls.map((call) => call.endpoint)).toContain(EP.EP_SAVE_ASSET_VERSION)
+    expect(onSaved).toHaveBeenCalledTimes(1)
+    expect(result).not.toBeNull()
+  })
+
+  it('属性栏选中连线 → 仍登记当前资产新版本', async () => {
+    const { remote, calls } = assetWriteRemote({ endpoint: EP.EP_SAVE_ASSET_VERSION, value: savedVersion })
+    const harness = await renderAssetHarness(flowAssetState({ editor: { source: 'edge', id: 'e-1' } }), { remote })
+
+    let result: unknown = null
+    await act(async () => { result = await saverOf(harness.editor).saveCanvasDocument() })
+
+    expect(calls.map((call) => call.endpoint)).toContain(EP.EP_SAVE_ASSET_VERSION)
+    expect(result).not.toBeNull()
+  })
+
+  it('无未保存改动（dirty=false）→ 不做影响面预览，直接登记版本', async () => {
+    const { remote, calls } = assetWriteRemote({ endpoint: EP.EP_SAVE_ASSET_VERSION, value: { ...savedVersion, unchanged: true } })
+    const harness = await renderAssetHarness(flowAssetState({ editor: null, dirty: false }), { remote })
+
+    await act(async () => { await saverOf(harness.editor).saveCanvasDocument() })
+
+    expect(calls.map((call) => call.endpoint)).not.toContain(EP.EP_PREVIEW_ASSET_CASCADE)
+    expect(calls.map((call) => call.endpoint)).toContain(EP.EP_SAVE_ASSET_VERSION)
+  })
+
+  it('登记版本失败 → 返回 null、不接续、不重投影画布', async () => {
+    const failure = remoteError('gone', EP.ERR_ASSET_NOT_FOUND)
+    const { remote } = makeRemote((endpoint) => {
+      if (endpoint === EP.EP_PREVIEW_ASSET_CASCADE) return { kind: 'workflow', affected: [] }
+      if (endpoint === EP.EP_SAVE_ASSET_VERSION) throw failure
+      return EMPTY_ASSETS
+    })
+    const harness = await renderAssetHarness(flowAssetState({ editor: null }), { remote })
+
+    const onSaved = vi.fn()
+    let result: unknown = 'sentinel'
+    await act(async () => { result = await saverOf(harness.editor).saveCanvasDocument({ onSaved }) })
+
+    expect(result).toBeNull()
+    expect(onSaved).not.toHaveBeenCalled()
+    expect(harness.dispatched.some((action) => action.type === 'OPEN_FLOW_ASSET')).toBe(false)
+    // 稳定码由 useAssets.handleAssetFailure 翻译为 error toast，故证据在 toasts 而非 errors（不重复提示）
+    expect(harness.toasts).toContainEqual({ kind: 'error', text: zh.assetNotFound })
+    expect(harness.errors).toEqual([])
+  })
+
+  it('当前资产详情缺失/错位（无法定位画布文档）→ 返回 null 并显式报错，不得静默', async () => {
+    const { remote, calls } = makeRemote(() => EMPTY_ASSETS)
+    const harness = await renderAssetHarness(flowAssetState({ editor: null, assetDoc: null }), { remote })
+
+    let result: unknown = 'sentinel'
+    await act(async () => { result = await saverOf(harness.editor).saveCanvasDocument() })
+
+    expect(result).toBeNull()
+    expect(calls.map((call) => call.endpoint)).not.toContain(EP.EP_SAVE_ASSET_VERSION)
+    // 「保存修改」已把弹窗关掉：定位失败必须留下提示，否则用户看到的仍是「点了没反应」
+    const errorToasts = harness.toasts.filter((toast) => toast.kind === 'error')
+    expect(harness.errors.length + errorToasts.length).toBeGreaterThan(0)
+  })
+})
+
+describe('未保存守卫接续：保存对象是当前画布文档（Issue #23）', () => {
+  it('资产态 + 属性栏无选中对象：保存修改 → 落库后继续一次', async () => {
+    const { remote, calls } = assetWriteRemote({
+      endpoint: EP.EP_SAVE_ASSET_VERSION,
+      value: { assetId: 'a-1', versionId: 3, rowId: 'a-1@3', unchanged: false },
+    })
+    let proceeded = 0
+    const harness = await renderAssetHarness(flowAssetState({
+      editor: null,
+      confirm: { kind: 'unsaved', proceed: () => { proceeded += 1 } },
+    }), { remote })
+
+    await act(async () => {
+      await harness.guard.saveAndProceed((onSaved) => saverOf(harness.editor).saveCanvasDocument({ onSaved }))
+    })
+
+    expect(calls.map((call) => call.endpoint)).toContain(EP.EP_SAVE_ASSET_VERSION)
+    expect(proceeded).toBe(1)
+  })
+
+  it('资产态 + 属性栏选中节点：保存失败 → 不继续（未保存内容不丢）', async () => {
+    const failure = remoteError('gone', EP.ERR_ASSET_NOT_FOUND)
+    const { remote } = makeRemote((endpoint) => {
+      if (endpoint === EP.EP_PREVIEW_ASSET_CASCADE) return { kind: 'workflow', affected: [] }
+      if (endpoint === EP.EP_SAVE_ASSET_VERSION) throw failure
+      return EMPTY_ASSETS
+    })
+    let proceeded = 0
+    const harness = await renderAssetHarness(flowAssetState({
+      editor: { source: 'node', id: 'n-new' },
+      confirm: { kind: 'unsaved', proceed: () => { proceeded += 1 } },
+    }), { remote })
+
+    await act(async () => {
+      await harness.guard.saveAndProceed((onSaved) => saverOf(harness.editor).saveCanvasDocument({ onSaved }))
+    })
+
+    // 确实走到了资产保存（不是「入口不存在」被 try/catch 吞掉）才谈得上失败不继续。
+    // 稳定码由 useAssets.handleAssetFailure 翻译为 error toast，故证据在 toasts 而非 errors（不重复提示）
+    expect(harness.toasts).toContainEqual({ kind: 'error', text: zh.assetNotFound })
+    expect(harness.errors).toEqual([])
+    expect(proceeded).toBe(0)
+  })
+})
+
+describe('属性栏保存：资产画布选中节点时复用同一保存通道（Issue #23 正向修复）', () => {
+  it('saveEditor 对选中节点走资产登记，不再委派画布通道', async () => {
+    const { remote, calls } = assetWriteRemote({
+      endpoint: EP.EP_SAVE_ASSET_VERSION,
+      value: { assetId: 'a-1', versionId: 3, rowId: 'a-1@3', unchanged: false },
+    })
+    const saveCanvas = vi.fn(async (_options?: { onSaved?: () => void }) => 'canvas-channel')
+    const harness = await renderAssetHarness(flowAssetState({ editor: { source: 'node', id: 'n-new' } }), { remote, saveCanvas })
+
+    let result: unknown = null
+    await act(async () => { result = await harness.editor.saveEditor() })
+
+    expect(calls.map((call) => call.endpoint)).toContain(EP.EP_SAVE_ASSET_VERSION)
+    expect(saveCanvas, '资产态选中节点时不得走画布通道（返回 null = 点保存没反应）').not.toHaveBeenCalled()
+    expect(result).not.toBeNull()
+  })
+})
