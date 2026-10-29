@@ -14,7 +14,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { stat } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { Readable } from 'node:stream'
-import { parseConditionOutput } from './condition-config.js'
+import { CONDITION_SCRIPT_EXTENSION_MESSAGE, hasSupportedScriptExtension, parseConditionOutput } from './condition-config.js'
 
 /** 条件脚本执行输入（引擎提供，脚本可经环境变量读取）。 */
 export interface ConditionScriptInput {
@@ -70,6 +70,9 @@ export async function validateConditionScriptPath(raw: string): Promise<void> {
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code
     if (code === 'ENOENT' || code === 'EACCES' || code === 'ENOTDIR' || code === 'EPERM') {
+      // 缺失路径上「扩展名不受支持」比「不存在」更具体：用户换一个脚本即可修复，
+      // 无需先放置文件；保存端点的读盘校验因此在纯校验之前执行。
+      if (!hasSupportedScriptExtension(path)) throw new Error(CONDITION_SCRIPT_EXTENSION_MESSAGE)
       throw new Error(`条件脚本文件不存在或不可访问：${path}（请填写存在的绝对路径文件）`)
     }
     throw error

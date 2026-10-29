@@ -10,7 +10,7 @@
 
 import type { ScheduledTask } from '../shared/types.js'
 import { parseDateOnly, parseTime } from './calendar.js'
-import { hasSupportedScriptExtension, isAbsoluteConditionScriptPath } from './condition-config.js'
+import { CONDITION_SCRIPT_EXTENSION_MESSAGE, hasSupportedScriptExtension, isAbsoluteConditionScriptPath } from './condition-config.js'
 
 /** 请求体形状非法（消息为中文；HTTP 端点转 400，其它调用方按输入错误处理）。 */
 export class ScheduledTaskInputError extends Error {
@@ -137,7 +137,7 @@ export function validateScheduledTask(task: Pick<
     const scriptPath = String(condition.scriptPath ?? '').trim()
     if (!scriptPath) return '启用条件触发时请选择脚本文件'
     if (!isAbsoluteConditionScriptPath(scriptPath)) return '条件脚本路径必须是绝对路径'
-    if (!hasSupportedScriptExtension(scriptPath)) return '条件脚本仅支持 .mjs/.cjs/.js 文件'
+    if (!hasSupportedScriptExtension(scriptPath)) return CONDITION_SCRIPT_EXTENSION_MESSAGE
   }
   return null
 }
