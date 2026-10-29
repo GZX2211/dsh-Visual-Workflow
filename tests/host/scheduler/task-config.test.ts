@@ -12,6 +12,7 @@ import {
   ScheduledTaskInputError,
   validateScheduledTask,
 } from '../../../src/host/scheduler/index.js'
+import type { ScheduledTask } from '../../../src/host/shared/types.js'
 import { makeTask } from './fixtures/task-fixture.js'
 
 /** 固定时钟（createdAt/updatedAt 注入用）。 */
@@ -150,5 +151,88 @@ describe('校验与规范化', () => {
     expect(normalized.name).toBe('任务')
     expect(normalized.dailyTimeConfig?.timePoints).toEqual(['10:00', '14:00'])
     expect(normalized.workspacePath).toBe('D:\\ws')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 第三层：条件触发配置（condition 为可选字段；旧任务缺省 = 未启用）
+// ---------------------------------------------------------------------------
+
+/** 当前平台可用的绝对脚本路径（校验层按运行平台判定绝对路径）。 */
+const ABSOLUTE_SCRIPT = process.platform === 'win32' ? 'C:\\scripts\\check-issue.mjs' : '/opt/scripts/check-issue.mjs'
+const RELATIVE_SCRIPT = 'scripts/check-issue.mjs'
+
+/** 以原始形状挂上 condition（类型上尚未声明该字段，夹具负责透传）。 */
+function withCondition(task: ScheduledTask, condition: unknown): ScheduledTask {
+  return { ...task, condition } as unknown as ScheduledTask
+}
+
+/** 读取 condition 原始值（未声明字段的受控读取）。 */
+function conditionOf(task: ScheduledTask): unknown {
+  return (task as ScheduledTask & { condition?: unknown }).condition
+}
+
+describe('条件触发配置：请求体收敛', () => {
+  it('请求体没有 condition → 收敛为 null（旧数据兼容）', () => {
+    const task = parseScheduledTaskInput({ taskId: 'task-9' }, { now: fixedNow })
+    expect(conditionOf(task)).toBeNull()
+  })
+
+  it('condition 不是对象 → null（字符串/数组/null 都不算配置）', () => {
+    for (const raw of ['enabled', ['a'], null]) {
+      const task = parseScheduledTaskInput({ taskId: 'task-9', condition: raw }, { now: fixedNow })
+      expect(conditionOf(task), String(raw)).toBeNull()
+    }
+  })
+
+  it('是对象 → enabled 仅按 true 收窄，scriptPath 转字符串并 trim', () => {
+    const task = parseScheduledTaskInput({
+      taskId: 'task-9',
+      condition: { enabled: 'yes', scriptPath: `  ${ABSOLUTE_SCRIPT}  ` },
+    }, { now: fixedNow })
+    expect(conditionOf(task)).toEqual({ enabled: false, scriptPath: ABSOLUTE_SCRIPT })
+  })
+})
+
+describe('条件触发配置：校验（仅在启用时校验路径）', () => {
+  it('启用但路径为空 → 提示选择脚本文件', () => {
+    const message = validateScheduledTask(withCondition(makeTask(), { enabled: true, scriptPath: '  ' }))
+    expect(message).toContain('请选择脚本文件')
+  })
+
+  it('启用但路径是相对路径 → 提示必须是绝对路径', () => {
+    const message = validateScheduledTask(withCondition(makeTask(), { enabled: true, scriptPath: RELATIVE_SCRIPT }))
+    expect(message).toContain('绝对路径')
+  })
+
+  it('启用但扩展名不支持 → 提示仅支持 .mjs/.cjs/.js', () => {
+    const ps1 = process.platform === 'win32' ? 'C:\\scripts\\check.ps1' : '/opt/scripts/check.ps1'
+    const message = validateScheduledTask(withCondition(makeTask(), { enabled: true, scriptPath: ps1 }))
+    expect(message).toContain('.mjs')
+  })
+
+  it('未启用条件时不校验路径（允许保留历史值）', () => {
+    expect(validateScheduledTask(withCondition(makeTask(), { enabled: false, scriptPath: RELATIVE_SCRIPT }))).toBeNull()
+    expect(validateScheduledTask(makeTask())).toBeNull()
+  })
+})
+
+describe('条件触发配置：规范化', () => {
+  it('关闭且路径为空 → 化简为 null（保持存储干净）', () => {
+    const normalized = normalizeScheduledTask(withCondition(makeTask(), { enabled: false, scriptPath: '' }))
+    expect(conditionOf(normalized)).toBeNull()
+  })
+
+  it('关闭但路径非空 → 保留配置（重新开启不必重填）', () => {
+    const normalized = normalizeScheduledTask(withCondition(makeTask(), { enabled: false, scriptPath: ABSOLUTE_SCRIPT }))
+    expect(conditionOf(normalized)).toEqual({ enabled: false, scriptPath: ABSOLUTE_SCRIPT })
+  })
+
+  it('启用 → 保留并 trim；与会话策略无关（current-session 同样保留）', () => {
+    const normalized = normalizeScheduledTask(withCondition(
+      makeTask({ sessionMode: 'current-session' }),
+      { enabled: true, scriptPath: ` ${ABSOLUTE_SCRIPT} ` },
+    ))
+    expect(conditionOf(normalized)).toEqual({ enabled: true, scriptPath: ABSOLUTE_SCRIPT })
   })
 })

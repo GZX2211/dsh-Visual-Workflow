@@ -10,6 +10,7 @@
 // 时区不可用经 Intl.DateTimeFormat.prototype.resolvedOptions 注入（不依赖本机时区）。
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import * as schedulerTaskLib from '../../../src/client/lib/scheduler-task.js'
 import {
   createTaskDraft,
   detectLocalTimezone,
@@ -160,5 +161,45 @@ describe('formatIso：ISO → 本地可读（格式跟随注入的界面语言�
   it('locale 真实影响格式：同一时刻中英输出不同（不再硬编码 zh-CN）', () => {
     const iso = '2026-09-01T10:30:00.000Z'
     expect(formatIso(iso, 'en-US')).not.toBe(formatIso(iso, 'zh-CN'))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 第三层：条件触发（草稿默认值 + 文件选择结果的绝对路径粗判）
+// ---------------------------------------------------------------------------
+
+/** 新增纯函数的受控访问（导出尚未存在时以「不是函数」失败，而不是整文件加载失败）。 */
+interface ConditionDraftHelpers {
+  isAbsoluteHostPath(value: string): boolean
+}
+
+const conditionHelpers = schedulerTaskLib as unknown as ConditionDraftHelpers
+
+describe('createTaskDraft：条件层默认关闭', () => {
+  it('新建草稿带 condition: { enabled: false, scriptPath: 空 }', () => {
+    const draft = createTaskDraft('s-1', new Date(2026, 8, 1, 10, 30))
+    expect((draft as ScheduledTask & { condition?: unknown }).condition).toEqual({ enabled: false, scriptPath: '' })
+  })
+})
+
+describe('taskFromView：旧任务不凭空补条件字段', () => {
+  it('旧任务（无 condition）→ 草稿不带该键，由表单按可选值处理', () => {
+    const view = { task: makeTask(), runtime: { status: 'idle' } } as unknown as ScheduledTaskView
+    const draft = taskFromView(view)
+    expect('condition' in draft).toBe(false)
+  })
+})
+
+describe('isAbsoluteHostPath：文件选择结果的绝对路径粗判（跨平台字符串判定）', () => {
+  it('Windows 盘符、正斜杠、UNC 与 POSIX 根路径为 true', () => {
+    for (const value of ['C:\\x\\a.mjs', 'C:/x/a.mjs', '\\\\server\\share\\a.mjs', '/x/a.mjs']) {
+      expect(conditionHelpers.isAbsoluteHostPath(value), value).toBe(true)
+    }
+  })
+
+  it('纯文件名、相对路径与空串为 false（不把文件名当路径写进草稿）', () => {
+    for (const value of ['a.mjs', 'scripts\\a.mjs', './a.mjs', '']) {
+      expect(conditionHelpers.isAbsoluteHostPath(value), value).toBe(false)
+    }
   })
 })

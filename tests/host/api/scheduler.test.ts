@@ -4,7 +4,7 @@
 // 删除解绑 / 引擎缺失 501 / 运行态合并视图返回。
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FlowStore } from '../../../src/host/storage/flow-store.js'
@@ -167,5 +167,79 @@ describe('schedulerTaskPut 的能力缝顺序与错误码', () => {
     const { api } = await makeApi()
     await expect(api.handle('schedulerTaskPut', { task: 123 })).rejects.toMatchObject({ status: 400 })
     await expect(api.handle('schedulerTaskPut', { task: 'not-an-object' })).rejects.toMatchObject({ status: 400 })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 第三层：条件触发（启用时才读盘校验脚本路径）
+// ---------------------------------------------------------------------------
+
+/** 当前平台可用的绝对脚本路径。 */
+const ABSOLUTE_SCRIPT = process.platform === 'win32' ? 'C:\\scripts\\check-issue.mjs' : '/opt/scripts/check-issue.mjs'
+const RELATIVE_SCRIPT = 'scripts/check-issue.mjs'
+
+/** 挂上条件层配置（字段尚未在共享类型中声明，夹具负责透传）。 */
+function withCondition(task: ScheduledTask, condition: unknown): ScheduledTask {
+  return { ...task, condition } as unknown as ScheduledTask
+}
+
+/** 读取 condition 原始值（未声明字段的受控读取）。 */
+function conditionOf(task: ScheduledTask): unknown {
+  return (task as ScheduledTask & { condition?: unknown }).condition
+}
+
+describe('schedulerTaskPut 的条件脚本路径校验', () => {
+  it('启用条件但脚本不存在 → 400「不存在或不可访问」，任务不落盘', async () => {
+    const { api, store } = await makeApi()
+    const dir = await mkdtemp(join(tmpdir(), 'vw-cond-'))
+    cleanups.push(() => rm(dir, { recursive: true, force: true }))
+    const missing = join(dir, 'missing.mjs')
+
+    await expect(
+      api.handle('schedulerTaskPut', { task: withCondition(makeTask('task-cond'), { enabled: true, scriptPath: missing }) }),
+    ).rejects.toThrow('不存在或不可访问')
+    expect(await store.list()).toEqual([])
+  })
+
+  it('启用条件但路径是目录 → 400「不是文件」', async () => {
+    const { api } = await makeApi()
+    const dir = await mkdtemp(join(tmpdir(), 'vw-cond-'))
+    cleanups.push(() => rm(dir, { recursive: true, force: true }))
+    const nested = join(dir, 'scripts')
+    await mkdir(nested)
+
+    await expect(
+      api.handle('schedulerTaskPut', { task: withCondition(makeTask('task-cond'), { enabled: true, scriptPath: nested }) }),
+    ).rejects.toThrow('不是文件')
+  })
+
+  it('启用条件但路径是相对路径 / 扩展名非法 → 400，且不读盘', async () => {
+    const { api } = await makeApi()
+    await expect(
+      api.handle('schedulerTaskPut', { task: withCondition(makeTask('task-cond'), { enabled: true, scriptPath: RELATIVE_SCRIPT }) }),
+    ).rejects.toThrow('绝对路径')
+    const ps1 = process.platform === 'win32' ? 'C:\\scripts\\check.ps1' : '/opt/scripts/check.ps1'
+    await expect(
+      api.handle('schedulerTaskPut', { task: withCondition(makeTask('task-cond'), { enabled: true, scriptPath: ps1 }) }),
+    ).rejects.toThrow('.mjs')
+  })
+
+  it('关闭条件层 → 不读盘，保留路径保存成功（允许历史值）', async () => {
+    const { api, store } = await makeApi()
+    const raw = withCondition(makeTask('task-cond-off'), { enabled: false, scriptPath: ABSOLUTE_SCRIPT })
+
+    const saved = await api.handle('schedulerTaskPut', { task: raw }) as ScheduledTask
+
+    expect(conditionOf(saved)).toEqual({ enabled: false, scriptPath: ABSOLUTE_SCRIPT })
+    expect(conditionOf((await store.list())[0]!)).toEqual({ enabled: false, scriptPath: ABSOLUTE_SCRIPT })
+  })
+
+  it('旧任务（请求体无 condition）→ 保存成功且落盘为 null（整任务替换语义）', async () => {
+    const { api, store } = await makeApi()
+
+    const saved = await api.handle('schedulerTaskPut', { task: makeTask('task-legacy') }) as ScheduledTask
+
+    expect(conditionOf(saved)).toBeNull()
+    expect(conditionOf((await store.list())[0]!)).toBeNull()
   })
 })
