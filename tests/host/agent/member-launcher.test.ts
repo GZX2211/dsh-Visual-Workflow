@@ -16,7 +16,7 @@ import { FlowStore } from '../../../src/host/storage/flow-store.js'
 import { TeamMemberLauncher, type TeamMemberLauncherDeps } from '../../../src/host/agent/member-launcher.js'
 import { createChildToolFilterSetup } from '../../../src/host/agent/child-tool-filter.js'
 import { createChildPromptSetup } from '../../../src/host/agent/prompt-setup.js'
-import { createModelSelectionSetup } from '../../../src/host/agent/model-selection.js'
+import { createModelSelectionSetup, type ModelSelectionLike } from '../../../src/host/agent/model-selection.js'
 import type { NodeStartInput } from '../../../src/host/orchestrator/index.js'
 import type { RoleNode } from '../../../src/host/shared/graph-model.js'
 import type { AgentTeamsServiceLike, TeamMemberViewLike } from '../../../src/host/team/index.js'
@@ -71,6 +71,34 @@ class FakeChildCtx {
     }
     return chain()
   }
+
+  /** 已安装监听器数（断言新核不安装 agent/request 改写）。 */
+  listenerCount(name: string): number {
+    return this.listeners.get(name)?.length ?? 0
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Fake：官方 Agent（0.2.2+ 的 AgentModel 选择面）
+// ---------------------------------------------------------------------------
+
+class FakeOfficialAgent {
+  selected: ModelSelectionLike[] = []
+  readonly ctx: FakeChildCtx['ctx']
+  readonly model: { current: () => ModelSelectionLike | undefined; select: (selection: ModelSelectionLike) => void }
+  private fixed: ModelSelectionLike | undefined
+
+  constructor(ctx: FakeChildCtx['ctx'], initial?: ModelSelectionLike) {
+    this.ctx = ctx
+    this.fixed = initial ? { ...initial } : undefined
+    this.model = {
+      current: () => (this.fixed ? { ...this.fixed } : undefined),
+      select: (selection: ModelSelectionLike) => {
+        this.fixed = { ...selection }
+        this.selected.push({ ...selection })
+      },
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -88,6 +116,8 @@ interface Harness {
   teams: { spawnTeammate: ReturnType<typeof vi.fn>; sendMessage: ReturnType<typeof vi.fn>; listMembers: ReturnType<typeof vi.fn> }
   spawns: SpawnCapture[]
   memberRows: TeamMemberViewLike[]
+  /** childId → 官方 Agent（含 AgentModel 选择面），模拟官方 agents 注册表。 */
+  children: Map<string, FakeOfficialAgent>
   react: { setLimit: ReturnType<typeof vi.fn>; drop: ReturnType<typeof vi.fn>; consumeCapped: ReturnType<typeof vi.fn> }
   resolveTools: ReturnType<typeof vi.fn>
   logger: { warn: ReturnType<typeof vi.fn>; info: ReturnType<typeof vi.fn>; debug: ReturnType<typeof vi.fn> }
@@ -111,6 +141,9 @@ async function makeHarness(options: { root?: boolean; provider?: string; service
 
   const memberRows: TeamMemberViewLike[] = []
   const spawns: SpawnCapture[] = []
+  const children = new Map<string, FakeOfficialAgent>()
+  /** Lead（会话根 Agent）当前路由：成员新建时官方继承它。 */
+  const leadRoute: ModelSelectionLike = { provider: 'lead-provider', model: 'lead-model', reasoningEffort: 'high' }
   let seq = 0
 
   const teams = {
@@ -120,9 +153,11 @@ async function makeHarness(options: { root?: boolean; provider?: string; service
       seq += 1
       const childId = `child-${seq}`
       const child = new FakeChildCtx()
+      const agent = new FakeOfficialAgent(child.ctx, leadRoute)
+      children.set(childId, agent)
       // 模拟宿主 agent/created：在创建窗口内安装每子代理作用域贡献（角色提示词/模型/工具白名单）
       promptSetup.contribution(child.ctx)
-      modelSelection.contribution(child.ctx)
+      modelSelection.contribution(child.ctx, agent)
       toolFilter.contribution(child.ctx)
       spawns.push({ request, child })
       const row: TeamMemberViewLike = { id: childId, name: request.name, role: 'teammate', status: 'inactive' }
@@ -140,7 +175,13 @@ async function makeHarness(options: { root?: boolean; provider?: string; service
 
   const deps: TeamMemberLauncherDeps = {
     store,
-    agents: () => ((options.root ?? true) ? { get: (id: string) => (id === 'session-1' ? { id } : undefined) } as never : null),
+    agents: () => ((options.root ?? true)
+      ? {
+          get: (id: string) => (id === 'session-1'
+            ? { id, model: { current: () => ({ ...leadRoute }), select: () => {} } }
+            : children.get(id)),
+        } as never
+      : null),
     subagents: () => ({ getProvider: (name: string) => ((options.provider ?? 'spawn') === name ? { name } : undefined) } as never),
     teams: () => ((options.service ?? true) ? (teams as unknown as AgentTeamsServiceLike) : null),
     toolsView: {
@@ -168,6 +209,7 @@ async function makeHarness(options: { root?: boolean; provider?: string; service
     teams,
     spawns,
     memberRows,
+    children,
     react,
     resolveTools,
     logger,
@@ -258,10 +300,25 @@ describe('TeamMemberLauncher.start（创建路径）', () => {
     expect(child!.sections[0]?.name).toBe('visual-workflow:prompt')
     expect((child!.sections[0]?.text as () => string)()).toBe('角色提示词：后端开发工程师')
     expect(child!.restrictCalls[0]).toEqual({ allow: ['read', 'write'] })
-    // 官方时序：selection 由组装期捕获，故先组装后请求
-    await child!.dispatch('system-prompt/assemble', [{ variables: {} }, {}], async () => ({ variables: {} }))
-    const resolved = await child!.dispatch('agent/request', [{}], async () => ({ provider: 'parent', model: 'parent', reasoningEffort: 'low' }))
-    expect(resolved).toEqual({ provider: 'commandcode', model: 'deepseek/deepseek-v4.1-flash' })
+    // 0.2.2+：成员路由经官方 AgentModel 提交（步进准备前），不再在 agent/request 阶段改写
+    expect(child!.listenerCount('agent/request')).toBe(0)
+    expect(h.children.get('child-1')?.selected).toEqual([{
+      provider: 'commandcode',
+      model: 'deepseek/deepseek-v4.1-flash',
+    }])
+  })
+
+  it('成员只配置 reasoning：以 Lead 当前路由为基准，只改强度（创建窗口内提交官方）', async () => {
+    const h = await makeHarness()
+    await h.launcher.start(memberInput({
+      node: roleNode('n-be-dev', '后端开发工程师', { provider: '', model: '', reasoning: 'low' }),
+    }))
+
+    expect(h.children.get('child-1')?.selected).toEqual([{
+      provider: 'lead-provider',
+      model: 'lead-model',
+      reasoningEffort: 'low',
+    }])
   })
 
   it('成员工具白名单解析沿用普通节点路径口径（成员节点 + 全局关闭工具快照）', async () => {

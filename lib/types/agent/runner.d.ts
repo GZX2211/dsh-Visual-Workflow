@@ -46,9 +46,14 @@ export interface SubagentActivationSpecLike {
             text: string;
         }>;
         parent: unknown;
+        /**
+         * 官方子代理创建参数。reasoningEffort 必须在创建时给出：官方步进准备会把它固化进
+         * 首条请求的选择，之后 agent/request 阶段不允许再改（0.2.2-rc.1 主循环断言）。
+         */
         agentOptions?: {
             provider?: string;
             model?: string;
+            reasoningEffort?: string;
         };
     };
     signal: AbortSignal;
@@ -76,6 +81,7 @@ export interface SubagentContinuableSpecLike {
         agentOptions?: {
             provider?: string;
             model?: string;
+            reasoningEffort?: string;
         };
     };
     signal: AbortSignal;
@@ -333,10 +339,12 @@ export declare class NodeAgentRunner implements NodeRunner {
     private requireSubagents;
     private requireParent;
     /**
-     * 把节点级模型选择（provider/model/reasoningEffort）写入该 child 的 selection
-     * （经 agent.ctx 身份匹配贡献安装的同一 childCtx，无 pending 竞态）。
-     * 官方语义：selection 可变，下一步骤生效——首条请求可能仍用创建时的 agentOptions
-     * （reasoning 从第二个步骤起稳定生效，与官方 installModelSelection 一致）。
+     * 把节点级模型选择（provider/model/reasoningEffort）写入该 child 的 selection，
+     * 并在新核（0.2.2+）经官方 `agent.model.select()` 提交——两者都必须在派发下一回合
+     * 之前完成：官方在步进准备阶段固化 selection，agent/request 阶段再改会被主循环断言拒绝。
+     *
+     * 节点只配置思考强度时沿用官方当前路由（父代理继承或创建时 AgentOptions），节点全空时
+     * 不动继承路由。selection 同时留存，供 modelOf 查询与冷恢复重装。
      */
     private attachModelSelection;
     /**

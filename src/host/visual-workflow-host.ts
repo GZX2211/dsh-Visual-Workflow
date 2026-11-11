@@ -281,14 +281,15 @@ export class VisualWorkflowHost extends Service {
    * 与官方 installModelSelection(agentCtx) 的「拿到 child 的 ctx 后安装」范式一致：
    *   - wf_* 可见性双保险（wf_run_node/wf_finish deny）；
    *   - ReAct 软截停护栏；
-   *   - 模型选择（provider/model/reasoning）；
+   *   - 模型选择（provider/model/reasoning；0.2.2+ 只登记留存，由本方法内 applyTo 提交
+   *     官方 AgentModel，旧核才安装 agent/request 瀑布）；
    *   - 角色提示词段 + 开关过滤。
    * 因在 `agent/created`（agents.create 发布、首轮组装之前串行 await）执行，
    * 四类贡献在首轮即可见——修复「系统提示词/工具第二轮才更新」的同源时序 BUG。
    * 单个贡献失败则跳过（其余照装），返回的 disposer 为已成功安装贡献的合并撤销。
    */
-  private installChildScope(childCtx: unknown, agentId: string): () => void {
-    const contributions: Array<(context: unknown) => () => void> = [
+  private installChildScope(childCtx: unknown, agentId: string, agent?: unknown): () => void {
+    const contributions: Array<(context: unknown, agent?: unknown) => () => void> = [
       childVisibilityContribution(),
       this.reactGuard.contribution,
       this.modelSelection.contribution,
@@ -298,7 +299,7 @@ export class VisualWorkflowHost extends Service {
     const disposers: Array<() => void> = []
     for (const contribution of contributions) {
       try {
-        const dispose = contribution(childCtx)
+        const dispose = contribution(childCtx, agent)
         if (typeof dispose === 'function') disposers.push(dispose)
       } catch {
         // 单个贡献因 childCtx 形状不符失败：跳过（其余照装），功能局部降级
@@ -309,6 +310,9 @@ export class VisualWorkflowHost extends Service {
     // 无记录（普通节点子代理）时两处调用都是空操作。
     try {
       this.modelSelection.restore(agentId, childCtx)
+      // 0.2.2+：把重装的选择提交官方 AgentModel（必须在首轮步进准备前）；旧核无该能力时
+      // 由贡献的 agent/request 瀑布生效，返回 false 不视为失败。
+      this.modelSelection.applyTo(agent)
     } catch {
       // 重装失败：模型选择退回官方路由，不阻断其余贡献
     }
@@ -356,7 +360,7 @@ export class VisualWorkflowHost extends Service {
    * 逐项 try/catch 隔离）。根 Agent 创建（source='startup'）同样触发本事件：此时
    * `peekPending()` 为空且 `childPromptStates` 无该 id → 直接返回，无副作用。
    */
-  private onAgentCreated(payload: { agent?: { id?: unknown; ctx?: unknown } }): void {
+  private onAgentCreated(payload: { agent?: { id?: unknown; ctx?: unknown; model?: unknown } }): void {
     // 卸载后不再安装任何新贡献：dispose() 已清空 childScopeDisposers 且不再遍历，
     // 此时安装的监听器持有 childCtx 与其子树却永远没有撤销点（泄漏到进程结束）。
     if (this._disposed) return
@@ -372,7 +376,7 @@ export class VisualWorkflowHost extends Service {
     this.dropChildScope(agentId) // 同 id 二次发布先撤销旧装配，防重复
     // 用 withPending 包裹，使 contribution 读到该 state（首建嵌套于 runner 的 pending，取最内层值）
     void this.childPrompt.withPending(state, async () => {
-      const dispose = this.installChildScope(childCtx, agentId)
+      const dispose = this.installChildScope(childCtx, agentId, agent)
       if (typeof dispose === 'function') this.childScopeDisposers.set(agentId, dispose)
       return dispose
     })

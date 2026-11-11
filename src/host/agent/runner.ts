@@ -25,7 +25,8 @@ import type { NodeRunner, NodeStartInput, OrchestratorLogger } from '../orchestr
 import { consumeReactCappedOf, type ReactGuardBridge } from './guards.js'
 import { renderTemplate, TASK_FALLBACK } from '../prompts/index.js'
 import { CHILD_AGENT_HIDDEN_TOOLS, RESERVED_TRANSPORT_TOOL, TEAM_TOOL_NAMES, WF_FINISH, WF_RUN_NODE, WF_RUN_NODE_WAIT } from '../shared/protocol.js'
-import type { ModelSelectionLike, ModelSelectionSetup, SelectionChildContext } from './model-selection.js'
+import { composeNodeSelection } from './model-selection.js'
+import type { ModelSelectionSetup, SelectionChildContext } from './model-selection.js'
 import type { ChildPromptSetup, ChildPromptState } from './prompt-setup.js'
 import type { ChildToolFilterSetup } from './child-tool-filter.js'
 import type { AgentTeamsServiceLike } from '../team/index.js'
@@ -137,7 +138,11 @@ export interface SubagentActivationSpecLike {
   request: {
     prompt: Array<{ type: 'text'; text: string }>
     parent: unknown
-    agentOptions?: { provider?: string; model?: string }
+    /**
+     * 官方子代理创建参数。reasoningEffort 必须在创建时给出：官方步进准备会把它固化进
+     * 首条请求的选择，之后 agent/request 阶段不允许再改（0.2.2-rc.1 主循环断言）。
+     */
+    agentOptions?: { provider?: string; model?: string; reasoningEffort?: string }
   }
   signal: AbortSignal
   /**
@@ -157,7 +162,7 @@ export interface SubagentContinuableSpecLike {
     parent: unknown
     persona?: string
     toolFilter?: { allow: string[] }
-    agentOptions?: { provider?: string; model?: string }
+    agentOptions?: { provider?: string; model?: string; reasoningEffort?: string }
   }
   signal: AbortSignal
 }
@@ -655,19 +660,21 @@ export class NodeAgentRunner implements NodeRunner {
       }
     }
     const { childId, created, replacedChildId } = await this.ensureNodeChild(input)
-    // 每轮派发前刷新护栏上限与模型选择（节点级参数可按次覆盖；官方 selection 可变态）。
+    // 每轮派发前刷新护栏上限、模型选择与提示词状态（节点级参数可按次覆盖；官方 selection 可变态）。
     // 【时序】setLimit 必须位于任何 await 之前：子代理本轮第一步推理的 pre-step 事件
     // 一旦触发就读 limits 表——若先派发再登记，新回合（可能换了 limit）的第一步
     // 会读到旧上限/未登记值，软截停延迟生效（guards.ts 对 unknown childId 直接放行）。
+    // 模型选择同理必须早于复用派发：复用消息会立即开启子代理下一回合，而官方在步进准备
+    // 阶段固化 selection——晚写入只能等到再下一步，或在旧核上被判成「步进后改路由」。
     this.deps.react.setLimit(childId, input.iterationLimit)
     const subagents = this.requireSubagents()
     const parent = this.requireParent(input.sessionId)
+    this.attachModelSelection(childId, input)
+    await this.attachPromptState(childId, input)
     if (!created) {
       // 复用子代理：相邻投递派发本轮任务（0.1.5-rc.1：sendMessage 优先，queuePrompt 兜底）
       await this.deliverReuse(subagents, parent, childId, input.blocks, input.signal)
     }
-    this.attachModelSelection(childId, input)
-      await this.attachPromptState(childId, input)
     return replacedChildId === undefined ? { childId, created } : { childId, created, replacedChildId }
   }
 
@@ -772,9 +779,13 @@ export class NodeAgentRunner implements NodeRunner {
     // 白名单为空 → 不传 toolFilter（子代理继承父代理工具集边界由宿主组合决定）；
     // CHILD_AGENT_HIDDEN_TOOLS 永不进入 allow（§4.4.2 规则 7）
     const toolFilter = tools.length > 0 ? { allow: [...tools] } : undefined
-    const agentOptions: { provider?: string; model?: string } = {}
+    const agentOptions: { provider?: string; model?: string; reasoningEffort?: string } = {}
     if (node.data?.provider) agentOptions.provider = node.data.provider
     if (node.data?.model) agentOptions.model = node.data.model
+    // 思考强度必须在创建参数里给出：官方步进准备据此固化首条请求的选择，创建后再改
+    // 会被 0.2.2-rc.1 主循环判为「步进后改强度」并抛错。
+    const reasoning = String(input.thinking ?? node.data?.reasoning ?? '').trim()
+    if (reasoning) agentOptions.reasoningEffort = reasoning
 
     const promptState: ChildPromptState = {
       systemPrompt: rolePrompt,
@@ -869,24 +880,32 @@ export class NodeAgentRunner implements NodeRunner {
   }
 
   /**
-   * 把节点级模型选择（provider/model/reasoningEffort）写入该 child 的 selection
-   * （经 agent.ctx 身份匹配贡献安装的同一 childCtx，无 pending 竞态）。
-   * 官方语义：selection 可变，下一步骤生效——首条请求可能仍用创建时的 agentOptions
-   * （reasoning 从第二个步骤起稳定生效，与官方 installModelSelection 一致）。
+   * 把节点级模型选择（provider/model/reasoningEffort）写入该 child 的 selection，
+   * 并在新核（0.2.2+）经官方 `agent.model.select()` 提交——两者都必须在派发下一回合
+   * 之前完成：官方在步进准备阶段固化 selection，agent/request 阶段再改会被主循环断言拒绝。
+   *
+   * 节点只配置思考强度时沿用官方当前路由（父代理继承或创建时 AgentOptions），节点全空时
+   * 不动继承路由。selection 同时留存，供 modelOf 查询与冷恢复重装。
    */
   private attachModelSelection(childId: string, input: NodeStartInput): void {
     const node = input.node as RoleNode
     const agents = this.deps.agents()
     const agent = agents?.get(childId) as { ctx?: unknown } | null | undefined
     if (!agent || typeof agent !== 'object' || !agent.ctx) return
-    const selection: ModelSelectionLike = {
-      provider: String(node.data?.provider ?? ''),
-      model: String(node.data?.model ?? ''),
-    }
-    const reasoning = input.thinking ?? node.data?.reasoning
-    if (typeof reasoning === 'string' && reasoning.trim()) selection.reasoningEffort = reasoning
+    const selection = composeNodeSelection(
+      {
+        provider: node.data?.provider,
+        model: node.data?.model,
+        reasoning: String(input.thinking ?? node.data?.reasoning ?? ''),
+      },
+      this.deps.modelSelection.currentOf(agent),
+    )
+    if (!selection) return
     try {
       this.deps.modelSelection.attach(agent.ctx as SelectionChildContext, selection)
+      // 0.2.2+：提交官方 AgentModel，下一步步进准备即按节点强度固化；旧核无该能力时返回
+      // false，由贡献的 agent/request 瀑布在下一步生效（见 model-selection.ts）。
+      this.deps.modelSelection.applyTo(agent)
       // 同时按 childId 留存：attach 只写进该 child 的 ctx（无法按 id 反查），
       // 而「这个子代理在用哪个模型」是评价归因等消费方需要按身份查询的事实。
       this.deps.modelSelection.remember(childId, selection)

@@ -70,7 +70,7 @@ declare module '@deepseek-ai/cordis' {
      * 再做运行时守卫，与官方版本漂移时静默降级而非崩溃。
      */
     'agent/created'(payload: {
-      agent?: { id?: unknown; ctx?: unknown }
+      agent?: { id?: unknown; ctx?: unknown; model?: unknown }
       source?: unknown
       signal?: unknown
     }): void | Promise<void>
@@ -84,11 +84,17 @@ declare module '@deepseek-ai/cordis' {
      */
     'agent/pre-step'(payload: unknown, next: () => Promise<unknown>): Promise<unknown> | unknown
     /**
-     * 系统提示词组装瀑布（思考强度注入 provider/model 变量；官方 model-selection
-     * L40-53，§8 #4）。签名 (assembly, context, next) 与官方一致。
+     * 系统提示词组装瀑布（旧核（≤0.2.1）旧版 installModelSelection 在此注入 provider/model
+     * 变量；官方 model-selection L40-53，§8 #4）。签名 (assembly, context, next) 与官方一致。
+     * 0.2.2+ 官方主循环已注册 provider/model 变量，本插件不再经此注入。
      */
     'system-prompt/assemble'(assembly: unknown, context: unknown, next: () => Promise<unknown>): Promise<unknown>
-    /** 模型请求路由瀑布（思考强度注入 reasoningEffort；官方 model-selection L54-70，§8 #4）。 */
+    /**
+     * 模型请求路由瀑布（仅旧核（≤0.2.1）用于注入 reasoningEffort；官方旧版
+     * model-selection L54-70，§8 #4）。
+     * 0.2.2+ 主循环在步进准备阶段固化选择，请求阶段改路由/强度会被断言拒绝，
+     * 插件改经 `agent.model.select()` 提交（见 model-selection.ts）。
+     */
     'agent/request'(payload: unknown, next: () => Promise<unknown>): Promise<unknown>
   }
 }

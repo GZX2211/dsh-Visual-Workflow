@@ -94,9 +94,13 @@ export declare class TeamMemberLauncher {
      * 返回 null：官方 Team 不可用，或该节点尚无对应成员（未创建 / 已降级为普通子代理）。
      */
     memberStatusOf(sessionId: string, nodeId: string): TeamMemberViewLike['status'] | null;
+    /** 成员当前模型选择（官方 AgentModel 的步进固化值；旧核返回 null）。 */
+    private currentSelectionOf;
     /**
-     * 应用成员级组成：留存（供重发布重装）并登记本轮护栏上限。
-     * 创建路径已在创建窗口内生效；复用路径下模型的后续请求与工具可见性由重发布重装补齐。
+     * 应用成员级组成：留存（供重发布重装）、提交模型选择并登记本轮护栏上限。
+     *
+     * 新核（0.2.2+）必须在本回合派发前经官方 `agent.model.select()` 提交——官方在步进准备
+     * 阶段固化 selection，派发后再写只能等下一轮；旧核由贡献的 agent/request 瀑布接管。
      */
     private applyMemberComposition;
     /** 记录成员组成签名（首次）。 */

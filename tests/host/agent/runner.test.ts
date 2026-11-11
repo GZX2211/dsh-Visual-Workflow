@@ -31,7 +31,7 @@ import {
 import type { ReactGuardBridge } from '../../../src/host/agent/guards.js'
 import { subagentsServiceLike } from '../../../src/host/agent/agents-host.js'
 import { createChildToolFilterSetup, type ChildToolFilterSetup } from '../../../src/host/agent/child-tool-filter.js'
-import { createModelSelectionSetup, type ModelSelectionSetup } from '../../../src/host/agent/model-selection.js'
+import { createModelSelectionSetup, type ModelSelectionLike, type ModelSelectionSetup } from '../../../src/host/agent/model-selection.js'
 import { createChildPromptSetup, type ChildPromptSetup } from '../../../src/host/agent/prompt-setup.js'
 import type { AgentTeamsServiceLike, TeamMemberViewLike } from '../../../src/host/team/index.js'
 import type { NodeStartInput } from '../../../src/host/orchestrator/index.js'
@@ -150,7 +150,12 @@ interface RunnerHarness<S extends SubagentsServiceLike = FakeSubagents> {
   agents: FakeAgentsService
   toolsView: FakeToolsView
     react: { setLimit: ReturnType<typeof vi.fn>; drop: ReturnType<typeof vi.fn>; consumeCapped: ReturnType<typeof vi.fn> }
-    modelSelection: { contribution: ReturnType<typeof vi.fn>; attach: ReturnType<typeof vi.fn> }
+    modelSelection: {
+      contribution: ReturnType<typeof vi.fn>
+      attach: ReturnType<typeof vi.fn>
+      applyTo: ReturnType<typeof vi.fn>
+      currentOf: ReturnType<typeof vi.fn>
+    }
     promptSetup: { contribution: ReturnType<typeof vi.fn>; attach: ReturnType<typeof vi.fn> }
 }
 
@@ -164,7 +169,12 @@ async function makeHarness<S extends SubagentsServiceLike = FakeSubagents>(subag
   agents.parents.set('session-1', { id: 'session-1' })
   const toolsView = new FakeToolsView()
   const react = { setLimit: vi.fn(), drop: vi.fn(), consumeCapped: vi.fn(() => false) }
-  const modelSelection = { contribution: vi.fn(() => () => {}), attach: vi.fn() }
+  const modelSelection = {
+    contribution: vi.fn(() => () => {}),
+    attach: vi.fn(),
+    applyTo: vi.fn(() => true),
+    currentOf: vi.fn((): ModelSelectionLike | null => null),
+  }
     const promptSetup = { contribution: vi.fn(() => () => {}), withPending: vi.fn((_state, operation) => operation()), attach: vi.fn() }
   const runner = new NodeAgentRunner({
     store,
@@ -468,7 +478,7 @@ describe('NodeAgentRunner 创建/复用/派发', () => {
     expect(spec.request.prompt).toEqual([{ type: 'text', text: '任务块' }]) // 首条消息=完整任务块
     expect(spec.request.persona).toBeUndefined() // 角色 Prompt 改为 system prompt 段，不再传官方 persona
     expect(spec.request.toolFilter).toEqual({ allow: ['read', 'wf_ask_user'] }) // 勾选∩可见（wf_ask_user 勾选注入）
-    expect(spec.request.agentOptions).toEqual({ provider: 'deepseek', model: 'deepseek-chat' })
+    expect(spec.request.agentOptions).toEqual({ provider: 'deepseek', model: 'deepseek-chat', reasoningEffort: 'high' })
     expect(h.react.setLimit).toHaveBeenCalledWith('child-1', 7)
   })
 
@@ -579,7 +589,78 @@ describe('NodeAgentRunner 创建/复用/派发', () => {
       model: 'deepseek-chat',
       reasoningEffort: 'high',
     })
+    // 新核：必须在派发前经官方 agent.model.select() 提交（否则下一回合会撞步进一致性断言）
+    expect(h.modelSelection.applyTo).toHaveBeenCalledWith(expect.objectContaining({ id: 'child-1', ctx: childCtx }))
     expect(h.react.setLimit).toHaveBeenCalledWith('child-1', 7)
+  })
+
+  it('创建参数携带节点配置的 reasoningEffort：首步即按节点强度（不等第二步）', async () => {
+    const h = await makeHarness()
+    await h.store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read'], mcpServers: [] })
+
+    await h.runner.startNodeTask(taskInput({ node: agentNode('n-a1', { reasoning: 'low' }) }))
+
+    // 官方 resolveChildAgentOptions 会把 requested.reasoningEffort 纳入子代理首条请求的选择；
+    // 缺失时子代理继承父会话 effort（或 adapter default），与节点配置不一致即触发 Issue #27。
+    expect(h.subagents.started[0]?.request.agentOptions).toEqual({
+      provider: 'deepseek',
+      model: 'deepseek-chat',
+      reasoningEffort: 'low',
+    })
+  })
+
+  it('未配置思考强度：创建参数不携带 reasoningEffort（沿用官方继承/模型默认语义）', async () => {
+    const h = await makeHarness()
+    await h.store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read'], mcpServers: [] })
+
+    await h.runner.startNodeTask(taskInput())
+
+    expect(h.subagents.started[0]?.request.agentOptions).toEqual({ provider: 'deepseek', model: 'deepseek-chat' })
+  })
+
+  it('节点只配置 reasoning：以官方当前路由为基准，只改强度（provider/model 留空不写空串）', async () => {
+    const h = await makeHarness()
+    await h.store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read'], mcpServers: [] })
+    const childCtx = { marker: 'ctx' }
+    h.agents.children.set('child-1', { id: 'child-1', ctx: childCtx })
+    h.modelSelection.currentOf.mockReturnValue({ provider: 'parent-provider', model: 'parent-model', reasoningEffort: 'high' })
+
+    await h.runner.startNodeTask(taskInput({ node: agentNode('n-a1', { provider: '', model: '', reasoning: 'low' }) }))
+
+    expect(h.modelSelection.attach).toHaveBeenCalledWith(childCtx, {
+      provider: 'parent-provider',
+      model: 'parent-model',
+      reasoningEffort: 'low',
+    })
+    expect(h.modelSelection.applyTo).toHaveBeenCalledWith(expect.objectContaining({ id: 'child-1' }))
+  })
+
+  it('节点未配置模型/强度：不写 selection（保持官方继承路由，不产生空路由）', async () => {
+    const h = await makeHarness()
+    await h.store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read'], mcpServers: [] })
+    h.agents.children.set('child-1', { id: 'child-1', ctx: { marker: 'ctx' } })
+
+    await h.runner.startNodeTask(taskInput({ node: agentNode('n-a1', { provider: '', model: '' }) }))
+
+    expect(h.modelSelection.attach).not.toHaveBeenCalled()
+    expect(h.modelSelection.applyTo).not.toHaveBeenCalled()
+  })
+
+  it('复用路径：模型选择在派发之前提交（新回合步进准备即可读到节点值）', async () => {
+    const h = await makeHarness()
+    await h.store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read'], mcpServers: [] })
+    h.agents.children.set('child-1', { id: 'child-1', ctx: { marker: 'ctx' } })
+    await h.runner.startNodeTask(taskInput({ thinking: 'low' })) // 首次创建
+
+    const order: string[] = []
+    h.modelSelection.applyTo.mockImplementation(() => {
+      order.push('applyTo')
+      return true
+    })
+    h.subagents.onDispatch = () => order.push('dispatch')
+    await h.runner.startNodeTask(taskInput({ thinking: 'medium', blocks: blocks('第二轮') }))
+
+    expect(order).toEqual(['applyTo', 'dispatch'])
   })
 
   it('interruptChild：官方 interrupt（kind=user/parentSessionId）', async () => {
