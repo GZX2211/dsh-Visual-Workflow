@@ -217,6 +217,50 @@ describe('VisualWorkflowHost 装配', () => {
     await root.fiber.dispose()
   })
 
+  it('agent/created（0.2.2+）：冷恢复把留存选择经 agent.model.select 提交，且不安装请求改写', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vw-host-'))
+    cleanups.push(() => rm(dir, { recursive: true, force: true }))
+    const root = new Context()
+    await root.plugin(VisualWorkflowHost, makeConfig(dir))
+    const host = root.get(VisualWorkflowHostServiceName) as VisualWorkflowHost
+    const surface = host as unknown as {
+      childPrompt: { withPending(s: unknown, o: () => Promise<void>): Promise<void> }
+      modelSelection: { remember(id: string, selection: unknown): void }
+    }
+
+    // 首建：持久化该子代理的提示词状态（模型选择尚未产生）
+    const first = makeChildCtx()
+    await surface.childPrompt.withPending(
+      { systemPrompt: '子代理角色', injectSystemPrompt: true, injectToolSections: true },
+      async () => {
+        root.emit('agent/created', { agent: { id: 'child-x', ctx: first.childCtx }, source: 'startup' })
+      },
+    )
+    // 成员路径在创建后留存模型选择；冷恢复时宿主必须经官方 AgentModel 重新提交
+    surface.modelSelection.remember('child-x', { provider: 'member', model: 'member-model', reasoningEffort: 'high' })
+    root.emit('agent/disposed', { agent: { id: 'child-x' } })
+
+    const second = makeChildCtx()
+    const selected: unknown[] = []
+    root.emit('agent/created', {
+      agent: {
+        id: 'child-x',
+        ctx: second.childCtx,
+        model: {
+          current: () => ({ provider: 'parent', model: 'parent-model' }),
+          select: (selection: unknown) => { selected.push(selection) },
+        },
+      },
+      source: 'resume',
+    })
+
+    expect(selected).toEqual([{ provider: 'member', model: 'member-model', reasoningEffort: 'high' }])
+    // 0.2.2+ 由官方步进固化选择；再装 agent/request 改写会触发主循环一致性断言（Issue #27）
+    expect(second.handlers.get('agent/request') ?? []).toEqual([])
+
+    await root.fiber.dispose()
+  })
+
   it('agent/disposed 不清除持久化状态：创建→销毁→冷恢复重发布，仍能重装贡献（第二轮回退官方提示词回归）', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vw-host-'))
     cleanups.push(() => rm(dir, { recursive: true, force: true }))

@@ -1,15 +1,25 @@
 // tests/host/agent/model-selection.test.ts
 //
 // 思考强度模型选择单测（T-022；V-02）：
-//   - 官方 installModelSelection 双瀑布移植：system-prompt/assemble 注入 provider/model
-//     变量并捕获 selection.assembled；agent/request 改写 provider/model/reasoningEffort
-//     （无 effort 时清除继承值）；按官方时序先 assemble 后 request（assembled 由
-//     组装期捕获，与官方 model-selection.ts L40-70 一致）；
-//   - WeakMap 身份匹配 attach（贡献与 runner 解耦、并发创建无竞态）。
-// 断言依据：需求文档 V-02、架构文档 §4.2 L220、官方 model-selection.ts L40-70。
+//   - 旧核（≤0.2.1）双瀑布移植：system-prompt/assemble 注入 provider/model 变量并捕获
+//     selection.assembled；agent/request 改写 provider/model/reasoningEffort
+//     （无 effort 时清除继承值）；
+//   - 新核（0.2.2+）官方契约：步进准备先固化 agent.model.current()，agent/request 阶段
+//     不允许改路由/强度——本装配只登记留存，经 agent.model.select() 在步进前提交；
+//     贡献不得安装 agent/request 改写（正是 Issue #27 的崩溃点）；
+//   - 节点配置合成（provider/model/reasoning 的「留空=默认」语义）与 WeakMap 身份匹配
+//     attach（贡献与 runner 解耦、并发创建无竞态）。
+// 断言依据：需求文档 V-02、架构文档 §4.2 L220、官方 0.2.1-rc.2 model-selection 双瀑布、
+// 官方 0.2.2-rc.1 prepareRequest 的步进一致性断言。
 
 import { describe, expect, it } from 'vitest'
-import { createModelSelectionSetup, type SelectionChildContext } from '../../../src/host/agent/model-selection.js'
+import {
+  composeNodeSelection,
+  createModelSelectionSetup,
+  type ModelSelectionLike,
+  type SelectionAgentLike,
+  type SelectionChildContext,
+} from '../../../src/host/agent/model-selection.js'
 
 /** 最小 childCtx fake：waterfall 事件链（可变参：assemble 为 (assembly, context, next)）。 */
 class FakeChildCtx implements SelectionChildContext {
@@ -23,6 +33,11 @@ class FakeChildCtx implements SelectionChildContext {
       const index = list.indexOf(listener)
       if (index >= 0) list.splice(index, 1)
     }
+  }
+
+  /** 已安装监听器数（断言「新核不安装请求改写」的可观察事实）。 */
+  listenerCount(name: string): number {
+    return this.listeners.get(name)?.length ?? 0
   }
 
   /** 瀑布链派发：监听器依次执行（args 透传 + 尾位 next）；末位 next 返回终值。 */
@@ -39,6 +54,37 @@ class FakeChildCtx implements SelectionChildContext {
     }
     return chain()
   }
+}
+
+/** 新核官方 Agent fake：AgentModel 的 current/select 语义（select 立即成为下一步固化值）。 */
+class FakeOfficialAgent implements SelectionAgentLike {
+  selected: ModelSelectionLike[] = []
+  readonly ctx: SelectionChildContext
+  readonly model: { current: () => ModelSelectionLike | undefined; select: (selection: ModelSelectionLike) => void }
+  private fixed: ModelSelectionLike | undefined
+
+  constructor(ctx: SelectionChildContext, initial?: ModelSelectionLike) {
+    this.ctx = ctx
+    this.fixed = initial ? { ...initial } : undefined
+    this.model = {
+      current: () => (this.fixed ? { ...this.fixed } : undefined),
+      select: (selection: ModelSelectionLike) => {
+        this.fixed = { ...selection }
+        this.selected.push({ ...selection })
+      },
+    }
+  }
+}
+
+/** 模拟官方一步：先固化 selection，再组装，最后派发 agent/request（请求提议以固化为种子）。 */
+async function officialStep(ctx: FakeChildCtx, agent: FakeOfficialAgent): Promise<{
+  fixed: ModelSelectionLike | undefined
+  proposed: Record<string, unknown>
+}> {
+  const fixed = agent.model.current()
+  await ctx.dispatch('system-prompt/assemble', [{ variables: {} }, {}], async () => ({ variables: {} }))
+  const proposed = (await ctx.dispatch('agent/request', [{}], async () => ({ ...fixed }))) as Record<string, unknown>
+  return { fixed, proposed }
 }
 
 /** 官方时序：先组装（捕获 assembled）再请求（改写路由）。 */
@@ -206,5 +252,161 @@ describe('模型选择装配（model-selection.ts）', () => {
     setup.bindParent(ctx, { provider: 'root', model: 'second' }, 'session-1')
 
     expect(setup.parentModelOf('session-1')?.model).toBe('second')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 节点配置合成（纯函数）
+// ---------------------------------------------------------------------------
+
+describe('composeNodeSelection', () => {
+  it('provider+model+reasoning 齐全：按节点路由与强度选择', () => {
+    expect(composeNodeSelection(
+      { provider: 'deepseek', model: 'deepseek-reasoner', reasoning: 'low' },
+      null,
+    )).toEqual({ provider: 'deepseek', model: 'deepseek-reasoner', reasoningEffort: 'low' })
+  })
+
+  it('provider+model 齐全且 reasoning 留空：省略 effort（= 所选模型默认强度）', () => {
+    expect(composeNodeSelection(
+      { provider: 'deepseek', model: 'deepseek-chat', reasoning: '   ' },
+      { provider: 'parent', model: 'parent-model', reasoningEffort: 'high' },
+    )).toEqual({ provider: 'deepseek', model: 'deepseek-chat' })
+  })
+
+  it('只配置 reasoning：沿用官方当前路由，只改强度', () => {
+    expect(composeNodeSelection(
+      { reasoning: 'medium' },
+      { provider: 'inherited', model: 'inherited-model', reasoningEffort: 'high' },
+    )).toEqual({ provider: 'inherited', model: 'inherited-model', reasoningEffort: 'medium' })
+  })
+
+  it('全空 / 只配置 reasoning 但当前路由不可知：返回 null（保持官方继承路由）', () => {
+    expect(composeNodeSelection({}, null)).toBeNull()
+    expect(composeNodeSelection({ reasoning: 'low' }, null)).toBeNull()
+    expect(composeNodeSelection({ provider: 'p', model: '' }, null)).toBeNull()
+  })
+
+  it('空白字符按未配置处理（节点面板留空语义）', () => {
+    expect(composeNodeSelection({ provider: '  ', model: '  ', reasoning: '  ' }, null)).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 新核（0.2.2+）官方 AgentModel 通道：步进前提交、请求阶段不得改写
+// ---------------------------------------------------------------------------
+
+describe('新核官方 AgentModel 通道（Agent.model.select）', () => {
+  it('贡献不安装 agent/request 与 system-prompt/assemble 改写（Issue #27 崩溃点）', () => {
+    const setup = createModelSelectionSetup()
+    const ctx = new FakeChildCtx()
+    const agent = new FakeOfficialAgent(ctx, { provider: 'deepseek', model: 'deepseek-chat' })
+    setup.contribution(ctx, agent)
+    setup.attach(ctx, { provider: 'deepseek', model: 'deepseek-chat', reasoningEffort: 'low' })
+
+    expect(ctx.listenerCount('agent/request')).toBe(0)
+    expect(ctx.listenerCount('system-prompt/assemble')).toBe(0)
+  })
+
+  it('applyTo：步进前提交完整选择，官方固化值与请求提议一致（不触发步进一致性断言）', async () => {
+    const setup = createModelSelectionSetup()
+    const ctx = new FakeChildCtx()
+    const agent = new FakeOfficialAgent(ctx, { provider: 'deepseek', model: 'deepseek-chat' })
+    setup.contribution(ctx, agent)
+    setup.attach(ctx, { provider: 'deepseek', model: 'deepseek-reasoner', reasoningEffort: 'low' })
+
+    expect(setup.applyTo(agent)).toBe(true)
+    expect(agent.selected).toEqual([{ provider: 'deepseek', model: 'deepseek-reasoner', reasoningEffort: 'low' }])
+
+    const { fixed, proposed } = await officialStep(ctx, agent)
+    expect(fixed).toEqual({ provider: 'deepseek', model: 'deepseek-reasoner', reasoningEffort: 'low' })
+    expect(proposed).toEqual(fixed)
+  })
+
+  it('applyTo(selection)：显式选择覆盖留存值并提交官方', () => {
+    const setup = createModelSelectionSetup()
+    const ctx = new FakeChildCtx()
+    const agent = new FakeOfficialAgent(ctx, { provider: 'deepseek', model: 'deepseek-chat', reasoningEffort: 'high' })
+    setup.contribution(ctx, agent)
+
+    expect(setup.applyTo(agent, { provider: 'deepseek', model: 'deepseek-chat', reasoningEffort: 'low' })).toBe(true)
+    expect(agent.model.current()).toEqual({ provider: 'deepseek', model: 'deepseek-chat', reasoningEffort: 'low' })
+  })
+
+  it('applyTo：旧核（无 model.select）返回 false 且不改选择（由贡献瀑布兜底）', () => {
+    const setup = createModelSelectionSetup()
+    const ctx = new FakeChildCtx()
+    setup.contribution(ctx)
+    setup.attach(ctx, { provider: 'deepseek', model: 'deepseek-chat', reasoningEffort: 'low' })
+
+    expect(setup.applyTo({ ctx })).toBe(false)
+  })
+
+  it('applyTo：provider/model 不完整时不提交（不把空路由写入官方）', () => {
+    const setup = createModelSelectionSetup()
+    const ctx = new FakeChildCtx()
+    const agent = new FakeOfficialAgent(ctx, { provider: 'deepseek', model: 'deepseek-chat' })
+    setup.contribution(ctx, agent)
+
+    expect(setup.applyTo(agent, { provider: '', model: '', reasoningEffort: 'low' })).toBe(false)
+    expect(agent.selected).toEqual([])
+  })
+
+  it('currentOf：读官方步进固化值；旧核 / 形状漂移返回 null', () => {
+    const setup = createModelSelectionSetup()
+    const ctx = new FakeChildCtx()
+    const agent = new FakeOfficialAgent(ctx, { provider: 'deepseek', model: 'deepseek-chat', reasoningEffort: 'high' })
+
+    expect(setup.currentOf(agent)).toEqual({ provider: 'deepseek', model: 'deepseek-chat', reasoningEffort: 'high' })
+    expect(setup.currentOf({ ctx })).toBeNull()
+    expect(setup.currentOf(null)).toBeNull()
+  })
+
+  it('withPending + contribution：创建窗口内的成员选择可在首轮前提交官方（Team 成员路径）', async () => {
+    const setup = createModelSelectionSetup()
+    const ctx = new FakeChildCtx()
+    const agent = new FakeOfficialAgent(ctx, { provider: 'parent', model: 'parent-model' })
+
+    await setup.withPending({ provider: 'member', model: 'member-model', reasoningEffort: 'high' }, async () => {
+      setup.contribution(ctx, agent)
+      return undefined
+    })
+    expect(setup.applyTo(agent)).toBe(true)
+    expect(agent.model.current()).toEqual({ provider: 'member', model: 'member-model', reasoningEffort: 'high' })
+  })
+
+  it('restore + applyTo：冷恢复重发布时按 childId 重装并提交官方', () => {
+    const setup = createModelSelectionSetup()
+    setup.remember('child-1', { provider: 'member', model: 'member-model', reasoningEffort: 'high' })
+
+    const ctx = new FakeChildCtx()
+    const agent = new FakeOfficialAgent(ctx, { provider: 'parent', model: 'parent-model' })
+    setup.contribution(ctx, agent)
+    setup.restore('child-1', ctx)
+    setup.applyTo(agent)
+
+    expect(agent.model.current()).toEqual({ provider: 'member', model: 'member-model', reasoningEffort: 'high' })
+  })
+
+  it('bindParent：新核不安装旧版瀑布，父代理路由经 model.select 提交（仅强度时沿用当前路由）', () => {
+    const setup = createModelSelectionSetup()
+    const ctx = new FakeChildCtx()
+    const agent = new FakeOfficialAgent(ctx, { provider: 'root', model: 'root-model', reasoningEffort: 'high' })
+
+    setup.bindParent(ctx, { provider: 'root', model: 'root-model', reasoningEffort: 'low' }, 'session-1', agent)
+
+    expect(ctx.listenerCount('agent/request')).toBe(0)
+    expect(agent.selected).toEqual([{ provider: 'root', model: 'root-model', reasoningEffort: 'low' }])
+    expect(setup.parentModelOf('session-1')).toEqual({ provider: 'root', model: 'root-model', reasoningEffort: 'low' })
+  })
+
+  it('bindParent：节点未配置路由/强度时不提交（保持官方继承路由）', () => {
+    const setup = createModelSelectionSetup()
+    const ctx = new FakeChildCtx()
+    const agent = new FakeOfficialAgent(ctx, { provider: 'root', model: 'root-model' })
+
+    setup.bindParent(ctx, { provider: '', model: '' }, 'session-1', agent)
+
+    expect(agent.selected).toEqual([])
   })
 })

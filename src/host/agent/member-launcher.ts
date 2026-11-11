@@ -29,6 +29,7 @@ import { TEAM_SPAWN_TEAMMATE } from '../shared/protocol.js'
 import { findMemberByName, isTeammateNameValid, teammateDescriptionOf, teammateNameOf, type AgentTeamsServiceLike, type TeamMemberViewLike } from '../team/index.js'
 import type { ChildPromptSetup, ChildPromptState } from './prompt-setup.js'
 import type { ChildToolFilterSetup } from './child-tool-filter.js'
+import { composeNodeSelection } from './model-selection.js'
 import type { ModelSelectionLike, ModelSelectionSetup } from './model-selection.js'
 import type { AgentsServiceLike, SubagentsServiceLike, ToolsView } from './runner.js'
 import type { ReactGuardBridge } from './guards.js'
@@ -160,7 +161,6 @@ export class TeamMemberLauncher {
     const rolePrompt = await this.deps.resolveRolePrompt(node)
     const injectSystemPrompt = node.data?.injectSystemPrompt !== false
     const injectToolSections = node.data?.injectToolSections !== false
-    const selection = selectionOf(node, input.thinking)
     const signature = this.deps.signatureOf(node, tools, rolePrompt, injectSystemPrompt, injectToolSections, input.collabPrompt ?? '')
 
     if (existing) {
@@ -175,8 +175,11 @@ export class TeamMemberLauncher {
         throw new Error(`Team 成员「${name}」仍在创建中，请稍后重试`)
       }
       const childId = String(existing.id ?? '')
-      await teams.sendMessage(root, { target: name, content: input.blocks, signal: input.signal })
+      // 复用回合前先提交模型选择：官方在步进准备阶段固化 selection，晚于派发就只能
+      // 等到再下一步（新核），或在旧核上被判成「步进后改路由」。
+      const selection = selectionOf(node, input.thinking, this.currentSelectionOf(childId))
       this.applyMemberComposition(childId, selection, tools, input.iterationLimit)
+      await teams.sendMessage(root, { target: name, content: input.blocks, signal: input.signal })
       this.reportSignatureChange(name, signature)
       return { childId, target: name, created: false }
     }
@@ -192,10 +195,13 @@ export class TeamMemberLauncher {
       )
     }
 
+    // 新建成员继承 Lead 的当前路由（官方 Team 请求不接受 agentOptions）：节点未配置路由时
+    // 以该路由为基准，只配置思考强度的节点也能在创建窗口内只改强度。
+    const selection = selectionOf(node, input.thinking, this.deps.modelSelection.currentOf(root))
     const promptState: ChildPromptState = { systemPrompt: rolePrompt, injectSystemPrompt, injectToolSections }
     const spawned = await this.deps.promptSetup.withPending(promptState, () =>
       this.deps.toolFilter.withPending(tools, () =>
-        this.deps.modelSelection.withPending(selection, () =>
+        this.deps.modelSelection.withPending(selection ?? undefined, () =>
           teams.spawnTeammate(root, {
             name,
             description: teammateDescriptionOf(node.data?.label, node.id),
@@ -233,18 +239,34 @@ export class TeamMemberLauncher {
     return member?.status ?? null
   }
 
+  /** 成员当前模型选择（官方 AgentModel 的步进固化值；旧核返回 null）。 */
+  private currentSelectionOf(childId: string): ModelSelectionLike | null {
+    const agent = this.deps.agents()?.get(childId)
+    return this.deps.modelSelection.currentOf(agent)
+  }
+
   /**
-   * 应用成员级组成：留存（供重发布重装）并登记本轮护栏上限。
-   * 创建路径已在创建窗口内生效；复用路径下模型的后续请求与工具可见性由重发布重装补齐。
+   * 应用成员级组成：留存（供重发布重装）、提交模型选择并登记本轮护栏上限。
+   *
+   * 新核（0.2.2+）必须在本回合派发前经官方 `agent.model.select()` 提交——官方在步进准备
+   * 阶段固化 selection，派发后再写只能等下一轮；旧核由贡献的 agent/request 瀑布接管。
    */
   private applyMemberComposition(
     childId: string,
-    selection: ModelSelectionLike | undefined,
+    selection: ModelSelectionLike | null,
     tools: readonly string[],
     iterationLimit: number | undefined,
   ): void {
     if (!childId) return
-    if (selection) this.deps.modelSelection.remember(childId, selection)
+    if (selection) {
+      this.deps.modelSelection.remember(childId, selection)
+      const agent = this.deps.agents()?.get(childId)
+      try {
+        this.deps.modelSelection.applyTo(agent, selection)
+      } catch (error) {
+        this.deps.logger?.warn(`[visual-workflow] Team 成员模型选择写入失败：${String(error)}`)
+      }
+    }
     this.deps.toolFilter.remember(childId, tools)
     // 软截停上限按 child 登记：回合开始读取，故必须在派发返回后的同步块内完成
     this.deps.react.setLimit(childId, iterationLimit)
@@ -276,16 +298,24 @@ export class TeamMemberLauncher {
 }
 
 /**
- * 成员模型选择：节点配置齐全时按节点路由，否则返回 undefined（沿用官方继承路由）。
+ * 成员模型选择：节点配置与官方当前路由合成（见 composeNodeSelection）。
  *
  * 为什么不做空串回退：把空 provider/model 写入 selection 会把成员请求路由改写为空值，
  * 而官方默认行为（继承 Lead 路由）才是未配置节点时的正确语义。
- * 为什么思考强度可单独生效：官方 selection 在无 effort 时清除继承值，恢复所选模型默认行为。
+ * 为什么思考强度可单独生效：未配置节点路由时以当前路由为基准，只改 reasoningEffort
+ * （节点面板「留空 = 模型默认」语义由 composeNodeSelection 承担）。
  */
-function selectionOf(node: RoleNode, thinking: string | undefined): ModelSelectionLike | undefined {
-  const provider = String(node.data?.provider ?? '').trim()
-  const model = String(node.data?.model ?? '').trim()
-  if (!provider || !model) return undefined
-  const reasoning = String(thinking ?? node.data?.reasoning ?? '').trim()
-  return reasoning ? { provider, model, reasoningEffort: reasoning } : { provider, model }
+function selectionOf(
+  node: RoleNode,
+  thinking: string | undefined,
+  current: ModelSelectionLike | null,
+): ModelSelectionLike | null {
+  return composeNodeSelection(
+    {
+      provider: node.data?.provider,
+      model: node.data?.model,
+      reasoning: thinking ?? node.data?.reasoning,
+    },
+    current,
+  )
 }

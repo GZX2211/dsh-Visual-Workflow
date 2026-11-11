@@ -223,10 +223,12 @@ export interface ModelSelectionValue {
 
 /**
  * 父代理模型选择装配的最小能力（编排器只用 bindParent：
- * 把父代理节点的模型三元组写进会话根 Agent 的 ctx）。
+ * 把父代理节点的模型三元组写进会话根 Agent 的 ctx；同时传入根 Agent 对象，
+ * 新核据此经官方 `agent.model.select()` 提交选择——官方在步进准备阶段固化路由，
+ * agent/request 阶段改写会被主循环断言拒绝）。
  */
 export interface ParentModelSelectionLike {
-  bindParent(ctx: unknown, selection: ModelSelectionValue, sessionId: string): void
+  bindParent(ctx: unknown, selection: ModelSelectionValue, sessionId: string, agent?: unknown): void
 }
 
 export const consoleLogger: OrchestratorLogger = {

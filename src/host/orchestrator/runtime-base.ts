@@ -105,7 +105,7 @@ export abstract class RuntimeBase {
         provider: String(data.provider ?? ''),
         model: String(data.model ?? ''),
         ...(typeof data.reasoning === 'string' && data.reasoning.trim() ? { reasoningEffort: data.reasoning } : {}),
-      }, sessionId)
+      }, sessionId, root)
     } catch (error) {
       this.deps.logger?.warn(`[visual-workflow] 父代理配置注入失败：${error instanceof Error ? error.message : String(error)}`)
     }

@@ -107,7 +107,8 @@ export declare class VisualWorkflowHost extends Service {
      * 与官方 installModelSelection(agentCtx) 的「拿到 child 的 ctx 后安装」范式一致：
      *   - wf_* 可见性双保险（wf_run_node/wf_finish deny）；
      *   - ReAct 软截停护栏；
-     *   - 模型选择（provider/model/reasoning）；
+     *   - 模型选择（provider/model/reasoning；0.2.2+ 只登记留存，由本方法内 applyTo 提交
+     *     官方 AgentModel，旧核才安装 agent/request 瀑布）；
      *   - 角色提示词段 + 开关过滤。
      * 因在 `agent/created`（agents.create 发布、首轮组装之前串行 await）执行，
      * 四类贡献在首轮即可见——修复「系统提示词/工具第二轮才更新」的同源时序 BUG。
