@@ -1199,6 +1199,7 @@ describe('DSH 0.2.1 子代理 seam（startActivation）', () => {
 
   it('激活首步携带节点思考强度及单次覆盖值', async () => {
     const h = await makeHarness(new ActivationFakeSubagents())
+    await h.store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read'], mcpServers: [] })
 
     await h.runner.startNodeTask(taskInput({
       node: agentNode('n-a1', { reasoning: 'low' }),
