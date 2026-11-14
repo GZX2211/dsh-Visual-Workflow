@@ -841,6 +841,8 @@ class ActivationFakeSubagents implements SubagentsServiceLike {
     return this.providers[name]
   }
   async startActivation(spec: SubagentActivationSpecLike): Promise<{ childId: string; messageId: string }> {
+    // 对齐宿主身份校验，防止错误嵌套的 request 被宽松 fake 接受。
+    expect((spec.parent as { id: string }).id).toBe('session-1')
     this.activations.push(spec)
     this.seq += 1
     const childId = `activation-${this.seq}`
@@ -1168,11 +1170,11 @@ describe('Team 成员路径：childId 登记、释放与降级', () => {
 // DSH 0.2.1 子代理 seam（startActivation 统一激活入口）
 // ---------------------------------------------------------------------------
 // 取证（0.2.1-rc.2 dsh-subagent types）：startActivation(spec) 必填 delivery；
-// request 为 Omit<SubagentStartRequest,...>，已移除 toolFilter/persona，新增 cwd/agentPreset。
+// prompt/parent/agentOptions 直接放在 spec 顶层，不嵌套 request。
 // 插件只消费 prompt/parent/agentOptions；工具白名单由 host 在 agent/created 窗口内自装 restrict。
 
 describe('DSH 0.2.1 子代理 seam（startActivation）', () => {
-  it('仅 startActivation 可用时走统一激活入口：delivery=parent，request 不传 toolFilter', async () => {
+  it('仅 startActivation 可用时走统一激活入口：delivery=parent，任务字段在顶层且不传 toolFilter', async () => {
     const h = await makeHarness(new ActivationFakeSubagents())
     await h.store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read', 'wf_ask_user'], mcpServers: [] })
     h.subagents.onStart = (childId) => {
@@ -1187,11 +1189,26 @@ describe('DSH 0.2.1 子代理 seam（startActivation）', () => {
     expect(spec.provider).toBe('spawn')
     expect(spec.label).toBe('节点n-a1')
     expect(spec.delivery).toBe('parent')
-    expect(spec.request.prompt).toEqual(blocks())
-    expect(spec.request.parent).toEqual({ id: 'session-1' })
-    expect(spec.request.agentOptions).toEqual({ provider: 'deepseek', model: 'deepseek-chat' })
-    expect('toolFilter' in spec.request).toBe(false)
+    expect(spec.prompt).toEqual(blocks())
+    expect(spec.parent).toEqual({ id: 'session-1' })
+    expect(spec.agentOptions).toEqual({ provider: 'deepseek', model: 'deepseek-chat' })
+    expect('request' in spec).toBe(false)
+    expect('toolFilter' in spec).toBe(false)
     expect(spec.signal).toBeInstanceOf(AbortSignal)
+  })
+
+  it('激活首步携带节点思考强度及单次覆盖值', async () => {
+    const h = await makeHarness(new ActivationFakeSubagents())
+    await h.store.saveToolCombo({ id: 'combo-c1', name: 'c1', tools: ['read'], mcpServers: [] })
+
+    await h.runner.startNodeTask(taskInput({
+      node: agentNode('n-a1', { reasoning: 'low' }),
+      thinking: 'high',
+    }))
+
+    expect(h.subagents.activations[0]?.agentOptions).toEqual({
+      provider: 'deepseek', model: 'deepseek-chat', reasoningEffort: 'high',
+    })
   })
 
   it('复用：0.2.1 面仍走 sendMessage 相邻派发（不重复创建）', async () => {
