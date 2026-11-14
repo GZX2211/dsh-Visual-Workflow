@@ -4,7 +4,7 @@
 // startNodeTask / interruptChild / 软截停消费。
 //
 // 官方 seam 取证：
-// - 0.2.1+：startActivation({ provider, label, request:{prompt,parent,agentOptions?}, signal, delivery }) → {childId,messageId,result,dispose}；request.prompt 为首条 user 消息，创建即推理；request 已移除 persona/toolFilter。
+// - 0.2.1+：startActivation({ provider, label, prompt, parent, agentOptions?, signal, delivery }) → {childId,messageId,result,dispose}；prompt 为首条 user 消息，创建即推理；request 已移除 persona/toolFilter。
 // - ≤0.2.0（兜底）：startContinuable({ provider, label, request:{prompt,parent,toolFilter?,agentOptions?}, signal }) → {childId,messageId}。
 // - interrupt(childId,{kind:'user',parentSessionId}) 尽力中断。
 // - 每子代理作用域贡献：官方无 registerContinuableSetup，改为 agent/created 事件（0.1.7 前名为 agent/session-start）在创建窗口按 agent.ctx 安装四类贡献（可见性/软截停/模型选择/角色提示词），与 installModelSelection(agentCtx,…) 范式一致。
@@ -135,15 +135,10 @@ export interface AgentsServiceLike {
 export interface SubagentActivationSpecLike {
   provider: string
   label: string
-  request: {
-    prompt: Array<{ type: 'text'; text: string }>
-    parent: unknown
-    /**
-     * 官方子代理创建参数。reasoningEffort 必须在创建时给出：官方步进准备会把它固化进
-     * 首条请求的选择，之后 agent/request 阶段不允许再改（0.2.2-rc.1 主循环断言）。
-     */
-    agentOptions?: { provider?: string; model?: string; reasoningEffort?: string }
-  }
+  prompt: Array<{ type: 'text'; text: string }>
+  parent: unknown
+  /** 思考强度在创建时提交，避免步进准备后再改写选择。 */
+  agentOptions?: { provider?: string; model?: string; reasoningEffort?: string }
   signal: AbortSignal
   /**
    * parent = 完成后向父代理发结算通知（与 0.2.0 startContinuable 的 notifySettlement
@@ -806,13 +801,10 @@ export class NodeAgentRunner implements NodeRunner {
         return subagents.startActivation({
           provider,
           label,
-          request: {
-            // 首条消息 = 完整任务块（任务 + 上下文），杜绝创建即空转；角色 Prompt 由
-            // prompt-setup 注册为系统提示词独立段，不占用官方人设。
-            prompt,
-            parent,
-            ...(Object.keys(agentOptions).length > 0 ? { agentOptions } : {}),
-          },
+          // 激活 API 直接读取顶层 parent/prompt；嵌套 request 会在身份校验时失败。
+          prompt,
+          parent,
+          ...(Object.keys(agentOptions).length > 0 ? { agentOptions } : {}),
           signal: input.signal,
           // 与 0.2.0 startContinuable 的结算通知语义保持一致（父代理仍收到完成通知）。
           delivery: 'parent',

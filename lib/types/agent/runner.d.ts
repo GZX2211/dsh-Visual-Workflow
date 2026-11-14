@@ -40,21 +40,16 @@ export interface AgentsServiceLike {
 export interface SubagentActivationSpecLike {
     provider: string;
     label: string;
-    request: {
-        prompt: Array<{
-            type: 'text';
-            text: string;
-        }>;
-        parent: unknown;
-        /**
-         * 官方子代理创建参数。reasoningEffort 必须在创建时给出：官方步进准备会把它固化进
-         * 首条请求的选择，之后 agent/request 阶段不允许再改（0.2.2-rc.1 主循环断言）。
-         */
-        agentOptions?: {
-            provider?: string;
-            model?: string;
-            reasoningEffort?: string;
-        };
+    prompt: Array<{
+        type: 'text';
+        text: string;
+    }>;
+    parent: unknown;
+    /** 思考强度在创建时提交，避免步进准备后再改写选择。 */
+    agentOptions?: {
+        provider?: string;
+        model?: string;
+        reasoningEffort?: string;
     };
     signal: AbortSignal;
     /**
