@@ -162,6 +162,24 @@ describe('startRun 启动与运行锁', () => {
     await expect(h.runtime.startRun({ sessionId: 'session-1', flowId: 'flow-none' })).rejects.toMatchObject({ code: 'WF_NOT_FOUND' })
   })
 
+  it('blocked 的 Dify 导入实例在派发前被兼容护栏拒绝', async () => {
+    const h = await makeHarness()
+    const flow = makeFlow()
+    flow.sourceImport = {
+      platform: 'dify',
+      importedAt: '2026-11-13T00:00:00.000Z',
+      status: 'blocked',
+      issues: [{ code: 'DIFY_NODE_UNSUPPORTED', level: 'error', message: '代码节点尚未适配', nodeId: 'n-a1' }],
+      dependencies: [],
+    }
+    await h.store.saveWorkflow(flow, 'session-1', { force: true })
+    await expect(h.runtime.startRun({ sessionId: 'session-1', flowId: flow.id })).rejects.toMatchObject({
+      code: 'WF_IMPORTED_FLOW_BLOCKED',
+      message: expect.stringContaining('n-a1'),
+    })
+    expect(h.runtime.activeRunForSession('session-1')).toBeNull()
+  })
+
   it('运行前完整性：缺启动/结束节点 WF_FLOW_INCOMPLETE（中文名按模式渲染）', async () => {
     const h = await makeHarness()
     const noStart = makeFlow()

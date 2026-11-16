@@ -15,6 +15,7 @@ import type { TemplatesFace } from './useTemplates.js'
 import type { ToastFace } from './useToast.js'
 import type { EditorActionsFace } from './useEditorActions.js'
 import type { Dict } from '../i18n.js'
+import type { WorkflowImportMetadata } from '../../host/shared/workflow-import.js'
 import { EP } from '../lib/remote.js'
 import { readFileAsText, readFileAsBase64, download } from '../lib/files.js'
 import { isRoleTemplateBundle } from '../lib/bundle.js'
@@ -29,6 +30,14 @@ export interface StudioTransferFace {
   onGroupMdSelected(file: File | null): Promise<void>
   onFileSelect(picked: File[]): Promise<void>
   testDbConnection(): Promise<void>
+}
+
+interface WorkflowImportResponse {
+  conflict?: boolean
+  existingName?: string
+  template?: unknown
+  sourceFormat?: "dify"
+  report?: WorkflowImportMetadata
 }
 
 /** 导入导出与文件/数据库交互面（远端失败抛错，由调用方 toast）。 */
@@ -47,6 +56,23 @@ export function useStudioTransfer(
   personaInputRef: React.RefObject<HTMLInputElement | null>,
   groupMdInputRef: React.RefObject<HTMLInputElement | null>,
 ): StudioTransferFace {
+  const notifyWorkflowImported = useCallback((result: WorkflowImportResponse): void => {
+    if (result.sourceFormat !== "dify" || !result.report) {
+      notify('success', t.toastImported)
+      return
+    }
+    const count = String(result.report.issues.length)
+    if (result.report.status === "blocked") {
+      notify('error', t.toastDifyImportedBlocked.replace('{count}', count))
+      return
+    }
+    if (result.report.status === "review-required") {
+      notify('success', t.toastDifyImportedReview.replace('{count}', count))
+      return
+    }
+    notify('success', t.toastDifyImportedReady)
+  }, [notify, t.toastDifyImportedBlocked, t.toastDifyImportedReady, t.toastDifyImportedReview, t.toastImported])
+
   // ---------- 导入导出 ----------
   const exportCurrent = useCallback(async () => {
     if (editorData?.kind === 'workflow' || editorData?.kind === 'service') {
@@ -100,7 +126,7 @@ export function useStudioTransfer(
         notify('success', t.toastImported)
         return
       }
-      const result = await remote.call(EP.EP_IMPORT_WORKFLOW, { json }) as { conflict?: boolean; existingName?: string; template?: unknown }
+      const result = await remote.call(EP.EP_IMPORT_WORKFLOW, { json }) as WorkflowImportResponse
       if (result?.conflict) {
         dispatch({
           type: 'CONFIRM_SET',
@@ -117,11 +143,11 @@ export function useStudioTransfer(
       // 图2 交互改造：导入一律落为「工作流模板」（全局共享，跨会话可见），
       // 用户需在画布中「创建实例」后才能运行——故只刷新模板列表，不动实例列表。
       await flowTemplates.loadFlowTemplates()
-      notify('success', t.toastImported)
+      notifyWorkflowImported(result)
     } catch (error) {
       toastError(error)
     }
-  }, [dispatch, notify, remote, t.importConflictMessage, t.toastImported, templates, flowTemplates, toastError, workflows])
+  }, [dispatch, notify, notifyWorkflowImported, remote, t.importConflictMessage, t.toastImported, templates, flowTemplates, toastError, workflows])
 
   const resolveImportConflict = useCallback(async (mode: 'rename' | 'overwrite') => {
     const confirm = state.confirm
@@ -132,15 +158,16 @@ export function useStudioTransfer(
       if (confirm.kind2 === 'agent') {
         await remote.call(EP.EP_IMPORT_AGENT_TEMPLATE, { json, conflictMode: mode })
         await templates.loadTemplates()
+        notify('success', t.toastImported)
       } else {
-        await remote.call(EP.EP_IMPORT_WORKFLOW, { json, conflictMode: mode })
+        const result = await remote.call(EP.EP_IMPORT_WORKFLOW, { json, conflictMode: mode }) as WorkflowImportResponse
         await flowTemplates.loadFlowTemplates()
+        notifyWorkflowImported(result)
       }
-      notify('success', t.toastImported)
     } catch (error) {
       toastError(error)
     }
-  }, [dispatch, notify, remote, state.confirm, t.toastImported, templates, flowTemplates, toastError])
+  }, [dispatch, notify, notifyWorkflowImported, remote, state.confirm, t.toastImported, templates, flowTemplates, toastError])
 
   // ---------- 文件选择（文件模板/节点：文本直接读；非文本读 base64 交后端受管拷贝） ----------
   /** 角色系统提示词 .md 加载（§4.2.3.1 卡片设计）。 */

@@ -1375,6 +1375,7 @@ packages:
     engines: {node: '>=0.4'}
 
   yaml@2.8.1:
+    resolution: {integrity: sha512-lcYcMxX2PO9XMGvAJkJ3OsNMw+/7FKes7/hgerGUYWIoWu5j/+YQqcZr5JnPZWzOsEBgMbSbiSTn/dv/69Mkpw==}
     engines: {node: '>= 14.6'}
 
   yuku-ast@0.8.7:

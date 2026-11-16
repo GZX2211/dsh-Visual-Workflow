@@ -1,6 +1,7 @@
 export { WorkflowImportError } from "./errors.js";
 export { WorkflowImportService } from "./service.js";
 export { parseDifyWorkflow } from "./source/dify/parser.js";
+export { convertDifyWorkflow } from "./target/dsh/convert.js";
 export type * from "./ir/source-ir.js";
 export type * from "./types.js";
 export type { DifyCapabilities, NormalizedDifyWorkflow } from "./source/dify/normalize.js";

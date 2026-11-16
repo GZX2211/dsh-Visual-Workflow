@@ -73,6 +73,8 @@ export interface InputRequirement {
 export interface RuntimeInputOptions {
     executionMode?: ExecutionMode;
     dagConcurrency?: number;
+    /** 外部固定图的工作流级输入可一次填写，并按同名声明分发给所有引用节点。 */
+    sharedWorkflowInputs?: boolean;
     nodeInputs: Record<string, Record<string, InputRequirement>>;
     files: InputAttachmentRef[];
     handoffPolicy?: HandoffPolicy;

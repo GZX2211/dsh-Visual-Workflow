@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/流程编排.png" alt="界面预览" width="100%" />
+  <img src="https://raw.githubusercontent.com/etoilestar/dsh-Visual-Workflow/main/assets/images/流程编排.png" alt="界面预览" width="100%" />
 </p>
 
 <h1 align="center">可视化 Agent 编排平台</h1>
@@ -20,7 +20,7 @@
   <a href="#"><img alt="pnpm" src="https://img.shields.io/badge/pnpm-11-orange"></a>
   <a href="#"><img alt="vitest" src="https://img.shields.io/badge/test-vitest-cyan"></a>
   <a href="#"><img alt="license" src="https://img.shields.io/badge/license-MIT-lightgrey"></a>
-  <a href="https://github.com/GZX2211/dsh-Visual-Workflow/releases"><img alt="version" src="https://img.shields.io/github/v/release/GZX2211/dsh-Visual-Workflow?label=version&color=0891b2&include_prereleases"></a>
+  <a href="https://github.com/etoilestar/dsh-Visual-Workflow/releases"><img alt="version" src="https://img.shields.io/github/v/release/etoilestar/dsh-Visual-Workflow?label=version&color=0891b2&include_prereleases"></a>
 </p>
 
 ---
@@ -290,7 +290,7 @@ node scripts/run-sales-live.mjs
 
 ## 安装（Windows）
 
-当前插件版本为 **0.11.0**；安装后核对插件 package.json 与生成 lib。运行输入、默认 explicit、主动 auto 配置及宿主访问控制的部署前置条件见 [运行输入说明](docs/runtime-input-handoff.md)。
+当前插件版本为 **1.1.0**；安装后核对插件 package.json 与生成 lib。运行输入、默认 explicit、主动 auto 配置及宿主访问控制的部署前置条件见 [运行输入说明](docs/runtime-input-handoff.md)。
 
 > **安装示例**：以下使用 **DeepSeek Harness `0.2.0-rc.2`**；旧版 `0.1.6-alpha.2` 的 Preset Scope 兼容范围与验收状态见上文。本次补丁不要求升级现有宿主。新安装可使用：
 >
@@ -311,7 +311,7 @@ allowBuilds:
 2. **运行插件安装命令**:
 
 ```bash
-dsh plugin --profile web add "github:GZX2211/dsh-Visual-Workflow#main"
+dsh plugin --profile web add "github:etoilestar/dsh-Visual-Workflow#main"
 ```
 
 3. **验证挂载**：（可选）
@@ -359,7 +359,17 @@ dsh plugin --profile web remove dsh-visual-workflow
 7. 创建实例。
 8. 点击运行。
 
-### 方式二：让 Agent 设计组织
+### 方式二：导入 Dify 工作流
+
+点击工作台顶部「导入」，选择 Dify 导出的 `.yml` / `.yaml` 文件。导入结果落为工作流模板，并携带兼容报告。Start → LLM/Agent → 直通 Answer/End 子集会转换为确定性 DAG：创建实例、核对模型、填写运行输入后即可运行。
+
+- `ready`：结构可转换，仍建议打开模板复核。
+- `review-required`：通常需要核对/重新选择模型，并在运行时填写由 Dify Start 变量生成的输入。
+- `blocked`：包含工具、知识库、HTTP、代码、模板转换、条件、循环、迭代、未知节点或非直通结束语义；Host 会在派发前拒绝运行。
+
+凭据和敏感请求头不会从 Dify 文件迁移；导入器只保留脱敏配置。详见 [Dify 导入说明](docs/dify-import.md)。
+
+### 方式三：让 Agent 设计组织
 
 在主会话中输入：
 
@@ -395,7 +405,7 @@ wf_graph_patch
 
 `/arrange` 本身只负责注入规划指令，不会因为规划完成而自动运行工作流。
 
-### 方式三：运行中人工调整
+### 方式四：运行中人工调整
 
 运行 Workflow 后：
 
@@ -407,7 +417,7 @@ wf_graph_patch
 
 也可以在流程中使用 `暂停/pause` 节点建立人工审查点。
 
-### 方式四：Agent 在运行中自动调整组织
+### 方式五：Agent 在运行中自动调整组织
 
 父代理根据运行事实发现当前组织不再合适时会自己调用 `wf_graph_patch` 修改当前实例：
 
@@ -487,7 +497,7 @@ scheduler/                  # 定时任务定义与触发记录
 ## 本地开发
 
 ```bash
-git clone https://github.com/GZX2211/dsh-Visual-Workflow.git
+git clone https://github.com/etoilestar/dsh-Visual-Workflow.git
 cd dsh-visual-workflow
 pnpm install
 dsh plugin --profile web add "link:$PWD"

@@ -109,6 +109,21 @@ it("test_linear_three_ordinary_agents_advance_and_finish_without_parent_tools_or
   expect(fixture.h.runtime.activeRunForSession("session-1")).toBeNull()
 })
 
+it("test_imported_dify_dag_exposes_the_final_agent_output_as_run_summary", async () => {
+  const flow = flowOf(["answer"])
+  flow.sourceImport = {
+    platform: "dify",
+    importedAt: "2026-11-13T00:00:00.000Z",
+    status: "review-required",
+    issues: [{ code: "DIFY_MODEL_REBIND_REQUIRED", level: "warning", message: "核对模型" }],
+    dependencies: [],
+  }
+  const fixture = await harness(flow)
+  const { runId } = await fixture.launch()
+  await finishTask(fixture, "answer", "这是导入工作流的最终业务结果")
+  expect((await fixture.h.store.getRun(runId))!.summary).toBe("这是导入工作流的最终业务结果")
+})
+
 it("test_concurrent_parallel_reviews_join_once_only_after_both_durable_acceptances", async () => {
   const flow = flowOf(["a", "b", "c", "d"])
   flow.lines = [["start", "a"], ["a", "b"], ["a", "c"], ["b", "d"], ["c", "d"], ["d", "end"]].map(([source, target], index) => ({ id: `edge-${index}`, source, target, sourceHandle: "flow-out", targetHandle: "flow-in" }))

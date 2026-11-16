@@ -9,7 +9,8 @@ import { findResumableRun, publicRuntimeInputs, dagStateOf } from '../orchestrat
 import type { RunSnapshot } from "../shared/types.js"
 import { buildIndexForDatabase, createDatabaseDriver, indexPathOf, testDatabaseConnection } from '../tools/index.js'
 import { VectorIndex } from '../embedding/indexer.js'
-import { exportAgentTemplate, exportWorkflowBundle, importAgentTemplate, importWorkflowBundle } from '../transfer/bundle.js'
+import { exportAgentTemplate, exportWorkflowBundle, importAgentTemplate } from '../transfer/bundle.js'
+import { importWorkflowSource } from "../transfer/import-workflow.js"
 import { httpError } from './http.js'
 import { VisualWorkflowApiBase } from './boundary.js'
 
@@ -174,7 +175,7 @@ export class RunEndpoints extends VisualWorkflowApiBase {
   async importWorkflow(args: { json?: unknown; conflictMode?: unknown }): Promise<unknown> {
     // 图2 交互改造：导入一律落为「工作流模板」（全局共享），不再直接创建实例——
     // 用户需在画布中「创建实例」后才能运行（sessionId 参数不再需要）。
-    return importWorkflowBundle(this.host.store, args?.json, {
+    return importWorkflowSource(this.host.store, args?.json, {
       conflictMode: args?.conflictMode as 'rename' | 'overwrite' | undefined,
     })
   }

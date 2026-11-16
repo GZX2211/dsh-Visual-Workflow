@@ -124,6 +124,29 @@ it("test_required_initial_input_is_rejected_before_parent_injection", async () =
   expect(h.runner.calls).toEqual([])
 })
 
+it("test_dify_workflow_input_is_declared_once_and_distributed_to_every_referencing_agent", async () => {
+  const h = await makeHarness()
+  const flow = makeFlow()
+  flow.sourceImport = {
+    platform: "dify",
+    importedAt: "2026-11-13T00:00:00.000Z",
+    status: "review-required",
+    issues: [{ code: "DIFY_RUNTIME_INPUT_REQUIRED", level: "warning", message: "填写 query" }],
+    dependencies: [],
+  }
+  for (const node of flow.nodes) if (node.kind === "agent") node.data.execution = { inputs: { query: { kind: "text" } } }
+  await h.store.saveWorkflow(flow, "session-1")
+  await expect(h.runtime.runtimeInputOptions({ sessionId: "session-1", flowId: flow.id })).resolves.toMatchObject({ sharedWorkflowInputs: true, initialNodeId: "n-a1" })
+  const result = await h.runtime.startRun({
+    sessionId: "session-1",
+    flowId: flow.id,
+    runtimeInputs: { workflowInputs: { query: [{ kind: "text", value: "只填写一次" }] }, nodeInputs: {} },
+  })
+  const snapshot = h.runtime.runSnapshot(result.runId)!
+  expect(snapshot.runtimeInputs?.nodeInputs["n-a1"].query[0]).toMatchObject({ kind: "text", value: "只填写一次" })
+  expect(snapshot.runtimeInputs?.nodeInputs["n-a2"].query[0]).toMatchObject({ kind: "text", value: "只填写一次" })
+})
+
 it("test_multiple_attachment_candidates_never_fill_required_initial_input_automatically", async () => {
   const h = await makeHarness(undefined, { sessionInputFiles: async () => [{ attachmentId: "one", name: "data", bytes: 1, path: "/one" }, { attachmentId: "two", name: "data", bytes: 1, path: "/two" }] })
   const flow = makeFlow()

@@ -53,5 +53,7 @@ export interface GraphCanvasProps {
     emptyHint: string;
     /** 画布左上角工作流名称角标（实例/模板 + 名称）。 */
     workflowCaption?: string;
+    /** 画布角标悬停详情（外部导入兼容报告等）。 */
+    workflowCaptionTitle?: string;
 }
 export declare function GraphCanvas(props: GraphCanvasProps): import("react").JSX.Element;

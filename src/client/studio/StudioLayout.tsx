@@ -70,6 +70,8 @@ export interface StudioLayoutProps {
   modeName: (presetId: string | null | undefined) => string
   /** 画布左上角工作流名称角标（实例/模板 + 名称）。 */
   canvasCaption: string
+  /** 外部导入兼容问题的悬停详情。 */
+  canvasCaptionTitle?: string
   // ---- 面板显隐（由 Studio 从状态推导：左栏/底栏来自折叠循环，右侧属性栏来自选中） ----
   leftOpen: boolean
   bottomOpen: boolean
@@ -126,7 +128,7 @@ export function StudioLayout(props: StudioLayoutProps) {
     canvasApiRef, canvasShellRef, libraryImportRef, personaInputRef, groupMdInputRef,
     dispatch, doc, assets, canvas, editor, run, transfer, selection, history, guard, panels, toast,
     beginLibraryDrag, dragPreview, dropGroupId,
-    modeMenuOpen, setModeMenuOpen, switchMode, canvasCaption,
+    modeMenuOpen, setModeMenuOpen, switchMode, canvasCaption, canvasCaptionTitle,
     leftOpen, bottomOpen, inspectorOpen,
     handleRun, panelsCollapsed, onTogglePanels,
     onSetLibrarySource, onSelectFlowAsset, onPlaceRoleAsset,
@@ -224,7 +226,7 @@ export function StudioLayout(props: StudioLayoutProps) {
         <input
           ref={libraryImportRef}
           type="file"
-          accept=".json,application/json"
+          accept=".json,.yml,.yaml,application/json,application/yaml,text/yaml"
           className="wf-import-hidden"
           onChange={(event) => { void transfer.handleImportFile(event.target.files?.[0] ?? null); event.target.value = '' }}
         />
@@ -354,6 +356,7 @@ export function StudioLayout(props: StudioLayoutProps) {
             zoomOutLabel={t.zoomOut}
             emptyHint={t.emptyHint}
             workflowCaption={canvasCaption}
+            workflowCaptionTitle={canvasCaptionTitle}
           />
         </div>
 

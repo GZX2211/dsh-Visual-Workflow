@@ -5,8 +5,8 @@
 // （导入导出领域行为见 tests/host/transfer/bundle.test.ts）。
 
 import { afterEach, describe, expect, it } from 'vitest'
-import { join } from 'node:path'
-import { writeFile } from "node:fs/promises"
+import { join, resolve } from 'node:path'
+import { readFile, writeFile } from "node:fs/promises"
 import { DatabaseSync } from 'node:sqlite'
 import { cleanupAll, databaseNode, makeFlow, makeHarness, saveFlow } from './fixtures/api-harness.js'
 
@@ -239,6 +239,22 @@ describe('导入导出端点', () => {
     // 实例数不变（只落模板），模板库 +1
     expect((await h.store.listWorkflows('session-1')).length).toBe(1)
     expect((await h.store.listFlowTemplates()).length).toBe(1)
+  })
+
+  it("test_import_workflow_accepts_dify_yaml_and_returns_review_report", async () => {
+    const h = await makeHarness()
+    const yaml = await readFile(resolve("tests/fixtures/dify/basic-llm.yml"), "utf8")
+    const imported = await h.api.handle("importWorkflow", { json: yaml }) as {
+      sourceFormat?: string
+      report?: { status?: string }
+      template?: { sourceImport?: { platform?: string } }
+    }
+    expect(imported).toMatchObject({
+      sourceFormat: "dify",
+      report: { status: "review-required" },
+      template: { sourceImport: { platform: "dify" } },
+    })
+    expect(await h.store.listFlowTemplates()).toHaveLength(1)
   })
 })
 

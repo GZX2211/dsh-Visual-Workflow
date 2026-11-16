@@ -11,6 +11,7 @@ import type { InputRequirement } from "./runtime-types.js"
 //   - 每个字段均以中文 JSDoc 说明业务语义。
 
 import type { OrgMeta } from './org-meta.js'
+import type { WorkflowImportMetadata } from "./workflow-import.js"
 
 // ---------------------------------------------------------------------------
 // 节点判别联合
@@ -349,6 +350,8 @@ export interface WorkflowTemplate extends WorkflowExecutionOptions {
   name: string
   /** 模板描述（可编辑）。 */
   description: string
+  /** 外部平台导入来源与兼容报告；原生模板和历史模板缺省。 */
+  sourceImport?: WorkflowImportMetadata
   /** 节点列表（全量内联，判别联合）。 */
   nodes: GraphNode[]
   /** 连线列表（全量内联）。 */
@@ -408,6 +411,8 @@ export interface WorkflowDocument extends WorkflowExecutionOptions {
   name: string
   /** 工作流描述（可编辑）。 */
   description: string
+  /** 外部平台导入来源与兼容报告；从模板实例化时保留，供运行前护栏与画布提示使用。 */
+  sourceImport?: WorkflowImportMetadata
   /** 节点列表（全量内联，判别联合）。 */
   nodes: GraphNode[]
   /** 连线列表（全量内联）。 */

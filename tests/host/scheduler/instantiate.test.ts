@@ -56,6 +56,19 @@ describe('instantiateFromTemplate 新会话字段退役（不继承）', () => {
     expect(instance.startNewSession).toBeUndefined()
     expect(instance.workspacePath).toBeUndefined()
   })
+
+  it('Dify 导入报告随模板进入实例，运行阶段仍可执行兼容护栏', () => {
+    const sourceImport = {
+      platform: 'dify' as const,
+      importedAt: '2026-11-13T00:00:00.000Z',
+      status: 'review-required' as const,
+      issues: [{ code: 'DIFY_MODEL_REBIND_REQUIRED', level: 'warning' as const, message: '请核对模型' }],
+      dependencies: [],
+    }
+    const instance = instantiateFromTemplate(template({ sourceImport }), 'session-1', [], { id: () => 'wf-1' })
+    expect(instance.sourceImport).toEqual(sourceImport)
+    expect(instance.sourceImport).not.toBe(sourceImport)
+  })
 })
 
 describe('overwriteInstanceFromTemplate 覆盖语义（每会话单实例）', () => {
@@ -82,5 +95,17 @@ describe('overwriteInstanceFromTemplate 覆盖语义（每会话单实例）', (
     )
     expect(overwritten.startNewSession).toBeUndefined()
     expect(overwritten.workspacePath).toBeUndefined()
+  })
+
+
+  it('覆盖实例时同步模板的 Dify 导入报告', () => {
+    const sourceImport = {
+      platform: 'dify' as const,
+      importedAt: '2026-11-13T00:00:00.000Z',
+      status: 'blocked' as const,
+      issues: [{ code: 'DIFY_NODE_UNSUPPORTED', level: 'error' as const, message: '不支持节点' }],
+      dependencies: [],
+    }
+    expect(overwriteInstanceFromTemplate(template({ sourceImport }), existing()).sourceImport).toEqual(sourceImport)
   })
 })

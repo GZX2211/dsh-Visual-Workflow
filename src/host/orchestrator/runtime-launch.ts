@@ -54,6 +54,14 @@ export abstract class RuntimeLaunch extends RuntimeBase {
     if (raw !== undefined || snapshot.runtimeInputs !== undefined || access.files.length === 1) {
       const inputs = await runtimeInputsOf(raw ?? snapshot.runtimeInputs ?? {}, flow, access)
       const target = Object.values(inputs.workflowInputs).some((values) => values.length) ? workflowInputTarget(flow) : undefined
+      // Dify Start 变量属于工作流作用域：用户只填写一次，按节点同名输入合同分发。
+      // 原生工作流仍维持“工作流输入只属于唯一初始 Agent”的既有语义。
+      if (flow.sourceImport?.platform === "dify") for (const node of flow.nodes) if (node.kind === "agent") {
+        const slots = inputs.nodeInputs[node.id] ??= {}
+        for (const name of Object.keys(executionOf(node).inputs ?? {})) if (!slots[name]?.length && inputs.workflowInputs[name]?.length) {
+          slots[name] = structuredClone(inputs.workflowInputs[name])
+        }
+      }
       let selected = false
       // A single authorized candidate can satisfy one declared file slot per node; no business inference.
       if (access.files.length === 1) for (const node of flow.nodes) if (node.kind === "agent" && !snapshot.nodes.find((record) => record.nodeId === node.id)?.resumed) {
@@ -90,7 +98,7 @@ export abstract class RuntimeLaunch extends RuntimeBase {
     try { initialNodeId = workflowInputTarget(flow) } catch (error) {
       if (!(error instanceof WfError) || error.code !== "WF_INPUT_AMBIGUOUS") throw error
     }
-    return { executionMode: executionModeOf(flow.executionMode), dagConcurrency: dagConcurrencyOf(flow.dagConcurrency), nodeInputs, files, ...(initialNodeId ? { initialNodeId } : {}), handoffPolicy: checkpoint?.handoffPolicy ?? (checkpoint && !checkpoint.harnessContext ? "explicit" : undefined), ...(checkpoint ? { checkpoint: { runId: checkpoint.id, runtimeInputs: publicRuntimeInputs(checkpoint.runtimeInputs), handoffPolicy: checkpoint.handoffPolicy, executionMode: checkpoint.executionMode ?? "agent", dagConcurrency: checkpoint.dagConcurrency } } : {}) }
+    return { executionMode: executionModeOf(flow.executionMode), dagConcurrency: dagConcurrencyOf(flow.dagConcurrency), ...(flow.sourceImport?.platform === "dify" ? { sharedWorkflowInputs: true } : {}), nodeInputs, files, ...(initialNodeId ? { initialNodeId } : {}), handoffPolicy: checkpoint?.handoffPolicy ?? (checkpoint && !checkpoint.harnessContext ? "explicit" : undefined), ...(checkpoint ? { checkpoint: { runId: checkpoint.id, runtimeInputs: publicRuntimeInputs(checkpoint.runtimeInputs), handoffPolicy: checkpoint.handoffPolicy, executionMode: checkpoint.executionMode ?? "agent", dagConcurrency: checkpoint.dagConcurrency } } : {}) }
   }
 
   /** Pending-node binding uses the dispatch mutex and publishes only after a durable write. */
@@ -161,6 +169,10 @@ export abstract class RuntimeLaunch extends RuntimeBase {
       ? await this.deps.store.getServiceAsFlow(flowId)
       : await this.deps.store.getWorkflow(sessionId, flowId)
     if (!flow) throw new WfError(mode === 'mode2' ? '服务不存在' : '工作流不存在', 'WF_NOT_FOUND')
+    if (flow.sourceImport?.status === "blocked") {
+      const blockers = flow.sourceImport.issues.filter((issue) => issue.level === "error")
+      throw new WfError(`导入的 Dify 工作流包含尚未适配的执行语义：${blockers.map((issue) => issue.nodeId ? `${issue.nodeId}（${issue.message}）` : issue.message).join('；')}`, 'WF_IMPORTED_FLOW_BLOCKED')
+    }
     const executionMode = executionModeOf(input.executionMode ?? flow.executionMode)
     const sessionRuns = [...this.runs.values()].filter((entry) => entry.snapshot.sessionId === sessionId && ["running", "paused"].includes(entry.snapshot.status))
     if (sessionRuns.some((entry) => executionMode === "dag" || entry.snapshot.executionMode === "dag")) throw new WfError("当前会话已有活动运行；DAG 不与其它运行共享父会话，请停止旧运行或使用独立会话", "WF_DAG_SESSION_CONFLICT")

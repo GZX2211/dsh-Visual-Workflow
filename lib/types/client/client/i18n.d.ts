@@ -352,6 +352,18 @@ export declare const zh: {
     importRename: string;
     importCancel: string;
     toastImported: string;
+    toastDifyImportedReady: string;
+    toastDifyImportedReview: string;
+    toastDifyImportedBlocked: string;
+    difyImportStatus: {
+        ready: string;
+        'review-required': string;
+        blocked: string;
+    };
+    difyImportIssueLevel: {
+        warning: string;
+        error: string;
+    };
     toastExported: string;
     needStartAndEnd: string;
     needParentForService: string;

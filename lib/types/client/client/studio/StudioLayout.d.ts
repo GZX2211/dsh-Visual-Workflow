@@ -44,6 +44,8 @@ export interface StudioLayoutProps {
     modeName: (presetId: string | null | undefined) => string;
     /** 画布左上角工作流名称角标（实例/模板 + 名称）。 */
     canvasCaption: string;
+    /** 外部导入兼容问题的悬停详情。 */
+    canvasCaptionTitle?: string;
     leftOpen: boolean;
     bottomOpen: boolean;
     inspectorOpen: boolean;

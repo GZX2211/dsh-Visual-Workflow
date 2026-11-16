@@ -1,5 +1,6 @@
 import type { InputRequirement } from "./runtime-types.js";
 import type { OrgMeta } from './org-meta.js';
+import type { WorkflowImportMetadata } from "./workflow-import.js";
 /** 节点种类：9 种判别的稳定字面量。 */
 export type NodeKind = 'parent' | 'agent' | 'file' | 'database' | 'start' | 'end' | 'pause' | 'group' | 'proxy';
 /** 节点公共基座：所有节点的共有最小字段。 */
@@ -311,6 +312,8 @@ export interface WorkflowTemplate extends WorkflowExecutionOptions {
     name: string;
     /** 模板描述（可编辑）。 */
     description: string;
+    /** 外部平台导入来源与兼容报告；原生模板和历史模板缺省。 */
+    sourceImport?: WorkflowImportMetadata;
     /** 节点列表（全量内联，判别联合）。 */
     nodes: GraphNode[];
     /** 连线列表（全量内联）。 */
@@ -367,6 +370,8 @@ export interface WorkflowDocument extends WorkflowExecutionOptions {
     name: string;
     /** 工作流描述（可编辑）。 */
     description: string;
+    /** 外部平台导入来源与兼容报告；从模板实例化时保留，供运行前护栏与画布提示使用。 */
+    sourceImport?: WorkflowImportMetadata;
     /** 节点列表（全量内联，判别联合）。 */
     nodes: GraphNode[];
     /** 连线列表（全量内联）。 */

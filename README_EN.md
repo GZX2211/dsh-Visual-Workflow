@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/GZX2211/dsh-Visual-Workflow/main/assets/images/流程编排.png" alt="UI Preview" width="100%" />
+  <img src="https://raw.githubusercontent.com/etoilestar/dsh-Visual-Workflow/main/assets/images/流程编排.png" alt="UI Preview" width="100%" />
 </p>
 
 <h1 align="center">Visual Agent Orchestration Platform</h1>
@@ -20,7 +20,7 @@
   <a href="#"><img alt="pnpm" src="https://img.shields.io/badge/pnpm-11-orange"></a>
   <a href="#"><img alt="vitest" src="https://img.shields.io/badge/test-vitest-cyan"></a>
   <a href="#"><img alt="license" src="https://img.shields.io/badge/license-MIT-lightgrey"></a>
-  <a href="https://github.com/GZX2211/dsh-Visual-Workflow/releases"><img alt="version" src="https://img.shields.io/github/v/release/GZX2211/dsh-Visual-Workflow?label=version&color=0891b2&include_prereleases"></a>
+  <a href="https://github.com/etoilestar/dsh-Visual-Workflow/releases"><img alt="version" src="https://img.shields.io/github/v/release/etoilestar/dsh-Visual-Workflow?label=version&color=0891b2&include_prereleases"></a>
 </p>
 
 ---
@@ -279,7 +279,7 @@ allowBuilds:
 2. **Run the plugin installation command**:
 
 ```bash
-dsh plugin --profile web add "github:GZX2211/dsh-Visual-Workflow#main"
+dsh plugin --profile web add "github:etoilestar/dsh-Visual-Workflow#main"
 ```
 
 3. **Verify mounting**: (optional)
@@ -327,7 +327,17 @@ dsh plugin --profile web remove dsh-visual-workflow
 7. Create an instance.
 8. Click Run.
 
-### Approach 2: Let the Agent Design the Organization
+### Approach 2: Import a Dify Workflow
+
+Click **Import** in the workbench and select a Dify `.yml` or `.yaml` export. The result is saved as a workflow template with a compatibility report:
+
+- `ready`: the structure was converted; review the template before production use.
+- `review-required`: models, tools, knowledge bases, HTTP integrations, or variables require rebinding.
+- `blocked`: loops, unknown nodes, or target-graph errors must be fixed before execution.
+
+Credentials and sensitive request headers are never migrated. See [Dify import guide](docs/dify-import.md).
+
+### Approach 3: Let the Agent Design the Organization
 
 In the main session, enter:
 
@@ -363,7 +373,7 @@ Run
 
 `/arrange` itself only injects planning instructions; it does not automatically run the workflow upon planning completion.
 
-### Approach 3: Runtime Manual Adjustment
+### Approach 4: Runtime Manual Adjustment
 
 After running a Workflow:
 
@@ -375,7 +385,7 @@ After running a Workflow:
 
 You can also use `pause` nodes in the flow to establish manual review points.
 
-### Approach 4: Agent Automatically Adjusts Organization During Runtime
+### Approach 5: Agent Automatically Adjusts Organization During Runtime
 
 When the parent agent discovers from runtime facts that the current organization is no longer suitable, it will call `wf_graph_patch` to modify the current instance itself:
 
@@ -453,7 +463,7 @@ Default values can be overridden in `cordis.patch.yml`:
 ## Local Development
 
 ```bash
-git clone https://github.com/GZX2211/dsh-Visual-Workflow.git
+git clone https://github.com/etoilestar/dsh-Visual-Workflow.git
 cd dsh-visual-workflow
 pnpm install
 dsh plugin --profile web add "link:$PWD"

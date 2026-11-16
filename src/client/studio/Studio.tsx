@@ -105,7 +105,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
   const editorData = editorDataOf(state)
   const running = isRunningOf(state)
   // 画布左上角工作流名称角标（用户批注：显示方式「模版/实例/资产（工作流名称）」）
-  const canvasCaption = currentFlowTemplate
+  const canvasCaptionBase = currentFlowTemplate
     ? `${t.canvasCaptionTemplate}${currentFlowTemplate.name ?? ''}`
     : currentFlowAsset
       ? `${t.canvasCaptionAsset}${currentFlowAsset.name ?? ''}`
@@ -114,6 +114,13 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
         : currentFlow
           ? `${t.canvasCaptionInstance}${currentFlow.name ?? ''}`
           : ''
+  const importReport = currentFlowTemplate?.sourceImport ?? currentFlow?.sourceImport
+  const canvasCaption = importReport
+    ? `${canvasCaptionBase} · ${t.difyImportStatus[importReport.status]} (${importReport.issues.length})`
+    : canvasCaptionBase
+  const canvasCaptionTitle = importReport
+    ? importReport.issues.map((issue) => `${t.difyImportIssueLevel[issue.level]}：${issue.message}`).join('\n')
+    : undefined
   // 运行中双向同步（需求 §4.5.8）：当前运行节点高亮 = 快照中 status=running 的节点
   // id 列表（GraphCanvas 渲染 is-highlighted；防回环：只写视图，不进保存/撤销历史）。
   const highlightedNodeIds = useMemo(() => runningNodeIds(state.run.snapshot), [state.run.snapshot])
@@ -309,6 +316,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
       instanceRunning={instanceRunning}
       modeName={modeName}
       canvasCaption={canvasCaption}
+      canvasCaptionTitle={canvasCaptionTitle}
       leftOpen={leftOpen}
       bottomOpen={bottomOpen}
       inspectorOpen={inspectorOpen}

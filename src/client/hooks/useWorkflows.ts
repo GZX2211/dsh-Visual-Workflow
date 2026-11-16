@@ -125,6 +125,7 @@ export function useWorkflows(
       ...(template.dagConcurrency !== undefined ? { dagConcurrency: template.dagConcurrency } : {}),
       name: template.name ?? fallbackName,
       description: template.description ?? '',
+      ...(template.sourceImport ? { sourceImport: JSON.parse(JSON.stringify(template.sourceImport)) as WorkflowDocument['sourceImport'] } : {}),
       revision: 0,
       nodes: JSON.parse(JSON.stringify(template.nodes ?? [])) as WorkflowDocument['nodes'],
       lines: JSON.parse(JSON.stringify(template.lines ?? [])) as WorkflowDocument['lines'],

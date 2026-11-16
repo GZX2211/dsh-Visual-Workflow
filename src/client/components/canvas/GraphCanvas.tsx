@@ -63,13 +63,15 @@ export interface GraphCanvasProps {
   emptyHint: string
   /** 画布左上角工作流名称角标（实例/模板 + 名称）。 */
   workflowCaption?: string
+  /** 画布角标悬停详情（外部导入兼容报告等）。 */
+  workflowCaptionTitle?: string
 }
 
 export function GraphCanvas(props: GraphCanvasProps) {
   const {
     nodes, edges, copy, mode, selectedNode, selectedEdge, runStatusByNode, highlightedNodeIds,
     onInit, onNodeDragStart, onNodeMove, onNodeDropToGroup, onNodeSelect, onEdgeSelect, onPaneClick,
-    onConnect, onConnectionRejected, onGroupResize, onSwapPorts, dropTargetGroupId, fitLabel, zoomInLabel, zoomOutLabel, emptyHint, workflowCaption,
+    onConnect, onConnectionRejected, onGroupResize, onSwapPorts, dropTargetGroupId, fitLabel, zoomInLabel, zoomOutLabel, emptyHint, workflowCaption, workflowCaptionTitle,
     lockedNodeIds, lockedEdgeIds, agentPatchedNodeIds,
   } = props
   const { rootRef, viewport, viewportRef, fitView, panning, beginPan, zoomBy, screenToWorld } = useCanvasViewport(nodes, onInit)
@@ -346,7 +348,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
             />
           ))}
         </div>
-        {workflowCaption ? <div className="wf-canvas-caption">{workflowCaption}</div> : null}
+        {workflowCaption ? <div className="wf-canvas-caption" title={workflowCaptionTitle}>{workflowCaption}</div> : null}
         {nodes.length === 0 ? (
           <div className="wf-canvas-empty">
             <div className="wf-canvas-empty__hint">

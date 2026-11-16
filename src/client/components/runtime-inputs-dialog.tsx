@@ -17,13 +17,13 @@ export function RuntimeInputsDialog({ state, t, onCancel, onSubmit, onReuseCheck
   const initialNode = state.nodeId ?? state.options.initialNodeId
   const initialRequirements = initialNode ? state.options.nodeInputs[initialNode] ?? {} : {}
   const initialSlot = Object.keys(initialRequirements).length === 1 ? Object.keys(initialRequirements)[0] : ""
-  const [target, setTarget] = useState(initialNode && initialSlot ? `node:${initialNode}` : "workflow")
+  const [target, setTarget] = useState(state.options.sharedWorkflowInputs ? "workflow" : initialNode && initialSlot ? `node:${initialNode}` : "workflow")
   const [name, setName] = useState(initialSlot)
   const [kind, setKind] = useState<InputEditorKind>(initialRequirements[initialSlot]?.kind === "file" ? "attachment" : initialRequirements[initialSlot]?.kind === "json" ? "json" : "text")
   const [value, setValue] = useState("")
   const selected = state.runId ? state.nodeId ? `node:${state.nodeId}` : "" : target
   const slots = selected === "workflow" ? state.inputs.workflowInputs : state.inputs.nodeInputs[selected.slice(5)] ?? {}
-  const requirements = selected === "workflow" ? {} : state.options.nodeInputs[selected.slice(5)] ?? {}
+  const requirements = selected === "workflow" ? state.options.sharedWorkflowInputs ? initialRequirements : {} : state.options.nodeInputs[selected.slice(5)] ?? {}
   return <div className="wf-confirm-backdrop">
     <section className="wf-confirm wf-runtime-inputs" role="dialog" aria-modal="true" aria-label={t.runtimeInputsTitle}>
       <h3>{state.runId ? t.runtimeBindTitle : t.runtimeInputsTitle}</h3>

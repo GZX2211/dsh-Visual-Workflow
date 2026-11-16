@@ -302,7 +302,7 @@ export abstract class RuntimeExecute extends RuntimeLaunch {
           if (!active()) return
           run.snapshot.status = "completed"
           run.snapshot.endedAt = this.isoNow()
-          run.snapshot.summary = "DAG 所有生效路径已通过任务合同并完成"
+          run.snapshot.summary = dagCompletionSummary(flow, run)
           run.snapshot.termination = { source: "runtime", stopReason: "dag-completed" }
           terminalizeNodes(run.snapshot, this.now(), "completed")
           await this.deps.store.saveRun(run.snapshot)
@@ -871,4 +871,19 @@ export abstract class RuntimeExecute extends RuntimeLaunch {
     this.runs.delete(snapshot.id)
     return { ok: true, runId: snapshot.id, status: snapshot.status }
   }
+}
+
+/** Imported Dify answer/end nodes are pass-through stages, so expose their accepted upstream result. */
+function dagCompletionSummary(flow: WorkflowDocument, run: RunEntry): string {
+  if (flow.sourceImport?.platform !== "dify") return "DAG 所有生效路径已通过任务合同并完成"
+  const end = flow.nodes.find((node) => node.kind === "end")
+  if (!end) return "DAG 所有生效路径已通过任务合同并完成"
+  const sourceIds = [...new Set(flow.lines.filter(isFlowLine).filter((line) => line.target === end.id).map((line) => mainNodeIdOf(flow, line.source) ?? line.source))]
+  const outputs = sourceIds.flatMap((nodeId) => {
+    const record = run.snapshot.nodes.find((node) => node.nodeId === nodeId)
+    return record && ["ok", "react-capped"].includes(record.status) && record.output.trim() ? [record.output.trim()] : []
+  })
+  if (outputs.length === 1) return outputs[0]
+  if (outputs.length > 1) return outputs.map((output, index) => `结果 ${index + 1}：\n${output}`).join("\n\n")
+  return "DAG 所有生效路径已通过任务合同并完成"
 }

@@ -43,6 +43,13 @@ export type {
 // 工作流模板：与 WorkflowDocument 同构但全局共享、跨会话可见。
 // 契约本体与图结构同源，此处 re-export 保持既有契约路径。
 export type { WorkflowTemplate } from './graph-model.js'
+export type {
+  WorkflowImportDependency,
+  WorkflowImportIssue,
+  WorkflowImportIssueLevel,
+  WorkflowImportMetadata,
+  WorkflowImportStatus,
+} from './workflow-import.js'
 
 // 元参数（自主编排）：本体在 org-meta.js（零 import 纯类型文件），
 // 供既有 `from './types.js'` 调用方继续引用。
