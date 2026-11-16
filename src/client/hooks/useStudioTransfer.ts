@@ -126,7 +126,7 @@ export function useStudioTransfer(
         notify('success', t.toastImported)
         return
       }
-      const result = await remote.call(EP.EP_IMPORT_WORKFLOW, { json }) as WorkflowImportResponse
+      const result = await remote.call(EP.EP_IMPORT_WORKFLOW, { json, fileName: file.name }) as WorkflowImportResponse
       if (result?.conflict) {
         dispatch({
           type: 'CONFIRM_SET',
@@ -134,6 +134,7 @@ export function useStudioTransfer(
             kind: 'importConflict',
             kind2: 'workflow',
             json,
+            fileName: file.name,
             name: String(result.existingName ?? ''),
             message: t.importConflictMessage.replace('{name}', String(result.existingName ?? '')),
           },
@@ -160,7 +161,7 @@ export function useStudioTransfer(
         await templates.loadTemplates()
         notify('success', t.toastImported)
       } else {
-        const result = await remote.call(EP.EP_IMPORT_WORKFLOW, { json, conflictMode: mode }) as WorkflowImportResponse
+        const result = await remote.call(EP.EP_IMPORT_WORKFLOW, { json, fileName: confirm.fileName, conflictMode: mode }) as WorkflowImportResponse
         await flowTemplates.loadFlowTemplates()
         notifyWorkflowImported(result)
       }

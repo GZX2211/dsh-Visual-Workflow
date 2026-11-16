@@ -1,14 +1,22 @@
 import type { FlowStore } from "../storage/flow-store.js"
 import { WorkflowImportError, WorkflowImportService } from "../importer/index.js"
 import { importWorkflowBundle, TransferError } from "./bundle.js"
+import { parse } from "yaml"
+
+interface WorkflowImportSourceOptions {
+  conflictMode?: "rename" | "overwrite"
+  sourceName?: string
+}
 
 export async function importWorkflowSource(
   store: FlowStore,
   source: unknown,
-  options: { conflictMode?: "rename" | "overwrite" } = {},
+  options: WorkflowImportSourceOptions = {},
 ): Promise<unknown> {
   const text = String(source ?? "")
-  if (!looksLikeDify(text)) return importWorkflowBundle(store, text, options)
+  if (!isDifySourceName(options.sourceName) && !looksLikeDify(text)) {
+    return importWorkflowBundle(store, text, options)
+  }
   try {
     return await new WorkflowImportService().importDify(store, text, options)
   } catch (error) {
@@ -18,12 +26,20 @@ export async function importWorkflowSource(
   }
 }
 
+function isDifySourceName(sourceName: string | undefined): boolean {
+  return /\.ya?ml$/i.test(sourceName?.trim() ?? "")
+}
+
 function looksLikeDify(source: string): boolean {
   try {
-    const value = JSON.parse(source) as { workflow?: { graph?: unknown } }
-    return typeof value === "object" && value !== null && typeof value.workflow?.graph === "object"
+    const value = parse(source)
+    if (!isRecord(value) || !isRecord(value.workflow)) return false
+    return isRecord(value.workflow.graph)
   } catch {
-    return /(?:^|\r?\n)workflow\s*:\s*(?:\r?\n|\{)/.test(source)
-      && /(?:^|\r?\n)\s*graph\s*:\s*(?:\r?\n|\{)/.test(source)
+    return false
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }

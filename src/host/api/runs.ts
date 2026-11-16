@@ -172,11 +172,12 @@ export class RunEndpoints extends VisualWorkflowApiBase {
     return { json: await exportWorkflowBundle(this.host.store, sessionId, id) }
   }
 
-  async importWorkflow(args: { json?: unknown; conflictMode?: unknown }): Promise<unknown> {
+  async importWorkflow(args: { json?: unknown; fileName?: unknown; conflictMode?: unknown }): Promise<unknown> {
     // 图2 交互改造：导入一律落为「工作流模板」（全局共享），不再直接创建实例——
     // 用户需在画布中「创建实例」后才能运行（sessionId 参数不再需要）。
     return importWorkflowSource(this.host.store, args?.json, {
       conflictMode: args?.conflictMode as 'rename' | 'overwrite' | undefined,
+      sourceName: String(args?.fileName ?? ''),
     })
   }
 

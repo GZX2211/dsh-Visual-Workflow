@@ -82,6 +82,7 @@ export declare class RunEndpoints extends VisualWorkflowApiBase {
     }): Promise<unknown>;
     importWorkflow(args: {
         json?: unknown;
+        fileName?: unknown;
         conflictMode?: unknown;
     }): Promise<unknown>;
     exportAgentTemplate(args: {

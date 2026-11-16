@@ -97,6 +97,8 @@ export interface ConfirmState {
     kind2?: string;
     /** 导入冲突补充：原始 JSON 文本。 */
     json?: string;
+    /** 工作流导入冲突补充：原始文件名，用于保持 YAML 来源识别。 */
+    fileName?: string;
     /** 导入冲突补充：已存在名称。 */
     name?: string;
 }

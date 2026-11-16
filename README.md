@@ -290,7 +290,7 @@ node scripts/run-sales-live.mjs
 
 ## 安装（Windows）
 
-当前插件版本为 **1.1.0**；安装后核对插件 package.json 与生成 lib。运行输入、默认 explicit、主动 auto 配置及宿主访问控制的部署前置条件见 [运行输入说明](docs/runtime-input-handoff.md)。
+当前插件版本为 **1.1.1**；安装后核对插件 package.json 与生成 lib。运行输入、默认 explicit、主动 auto 配置及宿主访问控制的部署前置条件见 [运行输入说明](docs/runtime-input-handoff.md)。
 
 > **安装示例**：以下使用 **DeepSeek Harness `0.2.0-rc.2`**；旧版 `0.1.6-alpha.2` 的 Preset Scope 兼容范围与验收状态见上文。本次补丁不要求升级现有宿主。新安装可使用：
 >

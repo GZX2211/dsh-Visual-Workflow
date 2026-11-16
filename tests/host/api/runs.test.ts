@@ -256,6 +256,17 @@ describe('导入导出端点', () => {
     })
     expect(await h.store.listFlowTemplates()).toHaveLength(1)
   })
+
+  it("test_import_workflow_preserves_yaml_filename_hint_for_dify_errors", async () => {
+    const h = await makeHarness()
+    await expect(h.api.handle("importWorkflow", {
+      json: '"workflow": [',
+      fileName: "broken.yaml",
+    })).rejects.toMatchObject({
+      code: "TRANSFER_INVALID_JSON",
+      message: expect.stringContaining("Dify 工作流导入失败"),
+    })
+  })
 })
 
 it("test_run_input_API_preserves_inputs_policy_pending_binding_and_resume_replacement", async () => {
