@@ -15,8 +15,7 @@
 // （t-001 的 package-contract.test.ts 同款最小语义校验思路），并做一次编译产物的
 // 「可被 Loader 导出」烟雾断言（若 lib/index.js 已存在）。
 //
-// 重要说明（键数）：架构文档 §2.2 的 config 块为 13 个键（L75-87）；任务描述中的
-// 「14 个键」系笔误，本测试以架构文档 §2.2 逐字列表为准（13 键）。
+// 重要说明（键数）：下列清单覆盖补丁文件中的稳定部署键；可选运行时键另由各自测试覆盖。
 //
 // 运行环境：node（host 测试默认）。
 import { existsSync, readFileSync } from 'node:fs'
@@ -37,7 +36,7 @@ const entryText =
   readFileSync(resolve(root, 'src/host/config.ts'), 'utf8') +
   readFileSync(resolve(root, 'src/host/visual-workflow-host.ts'), 'utf8')
 
-// 架构文档 §2.2 的 13 个 config 键 → 文本级期望值。
+// 补丁文件中的稳定 config 键 → 文本级期望值。
 //   key: 期望出现的「键: 值」片段（弱匹配，容忍 !!js 标签；null 值匹配字面 null）。
 const CONFIG_KEYS: Array<[string, string]> = [
   ['dataDir', "dshHomePath('visual-workflow')"],
@@ -53,6 +52,7 @@ const CONFIG_KEYS: Array<[string, string]> = [
   ['documentTextLimit', '20000'],
   ['embeddingModelDir', 'null'],
   ['embeddingEndpoint', 'null'],
+  ['difyMigratorCommand', 'dsh-dify-migrator'],
 ]
 
 describe('T-002 cordis.patch.yml（insert 行语义）', () => {
@@ -75,7 +75,7 @@ describe('T-002 cordis.patch.yml（insert 行语义）', () => {
     expect(patchText).toMatch(/dataDir:\s*!!js\s+dshHomePath\('visual-workflow'\)/)
   })
 
-  it('全部 13 个 config 键齐全且值正确', () => {
+  it('全部稳定 config 键齐全且值正确', () => {
     for (const [key, rawValue] of CONFIG_KEYS) {
       if (rawValue === 'null') {
         expect(patchText, `config 键值不符：${key}`).toMatch(new RegExp(`${key}:\\s*null`))
@@ -126,6 +126,7 @@ describe('T-002 Host 入口契约（index/config/visual-workflow-host 拆分后�
         new RegExp(`${key}:\\s*z\\.union\\(\\[z\\.string\\(\\),\\s*z\\.const\\(null\\)\\]\\)\\.default\\(null\\)`),
       )
     }
+    expect(entryText).toMatch(/difyMigratorCommand:\s*z\.string\(\)\.default\('dsh-dify-migrator'\)/)
   })
 
   it('提供 visualWorkflowHost Service（Service.init 装配 + effect 清理通道）', () => {

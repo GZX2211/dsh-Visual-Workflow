@@ -4,6 +4,7 @@ import { RuntimeLaunch } from './runtime-launch.js';
 import type { ChildMeta } from "./seams.js";
 import type { SubagentEndInfo } from "./run-entry.js";
 export declare abstract class RuntimeExecute extends RuntimeLaunch {
+    private dispatchToolNode;
     private verifyDagArtifacts;
     /** A settled ordinary task receives at most one isolated, tool-free Harness review. */
     protected reviewDagNode(run: RunEntry, nodeId: string): Promise<void>;

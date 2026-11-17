@@ -96,6 +96,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
   const canvasApiRef = useRef<CanvasApi | null>(null)
   const canvasShellRef = useRef<HTMLDivElement | null>(null)
   const libraryImportRef = useRef<HTMLInputElement | null>(null)
+  const difyToolImportRef = useRef<HTMLInputElement | null>(null)
   const personaInputRef = useRef<HTMLInputElement | null>(null)
   const groupMdInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -323,6 +324,7 @@ export function Studio({ t, sessionId, remote: remoteProp, onRunImmersive }: Stu
       canvasApiRef={canvasApiRef}
       canvasShellRef={canvasShellRef}
       libraryImportRef={libraryImportRef}
+      difyToolImportRef={difyToolImportRef}
       personaInputRef={personaInputRef}
       groupMdInputRef={groupMdInputRef}
       dispatch={dispatch}

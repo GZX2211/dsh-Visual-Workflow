@@ -80,6 +80,7 @@ export interface StudioLayoutProps {
   canvasApiRef: React.RefObject<CanvasApi | null>
   canvasShellRef: React.RefObject<HTMLDivElement | null>
   libraryImportRef: React.RefObject<HTMLInputElement | null>
+  difyToolImportRef: React.RefObject<HTMLInputElement | null>
   personaInputRef: React.RefObject<HTMLInputElement | null>
   groupMdInputRef: React.RefObject<HTMLInputElement | null>
   // ---- 交互面（controller hook faces） ----
@@ -125,7 +126,7 @@ export function StudioLayout(props: StudioLayoutProps) {
     currentFlow, currentService, currentFlowTemplate, editorData, edgeList, stageKinds, parentTemplate, roleTemplates, groupTemplates,
     toolbarRunning, runStatusByNode, highlightedNodeIds, modeName,
     lockedNodeIds, lockedEdgeIds, instanceRunning,
-    canvasApiRef, canvasShellRef, libraryImportRef, personaInputRef, groupMdInputRef,
+    canvasApiRef, canvasShellRef, libraryImportRef, difyToolImportRef, personaInputRef, groupMdInputRef,
     dispatch, doc, assets, canvas, editor, run, transfer, selection, history, guard, panels, toast,
     beginLibraryDrag, dragPreview, dropGroupId,
     modeMenuOpen, setModeMenuOpen, switchMode, canvasCaption, canvasCaptionTitle,
@@ -231,6 +232,14 @@ export function StudioLayout(props: StudioLayoutProps) {
           onChange={(event) => { void transfer.handleImportFile(event.target.files?.[0] ?? null); event.target.value = '' }}
         />
         <input
+          ref={difyToolImportRef}
+          type="file"
+          multiple
+          accept=".difypkg,.zip,application/zip"
+          className="wf-import-hidden"
+          onChange={(event) => { void transfer.migrateDifyToolFiles(Array.from(event.target.files ?? [])); event.target.value = '' }}
+        />
+        <input
           ref={personaInputRef}
           type="file"
           accept=".md,.markdown"
@@ -245,6 +254,9 @@ export function StudioLayout(props: StudioLayoutProps) {
           onChange={(event) => { void transfer.onGroupMdSelected(event.target.files?.[0] ?? null); event.target.value = '' }}
         />
         <button type="button" className="wf-btn is-ghost" onClick={() => libraryImportRef.current?.click()}>{t.importWorkflow}</button>
+        <button type="button" className="wf-btn is-ghost" disabled={transfer.migratingDifyTools} onClick={() => difyToolImportRef.current?.click()}>
+          {transfer.migratingDifyTools ? t.migratingDifyTools : t.migrateDifyTools}
+        </button>
         <button type="button" className="wf-btn is-ghost" onClick={() => { void transfer.exportCurrent() }}>{t.exportWorkflow}</button>
         <div className="wf-titlebar__mode">
           <button type="button" className="wf-btn" onClick={() => setModeMenuOpen((open) => !open)}>

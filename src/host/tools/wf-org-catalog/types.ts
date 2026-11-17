@@ -234,6 +234,16 @@ export interface CatalogDatabaseNodeEntry {
   vectorOptions?: Record<string, unknown>
 }
 
+/** DSH 标准工具节点；Dify 来源仅保留为工作流节点元数据。 */
+export interface CatalogToolNodeEntry {
+  id: string
+  kind: 'tool'
+  label: string
+  toolRef: string
+  arguments: Record<string, unknown>
+  requestedPackage?: string
+}
+
 /** 骨架里的节点条目（按 kind 判别）。 */
 export type CatalogNodeEntry =
   | CatalogStageNodeEntry
@@ -242,6 +252,7 @@ export type CatalogNodeEntry =
   | CatalogGroupNodeEntry
   | CatalogFileNodeEntry
   | CatalogDatabaseNodeEntry
+  | CatalogToolNodeEntry
 
 /** 连线条目（条件分支语义是编排事实，必须给全）。 */
 export interface CatalogLineEntry {

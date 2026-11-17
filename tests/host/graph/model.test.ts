@@ -41,8 +41,8 @@ import type { GraphNode, Line, WorkflowDocument } from '../../../src/host/shared
 import { makeFlow } from './fixtures/flow-fixture.js'
 
 describe('连接点兼容矩阵（NODE_HANDLES）', () => {
-  it('9 类节点矩阵齐全且与需求连接点定义一致', () => {
-    expect(NODE_KINDS).toHaveLength(9)
+  it('10 类节点矩阵齐全且与需求连接点定义一致', () => {
+    expect(NODE_KINDS).toHaveLength(10)
     expect(NODE_HANDLES.parent.inputs).toEqual(['flow-in', 'ctx-in', 'db-in'])
     expect(NODE_HANDLES.parent.outputs).toEqual(['flow-out', 'ctx-out'])
     expect(NODE_HANDLES.file).toEqual({ inputs: [], outputs: ['ctx-out'] })
@@ -52,6 +52,7 @@ describe('连接点兼容矩阵（NODE_HANDLES）', () => {
     expect(NODE_HANDLES.pause).toEqual({ inputs: ['flow-in'], outputs: ['flow-out'] })
     expect(NODE_HANDLES.group).toEqual({ inputs: ['flow-in'], outputs: ['flow-out'] })
     expect(NODE_HANDLES.proxy).toEqual(NODE_HANDLES.agent)
+    expect(NODE_HANDLES.tool).toEqual({ inputs: ['flow-in', 'ctx-in'], outputs: ['flow-out', 'ctx-out'] })
   })
 })
 

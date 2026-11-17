@@ -100,6 +100,9 @@ function metaLinesOf(node: CanvasNode, copy: Dict & { modeName(id: string | null
   } else if (kind === 'database') {
     out.push(data.dbType === 'server' ? `${String(data.dbKind ?? 'mysql')} · ${String(copy.dbTypeServer)}` : String(copy.dbLocalLabel))
     if (data.vectorSource === 'bm25') out.push(String(copy.dbBm25Badge))
+  } else if (kind === 'tool') {
+    out.push(clip(String(data.toolRef ?? ''), 52))
+    if ((data.source as { platform?: unknown } | undefined)?.platform === 'dify') out.push('Migrated from Dify')
   }
   return out.filter((line) => String(line ?? '').trim())
 }

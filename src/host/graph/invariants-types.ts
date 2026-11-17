@@ -79,7 +79,7 @@ export const META_BELOW_MIN_CODE = 'metaBelowMin'
 export const GRAPH_INVARIANT_CODES: readonly IssueCodeInfo[] = [
   // —— 用户明确要求的（a–e） ——
   { code: 'startRequired', level: 'error', description: '恰好 1 个启动/输入节点' },
-  { code: 'startNoFlowOut', level: 'error', description: '启动节点的流程出 ≥1 且目标为可执行单元（agent/parent/group）' },
+  { code: 'startNoFlowOut', level: 'error', description: '启动节点的流程出 ≥1 且目标为可执行单元（agent/parent/group/tool）' },
   { code: 'endRequired', level: 'error', description: '恰好 1 个结束/输出节点' },
   { code: 'endNoFlowIn', level: 'error', description: '结束节点的流程入 ≥1 且来源为可执行单元' },
   { code: 'orphanNode', level: 'error', description: '节点既无流程线也无上下文/数据库线（悬空节点）' },

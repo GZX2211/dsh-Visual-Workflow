@@ -52,6 +52,7 @@ export interface StudioLayoutProps {
     canvasApiRef: React.RefObject<CanvasApi | null>;
     canvasShellRef: React.RefObject<HTMLDivElement | null>;
     libraryImportRef: React.RefObject<HTMLInputElement | null>;
+    difyToolImportRef: React.RefObject<HTMLInputElement | null>;
     personaInputRef: React.RefObject<HTMLInputElement | null>;
     groupMdInputRef: React.RefObject<HTMLInputElement | null>;
     dispatch: Dispatch<StudioAction>;

@@ -21,6 +21,23 @@ export function StageForm({ data, copy, nodeLabel }: { data: Record<string, unkn
   )
 }
 
+/** 迁移工具节点统一绑定 DSH 工具注册表；来源身份只读，避免编辑后与安装包失配。 */
+export function ToolForm({ data, copy }: { data: Record<string, unknown>; copy: Dict }) {
+  return (
+    <div>
+      <h3>{copy.nodeKinds.tool}</h3>
+      <div className="wf-pathbox">
+        <span className="wf-pathbox__label">{copy.dshTool}</span>
+        <span className="wf-pathbox__value">{String(data.toolRef ?? '')}</span>
+      </div>
+      <Field label={copy.toolArguments}>
+        <textarea value={JSON.stringify(data.arguments ?? {}, null, 2)} readOnly rows={8} />
+      </Field>
+      <span className="wf-hint">{copy.migratedToolHint}</span>
+    </div>
+  )
+}
+
 /** 协作组（名称/协作 Prompt/成员列表删除）。模板态无成员（成员在画布内拖入登记），隐藏成员区。 */
 export function GroupForm({ data, copy, members, onPatch, onLoadMd, onRemoveMember }: {
   data: Record<string, unknown>

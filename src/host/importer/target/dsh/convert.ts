@@ -1,4 +1,4 @@
-import type { GraphNode, Line, RoleNode, WorkflowTemplate } from "../../../shared/graph-model.js"
+import type { GraphNode, Line, RoleNode, StageNode, ToolNode, WorkflowTemplate } from "../../../shared/graph-model.js"
 import type { InputRequirement } from "../../../shared/runtime-types.js"
 import type {
   WorkflowImportDependency,
@@ -15,7 +15,7 @@ export interface DshImportConversion {
   report: WorkflowImportMetadata
 }
 
-const directlyMappedKinds = new Set(["start", "end", "llm", "agent"])
+const directlyMappedKinds = new Set(["start", "end", "llm", "agent", "tool"])
 
 export function convertDifyWorkflow(
   source: SourceWorkflowIR,
@@ -78,16 +78,23 @@ export function convertDifyWorkflow(
 function convertNode(node: SourceNodeIR, index: number, source: SourceWorkflowIR, issues: WorkflowImportIssue[]): GraphNode {
   const position = positionOf(node, index)
   if (node.semanticKind === "start" || node.semanticKind === "end") {
-    if (node.semanticKind === "end" && !isPassThroughEnd(node, source)) {
-      issues.push(issueOf(node, "DIFY_END_UNSUPPORTED", "error", "该结束节点包含结果拼接或结构化输出，当前版本不能保证等价执行；请先改为单一上游输出直通。"))
+    const outputBindings = node.semanticKind === "end" ? endOutputBindingsOf(node, source) : undefined
+    if (node.semanticKind === "end" && outputBindings === null) {
+      issues.push(issueOf(node, "DIFY_END_UNSUPPORTED", "error", "该结束节点包含无法安全转换的结果表达式；当前支持单一引用或命名的 node.port 输出绑定。"))
     }
-    return {
+    const stage: StageNode = {
       id: node.id,
       kind: node.semanticKind,
       position,
-      data: { label: stageLabel(node.semanticKind, "mode1") },
+      data: {
+        label: stageLabel(node.semanticKind, "mode1"),
+        ...(outputBindings && Object.keys(outputBindings).length > 0 ? { outputBindings } : {}),
+      },
     }
+    return stage
   }
+
+  if (node.semanticKind === "tool") return convertToolNode(node, position, issues)
 
   const model = recordOf(node.config.model)
   const provider = stringOf(model?.provider) ?? ""
@@ -134,6 +141,71 @@ function convertNode(node: SourceNodeIR, index: number, source: SourceWorkflowIR
   return role
 }
 
+function convertToolNode(
+  node: SourceNodeIR,
+  position: { x: number; y: number },
+  issues: WorkflowImportIssue[],
+): ToolNode {
+  const pluginId = stringOf(node.config.plugin_id)
+  const providerId = stringOf(node.config.provider_id)
+  const toolName = stringOf(node.config.tool_name)
+  const identity = difyToolIdentity(pluginId, providerId, toolName)
+  if (!toolName || !identity) {
+    issues.push(issueOf(node, "DIFY_TOOL_IDENTITY_INVALID", "error", "该工具节点缺少可映射的 plugin_id/provider_id/tool_name，无法绑定 DSH 工具。"))
+  }
+  const toolRef = identity
+    ? dshToolRef(identity.author, identity.plugin, identity.tool)
+    : `dsh_migrated__unresolved__${safeId(node.id)}`
+  return {
+    id: node.id,
+    kind: "tool",
+    position,
+    data: {
+      label: node.title?.trim() || toolName || node.id,
+      toolRef,
+      arguments: toolArgumentsOf(node.config),
+      ...(stringOf(node.config.plugin_unique_identifier) ? { requestedPackage: stringOf(node.config.plugin_unique_identifier) } : {}),
+      source: {
+        platform: "dify",
+        ...(pluginId ? { pluginId } : {}),
+        ...(stringOf(node.config.plugin_unique_identifier) ? { uniqueIdentifier: stringOf(node.config.plugin_unique_identifier) } : {}),
+      },
+    },
+  }
+}
+
+function dshToolRef(author: string, plugin: string, tool: string): string {
+  return `dsh_migrated__${toolSegment(author)}__${toolSegment(plugin)}__${toolSegment(tool)}`
+}
+
+function toolSegment(value: string): string {
+  const normalized = value.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "")
+  return (normalized || "unknown").slice(0, 48)
+}
+
+function difyToolIdentity(
+  pluginId: string | undefined,
+  providerId: string | undefined,
+  toolName: string | undefined,
+): { author: string; plugin: string; tool: string } | undefined {
+  if (!toolName) return undefined
+  const parts = (pluginId ?? providerId ?? "").split("/").map((part) => part.trim()).filter(Boolean)
+  if (parts.length >= 2) return { author: parts[0], plugin: parts[1], tool: toolName }
+  if (parts.length === 1) return { author: "unknown", plugin: parts[0], tool: toolName }
+  return undefined
+}
+
+function toolArgumentsOf(config: Record<string, unknown>): Record<string, unknown> {
+  const parameters = recordOf(config.tool_parameters)
+  const legacy = recordOf(config.params)
+  const result: Record<string, unknown> = {}
+  for (const [name, raw] of Object.entries(parameters ?? legacy ?? {})) {
+    const entry = recordOf(raw)
+    result[name] = entry && Object.hasOwn(entry, "value") ? entry.value : raw
+  }
+  return result
+}
+
 function convertEdge(edge: SourceEdgeIR): Line {
   const condition = conditionOf(edge.sourceHandle)
   return {
@@ -177,7 +249,7 @@ function inputKindOf(dataType: string | undefined): InputRequirement["kind"] {
 /** Explicit variable dependencies preserve non-adjacent upstream output semantics. */
 function contextLinesOf(source: SourceWorkflowIR, issues: WorkflowImportIssue[]): Line[] {
   const nodes = new Map(source.nodes.map((node) => [node.id, node]))
-  const executable = (node: SourceNodeIR | undefined): boolean => node?.semanticKind === "llm" || node?.semanticKind === "agent"
+  const executable = (node: SourceNodeIR | undefined): boolean => node?.semanticKind === "llm" || node?.semanticKind === "agent" || node?.semanticKind === "tool"
   const adjacency = new Map<string, string[]>()
   for (const edge of source.edges) adjacency.set(edge.sourceNodeId, [...(adjacency.get(edge.sourceNodeId) ?? []), edge.targetNodeId])
   const reaches = (from: string, target: string): boolean => {
@@ -241,6 +313,9 @@ function collectSourceIssues(
       })
       continue
     }
+    // Tool 节点已经绑定到稳定的 DSH toolRef。安装由迁移器负责；运行前注册表会
+    // 对缺包/缺凭据给出确定错误，不再把节点降级成需要手工替换的占位 Agent。
+    if (dependency.kind === "tool") continue
     issues.push({
       code: `DIFY_${dependency.kind.toUpperCase()}_REBIND_REQUIRED`,
       level: dependency.kind === "credential" ? "error" : "warning",
@@ -287,19 +362,34 @@ function rewriteReferences(text: string, source: SourceWorkflowIR): string {
   })
 }
 
-function isPassThroughEnd(node: SourceNodeIR, source: SourceWorkflowIR): boolean {
+function endOutputBindingsOf(
+  node: SourceNodeIR,
+  source: SourceWorkflowIR,
+): Record<string, { nodeId: string; port: string }> | undefined | null {
   if (node.source.type === "answer") {
     const answer = stringOf(node.config.answer)?.trim()
     const match = answer?.match(/^\{\{#([^.#{}]+)\.([^#{}]+)#\}\}$/)
-    if (!match) return false
+    if (!match) return null
     const origin = source.nodes.find((candidate) => candidate.id === match[1])
     const incoming = source.edges.filter((edge) => edge.targetNodeId === node.id)
-    return (origin?.semanticKind === "llm" || origin?.semanticKind === "agent")
-      && incoming.length === 1
-      && incoming[0].sourceNodeId === origin.id
+    if ((origin?.semanticKind !== "llm" && origin?.semanticKind !== "agent" && origin?.semanticKind !== "tool")
+      || incoming.length !== 1 || incoming[0].sourceNodeId !== origin.id) return null
+    return { answer: { nodeId: match[1], port: match[2] } }
   }
   const outputs = node.config.outputs
-  return outputs === undefined || Array.isArray(outputs) && outputs.length === 0
+  if (outputs === undefined || Array.isArray(outputs) && outputs.length === 0) return undefined
+  if (!Array.isArray(outputs)) return null
+  const result: Record<string, { nodeId: string; port: string }> = {}
+  for (const raw of outputs) {
+    const output = recordOf(raw)
+    const name = stringOf(output?.variable)
+    const selector = output?.value_selector
+    if (!name || !Array.isArray(selector) || selector.length !== 2
+      || typeof selector[0] !== "string" || typeof selector[1] !== "string"
+      || !source.nodes.some((candidate) => candidate.id === selector[0])) return null
+    result[name] = { nodeId: selector[0], port: selector[1] }
+  }
+  return result
 }
 
 function safeId(value: string): string {
@@ -342,7 +432,7 @@ function convertDependency(dependency: SourceDependencyIR): WorkflowImportDepend
     kind: dependency.kind,
     ...(dependency.source.provider ? { provider: dependency.source.provider } : {}),
     ...(dependency.source.name ? { name: dependency.source.name } : {}),
-    requiresRebinding: true,
+    requiresRebinding: dependency.kind !== "tool",
   }
 }
 

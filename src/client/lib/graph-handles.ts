@@ -20,6 +20,7 @@ export const HANDLES: Record<string, HandleSpec> = {
   end: { inputs: ['flow-in'], outputs: [] },
   pause: { inputs: ['flow-in'], outputs: ['flow-out'] },
   group: { inputs: ['flow-in'], outputs: ['flow-out'] },
+  tool: { inputs: ['ctx-in', 'flow-in'], outputs: ['ctx-out', 'flow-out'] },
 }
 
 /** 阶段节点显示名（模式一：启动/结束；模式二：输入/输出，需求 §4.2.5.1）。 */

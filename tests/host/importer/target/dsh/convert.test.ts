@@ -105,6 +105,45 @@ describe("Dify to DSH conversion", () => {
     })
   })
 
+  test("test_convert_tool_node_binds_native_dsh_tool_and_preserves_arguments", async () => {
+    const parsed = parseDifyWorkflow(await fixture("tool.yml"))
+    const converted = convertDifyWorkflow(parsed.workflow, parsed.capabilities, { id: "tpl-tool" })
+    expect(converted.report.status).toBe("review-required")
+    expect(converted.template.nodes[1]).toMatchObject({
+      kind: "tool",
+      data: {
+        toolRef: "dsh_migrated__example__weather__current_weather",
+        arguments: { query: "{{#start-node.query#}}" },
+        requestedPackage: expect.stringContaining("example/weather:0.0.1@"),
+        source: { platform: "dify", pluginId: "example/weather" },
+      },
+    })
+    expect(converted.report.dependencies).toContainEqual(expect.objectContaining({ kind: "tool", requiresRebinding: false }))
+    expect(converted.report.issues).not.toContainEqual(expect.objectContaining({ code: "DIFY_NODE_UNSUPPORTED" }))
+  })
+
+  test("test_convert_dify_end_named_selector_preserves_start_output_binding", async () => {
+    const parsed = parseDifyWorkflow(await fixture("tool.yml"))
+    const tool = parsed.workflow.nodes.find((node) => node.semanticKind === "tool")!
+    tool.config.plugin_id = "web_ide_team/qps_test_1s"
+    tool.config.provider_id = "web_ide_team/qps_test_1s/qps_test_1s"
+    tool.config.tool_name = "qps_test_1s"
+    const end = parsed.workflow.nodes.find((node) => node.semanticKind === "end")!
+    end.source.type = "end"
+    delete end.config.answer
+    end.config.outputs = [{ variable: "xxx", value_selector: ["start-node", "query"], value_type: "string" }]
+
+    const converted = convertDifyWorkflow(parsed.workflow, parsed.capabilities, { id: "tpl-qps" })
+
+    expect(converted.report.issues).not.toContainEqual(expect.objectContaining({ code: "DIFY_END_UNSUPPORTED" }))
+    expect(converted.template.nodes.find((node) => node.kind === "tool")).toMatchObject({
+      data: { toolRef: "dsh_migrated__web_ide_team__qps_test_1s__qps_test_1s" },
+    })
+    expect(converted.template.nodes.find((node) => node.kind === "end")).toMatchObject({
+      data: { outputBindings: { xxx: { nodeId: "start-node", port: "query" } } },
+    })
+  })
+
   test("test_import_service_persists_template_and_applies_conflict_policy", async () => {
     const target = await store()
     const source = await fixture("basic-llm.yml")

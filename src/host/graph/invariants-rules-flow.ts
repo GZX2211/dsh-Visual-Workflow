@@ -16,8 +16,8 @@ import type { FlowDag } from './dag.js'
 import type { CheckGraphInput, GraphIssue } from './invariants-types.js'
 import type { GraphNode } from '../shared/graph-model.js'
 
-/** 可执行单元种类（流程端点判定用：agent/parent/group）。 */
-const UNIT_KINDS: readonly string[] = ['agent', 'parent', 'group']
+/** 可执行单元种类（流程端点判定用）。工具节点与角色节点一样可直接消费/产出控制流。 */
+const UNIT_KINDS: readonly string[] = ['agent', 'parent', 'group', 'tool']
 
 /** 节点 id 是否为可执行单元。 */
 function isUnit(node: GraphNode | undefined): boolean {
@@ -56,7 +56,7 @@ export function ruleStartFlowOut(input: CheckGraphInput, dag: FlowDag): GraphIss
         level: 'error',
         message: '启动/输入节点没有流程出线，流程无法开始',
         nodeIds: [node.id],
-        suggestion: '把启动/输入节点的流程出连接到第一个可执行节点（子代理 / 父代理 / 协作组）',
+        suggestion: '把启动/输入节点的流程出连接到第一个可执行节点（子代理 / 父代理 / 协作组 / 工具）',
       })
       continue
     }
@@ -67,7 +67,7 @@ export function ruleStartFlowOut(input: CheckGraphInput, dag: FlowDag): GraphIss
         level: 'error',
         message: `启动/输入节点的流程出指向了不可执行节点：${bad.join('、')}`,
         nodeIds: [node.id, ...bad],
-        suggestion: '流程线的目标只能是可执行节点（子代理 / 父代理 / 协作组）；数据节点请用上下文或数据库连线',
+        suggestion: '流程线的目标只能是可执行节点（子代理 / 父代理 / 协作组 / 工具）；数据节点请用上下文或数据库连线',
       })
     }
   }
@@ -112,7 +112,7 @@ export function ruleEndFlowIn(input: CheckGraphInput, dag: FlowDag): GraphIssue[
         level: 'error',
         message: `结束/输出节点的流程入来自不可执行节点：${bad.join('、')}`,
         nodeIds: [node.id, ...bad],
-        suggestion: '结束节点的流程入只能来自可执行节点（子代理 / 父代理 / 协作组）',
+        suggestion: '结束节点的流程入只能来自可执行节点（子代理 / 父代理 / 协作组 / 工具）',
       })
     }
   }

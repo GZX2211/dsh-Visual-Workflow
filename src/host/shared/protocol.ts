@@ -134,6 +134,8 @@ export const EP_DB_SEARCH_PREVIEW = 'dbSearchPreview'
 export const EP_EXPORT_WORKFLOW = 'exportWorkflow'
 /** 导入工作流端点名（v2 bundle）。 */
 export const EP_IMPORT_WORKFLOW = 'importWorkflow'
+/** 上传并安装一个 Dify .difypkg 或含多个 .difypkg 的批量 ZIP。 */
+export const EP_MIGRATE_DIFY_TOOLS = 'migrateDifyTools'
 /** 导出角色模板端点名（v2 bundle）。 */
 export const EP_EXPORT_AGENT_TEMPLATE = 'exportAgentTemplate'
 /** 导入角色模板端点名（v2 bundle）。 */

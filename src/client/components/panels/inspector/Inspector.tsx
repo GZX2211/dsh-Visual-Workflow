@@ -18,7 +18,7 @@ import type { EditorData, StudioState } from '../../../studio/studio-state.js'
 import { RoleForm } from './role-form.js'
 import { FileForm } from './file-form.js'
 import { DatabaseForm } from './database-form.js'
-import { GroupForm, ProxyForm, StageForm } from './node-forms.js'
+import { GroupForm, ProxyForm, StageForm, ToolForm } from './node-forms.js'
 import { LinePanel, WorkflowForm } from './flow-forms.js'
 import { AssetVersions } from './asset-versions.js'
 import { ExperienceForm } from './experience-form.js'
@@ -115,6 +115,9 @@ export function Inspector(props: InspectorProps) {
         break
       case 'proxy':
         content = <ProxyForm data={data} copy={t} onPatch={onPatch} mainLabel={editorData.mainLabel ?? ''} />
+        break
+      case 'tool':
+        content = <ToolForm data={data} copy={t} />
         break
       case 'edge':
         content = <LinePanel data={data} copy={t} onPatch={onPatch} />

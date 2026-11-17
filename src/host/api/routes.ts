@@ -21,6 +21,7 @@ import { EcosystemEndpoints } from './ecosystem.js'
 import { CatalogEndpoints } from './catalog.js'
 import { RunEndpoints } from './runs.js'
 import { SchedulerEndpoints } from './scheduler.js'
+import { MigratedToolEndpoints } from "./migrated-tools.js"
 
 /** GUI API 最终类：全部端点方法由端点组汇聚（端点白名单由共享协议常量派生）。 */
 export class VisualWorkflowApi extends VisualWorkflowApiBase {}
@@ -34,6 +35,7 @@ mixInEndpointGroups(VisualWorkflowApi, [
   CatalogEndpoints,
   RunEndpoints,
   SchedulerEndpoints,
+  MigratedToolEndpoints,
 ])
 
 /**
@@ -82,6 +84,13 @@ const ERROR_STATUS: Record<string, number> = {
   TRANSFER_INVALID_JSON: 400,
   TRANSFER_INVALID_BUNDLE: 422,
   TRANSFER_NOT_FOUND: 404,
+  DIFY_UPLOAD_INVALID: 400,
+  DIFY_UPLOAD_TOO_LARGE: 413,
+  DIFY_MIGRATOR_UNAVAILABLE: 503,
+  DIFY_MIGRATION_TIMEOUT: 504,
+  DIFY_MIGRATION_OUTPUT_LIMIT: 422,
+  DIFY_MIGRATION_REPORT_INVALID: 422,
+  DIFY_MIGRATION_FAILED: 422,
   [EP.ERR_ASSET_BAD_ARGS]: 400,
   [EP.ERR_ASSET_NOT_FOUND]: 404,
   [EP.ERR_ASSET_VERSION_NOT_FOUND]: 404,

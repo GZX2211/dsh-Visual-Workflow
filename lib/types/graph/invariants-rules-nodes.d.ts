@@ -6,7 +6,7 @@ export declare function ruleGroupMembers(input: CheckGraphInput, dag: FlowDag): 
 export declare function ruleProxySource({ flow }: CheckGraphInput): GraphIssue[];
 /** c) 数据节点配置完整性（缺少运行必需项 → error）。 */
 export declare function ruleDataNodeComplete({ flow }: CheckGraphInput): GraphIssue[];
-/** d) 上下文入线来源合法性（角色 / 虚拟节点 / 文件 / 模式二输入节点）。 */
+/** d) 上下文入线来源合法性（可产出上下文的执行/数据节点）。 */
 export declare function ruleCtxSource({ flow }: CheckGraphInput): GraphIssue[];
 /** e) 数据库出线目标合法性（必须是数据库节点）。 */
 export declare function ruleDbTarget({ flow }: CheckGraphInput): GraphIssue[];

@@ -1,6 +1,6 @@
 {
   "name": "dsh-visual-workflow",
-  "version": "1.1.1",
+  "version": "1.3.0",
   "private": true,
   "type": "module",
   "description": "DSH 可视化 Agent 编排平台",
@@ -57,6 +57,7 @@
   "devDependencies": {
     "@deepseek-ai/schemastery": "^3.18.1",
     "@playwright/mcp": "^0.0.79",
+    "@rolldown/binding-wasm32-wasi": "1.2.5",
     "@types/jsdom": "^28.0.3",
     "@types/node": "26.2.0",
     "@types/pg": "^8.23.1",

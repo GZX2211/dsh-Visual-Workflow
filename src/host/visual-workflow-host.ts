@@ -55,6 +55,7 @@ import { EmbeddingService } from './embedding/engine.js'
 import { ServiceManager } from './service/index.js'
 import { SchedulerEngine, SchedulerTaskStore } from './scheduler/index.js'
 import { CordisSessionProvider, sessionCwdResolver } from './sessions/session-provider.js'
+import { MigratedToolMigrationService, MigratedToolRegistry } from "./migrated-tools/index.js"
 
 export const VisualWorkflowHostServiceName = 'visualWorkflowHost'
 
@@ -87,6 +88,10 @@ export class VisualWorkflowHost extends Service {
   readonly schedulerTaskStore: SchedulerTaskStore
   /** 全局工具开关存储（tool-switches.json；父代理工具白名单「关闭」侧，全局即时生效）。 */
   readonly toolSwitches: ToolSwitchStore
+  /** Dify 来源包已统一转换后的 DSH 标准工具注册表。 */
+  readonly migratedTools: MigratedToolRegistry
+  /** Dify 包上传、转换与安装能力；执行完成后刷新统一 DSH 工具注册表。 */
+  readonly migratedToolMigration: MigratedToolMigrationService
   /** 新会话创建缝（「开启新会话」一次性动作：创建实例时新建主会话；API 端点使用）。 */
   readonly sessionProvider: CordisSessionProvider
   /** 会话工作目录解析（新会话继承创建者 cwd 用；API 端点使用）。 */
@@ -142,6 +147,12 @@ export class VisualWorkflowHost extends Service {
     this.store = new FlowStore(config.dataDir)
     this.assetStore = new AssetStore(config.dataDir)
     this.toolSwitches = new ToolSwitchStore(config.dataDir)
+    this.migratedTools = new MigratedToolRegistry(config.dataDir)
+    this.migratedToolMigration = new MigratedToolMigrationService({
+      dataDirectory: config.dataDir,
+      command: config.difyMigratorCommand,
+      refresh: () => this.migratedTools.reload(ctx),
+    })
     this.agents = new CordisAgentHost(ctx)
     this.embedding = new EmbeddingService({
       modelDir: config.embeddingModelDir,
@@ -186,6 +197,7 @@ export class VisualWorkflowHost extends Service {
       workingDirectory: async (sessionId) => (await sessionCwdResolver(ctx)(sessionId)) ?? undefined,
       authorizedInputFiles: async (sessionId) => this.agents.authorizedInputFiles(sessionId),
       sessionInputFiles: async (sessionId) => this.agents.sessionInputFiles(sessionId),
+      migratedTools: this.migratedTools,
       config: {
         outputFullLimit: config.outputFullLimit,
         documentTextLimit: config.documentTextLimit,
@@ -456,6 +468,10 @@ export class VisualWorkflowHost extends Service {
 
     // 数据目录结构初始化（幂等）
     await this.store.init()
+
+    // 迁移工具只以 DSH 标准工具注册；Dify worker 是包内私有实现细节，不建立第二套目录。
+    await this.migratedTools.load()
+    this.migratedTools.register(this.ctx)
 
     // 资产库（SQLite）初始化：失败降级为「不可用」而不是让 fiber 失败——模版编排、运行、
     // 定时任务等既有能力不依赖资产库，让新能力拖垮整个插件不划算；但降级必须显式：
@@ -781,6 +797,7 @@ export class VisualWorkflowHost extends Service {
     this.scheduler.dispose()
     this.orchestrator.dispose()
     this.runner.dispose()
+    this.migratedTools.disposeRegistrations()
     // 回收所有已安装的子代理作用域装配（角色提示词/工具可见性/模型选择/软截停）
     for (const dispose of this.childScopeDisposers.values()) {
       try {

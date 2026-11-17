@@ -4,7 +4,7 @@
 // 系统 Prompt / 协作 Prompt 从 .md 加载、文件模板内容选择（文本直读 / 多选
 // 上传受管拷贝）、数据库测试连接。
 
-import { useCallback } from 'react'
+import { useCallback, useState } from 'react'
 import type { Dispatch } from 'react'
 import type { EditorData, StudioAction, StudioState } from '../studio/studio-state.js'
 import { currentFlowOf, currentServiceOf } from '../studio/studio-state.js'
@@ -16,6 +16,7 @@ import type { ToastFace } from './useToast.js'
 import type { EditorActionsFace } from './useEditorActions.js'
 import type { Dict } from '../i18n.js'
 import type { WorkflowImportMetadata } from '../../host/shared/workflow-import.js'
+import type { DifyToolMigrationResult } from '../../host/shared/migrated-tool-migration.js'
 import { EP } from '../lib/remote.js'
 import { readFileAsText, readFileAsBase64, download } from '../lib/files.js'
 import { isRoleTemplateBundle } from '../lib/bundle.js'
@@ -30,6 +31,8 @@ export interface StudioTransferFace {
   onGroupMdSelected(file: File | null): Promise<void>
   onFileSelect(picked: File[]): Promise<void>
   testDbConnection(): Promise<void>
+  migrateDifyToolFiles(files: File[]): Promise<void>
+  migratingDifyTools: boolean
 }
 
 interface WorkflowImportResponse {
@@ -56,6 +59,7 @@ export function useStudioTransfer(
   personaInputRef: React.RefObject<HTMLInputElement | null>,
   groupMdInputRef: React.RefObject<HTMLInputElement | null>,
 ): StudioTransferFace {
+  const [migratingDifyTools, setMigratingDifyTools] = useState(false)
   const notifyWorkflowImported = useCallback((result: WorkflowImportResponse): void => {
     if (result.sourceFormat !== "dify" || !result.report) {
       notify('success', t.toastImported)
@@ -170,6 +174,36 @@ export function useStudioTransfer(
     }
   }, [dispatch, notify, notifyWorkflowImported, remote, state.confirm, t.toastImported, templates, flowTemplates, toastError])
 
+  const migrateDifyToolFiles = useCallback(async (files: File[]) => {
+    if (files.length === 0 || migratingDifyTools) return
+    setMigratingDifyTools(true)
+    const totals = { discovered: 0, installed: 0, converted: 0, skipped: 0, duplicates: 0, failed: 0 }
+    const uploadFailures: string[] = []
+    try {
+      for (const file of files) {
+        try {
+          const base64 = await readFileAsBase64(file)
+          const result = await remote.call(EP.EP_MIGRATE_DIFY_TOOLS, { name: file.name, base64 }, { timeoutMs: 10 * 60 * 1000 }) as DifyToolMigrationResult
+          for (const key of Object.keys(totals) as Array<keyof typeof totals>) totals[key] += result.summary[key]
+          for (const pkg of result.packages) {
+            if (pkg.error) uploadFailures.push(`${pkg.sourcePath}: ${pkg.error.message}`)
+          }
+        } catch (error) {
+          totals.failed += 1
+          uploadFailures.push(`${file.name}: ${error instanceof Error ? error.message : String(error)}`)
+        }
+      }
+      const message = t.toastDifyToolsMigrated
+        .replace('{installed}', String(totals.installed))
+        .replace('{skipped}', String(totals.skipped))
+        .replace('{failed}', String(totals.failed))
+      notify(totals.failed > 0 ? 'error' : 'success', message)
+      if (uploadFailures.length > 0) toastError(new Error(uploadFailures.slice(0, 3).join('\n')))
+    } finally {
+      setMigratingDifyTools(false)
+    }
+  }, [migratingDifyTools, notify, remote, t.toastDifyToolsMigrated, toastError])
+
   // ---------- 文件选择（文件模板/节点：文本直接读；非文本读 base64 交后端受管拷贝） ----------
   /** 角色系统提示词 .md 加载（§4.2.3.1 卡片设计）。 */
   const loadPersonaMd = useCallback(async () => {
@@ -260,7 +294,7 @@ export function useStudioTransfer(
   return {
     exportCurrent, handleImportFile, resolveImportConflict,
     loadPersonaMd, onPersonaMdSelected, loadGroupMd, onGroupMdSelected,
-    onFileSelect, testDbConnection,
+    onFileSelect, testDbConnection, migrateDifyToolFiles, migratingDifyTools,
   }
 }
 

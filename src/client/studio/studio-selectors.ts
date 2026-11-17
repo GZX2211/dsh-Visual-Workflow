@@ -194,6 +194,7 @@ export function editorDataOf(state: StudioState): EditorData | null {
     }
     if (node.kind === 'file') return { kind: 'file', data, name: String(data.label ?? ''), nodeId: node.id }
     if (node.kind === 'database') return { kind: 'database', data, name: String(data.label ?? ''), nodeId: node.id }
+    if (node.kind === 'tool') return { kind: 'tool', data, name: String(data.label ?? ''), nodeId: node.id }
     if (node.kind === 'group') {
       // 去重展示（历史数据可能残留重复 memberIds），与删除逻辑保持一致，避免出现「重复成员行/计数虚高」
       const memberIds = [...new Set((data.memberIds as string[] | undefined) ?? [])]

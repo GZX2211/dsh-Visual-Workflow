@@ -31,6 +31,7 @@ import type {
   CatalogRoleDetail,
   CatalogRoleNodeEntry,
   CatalogStageNodeEntry,
+  CatalogToolNodeEntry,
   CatalogWorkflowDetail,
   RoleAssetEntry,
   WorkflowAssetEntry,
@@ -439,6 +440,17 @@ function nodeEntryOf(
         ...(conn ? { conn } : {}),
         ...(trimmedOrNull(data.vectorSource) ? { vectorSource: textOf(data.vectorSource) } : {}),
         ...(data.vectorOptions ? { vectorOptions: data.vectorOptions as Record<string, unknown> } : {}),
+      }
+      return entry
+    }
+    case 'tool': {
+      const entry: CatalogToolNodeEntry = {
+        id: node.id,
+        kind: 'tool',
+        label: labelOf(node),
+        toolRef: textOf(node.data.toolRef),
+        arguments: structuredClone(node.data.arguments),
+        ...(node.data.requestedPackage ? { requestedPackage: node.data.requestedPackage } : {}),
       }
       return entry
     }

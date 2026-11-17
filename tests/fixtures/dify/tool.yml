@@ -25,7 +25,13 @@ workflow:
           type: tool
           title: Writer
           provider_id: weather
+          plugin_id: example/weather
+          plugin_unique_identifier: example/weather:0.0.1@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           tool_name: current_weather
+          tool_parameters:
+            query:
+              type: mixed
+              value: "{{#start-node.query#}}"
           model:
             provider: sample
             name: sample-model

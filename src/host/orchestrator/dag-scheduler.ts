@@ -28,7 +28,7 @@ export function validateDagForRun(flow: WorkflowDocument): void {
   const starts = flow.nodes.filter((node) => node.kind === "start")
   const ends = flow.nodes.filter((node) => node.kind === "end")
   if (starts.length !== 1 || ends.length !== 1) throw new WfError("DAG 必须具有唯一 start 和 end", "WF_FLOW_INVALID")
-  const control = flow.nodes.filter((node) => ["agent", "start", "end", "pause"].includes(node.kind))
+  const control = flow.nodes.filter((node) => ["agent", "tool", "start", "end", "pause"].includes(node.kind))
   const controlIds = new Set(control.map((node) => node.id))
   if (flow.lines.some((line) => isFlowLine(line) && (!controlIds.has(line.source) || !controlIds.has(line.target)))) throw new WfError("DAG 文件和数据库节点只能通过 ctx/db 提供输入，不能承载流程控制", "WF_DAG_UNSUPPORTED")
   const walk = (initial: string, neighbours: Map<string, string[]>): Set<string> => {
@@ -43,7 +43,7 @@ export function validateDagForRun(flow: WorkflowDocument): void {
   for (const line of flow.lines) {
     if (!line.id || lineIds.has(line.id)) throw new WfError("DAG 连线 ID 必须非空且唯一", "WF_FLOW_INVALID")
     lineIds.add(line.id)
-    if (line.condition && (!isFlowLine(line) || !["pass", "fail", "content"].includes(line.condition.type) || flow.nodes.find((node) => node.id === line.source)?.kind !== "agent")) throw new WfError("DAG 条件只能由 Agent 节点的已验证决策产生", "WF_DAG_CONDITION_INVALID")
+    if (line.condition && (!isFlowLine(line) || !["pass", "fail", "content"].includes(line.condition.type) || !["agent", "tool"].includes(flow.nodes.find((node) => node.id === line.source)?.kind ?? ""))) throw new WfError("DAG 条件只能由已结算的 Agent/Tool 节点产生", "WF_DAG_CONDITION_INVALID")
     if (line.condition) validateDagRule(line.condition.rule)
   }
   // ctx from another Agent is also a dependency, not permission to consume unsettled output.
@@ -68,12 +68,19 @@ function dagAgentAccepted(snapshot: RunSnapshot, record: RunSnapshot["nodes"][nu
     && !!origin && origin.runId === attempt.runId && origin.nodeId === record.nodeId && origin.attempt === record.attempts && origin.childId === record.childId && origin.definitionRunId === (snapshot.dagDefinitionRunId ?? snapshot.id)
 }
 
+function dagNodeAccepted(flow: WorkflowDocument, snapshot: RunSnapshot, nodeId: string): boolean {
+  const node = flow.nodes.find((entry) => entry.id === nodeId)
+  const record = snapshot.nodes.find((entry) => entry.nodeId === nodeId)
+  if (node?.kind === "tool") return record?.status === "ok" && record.attemptHistory?.at(-1)?.phase === "settled"
+  return dagAgentAccepted(snapshot, record)
+}
+
 /** Rules consume only a settled JSON output, never code or arbitrary expression text. */
 export function selectDagRoutes(flow: WorkflowDocument, snapshot: RunSnapshot, nodeId: string): string[] {
   const outgoing = flow.lines.filter(isFlowLine).filter((line) => line.source === nodeId && line.condition)
   if (!outgoing.length) return []
   const record = snapshot.nodes.find((node) => node.nodeId === nodeId)
-  if (!record || !dagAgentAccepted(snapshot, record)) throw new WfError("条件来源尚未有效结算并验收", "WF_DAG_CONDITION_INVALID")
+  if (!record || !dagNodeAccepted(flow, snapshot, nodeId)) throw new WfError("条件来源尚未有效结算并验收", "WF_DAG_CONDITION_INVALID")
   let output: unknown
   try { output = JSON.parse(record.output.trim().replace(/^```json\s*([\s\S]*?)\s*```$/, "$1")) } catch { throw new WfError("可计算条件的来源必须返回有效 JSON 数据", "WF_DAG_CONDITION_INVALID") }
   return outgoing.filter((line) => {
@@ -111,14 +118,14 @@ export function dagFrontierOf(flow: WorkflowDocument, snapshot: RunSnapshot): Da
   const dag = buildFlowDag(flow.nodes, flow.lines)
   const layers = computeFlowLayers(dag)
   const order = new Map(flow.nodes.map((node, index) => [node.id, index]))
-  const control = flow.nodes.filter((node) => ["start", "agent", "pause", "end"].includes(node.kind)).sort((a, b) => (layers.get(a.id) ?? 0) - (layers.get(b.id) ?? 0) || order.get(a.id)! - order.get(b.id)!)
+  const control = flow.nodes.filter((node) => ["start", "agent", "tool", "pause", "end"].includes(node.kind)).sort((a, b) => (layers.get(a.id) ?? 0) - (layers.get(b.id) ?? 0) || order.get(a.id)! - order.get(b.id)!)
   const records = new Map(snapshot.nodes.map((node) => [node.nodeId, node]))
   const inactive = new Set<string>()
   const accepted = (id: string): boolean => {
     const node = flow.nodes.find((entry) => entry.id === id)
     const record = records.get(id)
     if (node?.kind === "start" || node?.kind === "pause" || node?.kind === "end") return record?.status === "ok"
-    return dagAgentAccepted(snapshot, record)
+    return dagNodeAccepted(flow, snapshot, id)
   }
   for (const node of control) {
     const record = records.get(node.id)
@@ -138,7 +145,7 @@ export function dagFrontierOf(flow: WorkflowDocument, snapshot: RunSnapshot): Da
       continue
     }
     if (states.some((state) => state === "waiting") || !states.includes("satisfied")) continue
-    result.sources[node.id] = [...new Set(incoming.filter((_, index) => states[index] === "satisfied").map((line) => line.source).filter((id) => flow.nodes.find((source) => source.id === id)?.kind === "agent"))]
+    result.sources[node.id] = [...new Set(incoming.filter((_, index) => states[index] === "satisfied").map((line) => line.source).filter((id) => ["agent", "tool"].includes(flow.nodes.find((source) => source.id === id)?.kind ?? "")))]
     if (record?.status === "pending") result.ready.push(node.id)
   }
   const end = control.find((node) => node.kind === "end")
@@ -164,7 +171,7 @@ export function dagStateOf(flow: WorkflowDocument, snapshot: RunSnapshot): NonNu
         if (running >= (snapshot.dagConcurrency ?? 2)) blocked[record.nodeId] = { reason: "capacity", nodeIds: [] }
       } else {
         const incoming = flow.lines.filter(isFlowLine).filter((line) => line.target === record.nodeId)
-        if (incoming.length) blocked[record.nodeId] = { reason: "dependency", nodeIds: [...new Set(incoming.map((line) => line.source).filter((id) => snapshot.nodes.find((node) => node.nodeId === id)?.status !== "skipped" && !dagAgentAccepted(snapshot, snapshot.nodes.find((node) => node.nodeId === id)) && flow.nodes.find((node) => node.id === id)?.kind !== "start"))] }
+        if (incoming.length) blocked[record.nodeId] = { reason: "dependency", nodeIds: [...new Set(incoming.map((line) => line.source).filter((id) => snapshot.nodes.find((node) => node.nodeId === id)?.status !== "skipped" && !dagNodeAccepted(flow, snapshot, id) && flow.nodes.find((node) => node.id === id)?.kind !== "start"))] }
       }
     }
   }

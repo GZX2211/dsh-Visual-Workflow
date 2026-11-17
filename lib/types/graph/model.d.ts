@@ -1,4 +1,4 @@
-import type { ConditionType, DatabaseNode, FileNode, GraphNode, GroupNode, Handle, Line, NodeKind, ProxyNode, RoleNode, StageNode, WorkflowDocument, WorkflowMode } from '../shared/graph-model.js';
+import type { ConditionType, DatabaseNode, FileNode, GraphNode, GroupNode, Handle, Line, NodeKind, ProxyNode, RoleNode, StageNode, ToolNode, WorkflowDocument, WorkflowMode } from '../shared/graph-model.js';
 /** 单类节点的连接点定义：入点集合与出点集合。 */
 export interface NodeHandleDef {
     inputs: Handle[];
@@ -79,6 +79,11 @@ export declare function newStageNode(kind: 'start' | 'end' | 'pause', mode: Work
     x: number;
     y: number;
 }): StageNode;
+/** 新建确定性工具节点；工具引用必须来自 DSH 工具注册表。 */
+export declare function newToolNode(toolRef: string, label: string, position?: {
+    x: number;
+    y: number;
+}): ToolNode;
 /** 阶段节点硬编码名称（§4.2.5.1 卡片设计表：启动/输入、结束/输出、暂停）。 */
 export declare function stageLabel(kind: 'start' | 'end' | 'pause', mode: WorkflowMode): string;
 /** 新建协作组节点（§4.2.5.2）。 */

@@ -3,6 +3,7 @@ import type { RoleNode, WorkflowDocument } from '../shared/graph-model.js';
 import type { RunSnapshot, RunStatus } from '../shared/types.js';
 import type { AgentHost, NodeRunner, OrchestratorConfig, OrchestratorLogger, ParentModelSelectionLike, ParentPromptSetupLike } from './seams.js';
 import type { PendingAsk } from './ask-protocol.js';
+import type { MigratedToolExecutor } from "../migrated-tools/index.js";
 /** 单次运行的内存条目（旧项目 entry 同构：快照 + 护栏计数 + in-flight 表）。 */
 export interface RunEntry {
     /** 运行级取消控制器（停止/终止/插件卸载时 abort；阻塞中的 wait/提问随之取消）。 */
@@ -108,6 +109,8 @@ export interface OrchestratorDeps {
     /** 官方会话已接纳的附件路径；调用方不能通过 fileBindings 授予宿主文件权限。 */
     authorizedInputFiles?: (sessionId: string) => Promise<readonly string[]>;
     sessionInputFiles?: (sessionId: string) => Promise<readonly import("../shared/runtime-types.js").SessionInputFile[]>;
+    /** 确定性 ToolNode 的执行缝；实际实现同时注册到 DSH 全局工具目录。 */
+    migratedTools?: MigratedToolExecutor;
     /** 配置子集。 */
     config: OrchestratorConfig;
     /**

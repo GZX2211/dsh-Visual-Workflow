@@ -49,6 +49,8 @@ export interface Config {
   embeddingModelDir: string | null
   /** 外部 OpenAI 兼容 /embeddings 端点；null 优先本地嵌入。 */
   embeddingEndpoint: string | null
+  /** Dify 工具包迁移器可执行文件；以固定 argv 调用，不经过 Shell。 */
+  difyMigratorCommand: string
 }
 
 /** 导出的 Config schema，供 Loader 校验与默认值填充。 */
@@ -68,6 +70,7 @@ export const Config: z<Config> = z.object({
   documentTextLimit: z.natural().default(20000),
   embeddingModelDir: z.union([z.string(), z.const(null)]).default(null),
   embeddingEndpoint: z.union([z.string(), z.const(null)]).default(null),
+  difyMigratorCommand: z.string().default('dsh-dify-migrator'),
 })
 
 /**

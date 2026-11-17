@@ -20,6 +20,7 @@ import type {
   ProxyNode,
   RoleNode,
   StageNode,
+  ToolNode,
   WorkflowDocument,
 } from '../../../src/host/shared/graph-model.js'
 
@@ -58,6 +59,7 @@ const _minGroup: GroupNode = {
   data: { label: '组', collabPrompt: '协作', memberIds: ['n2'] },
 }
 const _minProxy: ProxyNode = { id: 'n9', kind: 'proxy', position: { x: 8, y: 8 }, proxySourceId: 'n2' }
+const _minTool: ToolNode = { id: 'n10', kind: 'tool', position: { x: 9, y: 9 }, data: { label: '工具', toolRef: 'dsh_migrated__example__plugin__tool', arguments: {} } }
 
 /** 判别联合：上述任意节点均可赋给 GraphNode。 */
 const _graphNodes: GraphNode[] = [
@@ -70,6 +72,7 @@ const _graphNodes: GraphNode[] = [
   _minStagePause,
   _minGroup,
   _minProxy,
+  _minTool,
 ]
 
 /** 连线最小对象（含条件）。 */
@@ -97,11 +100,11 @@ describe('shared/graph-model 纯形状层', () => {
   it('GraphNode 判别联合各分支均能通过对象字面量 + 类型断言编译（最小形状）', () => {
     // 运行期仅验证字面量对象非空且 kind 唯一（编译期已证明判别联合成立）。
     const kinds = _graphNodes.map((n) => n.kind)
-    expect(kinds).toHaveLength(9)
-    expect(new Set(kinds).size).toBe(9)
+    expect(kinds).toHaveLength(10)
+    expect(new Set(kinds).size).toBe(10)
   })
 
-  it('NodeKind 九类字面量齐全（parent/agent/file/database/start/end/pause/group/proxy）', () => {
+  it('NodeKind 十类字面量齐全（含确定执行的 tool）', () => {
     const expected: NodeKind[] = [
       'parent',
       'agent',
@@ -112,9 +115,10 @@ describe('shared/graph-model 纯形状层', () => {
       'pause',
       'group',
       'proxy',
+      'tool',
     ]
-    // 通过 _graphNodes 的 kind 覆盖全部 9 类（编译期已收窄字面量，运行期重复确认）。
-    expect(expected).toHaveLength(9)
+    // 通过 _graphNodes 的 kind 覆盖全部类型（编译期已收窄字面量，运行期重复确认）。
+    expect(expected).toHaveLength(10)
     for (const k of expected) {
       expect(_graphNodes.some((n) => n.kind === k), `缺少节点种类 ${k}`).toBe(true)
     }
@@ -149,7 +153,7 @@ describe('shared/graph-model 纯形状层', () => {
 
   it('WorkflowDocument 最小形状成立（nodes 为判别联合全量内联）', () => {
     expect(_minDoc.mode).toBe('mode1')
-    expect(_minDoc.nodes).toHaveLength(9)
+    expect(_minDoc.nodes).toHaveLength(10)
     expect(_minDoc.lines[0].condition?.type).toBe('pass')
   })
 })

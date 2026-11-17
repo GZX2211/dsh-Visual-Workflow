@@ -17,7 +17,7 @@ import type { WorkflowImportMetadata } from "./workflow-import.js"
 // 节点判别联合
 // ---------------------------------------------------------------------------
 
-/** 节点种类：9 种判别的稳定字面量。 */
+/** 节点种类：包含可确定执行的原生工具节点。 */
 export type NodeKind =
   | 'parent' // 父代理节点：调度中枢与最终汇总者
   | 'agent' // 子代理节点：任务执行单元
@@ -28,6 +28,7 @@ export type NodeKind =
   | 'pause' // 暂停阶段节点（流程门）
   | 'group' // 协作组节点：组卡片 + 组内角色并行
   | 'proxy' // 虚拟节点：主节点别名引用，无独立配置
+  | 'tool' // 工具节点：直接调用 DSH 标准工具，不经 LLM 代理
 
 /** 节点公共基座：所有节点的共有最小字段。 */
 export interface BaseNode {
@@ -219,7 +220,29 @@ export interface DatabaseNode extends BaseNode {
  */
 export interface StageNode extends BaseNode {
   kind: 'start' | 'end' | 'pause'
-  data: { label: string }
+  data: {
+    label: string
+    /** 结束节点的命名输出绑定；迁移器只接受受控的 node.port 引用，不保存表达式。 */
+    outputBindings?: Record<string, { nodeId: string; port: string }>
+  }
+}
+
+/**
+ * 工具节点：直接调用已注册的 DSH 工具。Dify 迁移只保留来源元数据；
+ * 执行时走与原生模板相同的 DSH 工具注册表，不维护第二套 Dify 运行时目录。
+ */
+export interface ToolNode extends BaseNode {
+  kind: 'tool'
+  data: {
+    label: string
+    /** DSH 标准工具注册名（迁移工具为 dsh_migrated__...）。 */
+    toolRef: string
+    /** 工具参数；值可包含 Dify {{#node.port#}} 变量引用，由运行时受控解析。 */
+    arguments: Record<string, unknown>
+    /** 原包版本/哈希仅用于诊断和安装匹配，不改变 DSH 工具调用协议。 */
+    requestedPackage?: string
+    source?: { platform: 'dify'; pluginId?: string; uniqueIdentifier?: string }
+  }
 }
 
 /**
@@ -280,6 +303,7 @@ export type GraphNode =
   | StageNode
   | GroupNode
   | ProxyNode
+  | ToolNode
 
 // ---------------------------------------------------------------------------
 // 连线模型

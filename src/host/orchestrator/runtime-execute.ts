@@ -17,7 +17,7 @@ import { createWaiter, type FinishArgs, type FinishResult, type RunEntry, type R
 import { failureOf, setNodeStatus, statusText, terminalizeNodes } from './snapshot.js'
 import { GLOBAL_RUN_CALL_LIMIT, type CallerInfo, type GroupMemberPlan, type GroupStartResult } from './seams.js'
 import { RuntimeLaunch } from './runtime-launch.js'
-import type { GroupNode, RoleNode, WorkflowDocument } from '../shared/graph-model.js'
+import type { GroupNode, RoleNode, StageNode, ToolNode, WorkflowDocument } from '../shared/graph-model.js'
 import { preflightNodeInputs } from './execution-inputs.js'
 import { runtimeInputsOf, validateRequiredInputs, nodeInputAttachments } from "./runtime-inputs.js"
 import { boundNodeInputs, effectiveNodeInputs, flowNodeContextOf, usesHarnessContext, conditionalRoute } from "./input-handoff.js"
@@ -29,11 +29,44 @@ import type { ChildMeta } from "./seams.js"
 import type { SubagentEndInfo } from "./run-entry.js"
 import { createHash } from "node:crypto"
 import type { TaskAcceptance } from "../shared/run-types.js"
+import type { RunSnapshot } from "../shared/run-types.js"
 
 const DAG_DISPATCH = Symbol("dag-dispatch")
 const DAG_RESCHEDULE = Symbol("dag-reschedule")
 
 export abstract class RuntimeExecute extends RuntimeLaunch {
+  private async dispatchToolNode(run: RunEntry, node: ToolNode): Promise<void> {
+    const executor = this.deps.migratedTools
+    if (!executor) throw new WfError("迁移工具执行器不可用", "WF_TOOL_UNAVAILABLE")
+    const attempt = (run.attempts.get(node.id) ?? 0) + 1
+    run.attempts.set(node.id, attempt)
+    run.callCount += 1
+    if (run.callCount > GLOBAL_RUN_CALL_LIMIT) throw new WfError(`工作流执行超过全局调用上限（${GLOBAL_RUN_CALL_LIMIT}）`, "WF_GLOBAL_LIMIT")
+    setNodeStatus(run.snapshot, node.id, "running", { attempts: attempt, now: this.now() })
+    await this.deps.store.saveRun(run.snapshot)
+    try {
+      const argumentsValue = resolveToolArguments(node.data.arguments, run.baseFlow, run.snapshot)
+      const result = await executor.invoke(node.data.toolRef, argumentsValue, run.controller.signal, node.data.requestedPackage)
+      if (run.controller.signal.aborted || this.runs.get(run.snapshot.id) !== run) return
+      const output = result.text.trim() || JSON.stringify(result.messages)
+      setNodeStatus(run.snapshot, node.id, "ok", {
+        attempts: attempt,
+        now: this.now(),
+        output,
+        outputFullLimit: this.deps.config.outputFullLimit,
+        stopReason: "completed",
+        recordTurn: true,
+      })
+      this.log().info(JSON.stringify({ runId: run.snapshot.id, nodeId: node.id, attempt, phase: "tool_node", tool: node.data.toolRef, status: "ok" }))
+    } catch (error) {
+      if (run.controller.signal.aborted || this.runs.get(run.snapshot.id) !== run) return
+      const failure = failureOf(error, "child_execute", "WF_TOOL_EXECUTION_FAILED", this.now())
+      setNodeStatus(run.snapshot, node.id, "fail", { attempts: attempt, now: this.now(), failure, stopReason: "tool-error", recordTurn: true })
+      this.log().warn(JSON.stringify({ runId: run.snapshot.id, nodeId: node.id, attempt, phase: "tool_node", tool: node.data.toolRef, status: "fail", errorCode: failure.code }))
+    }
+    await this.deps.store.saveRun(run.snapshot)
+  }
+
   private async verifyDagArtifacts(run: RunEntry, node: RoleNode): Promise<void> {
     if (!executionOf(node).outputFiles?.length) return
     const record = run.snapshot.nodes.find((entry) => entry.nodeId === node.id)!
@@ -288,6 +321,9 @@ export abstract class RuntimeExecute extends RuntimeLaunch {
                 return
               }
             }
+            changed = true
+          } else if (node?.kind === "tool") {
+            await this.dispatchToolNode(run, node)
             changed = true
           }
         }
@@ -876,8 +912,17 @@ export abstract class RuntimeExecute extends RuntimeLaunch {
 /** Imported Dify answer/end nodes are pass-through stages, so expose their accepted upstream result. */
 function dagCompletionSummary(flow: WorkflowDocument, run: RunEntry): string {
   if (flow.sourceImport?.platform !== "dify") return "DAG 所有生效路径已通过任务合同并完成"
-  const end = flow.nodes.find((node) => node.kind === "end")
+  const end = flow.nodes.find((node): node is StageNode => node.kind === "end")
   if (!end) return "DAG 所有生效路径已通过任务合同并完成"
+  const bindings = end.data.outputBindings ?? {}
+  if (Object.keys(bindings).length > 0) {
+    const result = Object.fromEntries(Object.entries(bindings).map(([name, binding]) => [
+      name,
+      referencedRuntimeValue(binding.nodeId, binding.port, flow, run.snapshot),
+    ]))
+    const values = Object.values(result)
+    return values.length === 1 ? stringifyReference(values[0]) : JSON.stringify(result)
+  }
   const sourceIds = [...new Set(flow.lines.filter(isFlowLine).filter((line) => line.target === end.id).map((line) => mainNodeIdOf(flow, line.source) ?? line.source))]
   const outputs = sourceIds.flatMap((nodeId) => {
     const record = run.snapshot.nodes.find((node) => node.nodeId === nodeId)
@@ -886,4 +931,78 @@ function dagCompletionSummary(flow: WorkflowDocument, run: RunEntry): string {
   if (outputs.length === 1) return outputs[0]
   if (outputs.length > 1) return outputs.map((output, index) => `结果 ${index + 1}：\n${output}`).join("\n\n")
   return "DAG 所有生效路径已通过任务合同并完成"
+}
+
+const DIFY_VALUE_REFERENCE = /\{\{#([^.#{}]+)\.([^#{}]+)#\}\}/g
+
+/** Resolve only Dify's closed node.port reference syntax; never evaluate expressions or code. */
+function resolveToolArguments(
+  value: Record<string, unknown>,
+  flow: WorkflowDocument,
+  snapshot: RunSnapshot,
+): Record<string, unknown> {
+  const resolved = resolveToolValue(value, flow, snapshot, 0)
+  if (!resolved || typeof resolved !== "object" || Array.isArray(resolved)) throw new WfError("工具参数必须为对象", "WF_TOOL_ARGUMENT_INVALID")
+  return resolved as Record<string, unknown>
+}
+
+function resolveToolValue(value: unknown, flow: WorkflowDocument, snapshot: RunSnapshot, depth: number): unknown {
+  if (depth > 24) throw new WfError("工具参数结构过深", "WF_TOOL_ARGUMENT_INVALID")
+  if (typeof value === "string") {
+    const exact = value.match(/^\{\{#([^.#{}]+)\.([^#{}]+)#\}\}$/)
+    if (exact) return referencedToolValue(exact[1], exact[2], flow, snapshot)
+    return value.replace(DIFY_VALUE_REFERENCE, (_match, nodeId: string, port: string) => stringifyReference(referencedToolValue(nodeId, port, flow, snapshot)))
+  }
+  if (value === null || typeof value === "number" || typeof value === "boolean") return value
+  if (Array.isArray(value)) return value.map((item) => resolveToolValue(item, flow, snapshot, depth + 1))
+  if (value && typeof value === "object") {
+    const result: Record<string, unknown> = {}
+    for (const [key, item] of Object.entries(value)) {
+      if (["__proto__", "prototype", "constructor"].includes(key)) throw new WfError("工具参数字段名无效", "WF_TOOL_ARGUMENT_INVALID")
+      result[key] = resolveToolValue(item, flow, snapshot, depth + 1)
+    }
+    return result
+  }
+  throw new WfError("工具参数包含不支持的值", "WF_TOOL_ARGUMENT_INVALID")
+}
+
+function referencedToolValue(nodeId: string, port: string, flow: WorkflowDocument, snapshot: RunSnapshot): unknown {
+  return referencedRuntimeValue(nodeId, port, flow, snapshot)
+}
+
+/** Resolve a previously frozen runtime value without evaluating source expressions. */
+function referencedRuntimeValue(nodeId: string, port: string, flow: WorkflowDocument, snapshot: RunSnapshot): unknown {
+  const source = flow.nodes.find((node) => node.id === nodeId)
+  if (!source || source.kind === "start") {
+    const values = snapshot.runtimeInputs?.workflowInputs[port] ?? []
+    if (!values.length) throw new WfError(`工具参数缺少运行输入：${port}`, "WF_INPUT_REQUIRED")
+    const parts = values.map(runtimeInputScalar)
+    return parts.length === 1 ? parts[0] : parts
+  }
+  const record = snapshot.nodes.find((node) => node.nodeId === nodeId)
+  if (!record || !["ok", "react-capped"].includes(record.status)) {
+    throw new WfError(`工具参数引用的上游尚未结算：${nodeId}.${port}`, "WF_INPUT_UPSTREAM_UNAVAILABLE")
+  }
+  if (["text", "output", "result"].includes(port)) return record.output
+  let parsed: unknown
+  try { parsed = JSON.parse(record.output) } catch {
+    throw new WfError(`上游 ${nodeId} 输出不是 JSON，无法读取字段 ${port}`, "WF_TOOL_ARGUMENT_INVALID")
+  }
+  let current = parsed
+  for (const segment of port.split(".")) {
+    if (!current || typeof current !== "object" || Array.isArray(current) || !Object.hasOwn(current, segment)) {
+      throw new WfError(`上游 ${nodeId} 输出缺少字段 ${port}`, "WF_TOOL_ARGUMENT_INVALID")
+    }
+    current = (current as Record<string, unknown>)[segment]
+  }
+  return current
+}
+
+function runtimeInputScalar(value: NonNullable<RunSnapshot["runtimeInputs"]>["workflowInputs"][string][number]): unknown {
+  if (value.kind === "text" || value.kind === "json") return value.value
+  return "path" in value.fileRef && value.fileRef.path ? value.fileRef.path : "name" in value.fileRef ? value.fileRef.name : ""
+}
+
+function stringifyReference(value: unknown): string {
+  return typeof value === "string" ? value : JSON.stringify(value)
 }

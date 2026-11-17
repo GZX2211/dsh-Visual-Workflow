@@ -195,6 +195,7 @@ export declare const zh: {
         pause: string;
         group: string;
         proxy: string;
+        tool: string;
     };
     fileKindLabel: {
         text: string;
@@ -207,6 +208,9 @@ export declare const zh: {
     inspectorSave: string;
     inspectorDelete: string;
     inspectorCopy: string;
+    dshTool: string;
+    toolArguments: string;
+    migratedToolHint: string;
     label: string;
     persona: string;
     personaHint: string;
@@ -343,6 +347,8 @@ export declare const zh: {
     unsavedDiscard: string;
     unsavedCancel: string;
     importWorkflow: string;
+    migrateDifyTools: string;
+    migratingDifyTools: string;
     exportWorkflow: string;
     exportFileName: string;
     exportEmpty: string;
@@ -355,6 +361,7 @@ export declare const zh: {
     toastDifyImportedReady: string;
     toastDifyImportedReview: string;
     toastDifyImportedBlocked: string;
+    toastDifyToolsMigrated: string;
     difyImportStatus: {
         ready: string;
         'review-required': string;

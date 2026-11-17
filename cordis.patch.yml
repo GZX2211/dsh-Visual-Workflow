@@ -40,3 +40,5 @@
         embeddingModelDir: null
         # 外部 OpenAI 兼容 /embeddings 端点；null 表示优先本地嵌入（不可用才降级 BM25）。
         embeddingEndpoint: null
+        # Dify .difypkg 批量迁移器命令；Host 只以固定参数调用，不经过 Shell。
+        difyMigratorCommand: dsh-dify-migrator

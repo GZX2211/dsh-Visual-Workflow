@@ -4,6 +4,7 @@ import type { OrchestratorRuntime } from '../orchestrator/index.js';
 import type { EmbeddingEngine } from '../embedding/engine.js';
 import type { SchedulerEngine, SchedulerTaskStore } from '../scheduler/index.js';
 import type { ToolSwitchStore } from '../tools/index.js';
+import type { DifyToolUpload, DifyToolMigrationResult } from '../shared/migrated-tool-migration.js';
 import type { AssetVersionEntry, ExperienceEntry, ExperiencePatch, RoleAssetDetail, RoleAssetReference, RoleAssetSummary, WorkflowAssetDetail, WorkflowAssetSummary } from '../shared/asset-types.js';
 import type { RoleTemplate } from '../shared/template-types.js';
 /**
@@ -80,6 +81,10 @@ export interface ApiHost {
     schedulerTaskStore?: SchedulerTaskStore;
     /** 全局工具开关存储（经 tools 模块公共入口取得；缺失时开关端点返回 501）。 */
     toolSwitches?: ToolSwitchStore;
+    /** Dify Tool 包迁移能力；API 仅翻译上传请求，不直接落盘或启动子进程。 */
+    migratedToolMigration?: {
+        install(upload: DifyToolUpload): Promise<DifyToolMigrationResult>;
+    };
     /** 资产库能力缝（宿主注入 assets 模块的 AssetStore；缺失时资产端点返回 501）。 */
     assets?: AssetStoreLike;
 }

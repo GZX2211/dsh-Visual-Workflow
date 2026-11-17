@@ -239,7 +239,7 @@ export interface Harness {
 /** 装配：临时目录真实 FlowStore + fake 依赖 + 可控时钟与 id 生成。 */
 export async function makeHarness(
   config?: Partial<OrchestratorConfig>,
-  options: Pick<OrchestratorDeps, 'workingDirectory' | 'authorizedInputFiles' | 'sessionInputFiles' | 'logger'> = {},
+  options: Pick<OrchestratorDeps, 'workingDirectory' | 'authorizedInputFiles' | 'sessionInputFiles' | 'logger' | 'migratedTools'> = {},
 ): Promise<Harness> {
   const dir = await mkdtemp(join(tmpdir(), 'vw-orch-'))
   cleanups.push(() => rm(dir, { recursive: true, force: true }))

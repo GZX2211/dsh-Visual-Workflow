@@ -17,6 +17,8 @@ export interface StudioTransferFace {
     onGroupMdSelected(file: File | null): Promise<void>;
     onFileSelect(picked: File[]): Promise<void>;
     testDbConnection(): Promise<void>;
+    migrateDifyToolFiles(files: File[]): Promise<void>;
+    migratingDifyTools: boolean;
 }
 /** 导入导出与文件/数据库交互面（远端失败抛错，由调用方 toast）。 */
 export declare function useStudioTransfer(state: StudioState, dispatch: Dispatch<StudioAction>, notify: ToastFace['toast'], toastError: ToastFace['toastError'], t: Dict, remote: RemoteFace, templates: TemplatesFace, flowTemplates: FlowTemplatesFace, workflows: WorkflowsFace, patchEditor: EditorActionsFace['patchEditor'], editorData: EditorData | null, personaInputRef: React.RefObject<HTMLInputElement | null>, groupMdInputRef: React.RefObject<HTMLInputElement | null>): StudioTransferFace;

@@ -189,7 +189,7 @@ export interface StudioState {
 
 /** 编辑器数据（右侧面板渲染源；Inspector 按 kind 分发表单）。 */
 export interface EditorData {
-  kind: 'workflow' | 'service' | 'role' | 'file' | 'database' | 'group' | 'stage' | 'proxy' | 'edge' | 'experience'
+  kind: 'workflow' | 'service' | 'role' | 'file' | 'database' | 'group' | 'stage' | 'proxy' | 'tool' | 'edge' | 'experience'
   data: Record<string, unknown>
   name: string
   template?: boolean

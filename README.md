@@ -290,7 +290,7 @@ node scripts/run-sales-live.mjs
 
 ## 安装（Windows）
 
-当前插件版本为 **1.1.1**；安装后核对插件 package.json 与生成 lib。运行输入、默认 explicit、主动 auto 配置及宿主访问控制的部署前置条件见 [运行输入说明](docs/runtime-input-handoff.md)。
+当前插件版本为 **1.3.0**；安装后核对插件 package.json 与生成 lib。运行输入、默认 explicit、主动 auto 配置及宿主访问控制的部署前置条件见 [运行输入说明](docs/runtime-input-handoff.md)。
 
 > **安装示例**：以下使用 **DeepSeek Harness `0.2.0-rc.2`**；旧版 `0.1.6-alpha.2` 的 Preset Scope 兼容范围与验收状态见上文。本次补丁不要求升级现有宿主。新安装可使用：
 >
@@ -361,13 +361,13 @@ dsh plugin --profile web remove dsh-visual-workflow
 
 ### 方式二：导入 Dify 工作流
 
-点击工作台顶部「导入」，选择 Dify 导出的 `.yml` / `.yaml` 文件。导入结果落为工作流模板，并携带兼容报告。Start → LLM/Agent → 直通 Answer/End 子集会转换为确定性 DAG：创建实例、核对模型、填写运行输入后即可运行。
+点击工作台顶部「导入」，选择 Dify 导出的 `.yml` / `.yaml` 文件。导入结果落为工作流模板，并携带兼容报告。Start、LLM/Agent、已迁移 Tool 与受控 End 输出会转换为确定性 DAG：创建实例、核对模型、填写运行输入后即可运行。
 
 - `ready`：结构可转换，仍建议打开模板复核。
 - `review-required`：通常需要核对/重新选择模型，并在运行时填写由 Dify Start 变量生成的输入。
-- `blocked`：包含工具、知识库、HTTP、代码、模板转换、条件、循环、迭代、未知节点或非直通结束语义；Host 会在派发前拒绝运行。
+- `blocked`：包含尚未适配的知识库、HTTP、代码、模板转换、条件、循环、迭代、未知节点或不安全结束表达式；Host 会在派发前拒绝运行。Tool 节点会稳定映射到 `dsh_migrated__...` 原生工具标识，转换包未安装时由运行前检查明确拒绝。
 
-凭据和敏感请求头不会从 Dify 文件迁移；导入器只保留脱敏配置。详见 [Dify 导入说明](docs/dify-import.md)。
+先安装 [`dsh-dify-migrator`](https://github.com/etoilestar/dsh-dify-migrator)，然后在工作台点击「迁移 Dify 工具」，可多选 `.difypkg` 或上传一个含多个包的 ZIP；也可用 CLI 批量安装。再导入 DSL 时，工作流中的 Tool 节点会自动绑定同一稳定标识，无需逐节点替换。凭据和敏感请求头不会从 Dify 文件迁移。详见 [Dify 导入说明](docs/dify-import.md)。
 
 ### 方式三：让 Agent 设计组织
 

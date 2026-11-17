@@ -24,6 +24,7 @@ import type {
   ProxyNode,
   RoleNode,
   StageNode,
+  ToolNode,
   WorkflowDocument,
   WorkflowMode,
 } from '../shared/graph-model.js'
@@ -81,6 +82,7 @@ export const NODE_HANDLES: Record<NodeKind, NodeHandleDef> = {
   pause: { inputs: ['flow-in'], outputs: ['flow-out'] },
   group: { inputs: ['flow-in'], outputs: ['flow-out'] },
   proxy: { inputs: ['flow-in', 'ctx-in', 'db-in'], outputs: ['flow-out', 'ctx-out'] },
+  tool: { inputs: ['flow-in', 'ctx-in'], outputs: ['flow-out', 'ctx-out'] },
 }
 
 /** 输出连接点 → 允许的输入连接点映射（三通道互斥，§4.3 连线类型规范）。 */
@@ -108,6 +110,7 @@ export const NODE_KINDS: NodeKind[] = [
   'pause',
   'group',
   'proxy',
+  'tool',
 ]
 
 // ---------------------------------------------------------------------------
@@ -229,6 +232,11 @@ export function newStageNode(kind: 'start' | 'end' | 'pause', mode: WorkflowMode
     position: { x: position.x, y: position.y },
     data: { label: stageLabel(kind, mode) },
   }
+}
+
+/** 新建确定性工具节点；工具引用必须来自 DSH 工具注册表。 */
+export function newToolNode(toolRef: string, label: string, position = { x: 120, y: 80 }): ToolNode {
+  return { id: makeNodeId(), kind: 'tool', position: { ...position }, data: { label, toolRef, arguments: {} } }
 }
 
 /** 阶段节点硬编码名称（§4.2.5.1 卡片设计表：启动/输入、结束/输出、暂停）。 */

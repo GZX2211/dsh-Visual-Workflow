@@ -19,6 +19,7 @@ import type {
   ParentPromptSetupLike,
 } from './seams.js'
 import type { PendingAsk } from './ask-protocol.js'
+import type { MigratedToolExecutor } from "../migrated-tools/index.js"
 
 /** 单次运行的内存条目（旧项目 entry 同构：快照 + 护栏计数 + in-flight 表）。 */
 export interface RunEntry {
@@ -135,6 +136,8 @@ export interface OrchestratorDeps {
   /** 官方会话已接纳的附件路径；调用方不能通过 fileBindings 授予宿主文件权限。 */
   authorizedInputFiles?: (sessionId: string) => Promise<readonly string[]>
   sessionInputFiles?: (sessionId: string) => Promise<readonly import("../shared/runtime-types.js").SessionInputFile[]>
+  /** 确定性 ToolNode 的执行缝；实际实现同时注册到 DSH 全局工具目录。 */
+  migratedTools?: MigratedToolExecutor
   /** 配置子集。 */
   config: OrchestratorConfig
   /**

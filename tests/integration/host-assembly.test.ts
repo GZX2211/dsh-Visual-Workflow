@@ -34,6 +34,7 @@ function makeConfig(dir: string): Config {
     documentTextLimit: 20000,
     embeddingModelDir: null,
     embeddingEndpoint: null,
+    difyMigratorCommand: 'dsh-dify-migrator',
   }
 }
 

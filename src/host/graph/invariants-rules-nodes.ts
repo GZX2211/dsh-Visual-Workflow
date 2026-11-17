@@ -133,7 +133,7 @@ export function ruleDataNodeComplete({ flow }: CheckGraphInput): GraphIssue[] {
   return issues
 }
 
-/** d) 上下文入线来源合法性（角色 / 虚拟节点 / 文件 / 模式二输入节点）。 */
+/** d) 上下文入线来源合法性（可产出上下文的执行/数据节点）。 */
 export function ruleCtxSource({ flow }: CheckGraphInput): GraphIssue[] {
   const byId = nodeMapOf(flow)
   const issues: GraphIssue[] = []
@@ -141,7 +141,7 @@ export function ruleCtxSource({ flow }: CheckGraphInput): GraphIssue[] {
     if (line.targetHandle !== 'ctx-in') continue
     const source = byId.get(line.source)
     if (!source) continue
-    const ok = source.kind === 'agent' || source.kind === 'parent' || source.kind === 'proxy'
+    const ok = source.kind === 'agent' || source.kind === 'parent' || source.kind === 'proxy' || source.kind === 'tool'
       || source.kind === 'file' || (source.kind === 'start' && flow.mode === 'mode2')
     if (ok) continue
     issues.push({
@@ -150,7 +150,7 @@ export function ruleCtxSource({ flow }: CheckGraphInput): GraphIssue[] {
       message: `上下文入线的来源「${line.source}」（${source.kind}）不能提供上下文`,
       nodeIds: [source.id, line.target],
       lineIds: [line.id],
-      suggestion: '上下文入线只能来自子代理 / 父代理 / 虚拟节点 / 文件节点',
+      suggestion: '上下文入线只能来自子代理 / 父代理 / 虚拟节点 / 工具 / 文件节点',
     })
   }
   return issues
@@ -241,9 +241,9 @@ export function ruleNodeDataFlowContract({ flow }: CheckGraphInput): GraphIssue[
   return issues
 }
 
-/** 是否可执行单元（agent/parent/group）。 */
+/** 是否可执行单元（角色、协作组或工具）。 */
 function isUnitNode(node: GraphNode | undefined): boolean {
-  return node?.kind === 'agent' || node?.kind === 'parent' || node?.kind === 'group'
+  return node?.kind === 'agent' || node?.kind === 'parent' || node?.kind === 'group' || node?.kind === 'tool'
 }
 
 /**

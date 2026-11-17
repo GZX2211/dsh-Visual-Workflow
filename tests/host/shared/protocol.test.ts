@@ -70,11 +70,11 @@ const EXPECTED_ENDPOINTS: string[] = [
   // 全局工具开关（父代理工具白名单「关闭」侧；全局即时生效）
   'toolSwitches', 'toolSwitchPut', 'toolSwitchPutMany',
   // 运行
-  'run', 'runStatus', 'activeRuns', 'runStop', 'runHistory', 'runResume',
+  'runtimeInputOptions', 'runInputBind', 'run', 'runStatus', 'activeRuns', 'runStop', 'runHistory', 'runResume',
   // 数据库
   'dbTest', 'dbSchema', 'dbSearchPreview',
   // 导入导出 v2
-  'exportWorkflow', 'importWorkflow', 'exportAgentTemplate', 'importAgentTemplate',
+  'exportWorkflow', 'importWorkflow', 'migrateDifyTools', 'exportAgentTemplate', 'importAgentTemplate',
   // 定时任务（新功能本阶段；需求见 prompt/定时任务开发.md）
   'schedulerTasks', 'schedulerTaskPut', 'schedulerTaskDelete',
   // 资产（模版的晋升形态：入库 / 资产态保存 / 版本 / 回滚 / 归档 / 恢复 / 影响面预览）
@@ -91,7 +91,7 @@ const EXPECTED_ENDPOINTS: string[] = [
  */
 function readProtocolEndpoints(): string[] {
   const src = readShared('protocol.ts')
-  const re = /export const EP_[A-Z_]+ = '([^']+)'/g
+  const re = /export const EP_[A-Z_]+ = ['"]([^'"]+)['"]/g
   const out: string[] = []
   let m: RegExpExecArray | null
   while ((m = re.exec(src)) !== null) out.push(m[1])
@@ -99,10 +99,10 @@ function readProtocolEndpoints(): string[] {
 }
 
 describe('shared/protocol 端点清单', () => {
-  it('端点常量定义 65 个且无重复', () => {
+  it('端点常量定义 68 个且无重复', () => {
     const eps = readProtocolEndpoints()
-    expect(eps).toHaveLength(65)
-    expect(new Set(eps).size).toBe(65) // 65 端点名全部唯一（无重复常量）
+    expect(eps).toHaveLength(68)
+    expect(new Set(eps).size).toBe(68) // 68 端点名全部唯一（无重复常量）
   })
 
   it('端点名逐字覆盖 §4.6 清单（正反向双向一致）', () => {

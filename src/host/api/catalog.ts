@@ -61,7 +61,7 @@ export class CatalogEndpoints extends VisualWorkflowApiBase {
         name,
         description: zhDescription(name, String(entry.description ?? '')),
         kind: 'tool',
-        source: name.startsWith('mcp__') ? 'mcp' : 'builtin',
+        source: name.startsWith('mcp__') ? 'mcp' : name.startsWith("dsh_migrated__") ? "migrated-dify" : 'builtin',
       })
     }
     const loader = this.ctx.get('loader') as { entries?: () => unknown[] } | null | undefined

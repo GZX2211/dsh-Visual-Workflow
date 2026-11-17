@@ -76,7 +76,7 @@ export async function flowNodeContextOf(flow: WorkflowDocument, node: RoleNode, 
 export function workflowInputTarget(flow: WorkflowDocument): string {
   const idOf = (id: string): string => mainNodeIdOf(flow, id) ?? id
   const candidates = flow.nodes.filter((node) => {
-    if (node.kind !== "agent" || isGroupMember(flow, node.id)) return false
+    if ((node.kind !== "agent" && node.kind !== "tool") || isGroupMember(flow, node.id)) return false
     const incoming = flow.lines.filter(isFlowLine).filter((line) => idOf(line.target) === node.id)
     return incoming.length > 0 && incoming.every((line) => !line.condition && nodeById(flow, idOf(line.source))?.kind === "start")
   })

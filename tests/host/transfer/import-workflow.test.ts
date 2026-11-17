@@ -44,7 +44,7 @@ test("test_import_source_uses_yaml_filename_hint_and_reports_dify_parse_error", 
   })
 })
 
-test("test_import_source_blocks_unsupported_dify_nodes_without_discarding_the_template", async () => {
+test("test_import_source_maps_dify_tool_nodes_to_native_dsh_tools", async () => {
   const store = await makeStore()
   const source = await readFile(resolve("tests/fixtures/dify/tool.yml"), "utf8")
 
@@ -58,12 +58,8 @@ test("test_import_source_blocks_unsupported_dify_nodes_without_discarding_the_te
   }
 
   expect(result.sourceFormat).toBe("dify")
-  expect(result.report?.status).toBe("blocked")
-  expect(result.report?.issues).toContainEqual(expect.objectContaining({
-    code: "DIFY_NODE_UNSUPPORTED",
-    level: "error",
-    nodeId: "llm-node",
-  }))
+  expect(result.report?.status).toBe("review-required")
+  expect(result.report?.issues).not.toContainEqual(expect.objectContaining({ code: "DIFY_NODE_UNSUPPORTED" }))
   expect(result.report?.dependencies).toContainEqual(expect.objectContaining({ kind: "tool" }))
   expect(await store.listFlowTemplates()).toHaveLength(1)
 })

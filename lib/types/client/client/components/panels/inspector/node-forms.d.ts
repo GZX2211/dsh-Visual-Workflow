@@ -5,6 +5,11 @@ export declare function StageForm({ data, copy, nodeLabel }: {
     copy: Dict;
     nodeLabel: string;
 }): import("react").JSX.Element;
+/** 迁移工具节点统一绑定 DSH 工具注册表；来源身份只读，避免编辑后与安装包失配。 */
+export declare function ToolForm({ data, copy }: {
+    data: Record<string, unknown>;
+    copy: Dict;
+}): import("react").JSX.Element;
 /** 协作组（名称/协作 Prompt/成员列表删除）。模板态无成员（成员在画布内拖入登记），隐藏成员区。 */
 export declare function GroupForm({ data, copy, members, onPatch, onLoadMd, onRemoveMember }: {
     data: Record<string, unknown>;
